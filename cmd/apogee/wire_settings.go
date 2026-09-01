@@ -443,18 +443,36 @@ func (s *liveSettings) setSystemPrompt(sp config.SystemPromptSettings, useDefaul
 // diff compares two reads of config.yaml in (settingsedit.go), and a projection that answered the
 // embedded default would make every unset config read as a prompt somebody wrote.
 //
-// The whole GLOBAL source has to be empty, not just the text key: `system-prompt-file` set beside a
-// seeded text field would make the very first ctrl+s commit a config the next resolution refuses —
-// both keys set is an error (config.ResolveSystemPrompt), and a config that works today must not be
-// walked into one that does not by a field apogee pre-filled. The two are read under one lock for
-// setSystemPrompt's reason: they are one prompt.
-func (s *liveSettings) promptEditorSeed() string {
+// The question it asks is the RESOLUTION's, not one key's: the editor seeds the embedded default
+// exactly when the whole prompt this session resolves IS the embedded default. That is the empty
+// global source — `system-prompt-file` set beside a seeded text field would make the very first
+// ctrl+s commit a config the next resolution refuses, since both keys set is an error
+// (config.ResolveSystemPrompt), and a config that works today must not be walked into one that does
+// not by a field apogee pre-filled — plus an empty `system-prompt-layers:` list, because layers
+// stop the default from firing at all (ADR 0067 §3) and a seeded field would show a prompt the run
+// does not send, plus the resolution itself coming back as the default for the model this session
+// is BOUND to. That last clause is what a per-model entry needs: an entry matching the bound model
+// replaces the default, so the editor opens empty, while an entry matching nothing leaves the
+// default in force and the editor shows it. `use-default-prompt: false` with nothing configured
+// resolves to an empty prompt, which is what the run sends and so what the editor opens on.
+//
+// The block and its flag are snapshotted under ONE lock for setSystemPrompt's reason — they are one
+// prompt — and resolved outside it, because the resolution reads prompt files from disk and no
+// holder lock is worth holding across I/O. A resolution that FAILS (an unreadable prompt file, say)
+// seeds nothing: what the run sends is then an error, not the default.
+func (s *liveSettings) promptEditorSeed(model, home string) string {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.systemPrompt.Global.Text != "" || s.systemPrompt.Global.File != "" {
+	systemPrompt, useDefault := s.systemPrompt, s.useDefaultPrompt
+	s.mu.RUnlock()
+
+	if systemPrompt.Global.Text != "" || systemPrompt.Global.File != "" || len(systemPrompt.Layers) > 0 {
 		return ""
 	}
-	return config.DefaultSystemPrompt()
+	resolved, err := config.ResolveSystemPrompt(systemPrompt, model, home, useDefault, os.ReadFile)
+	if err != nil || resolved != config.DefaultSystemPrompt() {
+		return ""
+	}
+	return resolved
 }
 
 // setContextFilesEnable flips the `context-files:` off-switch and reports the names to install with

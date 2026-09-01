@@ -134,7 +134,12 @@ co-send with the embedded default, and an empty layer list must not change any e
 resolution (the rung-3/4 anchors in TestResolveSystemPrompt). `grep -n "useDefault"
 internal/config/config.go` shows the flag's single consultation point.
 
-## 4. Editor seed guard + settings-frame regeneration
+## 4. Editor seed guard + settings-frame regeneration — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): promptEditorSeed gained (model, home string) parameters — the resolution it now asks needs the bound model and the config home; wire_options.go composes the closure from w.holder.Binding().Model and w.roots.config, the same two inputs rebindSpecFor resolves with. The block and its use-default flag are snapshotted under one RLock and resolved outside it, since ResolveSystemPrompt reads prompt files from disk.
+NOTES (2026-09-01): a failing resolution (unreadable prompt file) seeds nothing — what the run sends is then an error, not the default.
+NOTES (2026-09-01): consequential edit — cmd/apogee/settingsrows.go: made necessary by the seed recast; seedPromptEditor's doc named the old one-key rule ("whenever the global prompt IS set") that the resolution-wide guard replaced.
+NOTES (2026-09-01): the test name TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt is kept (the plan names it) though its subject widened; its doc comment was rewritten to the resolution rule.
 
 **What:** Recast at the re-check round (2026-09-01, seed-from-resolution — see the header block): the seed decision lives in liveSettings.promptEditorSeed (wire_settings.go:449–456), not seedPromptEditor (settingsrows.go:216, an applier only). The guard is replaced — liveSettings.promptEditorSeed (wire_settings.go:449–456)
 seeds the embedded default's bytes only when the whole resolution IS the embedded default:

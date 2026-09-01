@@ -208,8 +208,9 @@ func overlayLiveSettings(rows []tui.SettingRow, live runningSettings) []tui.Sett
 // external-edit diff (settingsedit.go) still compares two reads of config.yaml in the file's own
 // spelling and never mistakes a seeded field for a prompt somebody wrote.
 //
-// An empty seed seeds nothing — the settings holder answers that way whenever the global prompt IS
-// set, including by `system-prompt-file` alone — and a row that already carries prose is left alone,
+// An empty seed seeds nothing — the settings holder answers that way whenever the session resolves
+// anything OTHER than the embedded default, `system-prompt-file` alone and a `system-prompt-layers:`
+// entry included ([liveSettings.promptEditorSeed]) — and a row that already carries prose is left alone,
 // because a seed is what stands where nothing was written and never what replaces it. Only the ROW's
 // prose moves: the value cell still summarizes what the config says, since the row's job is to
 // report the setting and the seed's is to open an editor.

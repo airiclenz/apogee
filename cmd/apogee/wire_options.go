@@ -202,7 +202,12 @@ func (w *rootWiring) options() tui.Options {
 			configPath: configPath,
 			edits:      w.externalEdits,
 			apply:      applySetting,
-			promptSeed: w.live.promptEditorSeed,
+			// The seed is asked of the holder for the model this session is BOUND to and the config
+			// home its prompt files resolve against — the same two inputs rebindSpecFor resolves the
+			// running prompt with, so the editor opens on exactly what the run sends.
+			promptSeed: func() string {
+				return w.live.promptEditorSeed(w.holder.Binding().Model, w.roots.config)
+			},
 		},
 		// The `mechanisms:` block's own two seams — the one row of the pane whose children are edited
 		// in a list rather than in the file. What the list OFFERS is the catalogue this build carries,
@@ -350,20 +355,23 @@ type settingsHost struct {
 	// apply is the live-apply dispatcher (wire_settings.go). It stays a func because the Mechanism
 	// toggle reaches the same dispatcher by catalogue id, on a path this seam has no method for.
 	apply func(key, value string) (string, error)
-	// promptSeed is what the `system-prompt-text` editor opens on when that key is unset
-	// ([liveSettings.promptEditorSeed], wire_settings.go) — apogee's embedded default prompt, or
-	// nothing at all when the session already has a global prompt of its own. It is a func because
-	// the answer is the SESSION's and is re-asked per paint, like every other row: a prompt written
-	// through the pane stops the seeding from the moment it lands. A nil func seeds nothing, the
-	// answer a Driver that composed this host without a settings holder honestly has.
+	// promptSeed is what the `system-prompt-text` editor opens on when the session's whole prompt
+	// resolution IS the embedded default ([liveSettings.promptEditorSeed], wire_settings.go) —
+	// apogee's embedded default prompt, or nothing at all when anything the user configured (a
+	// global prompt, a per-model entry matching the bound model, a layer) is what the run sends
+	// instead. It is a func because the answer is the SESSION's and is re-asked per paint, like
+	// every other row: a prompt written through the pane stops the seeding from the moment it
+	// lands. A nil func seeds nothing, the answer a Driver that composed this host without a
+	// settings holder honestly has.
 	promptSeed func() string
 }
 
 // Rows is every key the registry describes, with the value this run resolved and the marker for a
 // key an environment variable or a flag overrode (settingsrows.go), and — for the two keys the
 // engine rather than the file holds — the value the session is RUNNING (overlayLiveSettings). The
-// one text row's prose is seeded with apogee's embedded default prompt where nothing is written for
-// it (seedPromptEditor), so the editor ⏎ opens starts from the prompt in force rather than blank.
+// one text row's prose is seeded with apogee's embedded default prompt where that default is what
+// the session resolves (seedPromptEditor), so the editor ⏎ opens starts from the prompt in force
+// rather than blank.
 // It is re-derived per ask because the pane derives its rows on every paint — the picker's
 // convention — which is also what makes the overlay and the seed enough: a mode cycled with the
 // pane open shows on the next paint, and a prompt written through the pane stops seeding from the

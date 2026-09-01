@@ -241,10 +241,23 @@ func TestSettingsHostRowsSeedTheEditorWithTheEmbeddedDefault(t *testing.T) {
 
 	opts := fabricatedSettings()
 	opts.SystemPrompt = config.SystemPromptSettings{}
-	host := settingsHost{opts: opts, promptSeed: newLiveSettings(opts, nil).promptEditorSeed}
+	opts.UseDefaultPrompt = true
+	host := settingsHost{opts: opts, promptSeed: promptSeedFor(t, opts)}
 	row := rowsByPath(t, host.Rows())["system-prompt-text"]
 	if row.Text != config.DefaultSystemPrompt() {
 		t.Errorf("the pane's prompt row opens on %q; want the embedded default verbatim", row.Text)
+	}
+
+	// And a config that enables `system-prompt-layers:` sends the layers, not the default — so the
+	// row the pane feeds the editor stays empty rather than offering a prompt this session refuses.
+	layered := opts
+	layered.SystemPrompt = config.SystemPromptSettings{
+		Layers: []config.SystemPromptLayer{{Text: "a layer\n"}},
+	}
+	if row := rowsByPath(t, settingsHost{opts: layered, promptSeed: promptSeedFor(t, layered)}.
+		Rows())["system-prompt-text"]; row.Text != "" {
+		t.Errorf("with layers configured the prompt row opens on %q; want nothing — the run sends the "+
+			"layers alone, and a seeded field would show a prompt it does not send", row.Text)
 	}
 
 	// A host composed without a settings holder — a Driver that wired no live settings (ADR 0031) —
@@ -252,6 +265,17 @@ func TestSettingsHostRowsSeedTheEditorWithTheEmbeddedDefault(t *testing.T) {
 	if row := rowsByPath(t, settingsHost{opts: opts}.Rows())["system-prompt-text"]; row.Text != "" {
 		t.Errorf("a host with no prompt seam seeded %q; want the projection's own blank", row.Text)
 	}
+}
+
+// promptSeedFor is the pane's prompt-seed seam over a holder built from one config: the settings
+// host asks it per paint, and it asks the holder for the model the session is bound to and the
+// config home its prompt files resolve against (wire_options.go composes the same closure).
+func promptSeedFor(t *testing.T, opts config.Options) func() string {
+	t.Helper()
+
+	home := t.TempDir()
+	live := newLiveSettings(opts, nil)
+	return func() string { return live.promptEditorSeed(opts.Model, home) }
 }
 
 // Sections are runs over the registry's order, so every opener must exist, they must appear in

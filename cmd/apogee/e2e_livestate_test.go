@@ -153,6 +153,13 @@ func TestE2ELiveStateFollowsTheRunningSession(t *testing.T) {
 		t.Errorf("the reopened mode row reads %q; want %q", got, "plan")
 	}
 	tuitest.Golden(t, "t16-settings-rows", drv.Frame(), goldenRedactions(sess)...)
+
+	// The same frame the golden just recorded, read for ONE claim a golden cannot make on its own: a
+	// registered config key with no row is invisible to the user, so the `system-prompt-layers:` key
+	// (ADR 0067) has to be painted — and painted with the $EDITOR affordance, since a list of prose
+	// blocks has no in-pane field to write it in.
+	assertPanePaintsRow(t, drv.Frame(), "system-prompt-layers", pointerExternalEdit)
+
 	closePane(drv, settingsHint)
 
 	// Step 9 — a second process saves the config file. Exactly ONE line lands, and it names the keys
@@ -310,6 +317,27 @@ func openSettings(drv *tuitest.Driver) {
 	submit(drv, "/settings")
 	drv.WaitText(settingsHint)
 	drv.WaitQuiet(settled)
+}
+
+// assertPanePaintsRow reads the settings pane out of a painted frame and fails unless exactly one
+// row names key and that row carries want. It reads the frame it is HANDED rather than walking the
+// pane, so it can check a claim about the very screen a golden recorded without moving the cursor
+// that golden captured.
+func assertPanePaintsRow(t *testing.T, frame tuitest.Frame, key, want string) {
+	t.Helper()
+
+	var painted []string
+	for _, line := range strings.Split(frame.String(), "\n") {
+		if strings.Contains(line, key+" ") {
+			painted = append(painted, line)
+		}
+	}
+	if len(painted) != 1 {
+		t.Fatalf("the settings pane paints %d rows naming %q; want exactly one:\n%s", len(painted), key, frame)
+	}
+	if !strings.Contains(painted[0], want) {
+		t.Errorf("the %q row reads %q; want it to carry %q", key, strings.TrimSpace(painted[0]), want)
+	}
 }
 
 // settingsRow walks the pane to the row naming key and returns it, marker and all.

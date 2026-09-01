@@ -2388,29 +2388,96 @@ func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *t
 }
 
 // The seed the `/settings` prompt editor opens on, and the one condition under which there is one:
-// the whole GLOBAL prompt is empty. `system-prompt-file` set beside a seeded text field would make
-// the very first ctrl+s commit a config the next resolution refuses — both keys set is an error —
-// so a file-only config seeds nothing and stays the config that works today.
+// the session's whole prompt RESOLUTION is the embedded default. Every explicitly-configured
+// resolution opens the editor empty instead, so the field never shows a prompt the run does not
+// send — and never walks a config that works today into one the next resolution refuses, which is
+// what a seeded text field beside `system-prompt-file` would do (both keys set is an error).
 func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 	t.Parallel()
 
+	// The model this session is bound to: what rebindSpecFor resolves the running prompt for, and so
+	// what the seed has to ask the resolution about.
+	const bound = "bound-model"
+
 	cases := []struct {
-		name   string
-		global config.PromptSource
-		want   string
+		name       string
+		prompt     config.SystemPromptSettings
+		useDefault bool
+		want       string
 	}{
-		{"nothing configured", config.PromptSource{}, config.DefaultSystemPrompt()},
-		{"an inline prompt", config.PromptSource{Text: "mine\n"}, ""},
-		{"a prompt file", config.PromptSource{File: "prompt.md"}, ""},
-		{"both keys", config.PromptSource{Text: "mine\n", File: "prompt.md"}, ""},
+		{
+			name:       "nothing configured",
+			useDefault: true,
+			want:       config.DefaultSystemPrompt(),
+		},
+		{
+			name:       "an inline prompt",
+			prompt:     config.SystemPromptSettings{Global: config.PromptSource{Text: "mine\n"}},
+			useDefault: true,
+		},
+		{
+			name:       "a prompt file",
+			prompt:     config.SystemPromptSettings{Global: config.PromptSource{File: "prompt.md"}},
+			useDefault: true,
+		},
+		{
+			name:       "both keys",
+			prompt:     config.SystemPromptSettings{Global: config.PromptSource{Text: "mine\n", File: "prompt.md"}},
+			useDefault: true,
+		},
+		{
+			// A per-model entry that matches NOTHING leaves the default in force — the run sends it,
+			// so the editor shows it. The old guard, which asked one key rather than the resolution,
+			// seeded here too; it is pinned so the recast keeps the answer it got right.
+			name: "a per-model entry that matches nothing",
+			prompt: config.SystemPromptSettings{
+				Models: map[string]config.PromptSource{"other-model": {Text: "theirs\n"}},
+			},
+			useDefault: true,
+			want:       config.DefaultSystemPrompt(),
+		},
+		{
+			// And one that MATCHES replaces the default for this session, so there is nothing to seed.
+			name: "a per-model entry for the bound model",
+			prompt: config.SystemPromptSettings{
+				Models: map[string]config.PromptSource{bound: {Text: "theirs\n"}},
+			},
+			useDefault: true,
+		},
+		{
+			// `use-default-prompt: false` with nothing configured sends an EMPTY prompt (ADR 0064 §2).
+			// Seeding the default there would offer the human a prompt this session refused.
+			name:       "the default switched off with nothing configured",
+			useDefault: false,
+		},
+		{
+			// Layers alone are sent alone (ADR 0067 §3): the default never fires behind them.
+			name: "layers alone",
+			prompt: config.SystemPromptSettings{
+				Layers: []config.SystemPromptLayer{{Text: "a layer\n"}},
+			},
+			useDefault: true,
+		},
+		{
+			name: "layers behind a global prompt",
+			prompt: config.SystemPromptSettings{
+				Global: config.PromptSource{Text: "mine\n"},
+				Layers: []config.SystemPromptLayer{{Text: "a layer\n"}},
+			},
+			useDefault: true,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			live := newLiveSettings(config.Options{
-				SystemPrompt: config.SystemPromptSettings{Global: c.global},
+				SystemPrompt:     c.prompt,
+				UseDefaultPrompt: c.useDefault,
 			}, nil)
-			if got := live.promptEditorSeed(); got != c.want {
+
+			got := live.promptEditorSeed(bound, t.TempDir())
+
+			if got != c.want {
 				t.Errorf("promptEditorSeed() = %q; want %q", got, c.want)
 			}
 		})
@@ -2418,10 +2485,20 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 
 	// The answer is the SESSION's, not the launch snapshot's: a prompt installed mid-session stops
 	// the seeding from the moment it lands, which is what makes the row feed safe to re-ask per paint.
-	live := newLiveSettings(config.Options{}, nil)
+	live := newLiveSettings(config.Options{UseDefaultPrompt: true}, nil)
 	live.setSystemPrompt(config.SystemPromptSettings{Global: config.PromptSource{File: "prompt.md"}}, true)
-	if got := live.promptEditorSeed(); got != "" {
+	if got := live.promptEditorSeed(bound, t.TempDir()); got != "" {
 		t.Errorf("after a mid-session prompt file the seed is %q; want none", got)
+	}
+
+	// Layers installed mid-session stop it for the layers' own reason: the run stops sending the
+	// default the moment the first one lands.
+	layered := newLiveSettings(config.Options{UseDefaultPrompt: true}, nil)
+	layered.setSystemPrompt(config.SystemPromptSettings{
+		Layers: []config.SystemPromptLayer{{Text: "a layer\n"}},
+	}, true)
+	if got := layered.promptEditorSeed(bound, t.TempDir()); got != "" {
+		t.Errorf("after a mid-session layer the seed is %q; want none", got)
 	}
 }
 
