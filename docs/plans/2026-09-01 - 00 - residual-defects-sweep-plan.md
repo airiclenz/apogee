@@ -505,7 +505,13 @@ guard, and the existing test's comment already says the row's kind is what settl
 **Acceptance:** `go test -race -count=1 -run 'TestRunView' ./internal/tui/`
 **Commit:** `test(tui): pin openRunAt's self-redirect guard`
 
-## 15. A sibling suggestion carrying a row break is driven end to end
+## 15. A sibling suggestion carrying a row break is driven end to end — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the row-break fixture name and its escaped spelling are two package-level test constants (`rowBreakSibling`, `escapedRowBreakSuggestion`) shared by both tests, so the seeded entry and the expected suggestion cannot drift; the per-case Windows skip rides a new `skipOnWindows` field on the existing `TestSuggestSiblings` table.
+NOTES (2026-09-01): `TestNotFoundMessage`'s loop gained a `strings.ContainsAny(got, "\r\n")` invariant check that applies to every case, which is what proves the assembled sentence carries no raw break.
+NOTES (2026-09-01): mutation-checked — stubbing `escapeRowBreaks` to a no-op fails both new subtests; the stub was reverted and `git diff` on `internal/tools/tools.go` is empty.
+NOTES (2026-09-01, verifier): the mutation check re-run at verification fails only the `TestSuggestSiblings` subtest — `TestNotFoundMessage`'s new case is handed the escaped spelling as a literal and never calls `escapeRowBreaks`, so its guarantee is the loop-wide `ContainsAny` invariant rather than the stub.
+NOTES (2026-09-01): per the plan header ("each item deletes its own entry"), this item removes its own `ISSUES.md` "Open defects" entry, so `ISSUES.md` joins **Files:** beyond the item's literal one-file list.
 
 **What:** Closes the residual at `ISSUES.md:131`. `suggestSiblings` escapes each rendered suggestion
 with `escapeRowBreaks` (`internal/tools/path_suggest.go:75`; the escaper is

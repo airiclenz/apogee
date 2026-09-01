@@ -41,12 +41,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 (`docs/plans/archived/2026-08-29 - 02 - tool-surface-transparency-plan.md`), deferred out of that
 run.
 
-- [ ] **The sibling-suggestion helper's row-break escaping is never exercised end to end.**
-  `suggestSiblings` (`internal/tools/path_suggest.go:39`) escapes each rendered suggestion with
-  `escapeRowBreaks` (`:75`) and `notFoundMessage` (`:91`) assembles them, but no test drives a
-  sibling entry whose NAME carries a newline, so neither helper's escaping is proven on the path a
-  hostile filename would take.
-
 - [ ] **`contentArgs` duplicates the tools' schema key names inside `internal/tui` with no
   cross-check against `internal/tools`.** The write/edit content keys the wire form drops are
   spelled a second time at `internal/tui/wireargs.go:25`, matched by tool name against the schemas
