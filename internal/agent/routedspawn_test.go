@@ -7,7 +7,10 @@ package agent
 // two (a latch swap reaches the spawns AFTER it, never the children already built).
 //
 // They drive newChildAgent directly rather than through a delegation, because the question is what
-// the CONSTRUCTION produces; the loop-level behaviour of a nested Agent is already covered.
+// the CONSTRUCTION produces; the loop-level behaviour of a nested Agent is already covered. Since
+// ADR 0069 that constructor is the DEFAULT-SEAT wrapper — the seat the `sub-agents-server` key
+// decides — so every test here asks what a delegation that names no seat builds, which is what they
+// have always asked; seat_test.go owns the two seats a call may name instead.
 
 import (
 	"context"

@@ -131,6 +131,60 @@ func delegationName(raw string) string {
 	return title.FirstLine(raw)
 }
 
+// delegationSeat is the Delegation seat ONE spawn is built for (ADR 0069) — the two places a
+// delegation may run, plus the absent ask that leaves the choice where it has always been. It is
+// unexported and lives here rather than on the wire because the seat is a construction decision:
+// the model names one of two strings (tools.RunOnSession / tools.RunOnSubAgentsServer) and the
+// engine resolves that, once, into which Upstream the child is built on.
+type delegationSeat int
+
+const (
+	// seatConfigured is the absent `run_on`: the latch alone decides, exactly as every delegation
+	// did before seat choice existed (ADR 0069 decision 2). It is the zero so that every caller
+	// that never heard of seats — newChildAgent's wrapper and its test callers — asks for it.
+	seatConfigured delegationSeat = iota
+	// seatSession is an explicit ask for the session server: the child is built on the parent's
+	// Upstream with the parent's posture whatever is latched (ADR 0069 decision 8).
+	seatSession
+	// seatSubAgentsServer is an explicit ask for the Sub-agent server: routed when a target is
+	// latched, and otherwise the session server with the note that says so (decision 9).
+	seatSubAgentsServer
+)
+
+// parseDelegationSeat resolves the OPTIONAL `run_on` a sub_agent call may carry into the seat the
+// spawn is built for. The empty string is the absent ask and the only value the plain tool variant
+// can produce, so every call made against a schema without `run_on` — and every call the
+// Mechanisms synthesise — resolves to seatConfigured.
+//
+// Anything else is refused rather than folded into the default: the two spellings are published in
+// the schema's own enum, so a third value is a model that read the menu wrong, and answering it
+// with a silent default would leave the parent believing a routing decision it never got. The error
+// names both accepted values because the result is the only place the model is told.
+func parseDelegationSeat(raw string) (delegationSeat, error) {
+	switch raw {
+	case "":
+		return seatConfigured, nil
+	case tools.RunOnSession:
+		return seatSession, nil
+	case tools.RunOnSubAgentsServer:
+		return seatSubAgentsServer, nil
+	default:
+		return seatConfigured, fmt.Errorf("invalid run_on %q: want %q or %q",
+			raw, tools.RunOnSession, tools.RunOnSubAgentsServer)
+	}
+}
+
+// seatFallbackNote is the ONE line the result of a fallen-back delegation carries (ADR 0069
+// decision 9): the call asked for the Sub-agent server, no usable target was latched, and the work
+// ran on the session server instead. It is for the PARENT MODEL — the human already read the
+// routing-state notice the host emits once per beat — so it says what happened to the decision the
+// model made and nothing about why the server is down, which is not the parent's to act on.
+//
+// A package constant, pinned by test, because it is a contract line: the parent reads it as the
+// answer to "did my run_on take effect", and it is appended to the result BODY (delegationResult),
+// never prefixed, so the child's own first line stays the head every reader meets first.
+const seatFallbackNote = "note: ran on the session server — the sub-agents server was unavailable"
+
 // runSubAgent is the recursion point: it parses the delegated task, constructs a nested Agent
 // bounded by this Agent's privileges (ADR 0005/0013), drives it to its Exchange boundary, and
 // returns the sub-agent's final message as this call's tool result. A cancellation propagates
@@ -160,7 +214,26 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorToolResult(call.ID, "sub_agent requires a non-empty task"), dispatchDone
 	}
 
-	sub, err := a.newChildAgent(call.ID, args.Task, delegationName(args.Name))
+	// The seat this one delegation runs on (ADR 0069), resolved BEFORE anything is built so an
+	// unparseable ask costs no child: it is refused with a result naming the two spellings, which
+	// is the only place the model can be told it read the menu wrong.
+	//
+	// `run_on` is only ever READ where this Agent's own sub_agent tool published it. A child's tool
+	// is the plain variant (withoutSeatChoice), and so is every tool built under
+	// `sub-agents-choice: fixed`, so a seat named against either is a value the model was never
+	// offered: it is IGNORED rather than honoured or refused, which is the identity rule — below the
+	// first hop a delegation keeps the seat it landed on (ADR 0069 decision 3) — and which keeps a
+	// hallucinated argument from being an error the model cannot act on.
+	seat := seatConfigured
+	if publishesSeatChoice(a.tools) {
+		asked, err := parseDelegationSeat(args.RunOn)
+		if err != nil {
+			return errorToolResult(call.ID, err.Error()), dispatchDone
+		}
+		seat = asked
+	}
+
+	sub, err := a.newChildAgentOn(seat, call.ID, args.Task, delegationName(args.Name))
 	if err != nil {
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
 	}
@@ -340,6 +413,21 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		result = domain.ToolResult{CallID: callID, Content: a.finalMessageText(), IsError: false}
 	}
 
+	// The routing note, for a child whose call ASKED for the Sub-agent server and was built on the
+	// session server instead (ADR 0069 decision 9). It rides every outcome that produces a result,
+	// for the same reason the trailer below does: a parent whose routing decision was overruled
+	// must see that from the result whichever way the delegation ended.
+	//
+	// It is appended, never prefixed — the body's first line is the child's answer, and the marker
+	// lines the engine DOES write at the head (stepCapResultFormat, subAgentFaultPrefix) are read
+	// anchored there by the TUI's recognisers, so a note in front of them would be a note that
+	// re-classified the result. And it is the last line of the BODY rather than of the result:
+	// ADR 0063 D3's trailer below is the final line on every outcome and stays there, so where both
+	// apply the note sits immediately above it.
+	if a.seatFallback {
+		result.Content += "\n" + seatFallbackNote
+	}
+
 	// The parent notice, appended once for EVERY outcome that produces a result (ADR 0063 D3) —
 	// the success above, the step cap, the fault and the Run error alike, because a human who
 	// steered a delegate must be told they did whichever way it ended. It is deliberately the
@@ -404,7 +492,27 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 // display too narrow for the task can still say which delegation it is showing. Empty means the
 // model named no delegation, and every display falls back to the task's first line. Like the
 // task it is display identity only: it is never consulted for privilege (ADR 0005).
+//
+// It is the DEFAULT-SEAT spelling of newChildAgentOn: the seat the `sub-agents-server` key decides,
+// which is what every spawn took before ADR 0069 and what every caller that never names a seat
+// still means. runSubAgent calls the seat-taking form directly.
 func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
+	return a.newChildAgentOn(seatConfigured, spawnCallID, task, name)
+}
+
+// newChildAgentOn is newChildAgent with the Delegation SEAT stated (ADR 0069) — the one axis a
+// single sub_agent call may move, and the only difference between the two: everything the doc above
+// describes (privileges, guards, tools, identity, the shared journal and console registry) is
+// built identically whichever seat is asked for, because a seat says where the child runs and never
+// what it may do.
+//
+// seatConfigured reads the latch and takes today's path verbatim. seatSession never reads it, so
+// the child is built on the parent's Upstream with the parent's posture however the session is
+// routed — and it is handed an EMPTY latch of its own, so its own nested delegations stay where it
+// was put (ADR 0045 decision 1's identity-once-there rule, read for the seat the model chose).
+// seatSubAgentsServer routes when a target is latched and otherwise degrades to the session server
+// (ADR 0045 §4), recording that on the child so its result carries the note.
+func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name string) (*Agent, error) {
 	childCfg := a.cfg
 	childCfg.Mode = a.Mode() // inherit the parent's LIVE mode at spawn (Shift+Tab may have changed it),
 	//                          read under the lock since this runs on the worker goroutine during dispatch
@@ -471,7 +579,22 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// "this spawn is not routed, or its target names no dialect" — both leave the parent's shape
 	// standing.
 	routedDialect := provider.EffortDialectNone
-	if target := a.delegationTarget(); target != nil {
+	// The latch is read for every seat but the session one. seatSession is the model naming the
+	// parent's own Upstream, so a target latched a moment before this spawn must not overrule it —
+	// not reading the latch is what makes that true by construction rather than by a later branch
+	// remembering to. seatConfigured reads it and nothing below can tell the difference from the
+	// unconditional read this replaced.
+	var target *DelegationTarget
+	if seat != seatSession {
+		target = a.delegationTarget()
+	}
+	// An explicit ask for the far seat that finds no usable target degrades to the session server
+	// (ADR 0045 §4) and says so in the result (ADR 0069 decision 9). Decided HERE, at the one place
+	// that holds both what was asked and what the single snapshot above found: a second read of the
+	// latch to answer the same question could see the next beat and disagree with the child that
+	// was built.
+	seatFallback := seat == seatSubAgentsServer && target == nil
+	if target != nil {
 		childCfg.Endpoint = target.Endpoint
 		childCfg.APIKey = target.APIKey
 		childCfg.Model = target.Model
@@ -529,6 +652,9 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// A routed child closes the client it dialled; an unrouted one must never close the session's
 	// out from under the parent that is still speaking over it (Agent.Close).
 	child.ownsUpstream = ownsUpstream
+	// And whether the seat it got is the seat it was asked for — the child's own fact, because the
+	// child's run is what the note qualifies and delegationResult reads it off the child.
+	child.seatFallback = seatFallback
 	// The wire shape an effort intent is expressed in. The FLOOR is the parent's LIVE field rather
 	// than the childCfg copy newAgent just seeded it from. The field is the authority the way it is
 	// everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two
@@ -603,6 +729,16 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// built — and "identity once there" (a routed child's delegations go to the same server) is
 	// exactly what one shared latch gives for free.
 	child.delegation = a.delegation
+	// — except for a child the model put on the SESSION seat, which is handed an EMPTY latch of its
+	// own (ADR 0069 decision 3 + ADR 0045 decision 1). The seat is offered at depth 0 only, so this
+	// child's own tool carries no `run_on` and it can neither confirm nor undo the placement; the
+	// identity rule that keeps a routed child's delegations on the routed server must therefore keep
+	// a session-seated child's on the session server, and sharing the parent's holder would instead
+	// send its grandchildren to the very server the model just steered this branch away from. The
+	// latch is empty and nothing ever writes it: the host pushes to the top-level Agent it built.
+	if seat == seatSession {
+		child.delegation = &delegationLatch{}
+	}
 	// The undo journal is shared by HANDLE too, and for a reason of its own (ADR 0051, ratified
 	// call 8): a delegation is work the human asked for in the CURRENT Exchange, so the files a
 	// child writes are files that Exchange changed and belong in its undo step. Handing the child
@@ -632,7 +768,9 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 //
 // The result is always ≤ the parent's tools: it is built from the parent registry's own names
 // via Subset, so it can never name a tool the parent lacks (a privilege expansion is
-// structurally impossible — ADR 0005).
+// structurally impossible — ADR 0005). The ONE tool that does not arrive verbatim is sub_agent
+// itself, and only in the narrowing direction: a parent offering seat choice hands the child the
+// PLAIN variant, so `run_on` is a depth-0 offer (withoutSeatChoice, ADR 0069 decision 3).
 func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 	if a.tools == nil {
 		return nil
@@ -648,7 +786,55 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 		}
 		names = append(names, t.Name())
 	}
-	return a.tools.Subset(names...)
+	return withoutSeatChoice(a.tools.Subset(names...))
+}
+
+// withoutSeatChoice returns roster with its sub_agent tool swapped for the PLAIN variant when the
+// one it holds publishes `run_on` — the depth-0-only rule of ADR 0069 decision 3, applied where a
+// child's tool set is built. Below the first hop a delegation keeps the seat it landed on, so the
+// child is never offered the parameter: removing it from the schema rather than accepting and
+// discarding it is the honest form, because a schema advertising a knob the engine ignores teaches
+// the model a lie about its own leverage.
+//
+// It is never a privilege change in either direction — both variants are the same recursion point
+// under the same name, and the plain one publishes strictly fewer arguments — so the ADR 0005
+// subset property Subset gives is untouched. A roster whose sub_agent is already plain, or which
+// holds none at all (the depth bound withheld it, or the parent had no tools), comes back as it
+// went in.
+func withoutSeatChoice(roster *domain.ToolRegistry) *domain.ToolRegistry {
+	if !publishesSeatChoice(roster) {
+		return roster
+	}
+	plain := domain.NewToolRegistry()
+	for _, tool := range roster.All() {
+		if tool.Name() == tools.SubAgentToolName {
+			tool = tools.NewSubAgent()
+		}
+		// Cannot fail: the names come from a registry, so each is non-empty and appears once.
+		_ = plain.Register(tool)
+	}
+	return plain
+}
+
+// publishesSeatChoice reports whether roster's sub_agent tool published the `run_on` argument —
+// the ONE question that decides both whether a spawn reads the seat a call names and whether the
+// child's own roster must be narrowed. Asking the tool rather than tracking a flag on the Agent is
+// what keeps the two answers from ever disagreeing: the published schema is the only thing the
+// model was actually told, and a mid-session SwapTools moves it.
+//
+// A nil roster, a roster without sub_agent, and a foreign tool registered under the name all report
+// false — none of them published the argument, and the false answer is the safe one in both
+// callers (the seat is ignored, the child's roster is left alone).
+func publishesSeatChoice(roster *domain.ToolRegistry) bool {
+	if roster == nil {
+		return false
+	}
+	t, ok := roster.Lookup(tools.SubAgentToolName)
+	if !ok {
+		return false
+	}
+	spawner, ok := t.(*tools.SubAgent)
+	return ok && spawner.OffersSeatChoice()
 }
 
 // finalMessageText returns the text of the last assistant message in the sub-agent's

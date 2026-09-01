@@ -346,7 +346,14 @@ consumed by `builtinTools` (:219; its `NewSubAgent()` line :246). `PromptArgKeys
 **Regression guard.** Every consumer of `SubAgentToolName`/`SubAgentArgs` (subagent.go, loop.go:1380, guideddecomposition.go, run.go:514) compiles unchanged; a synthesised call without `run_on` decodes to `RunOn == ""`.
 **Commit:** `feat(tools): sub_agent offers run_on when the host enables seat choice`
 
-## 11. Engine: resolve the seat at spawn, fallback note, plain variant for children
+## 11. Engine: resolve the seat at spawn, fallback note, plain variant for children — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's "any other value ⇒ error tool result" and its "a `run_on` a child sends anyway is ignored" are implemented as one gate: `runSubAgent` reads `args.RunOn` ONLY when this Agent's own sub_agent tool published the argument (`publishesSeatChoice(a.tools)`, asking the tool through item 10's `OffersSeatChoice`), so the refusal fires exactly where the parameter was offered and a value the model was never told about is dropped in silence. Refusing an unpublished `run_on` would be an error the model cannot act on; honouring it would move a seat that was never offered. It also covers a depth-0 agent under `sub-agents-choice: fixed`, which is the same case one hop up.
+NOTES (2026-09-02): `child.seatFallback` is set inside `newChildAgentOn` rather than by `runSubAgent` on the returned child (the item writes `sub.seatFallback = true`). The fallback is "asked for the far seat AND the latch snapshot was nil", and the snapshot is taken inside the constructor; deciding it outside would need a second read of the latch, which the host's beat can move between the two — the child would then be built one way and reported the other.
+NOTES (2026-09-02): the note is joined to the body with a single `\n` (the item states the position, not the separator), so it reads as the body's last line directly beneath the work it qualifies; the steered trailer keeps its own `\n\n` and stays the result's final line.
+NOTES (2026-09-02): the roster swap is a small package-level `withoutSeatChoice(roster)` beside `defaultSubAgentTools` rather than inline, so the guard clauses flatten; it shares `publishesSeatChoice` with the seat gate above, which is what keeps "was the argument published" from having two answers.
+NOTES (2026-09-02): routedspawn_test.go's only change is one clause in its file-header comment saying `newChildAgent` is now the default-seat wrapper and pointing at seat_test.go — all ten tests are otherwise untouched and pass unchanged, as the item's guard requires.
+NOTES (2026-09-02): the TUI recogniser pin landed in internal/tui/toolregistry_test.go, which the item's Files name, rather than beside the existing verdict cases in subagentblock_test.go — the functions under test (`delegationVerdict`, `delegationFailure`, `delegationStepCapHead`) live in toolregistry.go.
 
 Depends on item 10.
 **What:** Recast at the regression check (2026-09-01). `internal/agent/subagent.go`: `runSubAgent` parses `args.RunOn`: `""` ⇒ default seat;

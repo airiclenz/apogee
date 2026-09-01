@@ -287,6 +287,7 @@ type Agent struct {
 	callID        string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
 	consoleOwner  string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
 	task          string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
+	seatFallback  bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so. False for every other spawn, the absent ask included
 
 	// nameMu guards name, which is the ONE identity field a running Agent may see replaced under
 	// it: a delegation the model left unnamed is named out of band, by a completion that lands while

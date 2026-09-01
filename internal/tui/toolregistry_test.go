@@ -123,3 +123,63 @@ func TestGrepBranchRowShowsTheSearchedPath(t *testing.T) {
 		t.Errorf("grep row does not name the searched path:\n--- got ---\n%s", got)
 	}
 }
+
+// The ADR 0069 routing note — the line a delegation's result gains when its call asked for the
+// Sub-agent server and ran on the session server instead — is APPENDED to the result BODY. Both
+// recognisers that word a delegation's slot read the envelope from a fixed end of that body:
+// delegationStepCapHead at the START, delegationFailure from the first line. So a fallen-back
+// result must classify exactly as the plain one does, and only the text beneath the head may change.
+func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
+	t.Parallel()
+
+	const note = "\nnote: ran on the session server — the sub-agents server was unavailable"
+
+	t.Run("a capped run is still capped", func(t *testing.T) {
+		t.Parallel()
+
+		plain := envelopeCapMarker + "\nI had read two files so far"
+
+		if got, want := delegationVerdict(plain+note), delegationVerdict(plain); got != want {
+			t.Errorf("fallen-back verdict = %q, want the plain result's %q", got, want)
+		}
+	})
+
+	t.Run("a capped run that was steered still says both", func(t *testing.T) {
+		t.Parallel()
+
+		body := envelopeCapMarker + "\nI had read two files so far"
+
+		got := delegationVerdict(body + note + envelopeSteeredOne)
+
+		if want := delegationVerdict(body + envelopeSteeredOne); got != want {
+			t.Errorf("fallen-back steered verdict = %q, want the plain result's %q", got, want)
+		}
+	})
+
+	t.Run("a whole run still reads done", func(t *testing.T) {
+		t.Parallel()
+
+		if got := delegationVerdict("Found 4 gaps\nin the suite" + note); got != delegationDoneVerdict {
+			t.Errorf("fallen-back verdict = %q, want %q", got, delegationDoneVerdict)
+		}
+	})
+
+	t.Run("a faulted run keeps its cause", func(t *testing.T) {
+		t.Parallel()
+
+		word, output, ok := delegationFailure(envelopeFaultLine + note + envelopeSteeredOne)
+
+		wantWord, _, _ := delegationFailure(envelopeFaultLine + envelopeSteeredOne)
+		if !ok {
+			t.Fatal("delegationFailure declined a steered fallen-back result")
+		}
+		if word != wantWord {
+			t.Errorf("fallen-back failure line = %q, want the plain result's %q", word, wantWord)
+		}
+		// The note is not swallowed: it lands in the body beneath the summary, which is where the
+		// reader who wants to know where the work ran finds it.
+		if !strings.Contains(output, "the sub-agents server was unavailable") {
+			t.Errorf("fallen-back failure output = %q, want it to carry the routing note", output)
+		}
+	})
+}
