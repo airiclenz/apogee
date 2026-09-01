@@ -96,9 +96,9 @@ type Turn struct {
 	FinishReason string `yaml:"finish_reason,omitempty"`
 }
 
-// Match selects the requests a Turn answers. Both members may be set, in which case both must
-// match. A Match that sets neither is refused by validation — an always-true matcher is an
-// ordered turn written the confusing way.
+// Match selects the requests a Turn answers. Any combination of its members may be set, and
+// every member that is set must match. A Match that sets none is refused by validation — an
+// always-true matcher is an ordered turn written the confusing way.
 type Match struct {
 	// LastMessage is a regexp over the text of the request's LAST message, whatever its role.
 	LastMessage string `yaml:"last_message,omitempty"`
@@ -107,6 +107,13 @@ type Match struct {
 	// assistant turn that issued the call, because the wire shape of a tool result carries the
 	// id and not the name.
 	ToolResult string `yaml:"tool_result,omitempty"`
+	// System is a regexp over the request's system messages, concatenated in wire order the
+	// same way a `from: system` capture reads them. It is the discriminator for a request
+	// whose distinguishing mark is the directive the engine announced on it rather than
+	// anything in the conversation — a tool-less request, say, whose empty tool menu makes the
+	// preceding tool result render as a plain user message that `tool_result` cannot see and
+	// `last_message` cannot tell apart from the round before.
+	System string `yaml:"system,omitempty"`
 }
 
 // Capture is one value a Turn lifts out of the request it answers. Name is the placeholder it
@@ -340,8 +347,8 @@ func (t Turn) finishReason() string {
 
 // validate reports whether a Match can select anything.
 func (m Match) validate() error {
-	if m.LastMessage == "" && m.ToolResult == "" {
-		return errors.New("a when block sets last_message, tool_result, or both")
+	if m.LastMessage == "" && m.ToolResult == "" && m.System == "" {
+		return errors.New("a when block sets last_message, tool_result, system, or any combination")
 	}
 	if m.LastMessage == "" {
 		return nil

@@ -17,6 +17,7 @@ import (
 type matcher struct {
 	turns    []Turn
 	patterns []*regexp.Regexp // per turn: the compiled When.LastMessage, nil when it has none
+	systems  []*regexp.Regexp // per turn: the compiled When.System, nil when it has none
 	consumed []bool
 }
 
@@ -26,18 +27,28 @@ func newMatcher(s Script) (*matcher, error) {
 	m := &matcher{
 		turns:    s.Turns,
 		patterns: make([]*regexp.Regexp, len(s.Turns)),
+		systems:  make([]*regexp.Regexp, len(s.Turns)),
 		consumed: make([]bool, len(s.Turns)),
 	}
 	for i := range s.Turns {
 		when := s.Turns[i].When
-		if when == nil || when.LastMessage == "" {
+		if when == nil {
 			continue
 		}
-		pattern, err := regexp.Compile(when.LastMessage)
-		if err != nil {
-			return nil, fmt.Errorf("stubllm: turn %d: when.last_message: %w", i, err)
+		if when.LastMessage != "" {
+			pattern, err := regexp.Compile(when.LastMessage)
+			if err != nil {
+				return nil, fmt.Errorf("stubllm: turn %d: when.last_message: %w", i, err)
+			}
+			m.patterns[i] = pattern
 		}
-		m.patterns[i] = pattern
+		if when.System != "" {
+			pattern, err := regexp.Compile(when.System)
+			if err != nil {
+				return nil, fmt.Errorf("stubllm: turn %d: when.system: %w", i, err)
+			}
+			m.systems[i] = pattern
+		}
 	}
 	return m, nil
 }
@@ -77,13 +88,16 @@ func (m *matcher) release(i int) {
 	m.consumed[i] = false
 }
 
-// matches reports whether turn i's When selects r. Both members, when set, must match.
+// matches reports whether turn i's When selects r. Every member that is set must match.
 func (m *matcher) matches(i int, r Request) bool {
 	when := m.turns[i].When
 	if m.patterns[i] != nil && !m.patterns[i].MatchString(lastText(r.Messages)) {
 		return false
 	}
 	if when.ToolResult != "" && lastToolResultName(r.Messages) != when.ToolResult {
+		return false
+	}
+	if m.systems[i] != nil && !m.systems[i].MatchString(systemText(r.Messages)) {
 		return false
 	}
 	return true

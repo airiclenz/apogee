@@ -111,8 +111,16 @@ never consumed.
 A `when:` block sets `last_message` (a regexp over the text of the request's last message,
 whatever its role), `tool_result` (a tool NAME — resolved by following the last message's
 `tool_call_id` back to the assistant turn that issued the call, because the wire shape of a tool
-result carries no name), or both, in which case both must match. A `when:` that sets neither is
-refused: an always-true matcher is an ordered turn written the confusing way.
+result carries no name), `system` (a regexp over the request's system messages, concatenated in
+wire order exactly as a `from: system` capture reads them), or any combination, in which case
+every member set must match. A `when:` that sets none is refused: an always-true matcher is an
+ordered turn written the confusing way.
+
+`system` is the discriminator for a request whose distinguishing mark is the directive the engine
+announced on it rather than anything in the conversation. A request sent with an EMPTY tool menu
+is the case that needs it: the provider renders such a request with `hasTools=false`, which
+degrades the preceding tool result to a plain `user` message, so `tool_result` cannot match it at
+all and `last_message` sees text identical to the round before.
 
 **The stub is strict.** A request no turn answers is an HTTP 500 (`stubllm: no turn for request
 N`) and a logged entry with `Unmatched` set — never a plausible improvised reply. A silent

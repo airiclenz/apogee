@@ -27,7 +27,7 @@ func TestScriptRoundTripsThroughYAML(t *testing.T) {
 				ToolCalls: []ToolCall{{ID: "tc_1", Name: "list_dir", Arguments: `{"path":"."}`}},
 			},
 			{
-				When:         &Match{LastMessage: "^weather", ToolResult: "list_dir"},
+				When:         &Match{LastMessage: "^weather", ToolResult: "list_dir", System: "^You are apogee"},
 				Repeat:       true,
 				Text:         "sunny",
 				TokenDelay:   2 * time.Millisecond,
@@ -87,7 +87,7 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 		{
 			name: "an empty when block",
 			yaml: "turns:\n  - when: {}\n    text: hi\n",
-			want: "a when block sets last_message, tool_result, or both",
+			want: "a when block sets last_message, tool_result, system, or any combination",
 		},
 		{
 			name: "a when regexp that does not compile",
