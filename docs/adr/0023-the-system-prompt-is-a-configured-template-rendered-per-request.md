@@ -37,7 +37,12 @@ closes the parked story.
 
 ## Decision
 
-**1. The configuration surface is file-only: three top-level keys.** `system-prompt-text:` (the
+**1. The configuration surface is file-only: ~~three top-level keys~~.** *(Superseded 2026-08-31 by
+[ADR 0064](0064-the-system-prompt-ships-an-embedded-default.md) §2 and this record's own 2026-08-31
+amendment below: **four**. A fourth top-level key, `use-default-prompt:`, joins the three named
+here — a bool, default `true`, gating the embedded-default rung of that record's resolution ladder;
+an explicit `use-default-prompt: false` is the "send no prompt at all" that deleting these keys
+used to spell.)* `system-prompt-text:` (the
 template inline), `system-prompt-file:` (a file holding it), and `system-prompt-models:` (a map of
 model name → an entry reusing the *same two key spellings*, not a bare `text:`/`file:`). There is
 no flag and no environment variable, following the newer-key convention (`present:`, `mechanisms:`,

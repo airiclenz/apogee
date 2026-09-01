@@ -41,13 +41,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 (`docs/plans/archived/2026-08-31 - 00 - base-guidance-and-shipped-skills-plan.md`), deferred out
 of that run.
 
-- [ ] **ADR 0023 §1 still counts three top-level system-prompt keys.** The sentence at
-  `docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md:40` — "The
-  configuration surface is file-only: three top-level keys" — is stale now that
-  `use-default-prompt:` exists (ADR 0064). ADR 0064 states that it supersedes §8 "and nothing
-  else", so the record is defensible as written, but a reader counting the surface from §1 gets
-  the wrong number.
-
 - [ ] **The skill-gate applier test pins only one direction of the mirror.**
   `TestApplySettingSkillGatesLeaveEachOtherAlone`
   (`cmd/apogee/wire_settings_test.go:1338`) asserts `UseShippedSkills` survives an

@@ -275,7 +275,12 @@ or the assertion is green on macOS and red on every Linux CI run.
 **Acceptance:** `go test -race -count=1 -run 'TestRunRoot' ./cmd/apogee/`
 **Commit:** `test(cmd): carry both migration offers through the composition root`
 
-## 7. ADR 0023 §1 counts the fourth system-prompt key
+## 7. ADR 0023 §1 counts the fourth system-prompt key — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `ISSUES.md` joins **Files:** — the item's own **Files:** names only the ADR, while the plan's Closeout has every item remove its own register entry in its own commit. The section heading and its `**Status:**` block stay: two of its three entries (items 8 and 9) are still open.
+NOTES (2026-09-01): retry cleanup — a previous attempt at this item had also deleted item 8's register entry ("The skill-gate applier test pins only one direction of the mirror"); per the dispatch DECISION it is restored verbatim in its original position, so the tree carries item 7's removal alone. `cmd/apogee/wire_settings_test.go` is item 8's dirty file and was left exactly as found.
+NOTES (2026-09-01): the parenthetical's wording was tightened over the previous attempt's — `use-default-prompt:` gates the embedded-default rung of ADR 0064 §2's ladder (it is not itself the bottom rung; rung four is "nothing"). No blockquote header, no status change, and the count is struck through rather than rewritten, so the sweep grep still reports `0023:40`.
+NOTES (2026-09-01): sweep confirmed — `grep -rn 'three top-level' docs/adr/ internal/` reports exactly the two expected hits; `internal/config/config.go:1221` counts the trio against a `system-prompt:` block spelling and is correct as written, so it is left untouched.
 
 **What:** Closes the residual at `ISSUES.md:73`. The sentence at
 `docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md:40` — "The
