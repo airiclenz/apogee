@@ -209,15 +209,26 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	}
 
 	calls := resp.ToolCalls()
-	if len(calls) == 0 {
+	if len(calls) == 0 || a.wrapUp {
 		// Final no-tool response: commit the assistant message and end the Exchange. It is
 		// necessarily substantive — an empty reply never reaches here, the empty-reply guard
 		// (reviewedOutcome) faults the Turn first — so it is a NEUTRAL Turn for self-regulation's
 		// next-Turn judgment (R3), whose harmful proxy is the tool-result error alone. The empty
 		// final used to be that judgment's second harmful signal; a faulted Turn is discarded
 		// unjudged, so the signal is gone rather than merely relocated (CONTEXT: Self-regulation).
-		a.conv.Append(assistantMessage(resp, nil))
-		a.cfg.Events.Emit(domain.MessageEvent{EventBase: a.base(turn), Text: resp.Text()})
+		//
+		// The wrap-up Turn (Agent.wrapUp) takes this exit WHATEVER the reply carries: its menu was
+		// withdrawn, so a model that asks for a tool anyway is asking for something the request
+		// told it it cannot have, and a withdrawn menu that is still reachable is no withdrawal at
+		// all. The calls are DROPPED undispatched and the assistant message is committed without
+		// them. A wrap-up reply with no text is committed NOWHERE and emits no MessageEvent: an
+		// empty assistant message would become the child's last visible text and bury the partial
+		// result its capped Turns already earned, so that case falls back to the result instead
+		// (subagent.go). Outside the latch the text is never empty here, so nothing changes for it.
+		if text := resp.Text(); text != "" {
+			a.conv.Append(assistantMessage(resp, nil))
+			a.cfg.Events.Emit(domain.MessageEvent{EventBase: a.base(turn), Text: text})
+		}
 		return a.turns.end(t, endExchangeDone), nil
 	}
 
@@ -864,6 +875,15 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	req.SetSampling(domain.SamplingParams{MaxTokens: &outputCap})
 	req.SetDepth(a.depth)                      // surface this Agent's nesting level through req.View().Depth() (ADR 0013/0014)
 	req.SetParallelAgents(a.delegationWidth()) // and the width a delegation batch may take through req.View().ParallelAgents() (ADR 0039)
+	// The wrap-up directive (subagent.go), stamped at the same moment and for the same reason as
+	// the reply ceiling above: after construction, before any pre-request hook, because it is the
+	// engine's own bound and must hold under Bypass, where no hook runs at all. It is the other
+	// half of the withdrawn menu toolMenu just returned — without it the child is left to guess
+	// why its tools vanished. AppendToSystem CREATES the system message when none exists, so a
+	// session with no configured prompt and no context files still carries the directive.
+	if a.wrapUp {
+		req.AppendToSystem(wrapUpMarker, fmt.Sprintf(wrapUpDirectiveFormat, a.stepCap))
+	}
 	deferred, ok := a.conv.TakeDeferred()
 	if ok {
 		for _, inject := range deferred {
@@ -1339,6 +1359,14 @@ func (a *Agent) maxOutputTokens() int {
 // different modes (Mode() is live — agent.go).
 func (a *Agent) toolMenu() []domain.ToolDef {
 	if a.tools == nil {
+		return nil
+	}
+	// The wrap-up Turn withdraws the menu WHOLESALE (Agent.wrapUp): a delegate stopped at its step
+	// cap gets one closing request with no tools at all, and an empty menu is what "the tools are
+	// gone" means on a wire that carries no tool_choice — the seam renders no tool-instruction
+	// block for it and sends no native array. The withdrawal is the prohibition; step() drops any
+	// call a model makes anyway, so no path can reach a tool from here.
+	if a.wrapUp {
 		return nil
 	}
 	planMode := a.Mode() == domain.ModePlan

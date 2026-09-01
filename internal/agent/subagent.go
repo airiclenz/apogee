@@ -65,6 +65,29 @@ const subAgentFaultNoCause = "its exchange was abandoned (see the preceding erro
 // to show, rather than being handed a bare marker line with an empty body.
 const stepCapNoTextMarker = "(no visible text)"
 
+// wrapUpMarker and wrapUpDirectiveFormat are the one-request system directive a delegate stopped
+// at its step cap is handed for its closing report (Agent.wrapUp, loop.go): the request that
+// carries it carries no tools at all, so the directive is the only thing that tells the child WHY
+// its menu vanished and what to do with the reply it has left. It states the cause, the
+// prohibition and the ask — report to the agent that delegated the task, unfinished work included
+// — because a model that is merely given no tools narrates its next tool call instead of a result,
+// which is exactly the scavenged text this replaces.
+//
+// The marker is a phrase INSIDE the directive, as AppendToSystem's idempotency contract requires
+// (domain/hooks.go). %d is the cap actually applied (Agent.stepCap) — the same number the human
+// reads in stepCapErrFormat and the parent reads in stepCapResultFormat, so all three tell one
+// story. Package constants, pinned by test, because the child reads them as the contract for its
+// last reply.
+const (
+	wrapUpMarker = "no further tool calls are possible"
+
+	wrapUpDirectiveFormat = "You have reached the step limit for this delegation (%d steps) and " +
+		"no further tool calls are possible: the tools have been withdrawn for this final reply." +
+		"\n\nReport back to the agent that delegated this task now: what you found, what you " +
+		"concluded, and what remains unfinished. This is your only remaining reply — anything you " +
+		"do not write here is lost."
+)
+
 // userSteeredTrailerSingular and userSteeredTrailerPluralFormat are the two renderings of the
 // PARENT NOTICE a delegation's result carries when the human addressed the child while it ran
 // (ADR 0063 D3). The parent model is the one reader that never saw those messages — they landed in

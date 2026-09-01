@@ -1684,3 +1684,164 @@ func TestUserSteeredTrailer_SingularAndPlural(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The tool-less wrap-up Turn (Agent.wrapUp)
+// ----------------------------------------------------------------------------
+//
+// These tests set the latch BY HAND — nothing in the engine writes it yet — because the three
+// seams it moves (toolMenu, buildRequest, step) are its whole observable contract: one request
+// with no tools and a directive saying why, and a reply that ends the Exchange whatever it asks
+// for.
+
+// wrapUpAgent builds a latched-or-clear single Agent over the given scripts with one read tool,
+// returns it alongside the responder that logs what the loop actually sent and a counter the
+// tool bumps if it is ever dispatched.
+func wrapUpAgent(t *testing.T, latched bool, scripts ...[]provider.Delta) (*Agent, *requestLogResponder, *recordingSink, *int) {
+	t.Helper()
+
+	ran := 0
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore,
+		fakeTool{name: "read_thing", readOnly: true, ran: &ran, result: "package main"})
+
+	responder := &requestLogResponder{scripts: scripts}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.stepCap = 3 // what newChildAgent seeds on a delegate; the directive states this number
+	a.wrapUp = latched
+	return a, responder, sink, &ran
+}
+
+// runWrapUpAgent submits one task and runs the Agent to its boundary.
+func runWrapUpAgent(t *testing.T, a *Agent) domain.StepResult {
+	t.Helper()
+
+	if err := a.Submit(domain.UserInput{Text: "trawl the repo"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return res
+}
+
+// requestSystemText returns the content of the first system message on a request the loop sent,
+// or "" when it carries none — the native anchor a session with no configured prompt produces.
+func requestSystemText(req provider.Request) string {
+	for _, m := range req.Messages {
+		if m.Role == string(domain.RoleSystem) {
+			return m.Content
+		}
+	}
+	return ""
+}
+
+// assistantMessages returns the assistant messages committed to an Agent's conversation.
+func assistantMessages(a *Agent) []domain.Message {
+	var out []domain.Message
+	for _, m := range a.conv.Messages() {
+		if m.Role == domain.RoleAssistant {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// TestWrapUpRequestWithdrawsToolsAndSaysWhy pins the shape of the one request the latch composes:
+// zero tools on the wire and a system message carrying the directive with the cap's own number,
+// in a session that configured no system prompt at all.
+func TestWrapUpRequestWithdrawsToolsAndSaysWhy(t *testing.T) {
+	a, responder, _, _ := wrapUpAgent(t, true, contentScript("here is what I found"))
+
+	runWrapUpAgent(t, a)
+
+	if len(responder.requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(responder.requests))
+	}
+	req := responder.requests[0]
+	if len(req.Tools) != 0 {
+		t.Errorf("Tools = %d, want 0 — a latched Turn withdraws the whole menu", len(req.Tools))
+	}
+	want := fmt.Sprintf(wrapUpDirectiveFormat, 3)
+	if got := requestSystemText(req); !strings.Contains(got, want) {
+		t.Errorf("system text = %q, want it to contain the wrap-up directive %q", got, want)
+	}
+}
+
+// TestToolMenuUnchangedWithoutTheWrapUpLatch is the other half: with the latch CLEAR the same
+// session sends the full menu and no directive, so nothing about an ordinary Turn moved.
+func TestToolMenuUnchangedWithoutTheWrapUpLatch(t *testing.T) {
+	a, responder, _, _ := wrapUpAgent(t, false, contentScript("here is what I found"))
+
+	runWrapUpAgent(t, a)
+
+	req := responder.requests[0]
+	if len(req.Tools) != len(a.tools.All()) {
+		t.Errorf("Tools = %d, want the full menu of %d", len(req.Tools), len(a.tools.All()))
+	}
+	if got := requestSystemText(req); got != "" {
+		t.Errorf("system text = %q, want none — an unlatched no-prompt session seeds no system message", got)
+	}
+}
+
+// TestWrapUpDropsToolCallsAndKeepsTheText drives the reply the withdrawal exists to survive: a
+// child that narrates AND asks for a tool anyway. The narration is committed, the call is never
+// dispatched, and the Exchange ends there rather than taking another Turn.
+func TestWrapUpDropsToolCallsAndKeepsTheText(t *testing.T) {
+	a, responder, _, ran := wrapUpAgent(t, true,
+		narratedToolCallScript("t0", "read_thing", `{}`, "partial findings"))
+
+	res := runWrapUpAgent(t, a)
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("Status = %q, want %q — the wrap-up reply ends the Exchange", res.Status, domain.StatusExchangeComplete)
+	}
+	if res.Faulted {
+		t.Error("Faulted set; a dropped call is not a failure")
+	}
+	if *ran != 0 {
+		t.Errorf("tool ran %d times, want 0 — a withdrawn menu must not be reachable", *ran)
+	}
+	if responder.calls != 1 {
+		t.Errorf("upstream calls = %d, want 1 — the wrap-up Turn is the last one", responder.calls)
+	}
+	if got := a.lastVisibleText(); got != "partial findings" {
+		t.Errorf("lastVisibleText = %q, want %q", got, "partial findings")
+	}
+	msgs := assistantMessages(a)
+	if len(msgs) != 1 {
+		t.Fatalf("assistant messages = %d, want 1", len(msgs))
+	}
+	if len(msgs[0].ToolCalls) != 0 {
+		t.Errorf("committed assistant message carries %d tool calls, want 0", len(msgs[0].ToolCalls))
+	}
+}
+
+// TestWrapUpWithNoTextCommitsNothing pins the empty case: a wrap-up reply that is nothing but a
+// tool call commits no assistant message and emits no MessageEvent, so an empty final message can
+// never become the child's last visible text and bury the partial result its capped Turns earned.
+func TestWrapUpWithNoTextCommitsNothing(t *testing.T) {
+	a, _, sink, ran := wrapUpAgent(t, true, toolCallScript("t0", "read_thing", `{}`))
+
+	res := runWrapUpAgent(t, a)
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("Status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+	if *ran != 0 {
+		t.Errorf("tool ran %d times, want 0 — a withdrawn menu must not be reachable", *ran)
+	}
+	if got := a.lastVisibleText(); got != "" {
+		t.Errorf("lastVisibleText = %q, want empty — a text-less wrap-up commits nothing", got)
+	}
+	if got := len(assistantMessages(a)); got != 0 {
+		t.Errorf("assistant messages = %d, want 0", got)
+	}
+	if hasEvent[domain.MessageEvent](sink.events) {
+		t.Error("MessageEvent emitted for a text-less wrap-up reply")
+	}
+}

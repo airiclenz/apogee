@@ -311,6 +311,17 @@ type Agent struct {
 	// (ADR 0006), not a Mechanism: it stays on under Bypass. Run is the ONE enforcement site.
 	stepCap int
 
+	// wrapUp latches the ONE tool-less closing Turn a delegate stopped at its step cap is given
+	// (subagent.go's wrapUpDirectiveFormat). While it is set, three seams change together and only
+	// for the request they compose: toolMenu returns no tools, buildRequest stamps the directive
+	// that says why they are gone and what to write instead, and step() takes the final-answer exit
+	// even if the reply asks for a tool anyway (loop.go). It is latched for exactly ONE request and
+	// cleared before the capped Exchange returns, so it never outlives the Exchange that raised it,
+	// and it is written on this Agent's own loop goroutine. Transient like turns.exchangeTurns: it is neither configured nor serialized,
+	// because a resumed session resumes at a boundary, never mid-wrap-up. Structural (ADR 0006),
+	// not a Mechanism: no config key, and it holds under Bypass.
+	wrapUp bool
+
 	// midExchangeCompaction lifts shouldAutoCompact's Exchange-boundary-only gate (S2) for this
 	// Agent, so the estimate-driven fold may also run at a quiescent TURN boundary — the top of
 	// step(), where the previous Turn's tool results are already committed. It is a DELEGATE

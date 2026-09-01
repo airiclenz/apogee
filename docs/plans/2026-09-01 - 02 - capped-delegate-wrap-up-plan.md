@@ -77,7 +77,9 @@ that now names all three members.
 
 **Commit:** `feat(stubllm): when.system matches a request by its system text`
 
-## 2. The tool-less wrap-up request shape
+## 2. The tool-less wrap-up request shape — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): item's `%d` directive string is assembled from concatenated literals so the source line stays under the file's width; the rendered text is byte-identical to the plan's.
 
 **What.** Give `Agent` a `wrapUp bool` latch (unexported, NOT serialized — transient like
 `turns.exchangeTurns`) that makes ONE request tool-less and self-explaining. Three seams read it:
