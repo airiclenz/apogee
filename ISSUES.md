@@ -35,6 +35,15 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+- [ ] **A lone never-ran delegation wears its prompt indicator before it has reported.**
+  `blockHidesWhenCollapsed` (`internal/tui/blockstate.go:162-165`) asks `subAgentHidesPrompt` with
+  no `subAgentReported` gate, while the grouped member's rule landed on 2026-09-01 gates on exactly
+  that (`internal/tui/subagentblock.go:585`, and its comment names the gate as
+  `transcript.setExpanded`'s own permission). A spanless delegation that is still running therefore
+  wears a ▶ as a LONE block and none as a group member, and the lone row's click opens a reading
+  the expand refuses until the head is done. Closing it is the same gate on the single block's
+  rule; it sat outside the grouped-member scope of the item that landed the member rule.
+
 
 ## Parked / deferred work
 

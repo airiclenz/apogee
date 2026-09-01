@@ -343,6 +343,37 @@ point is a **minor** bump, not a breaking change.
   and the write can never point at different places. It is withheld when the listing carries no
   shipped skill and when no apogee home is resolved, where the export refuses outright.
 
+- Config: the `sub-agents-server:` root key can now be CLEARED as well as written
+  (`config.ResetSubAgentsServer`), the same careful splice in reverse — the key's line goes and the
+  file's comments, key order and `servers:` entries stay exactly as the user left them, while a file
+  that never set the key is a no-op rather than an error. The composition root's recorder takes the
+  empty name as the clear and reports it wrote, which is the groundwork for the picker's `auto`
+  opt-out row.
+
+- The `/sub-agents-server` picker offers an `auto` row, last, beside the configured entries — "no
+  routing; delegations run on this session's own server". Taking it retargets to the empty name and
+  REMOVES the `sub-agents-server:` key, so the opt-out survives a restart; the note says
+  `sub-agents server: auto · this session's own server · sub-agents-server: cleared`, the clause a
+  removal earns rather than ` · sub-agents-server: saved`. The argument form answers to the same
+  word (`/sub-agents-server auto`), and a configured entry literally named `auto` still wins the
+  name in both forms. Previously the ratified empty-key opt-out was reachable only by hand-editing
+  `config.yaml`.
+
+- Headless runs now say when the config still carries ADR 0045's retired `sub-agents: true` flag.
+  Detection and the migration offer are the TUI's, and a headless run builds no wiring to raise one,
+  so a config only ever driven unattended kept a flag that routes nothing without a word about it. A
+  stderr notice now names the flagged `servers:` entries and the file they are in, says why no offer
+  is coming, and names the edit that replaces the flag — the same bargain the plaintext `api-key:`
+  notice already struck. It is routing-agnostic on purpose: a stale flag and a set root
+  `sub-agents-server:` key can stand in the same file. Nothing is written, and stdout is untouched.
+
+- **`apogee.ErrNoSuchChild` is re-exported for embedders.** `Agent.InterjectChild`'s refusal was
+  only `domain.ErrNoSuchChild`, and `internal/` is unimportable from outside the module (ADR 0010),
+  so an embedder could not `errors.Is` it — while `cmd/apogee/wire_engine.go` already named
+  `apogee.ErrNoSuchChild` in prose. The alias now sits in the root sentinel block beside
+  `ErrNoOpenExchange`, is pinned by `example_test.go`'s compile-surface block, and an
+  `apogee_test.go` assertion proves it is the same sentinel the engine returns.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
@@ -540,6 +571,45 @@ point is a **minor** bump, not a breaking change.
   the ordinary marker tone, a failed one stays red, and no other tool's `clean`, `PASS` or `exit 0`
   is painted green. A resumed session replays the verdict rather than dropping to the marker tone.
 
+- The start-up's two config-file offers — the plaintext `api-key:` migration and the retired
+  `sub-agents: true` flag migration — are now pinned together through the composition root by
+  `TestRunRootCarriesBothMigrationOffers` (`cmd/apogee/keymigrate_test.go`): one real config home
+  carrying both facts reaches the renderer's Options with `KeyMigration`, `MigrateKey`,
+  `SubAgentsMigration` and `MigrateSubAgentsServer` all populated. Unwiring either preparer from
+  `runRoot` now fails a test. To make the assertion answerable on a store-less machine,
+  `probeKeyStore` (`cmd/apogee/keymigrate.go`) is a package-level var the test swaps for a fake
+  store — production behaviour is unchanged.
+
+- ADR 0023 §1's "three top-level keys" count is struck through and amended in the house
+  clause-level style: `use-default-prompt:` is named as the fourth key, pointing at ADR 0064 §2
+  and this record's own 2026-08-31 amendment.
+
+- `TestApplySettingSkillGatesLeaveEachOtherAlone` now pins BOTH directions of the skill-source
+  mirror: the project gate is restored before the `use-shipped-skills` apply, and that apply is
+  asserted to leave `UseProjectSkills` true and `project-only` resolving — the symmetric zeroing the
+  test exists to forbid used to pass.
+
+- The `/skills` note's `· N skills available:` header is back under end-to-end coverage.
+  `TestE2EHostileSurfacesKeepTheirOwnRows` now pages the transcript up past the thirty-row viewport
+  the header scrolled off when the shipped set grew, and asserts the exact line the run emits — so a
+  drift in that announced count fails a test again rather than passing a golden that no longer
+  frames it.
+
+- `openRunAt`'s self-redirect guard — the rule that a run view's own head cannot open a second copy of the run it is already showing — is pinned by a direct-call test; deleting the guard used to leave every suite green.
+
+- `suggestSiblings` and `notFoundMessage` are now driven by a fixture sibling whose filename carries a
+  newline, so the row-break escaping a hostile filename meets is proven end to end rather than by
+  inspection.
+
+- `internal/tui`'s `contentArgs` — the write/edit argument keys the stored wire form drops — is now
+  cross-checked in test against the schemas `internal/tools` actually publishes: every tool name it
+  spells must resolve in the default registry and every key it names (including the `oldText` /
+  `newText` pair nested inside `multi_find_and_replace`'s `replacements` array) must exist as a
+  schema property, so a rename on either side fails the build instead of silently pushing file
+  content onto the wire.
+
+- The manual and `layout.md` document the `/sub-agents-server` picker's `auto` row — what accepting it clears, the `/sub-agents-server auto` argument spelling, and the ` · sub-agents-server: cleared` clause that states the removal — and the stderr notice a headless run prints for a config still carrying the retired `sub-agents: true` flag. `layout.md` also records the grouped never-ran delegation's indicator rule.
+
 ### Fixed
 
 - A tool call whose arguments answer one parameter twice with DIFFERING values is now refused before resolution instead of running as last-wins. `repeatedArgumentKeysResult` fires at both dispatch seams — the serial `resolveAndExecute` and the fan-out `prepareDelegation` — immediately after the colliding-keys check, so the fan-out and serial paths answer such a call identically and the colliding refusal keeps precedence. The model gets one constant wording, `invalid arguments: repeated with different values: "task" — spell each argument once`, that a retry loop can recognise. A byte-identical repeat still runs last-wins, unchanged.
@@ -639,6 +709,73 @@ point is a **minor** bump, not a breaking change.
   an empty first return is now reserved for a genuine lookup failure.
 
 - An `api-key-cmd:` program is now resolved and fenced before it runs, through `security.ResolveProgram` like every other program apogee executes: a command whose `argv[0]` resolves inside the workspace is refused with `apogee: server "…": api-key-cmd: refusing to run "…"` and never runs, and one that is not on PATH now says `"…" is not on this machine's PATH` instead of arriving as a generic `failed:` wrap. A relative `argv[0]` carrying a path separator — the wrapper-script shape the manual documents — is made absolute against apogee's working directory first, exactly as `exec.Command` would have resolved it, so a wrapper outside the workspace keeps working. `probe model` and `daemon` hold no workspace and so fence nothing there, unchanged from before.
+- The `/sub-agents-server` pick and a live `servers:` re-read now push their CLEARED Delegation
+  target while still holding the wiring mutex, the way a beat's landing already does. Both seams
+  bumped the generation, released the lock and only then pushed the nil, so a beat landing on the
+  generation they had just bumped could be admitted inside that window and then clobbered by the
+  clearing push — leaving the session unrouted until the next beat, against a server it had already
+  resolved. The notice `land` deliberately sends after unlocking is unchanged.
+
+- A `⏎` refused inside a sub-agent run view now says so where the reader is. `childGoneNote` and
+  the not-running note still land as host notes at depth 0 — the 2026-08-18 design call keeping host
+  notes out of a delegate's run is unchanged — but the same sentence is now also flashed on the
+  status line for two seconds whenever the refusal is raised inside a view, so a reader no longer has
+  to back out to learn that their message did not go. At depth 0 nothing flashes: the note is already
+  on screen there, and the slot stays with the context gauge.
+
+- **Fixed — the Windows label revert clears only trees apogee's own label vouches for.** The
+  second remediation prong of security finding F-08: `revertibleRoots` filtered a journal's
+  `Root` entries on sibling liveness alone and handed every one of them to `ClearTree`, whose
+  root write is a NULL SACL, so a journal planted or corrupted under `~/.apogee` could make
+  apogee strip the mandatory label off an arbitrary tree. A new pure decision beside
+  `priorRestorable` — `rootClearable` — clears a root only where apogee's own Low label still
+  reads cleanly on it, and refuses a volume root (`C:\`, `\\server\share`, either separator)
+  whatever it carries, the same guardrail the label pass makes on the way in. The verdict is
+  taken once in the pre-clear pass that judges the priors and persisted on the entry
+  (`Entry.RootJudged`), so a retry after a failed descendant does not re-read the NULL SACL the
+  clear itself wrote and retire the journal over labels still standing; a refused root is
+  skipped, not an abort, and a root-only journal whose pre-clear rewrite fails still clears as
+  it always did.
+
+- A delegation that NEVER RAN — refused at the depth bound, failed by a hook, lost to a construct
+  error — now wears its ▶ and opens onto the prompt it carried when it is folded into a **group**,
+  not only when it stands alone. The member's collapsed row asks the same prompt-shaped question the
+  single block asks (`subAgentHidesPrompt`) instead of counting body lines alone, so the indicator
+  and the click target no longer come and go with the terminal's columns — a refusal short enough to
+  keep the outcome slot used to leave the member bodiless and unreachable at every wide width. The
+  row keeps its promoted refusal while it says so: the affordance arrives with no demote behind it.
+  A member still RUNNING keeps its bare row (the prompt reading opens only once the delegation has
+  reported, the same permission the transcript's expand grants), a member that carried no task at
+  all still wears nothing, and a SPANNED member is untouched — its row goes on opening the run's own
+  view (ADR 0063).
+
+- `/settings`: the note an escalation to `auto` leaves on the `mode` row is now measured against the
+  value column the apply is about to leave, not the one on screen. The apply records its edit only
+  after it has applied (the deliberate order at `settingsApplied`), so the ` *` marker the edit adds
+  to the value cell was not yet on the row when the note's column was measured — the note was handed
+  two cells it did not have, and at the widths where the blast-radius sentence lands within two cells
+  of the column edge the pane chose the whole sentence and then elided its tail, which is exactly what
+  the first-clause fallback exists to prevent. `settingsNoteWidth` now takes the pending edit and
+  measures the rows as they will stand once it is journaled. Only bites when the marked row is the
+  widest in its value column, which is why 80 and 160 columns never showed it.
+
+- **MCP's unusable-proxy refusal is matchable on the url-safety sentinel.** `vetEndpoint` returned a
+  bare `fmt.Errorf` when the configured egress proxy was not a usable URL, while its unpinnable
+  sibling and both `internal/tools` funnel paths wrapped `security.ErrURLBlocked` — so a caller
+  partitioning refusals on the sentinel saw an MCP unusable-proxy refusal as an unrelated error. It
+  now wraps the sentinel, keeps naming the server (the settings row's reconnect note has no other
+  source for the name) and still never prints the proxy's password.
+
+- **An unattributable goroutine is no longer forgiven by a neighbour.** `idOf` in the TUI driver
+  kit's leak check returned the empty id for every stack block whose header did not parse, so two
+  such blocks collapsed into one entry in `CheckLeaks`'s snapshot map and one present at snapshot
+  time forgave every later one — the opposite of what the function's own doc comment promised. An
+  unparseable block is now keyed on a short SHA-256 of its trimmed text under an `unparsed-` prefix
+  no runtime id can wear, and a header carrying a non-numeric id counts as unparseable too. The one
+  residual is stated in the comment: two goroutines with byte-identical unparseable blocks still
+  share a key, the same forgiveness a matching pair of real ids would earn. `startedSince` now takes
+  both the snapshot and the current set as arguments instead of reading the live dump itself, so the
+  comparison is a pure function the package's own tests can drive.
 
 ## [0.19.0] — 2026-08-30
 
