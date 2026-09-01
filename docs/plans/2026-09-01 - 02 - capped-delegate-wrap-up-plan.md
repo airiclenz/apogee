@@ -126,7 +126,15 @@ CLEAR the request's tool menu and system text are byte-identical to today's.
 
 **Commit:** `feat(agent): a latched Turn sends no tools and says why`
 
-## 3. `Run` asks the capped delegate for its closing report
+## 3. `Run` asks the capped delegate for its closing report — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `endStepCapped` is now the cap's FALLBACK row only — a completed wrap-up ends through `endExchangeDone` and its boundary is returned with `StepCapped` forced on, so the row's `turnEnd` const comment ("already judged · advance") was rewritten alongside the `turn.go:152` body comment the item names; both were made false by this item's change.
+
+NOTES (2026-09-01): `TestSubAgent_MaxStepsArgumentOnlyLowersTheCap` needed the same +1 script move as the three cap-test sites the guard enumerates (its child otherwise ate `contentScript("parent done")` as the wrap-up); the item's Tests line "a lowered `max_steps` behaves the same" covers it.
+
+NOTES (2026-09-01): `TestRunEndsTheExchangeAtTheStepCap` and `TestSubAgent_StepCapReturnsAPartialResultToTheParent` swapped `scriptedResponder` for the existing `requestLogResponder` so they can pin "the extra request carries no tools"; no other behaviour of either test moved.
+
+NOTES (2026-09-01): `TestE2EDelegationStepCap` (`cmd/apogee`) now fails on its two child-request counts (`:213`, `:277` — 4 requests where 3 are asserted). That is exactly the work item 4 owns ("T-04's request counts follow in item 4"), which is why this item's Acceptance stays on `./internal/agent`; the `:257` wording pin this item moves passes. `./internal/...` is fully green.
 
 Depends on item 2.
 

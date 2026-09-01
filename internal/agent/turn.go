@@ -72,7 +72,7 @@ const (
 	endExchangeDone                // judged · advance · Exchange closes       · StatusExchangeComplete
 	endAbandoned                   // discarded · advance · Exchange closes    · StatusExchangeComplete + Faulted
 	endCancelled                   // discarded · roll back + restore deferred · no advance · Exchange stays open · StatusCancelled
-	endStepCapped                  // already judged · advance · Exchange closes · StatusExchangeComplete + StepCapped
+	endStepCapped                  // step-cap fallback · no judge · no advance · Exchange closes · StatusExchangeComplete + StepCapped
 )
 
 // end exits the Turn t on the row how names — the single table that replaced the three exit
@@ -149,14 +149,16 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		// "re-attempt"), opening that exact hole.
 		status = domain.StatusCancelled
 	case endStepCapped:
-		// The delegate step cap: the child was still asking for tools when its bound was reached,
-		// so the ENGINE ends the Exchange the model would have kept going. This row is reached only
-		// from Run, and only right after endTurnDone closed a Turn that completed normally — so
-		// the Turn is already judged and this row deliberately does NOT judge it again (a second
+		// The delegate step cap's FALLBACK exit. The cap no longer ends the Exchange on this row in
+		// the ordinary case: finishAtStepCap (agent.go) spends one further tool-less Turn on the
+		// child's closing report, and THAT Turn ends through endExchangeDone — judged, counter
+		// advanced, Exchange closed — so a capped child now ends at cap+1 Turns and the boundary
+		// the parent reads is the wrap-up's own with StepCapped forced on. This row is what is
+		// left for the wrap-up that produced no boundary of its own: a loop-level error that gave
+		// up without closing the Exchange. Nothing completed here, so there is nothing to judge (a
 		// tracker.endTurn would rotate the pending set against an empty scratch and lose a
-		// judgment, R3). The counter is left alone for the same reason: endTurnDone ALREADY
-		// advanced past that Turn, and no new Turn ran here, so advancing again would leave the
-		// index one ahead of the Turns actually taken — an off-by-one a Snapshot stores and a
+		// judgment, R3) and nothing to advance past — the counter is left alone so the index keeps
+		// naming the next Turn rather than one beyond it, an off-by-one a Snapshot stores and a
 		// resume reads back (state.go). What is left is the Exchange half: close it (F6 — the
 		// deferred queue dies with it) and report the same StatusExchangeComplete a real final
 		// answer does. NOT Faulted: nothing failed — the work up to the cap stands and the parent

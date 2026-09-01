@@ -44,8 +44,12 @@ const maxSubAgentDepth = 2
 // stepCapResultFormat is the marker line the PARENT model receives when a delegation ended at its
 // step cap (Agent.stepCap): a NON-error result whose first line says the answer that follows is
 // partial, so the parent can re-delegate a narrower task instead of treating a half-finished
-// investigation as the finding. It is a package constant, pinned by test, because the parent model
-// reads it as the contract for what the rest of the result is. %d is the cap actually applied.
+// investigation as the finding. What follows it is the child's last visible text, which since
+// finishAtStepCap (agent.go) is normally its CLOSING REPORT — the tool-less wrap-up Turn's reply —
+// and falls back to whatever it last said out loud when that Turn produced nothing. The line
+// itself is unchanged either way: it promises a partial result, and a report of unfinished work is
+// exactly that. It is a package constant, pinned by test, because the parent model reads it as the
+// contract for what the rest of the result is. %d is the cap actually applied.
 const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); partial result — its last visible text follows]"
 
 // subAgentFaultPrefix opens the error result a FAULTED delegation becomes. What follows it is the
@@ -60,9 +64,10 @@ const subAgentFaultPrefix = "sub-agent faulted before finishing the delegated ta
 const subAgentFaultNoCause = "its exchange was abandoned (see the preceding error), so no result was produced"
 
 // stepCapNoTextMarker stands in for the child's last visible text when it produced none — a
-// delegate that spent every capped Turn calling tools and never wrote a word. The marker keeps
-// the result intelligible: the parent is told the delegation was stopped AND that it has nothing
-// to show, rather than being handed a bare marker line with an empty body.
+// delegate that spent every capped Turn calling tools and never wrote a word, and whose wrap-up
+// Turn then faulted or answered with nothing but another tool call. The marker keeps the result
+// intelligible: the parent is told the delegation was stopped AND that it has nothing to show,
+// rather than being handed a bare marker line with an empty body.
 const stepCapNoTextMarker = "(no visible text)"
 
 // wrapUpMarker and wrapUpDirectiveFormat are the one-request system directive a delegate stopped
@@ -239,6 +244,12 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		// self-regulation (noteToolProductivity, R3). So the parent gets a NON-error result whose
 		// first line is the marker saying the answer below is partial, followed by whatever the
 		// child last said out loud. The child's own ErrorEvent already told the human the cap hit.
+		//
+		// That last visible text is normally the child's CLOSING REPORT: finishAtStepCap spends one
+		// tool-less Turn asking the capped delegate to sum up, and its reply is the last thing
+		// committed (agent.go). This branch is also the fallback for that Turn going wrong — a
+		// faulted or text-less wrap-up arrives here with Faulted cleared, and the pre-cap text (or
+		// stepCapNoTextMarker) answers exactly as it did before the wrap-up existed.
 		text := a.lastVisibleText()
 		if text == "" {
 			text = stepCapNoTextMarker

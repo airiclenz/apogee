@@ -254,7 +254,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		// of the child's run, past the bottom of a terminal the run overflows, so it is read by
 		// scrolling rather than off one frame.
 		flat := flatten(scrollTranscript(drv))
-		for _, want := range []string{stepCapErrLead + " — returning what it has", stepCapErrTail} {
+		for _, want := range []string{stepCapErrLead + " — asking it to sum up", stepCapErrTail} {
 			if !strings.Contains(flat, flatten(want)) {
 				t.Errorf("the transcript does not say %q:\n%s", want, flat)
 			}

@@ -342,11 +342,14 @@ type Agent struct {
 	lastFault string
 }
 
-// stepCapErrFormat is the ErrorEvent text a delegate's Exchange ends on when it reaches its step
-// cap — the human-facing half of the bound, and the only thing that says the delegation was
-// STOPPED rather than finished. It is a package constant, pinned by test, because the line names
-// the key that raises the bound and a watcher acts on it. %d is the cap actually applied.
-const stepCapErrFormat = "delegate stopped at its step cap (%d steps) — returning what it has; " +
+// stepCapErrFormat is the ErrorEvent text a delegate surfaces when it reaches its step cap — the
+// human-facing half of the bound, and the only thing that says the delegation was STOPPED rather
+// than finished. It is emitted at the cap and the Exchange then runs ONE further tool-less Turn
+// for the child's closing report (finishAtStepCap), which is why the middle clause says what the
+// engine does next rather than what it already has. It is a package constant, pinned by test,
+// because the line names the key that raises the bound and a watcher acts on it. %d is the cap
+// actually applied.
+const stepCapErrFormat = "delegate stopped at its step cap (%d steps) — asking it to sum up; " +
 	"narrow the task or raise delegate-max-steps"
 
 // usageTally is one Agent's running token accounting: the sums and the call count behind the
@@ -565,10 +568,10 @@ func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) { return a.
 // depth > 0 ONLY: the top-level contract in the paragraph above stands unchanged.
 //
 // It is also the one place the DELEGATE STEP CAP is enforced (Agent.stepCap): a child agent that
-// is still asking for tools after its capped number of Turns has its Exchange ended here rather
-// than looping on, and the boundary returned carries StepCapped. A Step-driving host is not
-// capped — it decides when to stop stepping itself — and neither is a top-level Agent, whose cap
-// is always 0.
+// is still asking for tools after its capped number of Turns leaves this loop rather than looping
+// on, is given one further tool-less Turn to report what it has (finishAtStepCap), and the
+// boundary returned carries StepCapped. A Step-driving host is not capped — it decides when to
+// stop stepping itself — and neither is a top-level Agent, whose cap is always 0.
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 	for {
 		res, err := a.step(ctx)
@@ -582,7 +585,7 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 		// alternation-clean. A top-level Agent has no cap and never leaves this loop early.
 		a.turns.exchangeTurns++
 		if a.stepCap > 0 && a.turns.exchangeTurns >= a.stepCap {
-			return a.endAtStepCap(res), nil
+			return a.finishAtStepCap(ctx, res), nil
 		}
 		// AFTER the cap check, because this boundary is only a delivery point if another Turn
 		// actually follows it: committing a remark into an Exchange that ends here would report it
@@ -592,22 +595,61 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 	}
 }
 
-// endAtStepCap ends the open Exchange at the delegate step cap: it surfaces the bound to the human
-// as one ErrorEvent (the child's own stream, at its Depth) and closes the Exchange through the
-// exit table's endStepCapped row. The Exchange is NOT faulted — the Turns up to the cap did real
-// work and the parent receives what they produced (runSubAgent) — so the returned boundary carries
-// StepCapped rather than Faulted.
+// finishAtStepCap ends the open Exchange at the delegate step cap — but not before spending one
+// further Turn on the child's CLOSING REPORT. It surfaces the bound to the human as one ErrorEvent
+// (the child's own stream, at its Depth), then latches wrapUp for exactly one step(): the tool
+// menu is withdrawn and the request tells the delegate why its tools are gone and asks it to
+// report to the agent that delegated the task (subagent.go's wrapUpDirectiveFormat, loop.go's
+// three seams). What the parent reads is then AUTHORED rather than scavenged from whatever the
+// child happened to narrate alongside its last tool call.
 //
-// last is the StepResult of the Turn that just completed, and it is what the returned boundary
-// reports: no new Turn ran here, so the index is that Turn's and its wall time is reconstructed
-// from the elapsed step() already measured for it rather than invented as ~0.
-func (a *Agent) endAtStepCap(last domain.StepResult) domain.StepResult {
+// That Turn is EXTRA and uncounted: turns.exchangeTurns is advanced only by Run's loop, which this
+// exit has already left, so `delegate-max-steps: 3` still buys three working Turns plus this one
+// reply. It also cannot repeat — nothing loops here.
+//
+// last is the StepResult of the Turn that reached the cap. Four outcomes, in the order they are
+// decided:
+//
+//   - CANCELLED — returned as a cancel, exactly as a cancel inside any other child Turn: the
+//     parent Turn rolls back wholesale and no partial result surfaces (delegationResult).
+//   - COMPLETED — the wrap-up's own boundary is returned with StepCapped forced true, so the
+//     parent still reads the partial marker rather than a finish that did not happen.
+//   - FAULTED or errored with the Exchange left OPEN — close it on the exit table's endStepCapped
+//     row, which is the clean capped boundary this function produced whole before it had a Turn to
+//     spend. The wrap-up's boundary is not trustworthy here, so the Turn reported is still the one
+//     that reached the cap, its wall time reconstructed from the elapsed step() already measured.
+//   - FAULTED with the Exchange already closed (endAbandoned) — take that boundary, clear Faulted
+//     and set StepCapped.
+//
+// The last two are the ratified fallback: a cap is never reported to the parent as a failure. That
+// is also why Faulted must be CLEARED and not merely joined by StepCapped — delegationResult tests
+// Faulted BEFORE StepCapped (subagent.go), so a still-faulted boundary would reach the parent as
+// the error result this path exists to avoid. It then hands the parent exactly today's result:
+// lastVisibleText(), else stepCapNoTextMarker.
+func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) domain.StepResult {
 	a.cfg.Events.Emit(domain.ErrorEvent{
 		EventBase: a.base(last.TurnIndex),
 		Source:    "loop",
 		Err:       fmt.Sprintf(stepCapErrFormat, a.stepCap),
 	})
-	return a.turns.end(&turnRun{turn: last.TurnIndex, start: time.Now().Add(-last.Elapsed)}, endStepCapped)
+
+	a.wrapUp = true
+	defer func() { a.wrapUp = false }()
+
+	res, err := a.step(ctx)
+	switch {
+	case res.Status == domain.StatusCancelled:
+		return res
+	case err == nil && !res.Faulted:
+		res.StepCapped = true
+		return res
+	case a.turns.inExchange:
+		return a.turns.end(&turnRun{turn: last.TurnIndex, start: time.Now().Add(-last.Elapsed)}, endStepCapped)
+	default:
+		res.Faulted = false
+		res.StepCapped = true
+		return res
+	}
 }
 
 // AbortExchange discards an interrupted Exchange and returns the Agent to a clean quiescent

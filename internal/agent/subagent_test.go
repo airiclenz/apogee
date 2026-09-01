@@ -960,6 +960,11 @@ func subAgentArgsCapped(task string, maxSteps int) string {
 	return string(b)
 }
 
+// childClosingReport is what a capped delegate answers its tool-less wrap-up request with — the
+// report the parent reads under the partial marker, distinct from every narration the child wrote
+// during its capped Turns so a test can tell the authored text from the scavenged one.
+const childClosingReport = "I read two files; the third is unread and the survey is unfinished."
+
 // countCapErrors returns how many ErrorEvents at the given Depth name the step cap.
 func countCapErrors(events []domain.Event, depth int) int {
 	n := 0
@@ -974,13 +979,14 @@ func countCapErrors(events []domain.Event, depth int) int {
 
 // TestRunEndsTheExchangeAtTheStepCap pins the bound at its enforcement site: an Agent with a cap
 // that keeps asking for tools has its Exchange ENDED by Run, on a clean StatusExchangeComplete
-// boundary marked StepCapped and NOT Faulted, after exactly cap Turns.
+// boundary marked StepCapped and NOT Faulted, after exactly cap working Turns PLUS the one
+// tool-less wrap-up Turn the cap spends on a closing report (finishAtStepCap).
 func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 
-	responder := &scriptedResponder{scripts: cappedChildTurns(10)}
+	responder := &requestLogResponder{scripts: cappedChildTurns(10)}
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -1004,14 +1010,19 @@ func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
 	if res.Faulted {
 		t.Error("Faulted set on a capped Exchange; the cap is not a failure")
 	}
-	if responder.calls != 3 {
-		t.Errorf("upstream calls = %d, want 3 — Run must stop AT the cap, not past it", responder.calls)
+	// Three working Turns and then ONE more: the wrap-up Turn is EXTRA and uncounted, so the cap
+	// still buys the three requests it names and the fourth is the closing report.
+	if responder.calls != 4 {
+		t.Errorf("upstream calls = %d, want 4 — three working Turns plus the wrap-up", responder.calls)
 	}
-	// The counter must name the next Turn, not one past it: endTurnDone advances for the Turn that
-	// completed and the endStepCapped row must not advance a second time, or the index encodeState
-	// stores (state.go) and a resume reads back is one ahead of the Turns actually taken.
-	if a.turns.index != 3 {
-		t.Errorf("turn index = %d, want 3 — the cap must not advance the counter a second time", a.turns.index)
+	if got := len(responder.requests[3].Tools); got != 0 {
+		t.Errorf("the wrap-up request carries %d tools, want 0 — the menu is withdrawn for it", got)
+	}
+	// The counter names the next Turn: the wrap-up ends through endExchangeDone, which advances
+	// once for it, so a capped child ends at cap+1 — the index encodeState stores (state.go) and a
+	// resume reads back must match the Turns actually taken, no more and no fewer.
+	if a.turns.index != 4 {
+		t.Errorf("turn index = %d, want 4 — cap Turns plus the wrap-up, advanced exactly once each", a.turns.index)
 	}
 	if got := countCapErrors(sink.events, 0); got != 1 {
 		t.Errorf("step-cap ErrorEvents = %d, want exactly 1", got)
@@ -1019,11 +1030,15 @@ func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
 	if !hasErrorContaining(sink.events, 0, "raise delegate-max-steps") {
 		t.Error("the step-cap ErrorEvent does not name the key that raises the bound")
 	}
+	if !hasErrorContaining(sink.events, 0, "asking it to sum up") {
+		t.Error("the step-cap ErrorEvent does not say the engine is asking the delegate to sum up")
+	}
 }
 
 // TestSubAgent_StepCapReturnsAPartialResultToTheParent proves the parent's side of the bound: a
 // delegation stopped at its cap is NOT an error result — it carries the marker line plus the
-// child's last visible text — and the parent's own Turn continues to a normal Exchange end.
+// closing report the tool-less wrap-up Turn authored — and the parent's own Turn continues to a
+// normal Exchange end.
 func TestSubAgent_StepCapReturnsAPartialResultToTheParent(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
@@ -1032,8 +1047,11 @@ func TestSubAgent_StepCapReturnsAPartialResultToTheParent(t *testing.T) {
 
 	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
 	scripts = append(scripts, cappedChildTurns(3)...)
+	// The child's 4th request is the wrap-up: its menu is gone, so what it answers with is the
+	// report the parent reads rather than narration scavenged from a tool round.
+	scripts = append(scripts, contentScript(childClosingReport))
 	scripts = append(scripts, contentScript("parent done"))
-	responder := &scriptedResponder{scripts: scripts}
+	responder := &requestLogResponder{scripts: scripts}
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -1067,18 +1085,72 @@ func TestSubAgent_StepCapReturnsAPartialResultToTheParent(t *testing.T) {
 	if !strings.HasPrefix(sub.Content, marker+"\n") {
 		t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, marker)
 	}
-	if !strings.Contains(sub.Content, "reading file 2") {
-		t.Errorf("sub_agent result = %q, want the child's LAST visible text", sub.Content)
+	if !strings.HasSuffix(sub.Content, childClosingReport) {
+		t.Errorf("sub_agent result = %q, want it to end with the wrap-up reply %q", sub.Content, childClosingReport)
 	}
-	// The human sees the cause on the child's own stream, once.
+	// The wrap-up request itself: the child's last one, sent with the menu withdrawn — which is
+	// what makes the report a report instead of a fourth tool call.
+	if got := len(responder.requests[len(scripts)-2].Tools); got != 0 {
+		t.Errorf("the wrap-up request carries %d tools, want 0", got)
+	}
+	// The human sees the cause on the child's own stream, once, and it says what happens next.
 	if got := countCapErrors(sink.events, 1); got != 1 {
 		t.Errorf("step-cap ErrorEvents at Depth 1 = %d, want exactly 1", got)
+	}
+	if !hasErrorContaining(sink.events, 1, "asking it to sum up") {
+		t.Error("the step-cap ErrorEvent does not say the engine is asking the delegate to sum up")
+	}
+}
+
+// TestSubAgent_StepCapFallsBackWhenTheWrapUpFaults drives the ratified fallback: the wrap-up Turn
+// is a best effort, so an Upstream fault on it must never turn a capped delegation into a FAILED
+// one. The parent still gets the non-error partial result, carrying the text the child managed
+// before the cap.
+func TestSubAgent_StepCapFallsBackWhenTheWrapUpFaults(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 3
+
+	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
+	scripts = append(scripts, cappedChildTurns(3)...)
+	scripts = append(scripts, errorScript("upstream exploded on the wrap-up"))
+	scripts = append(scripts, contentScript("parent done"))
+
+	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: "please research"})
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Errorf("parent result = %+v, want a clean exchange-complete — a failed wrap-up is the child's, not the parent's", res)
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if sub.IsError {
+		t.Errorf("sub_agent result IsError = true after a faulted wrap-up; the cap is never reported as a failure: %q", sub.Content)
+	}
+	if strings.Contains(sub.Content, subAgentFaultPrefix) {
+		t.Errorf("sub_agent result = %q, want the step-cap result, not the fault result", sub.Content)
+	}
+	marker := fmt.Sprintf(stepCapResultFormat, 3)
+	if want := marker + "\n" + "reading file 2"; sub.Content != want {
+		t.Errorf("sub_agent result = %q, want %q — the pre-cap last visible text", sub.Content, want)
 	}
 }
 
 // TestSubAgent_StepCapMarksAWordlessDelegate covers the child that spent every capped Turn
-// calling tools and never said anything: the parent still gets an intelligible result rather than
-// a bare marker with an empty body, and never the "completed" note a finished child would get.
+// calling tools and never said anything — not even when its menu was withdrawn and it was asked to
+// sum up: the parent still gets an intelligible result rather than a bare marker with an empty
+// body, and never the "completed" note a finished child would get.
 func TestSubAgent_StepCapMarksAWordlessDelegate(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
@@ -1089,6 +1161,9 @@ func TestSubAgent_StepCapMarksAWordlessDelegate(t *testing.T) {
 		subAgentCallScript("c1", "trawl the repo"),
 		toolCallScript("t0", "read_thing", `{}`), // no visible text on either child Turn
 		toolCallScript("t1", "read_thing", `{}`),
+		// …and none on the wrap-up either: a child that answers its closing request with nothing
+		// but another tool call commits no assistant message, so there is still nothing to show.
+		toolCallScript("t2", "read_thing", `{}`),
 		contentScript("parent done"),
 	}
 	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
@@ -1167,7 +1242,9 @@ func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 			scripts := [][]provider.Delta{
 				toolCallScript("c1", tools.SubAgentToolName, subAgentArgsCapped("trawl the repo", tc.requested)),
 			}
-			scripts = append(scripts, cappedChildTurns(tc.wantSteps)...)
+			// wantSteps working Turns plus the one tool-less wrap-up Turn the cap spends: the
+			// bound governs the WORK, and the closing report is extra however low it is set.
+			scripts = append(scripts, cappedChildTurns(tc.wantSteps+1)...)
 			scripts = append(scripts, contentScript("parent done"))
 			responder := &scriptedResponder{scripts: scripts}
 
@@ -1181,7 +1258,7 @@ func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 			}
 
 			if responder.calls != len(scripts) {
-				t.Errorf("upstream calls = %d, want %d — the child ran a different number of Turns than the effective cap",
+				t.Errorf("upstream calls = %d, want %d — the child ran a different number of Turns than the effective cap plus its wrap-up",
 					responder.calls, len(scripts))
 			}
 			sub, ok := lastSubAgentResult(sink.events)
