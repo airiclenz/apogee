@@ -786,7 +786,14 @@ block present at snapshot no longer forgives a different malformed block.
 **Acceptance:** `go test -race -count=1 -run 'TestLeaked|TestCheckLeaks|TestIdOf|TestStartedSince' ./internal/tuitest/`
 **Commit:** `fix(tuitest): key an unparseable stack block on its content`
 
-## 22. The manual documents the auto row and the headless flag notice
+## 22. The manual documents the auto row and the headless flag notice — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `docs/manual/headless.md` is deliberately NOT amended, so it is absent from **Files:** — the item makes the placement conditional ("if `docs/manual/headless.md` carries a notices section … follow whichever placement that precedent sets"), and the precedent it names is one-sided: `headless.md` has no notices section, and the plaintext-key notice is documented at `configuration.md` alone. The sub-agents-flag notice therefore lands beside the retired flag's own paragraph in `configuration.md` and nowhere else.
+NOTES (2026-09-01): `docs/manual/commands.md:14,18` were left as they stand — both say only that the bare verb opens a picker and answers immediately, which the `auto` row does not change; only the table row at `:45`, which describes what the picker offers, needed the amendment.
+NOTES (2026-09-01): the `auto` paragraph is placed AFTER the existing "And they move mid-session." paragraph rather than inside it, because that paragraph's closing sentence ("It is also the only way the key changes from inside apogee…") has `/sub-agents-server` as its referent and splitting the paragraph re-pointed the pronoun at the new row.
+NOTES (2026-09-01): every quoted string was taken from the landed code and machine-checked byte-identical against it — `subAgentsAutoDescription`, `subAgentsAutoResolved`, `subAgentsSavedClause`, `subAgentsClearedClause` (`internal/tui/picker.go`) and `subAgentsFlagNotice`'s `fmt.Sprintf` sentence (`cmd/apogee/keymigrate.go`), the latter compared with its two `%s` filled. The sample notice fills the path as `~/.apogee/config.yaml`, the spelling the rest of the manual uses for the config home.
+NOTES (2026-09-01): the grouped never-ran indicator rule is stated in `layout.md`'s indicator paragraph (`:814-825`, "The block wears its state where the click is") rather than in the `/sub-agents-server` pane section — that paragraph is where the "an indicator appears exactly where a click toggles something" predicate lives, which is the rule item 18 changed. The item's Acceptance sentence reads as one grep over `layout.md` covering three claims; the pane section carries the `auto` row and the `cleared` clause, the indicator paragraph carries the third.
+NOTES (2026-09-01): no `ISSUES.md` edit — item 22 was added at the regression check and has no register entry; the `## Open defects` section is already empty after item 21.
 
 **What:** `docs/manual/configuration.md:596-603` describes `/sub-agents-server` as a pick over the
 `servers:` entries recorded as `sub-agents-server: <name>`, and `:623-629` describes the retired

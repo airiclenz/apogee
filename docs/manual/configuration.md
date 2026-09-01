@@ -606,6 +606,21 @@ reads `auto (session server)` while the key is unset — because `⏎` on a serv
 row switches the *session's* upstream, which is the one thing this key does not
 do.
 
+**And the last row is the way back out.** Under your entries the picker offers
+one more row — `auto`, whose second cell reads
+`— no routing; delegations run on this session's own server` — and it names no
+entry: taking it, or typing `/sub-agents-server auto`, points the delegations
+back at the server this session is itself talking to and *removes* the
+`sub-agents-server:` key from the file, so the opt-out survives a restart the
+same way a pick does. The line it writes says which write it was:
+
+    sub-agents server: auto · this session's own server · sub-agents-server: cleared
+
+where a named pick reads `· sub-agents-server: saved` instead — the two are
+opposites and never interchangeable. A `servers:` entry you actually named
+`auto` still wins in both forms: the entries are your file's, the row is the
+picker's, and the file answers first.
+
 Sub-agents there also ask for thinking effort the way that server understands
 it — the entry's `effort-dialect:` if it names one, else whatever the server
 advertises. A target that advertises no dialect and pins none is the
@@ -627,6 +642,10 @@ session's own server; where apogee finds one it says so at start-up and offers
 one edit — `move it` writes `sub-agents-server: <name>`, drops the retired flag,
 and re-points this session's delegations at that entry there and then. `not now`
 leaves the file exactly as it is and the offer comes back at the next start-up.
+An unattended `apogee headless` run never prompts, so it gets a stderr notice
+naming the entries instead — the same bargain a plaintext key gets:
+
+    apogee: cheaper still carries the retired sub-agents: true flag in ~/.apogee/config.yaml, and headless runs never prompt, so apogee cannot offer to migrate it. The flag no longer routes anything — set sub-agents-server: <entry> at the root of the file and drop the flag.
 
 **`server:` keeps itself current.** Every `/server` switch onto a listed entry
 splices `server: <name>` back into the file — that one key, your comments and layout

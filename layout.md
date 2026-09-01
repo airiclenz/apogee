@@ -818,7 +818,11 @@ name instead of as the last letter of it. Its presence *is* the clickability hin
 affordance and the click-target rule are **one predicate**: an indicator appears exactly where a
 click toggles something, so a row that hides nothing wears none, and a sub-agent run's head wears
 one however short its
-own report is. The `+N more lines` count is apogee's own word too and is painted as one — the
+own report is. A delegation that got **no span at all** (above) wears one too, and wears it inside
+a group exactly as it does standing alone: what its folded row holds back is the prompt it
+carried, which no row of it ever shows, so the click opens onto that prompt. It is granted only
+once the delegation is **over**, the same permission an expand asks for — a member still running
+has no reading to open, so its row stays bare until it ends. The `+N more lines` count is apogee's own word too and is painted as one — the
 `tool-marker` role, a warm orange `#E0B080` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for it. It is **no longer a line**: it joins
@@ -1810,7 +1814,11 @@ scrolling around the selection. It is modal — while it is open every key belon
 says so instead of switching. **The second server-kind question is `/sub-agents-server`**, which
 asks something else of the same list: not where this session runs but where its DELEGATIONS run.
 Its title says so — `sub-agents server — where delegations run` — and its rows are those same
-entries in two columns only, `name` and `— endpoint`. There is deliberately no third cell: the
+entries in two columns only, `name` and `— endpoint`, with **one more row under them**: `auto`,
+whose second cell reads `— no routing; delegations run on this session's own server`. That row
+names no entry — it is an ACTION and not a marker, taking it clears the routing rather than
+pointing it somewhere — and it is offered unconditionally, on a file with two entries as on one
+with ten. There is deliberately no third cell on any of them: the
 `· current` mark means "the session is bound here", which is the one thing a delegation target is
 not, and it opens on the FIRST row rather than on a marked one, because which entry takes the
 delegations right now is the wiring's state and a highlight guessed from the session's own server
@@ -1818,7 +1826,13 @@ would point at the wrong row on every session that routes elsewhere. Taking a ro
 delegations spawned from then on go and leaves the session exactly where it is — nothing about this
 session switches, so its hint reads `⏎ choose` — and the transcript gets
 one line naming the entry, with `· sub-agents-server: saved` after it when the choice was recorded
-into the file. `/model` has
+into the file. The `auto` row's line names no entry, because there is none to name: it says the
+word the row carries and what taking it resolved to —
+`sub-agents server: auto · this session's own server` — and the clause after it is the opposite
+write's, `· sub-agents-server: cleared`,
+since accepting that row REMOVES the key rather than writing one. The two clauses are never
+interchangeable: claiming "saved" for a removal would send a reader looking in `config.yaml` for a
+line that is no longer there. `/model` has
 two offerings and lists whichever one the session's own server can answer from: while it is on a
 `servers:` entry that names a llama-launcher config,
 the Launch profiles that config defines, in the launcher's own order, in five columns — `name`,
