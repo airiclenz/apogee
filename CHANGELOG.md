@@ -10,6 +10,42 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- ADR 0067 records `system-prompt-layers` as an explicit additive prompt channel: layers append
+  after whatever the four-rung ladder selected, are never a rung themselves, and never trigger the
+  embedded default. CONTEXT.md's *System prompt* entry gains the layers term.
+
+- **`system-prompt-layers:` is parsed and shown in /settings.** The new top-level key (ADR 0067)
+  takes a list of prompt fragments, each stating exactly one of `text:` or `file:`; they reach
+  resolution on `SystemPromptSettings.Layers`, in the order the file lists them, alongside the
+  three keys that select a prompt. A layer that states both spellings, or neither, is a startup
+  error naming it by position (`system-prompt-layers[N]`) — the per-position twin of the check
+  `system-prompt-models` entries already face. The key registers as a structured, read-only
+  /settings row between `system-prompt-models` and `use-default-prompt`, summarised as a layer
+  count and opened in the human's own editor. Composition of the layers into the sent prompt is
+  not wired yet — the key is inert until that lands.
+
+- `system-prompt-layers:` entries are now composed into the resolved system prompt: the prompt the
+  ladder selects first, then each enabled layer in listed order, joined by a blank line. Layers are
+  not a rung — a per-model entry that replaces the global prompt does not replace the layers, and
+  layers configured on their own are sent alone rather than behind the embedded default. A layer's
+  `file:` resolves like `system-prompt-file` (leading `~` expands, relative paths join the apogee
+  home) and is read on every resolution; an unreadable file or an unknown placeholder is a startup
+  error naming `system-prompt-layers[N]`. An empty layer list leaves every existing resolution
+  byte-identical.
+
+- The `/settings` prompt editor now seeds apogee's embedded default only when the session's whole
+  prompt resolution IS that default: a `system-prompt-layers:` entry, a `system-prompt-models:`
+  entry matching the bound model, or `use-default-prompt: false` with nothing configured each open
+  the editor empty, matching what the run actually sends. The settings pane paints the
+  `system-prompt-layers` row with the `⏎ opens $EDITOR` affordance.
+
+- Manual: "The system prompt" now documents `system-prompt-layers:` — the additive channel beside
+  the four-rung ladder, its `text:`/`file:` entry shape, path resolution and an example (ADR 0067).
+
+- The `/settings` manual now lists `system-prompt-layers:` among the blocks that open your editor,
+  and the config test comment for a layers-only file states ADR 0067 §3's rule: layers alone never
+  fire the embedded default.
+
 - **A scripted stubllm turn can now select requests by their system text.** A `when:` block takes a
   third optional member, `system:` — a regexp over the request's system messages, concatenated in
   wire order exactly as a `from: system` capture reads them — beside `last_message` and
