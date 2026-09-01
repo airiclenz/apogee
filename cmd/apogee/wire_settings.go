@@ -1426,7 +1426,15 @@ func deniedReason(d mcp.Denied) string {
 // mcpNoteFor turns a failed re-admission into the clause the url-safety row carries. liveMCP's own
 // sentence is reused verbatim rather than re-worded here so the two rows that can report a failed
 // reconnect — `mcp-servers:` and this one — tell the human the same thing.
-func mcpNoteFor(err error) string { return "; mcp " + err.Error() }
+//
+// The leading `mcp ` is the row's own label for whose subsystem is speaking, not part of the
+// sentence, so the sentence it labels is taken de-labelled (mcpSentence): internal/mcp words its own
+// refusals with an `mcp: ` lead of its own, and pasting one under the other stutters the word at the
+// reader — `; mcp mcp: server "docs": …`, or `; mcp reconnect failed: mcp: server "docs": …` once
+// mcpReconnectFailed has composed it. One label, at the front, where the row's sibling clause for a
+// disconnected server already puts it. An error that never carried internal/mcp's label reads exactly
+// as it did before, `; mcp <text>`, byte for byte.
+func mcpNoteFor(err error) string { return "; mcp " + mcpSentence(err) }
 
 // sameServerNames reports whether two admitted sets name the same servers in the same order. Both
 // come from one partition of one slice, so order is the file's and equal order is equal membership;

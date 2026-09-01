@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -1290,6 +1291,118 @@ func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T
 	}
 	if names := toolNames(fixture.set.tools()); !slices.Equal(names, []string{"serving__echo"}) {
 		t.Errorf("live MCP tools = %v, want the holder back on the set that is serving", names)
+	}
+}
+
+// The url-safety row's MCP clause is composed by mcpNoteFor, and the `mcp ` it prepends is the row's
+// own label for whose subsystem is speaking — not part of the error. internal/mcp words the refusals
+// it owns with an `mcp: server "<name>":` lead of its own (ratified wording, not this side's to
+// re-write), so a clause that pasted the label on unconditionally stuttered the word at the reader:
+// `; mcp mcp: server "docs": …` for a refusal carried straight, and `; mcp reconnect failed: mcp:
+// server "docs": …` once mcpReconnectFailed had composed it. One label, at the front — and the
+// spelling of every error that never carried internal/mcp's own is unchanged to the byte.
+func TestMCPNoteForDoesNotDoubleTheLabel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "a refusal internal/mcp labelled is carried once",
+			err: errors.New(`mcp: server "proxied": security: url blocked by url-safety: ` +
+				"the configured egress proxy is not a usable URL"),
+			want: `; mcp server "proxied": security: url blocked by url-safety: ` +
+				"the configured egress proxy is not a usable URL",
+		},
+		{
+			name: "the reconnect sentence carries a labelled refusal once",
+			err: mcpReconnectFailed(errors.New(`mcp: server "proxied": security: url blocked by ` +
+				"url-safety: the configured egress proxy is not a usable URL")),
+			want: `; mcp reconnect failed: server "proxied": security: url blocked by url-safety: ` +
+				"the configured egress proxy is not a usable URL — previous connections kept",
+		},
+		{
+			name: "the reconnect sentence around an unlabelled error is unchanged",
+			err:  mcpReconnectFailed(errors.New("dial: connection refused")),
+			want: "; mcp reconnect failed: dial: connection refused — previous connections kept",
+		},
+		{
+			name: "an unlabelled error still gets the row's label",
+			err:  errors.New("config.yaml no longer parses"),
+			want: "; mcp config.yaml no longer parses",
+		},
+		{
+			name: "a label-shaped word that is not the label is left alone",
+			err:  errors.New("mcpd: server is gone"),
+			want: "; mcp mcpd: server is gone",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := mcpNoteFor(tc.err); got != tc.want {
+				t.Errorf("mcpNoteFor(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// The row itself, end to end, against a refusal internal/mcp really produced rather than a copy of
+// its wording: the file names a server the dial cannot build a transport for, the operator closes the
+// host the OTHER server sits on, and the re-admission that follows dials what is left and fails. What
+// the human reads on the `url-safety:` row is asserted whole, because the defect this pins is a
+// property of the composed sentence and of nothing smaller — the helper reads correctly in isolation
+// either way.
+func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	// A second block with no `transport:` — admitted by the host lists (they gate endpoints, and it
+	// names none) and refused by the dial, which is what puts internal/mcp's own sentence on the row.
+	writeSettingsFixture(t, path, mcpServersFixture+"  - name: broken\n")
+
+	workspace := t.TempDir()
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
+	fixture := newMCPFixture(old, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+		// The production recipe (wire_live.go): the file's blocks, this session's guard, the real client.
+		return mcp.Connect(context.Background(), servers, mcpGuard(nil, nil), workspace)
+	})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+
+	// Closing the docs host changes WHICH servers are admitted, which is what makes the row dial at
+	// all; the dial then fails on the block behind it and the row reports that in one sentence.
+	note, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v — the MCP half of this row cannot fail it", err)
+	}
+	want := toolRosterNote + `; mcp reconnect failed: server "broken" has no transport configured` +
+		" — previous connections kept"
+	if note != want {
+		t.Errorf("row note = %q, want %q", note, want)
+	}
+	if strings.Contains(note, mcpErrorPrefix) {
+		t.Errorf("row note = %q; internal/mcp's own label reached the human under the row's", note)
+	}
+	if !old.closed && len(fixture.set.tools()) == 0 {
+		t.Error("a failed re-admission left the session with no MCP tools; the previous set is what it keeps")
+	}
+}
+
+// Dropping the label is a RENDERING change and must stay one: mcpReconnectFailed still wraps, so a
+// caller matching what internal/mcp wrapped — the sentinel item 20 of the sweep put on the
+// unusable-proxy refusal — reaches it through the reconnect sentence exactly as it did when that
+// sentence was an fmt.Errorf with %w.
+func TestMCPReconnectFailedKeepsTheErrorInTheChain(t *testing.T) {
+	t.Parallel()
+	refusal := fmt.Errorf("mcp: server %q: %w: the configured egress proxy is not a usable URL",
+		"proxied", security.ErrURLBlocked)
+	wrapped := mcpReconnectFailed(refusal)
+	if !errors.Is(wrapped, security.ErrURLBlocked) {
+		t.Errorf("errors.Is(%v, ErrURLBlocked) = false; de-labelling the sentence broke the chain", wrapped)
+	}
+	if !errors.Is(wrapped, refusal) {
+		t.Errorf("errors.Is(%v, the refusal) = false; the carried error is no longer reachable", wrapped)
 	}
 }
 

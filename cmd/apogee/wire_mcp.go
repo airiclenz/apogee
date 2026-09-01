@@ -8,7 +8,7 @@ package main
 // reached leaves the session on the connections it already has.
 
 import (
-	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee"
@@ -115,6 +115,37 @@ func closeSession(s mcpSession) error {
 // mcpReconnectFailed is what the row says when a reconnect could not land. It names the outcome the
 // human most needs to know — that the servers they were talking to a moment ago are still connected —
 // because the alternative reading of a failed reconnect is that the session now has no MCP tools.
+//
+// The sentence it builds drops internal/mcp's own `mcp: ` label from the refusal it carries. Every
+// surface that prints this one has already said `mcp` — the `mcp-servers:` row is that key, and the
+// url-safety row's clause is labelled by mcpNoteFor — so keeping the inner label stutters the word at
+// the reader (`; mcp reconnect failed: mcp: server "docs": …`). Only the RENDERING loses it: the
+// refusal stays wrapped, so a caller matching a sentinel internal/mcp wrapped (security.ErrURLBlocked,
+// mcp.ErrEndpointDenied) still reaches it through errors.Is.
 func mcpReconnectFailed(err error) error {
-	return fmt.Errorf("reconnect failed: %w — previous connections kept", err)
+	return mcpReconnectError{err: err}
+}
+
+// mcpReconnectError is mcpReconnectFailed's sentence. It is a type rather than an fmt.Errorf because
+// the two things it owes are in tension there: the text has to be composed from the CARRIED error's
+// de-labelled sentence, which %w cannot spell, while the error itself has to stay in the chain.
+type mcpReconnectError struct{ err error }
+
+// Error is the sentence the row prints.
+func (e mcpReconnectError) Error() string {
+	return "reconnect failed: " + mcpSentence(e.err) + " — previous connections kept"
+}
+
+// Unwrap keeps the refusal reachable: errors.Is/As see exactly what the fmt.Errorf %w form exposed.
+func (e mcpReconnectError) Unwrap() error { return e.err }
+
+// mcpErrorPrefix is how internal/mcp opens the refusals it words itself (`mcp: server %q: …`). It is
+// matched on this side of the seam, never produced: the prefix belongs to that package's sentences,
+// which are ratified and not ours to re-word.
+const mcpErrorPrefix = "mcp: "
+
+// mcpSentence is one of those refusals with that label taken off, for embedding in a sentence a
+// surface has already labelled `mcp`. An error that never carried the label comes back byte for byte.
+func mcpSentence(err error) string {
+	return strings.TrimPrefix(err.Error(), mcpErrorPrefix)
 }
