@@ -138,7 +138,8 @@ func (s transcriptSel) spanUnchanged(oldLines, newLines []string) bool {
 // flashClearMsg clears the transient status-line note (m.flash) once flashDuration elapses.
 type flashClearMsg struct{}
 
-// flashDuration is how long a mouse-copy confirmation lingers in the status line.
+// flashDuration is how long a flash — a mouse-copy confirmation, a refusal raised inside a run
+// view — lingers in the status line.
 const flashDuration = 2 * time.Second
 
 // inputEditable reports whether the prompt is live for the human to edit — the states in which a

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -603,14 +604,16 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 }
 
 // TestRunViewEnterRefusesANonRunningChild pins the two lifecycles with no mailbox behind them: ⏎ is
-// a no-op that says so and leaves the draft standing, so the same line can be carried back up.
+// a no-op that says so and leaves the draft standing, so the same line can be carried back up. The
+// note lands at depth 0 as it always has AND the same sentence flashes on the status line, because
+// a reader inside the view would otherwise see nothing at all until they backed out.
 func TestRunViewEnterRefusesANonRunningChild(t *testing.T) {
 	for _, phase := range []childPhase{childOver, childScheduled} {
 		eng := &fakeEngine{}
 		m := modelViewingChild(t, eng, phase)
 
 		m.input.SetValue("check the tests too")
-		m = step(t, m, keyEnter())
+		m, cmd := stepCmd(t, m, keyEnter())
 
 		if got := eng.childInterjections(); len(got) != 0 {
 			t.Errorf("phase %v: InterjectChild calls = %+v; want none — there is no child to read one", phase, got)
@@ -621,8 +624,71 @@ func TestRunViewEnterRefusesANonRunningChild(t *testing.T) {
 		if n := len(m.pendingInterjections); n != 0 {
 			t.Errorf("phase %v: staged rows = %d; want none", phase, n)
 		}
-		if want := "repo-scout is not running — go back to send a message"; !noteInTranscript(m, want) {
+		want := "repo-scout is not running — go back to send a message"
+		if !noteInTranscript(m, want) {
 			t.Errorf("phase %v: the refusal note %q is not in the scrollback", phase, want)
+		}
+		if m.flash != want {
+			t.Errorf("phase %v: flash = %q; want the refusal sentence %q on the status line", phase, m.flash, want)
+		}
+		if !clearsTheFlash(t, cmd) {
+			t.Errorf("phase %v: the refusal returned no command that clears the flash", phase)
+		}
+	}
+}
+
+// clearsTheFlash reports whether cmd — or any command batched inside it — eventually yields the
+// flashClearMsg that takes the sentence back off the status line. The tick is real, so the message
+// is drained on a goroutine and waited for rather than run inline.
+func clearsTheFlash(t *testing.T, cmd tea.Cmd) bool {
+	t.Helper()
+	if cmd == nil {
+		return false
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	select {
+	case msg := <-done:
+		switch msg := msg.(type) {
+		case flashClearMsg:
+			return true
+		case tea.BatchMsg:
+			for _, c := range msg {
+				if clearsTheFlash(t, c) {
+					return true
+				}
+			}
+		}
+		return false
+	case <-time.After(5 * time.Second):
+		t.Fatal("the flash-clearing command never produced a message")
+		return false
+	}
+}
+
+// TestRefuseChildMessageFlashesOnlyInsideAView is the guard on the flash's one condition: at depth 0
+// the note is already on screen, so the slot stays with the context gauge and nothing is flashed.
+func TestRefuseChildMessageFlashesOnlyInsideAView(t *testing.T) {
+	for _, note := range []string{
+		childNotRunningNote("repo-scout"),
+		childGoneNote("repo-scout"),
+	} {
+		m := newTestModel(t)
+		if m.inRunView() {
+			t.Fatal("setup: the model is not at depth 0")
+		}
+
+		next, cmd := m.refuseChildMessage(note)
+		got := next.(Model)
+
+		if got.flash != "" {
+			t.Errorf("note %q: flash = %q; at depth 0 the gauge keeps the slot", note, got.flash)
+		}
+		if cmd != nil {
+			t.Errorf("note %q: a depth-0 refusal returned a command; want none", note)
+		}
+		if !noteInTranscript(got, note) {
+			t.Errorf("note %q: the depth-0 note is not in the scrollback", note)
 		}
 	}
 }

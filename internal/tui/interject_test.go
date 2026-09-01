@@ -1754,13 +1754,14 @@ func TestRunViewChildDeliveryClearsTheBand(t *testing.T) {
 // TestRunViewChildGoneKeepsTheDraft is the race the engine reports: the child ended between the
 // frame that invited the message and the ⏎ that sent it. Nothing was queued, so nothing is shown as
 // queued — and the line stays in the box, because a draft silently swallowed there is the one
-// outcome worse than a refusal.
+// outcome worse than a refusal. The refusal reaches the reader where they are: the note at depth 0
+// as always, and the same sentence flashed on the status line of the view they are still inside.
 func TestRunViewChildGoneKeepsTheDraft(t *testing.T) {
 	eng := &fakeEngine{interjectChildFn: func(string, domain.UserInput) error { return domain.ErrNoSuchChild }}
 	m := modelViewingChild(t, eng, childRunning)
 
 	m.input.SetValue("check the tests too")
-	m = step(t, m, keyEnter())
+	m, cmd := stepCmd(t, m, keyEnter())
 
 	if got := m.input.Value(); got != "check the tests too" {
 		t.Errorf("input = %q; want the refused draft still in the box", got)
@@ -1768,8 +1769,15 @@ func TestRunViewChildGoneKeepsTheDraft(t *testing.T) {
 	if n := len(m.pendingInterjections); n != 0 {
 		t.Errorf("staged rows = %d; want none — nothing was queued", n)
 	}
-	if want := "repo-scout has finished — message not sent"; !noteInTranscript(m, want) {
+	want := "repo-scout has finished — message not sent"
+	if !noteInTranscript(m, want) {
 		t.Errorf("the refusal note %q is not in the scrollback", want)
+	}
+	if m.flash != want {
+		t.Errorf("flash = %q; want the refusal sentence %q on the status line", m.flash, want)
+	}
+	if !clearsTheFlash(t, cmd) {
+		t.Error("the refusal returned no command that clears the flash")
 	}
 }
 

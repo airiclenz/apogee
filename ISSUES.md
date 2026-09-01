@@ -40,13 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 **Status:** found 2026-08-30 at the close of the sub-agent run-view plan
 (`docs/plans/archived/2026-08-30 - 01 - sub-agent-run-view-plan.md`), deferred out of that run.
 
-- [ ] **A refusal raised inside an open run view is never painted while the reader is in it.**
-  `childGoneNote` / the not-running note (`internal/tui/interject.go:230`, `:236`) are host notes
-  committed at depth 0, so the two sentences a reader earns by pressing `⏎` on a child that has
-  finished or has not started are only visible after backing out. Fixing it means deciding which
-  surface carries a refusal inside a view: the ratified rule (2026-08-18 design call 4) keeps host
-  notes out of a delegate's run, so this is a design call, not a one-line move.
-
 - [ ] **`assertLastBodyRow` finds the transcript's end by the session-title rule.** It scans for
   the first row starting with `▔` (`cmd/apogee/e2e_subagent_view_test.go:341`) and treats it as the
   bottom of the body. A session whose own title happens to start with that glyph, or a layout change

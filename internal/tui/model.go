@@ -408,8 +408,8 @@ type Model struct {
 	// while a press is genuinely in flight. A plain bool, so it rides the value-copied Model
 	// (ADR 0011).
 	mousePressed bool
-	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy and
-	// cleared by flashClearMsg after flashDuration.
+	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy or a
+	// refused child message (interject.go) and cleared by flashClearMsg after flashDuration.
 	flash string
 	// mouseReasserts counts the mouse-tracking re-asserts sent so far (mousereassert.go), which is
 	// the only thing --tui-diag can say about them. A plain int, riding the value-copied Model
@@ -3422,7 +3422,8 @@ func (m Model) statusRight() string {
 	if !m.lastEsc.IsZero() {
 		return m.th.statusBar.Render("press esc again to stop")
 	}
-	// A fresh mouse-copy confirmation briefly takes the slot (flashClearMsg clears it).
+	// A fresh flash — a mouse-copy confirmation, or a child-message refusal raised inside a run
+	// view (interject.go) — briefly takes the slot (flashClearMsg clears it).
 	if m.flash != "" {
 		return m.th.statusBar.Render(m.flash)
 	}

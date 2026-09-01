@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -309,18 +310,27 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 	return m, record
 }
 
-// refuseChildMessage is the one posture both refusals inside a view take: the note, and NOTHING
-// else moved. The draft stays exactly as it was — refuseIdleOnlyCommand's posture, applied to a
-// message that is fine and merely has nowhere to go — so the human can carry the same line back up
-// a level and send it there.
+// refuseChildMessage is the one posture both refusals inside a view take: the note, and nothing
+// else moved but the status line. The draft stays exactly as it was — refuseIdleOnlyCommand's
+// posture, applied to a message that is fine and merely has nowhere to go — so the human can carry
+// the same line back up a level and send it there.
 //
 // The note is the host speaking, so it lands at the top level like every other note rather than
 // inside the delegate's run (transcript.tailBeforeHostNotes, the 2026-08-18 design call): it is
-// waiting when the reader backs out.
+// waiting when the reader backs out. That design call is unchanged — but a reader still INSIDE the
+// view would see nothing at all until they back out, so the same sentence is also written to
+// m.flash, the frame-level ephemeral slot painted in every view (statusRight, model.go), and
+// cleared by the usual flashClearMsg tick. Only inside a view: at depth 0 the note is already on
+// screen and a flash would displace the context gauge for nothing. Inside one it does take the
+// gauge's slot for its two seconds — statusRight's existing priority order, unchanged.
 func (m Model) refuseChildMessage(note string) (tea.Model, tea.Cmd) {
 	m.transcript.addNote(note)
 	m.refreshViewport()
-	return m, nil
+	if !m.inRunView() {
+		return m, nil
+	}
+	m.flash = note
+	return m, tea.Tick(flashDuration, func(time.Time) tea.Msg { return flashClearMsg{} })
 }
 
 // foldChildDelivery takes the staged row a child's delivery report accounts for off the band. Every

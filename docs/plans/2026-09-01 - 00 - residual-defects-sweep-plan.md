@@ -390,7 +390,12 @@ importing `internal/domain`.
 **Acceptance:** `go test -race -count=1 ./ ` and `go build ./...`
 **Commit:** `fix(api): re-export ErrNoSuchChild for embedders`
 
-## 11. A refusal raised inside a run view flashes on the status line
+## 11. A refusal raised inside a run view flashes on the status line — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — internal/tui/model.go: made necessary by refuseChildMessage now setting m.flash — the `flash` field doc (`:411`) and `statusRight`'s flash branch comment (`:3425`) named the mouse copy as the slot's only source.
+NOTES (2026-09-01): consequential edit — internal/tui/mouse.go: made necessary by refuseChildMessage now setting m.flash — `flashDuration`'s doc comment named the mouse-copy confirmation as the only thing it times.
+NOTES (2026-09-01): the item's Tests line asks for a depth-0 assertion, which no key path can reach (`refuseChildMessage` is only called from `stageChildMessage`, itself reachable only inside a view); it is pinned by the new `TestRefuseChildMessageFlashesOnlyInsideAView`, which calls the seam directly on a top-level model.
+NOTES (2026-09-01): the "returns a command that clears it" half is asserted by a new `clearsTheFlash` helper in `runview_test.go` that drains the real `tea.Tick` (recursing through `tea.BatchMsg`) rather than reaching into the command's internals.
 
 **What:** Closes the residual at `ISSUES.md:101`. `childGoneNote` (`internal/tui/interject.go:226`)
 and the not-running note (`:232`) are committed by `refuseChildMessage` (`:311-321`) as host notes at
