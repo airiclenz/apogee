@@ -45,6 +45,11 @@
 #              `/v1/chat/completions` and `/v1/models` itself, so OpenRouter is
 #              `https://openrouter.ai/api`. Spelled with the suffix, the chat and model-list
 #              requests land on `/api/v1/v1/…` and 404s. Required.
+#   description
+#              free text saying what this server IS — "fast local 27B, good at search and edits",
+#              "the big remote model". Optional, never checked, and written for one reader: with
+#              sub-agents-choice: model below, apogee relays it to the top-level model so it can
+#              pick where each delegation runs. The /sub-agents-server picker shows it too.
 #   api-key    the bearer token that server wants, if it wants one — llama.cpp started with
 #              --api-key, LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. It is
 #              sent as `Authorization: Bearer <key>` on EVERY request to that server: your
@@ -166,6 +171,7 @@
 # servers:
 #   - name: workstation
 #     endpoint: http://192.168.64.1:1111
+#     description: fast local 27B — search and edits
 #     model: gpt-oss-20b
 #     llama-launcher: auto
 #     parallel-agents: 4
@@ -206,6 +212,11 @@
 # Any entry above may carry bypass: and mechanisms: keys of its own; they say what DELEGATIONS to
 # that server run as, and they apply whenever it is the target named here — never to the session.
 # sub-agents-server: my-box
+
+# =============================================================================
+# Who picks where a delegation runs: fixed (the default) leaves it to sub-agents-server: above,
+# and model lets the top-level model choose per delegation, from the descriptions you wrote.
+# sub-agents-choice: fixed
 
 # =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).

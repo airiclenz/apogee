@@ -456,6 +456,18 @@ var keyAccessors = []keyAccessor{
 		fromFile: func(o *Options, fc fileConfig) { o.SubAgentsServer = fc.SubAgentsServer },
 	},
 	{
+		// File-only for its neighbour's reason one row up — who gets to choose the seat is a config
+		// act, not something one invocation overrides. The default comes from the row, so the value
+		// resolution starts from and the one /settings shows as "the default" are one string.
+		row: mustKey("sub-agents-choice"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.SubAgentsChoice = SubAgentsChoice(mustKey("sub-agents-choice").Default)
+			if fc.SubAgentsChoice != "" {
+				o.SubAgentsChoice = SubAgentsChoice(fc.SubAgentsChoice)
+			}
+		},
+	},
+	{
 		row: mustKey("mode"),
 		fromFile: func(o *Options, fc fileConfig) {
 			// The default comes from the row, so the mode resolution starts from and the mode /settings
@@ -1104,6 +1116,14 @@ type fileConfig struct {
 	// `server:`'s reason one field up — which names exist is what the list says, so selection
 	// answers it.
 	SubAgentsServer string `yaml:"sub-agents-server"`
+	// SubAgentsChoice says WHO picks the server a delegation runs on (ADR 0069): `fixed` — the key
+	// above decides, alone, which is what every session did before this key existed — or `model`,
+	// where the top-level model may name a seat per delegation (`run_on`) and the key above is only
+	// the default it falls back to. File-only, like the pointer above it and for its reason: who
+	// gets to choose is a config act rather than an invocation one. Absent/empty ⇒ `fixed`, so the
+	// feature is opt-in; any other word is refused at startup, since a value that means nothing
+	// would leave the file reading as configured while the session went on choosing for itself.
+	SubAgentsChoice string `yaml:"sub-agents-choice"`
 	// Editor names the command an external edit is opened with — the ⏎ jump the /settings pane makes
 	// on a key no field can hold, and any other edit of this file. A top-level scalar beside Server
 	// above, file-only (no flag/env), carried verbatim: `editor: code -w` is split
@@ -1313,6 +1333,13 @@ type UnconfinedHost struct {
 // server — which is why it is required and must be unique (ADR 0036 decision 1: the alias of the
 // server you are on is the name you call it). Endpoint is required for the obvious reason.
 //
+// Description is free text the user writes to say what this server IS — "fast local 27B, good at
+// search and edits", "the big remote model" — and it exists for exactly one reader: the top-level
+// model choosing a delegation's seat (ADR 0069). The orientation block relays it, and the
+// `/sub-agents-server` picker shows it beside the name, so the sentence a human writes here is the
+// sentence the model decides on. It is never validated and never parsed: apogee has nothing to
+// check a description against, and a server nobody delegates to is free to carry one anyway.
+//
 // APIKey and Model are optional. An entry naming no key source at all sends no Authorization
 // header, the keyless local-server default; an empty model leaves that server's discovery hint
 // unset, so whatever it serves is bound. APIKey is FILE-ONLY on purpose: APOGEE_API_KEY is a
@@ -1474,6 +1501,7 @@ type UnconfinedHost struct {
 type ServerEntry struct {
 	Name            string          `yaml:"name"`
 	Endpoint        string          `yaml:"endpoint"`
+	Description     string          `yaml:"description,omitempty"`
 	APIKey          string          `yaml:"api-key,omitempty"`
 	APIKeyCmd       string          `yaml:"api-key-cmd,omitempty"`
 	APIKeyEnv       string          `yaml:"api-key-env,omitempty"`
@@ -1502,12 +1530,17 @@ type ServerEntry struct {
 // have to agree, because an entry edit locates the entry by a name a caller is holding in memory —
 // already canonical — against the list the transaction just parsed.
 //
+// The entry's `description:` is trimmed on the same footing, for a reason of its own: it is free text
+// nothing validates, so padding would never be refused — it would simply travel, into the orientation
+// line the model reads its seat choice off and into the picker row beside the name (ADR 0069).
+//
 // Nothing here rewrites the document: the file keeps the padding the user wrote, and only the
 // in-memory view is canonical.
 func canonicaliseServers(fc *fileConfig) {
 	for i := range fc.Servers {
 		fc.Servers[i].Name = strings.TrimSpace(fc.Servers[i].Name)
 		fc.Servers[i].Endpoint = strings.TrimSpace(fc.Servers[i].Endpoint)
+		fc.Servers[i].Description = strings.TrimSpace(fc.Servers[i].Description)
 	}
 }
 
@@ -2693,6 +2726,14 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// today gets switched on months later, by which time the typo has lost its context. Whether the
 	// named files exist is deliberately not asked: discovery is the feature (contextFilesSettings).
 	if err := fc.contextFiles().validate(); err != nil {
+		return notices, err
+	}
+	// A `sub-agents-choice:` naming neither of the two words the key takes is refused on the
+	// cursor-shape reasoning above: an unknown word is not a magnitude nothing can spend but a value
+	// that means nothing at all, and resolving it silently to `fixed` would leave the file reading as
+	// configured while the model was never offered the choice. The judgement is the registry's own
+	// validator, so the startup refusal and the one the /settings pane writes are one wording.
+	if err := validateSubAgentsChoice(string(opts.SubAgentsChoice)); err != nil {
 		return notices, err
 	}
 	// A `servers:` entry that could never be switched to — no name, no endpoint, or a name an

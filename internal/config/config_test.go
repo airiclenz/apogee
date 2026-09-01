@@ -265,6 +265,13 @@ func TestResolvePrecedence(t *testing.T) {
 			file: fileConfig{CursorShape: "bar", Editor: "hx"},
 			want: func(o *Options) { o.CursorShape = "bar"; o.Editor = "hx" },
 		},
+		{
+			// The seat-choice gate is file-only like the target it gates, and the ONE word an absent
+			// key resolves to is `fixed` (wantDefaults) — so this case is the other word.
+			name: "sub-agents-choice is file-only and defaults fixed",
+			file: fileConfig{SubAgentsChoice: "model"},
+			want: func(o *Options) { o.SubAgentsChoice = SubAgentsChoiceModel },
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -292,6 +299,7 @@ func TestResolvePrecedence(t *testing.T) {
 func wantDefaults() Options {
 	return Options{
 		Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
+		SubAgentsChoice:  SubAgentsChoiceFixed,
 		UseShippedSkills: true,
 		UseDefaultPrompt: true,
 		DelegateMaxSteps: defaultDelegateMaxSteps,
@@ -508,6 +516,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 	want := map[string]bool{
 		"Mode": true, "Bypass": true, "Servers": true, "StartupServer": true, "Editor": true,
 		"SubAgentsServer":    true,
+		"SubAgentsChoice":    true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
 		"UseProjectSkills": true, "AutoCompact": true, "DelegateMaxSteps": true,
 		"UseShippedSkills": true,
@@ -549,6 +558,7 @@ func everyKeyFileConfig() fileConfig {
 	return fileConfig{
 		Mode: "auto", Bypass: boolptr(true), Server: "the-box", Editor: "hx",
 		SubAgentsServer:    "the-box",
+		SubAgentsChoice:    "model",
 		Servers:            []ServerEntry{{Name: "the-box", Endpoint: "http://localhost:9000"}},
 		ConfineToWorkspace: boolptr(false),
 		UnconfinedHosts:    []UnconfinedHost{{ID: "another-host", Acknowledged: "2026-08-20"}},
@@ -1002,6 +1012,29 @@ func TestApplyConfigTrimsAPaddedServerNameAndEndpoint(t *testing.T) {
 	}
 	if opts.HostAlias != "box" {
 		t.Errorf("hostAlias = %q; want box — the footer calls the server by its canonical name", opts.HostAlias)
+	}
+}
+
+// A `servers:` entry's `description:` is free text apogee never validates, so the only thing the
+// decode does with it is what it does with the entry's other two canonical values: trim it. It has
+// to, because nothing downstream would ever refuse the padding — the sentence travels straight into
+// the orientation line the model picks a seat off and into the picker row beside the name (ADR 0069).
+func TestApplyConfigTrimsAServerEntryDescription(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "servers:\n"+
+		"  - name: box\n    endpoint: http://x:1\n    description: \"  fast local 27B — search and edits  \"\n"+
+		"server: box\n")
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	if len(opts.Servers) != 1 {
+		t.Fatalf("servers = %+v; want the one entry", opts.Servers)
+	}
+	if got, want := opts.Servers[0].Description, "fast local 27B — search and edits"; got != want {
+		t.Errorf("description = %q; want the trimmed %q", got, want)
 	}
 }
 
@@ -3040,6 +3073,56 @@ server: workstation
 			}
 			if opts.SubAgentsServer != tt.want {
 				t.Errorf("SubAgentsServer = %q, want %q", opts.SubAgentsServer, tt.want)
+			}
+		})
+	}
+}
+
+// The gate over the key above resolves to a TYPED value, and an absent key resolves to `fixed` —
+// the behaviour of every session before the key existed, so the feature is opt-in. A word outside
+// the two is a loud startup error naming BOTH of them: with no refusal the file would read as
+// configured while the model went on never being offered the choice, and a message that named only
+// what was wrong would leave the reader guessing at what is right.
+func TestApplyConfigSubAgentsChoice(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		yaml    string
+		want    SubAgentsChoice
+		wantErr []string // substrings the startup error must carry; nil ⇒ the config is accepted
+	}{
+		{name: "the key absent resolves to fixed", want: SubAgentsChoiceFixed},
+		{name: "fixed stated outright", yaml: "sub-agents-choice: fixed\n", want: SubAgentsChoiceFixed},
+		{name: "model hands the choice to the top-level model", yaml: "sub-agents-choice: model\n", want: SubAgentsChoiceModel},
+		{
+			name:    "a word outside the two errors, naming the key and both values",
+			yaml:    "sub-agents-choice: banana\n",
+			wantErr: []string{"sub-agents-choice", "banana", "fixed", "model"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, tt.yaml)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false },
+				func(string) string { return "" }, os.ReadFile, noNotify)
+			if len(tt.wantErr) > 0 {
+				if err == nil {
+					t.Fatalf("ApplyConfig with %q: want an error, got nil", tt.yaml)
+				}
+				for _, want := range tt.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error = %q; want it to contain %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.SubAgentsChoice != tt.want {
+				t.Errorf("SubAgentsChoice = %q, want %q", opts.SubAgentsChoice, tt.want)
 			}
 		})
 	}

@@ -300,7 +300,12 @@ may run; Avoid: "target" — the latched spec).
 **Regression guard.** Every doc sentence claiming routing is "human-chosen" or "model-chosen routing stays deferred" (grep -rn 'human-chosen\|stays deferred\|Model-chosen' docs/ CONTEXT.md) is amended or scoped to `fixed`.
 **Commit:** `docs(adr): 0069 — the top-level model picks the delegation seat`
 
-## 9. Config: `description:` on `servers:` entries and the `sub-agents-choice` root key
+## 9. Config: `description:` on `servers:` entries and the `sub-agents-choice` root key — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the template also gains a short `#   description` entry in the `servers:` per-key list above the example — the item named only the example line, but that block documents every entry key and an undocumented example line is a gap the reader hits.
+NOTES (2026-09-01): the vocabulary's parse site is a new exported `config.ParseSubAgentsChoice` in options.go (empty ⇒ `fixed`); the registry's `Validate` hook and the live apply both go through it, the way `validateSettingMode` goes through `domain.ParseMode`.
+NOTES (2026-09-01): the boundary note is a `seatChoiceNote` const in cmd/apogee/wire.go, beside its two existing siblings (`contextFileNote`, `toolRosterNote`) — hence the extra file in FILES.
+NOTES (2026-09-01): the `description:` survival pins landed in internal/config/configwrite_server_test.go (the entry edit) and configwrite_scalar_test.go (both `sub-agents-server` splices) rather than configedit_test.go, which holds the transaction's generic machinery and no per-key fixtures.
 
 **What:** Recast at the regression check (2026-09-01). `internal/config/config.go`: `ServerEntry.Description string \`yaml:"description,omitempty"\``
 (free text, trimmed in `canonicaliseServers`, never validated); root key `sub-agents-choice`

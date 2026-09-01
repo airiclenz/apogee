@@ -129,6 +129,13 @@ type liveSettings struct {
 	// list, the `server:` recording check and the pane's picker all resolve names against.
 	servers []config.ServerEntry
 
+	// seatChoice is the `sub-agents-choice:` gate (ADR 0069) as the session holds it NOW: who picks
+	// the server a delegation runs on. It earns a field here for rememberModel's reason — the value
+	// is an INPUT to something that has not happened yet (the next roster build, and the runs this
+	// session raises), so one left in the launch snapshot would be frozen for the life of the
+	// process and a `/settings` flip would govern nothing until the next start.
+	seatChoice config.SubAgentsChoice
+
 	// manualIDs and mechanisms are the two halves of the `mechanisms:` block: the validated enabled
 	// ids the engine arms, and the block itself, whose mere non-emptiness is what suppresses a matched
 	// Validated set (whole-set-or-nothing, ADR 0016). They move together or the suppression rule and
@@ -233,6 +240,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		entryReserve:       opts.StartupResponseReserve,
 		entryName:          opts.HostAlias,
 		servers:            opts.Servers,
+		seatChoice:         opts.SubAgentsChoice,
 		manualIDs:          manualIDs,
 		mechanisms:         opts.Mechanisms,
 		validatedEnable:    opts.ValidatedSetsEnable,
@@ -622,6 +630,16 @@ func (s *liveSettings) setRememberModel(on bool) {
 	s.rememberModel = on
 }
 
+// setSubAgentsChoice installs the `sub-agents-choice:` gate the human just committed. The store is
+// the whole of what the value can reach from here, for setRememberModel's reason: what the gate
+// decides is whether the NEXT roster build offers the model a seat to choose, and that build has not
+// happened yet.
+func (s *liveSettings) setSubAgentsChoice(choice config.SubAgentsChoice) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seatChoice = choice
+}
+
 // setValidatedSets installs a re-read `validated-sets:` block — the surface's off-switch and its
 // carry-over map, the two inputs resolveValidatedSet keys a match on, moved together for
 // setMechanisms' reason.
@@ -742,6 +760,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.UseDefaultPrompt = s.useDefaultPrompt
 	next.ModelProfiles = slices.Clone(s.modelProfiles)
 	next.RememberModel = s.rememberModel
+	next.SubAgentsChoice = s.seatChoice
 
 	// The `context-files:` block is TWO keys and ONE resolved list, so it is collapsed here exactly
 	// as ApplyConfig collapses it at startup: the names while the switch is on, and no list at all
@@ -995,6 +1014,23 @@ var settingsTable = []settingsEntry{
 				return "", nil
 			}
 			return "", a.rideTheRebind()
+		},
+	},
+	{
+		key: "sub-agents-choice",
+		// The holder alone: the gate reaches no engine seam and rides no re-resolution — what reads it
+		// is the next roster build, and the holder is where that build asks.
+		reaches: reachesTheHolder,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			// An empty value is the pane's RESET, and it means what an absent key means: `fixed`, the
+			// seat the `sub-agents-server:` key picks on its own. The parse answers that, so no branch
+			// here has to know the default a second time.
+			choice, err := config.ParseSubAgentsChoice(value)
+			if err != nil {
+				return "", err
+			}
+			a.live.setSubAgentsChoice(choice)
+			return seatChoiceNote, nil
 		},
 	},
 	{

@@ -366,6 +366,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"servers":                "3 servers",
 		"server":                 "rented-box",
 		"sub-agents-server":      "auto (session server)",
+		"sub-agents-choice":      "fixed", // unset in the fixture, so the declared default is in force
 		"mode":                   "auto",
 		"system-prompt-text":     "2 lines",
 		"system-prompt-file":     "", // unset, and an editable string row's blank is what the field seeds from

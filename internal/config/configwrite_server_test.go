@@ -91,6 +91,44 @@ func TestSaveServerEntrySetting_AppendsToTheLastEntry(t *testing.T) {
 	}
 }
 
+// The edit transaction leaves an entry's `description:` exactly where the user wrote it — the free
+// text ADR 0069 relays to the model so it can pick a delegation's seat, and a key apogee itself
+// never writes. The write is a surgical splice of ONE line, so this is the transaction's existing
+// contract stated over the new key: a description eaten or reflowed by a `/model` recording would be
+// a sentence the model quietly stops being told.
+func TestSaveServerEntrySetting_LeavesAnEntryDescriptionAlone(t *testing.T) {
+	const described = "servers:\n" +
+		"  - name: workbench\n" +
+		"    endpoint: http://192.168.64.1:1111\n" +
+		"    description: fast local 27B — search and edits\n" +
+		"    model: gpt-oss-20b\n" +
+		"  - name: cloud\n" +
+		"    endpoint: https://llm.example.com\n" +
+		"    description: the big remote model\n"
+	path := writeTestConfig(t, described)
+
+	if err := SaveServerEntrySetting(path, "workbench", entryModelKey, pickedModel); err != nil {
+		t.Fatalf("record the model on the described entry: %v", err)
+	}
+
+	written := readTestConfig(t, path)
+	before, after := SplitConfigLines([]byte(described)), SplitConfigLines([]byte(written))
+	if len(after) != len(before) {
+		t.Fatalf("the replacement changed the line count: %d -> %d\n%s", len(before), len(after), written)
+	}
+	for i := range before {
+		if before[i] != after[i] && !strings.Contains(after[i], entryModelKey+":") {
+			t.Errorf("line %d changed to something other than the model line: %q", i+1, after[i])
+		}
+	}
+	if got, want := serverEntry(t, written, "workbench").Description, "fast local 27B — search and edits"; got != want {
+		t.Errorf("the edited entry's description = %q, want %q", got, want)
+	}
+	if got, want := serverEntry(t, written, "cloud").Description, "the big remote model"; got != want {
+		t.Errorf("the neighbouring entry's description = %q, want %q", got, want)
+	}
+}
+
 func TestSaveServerEntrySetting_WritesTheLaunchProfilePointer(t *testing.T) {
 	path := writeTestConfig(t, launcherServersConfig)
 

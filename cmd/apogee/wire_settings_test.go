@@ -572,6 +572,61 @@ func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
 	}
 }
 
+// `sub-agents-choice` is that third shape once more: a gate with no engine seam and no
+// re-resolution, whose whole apply is a store on the live holder — what it decides is settled when
+// the tool roster is next built, which is why the row carries a boundary note where the toggle above
+// carries none. The reset spelling (an empty value) is the key left out, and resolves to the same
+// `fixed` an absent key does rather than to an empty gate nothing could read.
+func TestApplySettingSubAgentsChoiceRecordsTheSeatGate(t *testing.T) {
+	t.Parallel()
+	spy := &applySettingSpy{}
+	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed}, nil)
+	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+
+	note, err := apply("sub-agents-choice", "model")
+	if err != nil {
+		t.Fatalf("apply sub-agents-choice: %v", err)
+	}
+	if note != seatChoiceNote {
+		t.Errorf("note = %q, want %q", note, seatChoiceNote)
+	}
+	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceModel {
+		t.Errorf("the holder reads %q, want %q", got, config.SubAgentsChoiceModel)
+	}
+	if spy.drove() != 0 {
+		t.Errorf("applying sub-agents-choice drove an engine seam: %+v", spy)
+	}
+
+	// And back, since a gate that could only be opened would leave the model choosing seats the human
+	// has just taken the choice away from.
+	if _, err := apply("sub-agents-choice", "fixed"); err != nil {
+		t.Fatalf("apply sub-agents-choice back to fixed: %v", err)
+	}
+	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceFixed {
+		t.Errorf("the holder reads %q after the second apply, want %q", got, config.SubAgentsChoiceFixed)
+	}
+
+	// The reset: no value at all is the key removed from the file, which is `fixed`.
+	if _, err := apply("sub-agents-choice", "model"); err != nil {
+		t.Fatalf("apply sub-agents-choice: %v", err)
+	}
+	if _, err := apply("sub-agents-choice", ""); err != nil {
+		t.Fatalf("reset sub-agents-choice: %v", err)
+	}
+	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceFixed {
+		t.Errorf("the reset left the holder on %q, want %q", got, config.SubAgentsChoiceFixed)
+	}
+
+	// The vocabulary is the registry's, enforced at the write; the dispatcher refuses anything else
+	// rather than storing a reading of its own, and leaves the gate where it was.
+	if _, err := apply("sub-agents-choice", "banana"); err == nil {
+		t.Error("apply sub-agents-choice=banana was accepted; the key takes fixed or model")
+	}
+	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceFixed {
+		t.Errorf("a refused value moved the gate to %q", got)
+	}
+}
+
 // The holder is the session's live configuration, not just its exception list: a Firing raised
 // inside the session composes its whole Config from options(), so every key a `/settings` commit
 // applies has to be visible there (ADR 0037's promise carried into the runs a session raises).

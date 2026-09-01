@@ -161,6 +161,10 @@ var (
 	modeValues        = []string{string(domain.ModePlan), string(domain.ModeAskBefore), string(domain.ModeAllowEdits), string(domain.ModeAuto)}
 	spinnerValues     = []string{"snake", "glitter", "classic"}
 	cursorShapeValues = []string{"block", "underline", "bar"}
+	// The one vocabulary internal/domain does not own: who picks a delegation's seat is a fact about
+	// the CONFIG rather than about the agent loop, so the two words live here (options.go) and this
+	// list is spelled out of them.
+	subAgentsChoiceValues = []string{string(SubAgentsChoiceFixed), string(SubAgentsChoiceModel)}
 )
 
 // KeyRegistry is the table: one row per leaf key of fileConfig, plus one row per structured
@@ -206,6 +210,19 @@ var KeyRegistry = []Key{
 			}
 			return o.SubAgentsServer
 		},
+	},
+	{
+		// The gate over the row above (ADR 0069), and EDITABLE where that one is not: this key's
+		// vocabulary is two words THIS table holds rather than the names a `servers:` list happens to
+		// spell, so the pane picks between them in place and moves nothing but the gate. File-only for
+		// the target's reason — who gets to choose is a config act rather than an invocation one.
+		Path: "sub-agents-choice", Kind: KindEnum, Default: string(SubAgentsChoiceFixed),
+		EnumValues: subAgentsChoiceValues,
+		Editable:   true,
+		Validate:   validateSubAgentsChoice,
+		Desc: "Who picks where a delegation runs: fixed = the sub-agents-server key; model = the " +
+			"top-level model may say run_on per delegation.",
+		Read: func(o Options) string { return string(o.SubAgentsChoice) },
 	},
 	{
 		Path: "mode", Kind: KindEnum, Default: string(domain.ModeAskBefore), EnumValues: modeValues,
@@ -816,6 +833,16 @@ func validateCursorShapeName(value string) error {
 		return nil
 	}
 	return fmt.Errorf("apogee: invalid cursor-shape: %w", domain.UnknownCursorShapeError(value))
+}
+
+// validateSubAgentsChoice refuses a `sub-agents-choice:` outside the two words the key takes, through
+// the same parse the startup resolution and the live apply both go through ([ParseSubAgentsChoice]),
+// so a value refused at the /settings pane and a value refused at launch are refused by one
+// implementation in one wording. The empty string is not a defect: it is the key left out, and the
+// parse answers it with the same `fixed` the row's default declares.
+func validateSubAgentsChoice(value string) error {
+	_, err := ParseSubAgentsChoice(value)
+	return err
 }
 
 // validateSettingMode refuses a mode outside the autonomy ladder, through the same parse the --mode

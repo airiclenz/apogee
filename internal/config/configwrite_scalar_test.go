@@ -1014,6 +1014,58 @@ func TestConfigWriteSubAgentsServerWritesTheNonEditableKey(t *testing.T) {
 	}
 }
 
+// Neither splice may disturb a `servers:` entry's `description:` — the free text ADR 0069 relays to
+// the model so it can pick a delegation's seat. Both writers address a TOP-LEVEL key, so the entries
+// are untouched by construction; this pins that, because a description silently dropped by the write
+// that records the delegation target would be a sentence the model stops being told.
+func TestConfigWriteSubAgentsServerSplicesLeaveEntryDescriptionsAlone(t *testing.T) {
+	t.Parallel()
+
+	const fixture = `# apogee config
+
+sub-agents-server: other-box
+
+servers:
+  - name: my-box
+    endpoint: http://localhost:1111/v1
+    description: fast local 27B — search and edits
+  - name: other-box
+    endpoint: http://otherbox:1111/v1
+    description: the big remote model
+`
+	path := writeTestConfig(t, fixture)
+
+	if err := SaveSubAgentsServer(path, "my-box"); err != nil {
+		t.Fatalf("SaveSubAgentsServer: %v", err)
+	}
+	assertDescriptionsIntact(t, readTestConfig(t, path), "the record")
+
+	if err := ResetSubAgentsServer(path); err != nil {
+		t.Fatalf("ResetSubAgentsServer: %v", err)
+	}
+	assertDescriptionsIntact(t, readTestConfig(t, path), "the clear")
+}
+
+// assertDescriptionsIntact fails unless the two entries of the fixture above still carry the
+// descriptions they were written with, read back through the decoder rather than off the text: what
+// matters is the sentence a reader gets, not the line it happens to sit on.
+func assertDescriptionsIntact(t *testing.T, written, what string) {
+	t.Helper()
+	var fc fileConfig
+	if err := yaml.Unmarshal([]byte(written), &fc); err != nil {
+		t.Fatalf("%s left a file that does not parse: %v\n%s", what, err, written)
+	}
+	if len(fc.Servers) != 2 {
+		t.Fatalf("%s left %d entries, want 2:\n%s", what, len(fc.Servers), written)
+	}
+	if got, want := fc.Servers[0].Description, "fast local 27B — search and edits"; got != want {
+		t.Errorf("%s changed my-box's description to %q, want %q", what, got, want)
+	}
+	if got, want := fc.Servers[1].Description, "the big remote model"; got != want {
+		t.Errorf("%s changed other-box's description to %q, want %q", what, got, want)
+	}
+}
+
 // The `auto` pick the `/sub-agents-server` picker offers is an opt-OUT: it CLEARS the key rather
 // than recording a name, so the next session picks its delegation target the way one that was never
 // told picks one. The clear has a function of its own for the write's reason — the settings-surface

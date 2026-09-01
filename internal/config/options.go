@@ -6,6 +6,8 @@ package config
 // cobra command that binds a handful of its fields (ADR 0043).
 
 import (
+	"fmt"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
@@ -94,6 +96,11 @@ type Options struct {
 	// children is a config act rather than an invocation. Empty ⇒ no target is named, and
 	// delegations run on the session's own upstream (SubAgentsServerTarget).
 	SubAgentsServer string
+
+	// SubAgentsChoice is the resolved `sub-agents-choice:` key — who picks the server a delegation
+	// runs on (ADR 0069). File-only like the pointer above it, and never empty once resolution has
+	// run: an absent key resolves to [SubAgentsChoiceFixed], the behaviour that predates the key.
+	SubAgentsChoice SubAgentsChoice
 
 	// serverFlagBound says the command being run registers the `--server` flag. Only the root
 	// command does: `apogee headless` and `apogee probe` declare their own flag surface and take
@@ -359,4 +366,39 @@ type Options struct {
 	// whose value this run is not taking from the file. ApplyConfig fills it (overrideSources);
 	// absent from the map ⇒ the file or the built-in default, which is the majority of keys.
 	Overrides map[string]Source
+}
+
+// SubAgentsChoice is who gets to pick the server a delegation runs on (ADR 0069) — the `fixed` |
+// `model` vocabulary of the root `sub-agents-choice:` key, as a type of its own so a seam taking the
+// answer cannot be handed any other string. It is a string underneath because that is what the file
+// spells and what the registry row offers; the two values below are the whole vocabulary.
+type SubAgentsChoice string
+
+const (
+	// SubAgentsChoiceFixed leaves the seat to the `sub-agents-server:` key alone — the behaviour of
+	// every session before this key existed, and what an absent key resolves to.
+	SubAgentsChoiceFixed SubAgentsChoice = "fixed"
+	// SubAgentsChoiceModel lets the top-level model name a seat per delegation (`run_on`), with the
+	// key above as the default it falls back to.
+	SubAgentsChoiceModel SubAgentsChoice = "model"
+)
+
+// ParseSubAgentsChoice resolves the file's spelling of `sub-agents-choice:` into the typed value,
+// refusing any word outside the two. The EMPTY string is not a defect and not a third state: it is
+// the key left out — and the reset a settings surface commits — so it resolves to
+// [SubAgentsChoiceFixed], the behaviour every session had before the key existed.
+//
+// The refusal spells both words and says what each one does, because the value is a choice between
+// two named behaviours rather than a magnitude or a name this process could look up: only saying
+// what would have worked tells a typo apart from a misunderstanding.
+func ParseSubAgentsChoice(value string) (SubAgentsChoice, error) {
+	switch choice := SubAgentsChoice(value); choice {
+	case "":
+		return SubAgentsChoiceFixed, nil
+	case SubAgentsChoiceFixed, SubAgentsChoiceModel:
+		return choice, nil
+	}
+	return "", fmt.Errorf("apogee: invalid sub-agents-choice: %q — it takes %q (the sub-agents-server: "+
+		"key alone picks where a delegation runs) or %q (the top-level model may say run_on per "+
+		"delegation)", value, SubAgentsChoiceFixed, SubAgentsChoiceModel)
 }

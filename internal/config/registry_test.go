@@ -146,6 +146,24 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		}
 	})
 
+	t.Run("sub-agents-choice", func(t *testing.T) {
+		t.Parallel()
+		// The one enum whose parse site is in THIS package: who picks a delegation's seat is a fact
+		// about the config rather than about the agent loop, so the vocabulary lives beside Options
+		// and validateSubAgentsChoice is what a value is admitted by. Both directions, as above.
+		values := enumValues(t, "sub-agents-choice")
+		for _, v := range values {
+			if err := validateSubAgentsChoice(v); err != nil {
+				t.Errorf("registry offers sub-agents-choice %q but validateSubAgentsChoice rejects it: %v", v, err)
+			}
+		}
+		for _, c := range []SubAgentsChoice{SubAgentsChoiceFixed, SubAgentsChoiceModel} {
+			if !slices.Contains(values, string(c)) {
+				t.Errorf("%q is a seat-choice the config knows but the registry does not offer it", c)
+			}
+		}
+	})
+
 	t.Run("cursor-shape", func(t *testing.T) {
 		t.Parallel()
 		values := enumValues(t, "cursor-shape")
