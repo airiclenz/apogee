@@ -37,8 +37,9 @@ const (
 	liveDelegateOutputCap = 16384
 	// liveParentGrowthCeiling is the most, in tokens, a capped delegation may cost the parent's
 	// context. A child that ran to its cap may have read hundreds of thousands of tokens; what
-	// reaches the parent is one marker line plus the child's last visible text, and this is the
-	// bound that says so.
+	// reaches the parent is one marker line plus the closing report the child was asked to keep
+	// to its findings (the tool-less wrap-up Turn, finishAtStepCap), and this is the bound that
+	// says so.
 	liveParentGrowthCeiling = 4096
 )
 
@@ -73,16 +74,19 @@ func (l *liveEventLog) snapshot() []domain.Event {
 }
 
 // budgetProbe is an experimental pre-request hook that records the Budget every request was
-// built under, keyed by the Depth of the agent that built it. It is the only seam a test has
-// onto a CHILD's Budget: the child Agent is constructed inside runSubAgent and closed there,
-// so nothing outside the delegation ever holds it, while its requests all pass through here.
+// built under, and the size of the tool menu it carried, keyed by the Depth of the agent that
+// built it. It is the only seam a test has onto a CHILD's Budget and menu: the child Agent is
+// constructed inside runSubAgent and closed there, so nothing outside the delegation ever holds
+// it, while its requests all pass through here. Only buildRequest's requests reach a pre-request
+// hook — the summarizer's run none (compact.go) — so what it records is one entry per model call.
 //
 // It carries no live state to isolate between a parent and its children, so it deliberately
 // does NOT implement domain.SubAgentScoped — the child inherits this very instance
 // (MechanismRegistry.ForSubAgent), which is what lets one probe see both depths.
 type budgetProbe struct {
-	mu   sync.Mutex
-	seen map[int][]domain.Budget
+	mu    sync.Mutex
+	seen  map[int][]domain.Budget
+	menus map[int][]int
 }
 
 func (p *budgetProbe) PreRequest(_ context.Context, req *domain.Request) error {
@@ -92,7 +96,11 @@ func (p *budgetProbe) PreRequest(_ context.Context, req *domain.Request) error {
 	if p.seen == nil {
 		p.seen = make(map[int][]domain.Budget)
 	}
+	if p.menus == nil {
+		p.menus = make(map[int][]int)
+	}
 	p.seen[view.Depth()] = append(p.seen[view.Depth()], view.Budget())
+	p.menus[view.Depth()] = append(p.menus[view.Depth()], len(view.Tools()))
 	return nil
 }
 
@@ -101,6 +109,14 @@ func (p *budgetProbe) at(depth int) []domain.Budget {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]domain.Budget(nil), p.seen[depth]...)
+}
+
+// menuSizesAt returns the tool-menu size of each request recorded for agents at the given
+// nesting depth, in request order.
+func (p *budgetProbe) menuSizesAt(depth int) []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]int(nil), p.menus[depth]...)
 }
 
 // childTurns counts the Turns a delegation actually took, from the events it emitted: the
@@ -255,7 +271,10 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 	events := log.snapshot()
 
 	// 1. The run ended AT the cap, and said so: a non-error partial result opening with the
-	//    marker, and exactly one ErrorEvent on the child's own stream naming the bound.
+	//    marker, and exactly one ErrorEvent on the child's own stream naming the bound. The cap
+	//    then bought the child one EXTRA tool-less Turn (finishAtStepCap), so what follows the
+	//    marker is an AUTHORED closing report and the last request the child built carried no
+	//    tools at all.
 	if result.IsError {
 		t.Fatalf("delegation reported IsError; a capped child is not a failure: %q", result.Content)
 	}
@@ -268,8 +287,40 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 	if got := countCapErrors(events, 1); got != 1 {
 		t.Errorf("step-cap ErrorEvents at Depth 1 = %d, want exactly 1", got)
 	}
-	if turns := childTurns(events, 1); turns < 1 || turns > liveDelegateStepCap {
-		t.Errorf("child Turns = %d, want between 1 and the cap of %d", turns, liveDelegateStepCap)
+	// The wrap-up Turn is "extra and uncounted" only in turns.exchangeTurns: it takes its own
+	// turns.index and emits its own non-maintenance UsageEvent, so every count derived from events
+	// or requests — this one included — is the cap PLUS ONE.
+	if turns := childTurns(events, 1); turns < 1 || turns > liveDelegateStepCap+1 {
+		t.Errorf("child Turns = %d, want between 1 and the cap of %d plus the wrap-up Turn",
+			turns, liveDelegateStepCap)
+	}
+
+	// The closing report itself: a real model told why its tools are gone and asked to sum up
+	// says something, so the marker is followed by text — and never by the stand-in the fallback
+	// path supplies when the child produced none.
+	report := strings.TrimSpace(strings.TrimPrefix(result.Content, marker+"\n"))
+	if report == "" || report == stepCapNoTextMarker {
+		t.Errorf("delegation result = %q, want a closing report after the marker — the capped child "+
+			"was given a tool-less Turn and asked to report back, so this fell through to the "+
+			"pre-cap fallback", result.Content)
+	}
+
+	// And the request that Turn built: the menu is withdrawn WHOLESALE (toolMenu, Agent.wrapUp),
+	// which on a wire that carries no tool_choice is the entire prohibition. The child's LAST
+	// request is the wrap-up's; the one before it is a working Turn, and must still be armed —
+	// otherwise an empty menu throughout would satisfy the check while proving nothing.
+	menus := probe.menuSizesAt(1)
+	if len(menus) < 2 {
+		t.Fatalf("the budget probe recorded %d requests at Depth 1; the shakeout needs the child's "+
+			"working Turns AND its wrap-up Turn to compare", len(menus))
+	}
+	if last := menus[len(menus)-1]; last != 0 {
+		t.Errorf("the child's wrap-up request offered %d tools, want 0 — the closing Turn withdraws "+
+			"the whole menu (menu sizes in request order: %v)", last, menus)
+	}
+	if prev := menus[len(menus)-2]; prev == 0 {
+		t.Errorf("the child's request before the wrap-up offered no tools either (menu sizes in "+
+			"request order: %v); the withdrawal is only meaningful against an armed menu", menus)
 	}
 
 	// 2. The child worked in the WINDOW the server advertises and the ROOM the key allows: its

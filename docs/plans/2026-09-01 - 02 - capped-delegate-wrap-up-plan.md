@@ -225,7 +225,13 @@ at three tool Turns and still adds exactly one wrap-up request (so its child req
 
 **Commit:** `test(cmd): T-04 drives a capped delegate's closing report`
 
-## 5. The live shakeout reads the closing report
+## 5. The live shakeout reads the closing report — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the "the extra request carried no tools" claim is made through `budgetProbe`, which gained a `menus map[int][]int` field and a `menuSizesAt(depth)` accessor beside `at(depth)` — the pre-request hook is the only seam onto a child's request, and `LoopView.Tools()` is where the withdrawn menu is visible. Its doc comment gained the menu and the note that only `buildRequest`'s requests reach a pre-request hook (the summarizer's run none, `compact.go:485`), so the recorded sequence is one entry per model call and its LAST entry is the wrap-up's.
+
+NOTES (2026-09-01): the menu check is a pair, not a single assertion — the last request's menu must be 0 AND the one before it non-zero. One line beyond the item's literal text: without the second, an engine that shipped an empty menu on every Turn would pass while proving nothing about the withdrawal.
+
+NOTES (2026-09-01): the closing-report assertion rejects `stepCapNoTextMarker` as well as `""` — a wrap-up that faulted falls back to the pre-cap text and, when there was none, to that stand-in, which is exactly the "no report" case the item asks the shakeout to catch.
 
 Depends on item 3.
 
