@@ -194,8 +194,9 @@ A paste lands here with its lines intact, which is what this field is for.
 
 ### The external edit (`· ⏎ opens $EDITOR`)
 
-The sixth key class has no field at all: the blocks no row can hold — `servers`, `mcp-servers`,
-`validated-sets.alias`, `system-prompt-models`, `model-profile` — carry the
+The sixth key class has no field at all: the keys no row writes — `servers`, `sub-agents-server`,
+`mcp-servers`, `validated-sets.alias`, `system-prompt-models`, `system-prompt-layers`,
+`tools.enabled`, `model-profile` — carry the
 `· ⏎ opens $EDITOR` pointer in their last cell, and `⏎` opens the file itself on that key's line
 where the editor takes a line argument. `mechanisms` is the one structured key that is **not** among
 them: its own list is above, and its pointer reads `· ⏎ opens toggle list`.
