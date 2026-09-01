@@ -1420,9 +1420,27 @@ func (m Model) settingsPaneHint(rows []SettingRow) string {
 // summary and the pointer wording all arrived decided ([SettingRow]); nothing here
 // reformats a value or rules on what may be edited.
 func (m Model) settingRowCells(row SettingRow) popupRow {
+	return m.settingRowCellsPending(row, settingEdit{})
+}
+
+// settingRowCellsPending is that row as it will stand once a PENDING edit — one landed on the file
+// but not yet journaled — is recorded: the row the edit names carries the marker settingsValueCell
+// appends only after recordSettingEdit has run (settingsEditedValueCell), and every other row is
+// exactly what settingRowCells paints today. A zero settingEdit names no row and changes nothing,
+// which is how the ordinary painter calls it.
+//
+// It exists for the one caller that measures the columns BEFORE the journal has the edit —
+// settingsNoteWidth, asked by an apply to size a note against the value column its own edit is about
+// to widen by the marker's two cells. The record-after-apply ordering that forces this is deliberate
+// and documented at [Model.settingsApplied]; measuring the pending row is what pays for it.
+func (m Model) settingRowCellsPending(row SettingRow, pending settingEdit) popupRow {
+	value := m.settingsValueCell(row)
+	if pending.path != "" && pending.path == row.Path {
+		value = settingsEditedValueCell(row, pending)
+	}
 	return popupRow{
 		stripEscapes(row.Path),
-		stripEscapes(m.settingsValueCell(row)),
+		stripEscapes(value),
 		stripEscapes(settingsSourceMarker(row.Source)),
 		stripEscapes(m.settingsNote(row)),
 	}
@@ -1444,6 +1462,14 @@ func (m Model) settingsValueCell(row SettingRow) string {
 	if !ok {
 		return row.Value
 	}
+	return settingsEditedValueCell(row, edit)
+}
+
+// settingsEditedValueCell is that cell for a row an edit has reached — journaled already, or (at an
+// apply measuring the columns its edit is about to widen) about to be. It is split out because the
+// marker is two cells the value column has to be measured WITH, and the only caller that has to
+// measure them has no journal to read them from yet (settingRowCellsPending).
+func settingsEditedValueCell(row SettingRow, edit settingEdit) string {
 	marker := settingsEditMarker
 	if edit.watched {
 		marker = settingsWatchMarker
@@ -1553,10 +1579,17 @@ const settingsNoteMarkerCells = 2
 // painter elides an over-wide cell from the right, so a note the column cannot hold ends in an
 // ellipsis rather than in a full stop, and the whole point of a note that says what a rung costs is
 // that it finishes saying it.
-func (m Model) settingsNoteWidth(rows []SettingRow) int {
+//
+// `pending` is that apply's own edit, which the journal does not have yet (settingsApplied records
+// after it applies). The rows are measured as they will stand once it does — the edited row's value
+// cell carrying the ` *` the apply is about to append (settingRowCellsPending) — because a column
+// measured two cells narrow than it ends up hands the note two cells it does not have. It only bites
+// where the marked row is the widest in the value column (popupColumnWidths), which is why 80 and 160
+// columns never showed it. A zero settingEdit measures the rows exactly as they stand.
+func (m Model) settingsNoteWidth(rows []SettingRow, pending settingEdit) int {
 	cells := make([]popupRow, 0, len(rows))
 	for _, row := range rows {
-		cells = append(cells, m.settingRowCells(row))
+		cells = append(cells, m.settingRowCellsPending(row, pending))
 	}
 	widths := popupColumnWidths(m.th, cells)
 	width := popupInnerWidth(m.th, m.width) - popupRowIndent - settingsNoteMarkerCells

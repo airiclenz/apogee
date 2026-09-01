@@ -1374,6 +1374,42 @@ func TestSettingsEnumCurrentMarkerSurvivesANarrowColumn(t *testing.T) {
 	}
 }
 
+// The note is measured against the value column the apply is about to LEAVE, not the one on screen.
+// The ⏎ that takes the auto rung appends ` *` to the row's value cell (settingsEditMarker), and it is
+// journaled only AFTER the note is composed (settingsApplied's deliberate order), so a measure taken
+// off the rows as they stand reads the value column two cells narrow. At a width where the sentence
+// lands within those two cells of the note column's edge, that buys it a column it does not have and
+// the painter elides the tail — which is the one thing the sentence-or-clause choice exists to avoid.
+//
+// 108 columns is such a width, and the mode row is the widest cell in its column because it is the
+// only one: the sentence measures 87 cells, the column leaves the note 86 once the marker is on the
+// row and 88 before it. 80 and 160 never showed it, which is why the cases above stayed green.
+func TestSettingsAutoNoteIsMeasuredAgainstTheMarkedValueColumn(t *testing.T) {
+	log := &settingsWriteLog{}
+	m := settingsModeEditModel(t, log, capableHost, true, 108)
+
+	m = step(t, m, keyEnter()) // the sub-list, highlighted on ask-before
+	m = step(t, m, keyDown())  // allow-edits
+	m = step(t, m, keyDown())  // auto
+	m = step(t, m, keyEnter()) // commit: the row takes the marker and the note is chosen
+
+	row := settingsModeRowOf(t, m)
+	if got, want := m.settingsValueCell(row), "auto"+settingsEditMarker; got != want {
+		t.Fatalf("value cell = %q, want %q — the marked cell is what the note has to be measured against", got, want)
+	}
+	want := "· " + autoBlastRadiusClause(capableHost, true)
+	if got := m.settingsNote(row); got != want {
+		t.Errorf("note = %q, want %q — the marker's two cells are the column's, not the note's", got, want)
+	}
+	rendered := strip(m.renderSettings())
+	if !strings.Contains(rendered, want) {
+		t.Errorf("the key list does not paint that note whole:\n%s", rendered)
+	}
+	if sentence := autoBlastRadiusLine(capableHost, true); strings.Contains(rendered, sentence) {
+		t.Errorf("the pane took the whole sentence into a column measured before the marker:\n%s", rendered)
+	}
+}
+
 // settingsLiveBoolRow is one editable bool row that applies through the dispatcher — `bypass:` as the
 // registry describes it, minus the restart gate no key keeps once its edit takes effect.
 func settingsLiveBoolRow() SettingRow {

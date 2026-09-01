@@ -678,7 +678,20 @@ refusal in the outcome slot, no demote arriving with the indicator.
 **Acceptance:** `go test -race -count=1 -run 'TestUnframedSubAgent|TestNeverRanDelegation|TestGroupMember|TestExpandedGroupMember|TestSubAgentStream|TestEveryToolBodyFrameKeepsItsOwnFraming' ./internal/tui/`
 **Commit:** `fix(tui): grant a grouped never-ran delegation its prompt indicator`
 
-## 19. The settings note is measured against the post-marker width
+## 19. The settings note is measured against the post-marker width — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the pending edit reaches the measure through the whole `settingEdit` rather than a
+path/value pair — `settingsApplyLive(path, value string)` became `settingsApplyLive(edit settingEdit)`
+(one caller, `settingsApplied`, whose `edit.path` is `row.Path` at every construction site) — so the
+marker the measure paints is the one the journal will actually carry (` ~` for a watcher-driven apply),
+not one reconstructed at the seam. `settingRowCells` now delegates to a `settingRowCellsPending`
+variant so the pane's column schema stays written once, and the marker half of `settingsValueCell`
+is split out as `settingsEditedValueCell` for the row the journal does not have yet.
+NOTES (2026-09-01): the new width case is 108 columns, not one of the numbers the item's prose
+implies: at the apply the value cell reads `auto` (4 cells) and `auto *` (6), so the boundary sits
+where the note column measures 86 with the marker and 88 without it against an 87-cell sentence — 107
+and 108 are the only two widths that show it, and 108 is the one taken. Verified both ways: the new
+assertion fails on the pre-fix measure and passes on the fixed one.
 
 **What:** Fixes the residual at `ISSUES.md:177`. `settingsNoteWidth` (`internal/tui/settings.go:1556`)
 measures the columns from `settingRowCells` as the rows stand, and `autoBlastRadiusNote`

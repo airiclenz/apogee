@@ -40,15 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 **Status:** found 2026-08-28 at the close of the deferred-residuals sweep
 (`docs/plans/archived/2026-08-28 - 02 - deferred-residuals-sweep-plan.md`), deferred out of that run.
 
-- [ ] **`settingsNoteWidth` measures the value column before the apply appends its ` *` marker.**
-  `settingsNoteWidth` (`internal/tui/settings.go:1556`) computes the note's cells from
-  `settingRowCells` as the rows stand, and its caller `autoBlastRadiusNote`
-  (`internal/tui/settingsapply.go:221`) then chooses the whole sentence whenever it fits that
-  measurement — but the apply that follows widens the value column by the ` *` marker, so a note
-  landing within 2 cells of the column edge can still be elided from the right, the failure the
-  clause fallback exists to prevent. Not observed at 80 or 160 columns; the fix is to measure
-  against the post-marker width.
-
 - [ ] **MCP's unusable-proxy refusal does not wrap `security.ErrURLBlocked`.**
   `vetEndpoint` returns a bare `fmt.Errorf` when the egress proxy is not a usable URL
   (`internal/mcp/transport.go:228`), while its unpinnable sibling three lines down wraps the
