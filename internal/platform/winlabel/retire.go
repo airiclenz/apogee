@@ -101,8 +101,89 @@ func priorRestorable(current string, readErr error) (restore, drop bool) {
 	return false, true
 }
 
+// rootClearable is the CLEAR-side check on one journalled root: from the root's path, its
+// current mandatory label and the error that read may have failed with, it reports whether the
+// revert may strip that tree.
+//
+// It is priorRestorable's mirror, and it closes the second prong of the same finding. The
+// restore side was vouched for first — a prior is written back only onto a path apogee's own
+// Low label still sits on — while the clear side obeyed the journal unconditionally:
+// revertibleRoots handed every Root a journal named to ClearTree, whose write is a NULL SACL
+// (clearSDDL), so a journal planted or corrupted under the apogee home made the next
+// construction STRIP the mandatory label off an arbitrary tree (security finding F-08). The
+// warrant is the one the restore side already takes:
+//
+//   - Apogee's own Low label, read cleanly, is what makes the tree apogee's to clear. Nothing
+//     else marks it as this run's, or a dead run's, work.
+//   - Any other label, or none at all, read cleanly, refuses the root: apogee never labelled
+//     this tree, or someone has changed it since, so there is nothing of apogee's on it to
+//     remove and the clear would only destroy someone else's label.
+//   - A read that FAILED refuses too, a vanished path included. An unknown label vouches for
+//     nothing, and unlike the restore side nothing is destroyed by declining — the journal is
+//     kept whole and a later run judges the root again.
+//   - A VOLUME root (C:\, \\server\share) is refused whatever label it carries, the same
+//     refusal windowsLabelGuardrail makes on the way IN: nothing above a box may be labelled,
+//     so nothing above a box may be cleared either, and a journal naming one describes a
+//     mutation apogee would never have made.
+//
+// A refused root is SKIPPED, not an abort — exactly the disposition a root a live sibling
+// still claims gets (revertibleRoots): the rest of the journal reverts as it would have.
+//
+// It is pure so the decision is table-testable on any OS — the retire seam pattern — which
+// matters most here: ReadSDDL errors off Windows, and this is the one decision a planted
+// journal attacks.
+func rootClearable(root, current string, readErr error) bool {
+	if readErr != nil {
+		return false
+	}
+	if isVolumeRoot(root) {
+		return false
+	}
+	return IsLowLabel(current)
+}
+
+// isVolumeRoot reports whether p names a volume root rather than a tree inside one: a drive
+// root (C:\), a bare drive (C:, which names no location at all), a UNC share root
+// (\\server\share) or a rooted path with no components below the anchor.
+//
+// The shape test is spelled HERE, over both separators, rather than through path/filepath: on
+// Linux filepath.Split answers "C:\" as one file name in the current directory, so the refusal
+// would hold only on Windows and the table case could never run — and package platform's
+// hostRules.split, the guardrail this mirrors, is unimportable from this leaf (D2). Windows
+// accepts / and \ interchangeably, so a journal may carry either spelling and both are folded
+// to one here, the whole-path posture foldPath already takes.
+func isVolumeRoot(p string) bool {
+	q := strings.ReplaceAll(p, "/", `\`)
+	if strings.HasPrefix(q, `\\`) {
+		// UNC: \\server\share is the anchor itself, so two components or fewer name no tree.
+		return len(pathComponents(q[2:])) <= 2
+	}
+	if len(q) >= 2 && q[1] == ':' && isDriveLetter(q[0]) {
+		return len(pathComponents(q[2:])) == 0
+	}
+	return len(pathComponents(q)) == 0
+}
+
+// pathComponents splits a backslash-separated path into its non-empty components, so a
+// trailing or doubled separator names no extra level.
+func pathComponents(p string) []string {
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(p, `\`) {
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// isDriveLetter reports whether b is a Windows drive letter, the first half of the C: anchor.
+func isDriveLetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
 // revertibleRoots returns the journalled roots a revert may clear: r's roots minus every
-// root also named (Root == true) by a sibling journal whose owning process is still ALIVE.
+// root also named (Root == true) by a sibling journal whose owning process is still ALIVE,
+// and minus every root apogee's own label no longer vouches for (rootClearable).
 // Two sessions confining one workspace journal the same root, and the first to tear down
 // must not strip the label out from under the survivor — its memoised label pass would never
 // re-label, and every later confined write in that session would be denied.
@@ -114,10 +195,19 @@ func priorRestorable(current string, readErr error) (restore, drop bool) {
 // is an interrupted run whose roots recovery will clear anyway, and clearing them here first
 // is the same idempotent operation.
 //
+// The clearability half is F-08's second prong. An entry already carrying the PERSISTED
+// verdict (Entry.RootJudged) is taken as clearable without a fresh read, and that precedence
+// is the point rather than an optimisation: a revert that cleared a root but failed a
+// descendant keeps the journal (clearTreeOutcome), and a verdict re-taken on the retry would
+// read the NULL SACL the clear itself wrote, refuse the root, and let the journal retire over
+// descendants still labelled Low. Only an UNJUDGED root is read, which is the pre-clear pass's
+// own case (judgePriors).
+//
 // Roots are compared case-folded (foldPath): C:\Work and c:\work name one location.
-// alive is injected (ProcessAlive in production, which is Windows-tagged) so the decision is
-// table-testable on any OS — the retire seam pattern.
-func revertibleRoots(r Record, siblings []Record, alive func(int) bool) []string {
+// alive is injected (ProcessAlive in production, which is Windows-tagged) and readLabel with
+// it (ReadSDDL, likewise), so the decision is table-testable on any OS — the retire seam
+// pattern.
+func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabel func(string) (string, error)) []string {
 	claimed := make(map[string]bool)
 	for _, sibling := range siblings {
 		if !alive(sibling.PID) {
@@ -127,16 +217,18 @@ func revertibleRoots(r Record, siblings []Record, alive func(int) bool) []string
 			claimed[foldPath(root)] = true
 		}
 	}
-	roots := r.Roots()
-	if len(claimed) == 0 {
-		return roots
-	}
-	out := make([]string, 0, len(roots))
-	for _, root := range roots {
-		if claimed[foldPath(root)] {
+	out := make([]string, 0, len(r.Entries))
+	for _, entry := range r.Entries {
+		if !entry.Root || claimed[foldPath(entry.Path)] {
 			continue
 		}
-		out = append(out, root)
+		if !entry.RootJudged {
+			current, readErr := readLabel(entry.Path)
+			if !rootClearable(entry.Path, current, readErr) {
+				continue
+			}
+		}
+		out = append(out, entry.Path)
 	}
 	return out
 }

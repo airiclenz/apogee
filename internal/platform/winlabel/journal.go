@@ -62,6 +62,15 @@ type Entry struct {
 	// path and drop a foreign prior for good. An older journal has no such field and decodes
 	// false, which is the honest answer: nothing has judged it yet, so its first pass does.
 	Judged bool `json:"judged,omitempty"`
+	// RootJudged records that a revert has already found this ROOT clearable: the tree still
+	// carried apogee's own Low label, and the path was no volume root, when the verdict was
+	// taken BEFORE anything was cleared (rootClearable). It is Judged's mirror on the clear
+	// side and is persisted for the same reason: a revert that cleared the root but failed a
+	// descendant KEEPS the journal (clearTreeOutcome), and a verdict re-taken on that retry
+	// would read the NULL SACL the clear itself wrote, refuse the root, and retire the journal
+	// over descendants still labelled Low. An older journal has no such field and decodes
+	// false, which is the honest answer: nothing has judged it yet, so its first pass does.
+	RootJudged bool `json:"root_judged,omitempty"`
 }
 
 // Roots returns the journalled box roots, the trees teardown walks.

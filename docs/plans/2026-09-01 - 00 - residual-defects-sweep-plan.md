@@ -554,7 +554,16 @@ carries.
 **Acceptance:** `go test -race -count=1 -run 'TestWireArgs|TestContentArgs' ./internal/tui/`
 **Commit:** `test(tui): cross-check contentArgs against the tools' schemas`
 
-## 17. F-08: the revert clears only roots apogee's own label vouches for
+## 17. F-08: the revert clears only roots apogee's own label vouches for — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `ISSUES.md` joins **Files:** — the item's own **Files:** is code-only, while the plan's Closeout has every item remove its own register entry in its own commit. This was the only entry under "Residuals deferred out of the 2026-08-29 audit-residue closeout", so its now-empty heading and `**Status:**` block go with it (the convention items 6, 9 and 14 set).
+NOTES (2026-09-01): the volume-root refusal is `isVolumeRoot` in `retire.go`, with two one-line helpers (`pathComponents`, `isDriveLetter`) beside it — separator-agnostic, drive-letter and UNC anchors counted in components, never `filepath.Split`, so the `C:\` and `C:/` table cases run on Linux.
+NOTES (2026-09-01): `judgePriors` takes ONE `ReadSDDL` per entry and feeds both verdicts from it — a root that already carried a foreign label is one entry wearing both instructions — rather than reading the path twice.
+NOTES (2026-09-01): the write-back's abort is now a PRIOR's rule only (`priorJudged`), per the item's third guard: a root-only journal whose rewrite fails falls through to the clear it performs today, so an unwritable apogee home cannot strand labels on runs that clear cleanly.
+NOTES (2026-09-01): mutation-checked — with the `rootClearable` filter deleted from `revertibleRoots`, three subtests of the new `TestRevertibleRootsClearsOnlyRootsApogeesOwnLabelVouchesFor` fail (planted root, unreadable root, volume root); the file was restored and `git diff` matches the intended change only.
+NOTES (2026-09-01): the existing `TestRevertibleRootsSparesOnlyALiveSiblingsRoots` gains the new `readLabel` seam (a stub answering apogee's own Low label for every path) so it still exercises the sibling rule alone; its comment says so.
+NOTES (2026-09-01): the Windows-only half lives in the new `walk_windows_test.go` behind the same build tag — an already-judged root is skipped (proved by the journal file staying unwritten) and a root-only journal whose rewrite fails still takes the verdict in memory and returns nil. Both label a real temp directory with `SetSDDL` and skip when the host refuses; neither runs under this item's Linux acceptance, and `GOOS=windows go vet ./internal/platform/...` compiles them.
+NOTES (2026-09-01): no design/ADR doc amendment was needed — neither `docs/adr/0020-…` nor `docs/design/confinement-execution-contract.md` §9 states that every journalled root is cleared unconditionally, so nothing they say is made false. The `CHANGELOG.md:1277` F-08 correction is the plan's Closeout's, not this item's.
 
 **What:** Recast at the regression check (2026-09-01). Fixes the untouched second prong of security
 finding F-08 (`ISSUES.md:150`). The restore side is vouched (`priorRestorable`, `internal/platform/winlabel/retire.go:94`, driven by `judgePriors`,

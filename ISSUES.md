@@ -35,21 +35,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Residuals deferred out of the 2026-08-29 audit-residue closeout
-
-**Status:** found 2026-08-29 at the close of the audit-residue closeout run
-(`docs/plans/archived/2026-08-29 - 00 - audit-residue-closeout-plan.md`), deferred out of that run.
-
-- [ ] **F-08's second remediation prong is untouched: the revert's tree walk still trusts a
-  journal's `Root` paths.** The restore side is now vouched — a `PriorSDDL` is applied only where
-  apogee's own Low label still stands — but the CLEAR side is not: `revertibleRoots`
-  (`internal/platform/winlabel/retire.go:120`) hands every `Root` a journal names to `ClearTree`
-  (`internal/platform/winlabel/walk_windows.go:367`, `:194`) unvalidated, so a journal planted or
-  corrupted under `~/.apogee` can still make apogee write a NULL SACL over an arbitrary tree.
-  `windowsProtectedRoots` guards the LABEL path only (`internal/platform/confiner_windows.go:180`),
-  not recovery. The closeout plan scoped its item to the restore side, so F-08 is half remediated
-  while the `ISSUES.md` entry it replaced and the CHANGELOG both record it as closed.
-
 ### Residuals deferred out of the 2026-08-28 deferred-residuals sweep
 
 **Status:** found 2026-08-28 at the close of the deferred-residuals sweep

@@ -251,7 +251,8 @@ func osRevert() revertFunc { return revertSparingLiveSiblings }
 
 // revertSparingLiveSiblings returns the production revert for the journal at own under home:
 // revertJournal over the journal's roots MINUS every root a sibling journal with a live owning
-// process still names (revertibleRoots), restoring only the priors no sibling journal still
+// process still names and every root apogee's own label no longer vouches for
+// (revertibleRoots, rootClearable), restoring only the priors no sibling journal still
 // claims the tree of — the rest are handed back as the journal's remains (restorablePriors,
 // retire). Teardown and recovery both revert through this closure, so neither ever clears a
 // root out from under a concurrently running session, and neither restores a foreign prior a
@@ -264,20 +265,24 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 		}
 		siblings := siblingJournals(home, own)
 		restore, handoff := restorablePriors(r, siblings)
-		if err := revertJournal(revertibleRoots(r, siblings, ProcessAlive), restore); err != nil {
+		if err := revertJournal(revertibleRoots(r, siblings, ProcessAlive, ReadSDDL), restore); err != nil {
 			return nil, err
 		}
 		return handoff, nil
 	}
 }
 
-// judgePriors settles which of one journal's recorded priors are still apogee's to put back,
-// and settles it BEFORE the caller clears anything (F-08). A journal is an instruction to WRITE
-// mandatory labels onto named paths, and until this check existed the revert obeyed it
-// unconditionally — so a journal planted or corrupted under the apogee home relabelled
-// arbitrary paths at the next construction. The rule (priorRestorable) is that apogee's own Low
-// label must still be on the path: nothing else marks the path as this run's, or a dead run's,
-// to revert.
+// judgePriors settles which of one journal's instructions are still apogee's to carry out —
+// which recorded priors may be put back, and which named ROOTS may be cleared — and settles it
+// BEFORE the caller clears anything (F-08). A journal is an instruction to WRITE mandatory
+// labels onto named paths and to STRIP them off named trees, and until these checks existed the
+// revert obeyed it unconditionally — so a journal planted or corrupted under the apogee home
+// relabelled arbitrary paths, and NULL-SACLed arbitrary trees, at the next construction. Both
+// rules (priorRestorable, rootClearable) are the same one: apogee's own Low label must still be
+// on the path, because nothing else marks it as this run's, or a dead run's, to revert. The
+// clear side adds the guardrail the label pass makes on the way in — a volume root is refused
+// whatever it carries — and it REFUSES rather than aborting: a root that fails the test is
+// skipped by revertibleRoots and the rest of the journal reverts.
 //
 // The ORDER is the whole point. ClearTree is what turns a path apogee labelled into an
 // unlabelled one, so a verdict taken after it cannot tell apogee's own work from a stranger's
@@ -287,13 +292,22 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 // which of the two an entry lands in is decided after this, and a handed-off entry is exactly
 // the one a later pass reads once some other session's clear has unlabelled its path.
 //
-// The verdict is recorded on the entry (Entry.Judged) and PERSISTED before the clear, because
-// the two paths that re-visit a path later — a hand-off waiting for a live sibling to retire,
-// and a retry after a restore that failed (session.go's kept journal, ADR 0020 §2) — both read
-// it after the clear. A journal written by an older apogee carries no flags and is judged on
-// its first pass, while it still reads Low. It is written back through own, this journal's own
+// The verdict is recorded on the entry (Entry.Judged, Entry.RootJudged) and PERSISTED before
+// the clear, because the paths that re-visit a path later — a hand-off waiting for a live
+// sibling to retire, and a retry after a revert that failed (session.go's kept journal, ADR
+// 0020 §2) — all read it after the clear, when the NULL SACL the clear itself wrote is all
+// there is to read. A journal written by an older apogee carries no flags and is judged on its
+// first pass, while it still reads Low. It is written back through own, this journal's own
 // file: a write failure aborts the revert with NOTHING cleared, which is the same posture the
 // label pass takes on the way in — no record on the disk, no mutation of the disk.
+//
+// That abort is a PRIOR's rule only. A root-only journal is the overwhelmingly common case
+// (journal.go's Entries), and it wrote nothing here at all before the root verdict existed, so
+// making the write a precondition of clearing would strand every label on an unwritable apogee
+// home for runs that clear cleanly today. A root verdict is therefore taken in memory — the
+// in-place r.Entries write below, which is the session's own slice — and a rewrite that fails
+// with no prior judged falls through to the clear it has always performed; the verdict is
+// simply not carried across processes on that run.
 //
 // A read failure other than "gone" aborts the revert too, and equally before the clear: the
 // entry stays unjudged, the journal is kept whole by retire, and the next run judges it against
@@ -308,13 +322,24 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 // instruction to do nothing — while an entry that still names a ROOT keeps its clear
 // obligation and only loses its prior.
 func judgePriors(r Record, own string) error {
-	judged := false
+	judged, priorJudged := false, false
 	for i := range r.Entries {
 		entry := &r.Entries[i]
-		if entry.PriorSDDL == "" || entry.Judged {
+		// A root that already carried a foreign label is ONE entry wearing both instructions
+		// (LabelTree), and both verdicts are taken off the same read of the same path.
+		judgeRoot := entry.Root && !entry.RootJudged
+		judgePrior := entry.PriorSDDL != "" && !entry.Judged
+		if !judgeRoot && !judgePrior {
 			continue
 		}
 		current, readErr := ReadSDDL(entry.Path)
+		if judgeRoot && rootClearable(entry.Path, current, readErr) {
+			entry.RootJudged = true
+			judged = true
+		}
+		if !judgePrior {
+			continue
+		}
 		switch restore, drop := priorRestorable(current, readErr); {
 		case restore:
 			entry.Judged = true
@@ -324,7 +349,7 @@ func judgePriors(r Record, own string) error {
 			return fmt.Errorf("apogee: confine: cannot read the mandatory label of %q to judge the prior the journal records for it: %v",
 				entry.Path, readErr)
 		}
-		judged = true
+		judged, priorJudged = true, true
 	}
 	if !judged || own == "" {
 		return nil
@@ -335,12 +360,16 @@ func judgePriors(r Record, own string) error {
 			surviving = append(surviving, entry)
 		}
 	}
-	return WriteJournal(own, Record{PID: r.PID, Entries: surviving})
+	if err := WriteJournal(own, Record{PID: r.PID, Entries: surviving}); err != nil && priorJudged {
+		return err
+	}
+	return nil
 }
 
 // revertJournal undoes one journal's disk mutation: clear the label from every object under
 // each of roots, then restore the prior descriptors. roots is the journal's root set minus
-// what a live sibling session still claims (revertibleRoots) — a spared root is not a failure,
+// what a live sibling session still claims and minus every root apogee's own Low label no
+// longer vouches for (revertibleRoots, rootClearable) — a spared root is not a failure,
 // because the sibling's own journal carries the Root entry and with it the clear obligation,
 // so this journal may still retire. priors is likewise the journal's restorable subset
 // (restorablePriors): a prior under a sibling-claimed root is handed off rather than restored

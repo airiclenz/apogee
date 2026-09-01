@@ -298,6 +298,9 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 	// journal also names. A spared root is not a failed revert — the sibling's own Root entry
 	// carries the clear obligation, so this journal may still retire — and a DEAD sibling
 	// spares nothing, because its roots are an interrupted run recovery clears anyway.
+	//
+	// The label read is stubbed to apogee's own mark throughout, so this table sees the sibling
+	// rule alone; the clearability rule it composes with has its own table below.
 	journal := Record{PID: 100, Entries: []Entry{
 		{Path: `C:\work`, Root: true},
 		{Path: `C:\scratch`, Root: true},
@@ -360,7 +363,7 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 			t.Parallel()
 
 			alive := func(pid int) bool { return tt.live[pid] }
-			got := revertibleRoots(journal, tt.siblings, alive)
+			got := revertibleRoots(journal, tt.siblings, alive, readsApogeesOwnLabel)
 			if len(got) != len(tt.want) {
 				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
 			}
@@ -420,6 +423,167 @@ func TestPriorRestorableTable(t *testing.T) {
 			if restore != tt.wantRestore || drop != tt.wantDrop {
 				t.Errorf("priorRestorable(%q, %v) = restore %v, drop %v; want restore %v, drop %v",
 					tt.current, tt.readErr, restore, drop, tt.wantRestore, tt.wantDrop)
+			}
+		})
+	}
+}
+
+// apogeesOwnLowLabel is the inherited spelling a labelled root propagates — the mark
+// rootClearable takes as apogee's warrant to clear a tree — and readsApogeesOwnLabel is the
+// label-read seam that answers it for every path, the state the disk is really in when a
+// revert runs over its own journal.
+const apogeesOwnLowLabel = "S:AI(ML;OICIID;NW;;;LW)"
+
+func readsApogeesOwnLabel(string) (string, error) { return apogeesOwnLowLabel, nil }
+
+func TestRootClearableTable(t *testing.T) {
+	t.Parallel()
+
+	// The CLEAR-side check that closes F-08's second prong. The restore side was vouched for
+	// first, while the revert still handed every Root a journal named to ClearTree — a NULL
+	// SACL over the whole tree — so a journal planted under the apogee home stripped the
+	// mandatory label off whatever it pointed at. Apogee's own Low label still on the root is
+	// the warrant, a volume root is refused whatever it carries, and the read itself is
+	// Windows-only (ReadSDDL needs a real SACL), so the verdict is proven here on every OS —
+	// the retire seam pattern.
+	const (
+		canonicalLow  = "S:AI(ML;;NW;;;S-1-16-4096)"
+		foreignMedium = "S:AI(ML;;NW;;;ME)"
+		foreignHigh   = "S:(ML;OICI;NW;;;HI)"
+	)
+	denied := errors.New("access is denied")
+
+	tests := []struct {
+		name    string
+		root    string
+		current string
+		readErr error
+		want    bool
+	}{
+		{name: "apogees_own_low_label_clears_the_tree", root: `C:\work`, current: apogeesOwnLowLabel, want: true},
+		{name: "the_canonical_low_sid_is_the_same_mark", root: `C:\work`, current: canonicalLow, want: true},
+		{name: "a_forward_slash_spelling_is_the_same_tree", root: "C:/work/box", current: canonicalLow, want: true},
+		{name: "a_share_subdirectory_clears", root: `\\server\share\box`, current: canonicalLow, want: true},
+		{name: "a_foreign_medium_label_refuses", root: `C:\work`, current: foreignMedium},
+		{name: "a_foreign_high_label_refuses", root: `C:\work`, current: foreignHigh},
+		{name: "an_unlabelled_root_refuses", root: `C:\work`},
+		{name: "an_unreadable_root_refuses", root: `C:\work`, current: canonicalLow, readErr: denied},
+		{name: "a_vanished_root_refuses", root: `C:\work`, readErr: os.ErrNotExist},
+		{
+			name:    "a_vanished_root_reported_as_a_path_error_refuses",
+			root:    `C:\work`,
+			readErr: &fs.PathError{Op: "read", Path: `C:\work`, Err: fs.ErrNotExist},
+		},
+		// The volume-root refusal is the guardrail windowsLabelGuardrail makes on the way IN,
+		// spelled here over both separators: nothing above a box may be labelled, so nothing
+		// above a box may be cleared, whatever label the journal found there.
+		{name: "a_drive_root_refuses_despite_apogees_label", root: `C:\`, current: apogeesOwnLowLabel},
+		{name: "a_forward_slash_drive_root_refuses", root: "C:/", current: apogeesOwnLowLabel},
+		{name: "a_bare_drive_refuses", root: "C:", current: apogeesOwnLowLabel},
+		{name: "a_unc_share_root_refuses", root: `\\server\share`, current: apogeesOwnLowLabel},
+		{name: "a_trailing_separator_does_not_make_a_share_root_a_tree", root: `\\server\share\`, current: apogeesOwnLowLabel},
+		{name: "a_forward_slash_unc_share_root_refuses", root: "//server/share", current: apogeesOwnLowLabel},
+		{name: "a_bare_separator_refuses", root: `\`, current: apogeesOwnLowLabel},
+		{name: "an_empty_root_refuses", current: apogeesOwnLowLabel},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := rootClearable(tt.root, tt.current, tt.readErr); got != tt.want {
+				t.Errorf("rootClearable(%q, %q, %v) = %v, want %v", tt.root, tt.current, tt.readErr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRevertibleRootsClearsOnlyRootsApogeesOwnLabelVouchesFor(t *testing.T) {
+	t.Parallel()
+
+	// F-08's second prong composed with the sibling rule: a journal is an instruction to STRIP
+	// mandatory labels off whole trees, so a root a planted or corrupted journal names is
+	// cleared only where apogee's own Low label still stands, and a root a live sibling still
+	// claims is spared as before. Both filters run here, purely, because the label read is
+	// Windows-only.
+	const foreignMedium = "S:AI(ML;;NW;;;ME)"
+	alwaysAlive := func(int) bool { return true }
+
+	tests := []struct {
+		name     string
+		journal  Record
+		siblings []Record
+		read     func(string) (string, error)
+		want     []string
+	}{
+		{
+			name:    "a_planted_root_is_dropped_while_the_labelled_one_survives",
+			journal: Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true}, {Path: `C:\Windows`, Root: true}}},
+			read: func(path string) (string, error) {
+				if path == `C:\work` {
+					return apogeesOwnLowLabel, nil
+				}
+				return foreignMedium, nil
+			},
+			want: []string{`C:\work`},
+		},
+		{
+			name:    "an_unreadable_root_is_skipped_rather_than_aborting_the_rest",
+			journal: Record{PID: 100, Entries: []Entry{{Path: `C:\locked`, Root: true}, {Path: `C:\work`, Root: true}}},
+			read: func(path string) (string, error) {
+				if path == `C:\locked` {
+					return "", errors.New("access is denied")
+				}
+				return apogeesOwnLowLabel, nil
+			},
+			want: []string{`C:\work`},
+		},
+		{
+			name:    "a_volume_root_is_dropped_even_carrying_apogees_label",
+			journal: Record{PID: 100, Entries: []Entry{{Path: `C:\`, Root: true}, {Path: `C:\work`, Root: true}}},
+			read:    readsApogeesOwnLabel,
+			want:    []string{`C:\work`},
+		},
+		{
+			// The persisted verdict, and the reason it exists: a revert that cleared the root
+			// but failed a descendant KEEPS the journal (clearTreeOutcome), and the retry reads
+			// the NULL SACL ClearTree itself wrote. Re-judging there would refuse the root and
+			// let the journal retire over descendants still labelled Low, so the verdict taken
+			// before the first clear wins over the read.
+			name:    "a_persisted_verdict_beats_the_null_sacl_the_clear_wrote",
+			journal: Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true, RootJudged: true}}},
+			read:    func(string) (string, error) { return clearSDDL, nil },
+			want:    []string{`C:\work`},
+		},
+		{
+			name:    "a_live_siblings_claim_still_spares_a_vouched_root",
+			journal: Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true}, {Path: `C:\scratch`, Root: true}}},
+			siblings: []Record{
+				{PID: 200, Entries: []Entry{{Path: `c:\WORK`, Root: true}}},
+			},
+			read: readsApogeesOwnLabel,
+			want: []string{`C:\scratch`},
+		},
+		{
+			name:    "a_prior_only_entry_names_no_root_to_clear",
+			journal: Record{PID: 100, Entries: []Entry{{Path: `C:\work\vendor.dll`, PriorSDDL: foreignMedium}}},
+			read:    readsApogeesOwnLabel,
+			want:    []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := revertibleRoots(tt.journal, tt.siblings, alwaysAlive, tt.read)
+			if len(got) != len(tt.want) {
+				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("revertibleRoots[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
 			}
 		})
 	}
