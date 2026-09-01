@@ -484,7 +484,11 @@ composed into the slot.
 **Acceptance:** `go test -race -count=1 -run 'TestE2ESubAgentView' ./cmd/apogee/`
 **Commit:** `test(cmd): assert the steered cell on the collapsed run row`
 
-## 14. `openRunAt`'s self-redirect guard is pinned
+## 14. `openRunAt`'s self-redirect guard is pinned — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the head index is taken from the production seam `runHeadAt(m.transcript.entries, m.viewedRun().spawn)` (`internal/tui/subagentblock.go:143`) rather than hard-coded as `1`, so the pin survives a fixture whose entry order changes.
+NOTES (2026-09-01): mutation-checked — with `m.viewedRun() == ref` deleted from `openRunAt` (`internal/tui/runview.go:170`) the new `TestRunViewOpenRunAtRefusesTheViewedRunsOwnHead` fails on both assertions (`opened == true`, stack 2 want 1) while `TestRunViewOwnHeadDoesNotReopenItself` stays green — the residual's premise confirmed; `runview.go` was restored afterwards and is untouched.
+NOTES (2026-09-01): `ISSUES.md` joins **Files:** — the item's own **Files:** is code-only, while the plan's Closeout has every item remove its own register entry in its own commit. This was the last entry under "Residuals deferred out of the 2026-08-30 sub-agent run-view plan", so its now-empty heading and `**Status:**` block go with it (the convention items 6 and 9 set).
 
 **What:** Closes the residual at `ISSUES.md:122`. Deleting `m.viewedRun() == ref`
 (`internal/tui/runview.go:170`) leaves both suites green: `TestRunViewOwnHeadDoesNotReopenItself`

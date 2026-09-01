@@ -163,6 +163,36 @@ func TestRunViewOwnHeadDoesNotReopenItself(t *testing.T) {
 	}
 }
 
+// TestRunViewOpenRunAtRefusesTheViewedRunsOwnHead pins the guard itself, which no click can reach.
+// The test above proves the ROW is safe — a rooted paint marks the view's own task targetTask, so
+// activating it folds the task and asks the redirect nothing — and that is exactly why deleting
+// [Model.openRunAt]'s `m.viewedRun() == ref` refusal leaves it green. The guard stands behind the
+// row for any OTHER reach that hands the redirect the run already on screen, so it is asserted
+// where that reach is: at the seam, called directly with the viewed run's own head.
+func TestRunViewOpenRunAtRefusesTheViewedRunsOwnHead(t *testing.T) {
+	m := enterOnLastBlock(t, modelWithRun(t))
+	if got := m.viewedRun().spawn; got != "s1" {
+		t.Fatalf("setup: ⏎ on the delegation opened run %q; want the run it heads", got)
+	}
+	head, ok := runHeadAt(m.transcript.entries, m.viewedRun().spawn)
+	if !ok {
+		t.Fatal("setup: the transcript holds no head for the run on screen, so there is no self-redirect to ask about")
+	}
+	before := len(m.viewStack)
+
+	m, opened := m.openRunAt(head)
+
+	if opened {
+		t.Error("openRunAt opened the run already on screen; a second level of it leaves esc to be pressed twice to leave one view")
+	}
+	if n := len(m.viewStack); n != before {
+		t.Fatalf("the refused redirect left %d level(s) open; want the %d that were already there", n, before)
+	}
+	if got := m.viewedRun().spawn; got != "s1" {
+		t.Errorf("the refused redirect re-rooted the paint at %q; it stands on the run it was already showing", got)
+	}
+}
+
 // seeMoreCount reads the number a collapsed prompt's see-more marker advertises off the row carrying
 // it — the claim the fold makes to the reader, taken from the marker's own wording (promptSeeMore)
 // rather than from a literal spelled twice.

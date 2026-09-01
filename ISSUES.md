@@ -35,17 +35,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Residuals deferred out of the 2026-08-30 sub-agent run-view plan
-
-**Status:** found 2026-08-30 at the close of the sub-agent run-view plan
-(`docs/plans/archived/2026-08-30 - 01 - sub-agent-run-view-plan.md`), deferred out of that run.
-
-- [ ] **`openRunAt`'s self-redirect guard is unpinned.** Deleting `m.viewedRun() == ref`
-  (`internal/tui/runview.go:170`) leaves both `./internal/tui` and `cmd/apogee`'s `SubAgent|RunView`
-  e2e tests green: the only test that used to reach it now clicks a `targetTask` row, which never
-  asks the redirect, so the rule that a view's own head must not open a second copy of the run has
-  no test standing behind it.
-
 ### Residuals deferred out of the 2026-08-29 tool-surface-transparency run
 
 **Status:** found 2026-08-29 at the close of the tool-surface transparency plan
