@@ -473,6 +473,48 @@ func TestRosterConflicts_ConsoleFamilyNamedBothWays(t *testing.T) {
 	}
 }
 
+// TestHostToolsSubAgentSeatChoice_ShapesTheRegisteredSubAgent pins the host seam for ADR 0069's
+// `sub-agents-choice: model` gate. The flag changes the sub_agent VARIANT the assembly builds, not
+// whether it is built: the tool is registered either way and the menu is the same length, so a host
+// that never enables seat choice gets the roster it always got, byte-identical schema included.
+func TestHostToolsSubAgentSeatChoice_ShapesTheRegisteredSubAgent(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		seatChoice     bool
+		wantSeatChoice bool
+	}{
+		{"fixed", false, false},
+		{"model", true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			reg := NewDefaultRegistryWithHost(root, HostTools{SubAgentSeatChoice: tc.seatChoice})
+			tool, ok := reg.Lookup(SubAgentToolName)
+			if !ok {
+				t.Fatal("sub_agent must be registered whichever way the seat choice is set")
+			}
+			sub, ok := tool.(*SubAgent)
+			if !ok {
+				t.Fatalf("registered sub_agent is a %T, want *SubAgent", tool)
+			}
+			if got := sub.OffersSeatChoice(); got != tc.wantSeatChoice {
+				t.Errorf("OffersSeatChoice = %v, want %v — the registry did not honour SubAgentSeatChoice", got, tc.wantSeatChoice)
+			}
+			if got := strings.Contains(string(sub.Schema()), "run_on"); got != tc.wantSeatChoice {
+				t.Errorf("schema publishes run_on = %v, want %v", got, tc.wantSeatChoice)
+			}
+			if got, want := rosterNamesOf(DefaultToolsWithHost(root, HostTools{SubAgentSeatChoice: tc.seatChoice})), rosterNamesOf(DefaultTools(root)); got != want {
+				t.Errorf("seat choice changed the menu:\n got: %s\nwant: %s", got, want)
+			}
+		})
+	}
+}
+
 // stubAsker is a no-op Asker for the registry tests (it is never called — the tests only
 // check registration/ordering). ask_user's round-trip behaviour is covered in ask_user_test.go.
 type stubAsker struct{}

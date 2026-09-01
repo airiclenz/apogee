@@ -112,6 +112,18 @@ type HostTools struct {
 	// THIS package, so the dependency cannot point back; they are compared case-insensitively
 	// (isSecretEnv), and a name matching nothing in the environment is simply not there to drop.
 	SecretEnvVars []string
+
+	// SubAgentSeatChoice offers the model the `run_on` argument on sub_agent — the host's
+	// `sub-agents-choice: model` gate (ADR 0069). False is the default and the whole of
+	// `sub-agents-choice: fixed`: the plain variant is registered and the schema is byte-identical
+	// to the one built before seat choice existed, so a model that cannot pick a seat is never
+	// told about one.
+	//
+	// It shapes the tool this build carries rather than whether it carries it, which is why it is
+	// not a roster delta: sub_agent is offered either way, and the two variants differ only in the
+	// argument published. Where the choice IS offered, the seat is still resolved by the engine —
+	// this flag decides what the model may ASK for, never where the child ends up.
+	SubAgentSeatChoice bool
 }
 
 // NewDefaultRegistry assembles the built-in tool set — the read/write/list/grep base
@@ -243,7 +255,7 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
-		NewSubAgent(),
+		NewSubAgentWith(SubAgentOptions{SeatChoice: host.SubAgentSeatChoice}),
 		// The Console family (ADR 0059) sits last because it is the first family registered
 		// DEFAULT-OFF: nothing here reaches a default menu, so its place in build order costs no
 		// model a slot, and a roster that lifts it appends it after the tools every model gets.

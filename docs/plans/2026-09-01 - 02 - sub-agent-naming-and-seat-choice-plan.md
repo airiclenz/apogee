@@ -325,7 +325,12 @@ lines of prose, and `#     description: fast local 27B — search and edits` in 
 **Regression guard.** `config.SaveSubAgentsServer`/`ResetSubAgentsServer` splices leave a `description:` line untouched (pin in the splice tests); `ValidateServers` is unchanged.
 **Commit:** `feat(config): servers description and the sub-agents-choice key`
 
-## 10. Tools: the `run_on` schema variant and `OffersSeatChoice`
+## 10. Tools: the `run_on` schema variant and `OffersSeatChoice` — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): both schema variants render from ONE template const (`subAgentSchemaTemplate`, a single `%s` hole filled by `subAgentRunOnProperty`) through `subAgentSchema(seatChoice bool)`, rather than from two literals. The plan names only the seat-choice schema text; sharing the literal is what makes "the plain variant's schema is byte-identical to today's" a property of the code rather than of an author keeping two copies in step, and the new test pins that plain rendering byte for byte against the shipped literal.
+NOTES (2026-09-01): `PromptArgKeys`'s BODY is unchanged as the item requires (`task`, `name`); its doc comment gained one clause saying `max_steps` and `run_on` are deliberately not declared, because the sentence beside it explains which arguments the dangerous-action guard looks away from and a new undeclared argument otherwise reads as an oversight.
+NOTES (2026-09-01): `RunOn` carries no `omitempty` (the item's literal tag), so `json.Marshal(tools.SubAgentArgs{…})` — the synthesised-call path in internal/mechanisms/guideddecomposition.go and the test helpers in internal/agent, internal/run — now emits `"run_on":""` beside the `"name":""` / `"max_steps":0` it already emitted. Nothing goldens those bytes: ./internal/tools, ./internal/domain, ./internal/run, ./internal/mechanisms, ./internal/agent, ./internal/tui and `go test ./cmd/apogee/ -run E2E` (the frame suite) all pass untouched.
+NOTES (2026-09-01): `HostTools.SubAgentSeatChoice` is appended as the struct's last field rather than placed beside the other tool-shaping fields — no existing field is reordered.
 
 **What:** `internal/tools/sub_agent.go`: `SubAgentArgs` gains `RunOn string \`json:"run_on"\``;
 exported consts `RunOnSession = "session"`, `RunOnSubAgentsServer = "sub-agents-server"`.

@@ -216,3 +216,153 @@ func TestSubAgentArgsParsesTheOptionalMaxSteps(t *testing.T) {
 		})
 	}
 }
+
+// wantPlainSubAgentSchema is the sub_agent schema as it was published before seat choice existed
+// (ADR 0069). It is spelled out here rather than derived, because "byte-identical" is the whole
+// claim: the plain variant is prefill on every request of every session that never enables the
+// choice, so a stray comma or a reordered property in the shared template would be paid for by
+// every model that was never offered a seat — and would break the KV-cache prefix of a running one.
+const wantPlainSubAgentSchema = `{
+  "type": "object",
+  "required": ["task"],
+  "properties": {
+    "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
+    "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
+    "max_steps": {"type": "integer", "description": "optional; lower cap for this delegation only; ignored when 0 or above the configured cap"}
+  }
+}`
+
+// TestSubAgentPlainSchemaIsTheOneShippedBeforeSeatChoice pins the plain variant byte for byte.
+// Both variants are rendered from ONE template, so this is the guard on that sharing: the
+// seat-choice property may only ever be added to the end of the properties object, never at the
+// cost of a byte the plain schema already had.
+func TestSubAgentPlainSchemaIsTheOneShippedBeforeSeatChoice(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		tool *SubAgent
+	}{
+		{"NewSubAgent", NewSubAgent()},
+		{"NewSubAgentWith zero options", NewSubAgentWith(SubAgentOptions{})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := string(tc.tool.Schema()); got != wantPlainSubAgentSchema {
+				t.Errorf("plain schema changed:\n got: %s\nwant: %s", got, wantPlainSubAgentSchema)
+			}
+		})
+	}
+}
+
+// TestSubAgentSchemaOffersRunOnOnlyWithSeatChoice pins both halves of the variant: the plain tool
+// publishes no `run_on` at all — a model that cannot pick a seat is never told about one — and the
+// seat-choice tool publishes it as an OPTIONAL string enumerating exactly the two Delegation seats.
+// `task` stays the only required argument in both, so enabling the choice can never invalidate a
+// call the model was already making.
+func TestSubAgentSchemaOffersRunOnOnlyWithSeatChoice(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		tool      *SubAgent
+		wantRunOn bool
+	}{
+		{"plain", NewSubAgent(), false},
+		{"seat choice", NewSubAgentWith(SubAgentOptions{SeatChoice: true}), true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var schema struct {
+				Required   []string                  `json:"required"`
+				Properties map[string]map[string]any `json:"properties"`
+			}
+			if err := json.Unmarshal(tc.tool.Schema(), &schema); err != nil {
+				t.Fatalf("schema is not valid JSON: %v", err)
+			}
+			if len(schema.Required) != 1 || schema.Required[0] != "task" {
+				t.Errorf("required = %v, want [task] — run_on must stay optional", schema.Required)
+			}
+			for _, key := range []string{"task", "name", "max_steps"} {
+				if _, ok := schema.Properties[key]; !ok {
+					t.Errorf("schema lost the %s property", key)
+				}
+			}
+
+			prop, ok := schema.Properties["run_on"]
+			if !tc.wantRunOn {
+				if ok {
+					t.Fatalf("the plain variant publishes run_on: %v", prop)
+				}
+				return
+			}
+			if !ok {
+				t.Fatal("the seat-choice variant is missing the run_on property")
+			}
+			if prop["type"] != "string" {
+				t.Errorf("run_on type = %v, want string", prop["type"])
+			}
+			var enum []string
+			for _, v := range prop["enum"].([]any) {
+				enum = append(enum, v.(string))
+			}
+			if want := []string{RunOnSession, RunOnSubAgentsServer}; !slices.Equal(enum, want) {
+				t.Errorf("run_on enum = %v, want %v — the schema and the exported seats must be one vocabulary", enum, want)
+			}
+			desc, _ := prop["description"].(string)
+			if !strings.Contains(desc, "Delegations line") {
+				t.Errorf("run_on description = %q, want it to point at the orientation's Delegations line — the only place the seats are described", desc)
+			}
+		})
+	}
+}
+
+// TestSubAgentOffersSeatChoiceReportsTheVariant pins the engine's question at spawn. The seat a
+// call names is only honoured where the tool actually offered the choice, so a variant that
+// misreported itself would either drop a seat the model was invited to pick or honour one it was
+// never told about.
+func TestSubAgentOffersSeatChoiceReportsTheVariant(t *testing.T) {
+	t.Parallel()
+
+	if NewSubAgent().OffersSeatChoice() {
+		t.Error("the plain variant reports it offers seat choice")
+	}
+	if !NewSubAgentWith(SubAgentOptions{SeatChoice: true}).OffersSeatChoice() {
+		t.Error("the seat-choice variant reports it does not offer seat choice")
+	}
+}
+
+// TestSubAgentArgsParsesTheOptionalRunOn proves the exported argument shape carries the seat across
+// the JSON boundary, and — the case that matters most — that a call WITHOUT it decodes to the empty
+// string rather than failing to parse. Every synthesised sub_agent call in this repo (guided
+// decomposition's, the run driver's) omits it, as does every call the plain variant invites.
+func TestSubAgentArgsParsesTheOptionalRunOn(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		payload   string
+		wantRunOn string
+	}{
+		{"session", `{"task":"summarise the repo","run_on":"session"}`, RunOnSession},
+		{"sub-agents server", `{"task":"summarise the repo","run_on":"sub-agents-server"}`, RunOnSubAgentsServer},
+		{"unseated", `{"task":"summarise the repo"}`, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var args SubAgentArgs
+			if err := json.Unmarshal([]byte(tc.payload), &args); err != nil {
+				t.Fatalf("unmarshal %s: %v", tc.payload, err)
+			}
+			if args.Task != "summarise the repo" {
+				t.Errorf("Task = %q, want the task", args.Task)
+			}
+			if args.RunOn != tc.wantRunOn {
+				t.Errorf("RunOn = %q, want %q", args.RunOn, tc.wantRunOn)
+			}
+		})
+	}
+}

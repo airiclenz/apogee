@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -18,6 +19,52 @@ import (
 // without importing an unexported constant.
 const SubAgentToolName = "sub_agent"
 
+// The two Delegation seats a delegation may name in `run_on` (ADR 0069): the SESSION server the
+// top-level model itself is bound to, and the Sub-agent server the `sub-agents-server` key flags.
+// They are the whole vocabulary — routing to an arbitrary `servers:` entry or to a tier is not
+// offered — and they are exported so the engine resolves a seat against the same two spellings the
+// schema publishes rather than against its own copies of them.
+const (
+	// RunOnSession asks for the child to run on the session server, with the parent's posture.
+	RunOnSession = "session"
+	// RunOnSubAgentsServer asks for the child to run on the Sub-agent server; where that server
+	// has no usable target the engine falls back to the session seat and says so in the result.
+	RunOnSubAgentsServer = "sub-agents-server"
+)
+
+// subAgentSchemaTemplate is the sub_agent schema with ONE hole: the optional `run_on` property the
+// seat-choice variant fills and the plain variant leaves empty. Keeping both variants in one
+// literal is what makes the plain schema byte-identical to the schema shipped before seat choice
+// existed — a second literal would be a second thing to keep in step, and the plain variant is
+// prefill on every request of every session that never enables the choice.
+const subAgentSchemaTemplate = `{
+  "type": "object",
+  "required": ["task"],
+  "properties": {
+    "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
+    "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
+    "max_steps": {"type": "integer", "description": "optional; lower cap for this delegation only; ignored when 0 or above the configured cap"}%s
+  }
+}`
+
+// subAgentRunOnProperty is the one property the seat-choice variant adds. It is OPTIONAL like every
+// other argument but `task`: a model that never names a seat keeps making valid calls and gets the
+// seat the `sub-agents-server` key decides. The description points at the orientation block rather
+// than describing the two servers here, because what each seat IS (its entry name, its
+// `description:`, the model it pins) is session state the schema cannot know.
+const subAgentRunOnProperty = `,
+    "run_on": {"type": "string", "enum": ["session", "sub-agents-server"], "description": "Optional; where this delegation runs — see the Delegations line of the host orientation. Leave unset for the configured default."}`
+
+// subAgentSchema renders the published schema for one variant: with seatChoice the `run_on`
+// property is offered, without it the schema is exactly what it was before seat choice existed.
+func subAgentSchema(seatChoice bool) json.RawMessage {
+	runOn := ""
+	if seatChoice {
+		runOn = subAgentRunOnProperty
+	}
+	return json.RawMessage(fmt.Sprintf(subAgentSchemaTemplate, runOn))
+}
+
 var subAgentSpec = toolSpec{
 	name: SubAgentToolName,
 	description: "Delegate a focused sub-task to a nested sub-agent. The sub-agent runs with the " +
@@ -26,15 +73,7 @@ var subAgentSpec = toolSpec{
 		"You may call sub_agent several times in a single reply; sibling delegations run " +
 		"concurrently, so dispatch independent sub-tasks together in one reply rather than " +
 		"one per turn.",
-	schema: json.RawMessage(`{
-  "type": "object",
-  "required": ["task"],
-  "properties": {
-    "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
-    "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
-    "max_steps": {"type": "integer", "description": "optional; lower cap for this delegation only; ignored when 0 or above the configured cap"}
-  }
-}`),
+	schema: subAgentSchema(false),
 }
 
 // SubAgentArgs is the sub_agent tool's argument shape: a self-contained task string plus an
@@ -53,10 +92,18 @@ var subAgentSpec = toolSpec{
 // absent means "use the configured cap", a value at or above it changes nothing, and a request
 // against a cap the host switched off is likewise ignored. Like Name it is never privilege: it
 // tightens a bound, so it can only make a delegation cheaper.
+//
+// RunOn is the Delegation seat this ONE delegation asks for — RunOnSession or
+// RunOnSubAgentsServer (ADR 0069) — and it is never privilege either: both seats run the child
+// with the posture that seat already has, so naming one moves the work, not what the work may do.
+// It is only ever OFFERED where the host enables seat choice (NewSubAgentWith), so a call that
+// carries it against the plain variant, and every synthesised call in this repo, decodes to the
+// empty string — the value that means "the configured default decides".
 type SubAgentArgs struct {
 	Task     string `json:"task"`
 	Name     string `json:"name"`
 	MaxSteps int    `json:"max_steps"`
+	RunOn    string `json:"run_on"`
 }
 
 // SubAgent is the model-facing descriptor for delegating a sub-task to a nested agent
@@ -70,19 +117,51 @@ type SubAgentArgs struct {
 //
 // Execute returns an error result so a misconfigured wiring (the tool reached as a leaf
 // because dispatch did not special-case it) fails loudly rather than silently no-op'ing.
-type SubAgent struct{ toolSpec }
+type SubAgent struct {
+	toolSpec
+	seatChoice bool
+}
 
-// NewSubAgent returns the sub_agent placeholder tool. The orchestrator (internal/agent)
-// supplies the real nested-agent execution; this value only carries the model-facing menu
-// entry and is the registry handle Subset narrows on.
-func NewSubAgent() *SubAgent { return &SubAgent{toolSpec: subAgentSpec} }
+// SubAgentOptions carries the host's choices about WHICH sub_agent variant this build offers. It
+// is a struct rather than a parameter list because the variants are a host policy that grows: a
+// second axis added later is a field here, not a new constructor.
+type SubAgentOptions struct {
+	// SeatChoice publishes the `run_on` argument, letting the top-level model name the Delegation
+	// seat per delegation (ADR 0069, the `sub-agents-choice: model` gate). False — the default and
+	// the whole of `sub-agents-choice: fixed` — publishes the schema unchanged, so a model that
+	// never gets the choice is never told about a seat it cannot pick.
+	SeatChoice bool
+}
+
+// NewSubAgent returns the plain sub_agent placeholder tool — no seat choice, the schema this tool
+// published before ADR 0069. The orchestrator (internal/agent) supplies the real nested-agent
+// execution; this value only carries the model-facing menu entry and is the registry handle Subset
+// narrows on.
+func NewSubAgent() *SubAgent { return NewSubAgentWith(SubAgentOptions{}) }
+
+// NewSubAgentWith returns the sub_agent placeholder tool in the variant opts asks for. Only the
+// published schema and OffersSeatChoice differ between variants: the name, the description and the
+// recursion point are one tool, so nothing downstream keys on which variant it holds.
+func NewSubAgentWith(opts SubAgentOptions) *SubAgent {
+	spec := subAgentSpec
+	if opts.SeatChoice {
+		spec.schema = subAgentSchema(true)
+	}
+	return &SubAgent{toolSpec: spec, seatChoice: opts.SeatChoice}
+}
+
+// OffersSeatChoice reports whether this tool published the `run_on` argument. It exists so the
+// engine can ask, at spawn, whether the choice was ever offered: a seat named against a variant
+// that published no `run_on` is a value the model could not have been told about.
+func (t *SubAgent) OffersSeatChoice() bool { return t.seatChoice }
 
 // PromptArgKeys declares `task` and `name` as delegation prompts (domain.PromptTool): both
 // carry prose written FOR the nested agent, never an action this host performs. The
 // dangerous-action guard therefore matches no rule against their text — a task that merely
 // NAMES a guarded path ("report on the readable git surfaces — .git/config") is a
 // description, and every tool call the child makes off the back of it is inspected at its
-// own action site, one level down.
+// own action site, one level down. `max_steps` and `run_on` are NOT declared: neither carries
+// prose, so neither needs an exemption from a guard that matches rules against text.
 func (t *SubAgent) PromptArgKeys() []string { return []string{"task", "name"} }
 
 // Execute is never reached on the real path: dispatch recognises SubAgentToolName as the
