@@ -322,6 +322,17 @@ point is a **minor** bump, not a breaking change.
   Bypass does not touch it. Wired in every Driver — session, `headless` and daemon Firings alike —
   and absent by construction where a host wires no catalogue.
 
+- The picker overlay gained an autonomy-mode kind: one row per rung of the ladder in the order
+  Shift+Tab walks it, each led by the footer's own marker (`⊞ plan`, `◐ ask before`, `✔ allow edits`,
+  `⏵⏵ auto`) and saying what the rung permits, under the "⏎ choose" legend. Taking a row does exactly
+  what Shift+Tab onto that rung does — the engine seam first, then the mode the footer renders — and
+  the Auto rung is offered and ACTS on every host, since this is the session's own ladder the chord
+  already reaches unconditionally. `domain.ModeLadder()` now exports the rungs (a copy), so the
+  offering and the Shift+Tab cycle read one list rather than two that agree. Nothing opens the pane
+  yet — the footer marker's click follows.
+
+- The footer's mode marker is now a click target: clicking it — the glyph, the word, and on Auto its blast-radius word, all one rect — opens the four-rung mode picker, which takes the rung through the same `SetMode` path `shift+tab` does. The marker answers a click only while the picker could hold the keyboard (a live state with no picker, `/sessions` browser or `/settings` pane up); `shift+tab` stays the every-state route. The marker's text and its column are now one value (`footerModeSpan`) the painter draws from and the pointer addresses, so what is drawn and what is clickable cannot drift apart.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
@@ -489,6 +500,35 @@ point is a **minor** bump, not a breaking change.
   interactive TUI can reach — are recorded in `ISSUES.md` under *Parked / deferred work*, each with
   its TUI site and the Driver (headless, daemon, or both) that lacks it; the review report itself is
   saved as `docs/reviews/architecture-review-2026-08-30.html`.
+
+- `write_file` now reports **what it changed**, not just how many bytes it wrote: its result
+  carries the Edit regions of the write (ADR 0052), cut from the file as it was read against the
+  content as written, so an overwrite's card shows the lines that actually differ with their real
+  line numbers instead of the whole content. A create records the whole content as one inserted
+  region; a write whose content is already there records nothing and the card keeps its prose
+  floor. The sentence the model reads is unchanged, and a pre-read that fails for any reason still
+  writes — it degrades to an empty before side rather than refusing.
+
+- **`domain.WroteBytes` retired.** `write_file` records the Edit regions of what it wrote
+  (previous entry), so the byte-count summary has no producer left: the variant and its
+  `apogee.WroteBytes` alias are deleted and the sealed sum is seven variants. The count of
+  summary-bearing built-ins is unchanged at **ten** — `write_file` swaps its summary rather
+  than losing one, leaving the plain enumeration and joining the Edit-regions group beside the
+  three edit tools — and its outcome slot still states the line count its own request holds.
+  Every doc and comment that enumerated the variants, named `write_file`'s outcome, or called
+  the Edit-regions producers "the three edit tools" now says **four writing tools**; ADR 0052
+  gains a dated amendment under decision 1 recording `write_file` as the fourth recorder.
+
+- The tool bodies that lay out whole file content are numbered: `write_file`'s body and
+  `edit_existing_file`'s full-content form number their lines 1..N in the row's chrome gutter,
+  right-aligned across the body. The patch form and the two find-and-replace bodies stay
+  unnumbered — a hunk written without ranges and a needle yet to be found have no position to show.
+
+- A finished delegation's `done` verdict now reads in the scheme's `success` green in the tool row's
+  outcome slot — the same role its done ✓ wears — and a collapsed run's composed row is green with
+  it. The tone is anchored on the delegation vocabulary alone: a run `stopped at its step cap` keeps
+  the ordinary marker tone, a failed one stays red, and no other tool's `clean`, `PASS` or `exit 0`
+  is painted green. A resumed session replays the verdict rather than dropping to the marker tone.
 
 ### Fixed
 
