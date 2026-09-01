@@ -455,8 +455,7 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 		}
 		view.finished = subAgentFinished(m.head)
 		view = guardPromotions(th, []toolView{view}, room, marker)[0]
-		rows, hides := renderSubAgentMemberRows(th, view, marker, width, room,
-			m.head.expanded, spanned, subAgentReported(m.head))
+		rows, hides := renderSubAgentMemberRows(th, view, marker, width, room, m.head.expanded, spanned)
 		kind := targetNone
 		if hides {
 			kind = targetHeader
@@ -531,10 +530,14 @@ func subAgentScheduled(head paintInput, span int) bool {
 // context fill, because the child has no window yet; no gist, because nothing has been touched. A
 // row saying "0 tool calls" would be stating a measurement of work that has not begun.
 //
-// The body goes with them, and that is what makes the row INERT: an empty body hides nothing, so the
-// member painter gives it no indicator and the group gives it no click target (renderGroupMember,
-// renderSubAgentGroup) — an affordance opening onto an empty frame is one a reader learns to
-// distrust. The row becomes an ordinary live delegation the moment its start lands.
+// The body goes with them, and the row is the emptier for it — but it is not INERT. What a
+// delegation's row opens is its child's run view and never a body in place (ADR 0063), and a queued
+// child has one: the view names the delegation and says it has not started (childLegend), which is
+// the reading a human asking what a row is waiting for is after. So the row wears the ▶ its running
+// siblings wear and opens the same way (renderSubAgentMemberRows). What its START lands is the
+// row's WORDS — the count, the fill and the gist replacing this one word — and never whether a
+// click on it does anything: an affordance appearing the instant a worker frees a slot is one no
+// reader could learn.
 //
 // The summary is NOT marked quoted (branchSummary): the word is apogee's own about a delegation, not
 // a line the child produced, and the mark is a statement about where the text came from.
@@ -566,23 +569,30 @@ func groupLabelOf(members []subAgentMember) string {
 //
 // A delegation with no span is an ordinary member and goes through the ordinary painter, so a
 // refused delegation folds, opens and closes exactly as a read or a terminal call does — with one
-// question asked after it, the SINGLE block's own (blockHidesWhenCollapsed): a delegation that never
-// ran hides the prompt it carried, and that is nowhere among the body lines the ordinary painter
-// counts. Its promoted refusal leaves the member bodiless at a wide terminal and demoted lands a
-// body at a narrow one, so the count alone gave the same delegation an indicator on some terminals
-// and none on others — the defect the lone block's rule already closed (subAgentHidesPrompt) and
-// this asks of a member. The plain row the painter composed is re-painted here with the collapsed
-// glyph, because renderGroupMember returns it bare whenever its OWN answer is no: an indicator
-// granted after the call would leave a click target with nothing on the row saying so.
+// question asked after it, the SINGLE block's own (blockHidesWhenCollapsed): a delegation hides the
+// prompt it carried, and that is nowhere among the body lines the ordinary painter counts. Its
+// promoted refusal leaves the member bodiless at a wide terminal and demoted lands a body at a
+// narrow one, so the count alone gave the same delegation an indicator on some terminals and none
+// on others — the defect the lone block's rule already closed (subAgentHidesPrompt) and this asks
+// of a member. The plain row the painter composed is re-painted here with the collapsed glyph,
+// because renderGroupMember returns it bare whenever its OWN answer is no: an indicator granted
+// after the call would leave a click target with nothing on the row saying so.
 //
-// reported is the gate, and it is setExpanded's own permission (transcript.go, which requires the
-// head to be done): a member still RUNNING has no prompt reading to open — the click would be
-// refused — so it keeps the bare row a live delegation wears.
+// It is asked with NO lifecycle gate, and that is the whole of the rule: a delegation's row always
+// has a reading behind it and only WHICH one changes. Once the head is over it is the prompt laid
+// out in place (unframedSubAgentView); while the child is still going — queued behind the Parallel
+// agents cap included — it is that child's own RUN VIEW, which [Model.openRunAt] opens from this
+// very mark and refuses for one case alone, a delegation that is over with nothing behind it
+// (ADR 0063). So a gate on the head having REPORTED does not withhold a dead affordance: it
+// withholds the one row a reader reaches a working child through, leaving every member of a fan-out
+// unopenable while the identical delegation standing alone opened fine (ISSUES.md, 2026-09-01).
+// Which siblings happened to fold beside a delegation is a fact about its frame and never about
+// what is behind its row, so the lone block's rule asks this ungated too (blockHidesWhenCollapsed).
 func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room int,
-	expanded, spanned, reported bool) (lines []string, hides bool) {
+	expanded, spanned bool) (lines []string, hides bool) {
 	if !spanned {
 		lines, hides = renderGroupMember(th, tv, marker, memberGutter, width, room, expanded)
-		if hides || !reported || !subAgentHidesPrompt(tv) {
+		if hides || !subAgentHidesPrompt(tv) {
 			return lines, hides
 		}
 		row := leaderRow(th, tv, marker, room, expanded, noRemainder)

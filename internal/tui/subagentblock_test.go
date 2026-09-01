@@ -217,20 +217,26 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 		groupMemberLine("  ┝ build ⋯ 1 tool call"),
 	}
 
-	t.Run("queued member says scheduled and wears no indicator", func(t *testing.T) {
+	// The one WORD is what the queued state changes, and the indicator is deliberately not part of
+	// it: what a delegation's row opens is its child's run view (ADR 0063), and a queued child has
+	// one — it names the delegation and says it has not started, which is exactly what a lone queued
+	// delegation opens onto today (TestRunViewPlaceholderNamesTheChild). An affordance that arrived
+	// the instant a worker freed a slot would be one no reader could learn.
+	t.Run("queued member says scheduled and still wears its indicator", func(t *testing.T) {
 		want := strings.Join(append(append([]string{header}, running...),
-			"  ┕ check ⋯ scheduled"), "\n") // no ▶: the row hides nothing
+			groupMemberLine("  ┕ check ⋯ scheduled")), "\n")
 		if got := renderPlain(build(t), 80); got != want {
 			t.Errorf("scheduled member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 	})
 
-	t.Run("queued member is not a click target", func(t *testing.T) {
+	t.Run("queued member is a click target like its running siblings", func(t *testing.T) {
 		lines, targets := targetedRender(build(t), 80)
-		if got := targets[rowWith(t, lines, "check")].kind; got != targetNone {
-			t.Errorf("scheduled row is target kind %v, want targetNone", got)
+		if got := targets[rowWith(t, lines, "check")].kind; got != targetHeader {
+			t.Errorf("scheduled row is target kind %v, want targetHeader", got)
 		}
-		// The contrast, off the same paint: a member with a run behind it does open.
+		// The comparison, off the same paint: a member with a run behind it opens the same way, so
+		// the fold offers one gesture down the whole list.
 		if got := targets[rowWith(t, lines, "survey")].kind; got != targetHeader {
 			t.Errorf("running row is target kind %v, want targetHeader", got)
 		}
@@ -240,7 +246,7 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 		tr := build(t)
 		subAgentStarted(tr, "s3", 1)
 		want := strings.Join(append(append([]string{header}, running...),
-			"  ┕ check ⋯"), "\n") // running with nothing done yet: the ordinary live reading
+			groupMemberLine("  ┕ check ⋯")), "\n") // running with nothing done yet: the live reading
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("started member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -266,10 +272,10 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	// phase alone would leave that row queued for the rest of the session; being over is the other
 	// thing that ends the state (subAgentScheduled).
 	//
-	// Being over is also what gives the row its ▶: the delegation has reported, so the prompt it
-	// carried is a reading the member can be opened onto (renderSubAgentMemberRows) — the one
-	// visible difference between this row and the queued one it replaces, whose empty body is
-	// exactly what leaves it inert.
+	// What changes with it is the row's WORDS and not its ▶: the refusal takes the slot the one
+	// queued word held, and the reading behind the row moves from the child's view to the prompt
+	// the delegation carried (renderSubAgentMemberRows), which is a swap the reader never has to
+	// notice — the row was openable throughout.
 	t.Run("a refused delegation is not scheduled", func(t *testing.T) {
 		tr := build(t)
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
@@ -928,6 +934,75 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 		}, "\n")
 		if got := renderPlain(tr, 110); got != want {
 			t.Errorf("folded grouped refusals mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+}
+
+// TestRunningGroupedDelegationOpensItsChild pins the FOLD's half of one rule: a delegation's row is
+// a toggle target whenever it holds back the prompt it carried, whatever lifecycle the delegation is
+// in — because the reading behind the row while its child works is that child's own RUN VIEW
+// (ADR 0063, [Model.openRunAt]), and the prompt itself only once the delegation is over.
+//
+// It is the grouped reading of what a LONE delegation has always done, and the point is that they
+// are the same delegation. A member of a fan-out painted a bare, unreachable row while an identical
+// delegation standing alone opened fine, so which siblings happened to fold beside a child decided
+// whether a reader could watch it at all — in exactly the case parallel delegation exists to make
+// (ADR 0039). ISSUES.md, 2026-09-01.
+func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
+	const width = 80
+
+	// Two children with a slot apiece and nothing committed behind either: the shape a fan-out
+	// wears for the whole beat between its start and its first landing.
+	started := func(tr *transcript) {
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentStarted(tr, "s1", 1)
+		subAgentCall(tr, "s2", "build it", 0)
+		subAgentStarted(tr, "s2", 1)
+	}
+
+	t.Run("both folded rows wear the indicator and carry their own entry", func(t *testing.T) {
+		tr := &transcript{}
+		started(tr)
+
+		want := strings.Join([]string{
+			"✦ Sub-Agent (2)",
+			groupMemberLine("  ┝ survey the tests ⋯"),
+			groupMemberLine("  ┕ build it ⋯"),
+		}, "\n")
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("running fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+
+		// The affordance and the click are the one predicate's single answer, and a list has no
+		// state of its own: the two member rows are marked, each for its OWN member's entry, and
+		// the header over them is marked for nothing.
+		marks := blockMarks(t, tr, width)
+		if len(marks) != 2 {
+			t.Fatalf("the fan-out marks %+v; want one target per member row", marks)
+		}
+		for i, mk := range marks {
+			if mk.kind != targetHeader || mk.entry != i {
+				t.Errorf("mark %+v; want a targetHeader on entry %d", mk, i)
+			}
+		}
+	})
+
+	t.Run("activating a member opens that member's own child", func(t *testing.T) {
+		m := newTestModel(t)
+		m.transcript.reset()
+		m.transcript.addUser("survey the repo", nil)
+		started(&m.transcript)
+		m.refreshViewport()
+
+		if got := enterOnLastBlock(t, m).viewedRun().spawn; got != "s2" {
+			t.Errorf("⏎ on the last member opened run %q; want the child that row names", got)
+		}
+		// The sibling above it opens ITS child and not the one the last row named — the rows are
+		// marked apart (blockPaint.addFor), so the fold is a way into each of them rather than one
+		// way into the group.
+		first := step(t, step(t, step(t, m, keyAltUp()), keyUp()), keyEnter())
+		if got := first.viewedRun().spawn; got != "s1" {
+			t.Errorf("⏎ on the first member opened run %q; want the child that row names", got)
 		}
 	})
 }

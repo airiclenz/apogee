@@ -1760,18 +1760,18 @@ func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
 	subAgentCall(tr, "s2", "survey the docs", 0)
 	// Both children are RUNNING — each has a slot of its own, as the engine says by starting them —
 	// so both rows are working ones rather than the queued row a delegation waiting for a slot wears
-	// (subAgentScheduled, pinned by TestSubAgentScheduledUntilItStarts). Being live is also what
-	// keeps the rows BARE: a member wears the prompt's ▶ only once its delegation has reported
-	// (renderSubAgentMemberRows), the same permission setExpanded grants, so a click offered here
-	// would be one the transcript then refuses.
+	// (subAgentScheduled, pinned by TestSubAgentScheduledUntilItStarts). Being live is not what
+	// decides the ▶ either way: each row wears one throughout, because what it opens while the
+	// child works is that child's own view (renderSubAgentMemberRows, ADR 0063) — which is where
+	// the words below are read, and the reason none of them may appear on these rows.
 	subAgentStarted(tr, "s1", 1)
 	subAgentStarted(tr, "s2", 1)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent (2)",
-		"  ┝ survey the tests ⋯",
-		"  ┕ survey the docs ⋯",
+		groupMemberLine("  ┝ survey the tests ⋯"),
+		groupMemberLine("  ┕ survey the docs ⋯"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("the fan-out leaked a child's live words:\n--- got ---\n%s\n--- want ---\n%s", got, want)

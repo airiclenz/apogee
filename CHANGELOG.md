@@ -777,6 +777,33 @@ point is a **minor** bump, not a breaking change.
   both the snapshot and the current set as arguments instead of reading the live dump itself, so the
   comparison is a pure function the package's own tests can drive.
 
+- The `url-safety:` settings row no longer stutters `mcp` at the reader. The row's MCP clause is
+  labelled `; mcp ` for whose subsystem is speaking (`mcpNoteFor`) and its sentence is composed by
+  `mcpReconnectFailed`, while `internal/mcp` words the refusals it owns with an `mcp: server "<name>"`
+  lead of its own — so a re-admission whose dial failed reached the human as `applies to the next
+  request; mcp reconnect failed: mcp: server "docs" …`. Both composers now drop internal/mcp's label
+  from the sentence they carry, wherever in the clause it would have landed, leaving one `mcp` at the
+  front where the row's sibling clause for a disconnected server already puts it. internal/mcp's own
+  wording is untouched and the refusal is still WRAPPED — `errors.Is` reaches `security.ErrURLBlocked`
+  through the reconnect sentence exactly as before — and every error that never carried that label
+  keeps its spelling to the byte: `; mcp reconnect failed: <text> — previous connections kept` and
+  `; mcp <text>` are unchanged.
+
+- **A delegation folded into a group can now be opened while its child is still working.** The `▶` a
+  member row wears was granted only once that delegation had reported, on the reasoning that a
+  running member has no prompt reading to open and the click would be refused — but what a
+  delegation's row opens while its child works is that child's **run view** (ADR 0063,
+  `Model.openRunAt`, which refuses one case alone: a delegation that is over with nothing behind it),
+  and the prompt in place only once the delegation is over. So every member of a fan-out painted a
+  bare, unreachable row for as long as its children ran, while the identical delegation standing
+  alone wore its `▶` and opened fine — a reader could watch a child only when it had no siblings,
+  which is the one case parallel delegation does not make. The gate is gone: a member row is a click
+  target whenever it holds back the prompt it carried, whatever the delegation's lifecycle, and a
+  queued member is one too — its view names the child and says it has not started, rather than the
+  affordance appearing the instant a worker frees a slot. The lone block's rule is untouched (it was
+  the correct half all along), a member that carried no prompt at all still wears nothing, and
+  `layout.md` records the corrected rule.
+
 ## [0.19.0] — 2026-08-30
 
 ### Added

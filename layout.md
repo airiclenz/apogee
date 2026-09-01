@@ -823,8 +823,11 @@ a group exactly as it does standing alone: what its folded row holds back is the
 carried, which no row of it ever shows, so the click opens onto that prompt. A delegation that
 carried **no prompt at all** — an empty task, or a record replayed from before the text was kept —
 is the exception the same predicate makes: it holds nothing back, so its row wears nothing. It is
-granted only once the delegation is **over**, the same permission an expand asks for — a member
-still running has no reading to open, so its row stays bare until it ends. The `+N more lines` count is apogee's own word too and is painted as one — the
+granted whatever lifecycle the delegation is in, because there is always a reading behind the row
+and only *which* one changes: while the child is still working — queued behind the parallel cap
+included — the row opens that child's **run view** (below), and once the delegation is over it opens
+the prompt in place. A member of a fan-out is therefore a way into its child from the moment it is
+announced, exactly as the same delegation standing alone has always been. The `+N more lines` count is apogee's own word too and is painted as one — the
 `tool-marker` role, a warm orange `#E0B080` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for it. It is **no longer a line**: it joins
