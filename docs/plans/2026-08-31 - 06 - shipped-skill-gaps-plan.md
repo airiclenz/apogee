@@ -109,7 +109,11 @@ match
 
 ---
 
-## 3. The `/skills` listing names the export verb
+## 3. The `/skills` listing names the export verb — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): deviation — the item's regression guard prescribed widening the padding trim at `cmd/apogee/e2e_hostile_test.go:405` to `^(.*(<root>|<home>).*?) +([│┃])$`. That trim normalizes padding but not the WRAP: a `t.TempDir` home is long enough that the hint row breaks mid-path, where the `<home>` redaction has no whole path left to replace, so the golden still recorded the machine's TMPDIR. Per the run's DECISION the scenario takes a fixed short home instead (new `hostileHome`, `launchTUIOn` at `e2e_hostile_test.go:79`) — the row never wraps and the redaction normalizes it whole — and `hostileRedactions` is left exactly as it was.
+
+NOTES (2026-09-01): `hostileHome` is a FIXED `/tmp/apogee-hostile-home` rather than a short random one, because the padding out to the scroll rail survives the redaction: a random path would re-record its own length into the golden under `<home>`'s alignment. It is cleared before use and removed on cleanup, and holds the config `upstreamHome` writes, read back rather than spelled a second time.
 
 **What:** `skillCatalogNote` (`internal/tui/skills.go:111`) renders three sections — loaded, failed,
 shadowed — and never names `/skills export <id>`, so the one supported way to fork a shipped skill

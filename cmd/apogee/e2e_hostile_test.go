@@ -76,7 +76,7 @@ func TestE2EHostileSurfacesKeepTheirOwnRows(t *testing.T) {
 	ws := hostileWorkspace(t)
 	stub := stubllm.New(t, loadScript(t, "hostile"))
 	drv := tuitest.NewDriver(t, e2eSize)
-	sess := launchTUIIn(t, drv, stub, ws, "", "--model", hostileModelFlag)
+	sess := launchTUIOn(t, drv, stub, hostileHome(t, stub), ws, "--model", hostileModelFlag)
 	red := ansiRed(t)
 
 	// Step 2 — the footer shows the label as ordinary text: the ESC dropped, the rest inert, and
@@ -376,6 +376,39 @@ func hostileWorkspace(t *testing.T) string {
 		write(filepath.Join(dir, "SKILL.md"), dupe)
 	}
 	return ws
+}
+
+// hostileHome is the apogee home the hundred-column golden is recorded on, and it is a FIXED short
+// path under /tmp for the same reason [hostileWorkspace]'s root is a short one: the /skills note
+// now names the home's own skills folder ("copies it into <home>/skills/<id>"), so the home's
+// LENGTH is painted into the frame twice over — at the column the row wraps at, and at the padding
+// out to the scroll rail. A t.TempDir home carries the test's name and a counter, and on macOS
+// TMPDIR alone is fifty columns: the row would wrap mid-path, where the `<home>` redaction can no
+// longer see a whole path to replace. Fixed rather than merely short because the padding survives
+// the redaction — a random path re-records the machine into the golden under `<home>`'s alignment.
+//
+// It holds the same config.yaml [upstreamHome] writes, read back from one rather than spelled a
+// second time, so the one definition of "a home pointed at the stub" keeps serving both.
+func hostileHome(t *testing.T, stub *stubllm.Server) string {
+	t.Helper()
+
+	const home = "/tmp/apogee-hostile-home"
+	if err := os.RemoveAll(home); err != nil {
+		t.Fatalf("clear the hostile fixture home: %v", err)
+	}
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatalf("make the hostile fixture home: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+
+	cfg, err := os.ReadFile(filepath.Join(upstreamHome(t, stub.URL, stub.Model), "config.yaml"))
+	if err != nil {
+		t.Fatalf("read the home config to copy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), cfg, 0o600); err != nil {
+		t.Fatalf("write the hostile home config: %v", err)
+	}
+	return home
 }
 
 // hostileRedactions are the substitutions the hundred-column golden needs on top of the session's

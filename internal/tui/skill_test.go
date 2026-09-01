@@ -1216,6 +1216,92 @@ func TestSkillCatalogNoteShadowOnlyClaimsNoFailure(t *testing.T) {
 	}
 }
 
+// A listing that carries a skill apogee ships names the one verb that forks it, because the copy
+// is what the human edits: the "/" menu's row summary was the only place `/skills export <id>`
+// was written down, and nobody reading the catalog is looking there. The folder is named too —
+// the export's own destination, so the hint and the write cannot point at different places.
+func TestSkillCatalogNoteNamesTheExportVerb(t *testing.T) {
+	home, ws := filepath.Join("/home", ".apogee"), filepath.Join("/ws")
+	note := skillCatalogNote([]skills.Skill{
+		{ID: "planning", DisplayName: "Planning", Dir: skills.ShippedMountPrefix + "planning"},
+		{ID: "clean-code", DisplayName: "Clean Code", Dir: filepath.Join(ws, ".apogee", "skills", "clean-code")},
+	}, nil, home, ws)
+
+	if !strings.Contains(note, "edit a skill apogee ships: /skills export <id>") {
+		t.Errorf("the listing does not name the export verb:\n%s", note)
+	}
+	want := "  copies it into " + filepath.Join(home, "skills", "<id>") + ", where your copy wins"
+	if !strings.Contains(note, want) {
+		t.Errorf("the hint does not name the folder the export writes (%q missing):\n%s", want, note)
+	}
+	// It is the LAST section, and it is separated from the one above it like every other half.
+	if !strings.HasSuffix(note, want) {
+		t.Errorf("the hint is not the note's last section:\n%s", note)
+	}
+	if !strings.Contains(note, "\n\nedit a skill apogee ships:") {
+		t.Errorf("the hint does not read as its own section:\n%s", note)
+	}
+}
+
+// The hint is offered only where it can be acted on. A catalog of purely local skills has nothing
+// to fork, and an unwired home has nowhere to write: `/skills export` refuses outright there
+// (noSkillExporterNote), so naming a folder would announce a write that cannot happen.
+func TestSkillCatalogNoteWithholdsTheExportHint(t *testing.T) {
+	home, ws := filepath.Join("/home", ".apogee"), filepath.Join("/ws")
+	local := []skills.Skill{
+		{ID: "clean-code", DisplayName: "Clean Code", Dir: filepath.Join(ws, ".apogee", "skills", "clean-code")},
+		{ID: "clean-house", DisplayName: "Clean House", Dir: filepath.Join(home, "skills", "clean-house")},
+	}
+	shipped := []skills.Skill{{ID: "planning", DisplayName: "Planning", Dir: skills.ShippedMountPrefix + "planning"}}
+
+	for _, c := range []struct {
+		name string
+		list []skills.Skill
+		home string
+	}{
+		{"no shipped skill in the listing", local, home},
+		{"a shipped skill but no apogee home", shipped, ""},
+	} {
+		note := skillCatalogNote(c.list, nil, c.home, ws)
+		if strings.Contains(note, "/skills export") {
+			t.Errorf("%s still offers the export hint:\n%s", c.name, note)
+		}
+	}
+}
+
+// The journey: the folder the listing announces is the folder the export actually writes. The real
+// verb is driven rather than its wording re-derived, so the hint cannot drift away from
+// [skills.ExportShipped]'s destination the way a second hard-coded path would.
+func TestExportHintNamesTheFolderTheExportWrites(t *testing.T) {
+	home := t.TempDir()
+	ids := skills.ShippedIDs()
+	if len(ids) == 0 {
+		t.Fatal("no shipped skills are compiled in; the hint has nothing to be about")
+	}
+	id := ids[0]
+
+	lines := exportShippedHintLines(
+		[]skills.Skill{{ID: id, DisplayName: id, Dir: skills.ShippedMountPrefix + id}},
+		home, filepath.Join("/ws"),
+	)
+	if len(lines) != 2 {
+		t.Fatalf("the hint rendered %d lines, want two: %q", len(lines), lines)
+	}
+	announced := filepath.Join(home, "skills", "<id>")
+	prefix, ok := strings.CutSuffix(announced, "<id>")
+	if !ok || !strings.Contains(lines[1], announced) {
+		t.Fatalf("the hint does not name %q: %q", announced, lines[1])
+	}
+
+	dir, err := skills.ExportShipped(id, filepath.Join(home, "skills"))
+	if err != nil {
+		t.Fatalf("exporting %q: %v", id, err)
+	}
+	if dir != prefix+id {
+		t.Errorf("the export wrote %q; the listing announced %q", dir, prefix+id)
+	}
+}
+
 // The /skills command reads the skips off the SAME catalog it lists, so a broken skill surfaces
 // through the real command path and not merely through the pure renderer.
 func TestSkillsCommandReportsSkipped(t *testing.T) {

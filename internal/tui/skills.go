@@ -97,7 +97,9 @@ func (m *Model) noteSkillCatalog() {
 }
 
 // skillCatalogNote renders the /skills report from one scan's halves: the skills that loaded, the
-// SKILL.md files that could not be loaded, and the ones that loaded but lost an id collision. list
+// SKILL.md files that could not be loaded, and the ones that loaded but lost an id collision —
+// then, when the listing carries a skill of apogee's own, the one verb that forks it
+// (exportShippedHintLines). list
 // arrives in the catalog's own order (sorted by display name), the order the merged "/" menu takes;
 // skipped arrives in discovery order and is partitioned here on its cause.
 //
@@ -119,6 +121,7 @@ func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, home, wor
 		loadedSkillLines(list, home, workspace),
 		failedSkillLines(failed),
 		shadowedSkillLines(shadowed),
+		exportShippedHintLines(list, home, workspace),
 	} {
 		if len(section) == 0 {
 			continue
@@ -429,4 +432,37 @@ func shadowedSkillLines(shadowed []skills.SkipError) []string {
 		lines = append(lines, "    the live copy is "+flattenField(by))
 	}
 	return lines
+}
+
+// exportShippedHintLines renders the fourth section: the one verb that turns a skill apogee ships
+// into one the human owns — `/skills export <id>`, which copies it into the library where the copy
+// outranks the original (ADR 0032, ADR 0065 §5). Until this, that verb was discoverable only from
+// the "/" menu's own row summary, which is not where anyone reading the catalog is looking.
+//
+// It is offered only when the listing actually HAS a shipped row: a catalog of purely local skills
+// has nothing to fork, and a hint for a verb with no subject is noise on every listing. It is also
+// withheld when no apogee home is resolved, because the export itself refuses outright there
+// (noSkillExporterNote, skillscmd.go) — naming a folder would announce a write that cannot happen.
+//
+// The folder is composed from the SAME home the export composes its library root from, so the hint
+// and the write can never name different places; `<id>` stays a placeholder because the row is
+// about the verb rather than about any one skill in the list above it.
+func exportShippedHintLines(list []skills.Skill, home, workspace string) []string {
+	if home == "" {
+		return nil
+	}
+	shipped := false
+	for _, sk := range list {
+		if skillSource(sk.Dir, home, workspace) == skillSourceShipped {
+			shipped = true
+			break
+		}
+	}
+	if !shipped {
+		return nil
+	}
+	return []string{
+		"edit a skill apogee ships: /skills export <id>",
+		"  copies it into " + filepath.Join(home, "skills", "<id>") + ", where your copy wins",
+	}
 }

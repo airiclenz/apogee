@@ -1,6 +1,3 @@
-    /commit-hygiene · shipped  Commit Hygiene — Land one logical change per commit, with a message │
-  that says what changed and why, after the project's own checks have passed.                      │
-      triggers: commit this, commit message, write a commit, git commit, stage these changes,      │
   split this commit, amend the commit, updat…                                                      │
     /debugging · shipped  Debugging — Chase a bug down in four steps — reproduce, isolate, fix the │
   cause, verify — with the rules that keep each step honest.                                       │
@@ -8,10 +5,10 @@
   fails, test is failing, stack trace, panic…                                                      │
     /dupe · workspace  Dupe — a duplicate id                                                       │
     /planning · shipped  Planning — Plan before you build — restate the goal, enumerate the steps  │
-  against real files, then execute one step at a time and verify each before starting the next.    ┃
-      triggers: make a plan, plan this, plan out, how should i approach, break this down, what are ┃
-  the steps, implement this feature, wh…                                                           ┃
-                                                                                                   ┃
+  against real files, then execute one step at a time and verify each before starting the next.    │
+      triggers: make a plan, plan this, plan out, how should i approach, break this down, what are │
+  the steps, implement this feature, wh…                                                           │
+                                                                                                   │
   1 skill found but not loaded:                                                                    ┃
     ev[31mil row — skill is missing a required field (id="ev\x1b[31mil\nrow"                       ┃
   displayName="ev\x1b[31mil\nrow" summary="ev\x1b[31mil\nrow" body-empty=true)                     ┃
@@ -20,6 +17,9 @@
   1 skill shadowed by another of the same id:                                                      ┃
     dupe — <root>/ws[31mRED/.apogee/skills/dupe/SKILL.md ┃
       the live copy is <root>/ws[31mRED/skills/dupe/SKILL.md ┃
+                                                                                                   ┃
+  edit a skill apogee ships: /skills export <id>                                                   ┃
+    copies it into <home>/skills/<id>, where your copy wins                      ┃
 
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
 
