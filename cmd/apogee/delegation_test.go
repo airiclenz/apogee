@@ -1114,6 +1114,96 @@ func TestDelegationRetargetMidRunDropsTheOldServersLanding(t *testing.T) {
 	}
 }
 
+// racedClearAgainstALanding runs one clearing seam — a pick or a relist — against a beat landing on
+// the generation that seam has just bumped, and answers what the engine was left holding. The
+// clearing push is held INSIDE the gate, which is the only place the landing can overtake it, and the
+// landing is then given that whole window to run in: it gets there only if the clear pushes outside
+// the wiring's lock.
+func racedClearAgainstALanding(
+	t *testing.T,
+	wiring *delegationWiring,
+	gate *gatedDelegationSpy,
+	clear func() error,
+	landing string,
+) []*apogee.DelegationTarget {
+	t.Helper()
+
+	cleared := make(chan struct{})
+	go func() {
+		defer close(cleared)
+		if err := clear(); err != nil {
+			t.Errorf("the clearing edit: %v", err)
+		}
+	}()
+	<-gate.arrived // the clear is mid-push, which is the only window the landing can win
+
+	landed := make(chan struct{})
+	go func() {
+		defer close(landed)
+		// The generation the clear bumped, read after its push announced itself: a beat resolved
+		// against the server the clear just installed lands on exactly this one.
+		wiring.land(wiring.generation, landing, &apogee.DelegationTarget{Model: "tiny-3b"}, nil)
+	}()
+	// The landing either finishes inside the window — the ordering under test — or is still held out
+	// of it when the wait expires, and the assertion is the same for both: what the engine is left
+	// holding.
+	select {
+	case <-landed:
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(gate.release)
+	<-cleared
+	<-landed
+
+	return gate.snapshot()
+}
+
+// The pick clears the latch and bumps the generation, so the very next beat resolved against the
+// server it just installed lands on that new generation and is admitted. Push the nil after
+// releasing the mutex and that landing can slip into the window: the target the picked server just
+// resolved is clobbered by the pick's own nil, and the session stays unrouted until the next beat —
+// the bug land's push is already written to avoid. So the pick pushes under the lock too, and the
+// new server's target is the last word.
+func TestDelegationRetargetPushesTheClearedTargetUnderTheLock(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},
+	}
+	gate := &gatedDelegationSpy{arrived: make(chan struct{}), release: make(chan struct{})}
+	wiring := retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, gate, nil)
+
+	pushes := racedClearAgainstALanding(t, wiring, gate,
+		func() error { return wiring.Retarget("cheaper") }, "cheaper")
+
+	if len(pushes) != 2 || pushes[0] != nil || pushes[1] == nil {
+		t.Fatalf("pushes = %+v; want the pick's nil first and the picked server's target last", pushes)
+	}
+}
+
+// The same window, one seam over: a relist that re-points the name at another entry clears the stale
+// latch and bumps the generation, and a beat on the newly installed server lands on that generation.
+// Its target must be the last word, so the clearing push holds the mutex across it exactly as the
+// pick's does.
+func TestDelegationRelistPushesTheClearedTargetUnderTheLock(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}}
+	moved := []config.ServerEntry{{Name: "grunt", Endpoint: "http://127.0.0.1:4444"}}
+	gate := &gatedDelegationSpy{arrived: make(chan struct{}), release: make(chan struct{})}
+	wiring := retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, gate, nil)
+
+	pushes := racedClearAgainstALanding(t, wiring, gate,
+		func() error { return wiring.relist("grunt", moved) }, "grunt")
+
+	if len(pushes) != 2 || pushes[0] != nil || pushes[1] == nil {
+		t.Fatalf("pushes = %+v; want the edit's nil first and the re-pointed server's target last", pushes)
+	}
+}
+
 // A name the list does not carry is REFUSED here, which is where this seam parts company with the
 // file's own key (missingNameNotice's degrade): the name came from a human picking in this session,
 // so the honest answer is to say so and change nothing at all — routing stays exactly where it was.

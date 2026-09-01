@@ -41,12 +41,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 (`docs/plans/archived/2026-08-31 - 03 - sub-agents-server-root-key-and-picker-plan.md`), deferred
 out of that run.
 
-- [ ] **`Retarget` pushes the nil Delegation target after releasing the mutex.**
-  `cmd/apogee/delegation.go:609-637` swaps the server, bumps the generation and unlocks, then calls
-  `d.engine.SetDelegationTarget(nil)` outside the lock — mirroring `relist`'s stale path
-  (`cmd/apogee/delegation.go:566-570`). A new-generation beat landing in that microsecond window
-  would be clobbered by the nil; unobservable in practice, since a beat takes seconds.
-
 - [ ] **The `/sub-agents-server` picker offers no "auto (session server)" row.** Its rows come from
   the configured entries alone (`internal/tui/picker.go:488-492`, `:860-863`), so the ratified
   empty-key opt-out — `Retarget("")`, delegations falling back to the session's own upstream

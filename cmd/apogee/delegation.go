@@ -563,11 +563,15 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 		// A name that went missing is forgotten for the same reason, so its notice is said once.
 		d.routed, d.stated, d.dialectAdvised = false, false, false
 	}
-	d.mu.Unlock()
-
 	if stale {
+		// UNDER the lock, for the reason land's own push is (see land): a clearing push released
+		// first can be overtaken by a beat landing on the generation this edit just bumped, and the
+		// nil would then be the last word over a target the new server just resolved — with no
+		// further beat coming to correct it until the next interval.
 		d.engine.SetDelegationTarget(nil)
 	}
+	d.mu.Unlock()
+
 	return nil
 }
 
@@ -631,9 +635,13 @@ func (d *delegationWiring) Retarget(name string) error {
 	// to hold: the only name this seam accepts is one the list carries, or none at all.
 	d.missingNotice = ""
 	d.routed, d.stated, d.dialectAdvised = false, false, false
+	// UNDER the lock, for the reason land's own push is (see land): a clearing push released first
+	// can be overtaken by a beat landing on the generation this pick just bumped, and the nil would
+	// then be the last word over a target the picked server just resolved — leaving the session
+	// unrouted until the next beat corrects it.
+	d.engine.SetDelegationTarget(nil)
 	d.mu.Unlock()
 
-	d.engine.SetDelegationTarget(nil)
 	return nil
 }
 
