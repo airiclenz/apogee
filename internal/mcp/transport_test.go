@@ -348,7 +348,9 @@ func proxiedServer() ServerConfig {
 // rather than letting the session dial around the operator's egress policy — the fail-OPEN
 // direction, which would put an MCP connection outside the proxy the operator requires. The
 // refusal names no part of the value, because the resolver quotes it back in its own error and
-// a proxy URL may carry credentials.
+// a proxy URL may carry credentials — but it does name the SERVER, and it wraps
+// security.ErrURLBlocked like its sibling below, so a caller partitioning on the sentinel sees
+// an unusable proxy as the url-safety refusal it is.
 //
 // It swaps the proxyForRequest seam, so it must not run in parallel.
 func TestVetEndpoint_AnUnusableProxyRefusesTheEndpoint(t *testing.T) {
@@ -366,8 +368,14 @@ func TestVetEndpoint_AnUnusableProxyRefusesTheEndpoint(t *testing.T) {
 	if endpoint != "" || client != nil {
 		t.Errorf("endpoint = %q, client = %v; want neither on a refusal", endpoint, client)
 	}
+	if !errors.Is(err, security.ErrURLBlocked) {
+		t.Errorf("error = %v; want a url-safety refusal a caller can match on the sentinel", err)
+	}
 	if !strings.Contains(err.Error(), "not a usable URL") {
 		t.Errorf("error = %v; want it to name the unusable egress proxy", err)
+	}
+	if !strings.Contains(err.Error(), `"proxied"`) {
+		t.Errorf("error = %v; want it to name the server, which the settings row's reconnect note has no other source for", err)
 	}
 	if strings.Contains(err.Error(), credentialedProxyPassword) {
 		t.Errorf("error = %v; it names the proxy's password", err)

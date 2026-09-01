@@ -713,7 +713,13 @@ column's widest and whose note lands within two cells of the edge — asserting 
 **Acceptance:** `go test -race -count=1 -run 'TestSettings' ./internal/tui/`
 **Commit:** `fix(tui): measure the settings note against the post-marker value column`
 
-## 20. MCP's unusable-proxy refusal wraps `security.ErrURLBlocked`
+## 20. MCP's unusable-proxy refusal wraps `security.ErrURLBlocked` — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the refusal uses the plan's pinned wording verbatim, so `mcp: server %q:` still
+leads and the sentinel sits between the name and the "not a usable URL" clause.
+NOTES (2026-09-01): consequential edit — ISSUES.md: made necessary by this item closing its own
+register entry (the plan's closeout: every item removes its own entry in its commit); only the
+unusable-proxy bullet was removed, the section's `**Status:**` block stays for item 21.
 
 **What:** Fixes the residual at `ISSUES.md:184`. `vetEndpoint` returns a bare `fmt.Errorf` when the
 egress proxy is not a usable URL (`internal/mcp/transport.go:228`), while its sibling three lines down

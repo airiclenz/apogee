@@ -226,7 +226,10 @@ func vetEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuard)
 	if err != nil {
 		// The proxy value is deliberately NOT interpolated: the resolver quotes it back and a
 		// proxy URL may carry credentials — the same reasoning checkEndpoint's bare wording rests on.
-		return "", nil, fmt.Errorf("mcp: server %q: the configured egress proxy is not a usable URL", cfg.Name)
+		// It wraps security.ErrURLBlocked like the funnel's own unusable-proxy refusal
+		// (internal/tools/network.go) so a caller matching on the sentinel sees this one too, and
+		// keeps naming the server, which the settings row's reconnect note has no other source for.
+		return "", nil, fmt.Errorf("mcp: server %q: %w: the configured egress proxy is not a usable URL", cfg.Name, security.ErrURLBlocked)
 	}
 	if proxyURL != nil {
 		pinned = append(pinned, proxyURL.Hostname())

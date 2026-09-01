@@ -40,14 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 **Status:** found 2026-08-28 at the close of the deferred-residuals sweep
 (`docs/plans/archived/2026-08-28 - 02 - deferred-residuals-sweep-plan.md`), deferred out of that run.
 
-- [ ] **MCP's unusable-proxy refusal does not wrap `security.ErrURLBlocked`.**
-  `vetEndpoint` returns a bare `fmt.Errorf` when the egress proxy is not a usable URL
-  (`internal/mcp/transport.go:228`), while its unpinnable sibling three lines down wraps the
-  guard's error (`internal/mcp/transport.go:235`) and both `internal/tools` funnel paths wrap
-  `security.ErrURLBlocked` on either refusal. A caller matching on the sentinel therefore sees an
-  MCP unusable-proxy refusal as an unrelated error, and the asymmetry is unpinned: the sweep's
-  `TestVetEndpoint_*` cases assert the wording, not the sentinel.
-
 - [ ] **`idOf` collapses every unparseable stack block onto one id.** `idOf`
   (`internal/tuitest/leak.go:135`) returns the empty id for any block whose header does not parse,
   so two such blocks are one entry in the snapshot map and an unparseable block present when
