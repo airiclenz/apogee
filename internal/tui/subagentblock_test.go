@@ -265,12 +265,17 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	// never comes — but its result does (internal/agent/dispatch.go). A rule reading the missing
 	// phase alone would leave that row queued for the rest of the session; being over is the other
 	// thing that ends the state (subAgentScheduled).
+	//
+	// Being over is also what gives the row its ▶: the delegation has reported, so the prompt it
+	// carried is a reading the member can be opened onto (renderSubAgentMemberRows) — the one
+	// visible difference between this row and the queued one it replaces, whose empty body is
+	// exactly what leaves it inert.
 	t.Run("a refused delegation is not scheduled", func(t *testing.T) {
 		tr := build(t)
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 			CallID: "s3", Content: "sub-agent depth limit reached", IsError: true}})
 		want := strings.Join(append(append([]string{header}, running...),
-			"  ┕ check ⋯ error: sub-agent depth limit reached"), "\n")
+			groupMemberLine("  ┕ check ⋯ error: sub-agent depth limit reached")), "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("refused member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -482,10 +487,13 @@ func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 
 	want := strings.Join([]string{
 		// The refusal fills the whole outcome slot, so the leader keeps its floor of one dot and
-		// the target gives way entirely — design call 4's order, played out to its end.
+		// the target gives way entirely — design call 4's order, played out to its end. Each row
+		// still wears its ▶: the task pushed off the row is precisely what the member opens onto
+		// (renderSubAgentMemberRows), so the delegation crowded out of its own header is the one
+		// with the most behind the indicator.
 		"✦ Sub-Agent (2)",
-		"  ┝ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper su" + clipTail,
-		"  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper su" + clipTail,
+		groupMemberLine("  ┝ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper su" + clipTail),
+		groupMemberLine("  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper su" + clipTail),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("refused delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -741,6 +749,7 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 			t.Fatalf("setExpanded(0, true) = false; want the first member open")
 		}
 
+		sibling := leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusedResult, glyphCollapsed)
 		want := strings.Join([]string{
 			"✦ Sub-Agent (2)",
 			leaderEdgeRow("  ┝ survey the tests ✓ ⋯ done", glyphExpanded),
@@ -751,13 +760,57 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 			"  │ " + refusedResult,
 			memberEdgeRow(t, "  │", promptSeeLess, width),
 			"┊",
-			// The sibling is shut and hides nothing of its own — its refusal rides the slot and its
-			// one-line prompt already rides the header — so its row wears no indicator.
-			"  ┕ build it ✓ ⋯ " + refusedResult,
+			// The sibling is shut and hides the prompt it carried, exactly as the lone block's row
+			// does: the task's first line rides the header as the delegation's NAME (subAgentTarget)
+			// and the prompt itself is nowhere on the row, so the member wears the ▶ that says so.
+			sibling,
 		}, "\n")
 
 		if got := renderPlain(tr, width); got != want {
 			t.Errorf("expanded grouped refusal mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+
+		// The affordance and the click surface are one answer: the row wearing the ▶ is the row a
+		// click on it toggles, carrying the sibling's own entry (renderSubAgentMemberRows).
+		marks := blockMarks(t, tr, width)
+		last := marks[len(marks)-1]
+		if last.kind != targetHeader || last.entry != 1 || last.text != sibling {
+			t.Errorf("the shut sibling's mark = %+v; want a targetHeader on entry 1 at %q", last, sibling)
+		}
+
+		// And what it opens is the lone block's reading in the member's frame: the prompt under its
+		// lead, then the refusal a blank line below it.
+		if !tr.setExpanded(1, true) {
+			t.Fatalf("setExpanded(1, true) = false; want the shut sibling open")
+		}
+		opened := strings.Join([]string{
+			leaderEdgeRow("  ┕ build it ✓ ⋯ done", glyphExpanded),
+			"  │ " + unframedSubAgentPromptLead + "build it",
+			"  │",
+			"  │ " + refusedResult,
+			memberEdgeRow(t, "  │", promptSeeLess, width),
+		}, "\n")
+		if got := renderPlain(tr, width); !strings.Contains(got, opened) {
+			t.Errorf("the opened sibling mismatch:\n--- got ---\n%s\n--- want it to contain ---\n%s",
+				got, opened)
+		}
+	})
+
+	// The rule is the prompt's, not the row's: a delegation that carried no task at all — a record
+	// replayed from a session written before the text was retained (transcriptbridge.go) — opens
+	// onto nothing, so its member row stays bare however its siblings fold (subAgentHidesPrompt).
+	t.Run("a shut member with no prompt wears nothing", func(t *testing.T) {
+		tr := &transcript{}
+		refusedDelegation(tr, "s1", refusedTask)
+		refusedDelegation(tr, "s2", "")
+
+		rows := strings.Split(renderPlain(tr, width), "\n")
+		last := rows[len(rows)-1]
+		if !strings.Contains(last, refusedResult) {
+			t.Fatalf("last row = %q; want the promptless member's own row", last)
+		}
+		if strings.HasSuffix(last, glyphCollapsed) {
+			t.Errorf("the promptless member row = %q; want no indicator over an empty body", last)
 		}
 	})
 
@@ -796,6 +849,11 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 // The table straddles the guard on purpose. At 80 columns this refusal is too long for the slot and
 // the presenter's typed phrase takes it; at 110 and above the refusal itself stays there — the
 // binding "no unconditional demote", the wide row going on saying why the delegation never ran.
+//
+// The subtest after it asks the same two halves of a delegation folded into a GROUP, where the row
+// is painted by a different hand (renderSubAgentMemberRows): the member's ▶ has to arrive with the
+// refusal still in its slot, because an indicator bought by demoting the outcome would be the fold
+// paying for the affordance with what the row says.
 func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 	// Long enough that the guard refuses it at the narrow end of the table and admits it at the
 	// wide end — the depth bound's own wording with the sentence it closes with.
@@ -850,6 +908,28 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 			}
 		})
 	}
+
+	// The GROUPED reading of the same row, at the wide end of the table where the guard admits the
+	// refusal. A member's indicator is granted by the prompt clause alone and never by a demote
+	// (renderSubAgentMemberRows), so both folded members go on saying why the delegation never ran
+	// while wearing the ▶ that opens onto the prompt — the binding "no unconditional demote"
+	// (render.go's rooted paint) asked of a fold rather than of a lone block.
+	t.Run("a folded grouped member keeps its promoted refusal at 110 columns", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", refusedTask, 0)
+		subAgentReport(tr, "s1", refusal, 0)
+		subAgentCall(tr, "s2", "build it", 0)
+		subAgentReport(tr, "s2", refusal, 0)
+
+		want := strings.Join([]string{
+			"✦ Sub-Agent (2)",
+			leaderEdgeRow("  ┝ "+target+" ✓ ⋯ "+refusal, glyphCollapsed),
+			leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusal, glyphCollapsed),
+		}, "\n")
+		if got := renderPlain(tr, 110); got != want {
+			t.Errorf("folded grouped refusals mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
 }
 
 // TestSubAgentPromptDetailsLeadsWithTheTask pins the body lines the prompt becomes: its first line

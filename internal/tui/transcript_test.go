@@ -1760,7 +1760,10 @@ func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
 	subAgentCall(tr, "s2", "survey the docs", 0)
 	// Both children are RUNNING — each has a slot of its own, as the engine says by starting them —
 	// so both rows are working ones rather than the queued row a delegation waiting for a slot wears
-	// (subAgentScheduled, pinned by TestSubAgentScheduledUntilItStarts).
+	// (subAgentScheduled, pinned by TestSubAgentScheduledUntilItStarts). Being live is also what
+	// keeps the rows BARE: a member wears the prompt's ▶ only once its delegation has reported
+	// (renderSubAgentMemberRows), the same permission setExpanded grants, so a click offered here
+	// would be one the transcript then refuses.
 	subAgentStarted(tr, "s1", 1)
 	subAgentStarted(tr, "s2", 1)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})

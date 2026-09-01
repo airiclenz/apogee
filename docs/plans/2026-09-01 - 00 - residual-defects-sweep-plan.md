@@ -623,7 +623,10 @@ the rewrite fails — goes in the new `walk_windows_test.go`, behind the same bu
 **Acceptance:** `go test -race -count=1 ./internal/platform/winlabel/` and `GOOS=windows go vet ./internal/platform/...`
 **Commit:** `fix(winlabel): clear only journal roots apogee's own label vouches for`
 
-## 18. A grouped never-ran delegation wears its ▶ and shows its prompt
+## 18. A grouped never-ran delegation wears its ▶ and shows its prompt — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — internal/tui/toolbody_test.go: made necessary by renderSubAgentMemberRows gaining its `reported` parameter (call-site arity only; the case's claim is unchanged).
+NOTES (2026-09-01): two goldens beyond the item's named tests asserted the pre-fix behaviour and were re-pinned to the fixed one, both in `internal/tui/subagentblock_test.go` — `TestSubAgentScheduledUntilItStarts/a refused delegation is not scheduled` and `TestSpanlessSubAgentHeadsGroupWithEachOther` — each now expecting `groupMemberLine(...)` (the row plus its ▶), with a comment saying why.
 
 **What:** Recast at the regression check (2026-09-01). Fixes the residual at `ISSUES.md:167`. The
 2026-08-28 sweep fixed the single-block reading only (`subAgentHidesPrompt`, `internal/tui/subagentblock.go:288-308`, asked by

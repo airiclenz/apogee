@@ -455,7 +455,8 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 		}
 		view.finished = subAgentFinished(m.head)
 		view = guardPromotions(th, []toolView{view}, room, marker)[0]
-		rows, hides := renderSubAgentMemberRows(th, view, marker, width, room, m.head.expanded, spanned)
+		rows, hides := renderSubAgentMemberRows(th, view, marker, width, room,
+			m.head.expanded, spanned, subAgentReported(m.head))
 		kind := targetNone
 		if hides {
 			kind = targetHeader
@@ -564,11 +565,28 @@ func groupLabelOf(members []subAgentMember) string {
 // stays a target, and what it opens is a screen and not a body.
 //
 // A delegation with no span is an ordinary member and goes through the ordinary painter, so a
-// refused delegation folds, opens and closes exactly as a read or a terminal call does.
+// refused delegation folds, opens and closes exactly as a read or a terminal call does — with one
+// question asked after it, the SINGLE block's own (blockHidesWhenCollapsed): a delegation that never
+// ran hides the prompt it carried, and that is nowhere among the body lines the ordinary painter
+// counts. Its promoted refusal leaves the member bodiless at a wide terminal and demoted lands a
+// body at a narrow one, so the count alone gave the same delegation an indicator on some terminals
+// and none on others — the defect the lone block's rule already closed (subAgentHidesPrompt) and
+// this asks of a member. The plain row the painter composed is re-painted here with the collapsed
+// glyph, because renderGroupMember returns it bare whenever its OWN answer is no: an indicator
+// granted after the call would leave a click target with nothing on the row saying so.
+//
+// reported is the gate, and it is setExpanded's own permission (transcript.go, which requires the
+// head to be done): a member still RUNNING has no prompt reading to open — the click would be
+// refused — so it keeps the bare row a live delegation wears.
 func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room int,
-	expanded, spanned bool) (lines []string, hides bool) {
+	expanded, spanned, reported bool) (lines []string, hides bool) {
 	if !spanned {
-		return renderGroupMember(th, tv, marker, memberGutter, width, room, expanded)
+		lines, hides = renderGroupMember(th, tv, marker, memberGutter, width, room, expanded)
+		if hides || !reported || !subAgentHidesPrompt(tv) {
+			return lines, hides
+		}
+		row := leaderRow(th, tv, marker, room, expanded, noRemainder)
+		return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
 	}
 	row := leaderRow(th, tv, marker, room, false, noRemainder)
 	return []string{indicatorRow(th, row, width, glyphCollapsed)}, true

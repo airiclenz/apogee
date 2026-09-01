@@ -100,7 +100,7 @@ func TestEveryToolBodyFrameKeepsItsOwnFraming(t *testing.T) {
 				// 0063), so the frame is asked of the delegation that never ran — the one reading
 				// that still lays its result out in place (unframedSubAgentView).
 				rows, _ := renderSubAgentMemberRows(th, toolView{Target: "explore", Details: newToolBody(body)},
-					memberGutter, width, width, true, false)
+					memberGutter, width, width, true, false, true)
 				return rows[1 : len(rows)-1] // between the ▼ leader row and the see-less row
 			},
 			want: func() []string {

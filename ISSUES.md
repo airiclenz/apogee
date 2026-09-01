@@ -40,15 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 **Status:** found 2026-08-28 at the close of the deferred-residuals sweep
 (`docs/plans/archived/2026-08-28 - 02 - deferred-residuals-sweep-plan.md`), deferred out of that run.
 
-- [ ] **A GROUPED never-ran delegation still wears no ▶ and never shows its prompt.** The sweep
-  fixed the single-block reading only (`subAgentHidesPrompt`, `internal/tui/subagentblock.go:243`).
-  The grouped path is unchanged: `renderGroupMember` grants the indicator on
-  `tv.Details.len() > 0` alone (`internal/tui/toolblock.go:325`), while a SPANNED member shows its
-  prompt in the run view its row opens (ADR 0063, `renderSubAgentMemberRows`) — so a folded
-  delegation whose refusal stays promoted has no hidden lines to count, wears no ▶, and its prompt
-  is unreachable at every width. Fixing it means asking the member the same
-  prompt-shaped question the ungrouped block now asks.
-
 - [ ] **`settingsNoteWidth` measures the value column before the apply appends its ` *` marker.**
   `settingsNoteWidth` (`internal/tui/settings.go:1556`) computes the note's cells from
   `settingRowCells` as the rows stand, and its caller `autoBlastRadiusNote`
