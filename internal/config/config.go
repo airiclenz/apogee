@@ -3170,6 +3170,14 @@ func FilePath(configDir string) string {
 // a configured prompt at either level has already replaced everything beneath it, so the flag is
 // never consulted there. The fallback is whole, like every other rung: the embedded text is never
 // appended to or merged into a prompt the user wrote.
+//
+// The LAYERS run after all of that, and outside it (ADR 0067 §2): they are not a rung, they never
+// compete with the one that won, and the selected prompt plus the layers in listed order are
+// joined into the one template this returns. Two consequences are binding. Layers configured at
+// all mean the embedded default NEVER fires — a run with layers and no prompt sends the layers
+// alone, because a layer is an explicit act and firing fifty unasked-for lines behind it is the
+// surprise ADR 0067 exists to end. And an empty layer list leaves the resolution byte-identical to
+// what the ladder alone produced, so nothing the user did not enable changes anything.
 func ResolveSystemPrompt(sp SystemPromptSettings, model, home string, useDefault bool, readFile func(string) ([]byte, error)) (string, error) {
 	src := sp.Global
 	modelKey := "" // non-empty ⇒ the selected prompt came from a system-prompt-models entry
@@ -3199,14 +3207,77 @@ func ResolveSystemPrompt(sp SystemPromptSettings, model, home string, useDefault
 		}
 		return "", fmt.Errorf("apogee: %s: %w", systemPromptKey(field, modelKey), err)
 	}
+	layers, err := resolveSystemPromptLayers(sp.Layers, home, readFile)
+	if err != nil {
+		return "", err
+	}
 	// Nothing configured anywhere: the embedded default (ADR 0064 §1) rather than the promptless
 	// run that used to be here, unless `use-default-prompt: false` asked for exactly that. The
 	// default is validated by its own test rather than here — it ships with the binary, so a bad
 	// placeholder in it is a build-time defect, not a user's config error to be named.
-	if template == "" && useDefault {
+	//
+	// Layers count as configuration for this question and for no other (ADR 0067 §3): with layers
+	// present the ladder has nothing left to fall back to, so the default stays where it belongs —
+	// behind a config that says nothing at all.
+	if template == "" && len(sp.Layers) == 0 && useDefault {
 		template = DefaultSystemPrompt()
 	}
-	return template, nil
+	if len(layers) == 0 {
+		return template, nil
+	}
+	// The selected prompt leads only if there is one: layers alone are sent alone, not behind the
+	// blank line an empty template would otherwise leave in front of them.
+	parts := layers
+	if template != "" {
+		parts = append([]string{template}, layers...)
+	}
+	return strings.Join(parts, systemPromptPartSeparator), nil
+}
+
+// systemPromptPartSeparator joins the selected prompt to the layers behind it and the layers to
+// each other: the blank line ADR 0067 §4 fixes, which a reader of the rendered prompt sees as a
+// paragraph break and which is what the engine already puts between the standing sources it
+// composes.
+const systemPromptPartSeparator = "\n\n"
+
+// resolveSystemPromptLayers renders the `system-prompt-layers:` entries into the parts appended to
+// whatever the ladder selected, in the order the file lists them (ADR 0067 §4 — no sorting, no
+// deduplication, no trimming; a layer that repeats the prompt's own sentence sends it twice).
+//
+// A layer's file is read on EVERY run that resolves the prompt, unlike a non-matching
+// system-prompt-models entry: a layer is unconditional by construction, so the travelling-config
+// argument that makes an unselected entry inert does not reach it (ADR 0067 §5). Paths resolve the
+// way system-prompt-file does — a leading `~` expands, a relative path joins the apogee home — and
+// every layer is a template in the same closed placeholder language. Both failures name the layer
+// by INDEX, because the list has no keys to quote and the index is what a reader counts down the
+// file to find.
+func resolveSystemPromptLayers(layers []SystemPromptLayer, home string, readFile func(string) ([]byte, error)) ([]string, error) {
+	if len(layers) == 0 {
+		return nil, nil
+	}
+	parts := make([]string, 0, len(layers))
+	for i, layer := range layers {
+		template := layer.Text
+		if layer.File != "" {
+			path, err := ExpandUserPath(layer.File)
+			if err != nil {
+				return nil, err
+			}
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(home, path)
+			}
+			data, err := readFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("apogee: read system-prompt-layers[%d] %q: %w", i, path, err)
+			}
+			template = string(data)
+		}
+		if err := prompt.Validate(template); err != nil {
+			return nil, fmt.Errorf("apogee: system-prompt-layers[%d]: %w", i, err)
+		}
+		parts = append(parts, template)
+	}
+	return parts, nil
 }
 
 // systemPromptKey names a system-prompt key for an error message, qualified by the model when the

@@ -105,7 +105,9 @@ unless the new system-prompt-layers fileConfig key and its KindStructured regist
 together — `go test ./internal/config -run TestRegistryIsBijectionWithFileConfig` is added
 to the item's Acceptance.
 
-## 3. ResolveSystemPrompt composes the layers
+## 3. ResolveSystemPrompt composes the layers — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — cmd/apogee/wire_settings.go: made necessary by ResolveSystemPrompt now collapsing the layers too — the liveSettings.systemPrompt doc comment claimed "the three keys are one prompt, and ResolveSystemPrompt collapses them", which the fourth (non-selecting) key falsifies. Comment-only.
 
 **What:** In ResolveSystemPrompt (config.go:3112), after rung selection: for each layer in
 order, resolve `file:` (ExpandUserPath; relative joined to `home`; unreadable → error naming

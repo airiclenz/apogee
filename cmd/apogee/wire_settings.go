@@ -142,8 +142,10 @@ type liveSettings struct {
 	validatedAlias  map[string]string
 
 	// systemPrompt is the `system-prompt-text` / `system-prompt-file` / `system-prompt-models` trio
-	// (ADR 0023). It is held whole rather than per key because selection is whole-entry replacement:
-	// the three keys are one prompt, and ResolveSystemPrompt collapses them per model at every rebind.
+	// (ADR 0023) plus the `system-prompt-layers:` list (ADR 0067). It is held whole rather than per
+	// key because ResolveSystemPrompt collapses the whole block into one template per model at every
+	// rebind: selection across the trio is whole-entry replacement, and the layers append behind
+	// whichever entry it selected.
 	systemPrompt config.SystemPromptSettings
 	// useDefaultPrompt is the fourth key of that one prompt — `use-default-prompt:`, the last rung
 	// of the ladder (ADR 0064 §2). It is held beside the block, and installed with it under one

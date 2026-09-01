@@ -3366,6 +3366,12 @@ func TestSystemPromptSettingsValidate(t *testing.T) {
 // EMBEDDED default is what this session runs on, and only `use-default-prompt: false` — the flag
 // this table spells inverted — brings back the promptless run. The flag is inert wherever a prompt
 // is configured, which is what the two paired cases pin.
+//
+// And the channel that is NOT a rung (ADR 0067): the layers append after whatever the ladder
+// selected, in listed order, joined by a blank line. Three of their cases are the load-bearing
+// ones — layers alone send the layers alone (the embedded default does not fire behind them), a
+// per-model entry that replaced the global prompt does not replace the layers, and an empty layer
+// list leaves every resolution above byte-identical to what it was before the key existed.
 func TestResolveSystemPrompt(t *testing.T) {
 	// Deliberately NOT parallel: the `~` case redirects the environment os.UserHomeDir reads.
 	userHome := t.TempDir()
@@ -3379,6 +3385,8 @@ func TestResolveSystemPrompt(t *testing.T) {
 		filepath.Join(home, "prompts", "relative.md"):  "from the apogee home",
 		filepath.Join(userHome, "prompts", "user.md"):  "from the user home",
 		filepath.Join(home, "prompts", "per-model.md"): "the per-model file",
+		filepath.Join(home, "prompts", "layer.md"):     "the layer file",
+		filepath.Join(userHome, "prompts", "layer.md"): "the user-home layer",
 	}
 	readFile := func(path string) ([]byte, error) {
 		if content, ok := files[path]; ok {
@@ -3481,6 +3489,71 @@ func TestResolveSystemPrompt(t *testing.T) {
 			name:    "an unknown placeholder in a model entry names that entry",
 			sp:      SystemPromptSettings{Models: map[string]PromptSource{model: {Text: "hi {{nope}}"}}},
 			wantErr: []string{`system-prompt-models["` + model + `"]`, "{{nope}}", "{{workspace}}"},
+		},
+		{
+			name: "layers append after the selected prompt in listed order",
+			sp: SystemPromptSettings{
+				Global: PromptSource{Text: "the global prompt"},
+				Layers: []SystemPromptLayer{{Text: "first layer"}, {Text: "second layer"}},
+			},
+			want: "the global prompt\n\nfirst layer\n\nsecond layer",
+		},
+		{
+			name: "layers ride the per-model entry that replaced the global prompt",
+			sp: SystemPromptSettings{
+				Global: PromptSource{Text: "the global prompt"},
+				Models: map[string]PromptSource{model: {Text: "the per-model prompt"}},
+				Layers: []SystemPromptLayer{{Text: "a standing layer"}},
+			},
+			want: "the per-model prompt\n\na standing layer",
+		},
+		{
+			name: "layers alone send the layers alone, never the embedded default behind them",
+			sp:   SystemPromptSettings{Layers: []SystemPromptLayer{{Text: "first layer"}, {Text: "second layer"}}},
+			want: "first layer\n\nsecond layer",
+		},
+		{
+			name:      "a prompt plus layers sends both with use-default-prompt false",
+			sp:        SystemPromptSettings{Global: PromptSource{Text: "hi {{workspace}}"}, Layers: []SystemPromptLayer{{Text: "a layer"}}},
+			noDefault: true,
+			want:      "hi {{workspace}}\n\na layer",
+		},
+		{
+			name: "an empty layer list resolves byte-identically to the ladder alone",
+			sp:   SystemPromptSettings{Global: PromptSource{Text: "hi {{workspace}}"}, Layers: []SystemPromptLayer{}},
+			want: "hi {{workspace}}",
+		},
+		{
+			name: "an empty layer list leaves the embedded default rung intact",
+			sp:   SystemPromptSettings{Layers: []SystemPromptLayer{}},
+			want: DefaultSystemPrompt(),
+		},
+		{
+			name: "a layer file resolves against the apogee home and the user home",
+			sp: SystemPromptSettings{
+				Global: PromptSource{Text: "the global prompt"},
+				Layers: []SystemPromptLayer{
+					{File: filepath.Join("prompts", "layer.md")},
+					{File: "~/prompts/layer.md"},
+				},
+			},
+			want: "the global prompt\n\nthe layer file\n\nthe user-home layer",
+		},
+		{
+			name: "an unreadable layer file names the layer index and the path",
+			sp: SystemPromptSettings{Layers: []SystemPromptLayer{
+				{Text: "a readable layer"},
+				{File: filepath.Join("prompts", "absent.md")},
+			}},
+			wantErr: []string{"system-prompt-layers[1]", filepath.Join(home, "prompts", "absent.md")},
+		},
+		{
+			name: "an unknown placeholder in a layer names the layer index and the known four",
+			sp: SystemPromptSettings{Layers: []SystemPromptLayer{
+				{Text: "fine"},
+				{Text: "hi {{bogus}}"},
+			}},
+			wantErr: []string{"system-prompt-layers[1]", "{{bogus}}", "{{workspace}}", "{{datetime}}", "{{mode}}", "{{scratch}}"},
 		},
 	}
 	for _, tt := range tests {
