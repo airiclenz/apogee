@@ -391,10 +391,14 @@ decides it is finished, and a model that keeps deciding otherwise can spend an u
 number of tokens on a single delegation. `delegate-max-steps:` (a file-only key) is the
 ceiling, counted in **turns** — one request plus the tools it asked for — after which
 apogee ends the delegation cleanly and hands your agent what the sub-agent produced so
-far, marked as partial. The default is **80**; `0` lets a delegation run unbounded, which
-is what it did before this key existed. It bounds sub-agents only, never the session you
-are talking to. A `sub_agent` call may ask for a lower ceiling of its own through its
-`max_steps` argument; it can never raise this one.
+far, marked as partial. It does not cut the sub-agent off mid-sentence, though: first
+it takes the tools away, tells the sub-agent why, and spends one further turn — an
+extra one, outside the ceiling — asking it to sum up what it found and what it left
+unfinished, so what your agent receives is a report rather than an interrupted sentence.
+The default is **80**; `0` lets a delegation run unbounded, which is what it did before
+this key existed. It bounds sub-agents only, never the session you are talking to. A
+`sub_agent` call may ask for a lower ceiling of its own through its `max_steps` argument;
+it can never raise this one.
 
 The context **window** these budgets are measured against is discovered from the
 server — live, not once: apogee asks every ten seconds, so switching the loaded model

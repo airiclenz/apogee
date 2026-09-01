@@ -258,7 +258,13 @@ accepted up to `liveDelegateStepCap+1`.
 
 **Commit:** `test(agent): live shakeout asserts the capped delegate's closing report`
 
-## 6. The documented promise
+## 6. The documented promise — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): CONTEXT.md keeps "the child's last visible text" only as the named fallback clause; the entry no longer ends there, and its ADR 0006 structural classification and `Agent.Run` enforcement sentence are untouched.
+
+NOTES (2026-09-01): reflowed the tail of each edited paragraph to the file's own wrap width (~95 cols CONTEXT.md, ~88 cols configuration.md) — no wording changed outside the two rewritten passages.
+
+NOTES (2026-09-01): swept `CONTEXT.md docs/ layout.md README.md AGENTS.md` for other sites naming the cap's handback; the only other hit is `layout.md:938` (`· stopped at its step cap`), which the plan header puts out of scope as TUI rendering.
 
 Depends on item 3.
 
