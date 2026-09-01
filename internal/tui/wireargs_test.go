@@ -3,8 +3,13 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // TestWireArgs pins the stored form of a call's arguments: what survives, what is elided, what is
@@ -168,4 +173,128 @@ func TestWireArgsSurvivesTheTranscriptEncoder(t *testing.T) {
 	if string(encoded) != want {
 		t.Errorf("re-encoded = %s, want %s", encoded, want)
 	}
+}
+
+// TestContentArgsMatchToolSchemas cross-checks [contentArgs] against the schemas the write/edit
+// tools actually publish. The map spells those content keys a second time and keys them by tool
+// NAME, so a rename in internal/tools — of a tool or of one of its arguments — would leave this
+// side silently matching nothing and quietly push file bodies onto the wire (ISSUES.md:137). The
+// registry is the same one the engine gives an Agent, so the check reads the shipped schemas
+// rather than a copy of them.
+func TestContentArgsMatchToolSchemas(t *testing.T) {
+	t.Parallel()
+
+	registry := tools.NewDefaultRegistry(t.TempDir())
+
+	problems := contentArgsProblems(registry, checkedContentArgs())
+
+	for _, problem := range problems {
+		t.Error(problem)
+	}
+}
+
+// TestContentArgsProblemsReportsBothHalves pins that the cross-check above can actually fail: a
+// tool name no registry resolves and a key no schema carries are the two ways the map drifts, and
+// each must be reported rather than passed over.
+func TestContentArgsProblemsReportsBothHalves(t *testing.T) {
+	t.Parallel()
+
+	registry := tools.NewDefaultRegistry(t.TempDir())
+
+	cases := []struct {
+		name string
+		args map[string][]string
+		want string
+	}{
+		{
+			name: "a tool the registry does not carry",
+			args: map[string][]string{"write_file_v2": {"content"}},
+			want: "write_file_v2",
+		},
+		{
+			name: "a key the tool's schema does not carry",
+			args: map[string][]string{"write_file": {"contents"}},
+			want: "contents",
+		},
+		{
+			name: "a nested key the replacement pairs do not carry",
+			args: map[string][]string{"multi_find_and_replace": {"replacements.old_text"}},
+			want: "replacements.old_text",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			problems := contentArgsProblems(registry, testCase.args)
+
+			if len(problems) != 1 || !strings.Contains(problems[0], testCase.want) {
+				t.Errorf("contentArgsProblems = %q, want one problem naming %q", problems, testCase.want)
+			}
+		})
+	}
+}
+
+// checkedContentArgs returns [contentArgs] with the two keys that live one level down added to it:
+// multi_find_and_replace drops its whole replacements array, but the bytes that array carries are
+// the oldText/newText pair inside its items, and a rename there drifts exactly as a top-level one
+// does. A dotted key is a path through the schema — see [contentArgsProblems].
+func checkedContentArgs() map[string][]string {
+	checked := map[string][]string{
+		"multi_find_and_replace": {"replacements.oldText", "replacements.newText"},
+	}
+	for tool, keys := range contentArgs {
+		checked[tool] = append(checked[tool], keys...)
+	}
+	return checked
+}
+
+// contentArgsProblems returns one line per mismatch between args — a [contentArgs]-shaped map of
+// tool name to the argument keys whose value is file content — and the schemas registry's tools
+// publish: a name the registry does not resolve, a schema that will not decode, or a key the
+// schema has no property for. An empty result means every name and key still lands.
+//
+// A key spelled with dots is a path: each segment is read from the enclosing schema's "properties"
+// object, descending through an array schema's "items" on the way, so "replacements.oldText"
+// resolves at properties.replacements.items.properties.oldText.
+func contentArgsProblems(registry *domain.ToolRegistry, args map[string][]string) []string {
+	var problems []string
+	for _, name := range slices.Sorted(maps.Keys(args)) {
+		tool, ok := registry.Lookup(name)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("contentArgs names %q, which no tool in the default registry answers to", name))
+			continue
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(tool.Schema(), &schema); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: decode the tool's schema: %v", name, err))
+			continue
+		}
+		for _, key := range args[name] {
+			if !schemaHasProperty(schema, strings.Split(key, ".")) {
+				problems = append(problems, fmt.Sprintf("contentArgs drops %q from %s, whose schema has no such property", key, name))
+			}
+		}
+	}
+	return problems
+}
+
+// schemaHasProperty reports whether path resolves to a property of the JSON schema, reading each
+// segment from the enclosing object's "properties" and stepping through an array schema's "items"
+// before the next segment.
+func schemaHasProperty(schema map[string]any, path []string) bool {
+	for _, segment := range path {
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			return false
+		}
+		schema, ok = properties[segment].(map[string]any)
+		if !ok {
+			return false
+		}
+		if items, ok := schema["items"].(map[string]any); ok {
+			schema = items
+		}
+	}
+	return true
 }

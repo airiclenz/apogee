@@ -35,18 +35,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Residuals deferred out of the 2026-08-29 tool-surface-transparency run
-
-**Status:** found 2026-08-29 at the close of the tool-surface transparency plan
-(`docs/plans/archived/2026-08-29 - 02 - tool-surface-transparency-plan.md`), deferred out of that
-run.
-
-- [ ] **`contentArgs` duplicates the tools' schema key names inside `internal/tui` with no
-  cross-check against `internal/tools`.** The write/edit content keys the wire form drops are
-  spelled a second time at `internal/tui/wireargs.go:25`, matched by tool name against the schemas
-  that live in `internal/tools`; a future schema rename would silently stop dropping file content
-  onto the wire, and no test guards the pairing.
-
 ### Residuals deferred out of the 2026-08-29 audit-residue closeout
 
 **Status:** found 2026-08-29 at the close of the audit-residue closeout run

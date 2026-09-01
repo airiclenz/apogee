@@ -531,7 +531,11 @@ suggestion, so the assembled sentence is proven to carry no raw break.
 **Acceptance:** `go test -race -count=1 -run 'TestSuggestSiblings|TestNotFoundMessage' ./internal/tools/`
 **Commit:** `test(tools): drive a sibling suggestion whose name carries a row break`
 
-## 16. `contentArgs` is cross-checked against the tools' own schemas
+## 16. `contentArgs` is cross-checked against the tools' own schemas — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the cross-check is split into a pure `contentArgsProblems` helper plus a `schemaHasProperty` walker so both failure halves (unknown tool name, key no schema carries) are driven as real assertions against the shipped registry rather than only by inspection; a third negative case covers the nested `replacements.<key>` path the item names.
+NOTES (2026-09-01): the item's **Files:** lists only `internal/tui/wireargs_test.go`; `ISSUES.md` is edited per the plan's Closeout rule that every item removes its own entry — and, this being the last entry under "Residuals deferred out of the 2026-08-29 tool-surface-transparency run", its heading and `**Status:**` block go with it.
+NOTES (2026-09-01, verifier): mutation-checked at verification — renaming the nested `oldText` property inside `multi_find_and_replace`'s schema in `internal/tools/find_replace.go` fails `TestContentArgsMatchToolSchemas` with `contentArgs drops "replacements.oldText" ... whose schema has no such property`; the rename was reverted and `git diff` on that file is empty.
 
 **What:** Closes the residual at `ISSUES.md:137`. The write/edit content keys the wire form drops are
 spelled a second time at `internal/tui/wireargs.go:25-30` and matched by tool NAME at `:55`, so a
