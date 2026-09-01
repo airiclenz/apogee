@@ -37,6 +37,17 @@ turns:
       tool_calls:
         - name: sub_agent
           arguments: '{"task":"Read the workspace files one at a time and describe them","name":"survey","max_steps":50}'
+    # The child's closing report. The engine spends ONE extra tool-less Turn on a capped delegate,
+    # stamping its system prompt with the directive this matches — so this turn is the only one a
+    # `system:` matcher can claim, and it sits ABOVE the child's tool turns to win that request. Its
+    # wording is deliberately NOT the child's own final words, so a capped run and an uncapped one
+    # stay tellable apart in a frame.
+    - when:
+        system: no further tool calls are possible
+      repeat: true
+      text: Stopped short — I read a.txt and listed the workspace; the grep never came back.
+      token_delay: 1ms
+      chunk_runes: 6
     # The child, four turns deep. Turn 1 is picked by its task; every later turn by the tool the
     # previous one ran. A cap of 3 stops it inside turn 3, before it ever speaks.
     - when:

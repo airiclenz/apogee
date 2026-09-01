@@ -187,7 +187,13 @@ The three cap-test sites the guard names move in this commit.
 
 **Commit:** `feat(agent): a capped delegate gets one tool-less Turn to report back`
 
-## 4. T-04 drives the closing report end to end
+## 4. T-04 drives the closing report end to end — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `cmd/apogee/testdata/frames/t04-step-cap-block.txt` is listed in the item's Files but was NOT touched — the item says to refresh it "only if the collapsed row actually moved", and the golden assertion passes unchanged (the wrap-up Turn happens inside the child's run, and the conversation's collapsed row is worded from the same result envelope as before). No `-update` was run.
+
+NOTES (2026-09-01): the "child never ran a 4th tool" assertion is made through a new `childToolMenus` helper (beside `childRequests`): the child's four requests offer menus `true, true, true, false`, so the wrap-up request is the disarmed one and there was nothing for a fourth tool call to reach. The stub log is the only surface that carries this — with `hasTools=false` the provider drops the assistant messages' tool_calls, so a message-shaped assertion would have been vacuous.
+
+NOTES (2026-09-01): the unbounded sub-test's existing "unwanted" list gained `childReportWords` — one line beyond the item's literal text, making the ratified "a wording of its own, distinct from childFinalWords, so the capped and uncapped runs stay tellable apart" actually checked rather than merely intended.
 
 Depends on items 1 and 3.
 

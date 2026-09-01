@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -55,6 +56,10 @@ const (
 	// child-side half of, and the only place a reader who never opens the run meets it.
 	stepCapSlot     = "stopped at its step cap"
 	childFinalWords = "The workspace holds a.txt and it says hello."
+	// childReportWords is what the CAPPED child says in the one tool-less Turn the engine spends
+	// asking it to sum up. It is deliberately not childFinalWords: a frame carrying one and not the
+	// other is proof of which of the two runs — capped or unbounded — produced it.
+	childReportWords = "Stopped short — I read a.txt and listed the workspace"
 )
 
 // ----------------------------------------------------------------------------
@@ -207,12 +212,20 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		drv.WaitText("The delegate handed back what it had.")
 		drv.WaitQuiet(settled)
 
-		// The child asked exactly three times. Its requests are the ones carrying its task; the
-		// parent's and the title call's do not.
-		if got := childRequests(stub, childTask); got != 3 {
-			t.Errorf("the child made %d requests; a cap of 3 turns allows 3", got)
+		// The child asked exactly four times: the three working Turns the cap allows, plus the one
+		// tool-less Turn the engine spends asking it to sum up. Its requests are the ones carrying
+		// its task; the parent's and the title call's do not.
+		if got := childRequests(stub, childTask); got != 4 {
+			t.Errorf("the child made %d requests; a cap of 3 turns allows 3 plus one wrap-up", got)
 		}
-		// And it never reached the turn where it would have spoken.
+		// The wrap-up is the one request that offered NO tools, which is both how the child is told
+		// its tools are gone and why it could never have run a fourth: three requests carried the
+		// menu, the fourth carried none.
+		if got := childToolMenus(stub, childTask); !slices.Equal(got, []bool{true, true, true, false}) {
+			t.Errorf("the child's requests offered tools %v; want the three capped Turns armed and "+
+				"the wrap-up disarmed", got)
+		}
+		// And it never reached the turn where it would have spoken its own answer.
 		if strings.Contains(drv.Frame().String(), childFinalWords) {
 			t.Errorf("the child ran past its cap and answered:\n%s", drv.Frame())
 		}
@@ -260,6 +273,13 @@ func TestE2EDelegationStepCap(t *testing.T) {
 			}
 		}
 
+		// And the report the child wrote in that tool-less Turn is what the run view ends on — the
+		// point of spending the Turn at all. Without it the parent would be handed whatever the
+		// child happened to narrate beside its last tool call.
+		if !strings.Contains(flat, flatten(childReportWords)) {
+			t.Errorf("the run view does not carry the capped child's closing report:\n%s", flat)
+		}
+
 		// Back out of the view first: inside one the prompt box addresses the child on screen
 		// (ADR 0063), so the next prompt is one for the CONVERSATION and has to be typed there.
 		drv.Press(tuitest.Esc)
@@ -270,12 +290,12 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		before := childRequests(stub, childTask)
 		submit(drv, raisedCapPrompt)
 		drv.WaitFor(func() bool {
-			return childRequests(stub, childTask) >= before+3
-		}, tuitest.Awaiting("the second delegation's three child turns"))
+			return childRequests(stub, childTask) >= before+4
+		}, tuitest.Awaiting("the second delegation's three child turns and its wrap-up"))
 		drv.WaitQuiet(settled)
-		if got := childRequests(stub, childTask); got != before+3 {
+		if got := childRequests(stub, childTask); got != before+4 {
 			t.Errorf("the second delegation made %d child requests; max_steps: 50 must not raise a "+
-				"cap of 3", got-before)
+				"cap of 3, which allows 3 plus one wrap-up", got-before)
 		}
 
 		if err := sess.Quit(); err != nil {
@@ -302,7 +322,9 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		if !strings.Contains(flat, flatten(childFinalWords)) {
 			t.Errorf("the uncapped child never got to answer:\n%s", flat)
 		}
-		for _, unwanted := range []string{"step cap", "delegate-max-steps"} {
+		// childReportWords is the capped run's wording and only its own: an unbounded child is never
+		// asked to sum up, so a frame carrying it would mean a cap fired where none was set.
+		for _, unwanted := range []string{"step cap", "delegate-max-steps", childReportWords} {
 			if strings.Contains(flat, unwanted) {
 				t.Errorf("an unbounded delegation still mentions %q:\n%s", unwanted, flat)
 			}
@@ -427,6 +449,22 @@ func childRequests(stub *stubllm.Server, task string) int {
 		}
 	}
 	return n
+}
+
+// childToolMenus reports, for each of the child's requests in order, whether it offered a tool menu
+// at all. A capped delegate's last request is the tool-less one the engine spends on its closing
+// report, so the run reads true, true, ..., false.
+func childToolMenus(stub *stubllm.Server, task string) []bool {
+	var armed []bool
+	for _, req := range stub.Requests() {
+		for _, msg := range req.Messages {
+			if strings.Contains(msg.Content, task) {
+				armed = append(armed, len(req.Tools) > 0)
+				break
+			}
+		}
+	}
+	return armed
 }
 
 // assertNoErrorTone fails when the row carrying marker holds any cell painted in the colour
