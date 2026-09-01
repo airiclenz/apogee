@@ -10,6 +10,40 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A scripted stubllm turn can now select requests by their system text.** A `when:` block takes a
+  third optional member, `system:` — a regexp over the request's system messages, concatenated in
+  wire order exactly as a `from: system` capture reads them — beside `last_message` and
+  `tool_result`; any combination may be set and every member set must match. It is the
+  discriminator for a request whose distinguishing mark is the directive the engine announced on it
+  rather than anything in the conversation: a request sent with an EMPTY tool menu renders with
+  `hasTools=false`, which degrades the preceding tool result to a plain `user` message, so
+  `tool_result` cannot match it and `last_message` sees text identical to the round before. A
+  `system:` regexp that does not compile is reported at construction naming its turn index
+  (`stubllm: turn N: when.system: ...`), and a `when:` block setting no member at all is still
+  refused.
+
+- Engine: an `Agent` now carries a transient `wrapUp` latch that makes ONE request tool-less and
+  self-explaining — `toolMenu` returns no tools, `buildRequest` stamps a system directive naming
+  the step limit, the withdrawal and the ask (report back to the delegating agent, unfinished work
+  included), and the reply takes the final-answer exit even when it asks for a tool anyway: those
+  calls are dropped undispatched and a reply with no text at all is committed nowhere, so it cannot
+  bury the partial result a capped delegate already earned. Structural, not a Mechanism — no config
+  key, on under Bypass.
+
+- A delegate stopped at `delegate-max-steps` is no longer cut off mid-tool-round: the engine spends
+  one further Turn with the tool menu withdrawn, telling the child why its tools are gone and asking
+  it to report to the agent that delegated the task, so the partial result the parent reads is
+  authored rather than scavenged from whatever the child narrated alongside its last tool call. The
+  wrap-up Turn is extra and uncounted — a cap of 3 still buys 3 working Turns — and a wrap-up that
+  faults falls back to today's partial result, never to a failure. The cap's own error line now
+  reads `— asking it to sum up;`.
+
+- Documented the capped delegate's closing report: `CONTEXT.md`'s "Step cap" entry and the
+  `delegate-max-steps` section of `docs/manual/configuration.md` now say that apogee spends one
+  further, uncounted Turn with the tool menu withdrawn, asking the sub-agent to sum up what it
+  found and what it left unfinished, and falls back to the child's last visible text when that
+  Turn fails.
+
 - Config: a new root key `sub-agents-server:` names which `servers:` entry takes the sub-agents a
   session delegates to. File-only and opt-in — absent or empty, delegations keep running on the
   session's own upstream, and a name no entry carries is not refused. `/settings` shows the target

@@ -23,17 +23,11 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [P] Planned Items - if you add an item to an implementation plan, mark it with `P`
 
 
-## Improvements / Ideas
-
-- [ ] **Run `golangci-lint` and `govulncheck` in `make check` and CI.**
-  Neither `golangci-lint` nor `govulncheck` was installed on the 2026-08-25 audit host, so none of
-  the three audits produced lint or dependency-vulnerability signal, and the dependency half of the
-  security audit's `dependency-surface` family went unaudited (no network for a CVE lookup) — every
-  verdict there was a code reading. Neither tool runs in `make check` or CI today, so the gap is
-  standing, not historical.
-
-
 ## Open defects
+
+- [ ] sometimes unsensible values like '77259 tok/s' are displayed. That number cannot be true.
+
+- [ ] when the context usage gauge does not fit and isn't displauyed, the black background is not painted all the way to the right side (where the gauge would be).
 
 
 ## Parked / deferred work
@@ -817,3 +811,42 @@ B3–B5) are recorded by the report and by that plan's out-of-scope list, not he
 
 The full findings, with the candidates this plan took and the ones it left, are in
 [`docs/reviews/architecture-review-2026-08-30.html`](docs/reviews/architecture-review-2026-08-30.html).
+
+---
+
+### Capped-delegate wrap-up — residue (plan `2026-09-01 - 02`)
+
+**Status:** recorded 2026-09-01 at the close of
+`docs/plans/2026-09-01 - 02 - capped-delegate-wrap-up-plan.md`. Open gaps in the wrap-up Turn that
+plan shipped — none is a regression, and none blocked the plan's acceptance.
+
+- [ ] **`when.system` is compiled at construction, not at parse time.** `Match.validate`
+  (`internal/stubllm/script.go:349`) compiles `last_message` only, so a `system:` regexp that does
+  not compile surfaces from `newMatcher` (`internal/stubllm/match.go:48`) with its turn index
+  rather than from the YAML parse the way a bad `last_message` does. The two members are
+  asymmetric; a script author reading a parse error for one and a construction error for the other
+  has no rule to predict which.
+- [ ] **The wrap-up's empty-text guard and `replyFault` disagree about whitespace.** The latched
+  final-answer exit tests `resp.Text() != ""` (`internal/agent/loop.go:228`) while `replyFault`
+  tests `strings.TrimSpace(resp.Text()) == ""` (`internal/agent/loop.go:547`). A wrap-up reply
+  whose text is whitespace only and that also carries a tool call therefore commits an assistant
+  message — exactly the "empty assistant message buries the partial result" case the guard exists
+  to prevent.
+- [ ] **Nothing pins that a wrap-up can never return `StatusTurnComplete`.** `finishAtStepCap`'s
+  completed branch (`internal/agent/agent.go:643-645`) forces `StepCapped` on `err == nil &&
+  !res.Faulted` without asserting the Exchange actually closed. It relies on the `|| a.wrapUp`
+  invariant at `internal/agent/loop.go:212`; no test holds that invariant in place, so a future
+  edit to the latched exit could return an open Turn to the parent as a capped result.
+- [ ] **The unbounded sub-test's `unwanted` check goes vacuous if the fixture gains a line
+  break.** `cmd/apogee/e2e_delegation_test.go:327-328` compares the raw `childReportWords`
+  (`:62`) against a flattened frame, while the sibling assertion at `:279` flattens the needle
+  first. Identical today because the fixture wording holds no break; the moment it wraps, the
+  assertion silently stops proving that the capped and uncapped runs stay tellable apart.
+- [ ] **The live shakeout's menu-pair check can fail spuriously.** The withdrawal assertion reads
+  `menus[len(menus)-2]` (`internal/agent/live_delegate_cap_test.go:321`) as "the request before the
+  wrap-up carried a menu". If an overflow fold re-fires the pre-request hooks inside the wrap-up
+  Turn itself, two zero-menu entries land and the check fails on a run that behaved correctly.
+- [ ] **`layout.md` still words the collapsed step-cap row without the closing report.**
+  `layout.md:938` reads `· stopped at its step cap` with no hint that a report now follows the cap.
+  TUI rendering was out of the plan's scope, so the spec text lags the shipped behaviour; either
+  the row's wording moves or the spec says why it deliberately does not.
