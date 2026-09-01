@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/judge"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -121,6 +122,17 @@ func TestE2EHostileSurfacesKeepTheirOwnRows(t *testing.T) {
 	}
 	assertNoLeakedColour(t, skills, red)
 	tuitest.Golden(t, "t12-skills", skills, hostileRedactions(sess, ws, hostileModelShown)...)
+
+	// The note's own heading — the count of what DID load — is the row a golden of the visible
+	// frame cannot hold: the shipped set outgrew the thirty-row viewport and the header scrolled
+	// off above it. It is still transcript, so it is still assertable; page up and read it there.
+	// The literal is the count this fixture yields — four shipped skills and the workspace's
+	// /dupe — and not a number computed from the same source the header is drawn from.
+	rows := scrollbackRows(t, drv, hostileSkillsHeader)
+	if !rowsContain(rows, hostileSkillsHeader) {
+		t.Errorf("the scrolled-up transcript never showed %q; the /skills note lost its header:\n%s",
+			hostileSkillsHeader, strings.Join(rows, "\n"))
+	}
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
@@ -317,6 +329,84 @@ func wrappedPaneFrame(t *testing.T, ws string) tuitest.Frame {
 // ----------------------------------------------------------------------------
 // The fixture
 // ----------------------------------------------------------------------------
+
+// hostileSkillsHeader is the heading the /skills note opens with in this fixture: the four shipped
+// skills plus the workspace's /dupe, behind the note renderer's own "· " lead (internal/tui:
+// loadedSkillLines, renderBlock). The count is written out because the assertion is about what the
+// reader was told, and a count derived from the loader would agree with the note however wrong both
+// were.
+const hostileSkillsHeader = "· 5 skills available:"
+
+// scrollbackRows walks the transcript up from where it stands, a window at a time, and returns the
+// content of every row it painted on the way — including the window it started on. The walk stops
+// early once a row contains want, and otherwise when the viewport reaches its top.
+//
+// It is deliberately not [scrollbackNumbers]: that walk measures movement through [windowLow], the
+// lowest numbered list line on screen, which answers math.MaxInt on any frame the stream fixture did
+// not author. On this fixture the first press would read as "did not move" and the walk would return
+// the window it began on. Movement here is the frame itself changing, which needs no fixture — and
+// costs nothing in false positives because the caller has already waited for the surface to settle,
+// so the only thing left that can repaint the screen is the scroll.
+func scrollbackRows(t *testing.T, drv *tuitest.Driver, want string) []string {
+	t.Helper()
+
+	// A ceiling on the walk, not an expectation: the walk stops on its own at the top.
+	const maxWindows = 40
+
+	var seen []string
+	collect := func() bool {
+		for _, row := range drv.Frame().Rows() {
+			if content := rowContent(row); content != "" {
+				seen = append(seen, content)
+			}
+		}
+		return rowsContain(seen, want)
+	}
+	for range maxWindows {
+		if collect() {
+			return seen
+		}
+		was := drv.Frame().String()
+		drv.Press(tuitest.PgUp)
+		if !waitForFrameChange(drv, was) {
+			collect()
+			return seen // the viewport is at the top and stopped moving
+		}
+	}
+	t.Fatalf("the transcript never reached its top in %d windows", maxWindows)
+	return seen
+}
+
+// rowsContain reports whether any collected row carries want.
+func rowsContain(rows []string, want string) bool {
+	for _, row := range rows {
+		if strings.Contains(row, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// waitForFrameChange reports whether the frame stopped being was within a bounded wait — the
+// movement predicate for a walk over rows that carry no number of their own. A frame that never
+// changes is the answer, not a failure: it is how a viewport says it is at its top.
+//
+// Like [waitForScroll] it watches the screen's byte counter before it pays for a snapshot, because a
+// poll loop that lays out every cell every few milliseconds costs more than the scroll it measures.
+func waitForFrameChange(drv *tuitest.Driver, was string) bool {
+	painted := drv.Screen().BytesWritten()
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if now := drv.Screen().BytesWritten(); now > painted {
+			painted = now
+			if drv.Frame().String() != was {
+				return true
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return false
+}
 
 // hostileWorkspace builds the checklist's own fixture tree and returns its root: a directory whose
 // NAME carries an escape sequence, four files that between them hold an escape, a newline, a

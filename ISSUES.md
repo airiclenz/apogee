@@ -35,17 +35,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Residuals deferred out of the 2026-08-31 base-guidance-and-shipped-skills plan
-
-**Status:** found 2026-08-31 at the close of the base guidance and shipped skills plan
-(`docs/plans/archived/2026-08-31 - 00 - base-guidance-and-shipped-skills-plan.md`), deferred out
-of that run.
-
-- [ ] **The re-recorded `/skills` golden no longer captures the `· N skills available:` header.**
-  The header scrolled off the frame the golden records
-  (`cmd/apogee/e2e_hostile_test.go:123`, `cmd/apogee/testdata/frames/t12-skills.txt`), so a
-  count drift in that announced line is no longer caught by the golden that used to carry it.
-
 ### Residuals deferred out of the 2026-08-30 sub-agent run-view plan
 
 **Status:** found 2026-08-30 at the close of the sub-agent run-view plan

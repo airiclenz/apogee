@@ -335,7 +335,11 @@ mirror after it; the item's `:1368`/`:1370`/`:1373` locators are the surrounding
 **Acceptance:** `go test -race -count=1 -run 'TestApplySettingSkillGates' ./cmd/apogee/`
 **Commit:** `test(cmd): pin both directions of the skill-gate mirror`
 
-## 9. The `· N skills available:` header returns to end-to-end coverage
+## 9. The `· N skills available:` header returns to end-to-end coverage — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — ISSUES.md: made necessary by this item's fix; the plan has each item delete its own register entry, and this was the last entry under "Residuals deferred out of the 2026-08-31 base-guidance-and-shipped-skills plan", so its now-empty heading and `**Status:**` block go with it (the convention item 6's commit `120cefc0` set).
+NOTES (2026-09-01): the walk got its own predicate and collector as the regression guard requires — `scrollbackRows` + `rowsContain` + `waitForFrameChange` (frame-differs movement, byte-counter polled), none of them touching `windowLow`. The header is `· 5 skills available:` after one `PgUp`, as the guard predicted.
+NOTES (2026-09-01): checked the assertion does real work — a probe asserting the header is absent from the un-scrolled frame passed (so the walk is what finds it), and mutating the literal to `· 6 skills available:` fails the test at the walk's top rather than hanging. Both probes were reverted.
 
 **What:** Closes the residual at `ISSUES.md:86`, with its premise corrected: the header did not fall
 off in the re-record — it scrolled off the 30-row viewport at `4d1f18c3`, when the shipped set grew
