@@ -336,11 +336,13 @@ const contextFileNote = "applies at next clear"
 // session boundary and nothing waits for a launch.
 const toolRosterNote = "applies to the next request"
 
-// seatChoiceNote is the boundary sentence `sub-agents-choice:` carries back: the gate is held the
-// moment the key is committed, and what it decides — whether the delegation tool offers the model a
-// seat to name at all — is settled when the tool roster is next built. A boundary like the two
-// above, not a deferral: nothing waits for a session boundary and nothing waits for a launch.
-const seatChoiceNote = "applies at the next roster build"
+// seatChoiceNote is the boundary sentence `sub-agents-choice:` carries back: what the gate decides —
+// whether the delegation tool offers the model a seat to name at all — is settled when the tool is
+// CONSTRUCTED, so committing the key swaps the set there and then, and the model learns of it at the
+// next request whose tool list is built from the set the session now holds. `tools.disabled`'s
+// boundary exactly, and a boundary rather than a deferral: nothing waits for a session boundary and
+// nothing waits for a launch.
+const seatChoiceNote = "applies to the next request"
 
 // ----------------------------------------------------------------------------
 // State-root resolution (phase-2 detail plan §3 C7)

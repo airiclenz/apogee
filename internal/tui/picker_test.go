@@ -2674,6 +2674,65 @@ func TestSubAgentsServerPickerListsTheConfiguredTargets(t *testing.T) {
 	}
 }
 
+// A `servers:` entry may carry a free-text `description:` — the human's own words for what the box
+// is FOR (ADR 0069) — and THIS is the pane that shows it: the choice here is between two boxes, and
+// "fast local 4B — search and edits" is the whole of what makes that a choice rather than a guess.
+// It rides the endpoint's own cell, so an entry nobody described draws exactly the row it drew
+// before descriptions existed and the pane keeps its two columns either way.
+func TestSubAgentsServerPickerShowsTheEntryDescription(t *testing.T) {
+	host := &fakeDelegationHost{targets: []ServerChoice{
+		{Name: "grunt", Endpoint: "http://grunt:2222", Description: "fast local 4B — search and edits"},
+		{Name: "plain", Endpoint: "http://plain:3333"},
+	}}
+	m := seededSubAgents(t, host)
+
+	m, _ = typeCommand(t, m, "/sub-agents-server")
+
+	rows := m.pickerRows()
+	if len(rows) != 3 {
+		t.Fatalf("rows = %v, want one per target plus the auto row", rows)
+	}
+	if want := (popupRow{"grunt", "— http://grunt:2222 · fast local 4B — search and edits"}); !reflect.DeepEqual(rows[0], want) {
+		t.Errorf("the described row = %v, want %v", rows[0], want)
+	}
+	if want := (popupRow{"plain", "— http://plain:3333"}); !reflect.DeepEqual(rows[1], want) {
+		t.Errorf("the undescribed row = %v, want %v — no separator with nothing after it", rows[1], want)
+	}
+	if got := plain(m.View()); !strings.Contains(got, "fast local 4B — search and edits") {
+		t.Errorf("the pane does not show the description:\n%s", got)
+	}
+}
+
+// And `/server` does NOT show it, on the very same [ServerChoice] values: that pane asks which box
+// this session TALKS to, a question the description does not answer, and its three cells are the ones
+// the "· current" mark is aligned in. The projection is shared, so this is the pin that the rendering
+// decision stayed where rows are composed.
+func TestServerPickerRowsIgnoreTheEntryDescription(t *testing.T) {
+	described := []ServerChoice{
+		{Name: "test-host", Endpoint: "http://localhost:1234", Description: "the big box upstairs"},
+		{Name: "remote", Endpoint: "http://remote:8080", Description: "the box in the cupboard"},
+	}
+	opts := testOpts
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo = staticServers(described), (&fakeSwitch{}).switchTo
+	m, _ := seededPicker(t, opts)
+
+	m, _ = typeCommand(t, m, "/server")
+
+	rows := m.pickerRows()
+	if len(rows) != len(described) {
+		t.Fatalf("rows = %v, want one per configured entry", rows)
+	}
+	for i, row := range rows {
+		if len(row) != 3 || row[1] != "— "+described[i].Endpoint {
+			t.Errorf("rows[%d] = %v, want the plain three cells with %q", i, row, "— "+described[i].Endpoint)
+		}
+	}
+	if got := plain(m.View()); strings.Contains(got, "the big box upstairs") {
+		t.Errorf("the /server pane showed a delegation-seat description:\n%s", got)
+	}
+}
+
 // ⏎ on a row retargets through the seam and records the choice, and the note states the CHOICE with
 // the recording hung off it — never the routing, which the host's own notice says once the newly
 // named server is observed.

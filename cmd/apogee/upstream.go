@@ -269,8 +269,14 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 		return tui.ServerSwitchResult{}, err
 	}
 	if err := m.agent.SwitchUpstream(apogee.UpstreamSpec{
-		Endpoint:                entry.Endpoint,
-		APIKey:                  apiKey,
+		Endpoint: entry.Endpoint,
+		APIKey:   apiKey,
+		// The arrived-at server in the HUMAN's words, so the orientation block names the session seat
+		// by the entry the session is on NOW when the model is offered a seat to choose (ADR 0069).
+		// They ride the switch for the pins' reason: the entry is in hand here, and a session that
+		// moved to another box must not go on describing the one it left.
+		ServerName:              entry.Name,
+		ServerDescription:       entry.Description,
 		MaxContextTokens:        window,
 		WorkingWindow:           working,
 		MaxOutputTokens:         entry.MaxOutputTokens,
@@ -336,14 +342,20 @@ func upstreamChoices(opts config.Options) []config.ServerEntry {
 	return append(entries, opts.Servers...)
 }
 
-// serverChoices projects the assembled entries onto the renderer's view of them: the name and the
-// endpoint, which is display and identity and nothing else. The per-server api key and discovery
-// hint deliberately stop here — they are what the SWITCH needs, and the switch is the binary's half
-// of the seam, so the renderer never holds a credential it has no use for.
+// serverChoices projects the assembled entries onto the renderer's view of them: the name, the
+// endpoint and the entry's free-text `description:`, which is display and identity and nothing else.
+// The per-server api key and discovery hint deliberately stop here — they are what the SWITCH needs,
+// and the switch is the binary's half of the seam, so the renderer never holds a credential it has
+// no use for.
+//
+// It is the ONE projection both pickers take their rows from, and the description reaches both. Only
+// `/sub-agents-server` renders it (subAgentsServerRows), which is a rendering decision and belongs
+// where rows are composed: a second projector that dropped the field would put the same knowledge in
+// two places and let them drift.
 func serverChoices(entries []config.ServerEntry) []tui.ServerChoice {
 	choices := make([]tui.ServerChoice, len(entries))
 	for i, e := range entries {
-		choices[i] = tui.ServerChoice{Name: e.Name, Endpoint: e.Endpoint}
+		choices[i] = tui.ServerChoice{Name: e.Name, Endpoint: e.Endpoint, Description: e.Description}
 	}
 	return choices
 }

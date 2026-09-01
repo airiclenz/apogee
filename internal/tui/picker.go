@@ -475,6 +475,11 @@ const subAgentsAutoDescription = "— no routing; delegations run on this sessio
 // states the entry and stops there; `auto` is not an entry, so the line says what it resolved to.
 const subAgentsAutoResolved = " · this session's own server"
 
+// subAgentsDescriptionSeparator joins an entry's `description:` to the endpoint it describes, in the
+// same cell. It is the mid-dot the notes above hang their clauses off, so one glyph means "and also,
+// about the same thing" everywhere this verb speaks.
+const subAgentsDescriptionSeparator = " · "
+
 // runSubAgentsServerCommand drives the /sub-agents-server verb in both its forms: bare, it opens the
 // picker over the `servers:` entries a delegation may run on; with one argument it takes that entry
 // by name. Surplus arguments are a usage note.
@@ -527,7 +532,13 @@ func (m Model) subAgentsTargets() []ServerChoice {
 }
 
 // subAgentsServerRows is one row per configured entry: the name and its endpoint, the two cells
-// /server's rows carry. It carries NO third marker cell, and that is deliberate — the "· current"
+// /server's rows carry — the second of which also carries the entry's `description:` when it has
+// one, since this is the pane where a human is choosing between boxes and "fast local 27B — search
+// and edits" is the whole of what makes that a choice rather than a guess (ADR 0069, the same words
+// the model is offered). It rides the endpoint's cell rather than a third column of its own so a
+// file where nobody wrote a description draws exactly the two columns it drew before.
+//
+// It carries NO third marker cell, and that is deliberate — the "· current"
 // mark of the server picker is drawn from [Options.HostAlias], the entry this SESSION is bound to,
 // which is the one thing a delegation target is not: marking it here would tell a human their
 // delegations run on the box they are talking to, on every session where they do not.
@@ -541,9 +552,11 @@ func (m Model) subAgentsServerRows() []popupRow {
 	targets := m.subAgentsTargets()
 	rows := make([]popupRow, 0, len(targets)+1)
 	for _, choice := range targets {
-		rows = append(rows, popupRow{
-			stripEscapes(choice.Name), "— " + stripEscapes(choice.Endpoint),
-		})
+		endpoint := "— " + stripEscapes(choice.Endpoint)
+		if described := stripEscapes(choice.Description); described != "" {
+			endpoint += subAgentsDescriptionSeparator + described
+		}
+		rows = append(rows, popupRow{stripEscapes(choice.Name), endpoint})
 	}
 	return append(rows, popupRow{subAgentsAutoLabel, subAgentsAutoDescription})
 }

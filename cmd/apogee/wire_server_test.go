@@ -732,7 +732,10 @@ func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 	// The spec carries the window the display adopted, not a second number: a profile's server is in
 	// no `servers:` list, so it pins nothing of its own and the top-level pin — which survives a move
 	// — is what the engine budgets against on the other side of it.
-	wantSpec := apogee.UpstreamSpec{Endpoint: "http://127.0.0.1:9090", APIKey: "llamacpp-key", MaxContextTokens: 16384}
+	wantSpec := apogee.UpstreamSpec{
+		Endpoint: "http://127.0.0.1:9090", APIKey: "llamacpp-key",
+		ServerName: "there", MaxContextTokens: 16384,
+	}
 	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
 		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v] — the key is the launcher config's own",
 			agent.specs, wantSpec)
@@ -934,7 +937,10 @@ func TestLoadProfileCrossAddressDialsTheLoopback(t *testing.T) {
 	if switched != want {
 		t.Errorf("the committed move = %+v; want %+v", switched, want)
 	}
-	wantSpec := apogee.UpstreamSpec{Endpoint: dial, APIKey: "llamacpp-key", MaxContextTokens: 16384}
+	wantSpec := apogee.UpstreamSpec{
+		Endpoint: dial, APIKey: "llamacpp-key",
+		ServerName: "there", MaxContextTokens: 16384,
+	}
 	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
 		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v]", agent.specs, wantSpec)
 	}
@@ -1467,6 +1473,7 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 
 	wantSpec := apogee.UpstreamSpec{
 		Endpoint: pinned.Endpoint, APIKey: pinned.APIKey,
+		ServerName: pinned.Name, ServerDescription: pinned.Description,
 		MaxContextTokens: 65536, MaxOutputTokens: 8192,
 	}
 	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
@@ -1505,7 +1512,9 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("move onto the unpinned entry: %v", err)
 	}
-	wantSpec = apogee.UpstreamSpec{Endpoint: bare.Endpoint, MaxContextTokens: 16384}
+	wantSpec = apogee.UpstreamSpec{
+		Endpoint: bare.Endpoint, ServerName: bare.Name, MaxContextTokens: 16384,
+	}
 	if len(agent.specs) != 2 || agent.specs[1] != wantSpec {
 		t.Errorf("SwitchUpstream specs = %+v; want the second to be [%+v] — the retired entry's "+
 			"bounds must not follow", agent.specs, wantSpec)
@@ -1842,6 +1851,65 @@ func TestBindServerResolvesTheWorkingWindow(t *testing.T) {
 			if handed.Context.WorkingWindow != tt.want {
 				t.Errorf("Config.Context.WorkingWindow = %d; want %d — the room this session's very "+
 					"first Turn budgets inside", handed.Context.WorkingWindow, tt.want)
+			}
+		})
+	}
+}
+
+// The orientation block names the SESSION seat by the entry the session is bound to when the model
+// is offered a seat to choose (ADR 0069), and those two strings ride the Config the Agent is
+// constructed from rather than a push afterwards: a session that starts on a described entry must be
+// able to say what this box is from its very first Turn, and the entry is in hand exactly here.
+//
+// An entry that describes nothing carries an empty description, which the block reads as a seat with
+// a name and no words — never as a reason to name no seat.
+func TestBindServerCarriesTheEntrysOwnWords(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry config.ServerEntry
+	}{
+		{
+			name: "a described entry",
+			entry: config.ServerEntry{
+				Name: "workstation", Endpoint: "http://127.0.0.1:1111",
+				Description: "the big box upstairs — 120B, slow and thorough",
+			},
+		},
+		{
+			name:  "an entry nobody described",
+			entry: config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			engine := newLateEngine(apogee.ModeAskBefore, true)
+			t.Cleanup(func() { _ = engine.Close() })
+			var handed apogee.Config
+			binder := serverBinder{
+				cfg:    validCfg(t),
+				engine: engine,
+				holder: newUpstreamHolder(),
+				caps:   newParallelAgentsCap(engine),
+				keys:   config.NewKeyResolver(""),
+				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+					handed = cfg
+					return buildAgent(cfg, resumed)
+				},
+			}
+			if err := binder.bind(tt.entry); err != nil {
+				t.Fatalf("bind: %v", err)
+			}
+
+			if handed.ServerName != tt.entry.Name {
+				t.Errorf("Config.ServerName = %q; want the entry's own name %q",
+					handed.ServerName, tt.entry.Name)
+			}
+			if handed.ServerDescription != tt.entry.Description {
+				t.Errorf("Config.ServerDescription = %q; want the entry's own %q",
+					handed.ServerDescription, tt.entry.Description)
 			}
 		})
 	}

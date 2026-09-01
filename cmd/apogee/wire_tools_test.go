@@ -23,7 +23,7 @@ func TestRegistryWithMCPThreadsPresenter(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.Presenter = stubPresenter{}
 
-	if _, ok := registryWithMCP(t.TempDir(), cfg, nil).Lookup("present_document"); !ok {
+	if _, ok := registryWithMCP(t.TempDir(), cfg, false, nil).Lookup("present_document"); !ok {
 		t.Error("present_document is missing from the MCP registry build despite a configured Presenter")
 	}
 }
@@ -41,7 +41,7 @@ func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.ExtraReadRoots = func() []string { return []string{extra} }
 
-	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, nil).Lookup("read_file")
+	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("read_file")
 	if !ok {
 		t.Fatal("read_file is missing from the MCP registry build")
 	}
@@ -72,7 +72,7 @@ func TestRegistryWithMCPThreadsVirtualReadRoots(t *testing.T) {
 	if !ok {
 		t.Fatal("the shipped debugging skill did not load")
 	}
-	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, nil).Lookup("list_dir")
+	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("list_dir")
 	if !found {
 		t.Fatal("list_dir is missing from the MCP registry build")
 	}
@@ -100,7 +100,7 @@ func TestRegistryWithMCPThreadsSkillLookup(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.SkillLookup = provider
 
-	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, nil).Lookup("load_skill")
+	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("load_skill")
 	if !found {
 		t.Fatal("load_skill is missing from the MCP registry build")
 	}
@@ -131,7 +131,7 @@ func TestRegistryWithMCPThreadsURLSafetyHosts(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.URLDenyHosts = []string{"Blocked.EXAMPLE."}
 
-	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, nil).Lookup("web_fetch")
+	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("web_fetch")
 	if !ok {
 		t.Fatal("web_fetch is missing from the MCP registry build")
 	}
@@ -163,7 +163,7 @@ func TestRegistryWithMCPHonoursDisabledTools(t *testing.T) {
 	cfg.DisabledTools = []string{"view_diff", "python_exec"}
 	mcpTool := mcpFixtureTool{name: "docs__search"}
 
-	registry := registryWithMCP(t.TempDir(), cfg, []apogee.Tool{mcpTool})
+	registry := registryWithMCP(t.TempDir(), cfg, false, []apogee.Tool{mcpTool})
 
 	for _, name := range []string{"view_diff", "python_exec"} {
 		if _, ok := registry.Lookup(name); ok {
@@ -236,7 +236,7 @@ func TestRegistryWithMCPWalksTheRosterLadder(t *testing.T) {
 			cfg.EnabledTools = tt.enabled
 			cfg.Profile.Tools = tt.profile
 
-			registry := registryWithMCP(t.TempDir(), cfg, []apogee.Tool{mcpFixtureTool{name: "docs__search"}})
+			registry := registryWithMCP(t.TempDir(), cfg, false, []apogee.Tool{mcpFixtureTool{name: "docs__search"}})
 
 			for _, name := range append(tt.wantOn, "docs__search") {
 				assertRegistryOffers(t, registry, name, true)
@@ -245,7 +245,7 @@ func TestRegistryWithMCPWalksTheRosterLadder(t *testing.T) {
 				assertRegistryOffers(t, registry, name, false)
 			}
 			if len(tt.wantOff) == 0 {
-				if got, want := len(registry.All()), len(registryWithMCP(t.TempDir(), validCfg(t), nil).All())+1; got != want {
+				if got, want := len(registry.All()), len(registryWithMCP(t.TempDir(), validCfg(t), false, nil).All())+1; got != want {
 					t.Errorf("the roster left %d tools, want %d — the lift subtracted something", got, want)
 				}
 			}
@@ -291,4 +291,29 @@ func TestMechanismIDsConstructsUnderBypass(t *testing.T) {
 		t.Fatalf("New with an enabled Mechanism under Bypass: %v", err)
 	}
 	t.Cleanup(func() { _ = agent.Close() })
+}
+
+// The `sub-agents-choice:` gate reaches this hand-assembly through the tool SET's own spec rather
+// than through apogee.Config (the engine reads no config of its own, ADR 0031), so registryWithMCP is
+// the one place that could drop it — and dropping it would leave the key inert in every session while
+// the config layer went on accepting it.
+//
+// The gate changes exactly ONE thing: whether sub_agent published `run_on`. The ROSTER is the same
+// either way — same tools, same count — which is what makes a session with the key absent byte-for-
+// byte the session that ran before the key existed.
+func TestRegistryWithMCPCarriesTheSeatChoiceGate(t *testing.T) {
+	t.Parallel()
+
+	plain := registryWithMCP(t.TempDir(), validCfg(t), false, nil)
+	offered := registryWithMCP(t.TempDir(), validCfg(t), true, nil)
+
+	if seatChoiceOffered(t, plain) {
+		t.Error("the gate off still published run_on; a session under `fixed` must offer no seat")
+	}
+	if !seatChoiceOffered(t, offered) {
+		t.Error("the gate on published no run_on; `model` is the whole of what offers the seat")
+	}
+	if got, want := len(plain.All()), len(offered.All()); got != want {
+		t.Errorf("the gate moved the roster: %d tools off, %d on — it may only move a schema", got, want)
+	}
 }

@@ -572,16 +572,26 @@ func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
 	}
 }
 
-// `sub-agents-choice` is that third shape once more: a gate with no engine seam and no
-// re-resolution, whose whole apply is a store on the live holder — what it decides is settled when
-// the tool roster is next built, which is why the row carries a boundary note where the toggle above
-// carries none. The reset spelling (an empty value) is the key left out, and resolves to the same
-// `fixed` an absent key does rather than to an empty gate nothing could read.
-func TestApplySettingSubAgentsChoiceRecordsTheSeatGate(t *testing.T) {
+// `sub-agents-choice` is the SWAP DOOR's class rather than the holder's: what the gate decides is
+// which schema sub_agent publishes, and that is settled when the tool is CONSTRUCTED — so committing
+// the key rebuilds the set and hands it to the engine (SwapTools, ADR 0037 binding F) and the row
+// carries `tools.disabled`'s boundary note. The holder records the word beside it, because a Firing
+// composed out of this session is armed from the file's spelling rather than from the tool's bool.
+// The reset spelling (an empty value) is the key left out, and resolves to the same `fixed` an absent
+// key does rather than to an empty gate nothing could read.
+func TestApplySettingSubAgentsChoiceSwapsTheSeatGate(t *testing.T) {
 	t.Parallel()
+	workspace := t.TempDir()
+	var built []bool
 	spy := &applySettingSpy{}
 	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed}, nil)
-	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+	set := newLiveTools(tools.NewDefaultRegistry(workspace), toolSetSpec{},
+		func(spec toolSetSpec) *apogee.ToolRegistry {
+			built = append(built, spec.seatChoice)
+			return tools.NewDefaultRegistryWithHost(workspace,
+				tools.HostTools{SubAgentSeatChoice: spec.seatChoice})
+		})
+	apply := applySettingFor(settingsApplier{engine: spy, live: live, tools: set})
 
 	note, err := apply("sub-agents-choice", "model")
 	if err != nil {
@@ -593,20 +603,30 @@ func TestApplySettingSubAgentsChoiceRecordsTheSeatGate(t *testing.T) {
 	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceModel {
 		t.Errorf("the holder reads %q, want %q", got, config.SubAgentsChoiceModel)
 	}
-	if spy.drove() != 0 {
-		t.Errorf("applying sub-agents-choice drove an engine seam: %+v", spy)
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want 1: which schema sub_agent publishes is a set-level change",
+			len(spy.swaps))
+	}
+	if !seatChoiceOffered(t, spy.swaps[0]) {
+		t.Error("the swapped-in registry's sub_agent publishes no run_on; `model` is what offers it")
 	}
 
 	// And back, since a gate that could only be opened would leave the model choosing seats the human
-	// has just taken the choice away from.
+	// has just taken the choice away from — and the way back is the same door, so the roster the
+	// engine is handed goes back to the plain variant with it.
 	if _, err := apply("sub-agents-choice", "fixed"); err != nil {
 		t.Fatalf("apply sub-agents-choice back to fixed: %v", err)
 	}
 	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceFixed {
 		t.Errorf("the holder reads %q after the second apply, want %q", got, config.SubAgentsChoiceFixed)
 	}
+	if len(spy.swaps) != 2 || seatChoiceOffered(t, spy.swaps[1]) {
+		t.Error("closing the gate did not swap back to the plain sub_agent")
+	}
 
-	// The reset: no value at all is the key removed from the file, which is `fixed`.
+	// The reset: no value at all is the key removed from the file, which is `fixed` — and `fixed`
+	// builds the plain tool, so an empty value can never leave the model holding an argument the
+	// engine will not read.
 	if _, err := apply("sub-agents-choice", "model"); err != nil {
 		t.Fatalf("apply sub-agents-choice: %v", err)
 	}
@@ -616,22 +636,74 @@ func TestApplySettingSubAgentsChoiceRecordsTheSeatGate(t *testing.T) {
 	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceFixed {
 		t.Errorf("the reset left the holder on %q, want %q", got, config.SubAgentsChoiceFixed)
 	}
+	if want := []bool{true, false, true, false}; !slices.Equal(built, want) {
+		t.Fatalf("rebuilds = %v, want %v — every commit builds the set the gate describes", built, want)
+	}
+	if len(spy.swaps) != 4 || seatChoiceOffered(t, spy.swaps[3]) {
+		t.Error("the reset did not swap back to the plain sub_agent")
+	}
 
 	// The vocabulary is the registry's, enforced at the write; the dispatcher refuses anything else
-	// rather than storing a reading of its own, and leaves the gate where it was.
+	// rather than storing a reading of its own, and leaves the gate — and the set — where it was.
 	if _, err := apply("sub-agents-choice", "banana"); err == nil {
 		t.Error("apply sub-agents-choice=banana was accepted; the key takes fixed or model")
 	}
 	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceFixed {
 		t.Errorf("a refused value moved the gate to %q", got)
 	}
+	if len(spy.swaps) != 4 {
+		t.Errorf("a refused value swapped the tool set: swaps = %d, want 4", len(spy.swaps))
+	}
+}
+
+// SwapTools is idle-only, so the gate is refusable mid-run exactly as `tools.disabled` is. The
+// refusal is REPORTED over a value the file already carries (binding A), the session keeps the set it
+// had, and — the half only this key has — the HOLDER keeps the word it had too, so a Firing raised
+// after the refusal is armed with the gate the session is actually running rather than one it was
+// refused.
+func TestApplySettingSubAgentsChoiceSwapRefusalKeepsTheGate(t *testing.T) {
+	t.Parallel()
+	old := apogee.NewToolRegistry()
+	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
+	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed}, nil)
+	set := newLiveTools(old, toolSetSpec{}, func(spec toolSetSpec) *apogee.ToolRegistry {
+		return tools.NewDefaultRegistryWithHost(t.TempDir(),
+			tools.HostTools{SubAgentSeatChoice: spec.seatChoice})
+	})
+	apply := applySettingFor(settingsApplier{engine: spy, live: live, tools: set})
+
+	if _, err := apply("sub-agents-choice", "model"); err == nil {
+		t.Fatal("apply sub-agents-choice: want the engine's refusal, got none")
+	}
+	if set.current != old {
+		t.Error("a refused swap still became the live set; the session must keep the tools it had")
+	}
+	if got := live.options().SubAgentsChoice; got != config.SubAgentsChoiceFixed {
+		t.Errorf("the holder reads %q after a refused swap, want the gate it was on (%q)",
+			got, config.SubAgentsChoiceFixed)
+	}
+}
+
+// seatChoiceOffered reports whether the sub_agent tool in registry published the `run_on` argument —
+// the one observable difference between the two variants the gate picks between (ADR 0069).
+func seatChoiceOffered(t *testing.T, registry *apogee.ToolRegistry) bool {
+	t.Helper()
+	found, ok := registry.Lookup("sub_agent")
+	if !ok {
+		t.Fatal("the registry holds no sub_agent tool")
+	}
+	sub, ok := found.(*tools.SubAgent)
+	if !ok {
+		t.Fatalf("sub_agent is a %T, want *tools.SubAgent", found)
+	}
+	return sub.OffersSeatChoice()
 }
 
 // The holder is the session's live configuration, not just its exception list: a Firing raised
 // inside the session composes its whole Config from options(), so every key a `/settings` commit
 // applies has to be visible there (ADR 0037's promise carried into the runs a session raises).
-// The ten keys below are the ones whose apply moves something OUTSIDE the holder — the tool set's
-// four, the engine's two toggles, the start-up-only inspector, the context-file pair and the
+// The eleven keys below are the ones whose apply moves something OUTSIDE the holder — the tool set's
+// five, the engine's two toggles, the start-up-only inspector, the context-file pair and the
 // `servers:` list an unattended run's secret-env union is read off — which is exactly the set that
 // used to leave the projection describing the launch snapshot.
 //
@@ -640,10 +712,11 @@ func TestApplySettingSubAgentsChoiceRecordsTheSeatGate(t *testing.T) {
 func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 	t.Parallel()
 
-	// The boot snapshot every case starts from, with each of the ten keys set to something its edit
+	// The boot snapshot every case starts from, with each of the eleven keys set to something its edit
 	// moves OFF: a value that came back unchanged would be the launch snapshot showing through rather
 	// than the apply landing.
 	boot := config.Options{
+		SubAgentsChoice:    config.SubAgentsChoiceFixed,
 		WebSearchEndpoint:  "https://boot.example.com/s",
 		ToolsDisabled:      []string{"python_exec"},
 		URLAllowHosts:      []string{"boot.example.com"},
@@ -672,6 +745,15 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				t.Helper()
 				if got := opts.WebSearchEndpoint; got != "https://moved.example.com/s" {
 					t.Errorf("WebSearchEndpoint = %q, want the endpoint the session moved to", got)
+				}
+			},
+		},
+		{
+			name: "sub-agents-choice", key: "sub-agents-choice", value: "model",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.SubAgentsChoice; got != config.SubAgentsChoiceModel {
+					t.Errorf("SubAgentsChoice = %q, want the gate the session moved to", got)
 				}
 			},
 		},
@@ -784,6 +866,7 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				disabled:   boot.ToolsDisabled,
 				allowHosts: boot.URLAllowHosts,
 				denyHosts:  boot.URLDenyHosts,
+				seatChoice: boot.SubAgentsChoice == config.SubAgentsChoiceModel,
 			}, func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
 			apply := applySettingFor(settingsApplier{
 				engine: &applySettingSpy{}, live: live, tools: set, configPath: path,

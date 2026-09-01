@@ -59,10 +59,10 @@ func startupEntry(opts config.Options) config.ServerEntry {
 // runs within seconds, for a late bind exactly as it does for the cold start a launch-time bind
 // with no model already is.
 type serverBinder struct {
-	// cfg is everything about the session the server does not decide. The eight fields it does —
-	// endpoint, key, model hint, fan-out width, reply cap, context window, working window, reply
-	// share — are overwritten from the entry, so nothing that reached this struct can contradict the
-	// server being bound.
+	// cfg is everything about the session the server does not decide. The ten fields it does —
+	// endpoint, key, model hint, the entry's own name and description, fan-out width, reply cap,
+	// context window, working window, reply share — are overwritten from the entry, so nothing that
+	// reached this struct can contradict the server being bound.
 	cfg     apogee.Config
 	resumed *session.Record
 	engine  *lateEngine
@@ -109,6 +109,12 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	cfg.Endpoint = entry.Endpoint
 	cfg.Model = entry.Model
 	cfg.APIKey = apiKey
+	// The same server in the HUMAN's words, for the orientation block to name the session seat by
+	// when the model is offered a seat to choose (ADR 0069). They ride the Config rather than a
+	// later push for the pins' reason: a session that starts on a described entry must be able to
+	// say what this box is from its very first Turn, and the entry is in hand exactly here.
+	cfg.ServerName = entry.Name
+	cfg.ServerDescription = entry.Description
 	// The fourth field the server decides, and the one that cannot be pushed after the fact here:
 	// the Agent does not exist yet, so the resolved cap goes in through the Config it is built from.
 	// follow's own push at the still-unbound engine is the no-op that says so.

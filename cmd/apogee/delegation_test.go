@@ -22,10 +22,15 @@ import (
 // a test reading these fields after the join reads what that goroutine wrote.
 type delegationSpy struct {
 	pushes []*apogee.DelegationTarget
+	seats  []*apogee.DelegationSeat
 }
 
 func (s *delegationSpy) SetDelegationTarget(target *apogee.DelegationTarget) {
 	s.pushes = append(s.pushes, target)
+}
+
+func (s *delegationSpy) SetDelegationSeat(seat *apogee.DelegationSeat) {
+	s.seats = append(s.seats, seat)
 }
 
 // beatSource is a Sub-agent server's observation written down: the wiring takes its beat as a func
@@ -706,6 +711,11 @@ func (s *gatedDelegationSpy) SetDelegationTarget(target *apogee.DelegationTarget
 	defer s.mu.Unlock()
 	s.pushes = append(s.pushes, target)
 }
+
+// SetDelegationSeat is the display half of the seam, and it is deliberately NOT gated: what this spy
+// exists to hold open is a beat's target landing, and a seat push is neither a beat's nor a race
+// against one.
+func (s *gatedDelegationSpy) SetDelegationSeat(*apogee.DelegationSeat) {}
 
 func (s *gatedDelegationSpy) snapshot() []*apogee.DelegationTarget {
 	s.mu.Lock()
@@ -1504,5 +1514,112 @@ func TestDelegationSaysNothingWhenTheTargetNamesADialect(t *testing.T) {
 
 	if len(notices.notes) != 1 || notices.notes[0] != "sub-agents: routing to grunt (cheap-7b)" {
 		t.Errorf("notices = %q; want the routing line alone for a server that names its dialect", notices.notes)
+	}
+}
+
+// The MODEL is offered a seat to choose between (ADR 0069), and a choice between two opaque labels
+// is a coin toss: the far seat's display facts — the entry's name, its `description:` and its
+// `model:` PIN — are pushed at the engine wherever this session's Sub-agent server is decided, which
+// is the composition, a `servers:` re-read and a `/sub-agents-server` pick, and nowhere else.
+//
+// Nothing here is a beat. These facts move only where the HUMAN moves the key, which is what keeps
+// the rendered orientation block a per-session constant and the prefix cache with it (ADR 0023 §6) —
+// so the assertions below are all made without a single observation.
+func TestDelegationSeatFactsFollowTheHumanDoors(t *testing.T) {
+	t.Parallel()
+
+	grunt := config.ServerEntry{
+		Name: "grunt", Endpoint: "http://127.0.0.1:2222", Model: "qwen3-4b",
+		Description: "fast local 4B — search and edits",
+	}
+	cheaper := config.ServerEntry{
+		Name: "cheaper", Endpoint: "http://127.0.0.1:3333",
+		Description: "the box in the cupboard",
+	}
+	entries := []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}, grunt}
+
+	spy := &delegationSpy{}
+	wiring, err := newDelegationWiring(
+		"grunt", staticServerList(entries), validCfg(t), spy, noProfiles, nil, config.NewKeyResolver(""))
+	if err != nil {
+		t.Fatalf("newDelegationWiring: %v", err)
+	}
+	want := &apogee.DelegationSeat{
+		Name: "grunt", Description: "fast local 4B — search and edits", Model: "qwen3-4b",
+	}
+	if len(spy.seats) != 1 || !reflect.DeepEqual(spy.seats[0], want) {
+		t.Fatalf("seats at construction = %+v; want exactly [%+v]", spy.seats, want)
+	}
+
+	// A re-read that re-points the key describes another box, so the seat follows the entry.
+	if err := wiring.relist("cheaper", []config.ServerEntry{grunt, cheaper}); err != nil {
+		t.Fatalf("relist re-pointing the key: %v", err)
+	}
+	moved := &apogee.DelegationSeat{Name: "cheaper", Description: "the box in the cupboard"}
+	if len(spy.seats) != 2 || !reflect.DeepEqual(spy.seats[1], moved) {
+		t.Fatalf("seats after the re-point = %+v; want the cheaper entry's own facts", spy.seats)
+	}
+
+	// And the `/sub-agents-server` pick moves it back, on the seam a human reaches directly.
+	if err := wiring.Retarget("grunt"); err != nil {
+		t.Fatalf("Retarget: %v", err)
+	}
+	if len(spy.seats) != 3 || !reflect.DeepEqual(spy.seats[2], want) {
+		t.Fatalf("seats after the pick = %+v; want the picked entry's facts", spy.seats)
+	}
+
+	// The opt-out leaves nothing to describe, so the block is told there is only the session seat.
+	if err := wiring.Retarget(""); err != nil {
+		t.Fatalf("Retarget to the opt-out: %v", err)
+	}
+	if len(spy.seats) != 4 || spy.seats[3] != nil {
+		t.Fatalf("seats after the opt-out = %+v; want a nil seat", spy.seats)
+	}
+}
+
+// The two ways a session has no far seat at all — the key unset, and a key naming an entry the list
+// does not carry — install nothing rather than a seat with a name and no box behind it. The second is
+// the interesting one: the wiring keeps the NAME (it is what the missing-name notice says out loud),
+// and a seat rendered from it would have the orientation block offer the model a server this session
+// cannot reach.
+func TestDelegationSeatIsNilWithoutAnEntryToDescribe(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}}
+
+	unset := &delegationSpy{}
+	if _, err := newDelegationWiring(
+		"", staticServerList(entries), validCfg(t), unset, noProfiles, nil, config.NewKeyResolver("")); err != nil {
+		t.Fatalf("newDelegationWiring with no key: %v", err)
+	}
+	if len(unset.seats) != 1 || unset.seats[0] != nil {
+		t.Errorf("seats with the key unset = %+v; want exactly one nil", unset.seats)
+	}
+
+	stale := &delegationSpy{}
+	wiring, err := newDelegationWiring(
+		"grunt", staticServerList(entries), validCfg(t), stale, noProfiles, nil, config.NewKeyResolver(""))
+	if err != nil {
+		t.Fatalf("newDelegationWiring with a stale name: %v", err)
+	}
+	if len(stale.seats) != 1 || stale.seats[0] != nil {
+		t.Errorf("seats for a name no entry carries = %+v; want exactly one nil", stale.seats)
+	}
+	if wiring.target != "grunt" {
+		t.Errorf("target = %q; want the stale name still held — the seat is nil, not the key", wiring.target)
+	}
+
+	// And a name that goes missing in a re-read clears the seat it had.
+	if err := wiring.relist("grunt", []config.ServerEntry{
+		{Name: "here", Endpoint: "http://127.0.0.1:1111"},
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222", Description: "briefly real"},
+	}); err != nil {
+		t.Fatalf("relist adding the named entry: %v", err)
+	}
+	if err := wiring.relist("grunt", entries); err != nil {
+		t.Fatalf("relist dropping the named entry: %v", err)
+	}
+	if len(stale.seats) != 3 || stale.seats[2] != nil {
+		t.Fatalf("seats = %+v; want the third push to be nil — the entry is gone", stale.seats)
 	}
 }

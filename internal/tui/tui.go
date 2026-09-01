@@ -1311,6 +1311,11 @@ type RebindResult struct {
 type ServerChoice struct {
 	Name     string // the row's label, the switch argument, the footer alias, and the row's identity
 	Endpoint string // the server's base URL, shown beside the name; display only, never identity
+	// Description is the entry's free-text `description:` — the human's own words for what the box
+	// is FOR (ADR 0069), empty when they wrote none. Only the `/sub-agents-server` picker shows it,
+	// because that is the pane where the choice is between two boxes rather than between a box and
+	// the one you are already on; `/server`'s rows are unchanged by it.
+	Description string
 }
 
 // ServerSwitchResult is what the display adopts once a switch has committed: the endpoint now on

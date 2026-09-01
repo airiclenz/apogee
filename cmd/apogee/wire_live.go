@@ -111,24 +111,33 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// set through Agent.SwapTools when the SET has to change. Neither is reachable through a
 	// registry the engine built privately, and with no MCP server configured the two builds are the
 	// same tools in the same order, so this changes what the root HOLDS, never what the Agent runs.
-	w.cfg.Tools = registryWithMCP(w.roots.workspace, w.cfg, w.mcpSet.tools())
+	// Whether the delegation tool offers the model a seat to name (ADR 0069). It is resolved once,
+	// here, because the set the session STARTS on and the spec a later rebuild carries forward must
+	// be the same reading of the key — the gate is a `sub-agents-choice:` word and the tool takes a
+	// bool, and two places translating it is two places one of them can be wrong.
+	seatChoice := w.opts.SubAgentsChoice == config.SubAgentsChoiceModel
+	w.cfg.Tools = registryWithMCP(w.roots.workspace, w.cfg, seatChoice, w.mcpSet.tools())
 	// What the set the session runs was BUILT from — the values a later rebuild has to carry rather
 	// than take from this snapshot again. The url-safety host lists ride it beside the endpoint and
 	// the roster because the guard is built WITH the set (registryWithMCP hands one URLGuard to every
 	// network tool), so an edit of either list is a rebuild rather than a write on a tool. The bound
 	// model's roster axis rides it for the same reason: a model switch re-composes the set under the
 	// profile it lands on (ADR 0057 decision 7), and the rebuild that does it must carry the axis
-	// forward, not the one the process launched under.
+	// forward, not the one the process launched under. And the `sub-agents-choice:` gate rides it for
+	// that same reason once more: which schema sub_agent publishes is settled at construction, so a
+	// rebuild driven by anything else must carry the gate the session is on rather than the launch's.
 	built := toolSetSpec{
 		endpoint:   w.cfg.WebSearchEndpoint,
 		disabled:   w.opts.ToolsDisabled,
 		roster:     w.cfg.Profile.Tools,
 		allowHosts: w.cfg.URLAllowHosts,
 		denyHosts:  w.cfg.URLDenyHosts,
+		seatChoice: seatChoice,
 	}
 	w.toolSet = newLiveTools(w.cfg.Tools, built, func(spec toolSetSpec) *apogee.ToolRegistry {
 		// The set as this session would have built it with another search endpoint, another roster,
-		// another model's profile axis and another pair of url-safety host lists: the MCP tools are
+		// another model's profile axis, another pair of url-safety host lists and the other
+		// `sub-agents-choice:` gate: the MCP tools are
 		// re-folded from the holder rather than remembered, so a rebuild always carries the
 		// connections that are live NOW.
 		host := w.cfg
@@ -137,7 +146,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		host.Profile.Tools = spec.roster
 		host.URLAllowHosts = spec.allowHosts
 		host.URLDenyHosts = spec.denyHosts
-		return registryWithMCP(w.roots.workspace, host, w.mcpSet.tools())
+		return registryWithMCP(w.roots.workspace, host, spec.seatChoice, w.mcpSet.tools())
 	})
 
 	// Resolve the catalogued Mechanisms enabled in config.yaml to the sorted ID list the engine arms

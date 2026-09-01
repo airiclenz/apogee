@@ -72,6 +72,14 @@ type toolSetSpec struct {
 	// at construction and none of them has a setter for it, so moving a list means building again.
 	allowHosts []string
 	denyHosts  []string
+
+	// seatChoice is the `sub-agents-choice:` gate as the set was built under it: true ⇒ the set's
+	// sub_agent tool publishes the `run_on` Delegation seat (ADR 0069), false ⇒ the plain variant
+	// whose schema is the one that shipped before the key existed. It belongs to the SET for the
+	// roster's reason rather than the endpoint's: which SCHEMA a tool publishes is settled at
+	// construction (tools.HostTools.SubAgentSeatChoice) and no tool exposes a setter for it, so
+	// moving the gate means building again.
+	seatChoice bool
 }
 
 // newLiveTools holds the registry the session was constructed with, the spec it was built from, and
@@ -149,6 +157,17 @@ func (t *liveTools) setDenyHosts(hosts []string, engine settingsEngine) error {
 	return t.rebuildWith(spec, engine)
 }
 
+// setSeatChoice moves the session onto the other `sub-agents-choice:` gate — whether the model is
+// offered `run_on` on sub_agent at all (ADR 0069). It is the swap door for setDisabled's reason
+// rather than a write on a tool: the gate decides which SCHEMA sub_agent publishes, which is settled
+// when the tool is constructed, so the set is built again under the new gate and handed to the
+// engine whole. Being idle-only, SwapTools can refuse mid-run, and then nothing has moved.
+func (t *liveTools) setSeatChoice(on bool, engine settingsEngine) error {
+	spec := t.built()
+	spec.seatChoice = on
+	return t.rebuildWith(spec, engine)
+}
+
 // rebuild reassembles the whole set as this session would assemble it NOW and hands it to the engine
 // — the door a change to the tool SET itself goes through when the change is not about any one tool's
 // configuration (ADR 0037 binding F). Today that is one caller: a reconnect to another set of MCP
@@ -211,7 +230,14 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // only, which is the half it names: an MCP server's tools come and go with the server, so the way
 // to stop offering them is to stop connecting it (`mcp-servers:`) rather than to list every tool it
 // happens to advertise.
-func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool) *apogee.ToolRegistry {
+//
+// seatChoice arrives as its own argument rather than on cfg because it is not the ENGINE's to know:
+// `sub-agents-choice:` shapes the schema this root publishes, and apogee.Config carries no field for
+// it (ADR 0031 — the engine reads no config of its own). It travels with the tool SET instead, off
+// the spec the live holder rebuilds from (toolSetSpec.seatChoice), so a rebuild driven by something
+// else entirely — a reconnect, a model switch — carries the gate this session is actually on.
+func registryWithMCP(workspace string, cfg apogee.Config, seatChoice bool,
+	mcpTools []apogee.Tool) *apogee.ToolRegistry {
 	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{
 		// The `url-safety:` host layer, off the same Config the engine would have read it from and
 		// through the same constructor — this hand-assembly must not be the one path on which a
@@ -247,6 +273,11 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 		// same Config for the same reason: an MCP session must not be the one place a shipped
 		// skill's announced files: line names a folder the read tools refuse.
 		VirtualReadRoots: cfg.VirtualReadRoots,
+		// And whether sub_agent publishes the `run_on` Delegation seat (ADR 0069) — the
+		// `sub-agents-choice:` gate, which reaches the engine's own build through nothing at all, so
+		// this hand-assembly must not be the one path on which connecting an MCP server takes the
+		// seat choice away from the model.
+		SubAgentSeatChoice: seatChoice,
 	})
 	for _, t := range mcpTools {
 		if err := registry.Register(t); err != nil {

@@ -87,6 +87,15 @@ type lateEngine struct {
 	// usable was ever resolved — which is also what a cleared target leaves behind, and both mean the
 	// same thing to a bind: latch nothing, delegations run on the session's own Upstream.
 	pendingDelegation *apogee.DelegationTarget
+	// pendingSeat is the last Delegation SEAT pushed while there was no Agent to install it on
+	// (ADR 0069) — what the orientation block tells the model about the Sub-agent server. It is
+	// remembered for pendingDelegation's reason and not quite: the seat is resolved once, at the
+	// composition root's own construction, which on a pre-bound session is long before any engine
+	// exists — so a bind with no memory of it would render a Delegations line naming only the session
+	// seat for the whole session, with no beat and no human door coming along to correct it. nil
+	// means no seat was ever installed, which is also what a cleared one leaves behind, and both mean
+	// the same to a bind: name only the session seat.
+	pendingSeat *apogee.DelegationSeat
 
 	// pendingScratch is the last session scratch dir pushed while there was no Agent to carry it
 	// (SetScratchDir): a /clear before a server is picked mints a new session id, and its scratch
@@ -157,6 +166,9 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	}
 	if t := e.pendingDelegation; t != nil {
 		agent.SetDelegationTarget(t)
+	}
+	if s := e.pendingSeat; s != nil {
+		agent.SetDelegationSeat(s)
 	}
 	if s := e.pendingScratch; s != nil {
 		agent.SetScratchDir(*s)
@@ -385,6 +397,24 @@ func (e *lateEngine) SetDelegationTarget(target *apogee.DelegationTarget) {
 	e.mu.Unlock()
 	if agent != nil {
 		agent.SetDelegationTarget(target)
+	}
+}
+
+// SetDelegationSeat installs what the orientation block tells the model about the Sub-agent server,
+// or clears it with nil (ADR 0069). It is the anytime-safe class SetDelegationTarget above belongs
+// to — the engine seam takes one lock and is never idle-gated, because it changes nothing about a
+// running Step, only what the NEXT request renders.
+//
+// It is REMEMBERED while unbound for that target's reason, and more sharply: the seat is resolved by
+// the composition root at ITS construction, which on a pre-bound session happens before any engine
+// exists — and unlike a target, nothing beats on it afterwards to state it again.
+func (e *lateEngine) SetDelegationSeat(seat *apogee.DelegationSeat) {
+	e.mu.Lock()
+	e.pendingSeat = seat
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetDelegationSeat(seat)
 	}
 }
 

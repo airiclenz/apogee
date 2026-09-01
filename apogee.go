@@ -82,6 +82,15 @@ type UpstreamSpec = agent.UpstreamSpec
 // delegations fall back to this session's own Upstream. See internal/agent for the contract.
 type DelegationTarget = agent.DelegationTarget
 
+// DelegationSeat carries what the model is TOLD about the Sub-agent server when it is offered the
+// `run_on` choice — the `servers:` entry's name, its free-text `description:` and its `model:` pin
+// (ADR 0069). The host resolves it whole from the flagged entry and installs it with
+// Agent.SetDelegationSeat, which is never idle-gated; nil clears it and the orientation block names
+// only the session seat. It is deliberately not the DelegationTarget above: that is a dial fact a
+// heartbeat re-states per beat, this is display prose that moves only where the human moves the key.
+// See internal/agent for the contract.
+type DelegationSeat = agent.DelegationSeat
+
 // ----------------------------------------------------------------------------
 // Construction & autonomy (internal/domain)
 // ----------------------------------------------------------------------------

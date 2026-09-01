@@ -75,12 +75,20 @@ func (h delegationHost) RecordChoice(name string) (bool, error) {
 	return h.w.recordSubAgentsServerChoice(name)
 }
 
-// delegationSetter is the engine mutation a resolved target is pushed through, named as the ONE
-// method it needs so the wiring below is exercisable without constructing an Agent — the
+// delegationSetter is the engine mutation a resolved target is pushed through, named as the two
+// methods it needs so the wiring below is exercisable without constructing an Agent — the
 // upstreamSwitcher / parallelAgentsSetter posture. Satisfied by *lateEngine, and through it by
 // *apogee.Agent.
+//
+// The two are deliberately one interface and deliberately different pushes. SetDelegationTarget is
+// the DIAL fact, re-stated by every beat and cleared the moment the far server stops answering;
+// SetDelegationSeat is the DISPLAY fact the orientation block renders, moved only where the human
+// moves the key, so the standing system message stays a per-session constant (ADR 0069, ADR 0023
+// §6). They travel together because one thing decides both — which `servers:` entry this session
+// delegates to — and splitting the seam would let a retarget move one without the other.
 type delegationSetter interface {
 	SetDelegationTarget(*apogee.DelegationTarget)
+	SetDelegationSeat(*apogee.DelegationSeat)
 }
 
 // subAgentServer is the named `servers:` entry as the wiring holds it: the entry itself — the dial
@@ -244,16 +252,39 @@ func newDelegationWiring(
 		keys:          keys,
 		engine:        engine,
 	}
-	entry, ok := config.SubAgentsServerTarget(entries, name)
-	if !ok {
-		return wiring, nil
+	if entry, ok := config.SubAgentsServerTarget(entries, name); ok {
+		server, err := newSubAgentServer(entry, base)
+		if err != nil {
+			return nil, err
+		}
+		wiring.server = server
 	}
-	server, err := newSubAgentServer(entry, base)
-	if err != nil {
-		return nil, err
-	}
-	wiring.server = server
+	// What the MODEL is told the far seat is (ADR 0069), installed here and not on a beat: these are
+	// the human's own words for the box, so they are known the moment the entry is resolved and they
+	// do not move again until the human moves the key. A name matching nothing installs nil — the
+	// same as no key at all — because there is no entry whose description to relay.
+	engine.SetDelegationSeat(delegationSeatOf(wiring.server))
 	return wiring, nil
+}
+
+// delegationSeatOf renders the installed Sub-agent server as the facts the orientation block names
+// it by — the entry's name, its free-text `description:` and its `model:` PIN — and nil when no
+// entry is installed, which the block reads as "there is only the session seat".
+//
+// The pin is relayed rather than anything a beat observed, deliberately: a pin is a per-session
+// constant a human wrote down, while an observation moves when the far box loads something else, and
+// a standing system message that followed it would churn per beat for a fact the model cannot act on
+// (ADR 0023 §6). Availability is not here for the same reason — an unusable target is reported by
+// the delegation's own result note, never by the standing prompt.
+func delegationSeatOf(server *subAgentServer) *apogee.DelegationSeat {
+	if server == nil {
+		return nil
+	}
+	return &apogee.DelegationSeat{
+		Name:        server.entry.Name,
+		Description: server.entry.Description,
+		Model:       server.entry.Model,
+	}
 }
 
 // missingNameNotice answers the notice a `sub-agents-server:` name earns when the `servers:` list
@@ -594,6 +625,12 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 	d.generation++
 	d.missingNotice = missing
 	d.configured, d.target = name, target
+	// The far seat's display facts follow the entry, because they ARE the entry: a re-pointed key
+	// describes another box, an edited entry may have re-worded its own `description:`, and a name
+	// that went missing has nothing left to describe. It is pushed on this path only — the two early
+	// returns above are the cases where the installed entry did not move, so there is nothing to
+	// restate (ADR 0069: the line moves on the human doors and nowhere else).
+	d.engine.SetDelegationSeat(delegationSeatOf(next))
 	if stale || missing != said {
 		// The state is forgotten rather than reported: a server the file stopped naming is not a
 		// server that became unavailable, and the human reading the notice is the one who just
@@ -670,6 +707,10 @@ func (d *delegationWiring) Retarget(name string) error {
 	d.mu.Lock()
 	d.server, d.target = next, name
 	d.generation++
+	// The seat the model is told about moves WITH the pick, and this is the human door ADR 0069 says
+	// the Delegations line moves on: the description the next request renders is the one belonging to
+	// the entry the delegations now go to, and the opt-out leaves only the session seat named.
+	d.engine.SetDelegationSeat(delegationSeatOf(next))
 	// The name came from this session rather than from the file, so there is no stale-name sentence
 	// to hold: the only name this seam accepts is one the list carries, or none at all.
 	d.missingNotice = ""

@@ -186,19 +186,24 @@ func TestUpstreamChoicesAssembly(t *testing.T) {
 }
 
 // The renderer is handed display and identity only: the per-server key and discovery hint are what
-// the SWITCH needs, so they stop at the composition root.
+// the SWITCH needs, so they stop at the composition root. The entry's free-text `description:` DOES
+// cross, because it is display and nothing else — the words the `/sub-agents-server` pane offers a
+// human choosing between boxes (ADR 0069).
 func TestServerChoicesCarryNoSecrets(t *testing.T) {
 	t.Parallel()
 
 	entries := []config.ServerEntry{
-		{Name: "workstation", Endpoint: "http://local:1111", APIKey: "local-key", Model: "local-model"},
+		{
+			Name: "workstation", Endpoint: "http://local:1111", APIKey: "local-key",
+			Model: "local-model", Description: "the big box upstairs",
+		},
 		{Name: "remote", Endpoint: "http://remote:8080", APIKey: "remote-key", Model: "remote-model"},
 	}
 
 	got := serverChoices(entries)
 
 	want := []tui.ServerChoice{
-		{Name: "workstation", Endpoint: "http://local:1111"},
+		{Name: "workstation", Endpoint: "http://local:1111", Description: "the big box upstairs"},
 		{Name: "remote", Endpoint: "http://remote:8080"},
 	}
 	if len(got) != len(want) {

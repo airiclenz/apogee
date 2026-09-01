@@ -653,7 +653,9 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 // session through liveTools' swap door. It takes the whole spec rather than the one value that
 // moved because that spec IS what the running set was assembled from (liveTools.built), so the
 // overlay and the set cannot end up describing two different edits; the profile roster it also
-// carries is nobody's config key and is dropped here.
+// carries is nobody's config key and is dropped here, and so is the `sub-agents-choice:` gate beside
+// it — that one IS a key, but the spec holds it as a bool and the overlay holds the word the file
+// spells, so it is recorded in its own language by recordSeatChoice.
 //
 // It is called after the door returned, never before: a refused SwapTools leaves the session on the
 // set it already had, and an overlay written ahead of the swap would hand a Firing a roster this
@@ -1018,9 +1020,10 @@ var settingsTable = []settingsEntry{
 	},
 	{
 		key: "sub-agents-choice",
-		// The holder alone: the gate reaches no engine seam and rides no re-resolution — what reads it
-		// is the next roster build, and the holder is where that build asks.
-		reaches: reachesTheHolder,
+		// The swap door, `tools.disabled`'s class: what the gate decides is which SCHEMA sub_agent
+		// publishes, and that is settled when the tool is constructed — so moving it builds the set
+		// again and hands it to the engine (ADR 0037 binding F), rather than writing on a tool.
+		reaches: reachesTheSwapDoor,
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// An empty value is the pane's RESET, and it means what an absent key means: `fixed`, the
 			// seat the `sub-agents-server:` key picks on its own. The parse answers that, so no branch
@@ -1029,7 +1032,13 @@ var settingsTable = []settingsEntry{
 			if err != nil {
 				return "", err
 			}
-			a.live.setSubAgentsChoice(choice)
+			if err := a.tools.setSeatChoice(choice == config.SubAgentsChoiceModel, a.engine); err != nil {
+				return "", err
+			}
+			// AFTER the door returned, for recordToolSet's reason: a refused SwapTools leaves the
+			// session on the set it already had, and a holder written ahead of the swap would hand a
+			// Firing a gate this session never ran.
+			a.recordSeatChoice(choice)
 			return seatChoiceNote, nil
 		},
 	},
@@ -1703,6 +1712,18 @@ func (a settingsApplier) recordToolSet() {
 		return
 	}
 	a.live.setToolSet(a.tools.built())
+}
+
+// recordSeatChoice mirrors the `sub-agents-choice:` gate the swap door has just built the set under.
+// It is recordToolSet's sibling rather than a line inside it because the two speak different
+// languages about one edit: the spec carries the gate as the BOOL the tool takes, while a Firing
+// composed out of this session is armed from the config word, and translating back from the bool
+// would be a second place that decides what `fixed` means.
+func (a settingsApplier) recordSeatChoice(choice config.SubAgentsChoice) {
+	if a.live == nil {
+		return
+	}
+	a.live.setSubAgentsChoice(choice)
 }
 
 // rideTheRebind re-drives the per-model resolution for the model the session is bound to right now.

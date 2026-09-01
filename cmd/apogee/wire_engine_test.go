@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 func TestFriendlyConstructErr(t *testing.T) {
@@ -31,5 +32,49 @@ func TestLateEngineInterjectChildRefusesUnbound(t *testing.T) {
 	err := engine.InterjectChild("call-1", apogee.UserInput{Text: "check the docs too"})
 	if !errors.Is(err, errNoServerBound) {
 		t.Errorf("InterjectChild err = %v; want errNoServerBound", err)
+	}
+}
+
+// The far seat's display facts are resolved by the composition root at ITS construction, which on a
+// pre-bound session happens before any Agent exists (ADR 0036 decision 3) — and unlike a Delegation
+// target, nothing beats on them afterwards to state them again. A bind with no memory of the push
+// would therefore render a Delegations line naming only the session seat for the whole session, with
+// no door left to correct it. So the seat is REMEMBERED and installed at the bind, and a push after
+// the bind goes straight through to the Agent (which is where installing it is pinned —
+// internal/agent's own SetDelegationSeat tests).
+func TestLateEngineRemembersTheDelegationSeatUntilTheBind(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	// A fresh holder carries no seat: the block then names only the session's own server.
+	if engine.pendingSeat != nil {
+		t.Fatalf("a fresh holder already carries a seat: %+v", engine.pendingSeat)
+	}
+
+	seat := &apogee.DelegationSeat{
+		Name: "grunt", Description: "fast local 4B — search and edits", Model: "qwen3-4b",
+	}
+	engine.SetDelegationSeat(seat)
+	if engine.pendingSeat != seat {
+		t.Fatalf("pendingSeat = %+v; want the seat held for the bind", engine.pendingSeat)
+	}
+
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	// And past the bind the door stays open and stays anytime-safe: a `/sub-agents-server` pick moves
+	// the facts on the Agent itself, and the opt-out clears them — remembered as cleared, so a second
+	// holder of this session can never resurrect a seat the human just took away.
+	moved := &apogee.DelegationSeat{Name: "cheaper", Description: "the box in the cupboard"}
+	engine.SetDelegationSeat(moved)
+	if engine.pendingSeat != moved {
+		t.Fatalf("pendingSeat after a bound push = %+v; want the moved seat", engine.pendingSeat)
+	}
+	engine.SetDelegationSeat(nil)
+	if engine.pendingSeat != nil {
+		t.Errorf("pendingSeat after the opt-out = %+v; want nil", engine.pendingSeat)
 	}
 }
