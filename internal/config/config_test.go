@@ -3252,8 +3252,9 @@ system-prompt-layers:
 			},
 		},
 		{
-			// A layer needs no prompt above it: it appends to whatever the ladder settles on, which
-			// with nothing else configured is the embedded default (item 3 resolves that).
+			// A layer needs no prompt above it: the settings carry it alone. Configuring layers is not
+			// configuring a prompt (ADR 0067 §3), so with nothing else set the ladder selects nothing
+			// and the run sends the layers alone — the embedded default never fires behind them.
 			name: "layers alone reach the settings without a configured prompt",
 			configYAML: `system-prompt-layers:
   - file: layers/house.md

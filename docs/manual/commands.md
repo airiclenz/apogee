@@ -256,8 +256,8 @@ writing today's default into it — so the key goes back to following the built-
 instead of being pinned to a copy of it. The default is applied on the same keypress, and the
 row reports it with the same marker: `default *`.
 
-**The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`,
-`validated-sets: alias:`, `system-prompt-models:` and the model profile render as a summary with an
+**The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`, `validated-sets: alias:`,
+`system-prompt-models:`, `system-prompt-layers:` and the model profile render as a summary with an
 `· ⏎ opens $EDITOR` pointer, and that is what `⏎` does — in the editor the
 [four-rung ladder](configuration.md) `editor:` heads, with the cursor on that key's line where the
 editor takes a line argument. A **terminal** editor (`vi`, `vim`, `nvim`, `nano`, `pico`,
