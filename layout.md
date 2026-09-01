@@ -820,9 +820,11 @@ click toggles something, so a row that hides nothing wears none, and a sub-agent
 one however short its
 own report is. A delegation that got **no span at all** (above) wears one too, and wears it inside
 a group exactly as it does standing alone: what its folded row holds back is the prompt it
-carried, which no row of it ever shows, so the click opens onto that prompt. It is granted only
-once the delegation is **over**, the same permission an expand asks for — a member still running
-has no reading to open, so its row stays bare until it ends. The `+N more lines` count is apogee's own word too and is painted as one — the
+carried, which no row of it ever shows, so the click opens onto that prompt. A delegation that
+carried **no prompt at all** — an empty task, or a record replayed from before the text was kept —
+is the exception the same predicate makes: it holds nothing back, so its row wears nothing. It is
+granted only once the delegation is **over**, the same permission an expand asks for — a member
+still running has no reading to open, so its row stays bare until it ends. The `+N more lines` count is apogee's own word too and is painted as one — the
 `tool-marker` role, a warm orange `#E0B080` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for it. It is **no longer a line**: it joins
