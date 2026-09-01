@@ -200,7 +200,14 @@ CONFIGURED entry literally named `auto` still resolves to itself in BOTH forms.
 **Acceptance:** `go test -race -count=1 -run 'TestSubAgentsServer' ./internal/tui/`
 **Commit:** `fix(tui): offer the auto row in the sub-agents-server picker`
 
-## 5. A headless run names a retired `sub-agents: true` flag
+## 5. A headless run names a retired `sub-agents: true` flag — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `ISSUES.md` joins **Files:** — the item's own **Files:** is code-only, while the plan's Closeout has every item remove its own register entry in its own commit. The section's `**Status:**` block stays: its "both-offers" entry (item 6) is still open.
+NOTES (2026-09-01): the headless emission reads the file path through `filepath.Join(roots.config, "config.yaml")` and drops a scan error silently (`err == nil && len(names) > 0`), matching `prepareSubAgentsMigration`'s own "a file the scan stumbles on is silent rather than fatal" rule — a start-up question is never a reason a run fails.
+NOTES (2026-09-01): the wording is pinned whole by `TestSubAgentsFlagNoticeNamesTheEntriesAndTheReplacement` (string equality against the ratified sentence); the headless drive then asserts stderr CONTAINS `subAgentsFlagNotice(path, []string{"cheaper"})`, so it pins emission, the resolved path and the entry name without restating the sentence in a second place where the two could drift apart.
+NOTES (2026-09-01): the headless drive is placed immediately above the file's `The start-up sub-agents-flag migration (ADR 0045)` divider, beside `TestHeadlessNoticesPlaintextKeysAndNeverPrompts` it is modelled on, so the two headless notice tests sit together; the string test is beside `TestPlaintextKeyNoticeNamesTheEntriesAndTheAlternatives` exactly as the item says.
+NOTES (2026-09-01): failure against the pre-item tree confirmed — with the emission removed, `TestHeadlessNoticesTheRetiredSubAgentsFlagAndNeverPrompts` fails with `stderr = "turns: 1 · denied: 0\n"`.
+NOTES (2026-09-01): `docs/manual/` is deliberately untouched — item 22 owns this notice's manual amendment.
 
 **What:** Fixes the residual at `ISSUES.md:54`. Detection and offer are interactive-only
 (`cmd/apogee/keymigrate.go:113`, `cmd/apogee/wire.go:131`, `cmd/apogee/wire_options.go:192`), so a

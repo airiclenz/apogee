@@ -212,6 +212,24 @@ func plaintextKeyNotice(path, reason string, names []string) string {
 		strings.Join(names, ", "), path, reason, path)
 }
 
+// subAgentsFlagNotice is what a headless run says instead of the offer prepareSubAgentsMigration
+// raises: which `servers:` entries still spell ADR 0045's retired `sub-agents: true`, why no offer is
+// coming, and the one edit that replaces the flag. It is the flag half of the same bargain the
+// plaintext key gets — a start-up fact about the human's own file that an unattended run can only
+// report, because the rewrite is a consented edit and there is nobody here to consent.
+//
+// It names the file for plaintextKeyNotice's reason: --config and APOGEE_CONFIG both move it.
+//
+// The wording is deliberately routing-agnostic. A stale flag and a set root `sub-agents-server:` key
+// can stand in the same file, so a notice claiming where delegations run today would be wrong for
+// exactly the configs most likely to carry both.
+func subAgentsFlagNotice(path string, names []string) string {
+	return fmt.Sprintf("apogee: %s still carries the retired sub-agents: true flag in %s, and "+
+		"headless runs never prompt, so apogee cannot offer to migrate it. The flag no longer "+
+		"routes anything — set sub-agents-server: <entry> at the root of the file and drop the flag.",
+		strings.Join(names, ", "), path)
+}
+
 // keyMigrator is the [tui.Options.MigrateKey] seam: the whole move for one entry, reported by the
 // file it rewrote. nil when this run found no store, which is also when no offer was raised.
 func (w *rootWiring) keyMigrator() func(string) (string, error) {

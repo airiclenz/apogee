@@ -278,6 +278,16 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		cmd.PrintErrln(plaintextKeyNotice(filepath.Join(roots.config, "config.yaml"), reasonHeadless, names))
 	}
 
+	// A retired `sub-agents: true` flag is worth the same sentence, and for the same reason: the
+	// migration OFFER is the TUI's (prepareSubAgentsMigration, keymigrate.go), which a headless run
+	// never reaches because it builds no rootWiring — so the flag would sit there routing nothing,
+	// silently, for as long as the config is only ever driven this way. The detection is the same
+	// raw-YAML scan the offer uses, because ServerEntry has no field for the retired key; a file the
+	// scan stumbles on is silent rather than fatal, exactly as it is there.
+	if names, err := config.RetiredSubAgentsEntries(filepath.Join(roots.config, "config.yaml")); err == nil && len(names) > 0 {
+		cmd.PrintErrln(subAgentsFlagNotice(filepath.Join(roots.config, "config.yaml"), names))
+	}
+
 	// The host's real Confiner backend for this OS, and the teardown the Windows token backend
 	// needs to put the disk back (ADR 0020 §2) — the same optional-interface assertion runRoot
 	// makes, for the same reason. It is deferred, which is why every failure below travels as a

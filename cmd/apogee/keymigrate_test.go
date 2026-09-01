@@ -135,6 +135,25 @@ func TestPlaintextKeyNoticeNamesTheEntriesAndTheAlternatives(t *testing.T) {
 	}
 }
 
+// The flag half of the same bargain: the notice names every entry the file still flags, the file
+// this run actually read, and the one edit that replaces the flag. It is pinned whole because the
+// wording is ratified — and because what it must NOT say is as load-bearing as what it does: a stale
+// flag and a set root `sub-agents-server:` key can stand in the same file, so a sentence claiming
+// where delegations run today would be wrong for exactly the configs most likely to carry both.
+func TestSubAgentsFlagNoticeNamesTheEntriesAndTheReplacement(t *testing.T) {
+	t.Parallel()
+
+	notice := subAgentsFlagNotice("/somewhere/else/config.yaml", []string{"cheaper", "spare"})
+
+	want := "apogee: cheaper, spare still carries the retired sub-agents: true flag in " +
+		"/somewhere/else/config.yaml, and headless runs never prompt, so apogee cannot offer to " +
+		"migrate it. The flag no longer routes anything — set sub-agents-server: <entry> at the " +
+		"root of the file and drop the flag."
+	if notice != want {
+		t.Errorf("notice =\n%s\nwant\n%s", notice, want)
+	}
+}
+
 // The move in full, in order: the secret reaches the store while the file still holds the literal,
 // the read-back command is built while it still does, and only afterwards is the entry rewritten —
 // into an ordinary `api-key-cmd:` line the config package validates like any other.
@@ -404,6 +423,48 @@ func TestHeadlessNoticesPlaintextKeysAndNeverPrompts(t *testing.T) {
 		t.Fatalf("read the config: %v", err)
 	}
 	if !strings.Contains(string(data), "api-key: sk-plain-as-day") {
+		t.Errorf("an unattended run edited the config it was only meant to report on:\n%s", data)
+	}
+}
+
+// A headless run is TOLD about a retired sub-agents flag and never asked about one. The offer is a
+// rootWiring's (prepareSubAgentsMigration), and this driver builds none — so without the notice the
+// flag would go on routing nothing, in silence, for as long as the config is only driven this way.
+// The wording itself is pinned by TestSubAgentsFlagNoticeNamesTheEntriesAndTheReplacement; what is
+// asserted here is that the sentence reaches stderr naming the entry and the file this run read,
+// leaves the answer alone, and edits nothing.
+func TestHeadlessNoticesTheRetiredSubAgentsFlagAndNeverPrompts(t *testing.T) {
+	stub := &stubRunner{res: run.Result{FinalText: "ok", Turns: 1}}
+	prev := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prev })
+	t.Setenv(config.EnvMode, "")
+
+	home := testConfigHome(t, subAgentsFlagYAML)
+	path := filepath.Join(home, "config.yaml")
+
+	cmd := newHeadlessCommand()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", home, "--workspace", t.TempDir(), "--no-save", "hi"})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("headless: %v\n%s", err, errOut.String())
+	}
+
+	if got := errOut.String(); !strings.Contains(got, subAgentsFlagNotice(path, []string{"cheaper"})) {
+		t.Errorf("stderr = %q; want the retired-flag notice for %q", got, path)
+	}
+	if strings.Contains(out.String(), "cheaper") {
+		t.Errorf("the notice contaminated the answer: %q", out.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the config: %v", err)
+	}
+	if string(data) != subAgentsFlagYAML {
 		t.Errorf("an unattended run edited the config it was only meant to report on:\n%s", data)
 	}
 }

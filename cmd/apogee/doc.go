@@ -88,7 +88,8 @@
 // offer one — and the consented move itself: store write, read-back through the very
 // command about to be persisted, then the entry rewrite; and the second start-up offer
 // beside it, for a `servers:` entry still carrying ADR 0045's retired `sub-agents: true`
-// flag — the raw-YAML detection, and the rewrite-then-retarget the answer runs;
+// flag — the raw-YAML detection, the rewrite-then-retarget the answer runs, and the notice
+// a headless run prints on stderr in place of the offer it never reaches;
 // launcher.go the only file
 // importing the llama-launcher facade, kept behind
 // the nil-degrading [tui.LauncherHost] the seven launcher acts cross to the renderer as

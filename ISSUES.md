@@ -41,13 +41,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 (`docs/plans/archived/2026-08-31 - 03 - sub-agents-server-root-key-and-picker-plan.md`), deferred
 out of that run.
 
-- [ ] **A headless run says nothing about a retired `sub-agents: true` flag.** Detection and offer
-  are interactive-only (`cmd/apogee/keymigrate.go:113`, called from `cmd/apogee/wire.go:131`,
-  reaching the renderer as `Options.SubAgentsMigration` at `cmd/apogee/wire_options.go:192`), where
-  the plaintext-key precedent also prints a stderr notice on the headless path
-  (`cmd/apogee/headless.go:277-278`). A headless session whose config still carries the flag
-  delegates to its own server without saying so.
-
 - [ ] **The both-offers case is pinned only at the Options level.**
   `TestSubAgentsMigrationGivesWayToTheKeyMigration` (`internal/tui/keymigration_test.go:370`) hands
   the renderer hand-built Options; no test carries a real config file with `api-key:` plus the
