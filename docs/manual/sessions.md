@@ -25,6 +25,15 @@ still remembers.
   opens a code fence. A bare `/rename` later re-reads the session — your opening
   request plus the most recent ones — and names it for what it has become, so
   one that moved on to another task gets named for where it ended up.
+- That same `auto-title:` switch also names **delegations**. A sub-agent the model
+  spawned without giving it a name gets a short one from the same kind of call off to
+  the side — asked of the server that child itself runs on, while it works — and the
+  generated name then stands wherever that run is shown: its collapsed block, the
+  `✦ Sub-Agent` rows, the breadcrumb when you open the run, and the saved record, so a
+  resumed session shows it too. A name the model supplied is never overwritten, a name
+  that arrives after the run has already finished is dropped, and anything that goes
+  wrong is silent — the run keeps reading as the first line of its task, which is what
+  it always did.
 - A run of a `/schedule` saves its own session, so it browses like every other:
   the browser tags it `⟳ <schedule>` beside its title, so a run reads as one of a
   series rather than as a session nobody remembers starting. Ordering, resume,

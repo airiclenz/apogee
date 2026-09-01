@@ -136,10 +136,10 @@ When one reply carries several `sub_agent` calls, the **top-level** agent runs t
 own delegations run serially inline); every event a sub-agent emits carries the **call-ID**
 of the `sub_agent` call that spawned it, so interleaved streams stay attributable
 ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
-A delegation may also carry a model-supplied short **name** — an optional `name` argument on the
-`sub_agent` call, normalised to a trimmed first line — which is what the session chat calls that
-child; it is display identity only, never privilege, and every display falls back to the
-delegated task's first line when it is absent.
+What a delegation is CALLED is its **Delegation name**, and the rule is three-deep: the name its
+call gave — an optional `name` argument on the `sub_agent` call, normalised to a trimmed first
+line — else a **generated** one that lands once the run is under way, else the delegated task's
+first line. It is display identity only, never privilege.
 A **running** child is **addressable**, and by the handle it already has: the spawning call-ID.
 `Agent.InterjectChild(spawnCallID, in)` appends a message to that child's engine-side **mailbox**,
 recursing into registered children so a grandchild is reachable from the top-level agent and
@@ -163,6 +163,24 @@ One shape to know when reading events: `domain.AuditEvent` carries a `CallID` of
 the spawning one still travels, reached as `ev.EventBase.CallID`.
 Bare "agent" means the **top-level** agent unless qualified as "sub-agent".
 _Avoid_: "child agent" (says nothing about the privilege bound), "worker".
+
+**Delegation name**:
+What one **Sub-agent** run is called wherever it is shown — the collapsed call block, the
+`✦ Sub-Agent (N)` umbrella's rows, a **Run view**'s breadcrumb, `apogee headless`'s
+`sub-agent:` line and the **Session record** it is saved into. Three-deep, in order: the `name`
+the `sub_agent` call carried (normalised to a trimmed first line), else a **generated** one, else
+the delegated task's first line. The generated one comes from a single out-of-band completion on
+the CHILD's own **Upstream** (routed ⇒ the **Sub-agent server**, else the session's), fired only
+when the call named nothing — Mechanism-synthesised delegations included, never over a name the
+model gave — concurrent with the child and bounded by its lifetime, so a reply that lands after the
+run finished is dropped. It is gated by the same `auto-title:` key that names a **Session**, silent
+on every failure, and announced as one `SubAgentNamedEvent` so every **Driver** folds the rename by
+the road it already reads its delegations on. It is **not a Mechanism** — it fires at no Hook
+point, runs under Bypass, and adds nothing to any model's context — and it is saved with the run,
+so a resumed session paints it. Ratified 2026-09-01
+([ADR 0068](docs/adr/0068-unnamed-delegations-are-named-out-of-band-on-the-childs-upstream.md)).
+_Avoid_: "title" (that is the **Session**'s — a delegation has a name, and no `^r` to change it),
+"label", "sub-agent title".
 
 **Parallel agents**:
 The per-server cap on how many sub-agents the top-level agent may run **concurrently**.

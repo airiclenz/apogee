@@ -64,7 +64,12 @@ runs on the session server or the Sub-agent server (`run_on`), guided by a per-e
 
 ---
 
-## 1. ADR 0068 — delegations are named out of band + CONTEXT.md/manual wording
+## 1. ADR 0068 — delegations are named out of band + CONTEXT.md/manual wording — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — internal/title/title.go: made necessary by ADR 0068 — the package doc's blanket "the naming call … emits no events" claim is now scoped to the SESSION naming call, with 0068's event-emitting sibling named beside it (the item's regression guard). Comment text only; no code touched.
+NOTES (2026-09-01): consequential edit — docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md: made necessary by ADR 0068 — the 2026-07-31 addendum's text is untouched and gains one `> **Amended 2026-09-01 by [ADR 0068](…)**` blockquote in ADR 0025's house idiom, so its "emits no TokenEvent or UsageEvent" claim reads as the session title's alone (the item's regression guard: "0068 named beside it").
+NOTES (2026-09-01): the third `emits no events` grep hit, docs/plans/archived/2026-07-31 - 02 - session-auto-titling-plan.md:188, is left as written — it is an archived (executed) plan, i.e. historical record, and its sentence is already about the session-title generator specifically.
+NOTES (2026-09-01): sessions.md takes the new paragraph as a list item of its own directly after the `/sessions` bullet that carries the auto-title text (plan cites :20-26) — a bare paragraph inside that bullet would have broken the list.
 
 **What:** Write `docs/adr/0068-unnamed-delegations-are-named-out-of-band-on-the-childs-upstream.md`
 (house form; read 0066 for shape; front matter `Amends: ADR 0022 (addendum — the naming call's

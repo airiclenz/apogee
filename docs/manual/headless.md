@@ -46,7 +46,10 @@ adds one stderr line per sub-agent run just ahead of that summary —
 `sub-agent: 12k/32k · <the name it was given, else the task>`, in the order the runs
 finished — because
 each child fills a context window of its own that the run's own figures say nothing
-about; a run that delegated nothing prints none. Beside those, and on the same terms,
+about; a run that delegated nothing prints none. That name is the one the delegating
+call supplied, else the short one apogee generated for an unnamed run while it worked
+(the `auto-title:` switch, on by default), else the delegated task's first line.
+Beside those, and on the same terms,
 comes what the run **spent**: `usage: calls 3 · prompt 18k · completion 1k · total 19k`
 for the run itself and one such line per delegated run (labelled the same way), counting
 every model call the agent made — the compaction folds included, which no context reading

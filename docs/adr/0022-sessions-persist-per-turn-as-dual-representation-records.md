@@ -159,6 +159,15 @@ still stamps the first Save and remains the fallback, and the record's shape, sa
 per-layer versioning are untouched. What is added is a *naming call* that renames a record once,
 shortly after it is born.
 
+> **Amended 2026-09-01 by [ADR 0068](0068-unnamed-delegations-are-named-out-of-band-on-the-childs-upstream.md).**
+> Everything below is the SESSION title's and stands exactly as ratified. What 0068 adds is a
+> sibling one level down — the naming of a DELEGATION the model left unnamed — which keeps every
+> property recorded here (cosmetic, fires at no Hook point, never shapes the primary call, silent
+> on failure, gated by the same `auto-title` key) except one: it announces its result as a single
+> `SubAgentNamedEvent`, so the "emits no `TokenEvent` or `UsageEvent`" claim below is the session
+> title's alone. Its seam is in the engine rather than on `tui.Options`, because a delegation is
+> the engine's object and every Driver shows one.
+
 - **It is a cosmetic call — a category of its own.** The naming completion is neither a
   **Mechanism** (it fires at no Hook point and never shapes the primary call, so it is exempt from
   Bypass reasoning and from the [ADR 0009](0009-the-ab-decision-rule.md) non-inferiority gate) nor

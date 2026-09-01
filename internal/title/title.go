@@ -29,11 +29,13 @@
 // binary. The assembly around them (the labelled context, the numbering, the elision marker) stays
 // in code.
 //
-// The naming call is NOT a Mechanism and NOT a Turn (ADR 0022 addendum, 2026-07-31): it fires
-// at no Hook point, never shapes the primary call, emits no events, and nothing breaks when it
-// fails. That is why the failure posture here is a quiet ok=false rather than an error: the
-// heuristic title the first Save already stamped stands, and a maintenance nicety must never
-// nag.
+// The SESSION naming call is NOT a Mechanism and NOT a Turn (ADR 0022 addendum, 2026-07-31): it
+// fires at no Hook point, never shapes the primary call, emits no events, and nothing breaks when
+// it fails. (ADR 0068 records its sibling one level down — the naming of a delegation the model
+// left unnamed — which keeps every one of those properties but the last-but-one: it announces its
+// result as a single SubAgentNamedEvent, because every Driver reads its runs off that stream.)
+// That is why the failure posture here is a quiet ok=false rather than an error: the heuristic
+// title the first Save already stamped stands, and a maintenance nicety must never nag.
 package title
 
 import (
