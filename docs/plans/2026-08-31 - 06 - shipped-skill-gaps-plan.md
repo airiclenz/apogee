@@ -76,7 +76,7 @@ match
 
 ---
 
-## 2. `code-review` names its review unit and excludes generated and vendored files
+## 2. `code-review` names its review unit and excludes generated and vendored files — ✅ DONE (2026-09-01)
 
 **What:** `internal/skills/shipped/code-review/SKILL.md` never says WHAT it is reviewing — §What
 to read opens on "Read the whole change" (line 32) with *change* undefined — and its §What NOT to

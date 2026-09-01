@@ -29,6 +29,9 @@ confident nits bury one data-loss bug. Report less, and mean it.
 
 ## What to read
 
+- Name the review unit before reading: a diff, a branch against its merge base, a PR, or
+  the working tree. Say which. 'The whole change' means that unit, and a finding outside
+  it is out of scope.
 - Read the whole change before commenting on any of it. A line that looks wrong in
   isolation is usually answered three files later.
 - Read the code the change CALLS and the code that calls IT. Most real defects live at
@@ -91,6 +94,8 @@ The most common review defect is a finding that is already handled elsewhere.
 - Rewrites motivated by taste: a different pattern, a different abstraction, a
   different library, when the existing one is correct.
 - Speculative performance without a measurement or an obvious complexity blow-up.
+- Generated, vendored and third-party files — unless the change is to the generator or
+  the pin itself. Read them for context, never for findings.
 - Anything the project's own conventions explicitly settle. Follow the repo's
   conventions, do not relitigate them.
 - Praise padding. One sentence of context is enough; the review is for the defects.
