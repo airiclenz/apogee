@@ -180,6 +180,30 @@ type SubAgentPhaseEvent struct {
 	Result ToolResult
 }
 
+// SubAgentNamedEvent reports that a delegation the model left unnamed has just been GIVEN a name by
+// the out-of-band naming call (ADR 0068). It is emitted exactly once per generated name, and never
+// for a delegation whose sub_agent call named itself: a name the model gave always wins, so there
+// is nothing to announce.
+//
+// Its EventBase is the CHILD run's identity, exactly as SubAgentPhaseEvent's is: Depth is the
+// child's nesting level and CallID the id of the sub_agent call that spawned it — the same stamp
+// every event that child emits carries, and the id of the parent's tool-call block being renamed.
+// That is what lets a reader apply the rename to one member of a concurrent fan-out without
+// threading anything through.
+//
+// It travels the event stream rather than a private channel because every Driver already learns
+// that a delegation EXISTS by reading this stream, so a rename has to reach those same readers by
+// the same road (ADR 0068 decision 6). It is the naming act's whole wire presence: no TokenEvent,
+// no UsageEvent, no movement of any context gauge — the naming call is neither a Turn nor a
+// Mechanism, and its tokens belong to no conversation.
+//
+// A reader that ignores it loses nothing but the improved name: the run keeps the delegated task's
+// first line, which is what it wore before this variant existed.
+type SubAgentNamedEvent struct {
+	EventBase
+	Name string
+}
+
 // ChildInterjectionEvent reports the fate of ONE user message a human addressed to a running
 // sub-agent through Agent.InterjectChild (ADR 0063 D2). Landed is true when the message was
 // committed into the child's open Exchange at a between-Steps boundary and the child's next

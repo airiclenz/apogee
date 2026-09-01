@@ -83,7 +83,11 @@ type Config struct {
 	Asker     Asker     // free-text Q&A delegate for the ask_user tool; nil ⇒ ask_user is not registered (P3.11)
 	Presenter Presenter // document-presentation delegate for the present_document tool; nil ⇒ present_document is not registered (ADR 0019)
 	Confiner  Confiner  // nil ⇒ no confinement ⇒ Auto is refused (ADR 0004)
-	Events    EventSink // where typed Events are pushed; required
+	// Namer names a delegation whose sub_agent call carried none, out of band and concurrently
+	// with the child (ADR 0068). nil ⇒ naming never fires and every unnamed run keeps the
+	// delegated task's first line, which is what the bench, an embedder and every test compose.
+	Namer  DelegationNamer
+	Events EventSink // where typed Events are pushed; required
 
 	// Inspector arms the raw-protocol capture (`ui.inspector` in config.yaml): with it set, the
 	// engine observes the Upstream client's own bytes and reports each model call's request body

@@ -89,7 +89,15 @@ the same switch names unnamed delegations; `docs/manual/headless.md:46` notes th
 **Regression guard.** Every sentence stating the naming call "emits no events" (grep `emits no events` docs/ CONTEXT.md internal/title/title.go) is either scoped to the SESSION title or re-worded; ADR 0022's addendum text stays as historical record with 0068 named beside it.
 **Commit:** `docs(adr): 0068 — unnamed delegations are named out of band`
 
-## 2. Domain seam + naming prompt: `DelegationNamer`, `SubAgentNamedEvent`, `title.DelegationPrompt`
+## 2. Domain seam + naming prompt: `DelegationNamer`, `SubAgentNamedEvent`, `title.DelegationPrompt` — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the item's "add it to … `eventDepth()`" needed no edit — `eventDepth()` is a method on the embedded `EventBase`, so `SubAgentNamedEvent` satisfies the sealed `Event` interface by embedding it, as every other variant does. The "event doc comment list" half landed in internal/domain/doc.go's events.go line.
+
+NOTES (2026-09-01): `titleWordBoundaryFloor` (a const derived from `MaxRunes`) became `wordBoundaryFloor(maxRunes int)` over a named `wordBoundaryFloorPercent = 60`, because `SanitizeTo`'s cap is now a parameter. The arithmetic is byte-identical at both caps (50 → 30, 40 → 24) and `Clip`'s own inline 60% rule was left untouched.
+
+NOTES (2026-09-01): the `TestDelegationPrompt_*` tests are named with the plan's underscore form (matching `TestSanitizeTo_CapsAtTheGivenRunes`) rather than the package's usual unbroken style; `prompts/README.md`'s pin-test obligation names the new pin.
+
+NOTES (2026-09-01): a second fold test beyond the plan's list — `TestFoldSubAgentNamedEventLeavesABorrowedBoxAlone` — pins the `decisionPending` half of the placeholder switch, so the new case cannot steal a box the human is answering an ask or approval with.
 
 **What:** Recast at the regression check (2026-09-01). `internal/domain/naming.go` (new): `type DelegationNaming struct{ Task string; Routed bool }`,
 `type DelegationNamer interface{ NameDelegation(ctx context.Context, req DelegationNaming) (string, error) }`;

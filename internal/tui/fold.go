@@ -58,15 +58,17 @@ func (m Model) foldEvent(e domain.Event) Model {
 	}
 	// Inside a run view the prompt box addresses the child on screen, and what it may say to that
 	// child is the child's own lifecycle — which this event may have just moved. Re-resolved on
-	// exactly the two events that move it, so the invitation is never a phase behind the run it
+	// exactly the three events that move it, so the invitation is never a phase behind the run it
 	// names, and every other event leaves the box alone (setPlaceholder is a transition, not a
-	// per-frame branch — doc.go).
+	// per-frame branch — doc.go). The third is the run's NAME rather than its phase: the legend
+	// spells the child it addresses, so a delegation renamed out of band (domain.SubAgentNamedEvent,
+	// ADR 0068) would otherwise leave the box inviting a message to the name the run no longer wears.
 	// A pane that has borrowed the box keeps it, question and legend both: an event arriving under
 	// an open ask or approval must not put the child's invitation back on a box the human is
 	// answering with (legendFor yields on the same two states).
 	if m.inRunView() && !m.state.decisionPending() {
 		switch e.(type) {
-		case domain.SubAgentPhaseEvent, domain.ToolResultEvent:
+		case domain.SubAgentPhaseEvent, domain.ToolResultEvent, domain.SubAgentNamedEvent:
 			m.setPlaceholder(m.legendFor(m.topLegend()))
 		}
 	}
@@ -190,6 +192,10 @@ func (m Model) foldStats(e domain.Event) Model {
 //   - A SubAgentPhaseEvent reporting SubAgentFinished: one delegation of a group reached its
 //     boundary and its report is in the record. Under a fan-out its siblings run on, so this is a
 //     progress point of its own rather than the Turn's end.
+//   - A SubAgentNamedEvent: a running delegation has just been given its generated name (ADR 0068),
+//     and what a run is CALLED is part of the run rather than view state — so a record saved
+//     before the rename, and resumed after it, would paint the task's first line the session had
+//     already stopped showing.
 //
 // SubAgentStarted is deliberately NOT one: the head's own ToolCallEvent already fired the save, and
 // under a fan-out a queued child's start adds nothing the record does not already show. Every other
@@ -204,6 +210,8 @@ func progressSaveTrigger(e domain.Event) bool {
 		return e.Depth >= 1
 	case domain.SubAgentPhaseEvent:
 		return e.Phase == domain.SubAgentFinished
+	case domain.SubAgentNamedEvent:
+		return true
 	}
 	return false
 }

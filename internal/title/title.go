@@ -1,11 +1,17 @@
-// Package title owns the naming of a session: the cosmetic, out-of-band completion that gives a
-// Session record a human title instead of the first line of the user's first prompt, the sanitizer
+// Package title owns the naming of a session or a delegation: the cosmetic, out-of-band completion
+// that gives a Session record a human title instead of the first line of the user's first prompt —
+// or a delegated run a short name instead of the first line of its task (ADR 0068) — the sanitizer
 // that turns whatever came back into one, and the pure title rules every Driver shares.
 //
-// Prompt renders the naming request from a WINDOW of the user's requests — one entry for the
-// automatic call at first-prompt submit, because one is all that exists when it fires; a bounded,
-// budget-capped selection of the session's user side when the human asks for a name later.
-// Sanitize turns whatever text came back into a title or reports that nothing usable did.
+// Prompt renders the SESSION naming request from a WINDOW of the user's requests — one entry for
+// the automatic call at first-prompt submit, because one is all that exists when it fires; a
+// bounded, budget-capped selection of the session's user side when the human asks for a name later.
+// DelegationPrompt renders the DELEGATION one from the single thing there is to name a delegation
+// from: the task it was given. The two share this package's sampling constants and its no-reasoning
+// ask, and differ in their instruction and in how wide an answer they will take — a browser row
+// holds MaxRunes, a status line holds MaxDelegateRunes.
+// SanitizeTo turns whatever text came back into a name of at most the cap it is handed, or reports
+// that nothing usable did; Sanitize is that pipeline at the session title's own cap.
 // ErrTruncated is the shared word for the one failure the callers on both sides of the naming seam
 // must agree on.
 //
@@ -100,12 +106,29 @@ const (
 // Schedule's name (internal/schedule) — passes its own cap instead.
 const MaxRunes = 50
 
-// titleWordBoundaryFloor is the earliest rune index at which Sanitize's truncation will break on a
-// word boundary. Below it the boundary would throw away more of the title than the ellipsis saves,
-// so a hard cut at MaxRunes is preferred. Clip applies the same 60% rule to the heuristic title,
-// but against a BYTE index — the arithmetic the copies it replaced all shared, kept verbatim so the
-// move changed no title.
-const titleWordBoundaryFloor = MaxRunes * 6 / 10
+// MaxDelegateRunes is the longest a DELEGATION's generated name runs before the same word-boundary
+// truncation. It is far shorter than MaxRunes because the two names live in different places: a
+// session title owns a whole session-browser row, while a delegation's name shares a status line,
+// an umbrella member row and a breadcrumb with everything else on them. It is exported for the
+// host that runs the naming call and sanitizes the reply against it, and it is a BACKSTOP rather
+// than the target — prompts/delegation-instruction.txt asks for two to four words, and a reply that
+// needs cutting here is one that ignored the instruction.
+const MaxDelegateRunes = 40
+
+// wordBoundaryFloorPercent is the share of a cap below which SanitizeTo stops looking for a word
+// boundary to break on: below it the boundary would throw away more of the name than the ellipsis
+// saves, so a hard cut at the cap is preferred. Clip applies the same 60% rule to the heuristic
+// title, but against a BYTE index — the arithmetic the copies it replaced all shared, kept verbatim
+// so the move changed no title.
+const wordBoundaryFloorPercent = 60
+
+// wordBoundaryFloor is the earliest rune index at which truncation will break on a word boundary
+// for a cap of maxRunes. It is a function rather than a constant because the cap is now a
+// parameter: 30 for a session title, 24 for a delegation name, and whatever a future caller's own
+// width asks for.
+func wordBoundaryFloor(maxRunes int) int {
+	return maxRunes * wordBoundaryFloorPercent / 100
+}
 
 // maxAffixPasses bounds the strip-the-wrapping loop in Sanitize. Models stack these wrappers in
 // any order (`"Title: fix the parser"` and `Title: "fix the parser"` are both common), so the
@@ -148,6 +171,15 @@ func mustPrompt(name string) string {
 // instruction.
 var systemInstruction = mustPrompt("system-instruction.txt")
 
+// delegationInstruction is the DELEGATION naming call's system prompt
+// (prompts/delegation-instruction.txt). It is a separate asset rather than a re-wording of
+// systemInstruction because the two ask for different things: a session title is a sentence-shaped
+// description of a whole session's dominant thread, while a delegation's name is the two-to-four
+// lowercase words that fit beside everything else on a status line. It carries the same
+// "describe the work, not its surroundings" and "reply with nothing else" constraints for the same
+// reason — the wrapping half is all Sanitize can strip.
+var delegationInstruction = mustPrompt("delegation-instruction.txt")
+
 // userInstruction closes the user message (prompts/user-instruction.txt). The system prompt
 // already said it, but small models answer the last thing they read, and repeating the constraint
 // next to the material is what keeps the reply to one line.
@@ -184,6 +216,36 @@ func Prompt(prompts []string, workspaceBase string, date time.Time, dialect prov
 		Messages: []provider.Message{
 			{Role: "system", Content: systemInstruction},
 			{Role: "user", Content: userMessage(prompts, workspaceBase, date)},
+		},
+		Sampling:       provider.Sampling{Temperature: &temperature, MaxTokens: &maxTokens},
+		ThinkingEffort: provider.EffortOff,
+		EffortDialect:  dialect,
+	}
+}
+
+// DelegationPrompt builds the naming completion for one DELEGATION: the short name a run the model
+// left unnamed wears instead of the first line of its task (ADR 0068). task is the delegated task
+// exactly as the spawning sub_agent call stated it, and it is the whole of the material — there is
+// no window here, because a delegation has one brief and it exists in full the moment the child is
+// spawned. Only its first promptExcerptRunes ride the call, for Prompt's reason: the job is stated
+// in the opening sentences, and the pasted file after them adds tokens and queue time without
+// adding signal.
+//
+// Everything else it shares with Prompt deliberately, so the two naming calls cannot drift into
+// different sampling: the same temperature and token backstop, no tools, no streaming, no model
+// (the Client's own configured one wins in buildBody — which is what binds this call to the CHILD's
+// Upstream, ADR 0068 decision 2), and the same request for no reasoning pass at all, stated in
+// whichever dialect the caller names. A two-to-four-word name needs no chain-of-thought even more
+// plainly than an eight-word title does.
+//
+// What differs is the instruction and the width the reply is allowed: this asks for a status line's
+// worth of words, and the caller sanitizes what comes back with SanitizeTo at MaxDelegateRunes.
+func DelegationPrompt(task string, dialect provider.EffortDialect) provider.Request {
+	temperature, maxTokens := titleTemperature, titleMaxTokens
+	return provider.Request{
+		Messages: []provider.Message{
+			{Role: "system", Content: delegationInstruction},
+			{Role: "user", Content: excerpt(task)},
 		},
 		Sampling:       provider.Sampling{Temperature: &temperature, MaxTokens: &maxTokens},
 		ThinkingEffort: provider.EffortOff,
@@ -357,6 +419,19 @@ func capRunes(s string, limit int) string {
 // An empty result is a failure, not an empty title: the caller keeps whatever title the record
 // already has.
 func Sanitize(raw string) (string, bool) {
+	return SanitizeTo(raw, MaxRunes)
+}
+
+// SanitizeTo is Sanitize's pipeline at a caller-chosen width: identical cleanup, identical
+// ok=false-on-nothing-usable contract, and a final truncation to maxRunes instead of to MaxRunes.
+// The cap is a parameter because the same reply cleanup now serves two widths — a session title's
+// browser row (MaxRunes, what Sanitize passes) and a delegation name's status line
+// (MaxDelegateRunes, ADR 0068) — and a second copy of the pipeline would be a second place for a
+// model's wrapping to be handled differently.
+//
+// The word-boundary floor follows the cap (wordBoundaryFloor), so a narrower name breaks on a word
+// proportionally as early as a title does rather than inheriting a floor sized for a wider one.
+func SanitizeTo(raw string, maxRunes int) (string, bool) {
 	s := firstContentLine(stripThinking(raw))
 	s = stripAffixes(StripEscapes(s))
 	s = collapseWhitespace(s)
@@ -364,7 +439,7 @@ func Sanitize(raw string) (string, bool) {
 	if s == "" {
 		return "", false
 	}
-	return truncate(s), true
+	return truncate(s, maxRunes), true
 }
 
 // thinkOpen and thinkClose delimit the reasoning block a thinking model may emit ahead of its
@@ -582,16 +657,17 @@ func collapseWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// truncate caps s at MaxRunes, breaking on the last word boundary past
-// titleWordBoundaryFloor and closing with an ellipsis. Everything is counted in RUNES, so a CJK
-// title is capped by the characters the browser row shows rather than by its byte length.
-func truncate(s string) string {
+// truncate caps s at maxRunes, breaking on the last word boundary past wordBoundaryFloor(maxRunes)
+// and closing with an ellipsis. Everything is counted in RUNES, so a CJK title is capped by the
+// characters the browser row shows rather than by its byte length.
+func truncate(s string, maxRunes int) string {
 	runes := []rune(s)
-	if len(runes) <= MaxRunes {
+	if len(runes) <= maxRunes {
 		return s
 	}
-	cut := runes[:MaxRunes]
-	for i := len(cut) - 1; i > titleWordBoundaryFloor; i-- {
+	floor := wordBoundaryFloor(maxRunes)
+	cut := runes[:maxRunes]
+	for i := len(cut) - 1; i > floor; i-- {
 		if cut[i] == ' ' {
 			cut = cut[:i]
 			break

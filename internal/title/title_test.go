@@ -510,6 +510,95 @@ func TestUserInstructionAndWindowHeaderPinTheirExactWording(t *testing.T) {
 	}
 }
 
+// TestDelegationPrompt_CarriesTheDelegationInstruction pins the delegation naming call's shape: a
+// system+user pair whose system message is the delegation asset — not the session one — and whose
+// user message is the task alone. The instruction's load-bearing phrases are asserted on the
+// constant so the wording cannot be silently softened: a status line has room for a few words, and
+// a re-wording that lets the model answer with a sentence is the failure this pin exists for
+// (prompts/README.md).
+func TestDelegationPrompt_CarriesTheDelegationInstruction(t *testing.T) {
+	t.Parallel()
+
+	req := DelegationPrompt("survey the tests and report what is untested", provider.EffortDialectNone)
+
+	if len(req.Messages) != 2 {
+		t.Fatalf("DelegationPrompt built %d messages, want 2 (system + user)", len(req.Messages))
+	}
+	if req.Messages[0].Role != "system" || req.Messages[0].Content != delegationInstruction {
+		t.Errorf("system message = %q/%q, want the delegation instruction on the system role",
+			req.Messages[0].Role, req.Messages[0].Content)
+	}
+	if req.Messages[0].Content == systemInstruction {
+		t.Error("the delegation call is sending the SESSION title's instruction")
+	}
+	if req.Messages[1].Role != "user" || req.Messages[1].Content != "survey the tests and report what is untested" {
+		t.Errorf("user message = %q/%q, want the task alone on the user role",
+			req.Messages[1].Role, req.Messages[1].Content)
+	}
+	for _, want := range []string{
+		"2 to 4 lowercase words",
+		"one line, plain text, no punctuation",
+		"never the agent, the project, or the folder",
+		"and nothing else",
+	} {
+		if !strings.Contains(delegationInstruction, want) {
+			t.Errorf("delegation instruction does not say %q:\n%s", want, delegationInstruction)
+		}
+	}
+}
+
+// TestDelegationPrompt_CapsTheExcerpt holds the delegation call to the same excerpt cap the
+// single-request session form uses: a task that pastes a whole file after its opening sentences
+// adds tokens and queue time without adding signal, and this call fires once per unnamed
+// delegation — including for every member of a fan-out.
+func TestDelegationPrompt_CapsTheExcerpt(t *testing.T) {
+	t.Parallel()
+
+	req := DelegationPrompt(strings.Repeat("x", promptExcerptRunes*2), provider.EffortDialectNone)
+
+	body := req.Messages[1].Content
+	if n := len([]rune(body)); n > promptExcerptRunes+1 {
+		t.Errorf("user message is %d runes, want at most %d plus the ellipsis", n, promptExcerptRunes)
+	}
+	if !strings.HasSuffix(body, "…") {
+		t.Error("a truncated task should be marked with an ellipsis")
+	}
+}
+
+// TestDelegationPrompt_AsksForNoReasoningInEveryDialect pins the half of the request that keeps a
+// thinking model from spending the whole token backstop arriving at three words: the ask is off,
+// and it is stated in whichever dialect the caller hands in — the child's own server's, since this
+// call rides the child's Upstream (ADR 0068).
+func TestDelegationPrompt_AsksForNoReasoningInEveryDialect(t *testing.T) {
+	t.Parallel()
+
+	for name, dialect := range map[string]provider.EffortDialect{
+		"the zero dialect": provider.EffortDialectNone,
+		"kwargs":           provider.EffortDialectKwargs,
+		"reasoning":        provider.EffortDialectReasoning,
+		"openai":           provider.EffortDialectOpenAI,
+		"off":              provider.EffortDialectOff,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			req := DelegationPrompt("survey the tests", dialect)
+
+			if req.EffortDialect != dialect {
+				t.Errorf("EffortDialect = %q, want %q — the caller's dialect did not reach the request",
+					req.EffortDialect, dialect)
+			}
+			if req.ThinkingEffort != provider.EffortOff {
+				t.Errorf("ThinkingEffort = %q, want %q — a three-word name needs no reasoning pass",
+					req.ThinkingEffort, provider.EffortOff)
+			}
+			if req.Model != "" {
+				t.Errorf("Model = %q, want it left to the Client that names the child's own server", req.Model)
+			}
+		})
+	}
+}
+
 func TestSanitize(t *testing.T) {
 	t.Parallel()
 
@@ -796,6 +885,86 @@ func TestSanitizeCountsMultibyteRunesNotBytes(t *testing.T) {
 	if want := strings.Repeat("日", MaxRunes) + "…"; got != want {
 		t.Errorf("Sanitize(CJK) = %q (%d runes), want %d runes plus the ellipsis",
 			got, len([]rune(got)), MaxRunes)
+	}
+}
+
+// TestSanitizeTo_CapsAtTheGivenRunes pins the parameterised half: the same pipeline, cutting at the
+// width the caller names rather than at the session title's. The word-boundary floor follows the
+// cap, so a delegation name breaks on a word proportionally as early as a title does instead of
+// inheriting a floor sized for a row twice as wide.
+func TestSanitizeTo_CapsAtTheGivenRunes(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		raw      string
+		maxRunes int
+		want     string
+	}{
+		{
+			name:     "a short name is returned whole at either cap",
+			raw:      "survey the tests",
+			maxRunes: MaxDelegateRunes,
+			want:     "survey the tests",
+		},
+		{
+			// 8 words of 5 runes runs past 40 but not past 50: the delegate cap bites where the
+			// title cap would not, which is the whole point of parameterising it.
+			name:     "an over-cap name breaks at the last word boundary past the floor",
+			raw:      strings.TrimSpace(strings.Repeat("alpha ", 8)),
+			maxRunes: MaxDelegateRunes,
+			want:     "alpha alpha alpha alpha alpha alpha…",
+		},
+		{
+			// One long word: no boundary past the 60% floor of 40, so the cut is hard at the cap.
+			name:     "a hard cut when there is no late word boundary",
+			raw:      strings.Repeat("x", 120),
+			maxRunes: MaxDelegateRunes,
+			want:     strings.Repeat("x", MaxDelegateRunes) + "…",
+		},
+		{
+			name:     "the cleanup runs unchanged before the cut",
+			raw:      "```\nTitle: \"repo scout\"\n```",
+			maxRunes: MaxDelegateRunes,
+			want:     "repo scout",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := SanitizeTo(tc.raw, tc.maxRunes)
+			if !ok {
+				t.Fatalf("SanitizeTo(%q, %d) reported failure", tc.raw, tc.maxRunes)
+			}
+			if got != tc.want {
+				t.Errorf("SanitizeTo(%q, %d) = %q, want %q", tc.raw, tc.maxRunes, got, tc.want)
+			}
+		})
+	}
+
+	if _, ok := SanitizeTo("   \n  ", MaxDelegateRunes); ok {
+		t.Error("SanitizeTo reported success on a reply with nothing usable in it")
+	}
+}
+
+// TestSanitize_StillCapsAtMaxRunes is the refactor's own guard: Sanitize is now a wrapper, and a
+// wrapper that passed the wrong cap would widen or narrow every session title in the browser
+// without failing a single other test — the two callers of the pipeline agree on nothing but this
+// number.
+func TestSanitize_StillCapsAtMaxRunes(t *testing.T) {
+	t.Parallel()
+
+	raw := strings.Repeat("x", MaxRunes*3)
+
+	got, ok := Sanitize(raw)
+	if !ok {
+		t.Fatal("Sanitize reported failure on a single long word")
+	}
+	if want := strings.Repeat("x", MaxRunes) + "…"; got != want {
+		t.Errorf("Sanitize = %q, want the MaxRunes cut %q", got, want)
+	}
+	if to, _ := SanitizeTo(raw, MaxRunes); to != got {
+		t.Errorf("Sanitize = %q but SanitizeTo(raw, MaxRunes) = %q — the wrapper is not the pipeline", got, to)
 	}
 }
 

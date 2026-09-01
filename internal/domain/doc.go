@@ -36,8 +36,10 @@
 // carriers a prompt is labelled with. present.go is Presenter and the presentation ladder's
 // request, outcome and method types (ADR 0019). promptslot.go is PromptSlot — the ONE prompt
 // a Driver draws, handed to one asking Agent at a time so a depth-0 fan-out cannot orphan a
-// human's reply (ADR 0039). events.go is EventSink and every typed Event the loop emits:
-// tokens and reasoning, messages, tool calls and results, approvals, Mechanism fires, usage,
+// human's reply (ADR 0039). naming.go is DelegationNamer and the DelegationNaming the engine
+// hands it — the out-of-band naming of a delegation the model left unnamed (ADR 0068).
+// events.go is EventSink and every typed Event the loop emits: tokens and reasoning, messages,
+// tool calls and results, approvals, delegation lifecycle and naming, Mechanism fires, usage,
 // audit.
 //
 // The loop's working values. hooks.go is the substrate a hook actually touches — Message and

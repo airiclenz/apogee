@@ -49,3 +49,32 @@ func TestEventBaseCallIDSeparatesSiblings(t *testing.T) {
 		t.Errorf("a top-level event carries CallID %q, want empty — it was spawned by no call", top.CallID)
 	}
 }
+
+// TestSubAgentNamedEventCarriesTheChildRunsIdentity pins the one thing a rename reader depends on:
+// the event is stamped with the CHILD's identity, exactly as SubAgentPhaseEvent is, so the name
+// lands on the run it belongs to. Under a concurrent fan-out (ADR 0039) the siblings share a depth
+// and only the spawning call id separates them, so a variant stamped with the emitting PARENT's
+// base — depth 0 and no call — would rename whichever member the reader happened to be holding.
+func TestSubAgentNamedEventCarriesTheChildRunsIdentity(t *testing.T) {
+	t.Parallel()
+
+	ev := SubAgentNamedEvent{
+		EventBase: EventBase{Depth: 1, Turn: 4, CallID: "spawn_7"},
+		Name:      "repo scout",
+	}
+
+	if got := ev.eventDepth(); got != 1 {
+		t.Errorf("eventDepth() = %d, want the CHILD's nesting level 1", got)
+	}
+	if ev.CallID != "spawn_7" {
+		t.Errorf("CallID = %q, want the SPAWNING call %q", ev.CallID, "spawn_7")
+	}
+
+	sibling := SubAgentNamedEvent{
+		EventBase: EventBase{Depth: 1, Turn: 4, CallID: "spawn_8"},
+		Name:      "repo scout",
+	}
+	if ev.EventBase == sibling.EventBase {
+		t.Error("two members of one fan-out share an EventBase; the rename cannot be attributed")
+	}
+}
