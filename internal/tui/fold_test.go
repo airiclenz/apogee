@@ -534,11 +534,15 @@ func TestFoldStatsSkipsAMaintenanceReadingForTheGaugeAndClock(t *testing.T) {
 // switch. Inside a run view the empty box invites a message to the child BY NAME, so a delegation
 // renamed out of band (ADR 0068) would otherwise leave the invitation addressing a name the run no
 // longer wears until some other event happened to re-resolve it. The box is scrambled first so the
-// assertion is that the fold PUT the legend back, not that it was never disturbed.
+// assertion is that the fold PUT the legend back, not that it was never disturbed — and the legend
+// it puts back is the one the RENAMED run earns, because the same fold has already moved the head's
+// name (transcript.addSubAgentName): the arm exists precisely so the box stops naming what the run
+// was called a moment ago.
 func TestFoldSubAgentNamedEventReResolvesThePlaceholder(t *testing.T) {
+	const want = "Message repo scout…  ⏎ send · ↑ recall · esc back"
+
 	m := modelViewingChild(t, &fakeEngine{}, childRunning)
-	want := m.input.Placeholder
-	if want == "" {
+	if m.input.Placeholder == "" {
 		t.Fatal("setup: the run view left the box with no legend to re-resolve")
 	}
 

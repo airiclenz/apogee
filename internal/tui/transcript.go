@@ -896,7 +896,7 @@ func presentedStatus(v presentedView) string {
 }
 
 // apply folds one engine Event into the transcript (the C6 rule). The switch covers the
-// ten transcript-rendered variants of the fourteen-variant Event set, so the rendered set
+// eleven transcript-rendered variants of the fifteen-variant Event set, so the rendered set
 // stays honest as the engine evolves; the other four append no entry (ReasoningEvent feeds
 // the activity line, AuditEvent and WireEvent nothing the transcript draws, and a UsageEvent is a
 // reading rather than a block — it lands ON an entry the run already has, through applyUsage,
@@ -909,7 +909,9 @@ func presentedStatus(v presentedView) string {
 // narration before recording the call; results, approvals, and recovered faults append
 // their own entries; a SubAgentPhase appends none — like a reading it lands ON the block a
 // delegation already has, marking it running or folding in the report its child just returned
-// (addSubAgentPhase); a ChildInterjection commits the message it reports INSIDE the child's run
+// (addSubAgentPhase); a SubAgentNamed appends none for the same reason — the generated name a
+// delegation was just given lands ON that same block, renaming the run every surface reads off it
+// (addSubAgentName); a ChildInterjection commits the message it reports INSIDE the child's run
 // when it landed and a note saying it never did when it did not (addChildInterjection); a
 // MechanismFired is surfaced only in the debug view. It renders only —
 // no agent logic (C5).
@@ -929,6 +931,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addToolResult(e.Result, runOf(e.EventBase))
 	case domain.SubAgentPhaseEvent:
 		t.addSubAgentPhase(e)
+	case domain.SubAgentNamedEvent:
+		t.addSubAgentName(e)
 	case domain.ChildInterjectionEvent:
 		t.addChildInterjection(e)
 	case domain.ApprovalEvent:
@@ -1258,6 +1262,38 @@ func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 		if e.Phase == domain.SubAgentFinished && !en.done {
 			en.tool.enrichWithResult(e.Result, t.ws)
 		}
+		return
+	}
+}
+
+// addSubAgentName folds the name a delegation the model left unnamed has just been GIVEN out of band
+// onto the block that delegation IS (domain.SubAgentNamedEvent, ADR 0068). The block is found by the
+// event's own call id, exactly as addSubAgentPhase finds it — the id of the sub_agent call that
+// spawned the child — so a rename lands on one member of a group however many siblings are running
+// beside it (ADR 0039).
+//
+// It renames the head rather than any surface, because every surface that names a run already reads
+// the head and nothing else: the collapsed row's header, the breadcrumb trail, the run view's
+// invitation, the status line's phrase and the /usage row all resolve through the head's two naming
+// fields (usageAgentName, transcript.runName). Both are set, because the two answer different
+// questions — agentName says a name was GIVEN, which is what the live phrase looks up, and Target is
+// the header text whatever filled it. Target is also the only half on the wire (session.ToolView),
+// so setting it is what makes a record saved after the rename come back wearing the generated name
+// instead of the task's first line the session had already stopped showing.
+//
+// The name is model-supplied text and takes the same escape strip every other such string does
+// (sanitize, addNote). The host already sanitises the naming reply before it is emitted, so this is
+// the view's own backstop rather than a second opinion.
+//
+// Nothing is appended, ever: a name is a fact about a block the transcript already holds, and an
+// event naming no such block — a rename for a run this view never saw — renames nothing at all.
+func (t *transcript) addSubAgentName(e domain.SubAgentNamedEvent) {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		en := &t.entries[i]
+		if !en.headsRunFor(e.CallID) {
+			continue
+		}
+		en.tool.rename(stripEscapes(e.Name))
 		return
 	}
 }

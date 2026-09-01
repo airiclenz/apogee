@@ -165,9 +165,10 @@ const (
 // reader two levels in sees both where they are and what stands between them and the top.
 //
 // Each run is named the way every other surface that names one does ([usageAgentName]): the short
-// name its call carried, else the task's first line, else the constant. An unnamed delegation
-// therefore reads as something rather than as a hole in the trail, and the /usage pane and this row
-// cannot come to call the same run different things.
+// name its call carried — or that the out-of-band naming completion later gave it (ADR 0068,
+// [transcript.addSubAgentName]) — else the task's first line, else the constant. An unnamed
+// delegation therefore reads as something rather than as a hole in the trail, and the /usage pane
+// and this row cannot come to call the same run different things.
 //
 // The walk climbs by SPAWNING CALL rather than by depth, for [insideCollapsedRun]'s reason: with
 // siblings live (ADR 0039) a depth says which level a run stands at and never which run it is. A

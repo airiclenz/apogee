@@ -194,10 +194,15 @@ const subAgentActivityName = "sub-agent"
 // sentence fragment at any nesting level.
 //
 // name is the acting delegation's short name, resolved by the caller (runningPhrase, against
-// transcript.runName) and "" when the delegation was given none. A named child takes its name in
+// transcript.runName) and "" when the delegation has no name yet. A named child takes its name in
 // place of the generic word — "repo-scout · reading" — because with a fan-out running
 // the slot can name only one delegate at a time and "sub-agent" says nothing about which. An
 // unnamed one falls back to subAgentActivityName.
+//
+// "Yet" is load-bearing: a delegation the model left unnamed is named out of band while it runs
+// (ADR 0068, transcript.addSubAgentName), and because the name is looked up per compose rather than
+// frozen into the slot, the phrase moves off subAgentActivityName onto the generated name the first
+// frame after the rename folds.
 func (a activity) text(name string) string {
 	var phrase string
 	switch a.kind {

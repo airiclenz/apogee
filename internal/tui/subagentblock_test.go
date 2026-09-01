@@ -1494,3 +1494,160 @@ func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// A delegation named out of band (ADR 0068)
+// ----------------------------------------------------------------------------
+
+// TestGeneratedDelegationNameReachesEverySurface is the whole point of folding a
+// domain.SubAgentNamedEvent onto the head rather than onto any one display: a delegation the model
+// left unnamed is named while it runs, and every surface that names a run reads that head and
+// nothing else (usageAgentName, transcript.runName). So ONE fold has to move all of them together —
+// a surface reading the name from somewhere else would go on showing the delegated task's first
+// line while its neighbour showed the generated name, and the human would be reading about two
+// different children.
+//
+// The fixture is a fan-out because the rename's aim is what a lone run cannot test: the event is
+// applied by CALL ID, so it must land on the member it names and leave its sibling wearing the task
+// it was given (ADR 0039).
+func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
+	const name = "test-surveyor"
+
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentStarted(tr, "s1", 1)
+		readCall(tr, "rs1", "a.go", 1, 5, 1)
+		subAgentCall(tr, "s2", "build the docs", 0)
+		subAgentStarted(tr, "s2", 1)
+		readCall(tr, "rs2", "b.go", 1, 5, 1)
+		return tr
+	}
+	rename := func(tr *transcript, callID, to string) {
+		tr.apply(domain.SubAgentNamedEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: callID},
+			Name:      to,
+		})
+	}
+
+	// The collapsed group is where the delegation is READ: its member row leads with the head's
+	// Target, so the rename is visible on the scrollback without opening anything.
+	t.Run("the collapsed member row wears it and its sibling is untouched", func(t *testing.T) {
+		tr := build(t)
+		rename(tr, "s1", name)
+
+		want := strings.Join([]string{
+			"✦ Sub-Agent (2)",
+			groupMemberLine("  ┝ " + name + " ⋯ 1 tool call"),
+			groupMemberLine("  ┕ build the docs ⋯ 1 tool call"),
+		}, "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("renamed group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("the breadcrumb trail names it", func(t *testing.T) {
+		tr := build(t)
+		rename(tr, "s1", name)
+
+		if got, want := breadcrumbTrail(tr.entries, "s1"), "← main › "+name; got != want {
+			t.Errorf("trail = %q, want %q", got, want)
+		}
+		if got, want := breadcrumbTrail(tr.entries, "s2"), "← main › build the docs"; got != want {
+			t.Errorf("sibling trail = %q, want %q — the rename named one member", got, want)
+		}
+	})
+
+	// The run view's empty box addresses the child on screen BY NAME, so the invitation is a reader
+	// of the head like the rest. The fold that renames the head is the same one that re-resolves the
+	// box (fold.go), which is why the legend never lags a rename by an event.
+	t.Run("the run view's invitation names it", func(t *testing.T) {
+		m := modelViewingChild(t, &fakeEngine{}, childRunning)
+		m = m.foldEvent(domain.SubAgentNamedEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Name:      name,
+		})
+
+		if got, want := m.runLabel("s1"), name; got != want {
+			t.Errorf("runLabel = %q, want %q", got, want)
+		}
+		if got := m.input.Placeholder; !strings.Contains(got, name) {
+			t.Errorf("placeholder = %q, want it inviting a message to %q", got, name)
+		}
+	})
+
+	t.Run("the /usage row names it", func(t *testing.T) {
+		m := usageModel(t, mainTotals, 8192)
+		m = delegate(t, m, "s1", "survey the tests", childTotals, 16384)
+		m = delegate(t, m, "s2", "build the docs", childTotals, 0)
+		rename(&m.transcript, "s1", name)
+
+		rows := m.usageSubAgentRows(false)
+		if len(rows) != 2 {
+			t.Fatalf("delegate rows = %q, want the two that spent", rows)
+		}
+		if got := rows[0][0]; !strings.Contains(got, name) {
+			t.Errorf("renamed delegate cell = %q, want it naming %q", got, name)
+		}
+		if got := rows[1][0]; !strings.Contains(got, "build the docs") {
+			t.Errorf("sibling cell = %q, want the task it was given", got)
+		}
+	})
+
+	// A rename for a run this view never saw — a record replayed without the head, a child whose
+	// event beat its parent's tool call in — renames nothing rather than renaming the last run it
+	// finds, and appends nothing either.
+	t.Run("an unknown call id renames nothing", func(t *testing.T) {
+		tr := build(t)
+		before := renderPlain(tr, 80)
+		rename(tr, "gone", name)
+
+		if got := renderPlain(tr, 80); got != before {
+			t.Errorf("an unknown id moved the paint:\n--- got ---\n%s\n--- want ---\n%s", got, before)
+		}
+		if len(tr.entries) != 4 {
+			t.Errorf("entries = %d, want the 4 the fixture built — a rename appends nothing", len(tr.entries))
+		}
+	})
+
+	// The control: a delegation the model named itself is one the engine never renames (no event is
+	// emitted for it at all), so its row goes on saying what its call said.
+	t.Run("a call the model named is unchanged when no event fires", func(t *testing.T) {
+		tr := &transcript{}
+		delegationCall(tr, "", "s1", "planner", "plan the work", 0)
+
+		if got, want := breadcrumbTrail(tr.entries, "s1"), "← main › planner"; got != want {
+			t.Errorf("trail = %q, want %q", got, want)
+		}
+	})
+
+	// The persistence half. agentName is deliberately off the wire, so the ONLY thing that carries a
+	// generated name into a resumed session is the head's Target — which is why the fold sets both.
+	// A record saved before the rename and resumed after it would otherwise paint the task's first
+	// line the session had already stopped showing (ADR 0068).
+	t.Run("a record saved after the rename comes back wearing it", func(t *testing.T) {
+		tr := build(t)
+		rename(tr, "s1", name)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		entries, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+
+		head, ok := runHead(entries, "s1")
+		if !ok {
+			t.Fatalf("the record came back without the renamed run head: %+v", entries)
+		}
+		if got := usageAgentName(head); got != name {
+			t.Errorf("restored name = %q, want the generated %q off the persisted Target", got, name)
+		}
+		if got, want := breadcrumbTrail(entries, "s1"), "← main › "+name; got != want {
+			t.Errorf("restored trail = %q, want %q", got, want)
+		}
+	})
+}

@@ -3262,3 +3262,87 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// The rename fold (transcript.addSubAgentName, ADR 0068)
+// ----------------------------------------------------------------------------
+
+// TestAddSubAgentNameSetsBothHalvesOfTheHeadsName pins what the fold WRITES, which the surface test
+// beside it (TestGeneratedDelegationNameReachesEverySurface) cannot see: the head carries two naming
+// fields answering two questions, and a rename that moved one without the other would leave the same
+// run wearing its generated name on the status line and its delegated task on the scrollback. Only
+// one of the two is on the wire, so only one of them survives a resume — which is exactly why both
+// are set rather than one.
+func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
+	t.Run("both fields take the generated name", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		tr.apply(domain.SubAgentNamedEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Name:      "test-surveyor",
+		})
+
+		head := tr.entries[0]
+		if got := head.tool.agentName; got != "test-surveyor" {
+			t.Errorf("agentName = %q, want the generated name — the live phrase reads this one", got)
+		}
+		if got := head.tool.Target; got != "test-surveyor" {
+			t.Errorf("Target = %q, want the generated name — the header and the record read this one", got)
+		}
+	})
+
+	// The status line asks the transcript for the acting delegate's name per compose, so a run that
+	// read as "sub-agent · reading" before the rename reads as its own name the next frame.
+	t.Run("the status line's lookup answers with it", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		if got := tr.runName("s1"); got != "" {
+			t.Fatalf("setup: runName = %q, want an unnamed delegation", got)
+		}
+		tr.apply(domain.SubAgentNamedEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Name:      "test-surveyor",
+		})
+
+		if got := tr.runName("s1"); got != "test-surveyor" {
+			t.Errorf("runName = %q, want the generated name", got)
+		}
+	})
+
+	// The name is model-supplied text and takes the same control strip every other display field on
+	// this card takes (sanitize) — the ESC byte itself, not the ANSI sequence around it, which the
+	// host's own sanitiser removes before the name is ever emitted. This is the view's backstop
+	// rather than a second opinion, and a backstop that let a control through would put it on the
+	// one row a collapsed delegation always paints.
+	t.Run("a control character in the name is stripped", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		tr.apply(domain.SubAgentNamedEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Name:      "test\x1b\x07-surveyor",
+		})
+
+		if got := tr.entries[0].tool.Target; got != "test-surveyor" {
+			t.Errorf("Target = %q, want the control bytes stripped out of it", got)
+		}
+	})
+
+	// A name that sanitised away to nothing is not a name. Blanking the header would take the task's
+	// first line off the row and leave a delegation with no text at all — strictly worse than what
+	// the block already wore.
+	t.Run("an empty name leaves the head as it was", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		tr.apply(domain.SubAgentNamedEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Name:      "\x1b\x07",
+		})
+
+		if got := tr.entries[0].tool.Target; got != "survey the tests" {
+			t.Errorf("Target = %q, want the task's first line kept", got)
+		}
+		if got := tr.entries[0].tool.agentName; got != "" {
+			t.Errorf("agentName = %q, want it still unset — nothing named this run", got)
+		}
+	})
+}

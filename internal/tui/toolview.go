@@ -528,16 +528,19 @@ type toolView struct {
 	name string
 
 	// agentName is the short name a delegation was given (the sub_agent call's optional `name`
-	// argument, normalised the way the tool normalises it: trimmed first line, empty when absent).
+	// argument, normalised the way the tool normalises it: trimmed first line, empty when absent) —
+	// or, where the call gave none, the name the out-of-band naming completion generated for it
+	// afterwards (domain.SubAgentNamedEvent, ADR 0068; [toolView.rename] sets both halves).
 	// It is the same text the Target already leads with on a named delegation, kept apart from it
 	// because the two answer different questions: Target is the header's text whatever filled it —
-	// the task's first line on an unnamed call — while this says whether a NAME was given at all,
-	// which is what the live status line looks up to word a phrase as "<name> · reading main.go"
-	// rather than "sub-agent · reading main.go".
+	// the task's first line on an unnamed call nothing has named yet — while this says whether a
+	// NAME is known at all, which is what the live status line looks up to word a phrase as
+	// "<name> · reading main.go" rather than "sub-agent · reading main.go".
 	//
 	// It is display text like the fields above it and is escape-stripped with them (sanitize), but
 	// deliberately NOT on the wire (session.ToolView): the status line is live-only, and the persisted
-	// header display already rides Target.
+	// header display already rides Target — which is why a rename writes the name into both, and why
+	// a resumed session paints a generated name off Target with this field empty.
 	agentName string
 
 	// task is the delegated prompt in full — the sub_agent call's `task` argument verbatim, newlines
@@ -622,6 +625,26 @@ type toolView struct {
 // re-derive its own solo mark rather than trust one the wire may predate (fromWireToolView).
 func (tv toolView) headsRun() bool {
 	return tv.name == subAgentToolName
+}
+
+// rename gives a delegation the name it was handed out of band (domain.SubAgentNamedEvent, ADR
+// 0068), which the model's own call did not carry. It is the ONE place the card's two naming fields
+// move together, because they must: agentName is what the live phrase and the run view's legend ask
+// for, Target is the header text every collapsed row paints, and a rename that moved one without the
+// other would leave the same run wearing two names on two surfaces.
+//
+// An empty name changes nothing. A generated name that sanitised away to nothing is not a name, and
+// blanking the header would take the task's first line off the row and leave a delegation with no
+// text at all — strictly worse than the name the block already wore.
+//
+// The caller strips the text (transcript.addSubAgentName); this method stores what it is given, the
+// way presentToolCall does for the fields it fills before the same strip runs over them.
+func (tv *toolView) rename(name string) {
+	if name == "" {
+		return
+	}
+	tv.agentName = name
+	tv.Target = name
 }
 
 // toolOutcome is what a prose extractor returns: the one-line Summary that fills the branch

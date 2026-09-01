@@ -180,7 +180,14 @@ delegation from its task, with one small extra completion each."
 **Regression guard.** `titleWiring.generate` untouched; `TestSettingsRowsFormatEffectiveValues` pins the new Desc only where it pins Descs; retargeting between spawn and naming may name on the new box — acceptable, noted in naming.go.
 **Commit:** `feat(apogee): host delegation namer on the child's Upstream, gated by auto-title`
 
-## 5. TUI: fold `SubAgentNamedEvent` into the head, every reader, and the saved record
+## 5. TUI: fold `SubAgentNamedEvent` into the head, every reader, and the saved record — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — internal/tui/fold_test.go: made necessary by the rename fold. Item 2 wrote `TestFoldSubAgentNamedEventReResolvesThePlaceholder` while the fold still moved no head, so it captured the pre-fold legend ("Message repo-scout…") as its expectation. Item 5's Tests line requires the placeholder to SHOW the generated name, so the expectation is now the literal renamed legend ("Message repo scout…"); the test's own subject — that the arm PUT a legend back on a scrambled box — is unchanged. This is the one existing test the item's change contradicted; every other test in ./internal/tui/ passes untouched.
+NOTES (2026-09-01): the fold's two moving parts live where they belong rather than both in transcript.go: `transcript.addSubAgentName` locates the head by CallID and strips the name, and a new `(*toolView).rename` sets `agentName` and `Target` together — the one place the card's two naming fields move as a pair, so no future caller can move one without the other. Not a deviation from the item text (it names both fields); a placement call.
+NOTES (2026-09-01): `rename` ignores an empty name. A generated name that sanitised away to nothing would otherwise blank the header and leave a delegation with no row text at all — strictly worse than the task's first line it already wore. The engine never emits one (title.SanitizeTo refuses), so this is a backstop.
+NOTES (2026-09-01): the view's escape strip at this seam (`sanitize.StripEscapes`) drops control CHARACTERS, not whole ANSI sequences — the same contract every other display field on the card has. The full sequence is removed upstream by the host's `title.SanitizeTo` before the event is emitted. The test asserts the seam's real contract rather than a stricter one.
+NOTES (2026-09-01): consequential edit — internal/tui/transcript.go's `apply` doc said "ten transcript-rendered variants of the fourteen-variant Event set". Item 2 added the fifteenth variant without updating it; this item makes it the eleventh rendered one, so the count is now correct.
+NOTES (2026-09-01): no manual or ADR edit needed — docs/manual/sessions.md:31 already describes exactly this painting (written under item 1), and every non-test reader of a head's name funnels through `usageAgentName` / `transcript.runName` / the rendered `tv.Target`, all of which the head rename moves.
 
 Depends on item 2.
 **What:** Recast at the regression check (2026-09-01). `internal/tui/transcript.go`: fold `domain.SubAgentNamedEvent` (beside `addSubAgentPhase`,
