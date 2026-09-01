@@ -60,7 +60,7 @@ import (
 //
 // The surface decides nothing about what a key MEANS. Closing an overlay, resuming a session,
 // rebinding a model: those are the pane's own acts with the pane's own consequences, and a
-// listVerdict is what asks for one. That is the split that lets seven pickerKinds, three browser
+// listVerdict is what asks for one. That is the split that lets eleven pickerKinds, three browser
 // modes, three /settings steps and two dropdown kinds share one key contract without this file
 // knowing that any of them exist.
 
