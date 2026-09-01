@@ -443,6 +443,60 @@ func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
 	}
 }
 
+// announcedSeatCalls are the two `run_on` arguments the model must end up sending — the two values
+// the orientation's Delegations line names, in the order it names them. They are spelled here as
+// they ride the wire so that a value the fixture merely echoed and a value it re-invented cannot
+// both satisfy the check.
+var announcedSeatCalls = []string{`"run_on":"session"`, `"run_on":"sub-agents-server"`}
+
+// TestE2EAnnouncedDelegationSeatsAreAcceptedVerbatim is the invariant over the Delegations line
+// (ADR 0069): every `run_on` value apogee names in the orientation is a value the sub_agent tool
+// then accepts, and the delegation runs where it says.
+//
+// It is the same shape as the rest of this suite and for the same reason. The line is an
+// ANNOUNCEMENT — the model is told "run_on \"sub-agents-server\" = qwen on grunt-box" and has no
+// other source for the word — so a schema that drifted from the prose (an enum re-spelled, a value
+// dropped, a clause the renderer stopped emitting) would be an instruction apogee itself refuses.
+// The fixture never spells the two values: it lifts them out of the system text of the very request
+// it is answering (seat-session.yaml's captures) and hands them straight back, so the day the line
+// changes this test fails rather than quietly testing a constant of its own.
+func TestE2EAnnouncedDelegationSeatsAreAcceptedVerbatim(t *testing.T) {
+	run := launchSeatSession(t, seatChoiceModel)
+
+	// Routing has to be in force before the far value can mean anything: an ask that finds no
+	// target falls back, which would prove the fallback rather than the acceptance.
+	awaitNotice(t, run.drv, "sub-agents: routing to "+seatTargetServer)
+	submit(run.drv, seatAnnouncedPrompt)
+	run.drv.WaitText(seatWrapUp)
+	run.drv.WaitQuiet(settled)
+
+	// What the model sent is what it was told, in the order it was told.
+	calls := toolCalls(run.session)
+	if len(calls) != 2 {
+		t.Fatalf("the run issued %d tool calls; want the fixture's two delegations", len(calls))
+	}
+	for i, want := range announcedSeatCalls {
+		if !strings.Contains(calls[i].Arguments, want) {
+			t.Errorf("delegation %d reads %s; want the announced seat %s", i+1, calls[i].Arguments, want)
+		}
+	}
+
+	// And both were honoured rather than refused: one child on each server, and no result carrying
+	// the engine's own refusal of a value it does not know.
+	if got := childRequests(run.session, seatNearTask); got != 1 {
+		t.Errorf("the session server answered %d of the near child's requests; want 1", got)
+	}
+	if got := childRequests(run.target, seatFarTask); got != 1 {
+		t.Errorf("the sub-agents server answered %d of the far child's requests; want 1", got)
+	}
+	for i, res := range toolResults(run.session) {
+		if strings.Contains(res, "invalid run_on") {
+			t.Errorf("delegation %d was refused the seat the orientation named it:\n%s", i+1, res)
+		}
+	}
+	run.quit(t)
+}
+
 // ----------------------------------------------------------------------------
 // Shared fixtures for the announced-paths suite
 // ----------------------------------------------------------------------------

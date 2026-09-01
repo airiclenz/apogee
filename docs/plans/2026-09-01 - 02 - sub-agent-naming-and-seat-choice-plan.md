@@ -437,7 +437,14 @@ when non-empty; `/server` rows untouched.
 **Regression guard.** Startup with `sub-agents-choice` absent builds the same roster as today (pin the tool list); `Retarget`/`relist` behaviour unchanged.
 **Commit:** `feat(apogee): wire sub-agents-choice, seat facts and the picker description`
 
-## 14. Manual + e2e: seat journey, fallback note, announced Delegations line
+## 14. Manual + e2e: seat journey, fallback note, announced Delegations line — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the `### Letting the model pick the seat` subsection is placed at the END of the `## The servers you run models on` section rather than immediately after the `sub-agents-server` narrative the item cites. That section carries no `###` headings at all and uses bold lead-ins as its subsection device, so a `###` inserted at :651 would have swallowed the four paragraphs that follow it — the retired-flag migration, `server:` bookkeeping, `remember-model:` and the first-run picker — under a heading about seats. Document order still puts the subsection after the narrative.
+NOTES (2026-09-02): the announced-surface case lives in e2e_announced_test.go over the SEAT fixture rather than a fixture of its own: the item's Files list names only seat-session.yaml and seat-target.yaml, so the capturing turn is a turn of seat-session.yaml keyed on its own prompt. Its two captures lift the `run_on` values out of the Delegations line on the very request they answer, so a line that stopped being rendered fails the case as an unmatched capture (HTTP 500) rather than silently testing two constants.
+NOTES (2026-09-02): case (3) reads the note as the last line of the whole tool-result content. Nothing steers in a driven run, so the body IS the content there; the body-last-line-ahead-of-the-trailer pairing is pinned one layer down by item 11's internal/agent/seat_test.go:188.
+NOTES (2026-09-02): case (1) also waits for the `sub-agents: routing to <name>` notice, which the item does not ask for. Without it a `run_on: "session"` sent before the first beat lands on the session server whether the value was honoured or ignored, and the case would pass vacuously. Confirmed by a negative control run: dropping `run_on` from that fixture turn makes the case fail (the child lands on the target).
+NOTES (2026-09-02): the manual's example Delegations line shows BOTH seats with their `description:`, which is what ADR 0069 decision 5 ratifies and what the code renders once the session's entry has been bound from a real `config.ServerEntry`. At startup today it renders the session seat WITHOUT its description — see the FOLLOW-UP; the manual documents the ratified rendering rather than the gap.
+NOTES (2026-09-02): the `sub-agents-choice: fixed` case asserts only the ABSENCE of the Delegations line in the system text, per the item's own decision — a request's tool schemas are not observable through stubllm, so the roster half of the gate stays item 13's unit test.
 
 Depends on items 12, 13.
 **What:** Recast at the regression check (2026-09-01). `docs/manual/configuration.md`: `description` joins the per-entry keys list (:562-570); a

@@ -564,7 +564,10 @@ entries may share one. `endpoint` is required; `api-key` (or `api-key-cmd` /
 `api-key-env` — exactly one of the three), `model`, `parallel-agents`,
 `working-window` (the room a session on that server works in, above)
 and `effort-dialect` (which of the three wires carries the
-thinking-effort dial, described above) are optional, as is `llama-launcher`,
+thinking-effort dial, described above) are optional, as are `description` — free
+text saying what that server is **for**, which the `/sub-agents-server` picker
+shows and which the model reads when you let it pick the seat
+([below](#letting-the-model-pick-the-seat)) — and `llama-launcher`,
 which lets apogee start, switch and stop that server itself — [below](#local-servers--llama-launcher).
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
@@ -697,6 +700,74 @@ where the backup is. If the fold cannot be made
 safely — no `endpoint:` among those keys, a name the list already uses, a `server:`
 you already set — **nothing is written at all** and the error carries the block to
 paste in their place. A config already in the new schema is never touched.
+
+### Letting the model pick the seat
+
+Everything above settles where delegations run before the session starts. The
+root `sub-agents-choice:` key can hand that decision to the top-level model
+instead, one delegation at a time.
+
+```yaml
+# ~/.apogee/config.yaml
+servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    model: gpt-oss-20b
+    description: the big local model, for review, design and ambiguous investigation
+  - name: grunt-box
+    endpoint: http://192.168.64.9:1111
+    model: qwen3-4b
+    description: small and fast, good at greps, file reads and mechanical edits
+
+server: workstation
+sub-agents-server: grunt-box
+sub-agents-choice: model      # fixed (the default) or model
+```
+
+`fixed` is the default and is what apogee did before this key existed:
+`sub-agents-server:` decides, and every delegation goes where it points. `model`
+adds one optional argument to the sub-agent tool — `run_on`, which takes
+`session` (this session's own server) or `sub-agents-server` (the entry
+`sub-agents-server:` names). A call that says nothing is unchanged: it runs
+wherever `sub-agents-server:` would have sent it, so turning the key on moves
+nothing by itself. The `sub-agents-choice` row on the
+[settings screen](commands.md#the-settings-screen--settings) switches it live,
+and the change applies to the next request.
+
+The choice is offered to the **top-level** model only. A sub-agent's own tool
+never carries `run_on`, so a delegation's own delegations stay where their
+parent ran.
+
+**The model chooses from what you wrote.** With `model` on, apogee adds one line
+to the host orientation it already sends, describing both places a delegation can
+go in the same words — the model, the entry's name, and the entry's
+`description:`:
+
+    - Delegations: run_on "session" = gpt-oss-20b on workstation — the big local model, for review, design and ambiguous investigation; run_on "sub-agents-server" = qwen3-4b on grunt-box — small and fast, good at greps, file reads and mechanical edits; unset = sub-agents-server. Keep judgment-heavy sub-tasks (review, design, ambiguous investigation) on the stronger seat and send mechanical ones (search, mechanical edits, running tests) to the other.
+
+`description:` is the only part of that line you write, and it is why the key is
+worth having: a choice between two bare names is a coin toss. The line carries
+**no availability state** and moves only where you move it — `/server`,
+`/model`, `/sub-agents-server` — so a server going down, or coming back, never
+rewrites the system prompt mid-session.
+
+**When the far seat is not there.** A delegation that asked for
+`sub-agents-server` while there is no usable target — the server is down, its key
+will not resolve, the name matches no entry — still runs. It falls back to the
+session's own server, exactly as a fixed route does, and its result gains one
+last line so the model that made the choice can see it was overruled:
+
+    note: ran on the session server — the sub-agents server was unavailable
+
+You are told the same thing once, by the routing notice `sub-agents-server:`
+already prints; the note is for the model, on the result of the call that asked.
+
+**Two seats in one reply.** When one reply's delegations land on both servers,
+apogee runs that batch at the smaller of the two `parallel-agents` caps, so
+neither box is oversubscribed. A reply whose delegations all land on one seat
+runs at that seat's own cap, exactly as above.
+
+See [ADR 0069](../adr/0069-the-top-level-model-picks-the-delegation-seat.md).
 
 ## The upstream API key
 

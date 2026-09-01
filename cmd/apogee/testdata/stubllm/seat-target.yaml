@@ -1,0 +1,19 @@
+# The Sub-agent server `sub-agents-server:` names in the seat-choice runs (ADR 0069): the box a
+# delegation reaches only by asking for it — `run_on: "sub-agents-server"`, or an absent `run_on`
+# under the root key's own rule.
+#
+# It answers CHILDREN and nothing else. The conversation never moves here, so a request in this
+# server's log that is not a child's is a routing bug, and every case asserts against that log by
+# the task the child was given. Its model id differs from the session server's for the same reason:
+# a request answered here can be told from one answered there by what it named.
+model: seat-target-model
+turns:
+    # The child, whichever half it was given.
+    - when:
+        last_message: half of the workspace
+      repeat: true
+      text: The far box read a.txt.
+    # Anything a child did not claim — never expected, and text rather than a 500 so a case that
+    # meant to assert about routing fails on its own assertion instead of on the transport.
+    - repeat: true
+      text: Nothing else to add.

@@ -1,0 +1,71 @@
+# The SESSION server the seat-choice runs are bound to (ADR 0069): the box the conversation lives
+# on, and — whenever a delegation names `run_on: "session"`, or asks for the far seat and does not
+# get it — the box a child runs on too.
+#
+# Its companion is seat-target.yaml, the Sub-agent server `sub-agents-server:` names. The two
+# scripts are deliberately not one file: which of them answered a child's request IS the assertion
+# every case here makes, and a fixture both servers shared could never say which one it was.
+#
+# Every delegating turn names its delegation, so no case spends an out-of-band naming completion on
+# top of the requests it is counting (ADR 0068 fires only on a call that gave no name). The session
+# title turn is here for smoke.yaml's reason: `auto-title:` is on by default, so a driven TUI asks
+# for a title off the first prompt, and one unanswered request is an HTTP 500 that would fail the
+# run rather than the assertion.
+model: seat-session-model
+turns:
+    # The session title.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Delegation seats
+    # The parent's wrap-up, once a delegation has reported. Matched ahead of every delegating turn
+    # so a parent request carrying a result can never be answered as a fresh request.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The delegate reported.
+    # The near seat, asked for by name: one delegation the model pins to the session's own server.
+    - when:
+        last_message: ^Delegate this to the session seat
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey the near half of the workspace","name":"near seat","run_on":"session"}'
+    # The far seat, asked for by name. Answered by seat-target.yaml when a target is latched, and by
+    # the child turn below — under the fallback note — when there is none.
+    - when:
+        last_message: ^Delegate this to the sub-agents seat
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey the far half of the workspace","name":"far seat","run_on":"sub-agents-server"}'
+    # The announced-surface turn: the two `run_on` values are LIFTED out of the orientation block on
+    # this very request and handed straight back, so what the tool is sent is what apogee itself
+    # announced. A capture that matches nothing is an HTTP 500 and the turn is not spent, which is
+    # what makes a dropped or re-worded Delegations line fail here rather than in a user's session.
+    - when:
+        last_message: ^Delegate one to each seat the orientation names
+      captures:
+        - {name: near, from: system, pattern: 'Delegations: run_on "([^"]+)"'}
+        - {name: far, from: system, pattern: 'Delegations: run_on "[^"]+" = [^;]+; run_on "([^"]+)"'}
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey the near half of the workspace","name":"near seat","run_on":"{{near}}"}'
+        - name: sub_agent
+          arguments: '{"task":"Survey the far half of the workspace","name":"far seat","run_on":"{{far}}"}'
+    # A plain reply, for the cases whose whole subject is the system text a request CARRIES rather
+    # than anything the model does with it.
+    - when:
+        last_message: ^Say what you see
+      repeat: true
+      text: I see the workspace.
+    # The child, whichever half it was given — the near one always, the far one whenever the far
+    # seat was asked for and no target was latched.
+    - when:
+        last_message: half of the workspace
+      repeat: true
+      text: The half I was given holds a.txt.
+    # Anything neither the parent nor a child claims.
+    - repeat: true
+      text: Nothing else to add.
