@@ -68,6 +68,16 @@ impossible without slot accounting, and bounds total concurrent LLM streams at t
 delegating parent is blocked and consumes no slot). Relaxing to deeper fan-out with a
 release-while-delegating budget is additive, if evidence ever wants it.
 
+> **Amended 2026-09-01 by [ADR 0069](0069-the-top-level-model-picks-the-delegation-seat.md) —
+> mixed-seat width.** A depth-0 reply may now put some of its `sub_agent` calls on the session's
+> own server and others on the **Sub-agent server**, which this record never had to size: its cap
+> was the cap of the one server every child was going to. The rule now: a reply whose children all
+> share a **Delegation seat** is bounded by THAT seat's cap, exactly as above; a reply that spans
+> both seats is bounded by `min(session cap, target cap)`. Decision 1's one-width-per-reply rule is
+> what picks the smaller of the two rather than running a pool per seat — two widths in one Turn
+> would need the slot accounting this decision exists to avoid — and the depth-0 bound itself is
+> untouched, since a child's own tool carries no seat parameter.
+
 **4 — Execution semantics preserve every existing per-child rule.** In a mixed reply,
 **leaf tools run first, in emitted order** — a write a child depends on lands before
 children start — then the `sub_agent` group fans out through a pool bounded by the cap

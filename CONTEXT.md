@@ -133,7 +133,8 @@ circuit-breaker + audit log — `Guards.ForSubAgent`) over a **shared, read-only
 dangerous-action floor** (unloosenable one level down), and recursion is depth-bounded.
 When one reply carries several `sub_agent` calls, the **top-level** agent runs them
 **concurrently** up to the server's **Parallel agents** cap (depth-0 only — a sub-agent's
-own delegations run serially inline); every event a sub-agent emits carries the **call-ID**
+own delegations run serially inline; a reply split across **Delegation seats** takes the
+smaller of the two caps); every event a sub-agent emits carries the **call-ID**
 of the `sub_agent` call that spawned it, so interleaved streams stay attributable
 ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
 What a delegation is CALLED is its **Delegation name**, and the rule is three-deep: the name its
@@ -191,8 +192,13 @@ serial, today's behavior. It is **structural, not a Mechanism** — it only exec
 the model already made, so it is on under Bypass — but it is also the width of a guided
 decomposition **batch** (`min(cap, remaining)` delegations per Turn). More parallel agents
 means a **smaller window each**: a llama.cpp `--parallel N` server splits its context into
-N slots, and the reported window is the per-slot share. See
-[ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md).
+N slots, and the reported window is the per-slot share. One reply has ONE width even when its
+children do not share a **Delegation seat**: all-on-one-seat is bounded by that seat's cap, a
+**mixed** reply by `min(session cap, target cap)` — small enough that neither server is
+oversubscribed, and never a pool per seat. See
+[ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)
+(mixed width amended 2026-09-01 by
+[ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md)).
 _Avoid_: "slots" (the server's own term for its side of the trade), "concurrency limit"
 (names the bound, not the thing bounded), "fan-out width" (fan-out is the act; this is the
 cap).
@@ -212,10 +218,17 @@ what it advertises — because the dialect is a property of the server a request
 that names neither leaves its delegates speaking the SESSION server's dialect, and apogee says so
 once when routing engages. An unset key means today's behavior: children share the parent's
 Upstream. A name no entry carries is not a startup error — apogee says which name went missing,
-names the entries the file does carry, and routes to the session's own server. Ratified
-2026-08-11, re-shaped as a root key 2026-08-31
+names the entries the file does carry, and routes to the session's own server. ANY entry may also
+carry a free-text `description:` — what the owner keeps that box for — which the **Orientation
+block**'s Delegations line relays and the `/sub-agents-server` picker shows in its rows. With root
+`sub-agents-choice: model` the key stops being the last word: a depth-0 `sub_agent` call may carry
+`run_on: session | sub-agents-server` and pick its own **Delegation seat**, and the key's rule
+covers every call that carries no `run_on` — which, under the default `sub-agents-choice: fixed`,
+is all of them. Ratified 2026-08-11, re-shaped as a root key 2026-08-31, opened to the model
+2026-09-01
 ([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md),
-[ADR 0066](docs/adr/0066-sub-agent-routing-follows-the-sub-agents-server-root-key.md)).
+[ADR 0066](docs/adr/0066-sub-agent-routing-follows-the-sub-agents-server-root-key.md),
+[ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md)).
 _Avoid_: "grunt server" (colloquial), "worker server", "delegation server" (too close to the
 **Delegation target**, which is the latched spec rather than the entry), "flagged server" (there
 is no flag any more — the root key names it).
@@ -232,6 +245,28 @@ down, no model) is not an error: the spawn **falls back** to the parent's Upstre
 parent posture, with one notice per routing state change. Ratified 2026-08-11 (ADR 0045).
 _Avoid_: "child upstream" (the target outlives any one child), "sub-agent endpoint" (it
 carries far more than an address).
+
+**Delegation seat**:
+One of the **two** places a delegation may run — the session's own server, or the **Sub-agent
+server** — and, with root `sub-agents-choice: model`, something the top-level model picks per
+call through the `sub_agent` tool's optional `run_on` (`session` | `sub-agents-server`). Absent,
+the root `sub-agents-server:` key's rule stands, so the default gate value (`fixed`) is today's
+behavior with the parameter not even in the schema. The choice exists at **depth 0 only** — a
+child's own tool carries no `run_on`, and a delegation keeps the seat it landed on
+([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)'s
+depth-0 rule, ADR 0045's identity-once-there rule). The seat carries everything the seat means:
+`run_on: session` in a routed session runs unrouted with the parent's posture, window and
+**effort dialect**, while `sub-agents-server` is routing exactly as ADR 0045/0066 already build
+it. The model chooses from session-constant facts the **Orientation block**'s Delegations line
+states for BOTH seats symmetrically — entry name, the entry's `description:`, its `model:` pin,
+the bound session model — never from availability, which is why an ask the far seat cannot honour
+**falls back** to the session server and says so in ONE appended note line, the last line of the
+result body ahead of a steered child's trailer
+([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md) D3 keeps the final line).
+Ratified 2026-09-01
+([ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md)).
+_Avoid_: "target" (the **Delegation target** is the latched spec of ONE seat, not the pair),
+"routing choice" (routing is what one of the two seats is), "worker pool".
 
 **Run view**:
 The surface one **Sub-agent** run is read and addressed in. Expanding a framed delegation — from the
@@ -690,8 +725,11 @@ work space, not a cache with an invalidation story).
 
 **Orientation block**:
 The engine-composed part of the **standing system content** that states the host facts a model
-needs to get oriented — the **workspace** path, its **Scratch dir**, the `/tmp` caveat, and the
-read-only library roots with the tools that reach them. It is **harness text, not persona text**:
+needs to get oriented — the **workspace** path, its **Scratch dir**, the `/tmp` caveat, the
+read-only library roots with the tools that reach them, and — only under `sub-agents-choice:
+model` — a **Delegations** line describing both **Delegation seats** symmetrically (each seat's
+entry name, its `description:`, its `model:` pin and the bound session model) so the model can
+choose a `run_on`. It is **harness text, not persona text**:
 the engine writes it, so no edit to the user's `system-prompt-text` — and no install whose config
 was seeded before a fact existed — can lose it. It **rides along**: appended only when a standing
 system message exists anyway (a rendered template and/or **Context files** blocks), never
@@ -699,9 +737,12 @@ on its own, so "delete the prompt to send none" stays byte-identical on the wire
 floor is untouched. Wire position is directly after the prompt —
 prompt → orientation → context files → mechanism directives → tool block — so no workspace text
 precedes it and a repo file cannot open with a forged copy the real one then reads as a
-correction of; every fact it states is a per-session constant, so it is prefix-KV-cache safe. A
+correction of; every fact it states is a per-session constant, so it is prefix-KV-cache safe —
+the Delegations line carries no availability state and moves only on the human doors (`/server`,
+`/model`, `/sub-agents-server`), the way the **Scratch dir** moves at a session boundary. A
 fact the session does not have is omitted rather than rendered empty. See
-[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §6.
+[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §6
+and [ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md).
 _Avoid_: "system prompt" (that is the user's configured template; this is the engine's own text),
 "preamble" (the terminal tool's fail-fast preamble is a different thing).
 

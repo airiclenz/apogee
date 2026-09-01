@@ -31,12 +31,19 @@ they describe is what this key now steers.
 
 **A root `sub-agents-server:` key names the `servers:` entry every delegation routes to, the
 `/sub-agents-server` picker moves it in a running session, and the entry flag is removed.**
-Concretely:
+Concretely (*amended 2026-09-01 —
+[ADR 0069](0069-the-top-level-model-picks-the-delegation-seat.md) makes "every delegation" mean
+every delegation whose call carries no `run_on`, which under the default
+`sub-agents-choice: fixed` is still every delegation there is*):
 
 **1 — The target is a root key, not a flag on an entry — this amends ADR 0045 decision 1.**
 `sub-agents-server: <name>` names one entry of the `servers:` list; every delegation at every
-depth routes there, and a routed child's own delegations route to the same place (identity once
-there, unchanged). Every entry is an eligible target, including the one the session itself runs
+depth routes there — *scoped 2026-09-01 by
+[ADR 0069](0069-the-top-level-model-picks-the-delegation-seat.md) to a delegation whose call
+carries no `run_on`, which is every delegation under the default `sub-agents-choice: fixed`; an
+explicit `run_on: session` runs unrouted with the parent's posture* — and a routed child's own
+delegations route to the same place (identity once there, unchanged, and a child's own tool
+carries no `run_on` at all). Every entry is an eligible target, including the one the session itself runs
 on. An ABSENT or empty key is the pre-ADR-0045 behaviour — children share the parent's Upstream —
 so the feature is opt-in and the floor is the one ADR 0045 already promised. A name no entry
 carries is **not** a startup refusal, which is the `server:` key's own precedent (ADR 0036): one
@@ -90,6 +97,15 @@ deferred item is unchanged in status: routing is human-chosen, by the file or by
 changes is that the wiring consults the target name in exactly ONE place, so a future per-call
 `sub_agent` parameter slots in there without touching the recursion path.
 
+> **Amended 2026-09-01 by [ADR 0069](0069-the-top-level-model-picks-the-delegation-seat.md).** The
+> deferral this decision recorded is over, and the consultation point it reserved is now used.
+> Model-chosen routing is ratified in a two-seat shape: with root `sub-agents-choice: model` the
+> top-level model's `sub_agent` call may carry `run_on: session | sub-agents-server`, resolved at
+> that same single consultation point, at depth 0 only. Routing stays human-chosen *by default* —
+> `sub-agents-choice:` defaults to `fixed`, and with it the parameter is not in the schema at all —
+> so this decision's claim holds wherever the key is unset, and the file and the picker remain the
+> only doors that move the target itself.
+
 ## Considered and rejected
 
 - **Keep the flag and add the root key beside it.** Two spellings for one fact, and a conflict
@@ -119,4 +135,6 @@ changes is that the wiring consults the target name in exactly ONE place, so a f
 - CONTEXT.md's **Sub-agent server** term is no longer "the flagged entry" but "the entry the root
   key names", and its "at most one entry may carry the flag" sentence is gone.
 - ADR 0045 is amended, not superseded: decisions 3-7 of that record are the mechanism this key
-  steers, and its deferred items stay deferred.
+  steers, and its deferred items stay deferred. *Amended 2026-09-01 — its **Model-chosen routing**
+  item is no longer deferred ([ADR 0069](0069-the-top-level-model-picks-the-delegation-seat.md));
+  **Launcher actuation** still is.*
