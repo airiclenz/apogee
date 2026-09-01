@@ -1041,11 +1041,18 @@ advertised window is `Window`).
 The standing instructions apogee sends ahead of the user's own messages — the **first system
 message of every request**, rendered fresh per request from a **template** the user configures
 in `~/.apogee/config.yaml` (`system-prompt-text` / `system-prompt-file`, plus per-model
-overrides in `system-prompt-models`; file-only — no flag or env) — or, when the user configures
+overrides in `system-prompt-models` and the additive `system-prompt-layers`; file-only — no
+flag or env) — or, when the user configures
 none, from the **embedded default** apogee compiles into the binary and refreshes with every
 upgrade, unless `use-default-prompt: false` turns it off. Resolution is a four-rung ladder, first
 hit winning and supplying the *whole* prompt: matching per-model entry > top-level text/file >
-embedded default > nothing. The template's whole vocabulary is four strictly-spelled
+embedded default > nothing. **Layers** are the one additive channel beside that ladder:
+`system-prompt-layers:` is an ordered list whose entries each state exactly one of `text:` or
+`file:` (a `file:` resolving like `system-prompt-file`), appended to whatever the ladder
+picked — selected prompt first, then the layers in listed order, joined by a blank line. They
+are **not a rung**: a per-model entry replaces the selected prompt but never the layers, layers
+alone are sent alone, and they never fire the embedded default, which stays the fallback for a
+wholly unconfigured prompt. The template's whole vocabulary is four strictly-spelled
 placeholders — `{{workspace}}`, `{{datetime}}` (the **date** only, so a local server's prefix
 cache survives a turn), `{{mode}}`, `{{scratch}}` — and an unknown one is a startup error, never
 raw braces on the wire. It is **request-scoped**: seeded into the
@@ -1059,10 +1066,12 @@ reaches by construction: the Compaction summariser's instruction and the probe b
 sentence of guidance belongs in (host fact → Orientation block, standing steering → this template,
 model-gated and measured → Mechanism, task-shaped → Skill) is ADR 0064's placement rule. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) and
-[ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md).
+[ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md) and
+[ADR 0067](docs/adr/0067-system-prompt-layers-are-an-explicit-additive-channel.md).
 _Avoid_: "persona", "preamble" (either may be its *content*; the term names the channel),
 "prompt" alone (in TUI speech that is the user's own input line), "instructions block" (that is
-the profile's engine-owned tool menu, which follows it). Distinct from a **Skill**, which is
+the profile's engine-owned tool menu, which follows it), "rung" for a **layer** (a layer appends
+after the ladder's pick and never competes with it). Distinct from a **Skill**, which is
 turn-local and invoked from one message.
 
 **Context files**:
