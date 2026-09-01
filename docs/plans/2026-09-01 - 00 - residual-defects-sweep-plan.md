@@ -151,7 +151,10 @@ asserts the file no longer carries the key and the call reports it wrote.
 **Acceptance:** `go test -race -count=1 -run 'SubAgentsServer' ./internal/config/ ./cmd/apogee/`
 **Commit:** `feat(config): clear the sub-agents-server key from the config file`
 
-## 4. The `/sub-agents-server` picker offers the `auto` row
+## 4. The `/sub-agents-server` picker offers the `auto` row — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `ISSUES.md` joins **Files:** — the item's own **Files:** is code-only, while the plan's Closeout has every item remove its own register entry in its own commit. The section's `**Status:**` block stays; two of its entries are still open.
+NOTES (2026-09-01): the ` · sub-agents-server: cleared` clause is conditional on the host reporting a write, exactly as ` · sub-agents-server: saved` is — a clause states a write that happened. The composition root reports written for the empty name (`recordSubAgentsServerChoice`), so the full note the item specifies is what a real session paints; a host that records nothing claims no clause, and a subtest pins that.
 
 **What:** Recast at the regression check (2026-09-01). Fixes the residual at `ISSUES.md:49` — the
 ratified empty-key opt-out (`Retarget("")`, `cmd/apogee/delegation.go:609-611`) is reachable only by hand-editing `config.yaml`. Depends on item 3.

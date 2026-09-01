@@ -2566,9 +2566,25 @@ type fakeDelegationHost struct {
 	recorded    []string
 	saved       bool
 	recordErr   error
+	// entriesLeft counts down the reads that still answer with the targets, and is armed by the one
+	// test that needs the `servers:` block to vanish MID-accept: zero disables it, so every other
+	// test's list simply stands. Targets is asked per draw, and the accept asks it twice — once for
+	// the frame it maps the highlight against, once for the entry that highlight names — so this is
+	// what puts the emptied block between those two reads.
+	entriesLeft int
 }
 
-func (h *fakeDelegationHost) Targets() []ServerChoice { return h.targets }
+func (h *fakeDelegationHost) Targets() []ServerChoice {
+	if h.entriesLeft > 0 {
+		h.entriesLeft--
+		if h.entriesLeft == 0 {
+			answered := h.targets
+			h.targets = nil
+			return answered
+		}
+	}
+	return h.targets
+}
 
 func (h *fakeDelegationHost) Retarget(name string) error {
 	if h.retargetErr != nil {
@@ -2607,7 +2623,8 @@ func seededSubAgents(t *testing.T, host *fakeDelegationHost) Model {
 // The picker lists what the FILE carries — the delegation host's own targets — and nothing else: not
 // the synthesized ephemeral row of the session's switchable list, and no "· current" mark, which on
 // this pane could only name the server the session is bound to rather than the one its delegations
-// run on.
+// run on. One row is no entry: `auto`, LAST, the opt-out that clears the routing — an action, which
+// is why it still costs the pane no third cell.
 func TestSubAgentsServerPickerListsTheConfiguredTargets(t *testing.T) {
 	host := &fakeDelegationHost{}
 	m := seededSubAgents(t, host)
@@ -2633,8 +2650,8 @@ func TestSubAgentsServerPickerListsTheConfiguredTargets(t *testing.T) {
 		t.Errorf("the pane offered the synthesized --endpoint row, which names no servers: entry:\n%s", got)
 	}
 	rows := m.pickerRows()
-	if len(rows) != len(twoServers) {
-		t.Fatalf("rows = %v, want one per configured entry", rows)
+	if len(rows) != len(twoServers)+1 {
+		t.Fatalf("rows = %v, want one per configured entry plus the auto row", rows)
 	}
 	for i, row := range rows {
 		if len(row) != 2 {
@@ -2644,6 +2661,15 @@ func TestSubAgentsServerPickerListsTheConfiguredTargets(t *testing.T) {
 			if cell == currentRowCell {
 				t.Errorf("rows[%d] = %v, want no %q mark on a delegation target", i, row, currentRowCell)
 			}
+		}
+	}
+	want := popupRow{subAgentsAutoLabel, subAgentsAutoDescription}
+	if last := rows[len(rows)-1]; !reflect.DeepEqual(last, want) {
+		t.Errorf("last row = %v, want the auto row %v", last, want)
+	}
+	for _, cell := range want {
+		if !strings.Contains(got, cell) {
+			t.Errorf("the pane is missing the auto row's %q:\n%s", cell, got)
 		}
 	}
 }
@@ -2709,6 +2735,142 @@ func TestSubAgentsServerArgumentFormSkipsThePicker(t *testing.T) {
 	}
 	if want := []string{"remote"}; !reflect.DeepEqual(host.recorded, want) {
 		t.Errorf("recorded = %v, want %v", host.recorded, want)
+	}
+}
+
+// autoNamedServers are the entries of a file that happens to carry one called `auto` — the name the
+// pane's own last row uses. The configured entry is the LAST of the three, so the row that takes it
+// and the synthetic row that follows are neighbours.
+var autoNamedServers = append(append([]ServerChoice{}, twoServers...),
+	ServerChoice{Name: subAgentsAutoLabel, Endpoint: "http://auto:9100"})
+
+// autoRowNote is what taking the opt-out states: the label, what it resolved to, and the clause of
+// the write that happened — which for this row is a REMOVAL, never "saved".
+const autoRowNote = "sub-agents server: auto · this session's own server · sub-agents-server: cleared"
+
+// The `auto` row is the ratified opt-out (ADR 0045's key, owner 2026-09-01): it retargets to the
+// EMPTY name and records that same emptiness, which clears the `sub-agents-server:` key so the
+// opt-out survives a restart. Both forms of the verb reach it, and both say the same line.
+func TestSubAgentsServerAutoRowClearsTheRouting(t *testing.T) {
+	t.Run("the picker's last row", func(t *testing.T) {
+		host := &fakeDelegationHost{saved: true}
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server")
+		for range twoServers { // past the last configured entry, onto the appended row
+			m, _ = stepCmd(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+		}
+		m, _ = stepCmd(t, m, keyEnter())
+
+		if want := []string{""}; !reflect.DeepEqual(host.retargets, want) {
+			t.Errorf("retargets = %v, want the empty name — the opt-out points at no entry", host.retargets)
+		}
+		if want := []string{""}; !reflect.DeepEqual(host.recorded, want) {
+			t.Errorf("recorded = %v, want the empty name — the key is cleared, not skipped", host.recorded)
+		}
+		if m.picker.open {
+			t.Error("the picker stayed open after the auto row was taken")
+		}
+		if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != autoRowNote {
+			t.Errorf("notes = %v, want %q", got, autoRowNote)
+		}
+	})
+
+	t.Run("the argument form", func(t *testing.T) {
+		host := &fakeDelegationHost{saved: true}
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server auto")
+
+		if m.picker.open {
+			t.Error("the argument form opened the picker")
+		}
+		if want := []string{""}; !reflect.DeepEqual(host.retargets, want) {
+			t.Errorf("retargets = %v, want the empty name from the argument form too", host.retargets)
+		}
+		if want := []string{""}; !reflect.DeepEqual(host.recorded, want) {
+			t.Errorf("recorded = %v, want the empty name", host.recorded)
+		}
+		if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != autoRowNote {
+			t.Errorf("notes = %v, want %q — one line for both forms", got, autoRowNote)
+		}
+	})
+
+	// A host that wrote nothing claims nothing, the named pick's own posture: the clause states a
+	// write that happened, and "cleared" is a write like "saved" is.
+	t.Run("a recording that did not happen claims no clause", func(t *testing.T) {
+		host := &fakeDelegationHost{} // saved false, no error
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server auto")
+
+		want := "sub-agents server: auto · this session's own server"
+		if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+			t.Errorf("notes = %v, want %q with no cleared clause", got, want)
+		}
+	})
+}
+
+// A CONFIGURED entry named `auto` outranks the synthetic row in BOTH forms: the entries are the
+// file's, and a name the file carries must stay reachable by that name — the invariant that the two
+// forms never disagree about what exists cuts this way too.
+func TestSubAgentsServerConfiguredAutoEntryWinsTheName(t *testing.T) {
+	t.Run("the argument form resolves the entry", func(t *testing.T) {
+		host := &fakeDelegationHost{targets: autoNamedServers, saved: true}
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server auto")
+
+		if want := []string{subAgentsAutoLabel}; !reflect.DeepEqual(host.retargets, want) {
+			t.Errorf("retargets = %v, want the configured entry %v, not the opt-out", host.retargets, want)
+		}
+		want := "sub-agents server: auto" + subAgentsSavedClause
+		if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+			t.Errorf("notes = %v, want %q — an entry was named, so the key was SAVED", got, want)
+		}
+	})
+
+	t.Run("the picker offers the entry and the opt-out both", func(t *testing.T) {
+		host := &fakeDelegationHost{targets: autoNamedServers, saved: true}
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server")
+		rows := m.pickerRows()
+		if len(rows) != len(autoNamedServers)+1 {
+			t.Fatalf("rows = %v, want every entry plus the opt-out", rows)
+		}
+		for i := 0; i < len(autoNamedServers)-1; i++ { // onto the configured `auto` entry
+			m, _ = stepCmd(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+		}
+		m, _ = stepCmd(t, m, keyEnter())
+
+		if want := []string{subAgentsAutoLabel}; !reflect.DeepEqual(host.retargets, want) {
+			t.Errorf("retargets = %v, want the configured entry %v", host.retargets, want)
+		}
+	})
+}
+
+// The accept re-reads the targets, so a `servers:` block emptied under the OPEN overlay costs the
+// accept and nothing more: an index past the offering's last row names no entry and moves nothing.
+func TestSubAgentsServerAcceptSurvivesTargetsThatVanished(t *testing.T) {
+	host := &fakeDelegationHost{saved: true}
+	m := seededSubAgents(t, host)
+
+	m, _ = typeCommand(t, m, "/sub-agents-server")
+	for range twoServers {
+		m, _ = stepCmd(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	// Two more reads answer with the entries — the clamp the key press runs, then the frame the
+	// accept maps the highlight against — and the accept's own re-read finds nothing.
+	host.entriesLeft = 2
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if len(host.retargets) != 0 || len(host.recorded) != 0 {
+		t.Errorf("retargets = %v, recorded = %v, want neither — the row named no entry",
+			host.retargets, host.recorded)
+	}
+	if got := noteTexts(m); len(got) != 0 {
+		t.Errorf("notes = %v, want none", got)
 	}
 }
 

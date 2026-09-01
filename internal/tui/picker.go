@@ -448,7 +448,32 @@ const noSubAgentsTargetsNote = "no servers configured — add a servers: block t
 // key now names the entry this session's delegations run on, so the next session routes there
 // without being asked. It names the key rather than describing it — savedChoiceClause's own reason,
 // since the key is what the human will find in config.yaml.
+//
+// It is therefore the clause of a pick that NAMES an entry, and only that: the `auto` row records
+// the ABSENCE of the key, which is the opposite write, and says so with [subAgentsClearedClause].
 const subAgentsSavedClause = " · sub-agents-server: saved"
+
+// subAgentsClearedClause is [subAgentsSavedClause]'s sibling, and the clause the `auto` row earns:
+// accepting that row REMOVES the `sub-agents-server:` key rather than writing one
+// ([DelegationHost.RecordChoice]), so the opt-out survives a restart. It names the same key for the
+// same reason, and the two are never interchangeable — claiming "saved" for a removal would send a
+// human looking in config.yaml for a line that is no longer there.
+const subAgentsClearedClause = " · sub-agents-server: cleared"
+
+// subAgentsAutoLabel is the ONE spelling of the opt-out, shared by the picker's last row and by the
+// argument form, which answers to the same word. One constant because the two forms may never
+// disagree about what the verb offers (runSubAgentsServerCommand): a row a human can take with ⏎
+// while typing its name earns `unknown server "auto"` would be exactly that disagreement.
+const subAgentsAutoLabel = "auto"
+
+// subAgentsAutoDescription is what the `auto` row says out loud, effortRows' reason: every other row
+// names a configured entry and so names itself, while the row that names none has to state what
+// taking it DOES.
+const subAgentsAutoDescription = "— no routing; delegations run on this session's own server"
+
+// subAgentsAutoResolved is what the note hangs off the label once the opt-out is taken. A named pick
+// states the entry and stops there; `auto` is not an entry, so the line says what it resolved to.
+const subAgentsAutoResolved = " · this session's own server"
 
 // runSubAgentsServerCommand drives the /sub-agents-server verb in both its forms: bare, it opens the
 // picker over the `servers:` entries a delegation may run on; with one argument it takes that entry
@@ -459,7 +484,7 @@ const subAgentsSavedClause = " · sub-agents-server: saved"
 // host rather than the server one — a session may be perfectly able to switch its own upstream and
 // still route no delegations at all (a Driver that composed no such host, ADR 0031) — and the name
 // is resolved against the targets the picker would have listed, so the two forms can never disagree
-// about what exists.
+// about what exists — the picker's synthetic `auto` row included, which this form takes by name.
 func (m Model) runSubAgentsServerCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 1 {
 		return m.pickerNote(subAgentsServerUsage)
@@ -469,8 +494,15 @@ func (m Model) runSubAgentsServerCommand(args []string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(noSubAgentsTargetsNote)
 	}
 	if len(args) == 1 {
+		// A CONFIGURED entry answers the name FIRST, the word `auto` included: the entries are the
+		// file's and the row is this pane's, so a `servers:` block that happens to carry that name
+		// keeps it reachable by name in both forms. Only when no entry answers does the word mean the
+		// last row — the opt-out — which is the empty name the seams read as "no routing".
 		if choice, ok := serverNamed(targets, args[0]); ok {
 			return m.retargetSubAgents(choice.Name)
+		}
+		if args[0] == subAgentsAutoLabel {
+			return m.retargetSubAgents("")
 		}
 		return m.pickerNote(fmt.Sprintf(
 			"unknown server %q — configured: %s", args[0], serverNameList(targets)))
@@ -499,19 +531,27 @@ func (m Model) subAgentsTargets() []ServerChoice {
 // mark of the server picker is drawn from [Options.HostAlias], the entry this SESSION is bound to,
 // which is the one thing a delegation target is not: marking it here would tell a human their
 // delegations run on the box they are talking to, on every session where they do not.
+//
+// The LAST row is `auto`, effortRows' shape: the row that names no entry because taking it clears
+// the routing rather than pointing it somewhere, so the delegations run on the server this session
+// is itself talking to. It is an ACTION and not a marker — which is why it costs the pane no third
+// cell — and it is offered unconditionally, because the opt-out is exactly as available on a file
+// with two entries as on one with ten.
 func (m Model) subAgentsServerRows() []popupRow {
 	targets := m.subAgentsTargets()
-	rows := make([]popupRow, 0, len(targets))
+	rows := make([]popupRow, 0, len(targets)+1)
 	for _, choice := range targets {
 		rows = append(rows, popupRow{
 			stripEscapes(choice.Name), "— " + stripEscapes(choice.Endpoint),
 		})
 	}
-	return rows
+	return append(rows, popupRow{subAgentsAutoLabel, subAgentsAutoDescription})
 }
 
 // retargetSubAgents is the accept path both forms of the verb share — a highlighted row and
-// "/sub-agents-server <name>". It closes the overlay, asks the host to move the routing
+// "/sub-agents-server <name>", the `auto` row of each being the EMPTY name: the opt-out the seams
+// read as "no routing at all", and the one name that names no entry. It closes the overlay, asks the
+// host to move the routing
 // ([DelegationHost.Retarget], synchronously on the Update loop like every other seam call), and folds
 // what came back.
 //
@@ -541,11 +581,22 @@ func (m Model) retargetSubAgents(name string) (tea.Model, tea.Cmd) {
 	// name goes to the recording seam, which writes it when it belongs to a configured entry and
 	// skips it silently when it does not ([DelegationHost.RecordChoice]).
 	record := recordSubAgentsChoice(m.opts.Delegation, name)
+	label := name
+	if name == "" {
+		// The opt-out names no entry, so the line says the word the row carries and what taking it
+		// resolved to; there is no target to state.
+		label = subAgentsAutoLabel + subAgentsAutoResolved
+	}
 	clause := ""
 	if record.saved {
+		// A write happened, and which one it was is what the clause states: the two are opposites —
+		// a named entry goes UNDER the key, the empty name removes the key.
 		clause = subAgentsSavedClause
+		if name == "" {
+			clause = subAgentsClearedClause
+		}
 	}
-	m.transcript.addNote("sub-agents server: " + name + clause)
+	m.transcript.addNote("sub-agents server: " + label + clause)
 	record.warn(&m.transcript)
 	m.layout()
 	return m, nil
@@ -556,8 +607,13 @@ func (m Model) retargetSubAgents(name string) (tea.Model, tea.Cmd) {
 // and it answers the same three ways: recorded, silently skipped (a name no `servers:` entry holds,
 // or a host that records nothing), or failed — and a failure is a warning and nothing more, because
 // the retarget already landed and stays landed.
+//
+// The EMPTY name is passed on rather than short-circuited: it is the `auto` row, and what the seam
+// records for it is the ABSENCE of the key ([DelegationHost.RecordChoice]), which is a write like
+// any other — skipping it here would leave a stale key routing the NEXT session at a target this one
+// just opted out of.
 func recordSubAgentsChoice(host DelegationHost, name string) choiceRecord {
-	if host == nil || name == "" {
+	if host == nil {
 		return choiceRecord{}
 	}
 	saved, err := host.RecordChoice(name)
@@ -862,11 +918,18 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 	case pickerSubAgentsServer:
 		// Re-read for pickerServer's reason and with the same answer: the targets are asked per draw,
 		// so a `servers:` block that shrank under the open overlay costs the accept and nothing more.
+		// The mapping past the last target is the effort picker's — absence, not an entry: the one row
+		// the offering appends is `auto`, which resolves to the empty name, and anything beyond it
+		// names no row at all and moves nothing.
 		targets := m.subAgentsTargets()
-		if offered >= len(targets) {
+		if offered < 0 || offered > len(targets) {
 			return m, nil
 		}
-		return m.retargetSubAgents(targets[offered].Name)
+		name := ""
+		if offered < len(targets) {
+			name = targets[offered].Name
+		}
+		return m.retargetSubAgents(name)
 	case pickerSubAgentsMigration:
 		return m.acceptSubAgentsMigration(offered)
 	case pickerMode:

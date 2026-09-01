@@ -41,11 +41,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 (`docs/plans/archived/2026-08-31 - 03 - sub-agents-server-root-key-and-picker-plan.md`), deferred
 out of that run.
 
-- [ ] **The `/sub-agents-server` picker offers no "auto (session server)" row.** Its rows come from
-  the configured entries alone (`internal/tui/picker.go:488-492`, `:860-863`), so the ratified
-  empty-key opt-out — `Retarget("")`, delegations falling back to the session's own upstream
-  (`cmd/apogee/delegation.go:609-611`) — stays reachable only by hand-editing `config.yaml`.
-
 - [ ] **A headless run says nothing about a retired `sub-agents: true` flag.** Detection and offer
   are interactive-only (`cmd/apogee/keymigrate.go:113`, called from `cmd/apogee/wire.go:131`,
   reaching the renderer as `Options.SubAgentsMigration` at `cmd/apogee/wire_options.go:192`), where
