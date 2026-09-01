@@ -42,7 +42,7 @@ Three things set it apart from other AI coding agents:
   genuinely cannot enforce the fence, apogee asks before each command instead
   of running it unbounded.
 - **A complete agent with a UX that gets out of your way.** The full agentic
-  loop — a 27-tool suite (file ops, grep, git, terminal, tests, web,
+  loop — a 29-tool suite (file ops, grep, git, terminal, tests, web,
   sub-agents) plus a default-off Console family (`console_open` and its three
   companions) for the REPLs, shells and dev servers a model keeps alive across
   turns, an MCP client, sessions that survive a crash — inside a
