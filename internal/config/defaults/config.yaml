@@ -292,6 +292,20 @@
 #   gpt-oss-20b:
 #     system-prompt-file: ~/prompts/gpt-oss.md
 
+# Additive layers. Everything above SELECTS one prompt; system-prompt-layers APPENDS to whichever
+# one won, in the order you list them, each fragment joined to the last by a blank line. Layers are
+# not a fifth rung and replace nothing: a system-prompt-models entry that replaces the prompt above
+# still gets the layers, and layers listed with no prompt configured anywhere are sent on their own
+# — they never bring the built-in default along behind them. Each entry states exactly one of text:
+# or file: (both in one entry, or neither, is a startup error naming the entry by position). A
+# file: resolves the way system-prompt-file does — a leading ~ expands, a relative path resolves
+# against this apogee home — and is read on every run that resolves the prompt, so a file that is
+# missing or unreadable is a startup error. The four placeholders above apply to a layer too.
+#
+# system-prompt-layers:
+#   - text: "This box has no network. Prefer rg over grep."
+#   - file: house-conventions.md
+
 # =============================================================================
 # Workspace context files: files apogee looks for in the WORKSPACE ROOT and folds into the
 # system prompt when a session starts — the AGENTS.md / CLAUDE.md behaviour. The system prompt

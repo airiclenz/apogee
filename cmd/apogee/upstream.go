@@ -159,7 +159,9 @@ func (h *upstreamHolder) Endpoint() string {
 //   - a scheduled Firing (schedule.go) takes BOTH halves of its upstream from it — the wire it
 //     dials and the endpoint that same resolution keys on;
 //   - the settings applier's rideTheRebind (wire.go) reads Model alone, to name the model a
-//     committed `/settings` edit has to be re-resolved for.
+//     committed `/settings` edit has to be re-resolved for;
+//   - the `/settings` prompt-editor seed (wire_options.go) reads Model alone, because what that
+//     editor opens with follows the live prompt resolution, which the bound model keys.
 func (h *upstreamHolder) Binding() upstreamBinding {
 	h.mu.Lock()
 	defer h.mu.Unlock()
