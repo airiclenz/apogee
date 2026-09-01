@@ -190,6 +190,7 @@ var (
 	_ = apogee.ErrSessionVersion
 	_ = apogee.ErrInputPending
 	_ = apogee.ErrNoOpenExchange
+	_ = apogee.ErrNoSuchChild
 	_ = apogee.ErrDuplicateTool
 	_ = apogee.ErrInvalidTool
 

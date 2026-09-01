@@ -40,13 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 **Status:** found 2026-08-30 at the close of the sub-agent run-view plan
 (`docs/plans/archived/2026-08-30 - 01 - sub-agent-run-view-plan.md`), deferred out of that run.
 
-- [ ] **`ErrNoSuchChild` has no alias in the public root package.** Every other Agent-surface
-  sentinel is re-exported for embedders (`apogee.go:584` `ErrInputPending`, `:588`
-  `ErrNoOpenExchange`), but `InterjectChild`'s refusal is only `domain.ErrNoSuchChild`
-  (`internal/domain/errors.go:67`), and `internal/` is unimportable from outside the module
-  (ADR 0010) — so an embedder cannot `errors.Is` it. The comment at
-  `cmd/apogee/wire_engine.go:223` already names the alias that does not exist.
-
 - [ ] **A refusal raised inside an open run view is never painted while the reader is in it.**
   `childGoneNote` / the not-running note (`internal/tui/interject.go:230`, `:236`) are host notes
   committed at depth 0, so the two sentences a reader earns by pressing `⏎` on a child that has

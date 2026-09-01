@@ -366,7 +366,9 @@ where nothing outside `internal/tui` sees the header at all.
 **Acceptance:** `go test -race -count=1 -run 'TestE2EHostileSurfacesKeepTheirOwnRows' ./cmd/apogee/`
 **Commit:** `test(cmd): assert the skills-available header off the scrolled transcript`
 
-## 10. `ErrNoSuchChild` is re-exported for embedders
+## 10. `ErrNoSuchChild` is re-exported for embedders — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — ISSUES.md: made necessary by this item closing the register entry it names (plan convention: each item deletes its own entry).
 
 **What:** Closes the residual at `ISSUES.md:94`. Every other Agent-surface sentinel is aliased in the
 root package (`apogee.go:580-586`), but `InterjectChild`'s refusal is only `domain.ErrNoSuchChild`

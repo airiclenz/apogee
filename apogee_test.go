@@ -317,3 +317,19 @@ func TestEnableErrors_MatchableThroughRoot(t *testing.T) {
 		t.Errorf("New(bogus-id) err = %v, want ErrUnknownMechanism", err)
 	}
 }
+
+// TestInterjectChild_NoSuchChildMatchableThroughRoot proves the child-addressing refusal is
+// matchable through the root re-export: an embedder outside the module cannot import
+// internal/domain (ADR 0010), so apogee.ErrNoSuchChild must BE the sentinel InterjectChild
+// returns. A spawn call-ID naming no running sub-agent is the refusal's own case.
+func TestInterjectChild_NoSuchChildMatchableThroughRoot(t *testing.T) {
+	a, err := apogee.New(validConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	err = a.InterjectChild("no-such-call-id", apogee.UserInput{Text: "hello"})
+	if !errors.Is(err, apogee.ErrNoSuchChild) {
+		t.Errorf("InterjectChild(unknown id) err = %v, want ErrNoSuchChild", err)
+	}
+}

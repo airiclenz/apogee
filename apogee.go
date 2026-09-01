@@ -585,6 +585,12 @@ var (
 	// mirror of ErrInputPending. Match with errors.Is.
 	ErrNoOpenExchange = domain.ErrNoOpenExchange
 
+	// ErrNoSuchChild is returned by Agent.InterjectChild when the spawn call-ID names no
+	// RUNNING sub-agent in this agent tree — the child finished, was cancelled, or never
+	// existed. Addressing a child is inherently racy, so this is a normal outcome a Driver
+	// reports rather than a fault; nothing was queued. Match with errors.Is.
+	ErrNoSuchChild = domain.ErrNoSuchChild
+
 	// ErrDuplicateTool is returned by ToolRegistry.Register on a duplicate tool name.
 	ErrDuplicateTool = domain.ErrDuplicateTool
 
