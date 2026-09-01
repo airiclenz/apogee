@@ -31,7 +31,7 @@ var subAgentSpec = toolSpec{
   "required": ["task"],
   "properties": {
     "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
-    "name": {"type": "string", "description": "Optional short name for this delegation, shown in the UI."},
+    "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
     "max_steps": {"type": "integer", "description": "optional; lower cap for this delegation only; ignored when 0 or above the configured cap"}
   }
 }`),
@@ -42,8 +42,10 @@ var subAgentSpec = toolSpec{
 // dispatch layer parses the delegated task without re-declaring the schema.
 //
 // Name is display identity only, never privilege (ADR 0005): it is what the session chat calls
-// the child instead of the task's first line. It is not required — an absent or blank name
-// leaves every display on that fallback.
+// the child instead of the task's first line. The schema asks the model outright for one, but it
+// is not REQUIRED: an absent or blank name is a valid call, and the host then names that
+// delegation out of band while it runs (ADR 0068). Every display wears the task's first line until
+// that name lands, and keeps wearing it where out-of-band naming is switched off or fails.
 //
 // MaxSteps is the Turns this ONE delegation may take before the engine ends it, and it can only
 // ever LOWER the host's configured cap (`delegate-max-steps`): the orchestrator applies

@@ -1,0 +1,56 @@
+# The upstream TestE2ENamingJourney talks to: one reply that delegates WITHOUT naming the
+# delegation, the child behind it, and the out-of-band completion apogee makes on its own account to
+# name a delegation the model left unnamed (ADR 0068).
+#
+# The naming call is picked out by its SYSTEM message — internal/title/prompts/delegation-instruction.txt
+# opens "You name delegated sub-tasks for a status line" — and never by its last message, because
+# its last message IS the delegated task and would otherwise be answered as the child's own first
+# Step. That is also why the naming turn is listed ABOVE the child's: the turns carrying a `when:`
+# are matched in script order and the first match wins.
+#
+# The session title turn is here for smoke.yaml's reason: `auto-title:` is on by default, so a
+# driven TUI asks for a title off the first prompt, and one unanswered request is an HTTP 500 that
+# would fail the run rather than the assertion. It never fires on the headless half — that Driver
+# titles its record from the prompt — nor in the `auto-title: false` case, which is why every turn
+# here repeats and none is asserted consumed.
+model: naming-model
+turns:
+    # The session title.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Configuration key audit
+    # The delegation's generated NAME — the fixture's whole point. Two to four lowercase words, as
+    # prompts/delegation-instruction.txt asks for, and deliberately sharing no word with the task
+    # below: an assertion that finds this text on a frame or on stderr has found the generated name
+    # and not the task's first line.
+    - when:
+        system: You name delegated sub-tasks
+      repeat: true
+      text: scout config keys
+    # The parent's wrap-up, once the delegation has reported. Matched before the delegating turn so
+    # a parent request carrying a result can never be answered as a fresh request.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The audit is in.
+    # The delegating turn: ONE sub_agent call carrying no `name` argument at all, which is the only
+    # condition under which the engine asks for a name (ADR 0068).
+    - when:
+        last_message: ^Delegate the configuration audit
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Audit every configuration key in this workspace"}'
+    # The child. It states its usage because the headless sub-agent line is printed only for a run
+    # that reported a fill against a window (headlessSubAgentLines).
+    - when:
+        last_message: configuration key in this workspace
+      repeat: true
+      text: a.txt holds no configuration keys.
+      usage:
+        prompt: 11800
+        completion: 200
+    # Anything neither the parent nor a child claims.
+    - repeat: true
+      text: Nothing else to add.

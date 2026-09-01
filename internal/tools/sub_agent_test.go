@@ -63,6 +63,41 @@ func TestSubAgentSchemaOffersAnOptionalName(t *testing.T) {
 	}
 }
 
+// TestSubAgentSchemaAsksForADelegationName pins the SHARPENED wording of the `name` property
+// (ADR 0068). The out-of-band namer is a fallback for the delegations the model leaves unnamed, not
+// the primary source of a name: a name the CALL gave costs no completion, arrives before the child
+// does any work, and is what the model itself thinks the job is. So the description asks for one
+// outright — it says how many words, it shows one, and it ends with the ask — rather than
+// describing the argument and leaving the model to decide whether to bother.
+//
+// It stays ONE short line: schema text is prefill on every single request for the whole target
+// class, and this is the sole reason the archived 2026-08-09 plan capped the description's length
+// in the first place. A wording that grew into a paragraph would be paid for on every turn of every
+// session to save one small completion per unnamed delegation.
+func TestSubAgentSchemaAsksForADelegationName(t *testing.T) {
+	t.Parallel()
+
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(NewSubAgent().Schema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+
+	desc, _ := schema.Properties["name"]["description"].(string)
+	for _, want := range []string{"2–4 words", "scout config keys", "Give one."} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("the name description does not ask for a name (missing %q): %q", want, desc)
+		}
+	}
+	if strings.Contains(desc, "\n") {
+		t.Errorf("the name description is more than one line: %q", desc)
+	}
+	if runes := len([]rune(desc)); runes > 160 {
+		t.Errorf("the name description is %d runes; it must stay one short line — it is prefill on every request", runes)
+	}
+}
+
 // TestSubAgentDeclaresBothArgumentsAsDelegationPrompts pins WHICH arguments the guard is
 // allowed to look away from. Both of sub_agent's arguments are prose for the child — the task
 // and the display name — so both are declared; a third argument added later is inspected by

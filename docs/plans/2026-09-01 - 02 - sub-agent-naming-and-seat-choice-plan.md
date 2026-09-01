@@ -232,7 +232,26 @@ run.go's doc comment which events feed `Name`.
 **Regression guard.** `headlessSubAgentLines` output for a named/unnamed delegation without the event is byte-identical to today (pin both in the test).
 **Commit:** `feat(run): fold the generated delegation name into the run's usage record`
 
-## 7. Sharpen the `name` schema text + e2e journey (TUI frame and headless)
+## 7. Sharpen the `name` schema text + e2e journey (TUI frame and headless) — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — internal/tools/sub_agent.go: made necessary by this item's
+schema change landing on top of ADR 0068 — `SubAgentArgs.Name`'s doc said an absent or blank name
+"leaves every display on that fallback", which the out-of-band namer makes false and which now
+reads as the schema asking for a name, the call staying valid without one, and the fallback holding
+until the generated name lands (or for good where naming is off). Comment text only; the field, its
+tag and `required` are untouched.
+NOTES (2026-09-01): the frame assertions compare against the task's HEAD ("Audit every configuration
+key") rather than its whole first line: a delegation's branch row clips its label to the pane width
+(the observed row is `Audit every configuration key in this …`), so the full line is never on screen
+and only its opening is a fact a frame can be asked about. The headless assertions still use the
+whole line, which fits that Driver's 80-rune clip.
+NOTES (2026-09-01): the headless case pins `context-window: 32768` in the home it writes.
+`headlessSubAgentLines` prints nothing for a run whose fill sits in no window, and a stub advertises
+none, so without the pin the case would assert on an empty stream and pass for the wrong reason.
+NOTES (2026-09-01): the item's third case is written as its own test function
+(`TestE2ENamingIsSilentWithAutoTitleOff`) beside the other two rather than as a sub-case: each of
+the three needs its own stub — a fresh request log is what "no naming request was made" is asserted
+against — and the gate case needs a different config home, which is fixed at launch.
 
 Depends on items 3, 4, 5, 6.
 **What:** `internal/tools/sub_agent.go` `name` description becomes: "Short name for this
