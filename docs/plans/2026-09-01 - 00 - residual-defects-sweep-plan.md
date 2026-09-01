@@ -460,7 +460,12 @@ against the extracted pure scan) — a synthetic `tuitest.Frame` whose body carr
 **Acceptance:** `go test -race -count=1 -run 'TestE2ESubAgentView' ./cmd/apogee/`
 **Commit:** `test(cmd): anchor assertLastBodyRow on the rule above the status line`
 
-## 13. The steering cell gets a real-engine assertion
+## 13. The steering cell gets a real-engine assertion — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the steered row's assertion now uses a new `steeredOutcome = countedOutcome + " · steered by 1 message"` const rather than an inline literal, so the un-steered tail stays named once and the composed spelling reads as the one cell added on top of it. `countedOutcome` is kept, as the item requires, and stays referenced through that composition.
+NOTES (2026-09-01): mutation-checked — with `delegationVerdict`'s `if steered > 0 { verdict += " · " + delegationSteeredCell(steered) }` removed (`internal/tui/toolregistry.go:780-782`), `TestE2ESubAgentView` fails on the new assertion (row reads `2 tool calls · done`); the tree was restored before finishing. No new golden was recorded, per the item.
+NOTES (2026-09-01): the comment above the collapsed-row assertions was amended to say the row falls back to the count, the outcome AND the steering cell that outcome composes; the failure message now names the expected spelling.
+NOTES (2026-09-01): `ISSUES.md` — this item's own register entry (was `:43-49`) deleted, per the plan's "each item deletes its own entry".
 
 **What:** Closes the residual at `ISSUES.md:116`. `TestE2ESubAgentView`
 (`cmd/apogee/e2e_subagent_view_test.go:52`, assertions at `:176-178`) pins the steered run's collapsed

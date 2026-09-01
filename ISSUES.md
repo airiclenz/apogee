@@ -40,13 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 **Status:** found 2026-08-30 at the close of the sub-agent run-view plan
 (`docs/plans/archived/2026-08-30 - 01 - sub-agent-run-view-plan.md`), deferred out of that run.
 
-- [ ] **The steering half of the run view has no real-engine e2e assertion.** `TestE2ESubAgentView`
-  pins the steered run's collapsed row with `countedOutcome = "tool calls · done"`
-  (`cmd/apogee/e2e_subagent_view_test.go:52`), a `Contains` check that passes with or without the
-  `· steered by 1 message` cell the same run added — so nothing outside `internal/tui` proves the
-  steering cell reaches the painted row. The step-cap half of the same slot IS covered end to end,
-  by T-04.
-
 - [ ] **`openRunAt`'s self-redirect guard is unpinned.** Deleting `m.viewedRun() == ref`
   (`internal/tui/runview.go:170`) leaves both `./internal/tui` and `cmd/apogee`'s `SubAgent|RunView`
   e2e tests green: the only test that used to reach it now clicks a `targetTask` row, which never

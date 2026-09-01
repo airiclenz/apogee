@@ -51,6 +51,12 @@ const (
 	// how the run ended, with no sentence promoted into the slot.
 	countedOutcome = "tool calls · done"
 
+	// The same tail on the run the human DID steer: the verdict carries the steering cell composed
+	// behind it, one slot separator on. Asserting the whole composed spelling — not just the tail it
+	// starts with — is what proves `· steered by 1 message` reaches the painted row from outside
+	// `internal/tui`.
+	steeredOutcome = countedOutcome + " · steered by 1 message"
+
 	// The run view's own furniture: the header naming the way back, and the key hint both it and
 	// the status line's right slot carry while a view is open.
 	runViewCrumb = "← main › " + longDelegate
@@ -170,11 +176,11 @@ func TestE2ESubAgentView(t *testing.T) {
 
 	// Both delegates wear one collapsed row, and the trade item 3 accepted shows in the pair: the
 	// steered child's report is no longer one line — the notice is under it — so its row falls back
-	// to the count and the outcome, while the sibling nobody spoke to still promotes the sentence it
-	// answered with.
+	// to the count, the outcome and the steering cell that outcome composes, while the sibling
+	// nobody spoke to still promotes the sentence it answered with.
 	top := drv.Frame()
-	if row := rowContaining(t, top, longDelegate); !strings.Contains(row, countedOutcome) {
-		t.Errorf("the steered delegation is not back to its collapsed row: %q", row)
+	if row := rowContaining(t, top, longDelegate); !strings.Contains(row, steeredOutcome) {
+		t.Errorf("the steered delegation's collapsed row does not read %q: %q", steeredOutcome, row)
 	}
 	if row := rowContaining(t, top, shortDelegate); !strings.Contains(row, siblingAnswer) {
 		t.Errorf("the unsteered delegation's row lost the one-line report it promotes: %q", row)
