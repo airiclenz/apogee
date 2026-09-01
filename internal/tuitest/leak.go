@@ -1,8 +1,11 @@
 package tuitest
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +64,10 @@ var timerFrames = []string{"bubbletea/v2.Tick.func1("}
 // "goroutine <id> [<state>]:" header that opens every block of a [runtime.Stack] dump.
 type goroutineID string
 
+// unparsedID prefixes the id [idOf] invents for a block whose header does not parse. The runtime
+// writes goroutine ids as decimal digits and nothing else, so no real id can ever wear it.
+const unparsedID = "unparsed-"
+
 // CheckLeaks registers a cleanup that fails the test when a goroutine the test itself started, from
 // the driver's own stack, is still running after it. Call it FIRST in a driver test — before
 // anything is launched — so that the snapshot it takes holds only what the test inherited, and so
@@ -72,7 +79,7 @@ func CheckLeaks(t testing.TB) {
 	t.Cleanup(func() {
 		deadline := time.Now().Add(leakGrace)
 		for {
-			left := startedSince(inherited)
+			left := startedSince(inherited, leakedGoroutines())
 			if len(left) == 0 {
 				return
 			}
@@ -86,12 +93,13 @@ func CheckLeaks(t testing.TB) {
 	})
 }
 
-// startedSince returns the stacks of the leaked goroutines that were not already running when the
-// snapshot was taken, in a stable order — the map behind them has none, and a report that reads the
-// same way twice is worth the sort.
-func startedSince(snapshot map[goroutineID]string) []string {
+// startedSince returns the stacks in current that the snapshot does not already hold, in a stable
+// order — the maps behind them have none, and a report that reads the same way twice is worth the
+// sort. Both sides are arguments: reading the live dump in here would leave the caller no way to
+// say what was running, and this package's own tests no way to drive the comparison at all.
+func startedSince(snapshot, current map[goroutineID]string) []string {
 	var left []string
-	for id, stack := range leakedGoroutines() {
+	for id, stack := range current {
 		if _, born := snapshot[id]; !born {
 			left = append(left, stack)
 		}
@@ -130,16 +138,22 @@ func leakedGoroutines() map[goroutineID]string {
 }
 
 // idOf reads the goroutine id out of a stack block's header line — "goroutine 42 [chan receive]:".
-// A block whose header does not parse gets the empty id, which no snapshot taken from the same
-// dump format can hold: an unattributable goroutine is reported, never silently forgiven.
+// A block whose header does not parse is keyed on a short hash of its own trimmed text instead,
+// under the [unparsedID] prefix no runtime id can wear: two unattributable goroutines stay two
+// entries, and one present when the snapshot was taken forgives itself and nothing else. The one
+// case that still collapses is two goroutines whose unparseable blocks are byte-identical — they
+// share a key, which is the same forgiveness a matching pair of real ids would earn.
 func idOf(stack string) goroutineID {
+	stack = strings.TrimSpace(stack)
 	header, _, _ := strings.Cut(stack, "\n")
-	rest, ok := strings.CutPrefix(strings.TrimSpace(header), "goroutine ")
-	if !ok {
-		return ""
+	if rest, ok := strings.CutPrefix(strings.TrimSpace(header), "goroutine "); ok {
+		id, _, _ := strings.Cut(rest, " ")
+		if _, err := strconv.ParseUint(id, 10, 64); err == nil {
+			return goroutineID(id)
+		}
 	}
-	id, _, _ := strings.Cut(rest, " ")
-	return goroutineID(id)
+	sum := sha256.Sum256([]byte(stack))
+	return unparsedID + goroutineID(hex.EncodeToString(sum[:6]))
 }
 
 // parkedOnATimer reports whether a stack is one of [timerFrames] — over, but not yet told.

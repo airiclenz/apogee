@@ -124,3 +124,48 @@ func TestCheckLeaksReportsOnlyWhatTheTestStarted(t *testing.T) {
 		t.Errorf("the goroutine parked before CheckLeaks (%s) was attributed to this test:\n%s", inherited, report)
 	}
 }
+
+// TestIdOfKeysAnUnparseableBlockOnItsContent: a well-formed header still yields the bare number,
+// and a block whose header does not parse yields an id of its own instead of the empty one every
+// such block used to share — two of them stay two entries in the snapshot map, and the same block
+// keys the same way twice so a snapshot still forgives the goroutine it actually holds.
+func TestIdOfKeysAnUnparseableBlockOnItsContent(t *testing.T) {
+	t.Parallel()
+
+	if got := idOf("goroutine 42 [chan receive]:\ninternal/tui.wait()"); got != "42" {
+		t.Errorf("idOf(a well-formed header) = %q, want %q", got, "42")
+	}
+
+	const truncated = "goroutine\ninternal/tui.wait()"
+	const headerless = "internal/tui.paint()\n\tlayout.go:12 +0x1"
+	first, second := idOf(truncated), idOf(headerless)
+	for _, id := range []goroutineID{first, second} {
+		if !strings.HasPrefix(string(id), unparsedID) {
+			t.Errorf("idOf(an unparseable block) = %q, want the %q prefix a runtime id cannot wear", id, unparsedID)
+		}
+	}
+	if first == second {
+		t.Errorf("two different unparseable blocks share the id %q", first)
+	}
+	if again := idOf(truncated); again != first {
+		t.Errorf("idOf(the same unparseable block) = %q then %q, want one stable id", first, again)
+	}
+}
+
+// TestStartedSinceDoesNotForgiveASecondUnparseableBlock is the leak the empty id caused: one
+// unparseable block running when CheckLeaks snapshotted forgave every later one, because they all
+// keyed the same. Both maps are built through the real keying, so it is [idOf]'s rule under test
+// here and not the test's own bookkeeping.
+func TestStartedSinceDoesNotForgiveASecondUnparseableBlock(t *testing.T) {
+	t.Parallel()
+
+	const inherited = "goroutine\ninternal/tui.inherited()"
+	const leaked = "goroutine\ninternal/tui.leaked()"
+	snapshot := map[goroutineID]string{idOf(inherited): inherited}
+	current := map[goroutineID]string{idOf(inherited): inherited, idOf(leaked): leaked}
+
+	left := startedSince(snapshot, current)
+	if len(left) != 1 || left[0] != leaked {
+		t.Fatalf("startedSince(...) = %q, want only the block that was not in the snapshot", left)
+	}
+}

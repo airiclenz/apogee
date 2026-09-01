@@ -743,7 +743,22 @@ beside the sentinel. It must fail against the pre-item tree.
 **Acceptance:** `go test -race -count=1 -run 'TestVetEndpoint_' ./internal/mcp/`
 **Commit:** `fix(mcp): wrap ErrURLBlocked on the unusable-proxy refusal`
 
-## 21. `idOf` keys an unparseable stack block on its content
+## 21. `idOf` keys an unparseable stack block on its content — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): of the two decompositions the regression guard offered, the item takes
+`startedSince(snapshot, current map[goroutineID]string)` — `CheckLeaks` passes
+`leakedGoroutines()` at each poll, and the new case builds both maps through the real `idOf` keying,
+so no separate `leakedIn(dump)` seam was added.
+NOTES (2026-09-01): the parse rule was tightened beyond a bare `CutPrefix` check — a header whose id
+is not decimal digits (`goroutine [running]:`, a truncated dump) is now unparseable rather than
+yielding an empty or junk id, which is what "never the empty id" requires.
+NOTES (2026-09-01): both new tests were confirmed to FAIL against the previous `idOf` body before
+being accepted (temporary revert, restored).
+NOTES (2026-09-01): consequential edit — ISSUES.md: made necessary by this item closing its own
+register entry (plan closeout: every item removes its own entry in its commit). As the last entry in
+the section it takes the `### Residuals deferred out of the 2026-08-28 deferred-residuals sweep`
+heading and its `**Status:**` block with it, leaving `## Open defects` holding nothing but its
+heading — exactly what the plan's Closeout describes.
 
 **What:** Fixes the residual at `ISSUES.md:192`. `idOf` (`internal/tuitest/leak.go:132-144`) returns
 the empty id for any block whose header does not parse, and `leakedGoroutines` stores blocks by that

@@ -35,19 +35,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Residuals deferred out of the 2026-08-28 deferred-residuals sweep
-
-**Status:** found 2026-08-28 at the close of the deferred-residuals sweep
-(`docs/plans/archived/2026-08-28 - 02 - deferred-residuals-sweep-plan.md`), deferred out of that run.
-
-- [ ] **`idOf` collapses every unparseable stack block onto one id.** `idOf`
-  (`internal/tuitest/leak.go:135`) returns the empty id for any block whose header does not parse,
-  so two such blocks are one entry in the snapshot map and an unparseable block present when
-  `CheckLeaks` snapshots would forgive every later one — which is exactly what the function's own
-  doc comment says cannot happen ("an unattributable goroutine is reported, never silently
-  forgiven"). Defensive path only; never observed. Either the id is made unique per block or the
-  comment is corrected.
-
 
 ## Parked / deferred work
 
