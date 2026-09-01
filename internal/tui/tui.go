@@ -607,7 +607,10 @@ type DelegationHost interface {
 	// key for key and answer for answer (ADR 0036 decision 2's shape, ADR 0045's key).
 	//
 	// It answers whether it WROTE: a name no `servers:` entry holds is skipped silently (false, no
-	// error), which is also the answer of a host that records nothing at all. Like its twin it is
+	// error), which is also the answer of a host that records nothing at all. The EMPTY name is the
+	// exception, and it holds no entry on purpose: it is the picker's `auto` row, the opt-OUT, and
+	// what it records is the ABSENCE of the key — it CLEARS what is written there and reports
+	// written (true, no error), including when there was no line to remove. Like its twin it is
 	// best-effort persistence of something that ALREADY happened — the retarget landed before this is
 	// called and stays landed whatever it answers — so an error is a note and never an undo.
 	RecordChoice(name string) (recorded bool, err error)

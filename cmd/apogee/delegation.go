@@ -68,7 +68,8 @@ func (h delegationHost) Targets() []tui.ServerChoice {
 func (h delegationHost) Retarget(name string) error { return h.w.delegation.Retarget(name) }
 
 // RecordChoice persists that choice as the `sub-agents-server:` key, and answers whether it wrote: a
-// name in no `servers:` entry is skipped silently, which only this layer can tell
+// name in no `servers:` entry is skipped silently, which only this layer can tell, and the empty
+// name — the picker's `auto` row — clears the key instead of writing one and reports written
 // (recordSubAgentsServerChoice).
 func (h delegationHost) RecordChoice(name string) (bool, error) {
 	return h.w.recordSubAgentsServerChoice(name)

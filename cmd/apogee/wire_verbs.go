@@ -181,15 +181,29 @@ func (w *rootWiring) recordServerChoice(name string) (bool, error) {
 // check exists for — an entry deleted between the offer and the accept — and it is why the check is
 // made here and not at the picker: only this layer reads the file.
 //
+// The EMPTY name is the one name that is not looked up, because it names no entry on purpose: it is
+// the picker's `auto` row — the opt-OUT — and what it records is the ABSENCE of the key, so the next
+// session picks its target the way one that was never told picks one. It is not skipped: it CLEARS
+// the key and reports written (true, no error), and a file that never set the key is already at that
+// default, which is a no-op rather than a failure (config.ResetSubAgentsServer's own rule).
+//
 // It writes through a splice of its own rather than through SaveConfigSetting, because the key's
 // registry row is deliberately NOT editable: a KindServer row the settings pane could take ⏎ on would
 // route into the `/server` switch and move the SESSION (registry.go), so the pane shows the key
-// read-only and this verb is the single surface that writes it (config.SaveSubAgentsServer).
+// read-only and this verb is the single surface that writes it — and, for the same reason, the single
+// surface that clears it (config.SaveSubAgentsServer, config.ResetSubAgentsServer).
 func (w *rootWiring) recordSubAgentsServerChoice(name string) (bool, error) {
+	path := filepath.Join(w.roots.config, "config.yaml")
+	if name == "" {
+		if err := config.ResetSubAgentsServer(path); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 	if !configuredServer(w.live.serverList(), name) {
 		return false, nil
 	}
-	if err := config.SaveSubAgentsServer(filepath.Join(w.roots.config, "config.yaml"), name); err != nil {
+	if err := config.SaveSubAgentsServer(path, name); err != nil {
 		return false, err
 	}
 	return true, nil

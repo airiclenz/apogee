@@ -1013,3 +1013,61 @@ func TestConfigWriteSubAgentsServerWritesTheNonEditableKey(t *testing.T) {
 		t.Errorf("the file carries %d active sub-agents-server lines, want exactly 1:\n%s", n, again)
 	}
 }
+
+// The `auto` pick the `/sub-agents-server` picker offers is an opt-OUT: it CLEARS the key rather
+// than recording a name, so the next session picks its delegation target the way one that was never
+// told picks one. The clear has a function of its own for the write's reason — the settings-surface
+// reset admits Editable keys only, and this row is deliberately not one — and it must be the same
+// careful splice: the key's line goes, and the file's comments and its `servers:` entries stay
+// exactly where the user left them.
+func TestConfigWriteSubAgentsServerClearsTheNonEditableKey(t *testing.T) {
+	t.Parallel()
+
+	const fixture = `# apogee config
+
+# Where sub-agents run.
+sub-agents-server: my-box
+
+servers:
+  # the workstation on the desk
+  - name: my-box
+    endpoint: http://localhost:1111/v1
+  - name: other-box
+    endpoint: http://otherbox:1111/v1
+
+ui:
+  spinner: dots
+`
+	path := writeTestConfig(t, fixture)
+
+	if err := ResetConfigSetting(path, subAgentsServerPath); err == nil {
+		t.Error("ResetConfigSetting cleared a non-editable key; the settings surface must refuse it")
+	}
+	if err := ResetSubAgentsServer(path); err != nil {
+		t.Fatalf("ResetSubAgentsServer: %v", err)
+	}
+
+	cleared := readTestConfig(t, path)
+	if got, ok, err := scalarAtPath([]byte(cleared), subAgentsServerPath); err != nil || ok {
+		t.Errorf("the config still reads sub-agents-server = %q (set=%v, err=%v):\n%s", got, ok, err, cleared)
+	}
+	if got, want := commentLines(cleared), commentLines(fixture); !slices.Equal(got, want) {
+		t.Errorf("the clear changed the file's comments:\n%v\nwant:\n%v", got, want)
+	}
+	var fc fileConfig
+	if err := yaml.Unmarshal([]byte(cleared), &fc); err != nil {
+		t.Fatalf("the cleared file does not parse: %v\n%s", err, cleared)
+	}
+	if len(fc.Servers) != 2 || fc.Servers[0].Name != "my-box" || fc.Servers[1].Name != "other-box" {
+		t.Errorf("the clear disturbed the servers block: %+v\n%s", fc.Servers, cleared)
+	}
+	assertOnlyKeyChanged(t, fixture, cleared, subAgentsServerPath)
+
+	// A file that never set the key is already at its default: nothing to remove, and no error.
+	if err := ResetSubAgentsServer(path); err != nil {
+		t.Fatalf("ResetSubAgentsServer on a file that does not set the key: %v", err)
+	}
+	if again := readTestConfig(t, path); again != cleared {
+		t.Errorf("the second clear rewrote the file:\n%s\nwant:\n%s", again, cleared)
+	}
+}

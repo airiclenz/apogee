@@ -92,6 +92,25 @@ func saveScalar(path string, k Key, value string) error {
 	return edit(path, splice, verify)
 }
 
+// ResetSubAgentsServer removes the config file's `sub-agents-server:` line, so the next session
+// picks its delegation target the way a session that was never told picks one. It is
+// [ResetConfigSetting]'s removal in every respect that touches the file — the same splice, the same
+// round-trip gate, the same atomic mode-preserving rename — and a key the file does not set is
+// already at its default: a no-op, not an error, and nothing is written.
+//
+// It is a function of its own for exactly [SaveSubAgentsServer]'s reason: the key's registry row is
+// deliberately not Editable, and Editable is what gates the settings-surface reset below, so a key
+// that is read-only IN THE PANE would otherwise be un-clearable ANYWHERE — and this key has exactly
+// one clearing surface, which is the verb that picks it.
+func ResetSubAgentsServer(path string) error {
+	k, ok := LookupKey(subAgentsServerPath)
+	if !ok {
+		return fmt.Errorf("apogee: %q is not a setting apogee knows", subAgentsServerPath)
+	}
+	splice, verify := scalarResetEdit(k)
+	return edit(path, splice, verify)
+}
+
 // ResetConfigSetting removes the config file's active line for the registry path key, so the key
 // resolves from its default again. A key the file does not set is already at its default: that is
 // a no-op, not an error, and nothing is written.

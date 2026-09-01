@@ -121,7 +121,11 @@ first.
 **Acceptance:** `go test -race -count=1 -run 'TestDelegation' ./cmd/apogee/`
 **Commit:** `fix(delegation): push the cleared delegation target under the wiring mutex`
 
-## 3. The composition root can clear the `sub-agents-server:` key
+## 3. The composition root can clear the `sub-agents-server:` key — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `ResetSubAgentsServer` sits below `saveScalar` and directly above
+`ResetConfigSetting` rather than immediately after `SaveSubAgentsServer`, so `saveScalar`'s "the write
+both of those share" still follows the two writes it names and the two resets stay adjacent.
 
 **What:** Groundwork for item 4's ratified opt-out, split from it because it crosses two packages.
 `recordSubAgentsServerChoice` (`cmd/apogee/wire_verbs.go:188`) can only WRITE a name, and
