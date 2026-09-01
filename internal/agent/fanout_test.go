@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
@@ -496,6 +497,129 @@ func TestFanOutWidth_BoundsTheGroup(t *testing.T) {
 					tc.delegations, tc.depth, tc.cap, got, tc.want)
 			}
 		})
+	}
+}
+
+// seatCalls builds one sub_agent call per named seat — "" for a call that names none — so a row
+// below can state a reply's SHAPE ("one here, two there") and nothing else about it.
+func seatCalls(runOn ...string) []domain.ToolCall {
+	calls := make([]domain.ToolCall, 0, len(runOn))
+	for i, seat := range runOn {
+		args := `{"task":"scout"}`
+		if seat != "" {
+			args = fmt.Sprintf(`{"task":"scout","run_on":%q}`, seat)
+		}
+		calls = append(calls, domain.ToolCall{
+			ID:        fmt.Sprintf("c%d", i),
+			Tool:      tools.SubAgentToolName,
+			Arguments: json.RawMessage(args),
+		})
+	}
+	return calls
+}
+
+// TestFanOutWidth_MixedSeatsTakeTheSmallerCap pins the seat-aware width (ADR 0069): a reply the
+// model SPLIT across both Delegation seats is sized by the smaller of the two servers' caps,
+// because one pool runs the whole group and a wider one would overrun whichever server the children
+// in flight happen to be on. Every reply that is not split — one seat, no target to split onto, no
+// `run_on` on the menu, below depth 0 — falls through to fanOutWidth unchanged, which is what the
+// rows without a mixed reply are here to prove.
+func TestFanOutWidth_MixedSeatsTakeTheSmallerCap(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		depth      int
+		sessionCap int
+		target     *DelegationTarget
+		seatChoice bool
+		runOn      []string
+		want       int
+	}{
+		{
+			name:       "split: the target's narrower cap bounds the whole group",
+			sessionCap: 4, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true,
+			runOn: []string{"session", "sub-agents-server", "", ""}, want: 3,
+		},
+		{
+			name:       "split: the session's narrower cap bounds it just the same",
+			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 5}, seatChoice: true,
+			runOn: []string{"session", "sub-agents-server", "", ""}, want: 2,
+		},
+		{
+			name:       "split: the group size still bounds the smaller cap",
+			sessionCap: 5, target: &DelegationTarget{ParallelAgents: 4}, seatChoice: true,
+			runOn: []string{"session", "sub-agents-server"}, want: 2,
+		},
+		{
+			name:       "split: a smaller cap of 1 is serial",
+			sessionCap: 1, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true,
+			runOn: []string{"session", "sub-agents-server", ""}, want: 1,
+		},
+		{
+			name:       "one seat: every call routed keeps the target's cap, not the smaller one",
+			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true,
+			runOn: []string{"sub-agents-server", "sub-agents-server", "", ""}, want: 3,
+		},
+		{
+			name:       "one seat: every call on the session seat is fanOutWidth's row verbatim",
+			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true,
+			runOn: []string{"session", "session", "session"}, want: 3,
+		},
+		{
+			name:       "nothing latched: there is no second seat to split onto",
+			sessionCap: 3, target: nil, seatChoice: true,
+			runOn: []string{"session", "sub-agents-server", "", ""}, want: 3,
+		},
+		{
+			name:       "the plain tool never reads run_on, so no reply is ever split",
+			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: false,
+			runOn: []string{"session", "sub-agents-server", "", ""}, want: 3,
+		},
+		{
+			name:       "a single delegation never pools, whatever it named",
+			sessionCap: 4, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true,
+			runOn: []string{"session"}, want: 1,
+		},
+		{
+			name:  "depth 1 is serial, split or not",
+			depth: 1, sessionCap: 4, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true,
+			runOn: []string{"session", "sub-agents-server", ""}, want: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, delegation: &delegationLatch{}}
+			if tc.seatChoice {
+				a.tools = seatChoiceRegistry(t)
+			}
+			a.SetDelegationTarget(tc.target)
+
+			if got := a.fanOutWidthFor(seatCalls(tc.runOn...)); got != tc.want {
+				t.Errorf("fanOutWidthFor(%v) at depth %d, session cap %d = %d, want %d",
+					tc.runOn, tc.depth, tc.sessionCap, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFanOutWidth_UnparseableSeatIsNotASplit: a call whose arguments do not parse, or which names a
+// seat outside the enum, is refused by runSubAgent before it spawns — so it must not be able to make
+// a group look split and shrink the pool the calls beside it actually use.
+func TestFanOutWidth_UnparseableSeatIsNotASplit(t *testing.T) {
+	t.Parallel()
+
+	a := &Agent{parallelAgents: 4, delegation: &delegationLatch{}, tools: seatChoiceRegistry(t)}
+	a.SetDelegationTarget(&DelegationTarget{ParallelAgents: 3})
+
+	calls := seatCalls("banana", "", "")
+	calls = append(calls, domain.ToolCall{
+		ID:        "c3",
+		Tool:      tools.SubAgentToolName,
+		Arguments: json.RawMessage(`{"task":`),
+	})
+
+	if got := a.fanOutWidthFor(calls); got != 3 {
+		t.Errorf("fanOutWidthFor = %d, want the routed group's 3 — a refused call split the reply", got)
 	}
 }
 

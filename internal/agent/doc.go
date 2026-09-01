@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-one files: the handle and its lifecycle, the loop proper, the tool path, and the
+// Twenty-four files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
@@ -65,6 +65,8 @@
 // tool registry, so no second registry-mutation path has to exist. delegationtarget.go is the
 // Delegation-target latch: the never-idle-gated door a host's second heartbeat pushes the
 // Sub-agent server through, held by one handle for a whole agent tree (ADR 0045).
+// delegationseat.go is that same server's DISPLAY half — the seat facts the orientation block
+// names it by, moved only where the human moves the key (ADR 0069).
 // contextfiles.go owns the workspace context files' discovery half — the session-scoped cache,
 // its loader, and the construction-time name gate. orientation.go composes the engine-owned
 // orientation block that rides directly after the prompt on that same standing system message,

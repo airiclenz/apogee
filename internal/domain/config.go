@@ -34,6 +34,23 @@ type Config struct {
 	// server is a different invocation.
 	APIKey string
 
+	// ServerName and ServerDescription name the Upstream in the HUMAN's words — the `servers:`
+	// entry this session is bound to and the free-text `description:` beside it (ADR 0069). They
+	// are display facts and never dial facts: nothing routes, authenticates or budgets by them, so
+	// a Driver that names neither — a bench arm, an embedder, every session before this existed —
+	// runs byte-identically to one that does.
+	//
+	// The engine reads them in exactly ONE place: the orientation block's Delegations line, which
+	// tells a model offered `run_on` what the session seat actually IS, so its choice between the
+	// two seats is an informed one rather than a guess about two opaque labels. Both are optional
+	// and independently so — an unnamed server renders no name, an undescribed one no description.
+	//
+	// Like every other input of that block they are per-session constants (ADR 0023 §6): they move
+	// only where the human moves the server, through SwitchUpstream's `/server` door, which is what
+	// keeps the rendered line prefix-cache-stable for the life of a binding.
+	ServerName        string
+	ServerDescription string
+
 	// EffortDialect is the wire shape THIS server reads a thinking-effort intent in (CONTEXT:
 	// Thinking effort; ADR 0060). It is a property of the SERVER rather than of the call — the
 	// forced `effort-dialect:` a host configured, else what discovery saw — so it is stated once

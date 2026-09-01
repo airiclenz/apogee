@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -213,12 +214,16 @@ func TestOrientation_NamesTheContextFilesOnlyWhenTheyExist(t *testing.T) {
 }
 
 // TestOrientation_SubAgentInheritsTheBlock: a child renders its own standing content from the
-// config it inherits, so the sub-agent is oriented by the same facts with no wiring of its own.
+// config it inherits, so the sub-agent is oriented by the same facts with no wiring of its own —
+// with the Delegations bullet as the ONE exception, because the seat is a depth-0 offer (ADR 0069
+// decision 3) and the child's own tool no longer publishes `run_on`. The parent states the choice;
+// the child is never told about a choice it does not have.
 func TestOrientation_SubAgentInheritsTheBlock(t *testing.T) {
-	cfg := orientationConfig(t)
+	cfg := seatOrientationConfig(t)
 	cfg.ScratchDir = orientationScratchDir
 
 	parent := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	parent.SetDelegationSeat(fullSeat())
 	child, err := parent.newChildAgent("call_sub", "a delegated task", "")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
@@ -231,6 +236,12 @@ func TestOrientation_SubAgentInheritsTheBlock(t *testing.T) {
 	}
 	if !strings.Contains(block, workspaceBullet(orientationWorkspaceDir)) {
 		t.Errorf("the child's block is missing the workspace bullet: %q", block)
+	}
+	if !strings.Contains(parent.orientationBlock(), delegationsLabel) {
+		t.Fatalf("the parent's own block states no Delegations bullet: %q", parent.orientationBlock())
+	}
+	if strings.Contains(block, delegationsLabel) {
+		t.Errorf("the child's block offers a seat choice its tool does not publish: %q", block)
 	}
 }
 
@@ -277,4 +288,249 @@ func withOrientation(a *Agent, rendered, blocks string) string {
 		parts = append(parts, blocks)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// ----------------------------------------------------------------------------
+// The Delegations bullet (ADR 0069 — the model picks the seat)
+// ----------------------------------------------------------------------------
+//
+// The bullet exists to make a `run_on` choice an informed one, so what these pin is that it
+// describes the two seats and nothing else: the roster is its only gate, a seat with nothing to say
+// is dropped rather than rendered empty, and — the load-bearing one — the rendered block is a
+// per-session constant (ADR 0023 §6), so the heartbeat that finds the far server down and the beat
+// that finds it back move nothing here.
+
+const (
+	orientationServerName = "apollo"
+	orientationServerDesc = "the orchestrator box, 70B and careful"
+	orientationSeatName   = "grunt"
+	orientationSeatDesc   = "fast local 27B, search and mechanical edits"
+	orientationSeatModel  = "cheap-4b"
+)
+
+// delegationsLabel is the bullet's label alone — enough to say whether the line is rendered at all
+// without restating a word of its guidance.
+const delegationsLabel = "- Delegations: "
+
+// delegationsBullet renders the leading, seat-bearing half of the bullet: the label plus the clause
+// list, up to the full stop the fixed guidance follows.
+func delegationsBullet(clauses string) string { return delegationsLabel + clauses + "." }
+
+// seatOrientationConfig is orientationConfig with the two halves the bullet needs: a sub_agent tool
+// that PUBLISHES `run_on` (the bullet's only gate) and the human's words for the session's own
+// server.
+func seatOrientationConfig(t *testing.T) domain.Config {
+	t.Helper()
+	cfg := orientationConfig(t)
+	cfg.Tools = seatChoiceRegistry(t)
+	cfg.ServerName = orientationServerName
+	cfg.ServerDescription = orientationServerDesc
+	return cfg
+}
+
+// seatOrientationAgent is the agent those tests render: seat choice on the menu, a described
+// session seat, and no Sub-agent server installed until a test installs one.
+func seatOrientationAgent(t *testing.T) *Agent {
+	t.Helper()
+	return newProfileAgent(t, seatOrientationConfig(t), &recordingResponder{reply: "All done."})
+}
+
+// fullSeat is a Sub-agent server described in all three parts — the shape a host builds from an
+// entry that pins a model and carries a description.
+func fullSeat() *DelegationSeat {
+	return &DelegationSeat{
+		Name:        orientationSeatName,
+		Description: orientationSeatDesc,
+		Model:       orientationSeatModel,
+	}
+}
+
+// TestOrientation_PlainToolStatesNoDelegationsBullet is the regression guard, pinned as the WHOLE
+// rendered block: a session whose sub_agent publishes no `run_on` — every session under
+// `sub-agents-choice: fixed`, which is the default — renders exactly the bullets it rendered before
+// seat choice existed, in the order it rendered them.
+//
+// The expectation is composed from the asset rather than spelled out, which is this file's standing
+// convention (the prose may be tightened; the SHAPE may not): what it pins is that no bullet was
+// added, dropped or reordered, and that the Delegations line stays behind its gate.
+func TestOrientation_PlainToolStatesNoDelegationsBullet(t *testing.T) {
+	cfg := orientationConfig(t) // no tool registry at all: nothing published `run_on`
+	cfg.ScratchDir = orientationScratchDir
+	cfg.ExtraReadRoots = func() []string { return []string{orientationFirstRoot} }
+
+	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+
+	want := strings.Join([]string{
+		orientationTemplate[orientationHeaderLine],
+		fmt.Sprintf(orientationTemplate[orientationWorkspaceLine], orientationWorkspaceDir),
+		fmt.Sprintf(orientationTemplate[orientationScratchLine], orientationScratchDir),
+		fmt.Sprintf(orientationTemplate[orientationRootsLine], orientationFirstRoot),
+	}, "\n")
+
+	if got := a.orientationBlock(); got != want {
+		t.Errorf("the plain tool's block is no longer byte-identical:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestOrientation_NamesBothDelegationSeats is the bullet doing its job: each seat rendered as
+// "<model> on <entry name> — <description>", the same shape for both so a model is comparing like
+// with like, and an absent `run_on` named as the seat it actually equals.
+func TestOrientation_NamesBothDelegationSeats(t *testing.T) {
+	a := seatOrientationAgent(t)
+	a.SetDelegationSeat(fullSeat())
+
+	want := delegationsBullet(
+		`run_on "session" = test-model on ` + orientationServerName + " — " + orientationServerDesc +
+			`; run_on "sub-agents-server" = ` + orientationSeatModel + " on " + orientationSeatName +
+			" — " + orientationSeatDesc +
+			"; unset = sub-agents-server")
+
+	if block := a.orientationBlock(); !strings.Contains(block, want) {
+		t.Errorf("block is missing the two-seat bullet %q:\n%q", want, block)
+	}
+}
+
+// TestOrientation_SeatClausesDropWhatTheHostDidNotSupply: every part of a seat is optional and
+// independently so, and a part the host never named is omitted rather than rendered as an empty
+// word — the block's rule for every other bullet, read for the two seats.
+func TestOrientation_SeatClausesDropWhatTheHostDidNotSupply(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		seat *DelegationSeat
+		want string
+	}{
+		{
+			name: "no model pin names the entry alone",
+			seat: &DelegationSeat{Name: orientationSeatName, Description: orientationSeatDesc},
+			want: orientationSeatName + " — " + orientationSeatDesc,
+		},
+		{
+			name: "no description names the model on the entry",
+			seat: &DelegationSeat{Name: orientationSeatName, Model: orientationSeatModel},
+			want: orientationSeatModel + " on " + orientationSeatName,
+		},
+		{
+			name: "an entry name on its own is still a seat",
+			seat: &DelegationSeat{Name: orientationSeatName},
+			want: orientationSeatName,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := seatOrientationAgent(t)
+			a.SetDelegationSeat(tc.seat)
+
+			want := `run_on "sub-agents-server" = ` + tc.want + "; unset = sub-agents-server."
+			if block := a.orientationBlock(); !strings.Contains(block, want) {
+				t.Errorf("block is missing %q:\n%q", want, block)
+			}
+		})
+	}
+}
+
+// TestOrientation_NoSeatInstalledDropsTheSubAgentsClause: with no Sub-agent server installed there
+// is no far seat to describe, so the bullet names the near one and says an unset `run_on` stays
+// there. Nothing is invented to fill the gap, and no availability is implied by its absence.
+func TestOrientation_NoSeatInstalledDropsTheSubAgentsClause(t *testing.T) {
+	a := seatOrientationAgent(t)
+	a.SetDelegationSeat(fullSeat())
+	a.SetDelegationSeat(nil)
+
+	block := a.orientationBlock()
+
+	want := delegationsBullet(
+		`run_on "session" = test-model on ` + orientationServerName + " — " + orientationServerDesc +
+			"; unset = session")
+	if !strings.Contains(block, want) {
+		t.Errorf("block is missing the session-only bullet %q:\n%q", want, block)
+	}
+	if strings.Contains(block, `run_on "sub-agents-server" =`) {
+		t.Errorf("block describes a Sub-agent server the host installed none of:\n%q", block)
+	}
+}
+
+// TestOrientation_NoSeatFactsAtAllOmitTheBullet: a Driver that names no server and installs no seat
+// has nothing to say about either place, so the bullet is omitted whole rather than rendered as a
+// label with an "unset" clause and no seats.
+func TestOrientation_NoSeatFactsAtAllOmitTheBullet(t *testing.T) {
+	cfg := orientationConfig(t)
+	cfg.Tools = seatChoiceRegistry(t)
+	cfg.Model = "" // no bound model, no server name, no description: nothing describes the near seat
+
+	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+
+	if block := a.orientationBlock(); strings.Contains(block, delegationsLabel) {
+		t.Errorf("block states a Delegations bullet with no seat to name:\n%q", block)
+	}
+}
+
+// TestOrientation_DelegationsBulletFollowsAServerSwitch: the session seat is read from the LIVE
+// binding, so the human door that moves the session to another box moves what the model is told
+// about it on the very next request — a switch never leaves the line describing the retired server.
+func TestOrientation_DelegationsBulletFollowsAServerSwitch(t *testing.T) {
+	const (
+		movedName = "hermes"
+		movedDesc = "the spare box"
+	)
+
+	a := seatOrientationAgent(t)
+
+	if err := a.SwitchUpstream(UpstreamSpec{
+		Endpoint:          "http://hermes.local:1111",
+		ServerName:        movedName,
+		ServerDescription: movedDesc,
+	}); err != nil {
+		t.Fatalf("SwitchUpstream: %v", err)
+	}
+
+	block := a.orientationBlock()
+
+	// A switch UNBINDS the model (ADR 0024), so the seat is the new server's name alone until the
+	// first Rebind — which is exactly what the model should read while nothing is bound.
+	if want := `run_on "session" = ` + movedName + " — " + movedDesc; !strings.Contains(block, want) {
+		t.Errorf("block is missing the switched seat %q:\n%q", want, block)
+	}
+	if strings.Contains(block, orientationServerName) {
+		t.Errorf("block still names the retired server:\n%q", block)
+	}
+}
+
+// TestOrientation_DelegationsBulletIsConstantAcrossABeat is ADR 0023 §6, kept: the Sub-agent
+// server's Delegation TARGET is re-stated by the host's heartbeat and goes nil the moment the box
+// stops answering, and none of that may reach the standing system message — a prompt that churned
+// per beat would cost the prefix cache the very stability the rule promises. An unusable target is
+// the delegation result's note to tell, not the prompt's.
+func TestOrientation_DelegationsBulletIsConstantAcrossABeat(t *testing.T) {
+	a := seatOrientationAgent(t)
+	a.SetDelegationSeat(fullSeat())
+
+	landed := a.orientationBlock()
+	a.SetDelegationTarget(nil) // the beat that finds the far server down
+	down := a.orientationBlock()
+	a.SetDelegationTarget(routedTarget()) // and the one that finds it back
+	up := a.orientationBlock()
+
+	if down != landed {
+		t.Errorf("a target-down beat moved the block:\ngot  %q\nwant %q", down, landed)
+	}
+	if up != landed {
+		t.Errorf("a target-up beat moved the block:\ngot  %q\nwant %q", up, landed)
+	}
+	if !strings.Contains(landed, delegationsLabel) {
+		t.Fatalf("the block under test states no Delegations bullet at all: %q", landed)
+	}
+}
+
+// TestOrientation_DelegationsBulletReachesTheWire: the bullet is not a rendering curiosity either —
+// it travels in the position-0 system message the provider actually receives, which is the only
+// place it can do the model any good.
+func TestOrientation_DelegationsBulletReachesTheWire(t *testing.T) {
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, seatOrientationConfig(t), responder)
+	a.SetDelegationSeat(fullSeat())
+
+	got := seedSystemMessage(t, a, responder, "hi")
+
+	if want := `run_on "sub-agents-server" = ` + orientationSeatModel + " on " + orientationSeatName; !strings.Contains(got, want) {
+		t.Errorf("the wire's system message is missing the far seat %q:\n%q", want, got)
+	}
 }

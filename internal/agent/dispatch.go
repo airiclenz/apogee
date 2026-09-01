@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -53,7 +54,7 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 	if outcome := a.dispatchSerially(ctx, turn, leaves); outcome == dispatchCancelled {
 		return dispatchCancelled
 	}
-	if width := a.fanOutWidth(len(delegations)); width > 1 {
+	if width := a.fanOutWidthFor(delegations); width > 1 {
 		return a.dispatchFanOut(ctx, turn, width, delegations)
 	}
 	return a.dispatchSerially(ctx, turn, delegations)
@@ -79,16 +80,94 @@ func partitionDispatch(calls []domain.ToolCall) (leaves, delegations []domain.To
 // meaning "run the group serially, exactly as this loop always has" — otherwise. A group of
 // one is never worth a pool; everything else is delegationWidth's rule.
 //
-// dispatchTools calls it ONCE per reply and hands the number DOWN as an argument, which is what
-// makes a group's width immutable for the life of that group: the Delegation target it may have
-// been resolved from is re-stated on every heartbeat of the Sub-agent server (ADR 0045), so a
-// beat landing between the first child and the last must not be able to re-size a pool that is
-// already running. One reply, one width, however many beats cross it.
+// It is reached ONCE per reply — through fanOutWidthFor, the seat-aware form dispatchTools calls —
+// and the number is handed DOWN as an argument, which is what makes a group's width immutable for
+// the life of that group: the Delegation target it may have been resolved from is re-stated on
+// every heartbeat of the Sub-agent server (ADR 0045), so a beat landing between the first child and
+// the last must not be able to re-size a pool that is already running. One reply, one width,
+// however many beats cross it.
 func (a *Agent) fanOutWidth(delegations int) int {
 	if delegations < 2 {
 		return 1
 	}
 	return min(a.delegationWidth(), delegations)
+}
+
+// fanOutWidthFor is fanOutWidth read against the SEATS this particular reply named (ADR 0069):
+// with `run_on` on the menu a single reply may put some children on the session server and the rest
+// on the Sub-agent server, and the two seats have caps of their own. A reply split across both is
+// sized by min(session cap, target cap) — the smaller of the two, because ONE pool runs the whole
+// group and a pool wider than either server's cap would overrun that server whichever children
+// happened to be in flight. A reply that lands entirely on one seat is not split at all and keeps
+// that seat's own width, which is fanOutWidth's rule verbatim.
+//
+// The smaller cap is deliberately the whole rule rather than a per-seat accounting: two pools, or
+// slots counted per seat, would buy width in the mixed case at the price of a second scheduler in
+// the dispatch path — and the mixed case is a reply the model chose to split, not the shape most
+// replies take. One reply, one width, however the seats fall (the once-per-reply snapshot rule the
+// doc above states, now read for two servers instead of one).
+//
+// Like fanOutWidth it is called ONCE per reply, and it takes ONE latch snapshot for the whole
+// classification: a beat landing between two calls of the same reply must not be able to make the
+// group look split when it was not.
+func (a *Agent) fanOutWidthFor(calls []domain.ToolCall) int {
+	if len(calls) < 2 || a.depth != 0 {
+		return 1
+	}
+	target := a.delegationTarget()
+	if !a.seatsAreSplit(calls, target) {
+		return a.fanOutWidth(len(calls))
+	}
+	// A split reply always has a usable target — a child only lands on the far seat because one is
+	// latched — so the cap below is read off a non-nil target by construction.
+	width := min(a.parallelAgentsCap(), target.ParallelAgents)
+	if width < 2 {
+		return 1
+	}
+	return min(width, len(calls))
+}
+
+// seatsAreSplit reports whether calls put children on BOTH Delegation seats, given the target
+// latched for the whole group. A call lands on the session server when it ASKED for it and when
+// nothing is latched to route it anywhere else; every other call lands on the Sub-agent server. So
+// a split needs a latched target and at least one explicit `run_on: "session"` beside at least one
+// call that is not one — which is why an unrouted session, a session under `sub-agents-choice:
+// fixed`, and every depth below the first can never be split, and never pay for the classification.
+//
+// The seat is read exactly as runSubAgent reads it, through the same two gates: the roster must
+// have PUBLISHED `run_on` for the argument to mean anything, and an unparseable value is not a seat
+// at all. It differs only in what it does with a bad one — that call is refused before it spawns
+// (subagent.go), so counting it as the configured seat here can only mis-size a group by one slot
+// it will never use, where an error would abandon a whole reply's fan-out over one malformed
+// argument.
+func (a *Agent) seatsAreSplit(calls []domain.ToolCall, target *DelegationTarget) bool {
+	if target == nil || !publishesSeatChoice(a.tools) {
+		return false
+	}
+	var onSession, onSubAgentsServer bool
+	for _, call := range calls {
+		if a.askedSeat(call) == seatSession {
+			onSession = true
+			continue
+		}
+		onSubAgentsServer = true
+	}
+	return onSession && onSubAgentsServer
+}
+
+// askedSeat reports the Delegation seat one call named, seatConfigured for every call that named
+// none — which includes a call whose arguments do not parse and one naming a value outside the
+// enum, both of which runSubAgent refuses on their own account before a child exists.
+func (a *Agent) askedSeat(call domain.ToolCall) delegationSeat {
+	var args tools.SubAgentArgs
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return seatConfigured
+	}
+	seat, err := parseDelegationSeat(args.RunOn)
+	if err != nil {
+		return seatConfigured
+	}
+	return seat
 }
 
 // delegationWidth reports how many sub_agent delegations THIS agent may run at once,
@@ -98,11 +177,17 @@ func (a *Agent) fanOutWidth(delegations int) int {
 // Depth 0 is the whole eligibility rule (decision 3): a child's own delegations stay serial
 // inline, so there is no slot accounting across levels and no way for a nested fan-out to hold
 // slots its own children need. It is one rule with two readers — the pool below sizes itself by
-// it, and buildRequest stamps it onto the hook-facing view (LoopView.ParallelAgents) so a
-// Mechanism synthesizing delegations batches by the same width the engine will honour. That
-// second reader is why guided decomposition's batch needs nothing of its own to follow a routed
-// cap (ADR 0045 §5): its min(cap, remaining) reads the view, the view carries this number, and
-// this number already knows which server the children will run on.
+// it through fanOutWidthFor, and buildRequest stamps it onto the hook-facing view
+// (LoopView.ParallelAgents) so a Mechanism synthesizing delegations batches by the same width the
+// engine will honour. That second reader is why guided decomposition's batch needs nothing of its
+// own to follow a routed cap (ADR 0045 §5): its min(cap, remaining) reads the view, the view
+// carries this number, and this number already knows which server the children will run on.
+//
+// It is the DEFAULT seat's width, and stays so with seat choice on the menu (ADR 0069): the view
+// is a BATCH HINT, read before any reply exists, and a synthesised delegation names no `run_on` —
+// so the seat it will take is precisely the one this number is resolved for. Only a reply the model
+// SPLIT across both seats is sized differently, and that is a fact about one reply rather than
+// about this agent, which is why it lives in fanOutWidthFor and not here.
 func (a *Agent) delegationWidth() int {
 	if a.depth != 0 {
 		return 1

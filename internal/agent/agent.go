@@ -149,6 +149,20 @@ type Agent struct {
 	// above carry theirs, and is never nil on a constructed Agent (newAgent allocates it).
 	delegation *delegationLatch
 
+	// seatMu guards seat — what the orientation block tells the model about the Sub-agent server as
+	// a Delegation SEAT (ADR 0069 — internal/agent/delegationseat.go). It sits beside the latch
+	// above because the two describe the same box, and apart from it because they move on different
+	// clocks: the latch is a dial fact the host's heartbeat re-states every beat, this is a display
+	// fact the human moves with `/sub-agents-server`, and only the second one may reach a standing
+	// system message without churning the prefix cache (ADR 0023 §6).
+	//
+	// nil — the zero, and every Agent's default — means no Sub-agent server is installed and the
+	// rendered line names the session seat alone. It is held BY VALUE rather than by the latch's
+	// shared pointer, because the seat is offered at depth 0 only: a child renders no Delegations
+	// line, so there is nothing for it to inherit.
+	seatMu sync.RWMutex
+	seat   *DelegationSeat
+
 	// effortMu guards effortOverride, this session's Thinking-effort intent (CONTEXT: Thinking
 	// effort): the level a user asked THIS session to think at, layered above whatever the bound
 	// model's profile carries (ADR 0050). It belongs to the anytime-safe class above — /effort is

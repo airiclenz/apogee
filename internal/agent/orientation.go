@@ -6,7 +6,8 @@ package agent
 // where the workspace is, where its own writable scratch dir is, and which read-only roots it
 // may reach — as harness text the engine composes itself, so no edit to the user-editable
 // prompt template can lose them and no install seeded before the facts existed is left without
-// them.
+// them. Where the host offers the model a Delegation seat (ADR 0069) it states that too — what
+// each of the two seats IS — because a choice between two opaque labels is not a choice.
 //
 // Position is a SECURITY property, not a matter of taste: the block is plain text and a
 // workspace context file is repo-controlled prose. With the blocks ahead of it, a hostile
@@ -22,19 +23,27 @@ package agent
 import (
 	"fmt"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The orientation asset (prompts/orientation.txt) is POSITIONAL: line 0 is the header and every
-// line after it is one bullet. The three PATH bullets are templates carrying exactly one %s for
-// the path or paths they name; the context-files bullet is a literal line with no verb at all —
-// it names a header shape rather than a path. The constants below are those line numbers, and
-// orientationLineCount is the shape the loader enforces — a bullet added to the asset without a
-// constant beside it fails the build's first test run rather than rendering as a stray line.
+// line after it is one bullet. Each rendered bullet is a template carrying exactly one %s — the
+// path or paths it names, or the Delegations bullet's rendered seat clauses; the context-files
+// bullet is a literal line with no verb at all — it names a header shape rather than a path. The
+// constants below are those line numbers, and orientationLineCount is the shape the loader
+// enforces — a bullet added to the asset without a constant beside it fails the build's first test
+// run rather than rendering as a stray line.
+//
+// The context-files bullet stays LAST whatever is added, because it is the only one that speaks
+// about the content following the block rather than about the host: a bullet between it and those
+// blocks would separate the bridge from what it bridges to.
 const (
 	orientationHeaderLine = iota
 	orientationWorkspaceLine
 	orientationScratchLine
 	orientationRootsLine
+	orientationDelegationsLine
 	orientationContextFilesLine
 	orientationLineCount
 )
@@ -46,7 +55,7 @@ const (
 var orientationTemplate = mustOrientationTemplate()
 
 // mustOrientationTemplate loads prompts/orientation.txt and splits it into its lines, panicking
-// unless it carries exactly the header plus the three bullet templates the constants name.
+// unless it carries exactly one line per constant above — the header plus every bullet they name.
 func mustOrientationTemplate() []string {
 	lines := strings.Split(mustPrompt("orientation.txt"), "\n")
 	if len(lines) != orientationLineCount {
@@ -81,8 +90,9 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 // the fenced content below cannot be read as more harness facts.
 //
 // KV cache: every input is a per-session constant — the workspace and the roots are the host's
-// wiring, the scratch dir moves only at a session boundary, and the context-file cache is
-// refilled only at one too (ADR 0026 §5) — so the block is prefix-cache-stable for the life of
+// wiring, the scratch dir moves only at a session boundary, the context-file cache is refilled
+// only at one too (ADR 0026 §5), and the Delegation seats move only on the human's own `/server`,
+// `/model` and `/sub-agents-server` doors — so the block is prefix-cache-stable for the life of
 // a session, exactly like the {{scratch}} placeholder it stands beside.
 func (a *Agent) orientationBlock() string {
 	bullets := make([]string, 0, orientationLineCount-1)
@@ -100,6 +110,9 @@ func (a *Agent) orientationBlock() string {
 			))
 		}
 	}
+	if seats := a.delegationSeats(); seats != "" {
+		bullets = append(bullets, fmt.Sprintf(orientationTemplate[orientationDelegationsLine], seats))
+	}
 	if a.hasContextBlocks() {
 		bullets = append(bullets, orientationTemplate[orientationContextFilesLine])
 	}
@@ -107,4 +120,70 @@ func (a *Agent) orientationBlock() string {
 		return ""
 	}
 	return orientationTemplate[orientationHeaderLine] + "\n" + strings.Join(bullets, "\n")
+}
+
+// delegationSeats renders the clause list the Delegations bullet states — what each value of the
+// sub_agent tool's `run_on` argument means in this session, and which one an absent value equals
+// (ADR 0069) — or "" when the bullet is not rendered at all.
+//
+// The ROSTER is the gate, and the only one: the bullet is rendered exactly when this Agent's own
+// sub_agent tool published `run_on`, so the model is told about a choice precisely when it has one.
+// A child's tool is the plain variant (withoutSeatChoice) and so is every tool built under
+// `sub-agents-choice: fixed`, which is why nothing here needs a depth check or a flag of its own —
+// asking the published schema is what keeps the prompt and the tool menu from ever disagreeing.
+//
+// A seat with nothing to say is DROPPED rather than rendered empty, the block's rule everywhere:
+// a session whose host names no server describes no session seat, and a session with no Sub-agent
+// server installed names only the near one and says an unset `run_on` stays there. With neither
+// seat describable there is no clause to state and the bullet is omitted entirely — the schema's
+// two values are still legal, and item 11's result note is what tells a parent where its work
+// actually ran.
+func (a *Agent) delegationSeats() string {
+	if !publishesSeatChoice(a.tools) {
+		return ""
+	}
+	// The session seat is the Upstream this Agent is bound to, read from the live Config the way
+	// every request reads the model it sends: a `/server` switch moves both together
+	// (SwitchUpstream), so the line can never name the retired box.
+	clauses := make([]string, 0, 3)
+	unset := tools.RunOnSession
+	if session := describeDelegationSeat(a.cfg.Model, a.cfg.ServerName, a.cfg.ServerDescription); session != "" {
+		clauses = append(clauses, fmt.Sprintf("run_on %q = %s", tools.RunOnSession, session))
+	}
+	if seat := a.subAgentsSeat(); seat != nil {
+		if far := describeDelegationSeat(seat.Model, seat.Name, seat.Description); far != "" {
+			clauses = append(clauses, fmt.Sprintf("run_on %q = %s", tools.RunOnSubAgentsServer, far))
+			unset = tools.RunOnSubAgentsServer
+		}
+	}
+	if len(clauses) == 0 {
+		return ""
+	}
+	return strings.Join(append(clauses, "unset = "+unset), "; ")
+}
+
+// describeDelegationSeat renders ONE seat as `<model> on <entry name> — <description>`, dropping
+// whichever part the host did not supply and returning "" when it supplied none. The shape is the
+// same for both seats deliberately: a model comparing them is comparing like with like, and a form
+// that described the far seat differently would read as a difference in kind rather than in box.
+//
+// What it never carries is AVAILABILITY. Every part is a per-session constant the human wrote or
+// switched to, so the rendered line is stable for the life of a binding (ADR 0023 §6); a seat that
+// is momentarily unreachable is reported to the parent model by its delegation's own result note,
+// where it can still act on it, rather than by a standing prompt it would have to re-read.
+func describeDelegationSeat(model, name, description string) string {
+	seat := model
+	switch {
+	case seat == "":
+		seat = name
+	case name != "":
+		seat += " on " + name
+	}
+	if seat == "" {
+		return ""
+	}
+	if description != "" {
+		seat += " — " + description
+	}
+	return seat
 }

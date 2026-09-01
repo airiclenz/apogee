@@ -297,6 +297,15 @@ type UpstreamSpec struct {
 	// APIKey is the new server's bearer token; "" sends no auth header. Keys are per-server, so
 	// this replaces the old one outright rather than being carried over.
 	APIKey string
+	// ServerName and ServerDescription are the new Upstream in the HUMAN's words — the `servers:`
+	// entry being switched to and its free-text `description:` (ADR 0069, domain.Config's pair of
+	// the same name). They ride the switch rather than being pushed separately because they
+	// describe the very server the endpoint above dials: a session moved to another box must not
+	// keep telling the model it is on the retired one, and two doors for one move is exactly the
+	// gap a stale name falls through. Both may be empty — a host that names no servers says
+	// nothing about the seat, which is what every session did before this existed.
+	ServerName        string
+	ServerDescription string
 	// MaxContextTokens is the BOUND context window in tokens on the new server — the caller has
 	// already applied the new entry's `context-window:` pin over whatever the session ran on, exactly
 	// as RebindSpec.MaxContextTokens carries the resolved window for a model change. 0 ⇒ nobody named
@@ -392,6 +401,12 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	a.ownsUpstream = true
 	a.cfg.Endpoint = spec.Endpoint
 	a.cfg.APIKey = spec.APIKey
+	// The human's words for the box just dialled, moving WITH it (ADR 0069): the orientation
+	// block's Delegations line describes the session seat from these, and an empty spec field
+	// clears rather than keeps — the retired server's name describes a machine this session no
+	// longer talks to, exactly like the window and the reply cap below.
+	a.cfg.ServerName = spec.ServerName
+	a.cfg.ServerDescription = spec.ServerDescription
 	a.cfg.Model = ""
 	a.cfg.Context.MaxContextTokens = spec.MaxContextTokens
 	a.cfg.Context.WorkingWindow = spec.WorkingWindow
