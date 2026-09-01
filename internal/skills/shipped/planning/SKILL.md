@@ -75,8 +75,9 @@ Rules that make the list useful:
 - Stop at the goal. A step that is not needed for the restated goal does not belong in
   the list, however tempting.
 
-Sanity-check the finished list once: does executing every step, in order, actually make
-the restated goal true? If a step is missing, this is where it is cheap to add.
+The list is ready when you can say, in one line: the goal is true when [observable], N
+steps, files [paths], first verification command [cmd]. If you cannot fill that line,
+the list is not finished — a missing observable means step 1 is missing.
 
 ## 4. Execute one step at a time
 
@@ -101,7 +102,8 @@ Plans meet the codebase and the codebase wins.
 
 ## Reporting
 
-Present the plan as the numbered list itself: step, files, verification. No preamble.
+Lead with that one-line readiness statement, then the numbered list itself: step, files,
+verification. No preamble.
 
 While executing, report per step: what was done, the verification command, its result.
 At the end, state the goal as it now stands and name anything you deliberately left
