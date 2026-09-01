@@ -41,13 +41,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 (`docs/plans/archived/2026-08-31 - 00 - base-guidance-and-shipped-skills-plan.md`), deferred out
 of that run.
 
-- [ ] **The skill-gate applier test pins only one direction of the mirror.**
-  `TestApplySettingSkillGatesLeaveEachOtherAlone`
-  (`cmd/apogee/wire_settings_test.go:1338`) asserts `UseShippedSkills` survives an
-  `apply("use-project-skills", …)` (`:1362`), but after `apply("use-shipped-skills", "false")`
-  (`:1369`) it never asserts that `UseProjectSkills` survived — the symmetric zeroing the test
-  exists to forbid would pass.
-
 - [ ] **The re-recorded `/skills` golden no longer captures the `· N skills available:` header.**
   The header scrolled off the frame the golden records
   (`cmd/apogee/e2e_hostile_test.go:123`, `cmd/apogee/testdata/frames/t12-skills.txt`), so a

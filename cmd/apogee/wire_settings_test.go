@@ -1366,11 +1366,24 @@ func TestApplySettingSkillGatesLeaveEachOtherAlone(t *testing.T) {
 		t.Error("the shipped skills left the catalog when the project gate moved")
 	}
 
+	// The mirror of the pair above needs a live `true` to survive, so the project gate goes back on
+	// before the shipped apply — otherwise the assertions below would read the `false` the previous
+	// apply legitimately wrote and pass whether or not the shipped apply zeroed its sibling.
+	if _, err := apply("use-project-skills", "true"); err != nil {
+		t.Fatalf("apply use-project-skills=true: %v", err)
+	}
+
 	if _, err := apply("use-shipped-skills", "false"); err != nil {
 		t.Fatalf("apply use-shipped-skills=false: %v", err)
 	}
 	if _, ok := provider.Get("debugging"); ok {
 		t.Error("a shipped skill still resolves with use-shipped-skills off; the re-scan did not happen")
+	}
+	if !provider.Sources().UseProjectSkills {
+		t.Error("a use-shipped-skills apply zeroed use-project-skills")
+	}
+	if _, ok := provider.Get("project-only"); !ok {
+		t.Error("the project skills left the catalog when the shipped gate moved")
 	}
 
 	if _, err := apply("use-project-skills", "true"); err != nil {

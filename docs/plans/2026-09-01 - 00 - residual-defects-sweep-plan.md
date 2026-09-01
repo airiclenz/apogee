@@ -308,7 +308,11 @@ than rewritten.
 **Acceptance:** `grep -n 'use-default-prompt' "docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md"`; `grep -rn 'three top-level' docs/adr/ internal/` shows only `internal/config/config.go:1221`, plus `0023:40` where the count is struck through rather than rewritten.
 **Commit:** `docs(adr): ADR 0023 §1 counts the fourth system-prompt key`
 
-## 8. The skill-gate applier test pins both directions of the mirror
+## 8. The skill-gate applier test pins both directions of the mirror — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `ISSUES.md` joins **Files:** — the item's own **Files:** is code-only, while the plan's Closeout has every item remove its own register entry in its own commit. The section's `**Status:**` block stays: its `/skills` golden entry (item 9) is still open.
+NOTES (2026-09-01): retry — the test half of this item survived in the working tree from the first attempt; the `ISSUES.md` entry, which item 7's own retry restored, is removed again here. Nothing else was carried over.
+NOTES (2026-09-01): mutation-checked as **Tests** requires — with `applySkillSourceGate` (`cmd/apogee/wire_settings.go`) edited to build `skills.Sources{}` instead of reading the sibling back off the Provider, both added assertions fail (`wire_settings_test.go:1383`, `:1386`); the edit was reverted and the file is untouched.
 
 **What:** Closes the residual at `ISSUES.md:80`. `TestApplySettingSkillGatesLeaveEachOtherAlone`
 (`cmd/apogee/wire_settings_test.go:1338`) asserts `UseShippedSkills` survives an
