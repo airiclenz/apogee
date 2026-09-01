@@ -238,7 +238,18 @@ clean, and the config file is not edited.
 **Acceptance:** `go test -race -count=1 -run 'TestHeadless|TestSubAgentsFlagNotice' ./cmd/apogee/`
 **Commit:** `fix(headless): name a retired sub-agents flag on stderr`
 
-## 6. The both-offers pairing is carried through the composition root
+## 6. The both-offers pairing is carried through the composition root — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — ISSUES.md: made necessary by this item's fix — the closed
+entry is deleted, and with it the now-empty "Residuals deferred out of the 2026-08-31
+sub-agents-server routing plan" section heading and Status block, whose last entry this was.
+NOTES (2026-09-01): the new test is deliberately NOT `t.Parallel()` — it swaps the package-level
+`probeKeyStore`, which the three parallel `TestRunRoot*` tests read; Go runs sequential top-level
+tests to completion before resuming parallel ones, so the swap cannot race. Verified with
+`go test -race -count=1 ./cmd/apogee/` (whole package, clean).
+NOTES (2026-09-01): the must-fail direction was proved both ways — unwiring `prepareKeyMigration`
+fails the KeyMigration/MigrateKey assertions, unwiring `prepareSubAgentsMigration` fails the
+SubAgentsMigration/MigrateSubAgentsServer ones; `wire.go` was restored afterwards.
 
 **What:** Closes the residual at `ISSUES.md:62`. `TestSubAgentsMigrationGivesWayToTheKeyMigration`
 (`internal/tui/keymigration_test.go:370`) hands the renderer hand-built Options, so no test carries a

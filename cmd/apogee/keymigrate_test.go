@@ -587,3 +587,70 @@ func TestSubAgentsMigratorRefusesAnUnknownEntry(t *testing.T) {
 		t.Errorf("the refused migration rewrote the file:\n%s", data)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Both offers, through the composition root
+// ----------------------------------------------------------------------------
+
+// bothMigrationOffersYAML is one config file carrying BOTH start-up questions about itself: the
+// first `servers:` entry's key sits in the file as plain text, and the second still spells ADR
+// 0045's retired `sub-agents: true` flag.
+const bothMigrationOffersYAML = "# the box under the desk\nservers:\n" +
+	"  - name: workstation\n    endpoint: http://127.0.0.1:1111\n" +
+	"    api-key: sk-plain-as-day   # from the provider's console\n" +
+	"  - name: cheaper\n    endpoint: http://127.0.0.1:3333\n    sub-agents: true\n" +
+	"server: workstation\n"
+
+// One real config file, one runRoot, both offers on the renderer's Options. The two preparers are
+// separate calls on the start-up path (wire.go) and the renderer's own test hands them hand-built
+// Options, so nothing else proves that a file carrying both facts reaches the UI with both — unwire
+// either preparer and this is the test that goes red.
+//
+// It pins the FILE-shaped pairing only. Which offer the renderer raises first, and how the second
+// gives way to it, stays TestSubAgentsMigrationGivesWayToTheKeyMigration's.
+//
+// The plaintext entry has to ride opts.Servers as well as the fixture: runRoot is handed its
+// config.Options and never re-reads the file, so the key half of the pairing is what resolution
+// already produced (prepareKeyMigration) while the flag half is a raw scan of the file itself
+// (prepareSubAgentsMigration) — the fixture is the only place those two can be stated together.
+//
+// Not parallel: it swaps the package-level probeKeyStore, which every other runRoot test reads.
+func TestRunRootCarriesBothMigrationOffers(t *testing.T) {
+	home := testConfigHome(t, bothMigrationOffersYAML)
+	store := &fakeStore{t: t, configPath: filepath.Join(home, "config.yaml")}
+	prev := probeKeyStore
+	probeKeyStore = func(string) (secretStore, error) { return store, nil }
+	t.Cleanup(func() { probeKeyStore = prev })
+
+	rec := &recordingLauncher{}
+	opts := config.Options{
+		Endpoint:  "http://127.0.0.1:1111",
+		Model:     "fake",
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
+		ConfigDir: home,
+		Servers: []config.ServerEntry{
+			{Name: "workstation", Endpoint: "http://127.0.0.1:1111", APIKey: "sk-plain-as-day"},
+			{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},
+		},
+	}
+
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+
+	if got := rec.opts.KeyMigration; got.StoreName != store.Name() ||
+		len(got.Entries) != 1 || got.Entries[0] != "workstation" {
+		t.Errorf("KeyMigration = %+v; want the plaintext entry offered a move into %q",
+			got, store.Name())
+	}
+	if rec.opts.MigrateKey == nil {
+		t.Error("the key offer arrived with no seam to answer it")
+	}
+	if got := rec.opts.SubAgentsMigration; len(got) != 1 || got[0] != "cheaper" {
+		t.Errorf("SubAgentsMigration = %v; want the one entry the same file still flags", got)
+	}
+	if rec.opts.MigrateSubAgentsServer == nil {
+		t.Error("the retired-flag offer arrived with no seam to answer it")
+	}
+}

@@ -124,6 +124,8 @@ func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
 	// stderr what can be done by hand where it has not. It goes here, beside the confinement
 	// sentences, because it is the same kind of thing — a start-up fact about the human's own
 	// machine, told while stderr is still a safe place to write.
+	// probeKeyStore is a package-level var (keymigrate.go), so a test driving this whole root can
+	// swap it for a fake store and assert the offer on any machine.
 	w.prepareKeyMigration(probeKeyStore, os.Stderr)
 	// And the other start-up question about this file: a `servers:` entry still carrying ADR 0045's
 	// retired `sub-agents: true` flag, which the root `sub-agents-server:` key replaced (keymigrate.go).

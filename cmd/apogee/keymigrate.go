@@ -48,10 +48,15 @@ type secretStore interface {
 // passed to prepareKeyMigration rather than called by it so the decision — offer, or notice — can be
 // tested from a machine of any kind.
 //
+// It is a VAR rather than a func for the one caller that cannot be handed a probe: runRoot names it
+// at the composition root (wire.go), so a test driving the whole root swaps this to a fake store —
+// otherwise the offer half of the assertion is answered by whatever secret store the machine running
+// the suite happens to have, which is a keychain on macOS and keystore.ErrNoStore on a Linux runner.
+//
 // workspaceRoot is what the store tool's own path is fenced against: the probe launches a program on
 // apogee's behalf at startup, before any confinement box exists, so the workspace is the whole
 // model-writable set there is to measure it by.
-func probeKeyStore(workspaceRoot string) (secretStore, error) {
+var probeKeyStore = func(workspaceRoot string) (secretStore, error) {
 	store, err := keystore.Probe(workspaceRoot)
 	if err != nil {
 		return nil, err

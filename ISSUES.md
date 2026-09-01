@@ -35,17 +35,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Residuals deferred out of the 2026-08-31 sub-agents-server routing plan
-
-**Status:** found 2026-08-31 at the close of the sub-agents-server root key and picker plan
-(`docs/plans/archived/2026-08-31 - 03 - sub-agents-server-root-key-and-picker-plan.md`), deferred
-out of that run.
-
-- [ ] **The both-offers case is pinned only at the Options level.**
-  `TestSubAgentsMigrationGivesWayToTheKeyMigration` (`internal/tui/keymigration_test.go:370`) hands
-  the renderer hand-built Options; no test carries a real config file with `api-key:` plus the
-  retired flag through the composition root, so the file-shaped pairing has no end-to-end coverage.
-
 ### Residuals deferred out of the 2026-08-31 base-guidance-and-shipped-skills plan
 
 **Status:** found 2026-08-31 at the close of the base guidance and shipped skills plan
