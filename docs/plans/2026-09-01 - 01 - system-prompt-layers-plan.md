@@ -171,7 +171,10 @@ row is invisible to the user, and a row whose ExternalEdit Flag lies sends users
 editor for a list key. `grep -n "system-prompt" cmd/apogee/settingsrows.go`. Guarded by the
 seed-from-resolution decision (2026-09-01 — see the What and the header block).
 
-## 5. Manual amendment (owning item)
+## 5. Manual amendment (owning item) — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the plan's line references for the section (837–931, ladder 842–860) are stale by ~23 lines — the section now starts at 860 and the ladder text runs 869–884; the passage was inserted after the `use-default-prompt: false` block (now 886–912), i.e. directly after the ladder text as the item specifies.
+NOTES (2026-09-01): regression guard re-read of the ladder text — the four rungs and `use-default-prompt`'s one meaning are untouched (`grep -n "use-default-prompt"` → 873/877/883, all pre-existing); the new passage says layers are not a rung and replace nothing, so it clarifies "nothing configured" (a config with layers is not that) rather than contradicting it.
 
 **What:** docs/manual/configuration.md "The system prompt" (837–931): after the rungs list, a
 short "Layering" passage — layers append after the selected prompt in listed order; they are

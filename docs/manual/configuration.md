@@ -883,6 +883,34 @@ ask for the promptless run:
 use-default-prompt: false
 ```
 
+**Layering.** Beside that ladder sits one additive channel: `system-prompt-layers:`, an
+ordered list of fragments appended to whatever the ladder picked. The rung that wins still
+supplies the whole prompt — layers are not a fifth rung and replace nothing; they simply
+follow it, in the order you wrote them, joined by a blank line. They are opt-in and
+unconditional: nothing is appended unless you list it, and everything you list is sent,
+whichever rung won. A `system-prompt-models:` entry replaces the selected prompt but never
+the layers. Layers with no prompt configured are sent on their own, and do **not** bring
+the built-in default along with them — the default stays what it is, the fallback for a
+prompt you configured nothing for at all.
+
+Each entry states exactly one of `text:` or `file:`; both in one entry, or neither, is a
+startup error naming the offending index:
+
+```yaml
+# ~/.apogee/config.yaml
+system-prompt-layers:
+  - text: "This box has no network. Prefer rg over grep."
+  - file: house-conventions.md
+```
+
+A `file:` resolves exactly as `system-prompt-file` does — a leading `~` expands, and a
+relative path resolves against your apogee home rather than the workspace. Unlike a
+`system-prompt-models:` entry you are not running, a layer's file is read on every run
+that resolves the prompt, so a missing one is a startup error naming the index and the
+path. Layers are templates in the same closed placeholder language as the prompt itself
+(below). See
+[the layering record](../adr/0067-system-prompt-layers-are-an-explicit-additive-channel.md).
+
 An existing `~/.apogee/config.yaml` that carries a `system-prompt-text:` of its own
 keeps it: that is rung 2, and it wins, so nothing changes under a setup you already
 run. To start from apogee's text instead, open `system-prompt-text` in `/settings`
