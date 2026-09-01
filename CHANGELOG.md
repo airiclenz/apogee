@@ -333,6 +333,16 @@ point is a **minor** bump, not a breaking change.
 
 - The footer's mode marker is now a click target: clicking it — the glyph, the word, and on Auto its blast-radius word, all one rect — opens the four-rung mode picker, which takes the rung through the same `SetMode` path `shift+tab` does. The marker answers a click only while the picker could hold the keyboard (a live state with no picker, `/sessions` browser or `/settings` pane up); `shift+tab` stays the every-state route. The marker's text and its column are now one value (`footerModeSpan`) the painter draws from and the pointer addresses, so what is drawn and what is clickable cannot drift apart.
 
+- The shipped `planning` skill now closes its step-list section with a hard readiness gate (goal-when-observable, step count, files, first verification command) and requires that one-line statement to lead the report.
+
+- The shipped `code-review` skill now names its review unit (diff, branch against its merge base, PR, or working tree) before reading, and excludes generated, vendored and third-party files from findings unless the change is to the generator or the pin itself.
+
+- The `/skills` listing now names the one verb that forks a skill apogee ships. A listing that
+  carries a shipped row ends with `edit a skill apogee ships: /skills export <id>` and the folder
+  the export writes into — composed from the same apogee home the export itself uses, so the hint
+  and the write can never point at different places. It is withheld when the listing carries no
+  shipped skill and when no apogee home is resolved, where the export refuses outright.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
