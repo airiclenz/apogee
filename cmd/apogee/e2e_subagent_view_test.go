@@ -326,22 +326,55 @@ func assertFirstBodyRow(t *testing.T, f tuitest.Frame, header, want string) {
 	t.Errorf("nothing is painted under %q:\n%s", header, f)
 }
 
+// idleRuleFromBottom is how far above the frame's bottom edge the session-title rule sits, counting
+// the rule itself: the rule, the status line, the prompt box's three rows (two borders around one
+// content row), the footer's line and the ▁ hairline under it. That stack is the frame's floor
+// (layout.md, "The frame's own floor is eight rows": the gap row, the ▔ hairline, the status line,
+// the input box, the footer's single line and the ▁ hairline under it — the rule and everything
+// below it being seven of those eight), and cmd/apogee/testdata/frames/t17-run-view.txt records it,
+// the rule on row 24 of a 30-row frame.
+//
+// It is the IDLE one-row frame's offset and only that. stackInputSlot (internal/tui/model.go) seats
+// the autocomplete dropdown and the staged-interjection strip between the status line and the box,
+// and the box itself grows to maxInputRows, so a future call site made with a staged band up or a
+// grown draft would find the rule higher — that is the layout doing its job, not a regression, and
+// such a call site needs its own offset rather than a change to this one.
+const idleRuleFromBottom = 7
+
+// lastRuleRow returns the row index of the LAST row beginning with ▔ — the session-title rule the
+// prompt box sits under, and so the transcript's end — in a frame h rows tall. It scans from the
+// BOTTOM because a session title, a body row or a wrapped rule of some pane's own may open with the
+// same glyph higher up; only the bottom-most one is the chrome. ok is false when the frame carries
+// no such row, and when the one it carries is not where an idle frame draws it: either way the
+// transcript's end is not located, and a caller that guessed would silently retarget itself at a
+// body row.
+func lastRuleRow(rows []string, h int) (int, bool) {
+	for y := len(rows) - 1; y >= 0; y-- {
+		if !strings.HasPrefix(rows[y], "▔") {
+			continue
+		}
+		return y, y == h-idleRuleFromBottom
+	}
+	return 0, false
+}
+
 // assertLastBodyRow fails unless the last non-blank row of the transcript holds want — the other
 // half of "the view opened on the run": it opens FOLLOWING the latest line the child has written
 // (ADR 0063 D5), not parked at the top of a conversation the reader would have to scroll.
 //
-// The transcript ends at the session-title rule the prompt box sits under (layout.md), which is the
-// one piece of chrome always drawn and always first on its row.
-func assertLastBodyRow(t *testing.T, f tuitest.Frame, want string) {
+// The transcript ends at the session-title rule the prompt box sits under (layout.md), located from
+// the bottom and checked against idleRuleFromBottom — so a title or a body row opening with the
+// same glyph, or a layout change that moves the chrome, fails this assertion loudly instead of
+// quietly retargeting it at another row.
+func assertLastBodyRow(t testing.TB, f tuitest.Frame, want string) {
 	t.Helper()
 
 	rows := f.Rows()
-	end := len(rows)
-	for y, row := range rows {
-		if strings.HasPrefix(row, "▔") {
-			end = y
-			break
-		}
+	end, ok := lastRuleRow(rows, f.Height())
+	if !ok {
+		t.Fatalf("no session-title rule %d rows above the bottom of this %d-row frame, so the transcript's end cannot be located:\n%s",
+			idleRuleFromBottom, f.Height(), f)
+		return
 	}
 	for i := end - 1; i >= 0; i-- {
 		if strings.TrimSpace(rows[i]) == "" {
@@ -433,4 +466,69 @@ func resultEndsWith(stub *stubllm.Server, suffix string) bool {
 		}
 	}
 	return false
+}
+
+// TestE2ESubAgentViewRuleAnchor is assertLastBodyRow's own guard, asked of the pure scan the
+// assertion rests on. It cannot be asked of the assertion itself: testing.TB is sealed by an
+// unexported method, so no recording double can stand in for a *testing.T and catch the Fatalf.
+//
+// The residual this closes was a silent one — the old scan took the FIRST ▔ row on the frame, so a
+// session title or a body row opening with that glyph retargeted every assertion at the wrong end
+// of the transcript and still passed. Both halves of that are pinned here: the decoy above the rule
+// must not win, and a frame with no rule where the chrome puts one must not resolve at all.
+func TestE2ESubAgentViewRuleAnchor(t *testing.T) {
+	t.Parallel()
+
+	// An idle 10-row frame: three body rows — one of them a decoy opening with the rule's own
+	// glyph — then the chrome, whose rule sits idleRuleFromBottom rows above the bottom.
+	const h = 10
+	framed := func(body ...string) []string {
+		rows := append([]string(nil), body...)
+		return append(rows,
+			"▔▔▔▔▔ a session ▔▔▔▔▔", // the rule: row h-idleRuleFromBottom
+			"  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ dir", "▁▁▁▁▁")
+	}
+
+	for _, tc := range []struct {
+		name string
+		rows []string
+		want int
+		ok   bool
+	}{
+		{
+			name: "a body row opening with the glyph does not win",
+			rows: framed("the child's first line", "▔ a report the child drew itself", "the latest line"),
+			want: 3,
+			ok:   true,
+		},
+		{
+			name: "a plain body resolves to the rule",
+			rows: framed("one", "two", "three"),
+			want: 3,
+			ok:   true,
+		},
+		{
+			name: "no rule at all does not resolve",
+			rows: []string{"one", "two", "three", "  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ dir", "▁▁▁▁▁", ""},
+			ok:   false,
+		},
+		{
+			name: "a rule off the chrome's offset does not resolve",
+			rows: []string{"one", "▔▔▔▔▔ a session ▔▔▔▔▔", "three", "four", "five", "six", "seven", "eight", "nine", "ten"},
+			want: 1,
+			ok:   false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := lastRuleRow(tc.rows, h)
+			if ok != tc.ok {
+				t.Fatalf("lastRuleRow reported ok=%v; want %v (row %d)", ok, tc.ok, got)
+			}
+			if ok && got != tc.want {
+				t.Errorf("lastRuleRow found the rule on row %d; want row %d", got, tc.want)
+			}
+		})
+	}
 }

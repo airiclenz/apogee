@@ -425,7 +425,12 @@ note lands in both cases (the existing `noteInTranscript` helper, `runview_test.
 **Acceptance:** `go test -race -count=1 -run 'TestRunView|TestInterject' ./internal/tui/`
 **Commit:** `fix(tui): flash a child-message refusal inside the run view`
 
-## 12. `assertLastBodyRow` anchors on the chrome, not on the first `▔`
+## 12. `assertLastBodyRow` anchors on the chrome, not on the first `▔` — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): took the plan's second option — the scan is extracted as the pure `lastRuleRow(rows []string, h int) (int, bool)` and guarded directly. The recording-`testing.TB` route the plan offered first is not writable: `testing.TB` is sealed by an unexported method, so no double outside `testing` can stand in for a `*testing.T` and catch the `Fatalf`. The helper still takes `testing.TB`, as the item requires.
+NOTES (2026-09-01): the two loud failures the item names — no `▔` row at all, and one at an unexpected offset — are both carried by `lastRuleRow`'s single `ok=false`, so `assertLastBodyRow` has ONE `t.Fatalf` (with the explicit `return` after it) rather than two. The message names the expected offset and prints the frame, so either failure is diagnosable.
+NOTES (2026-09-01): the guard test is named `TestE2ESubAgentViewRuleAnchor` so the item's acceptance regex `-run 'TestE2ESubAgentView'` covers it.
+NOTES (2026-09-01): `ISSUES.md` — this item's own register entry (was `:43-46`) deleted, per the plan's "each item deletes its own entry".
 
 **What:** Closes the residual at `ISSUES.md:110`. The helper
 (`cmd/apogee/e2e_subagent_view_test.go:336-357`) scans `f.Rows()` for the FIRST row starting with `▔`

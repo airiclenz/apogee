@@ -40,11 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 **Status:** found 2026-08-30 at the close of the sub-agent run-view plan
 (`docs/plans/archived/2026-08-30 - 01 - sub-agent-run-view-plan.md`), deferred out of that run.
 
-- [ ] **`assertLastBodyRow` finds the transcript's end by the session-title rule.** It scans for
-  the first row starting with `▔` (`cmd/apogee/e2e_subagent_view_test.go:341`) and treats it as the
-  bottom of the body. A session whose own title happens to start with that glyph, or a layout change
-  that moves the rule, silently retargets every assertion the helper makes rather than failing it.
-
 - [ ] **The steering half of the run view has no real-engine e2e assertion.** `TestE2ESubAgentView`
   pins the steered run's collapsed row with `countedOutcome = "tool calls · done"`
   (`cmd/apogee/e2e_subagent_view_test.go:52`), a `Contains` check that passes with or without the
