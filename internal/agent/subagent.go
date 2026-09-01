@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -171,12 +172,29 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	if args.MaxSteps > 0 && sub.stepCap > 0 && args.MaxSteps < sub.stepCap {
 		sub.stepCap = args.MaxSteps
 	}
+	// The out-of-band namer's two handles, declared ABOVE the reaping defer so that defer can stop
+	// and join the naming goroutine before anything the child owns is torn down (ADR 0068). Both
+	// stay zero when no naming starts — every early return below, a named delegation, and a nil
+	// Config.Namer — and the defer is a no-op on them.
+	var (
+		naming     sync.WaitGroup
+		stopNaming context.CancelFunc
+	)
 	// The delegation is the child's whole life, so this scope is the only one that knows when the
 	// child's resources stop being needed — nothing else holds the child to close it later. Close
 	// reaps the Consoles this delegation opened (ADR 0059 §6), routed or not, and tears down a
 	// ROUTED child's own client; an unrouted child borrowed the parent's client, so that one is
 	// left running for the parent (ownsUpstream).
 	defer func() {
+		// The namer goes FIRST and is JOINED, not merely cancelled: it writes the child's display
+		// name and emits through this Agent's sink, so letting it outlive the run would let a name
+		// land on a closed child and an event arrive after the delegation was reported. Cancelling
+		// its context is also what makes a reply that comes back too late a dropped reply rather
+		// than a rename nobody can see (ADR 0068 decision 2).
+		if stopNaming != nil {
+			stopNaming()
+		}
+		naming.Wait()
 		// Unregister and close the mailbox before the child's resources go: after this the child
 		// is no longer addressable, and anything a human queued for it that never reached a
 		// boundary is reported undelivered rather than left unaccounted for (ADR 0063 D2).
@@ -192,8 +210,67 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	// chose for this call — the same id the child stamps on every Event it emits, so a Driver
 	// addresses it by the identity it already paints (ADR 0063 D1).
 	a.children.register(call.ID, sub)
+	// Named CONCURRENTLY with the run it names, and only once the child is addressable: the name is
+	// worth having while the delegation is still on screen, so waiting for a completion before
+	// starting the work would buy a better label at the price of the thing it labels.
+	stopNaming = a.startDelegationNaming(ctx, call.ID, sub, &naming)
 	res, err := sub.Run(ctx)
 	return sub.delegationResult(call.ID, res, err)
+}
+
+// startDelegationNaming launches the ONE out-of-band completion that names a delegation the model
+// left unnamed (ADR 0068), and returns the cancel that stops it. It answers nil — and starts
+// nothing — for the two cases that need no name: a delegation the spawning call already named (a
+// name the model chose always wins) and a host that supplied no Config.Namer at all, which is the
+// bench, an embedder and every test written before this seam existed.
+//
+// The engine's whole part is stating what it knows: the delegated task, and whether this child
+// runs on the Sub-agent server (domain.DelegationNaming). Which endpoint answers, which model,
+// which prompt and which cap the reply is cleaned to are the host's (ADR 0031, wire-silent engine)
+// — the sanitiser is the only shared piece, because a name that broke a status line would be the
+// engine's problem however it was produced. Config.Bypass is never consulted: naming is not a
+// Mechanism, so the Bypass floor has nothing to say about it (ADR 0022 addendum).
+//
+// Every failure is silent by contract: an error, a reply with nothing usable in it, or a name that
+// arrives after the run has been reported all leave the delegation wearing the task's first line,
+// which is exactly what it wore before naming existed. Nothing is logged and no event is emitted,
+// so a namer that cannot reach its server costs the run nothing but the better label.
+//
+// The child inherits Config.Namer verbatim through the whole-Config copy newChildAgent takes, so a
+// grandchild the child leaves unnamed is named the same way, one level further down.
+func (a *Agent) startDelegationNaming(ctx context.Context, callID string, sub *Agent, wg *sync.WaitGroup) context.CancelFunc {
+	if a.cfg.Namer == nil || sub.displayName() != "" {
+		return nil
+	}
+	// Everything the goroutine reads, read HERE on the dispatch goroutine: the request the namer is
+	// handed, and the Turn the event is stamped with. The goroutine below then touches nothing of
+	// this Agent's or the child's loop state — it writes one field through the child's lock and
+	// emits one event.
+	req := domain.DelegationNaming{Task: sub.task, Routed: sub.ownsUpstream}
+	turn := a.turns.index
+	nctx, cancel := context.WithCancel(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		name, err := a.cfg.Namer.NameDelegation(nctx, req)
+		if err != nil {
+			return
+		}
+		line, ok := title.SanitizeTo(name, title.MaxDelegateRunes)
+		if !ok {
+			return
+		}
+		// The late-reply drop, checked AFTER the call and before the rename: runSubAgent cancels
+		// this context on its way out, so a namer that answered once the delegation had already
+		// been read and reported finds the run it was naming gone. Renaming it then would move a
+		// label the human and the parent model have both already read.
+		if nctx.Err() != nil {
+			return
+		}
+		sub.setName(line)
+		a.emitSubAgentNamed(turn, callID, line)
+	}()
+	return cancel
 }
 
 // delegationResult renders a child's FINISHED run as the ToolResult the parent model reads on its
@@ -501,7 +578,7 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// key; that is harmless on a child, because an engine with no registry holds no Console.
 	child.consoleOwner = a.consoles.MintOwner()
 	child.task = task
-	child.name = name
+	child.setName(name)
 	// Bind the routed spawn's own capture seam AFTER its identity is stamped, so its WireEvents
 	// carry the child's depth and spawning call id rather than the zero values newAgent left.
 	tap.bind(child)

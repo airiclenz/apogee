@@ -70,11 +70,13 @@ type AskRequest struct {
 	// runs under (WithSubAgentTask), because the ask_user TOOL is what builds an AskRequest.
 	SubAgentTask string
 
-	// SubAgentName is the OPTIONAL short name the spawning sub_agent call gave that child, the twin
-	// of ApprovalRequest.SubAgentName: the few words a human recognises it by where SubAgentTask is
-	// a whole sentence. DISPLAY identity only, never privilege (ADR 0005).
+	// SubAgentName is the OPTIONAL short name that child is known by, the twin of
+	// ApprovalRequest.SubAgentName: the few words a human recognises it by where SubAgentTask is
+	// a whole sentence — the name the spawning sub_agent call supplied, or the one the out-of-band
+	// namer generated for a call that supplied none (ADR 0068). DISPLAY identity only, never
+	// privilege (ADR 0005).
 	//
-	// It is empty whenever the delegation carried no name (and always at depth 0) — the signal to
+	// It is empty whenever the delegation has no name (and always at depth 0) — the signal to
 	// fall back to SubAgentTask. It rides the same ctx carrier the task does (WithSubAgentName),
 	// for the same reason: ask_user builds this request an interface boundary away from the Agent
 	// that knows the name.

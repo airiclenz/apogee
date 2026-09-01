@@ -287,7 +287,14 @@ type Agent struct {
 	callID        string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
 	consoleOwner  string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
 	task          string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
-	name          string              // this Agent's display identity in words: the optional short name the spawning sub_agent call supplied, normalised to a trimmed first line; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
+
+	// nameMu guards name, which is the ONE identity field a running Agent may see replaced under
+	// it: a delegation the model left unnamed is named out of band, by a completion that lands while
+	// the child is already dispatching (ADR 0068). It follows the modeMu pattern for the same reason
+	// every sibling above has its own lock — one mutex per field, named for the single field it
+	// guards — and every reader goes through displayName(), every writer through setName().
+	nameMu sync.RWMutex
+	name   string // this Agent's display identity in words: the short name the spawning sub_agent call supplied (normalised to a trimmed first line) or the one the namer generated for it; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
 
 	// children and mailbox are the child-addressing pair (ADR 0063 D1 — internal/agent/children.go):
 	// children is the set of sub-agents THIS Agent currently has running, keyed by spawn call-ID, and
@@ -868,6 +875,26 @@ func (a *Agent) compactionEnabled() bool {
 	a.compactionMu.RLock()
 	defer a.compactionMu.RUnlock()
 	return a.compaction
+}
+
+// setName replaces this Agent's display identity. It exists for ONE writer: the out-of-band namer
+// a delegation the model left unnamed is given (ADR 0068), which runs on a goroutine of its own
+// while this Agent is already dispatching. The name it writes is display identity like the one the
+// spawning call could have supplied — never privilege, never routing, never a key anything is
+// looked up by (ADR 0005) — so nothing downstream has to be re-derived when it changes.
+func (a *Agent) setName(name string) {
+	a.nameMu.Lock()
+	a.name = name
+	a.nameMu.Unlock()
+}
+
+// displayName reports this Agent's display identity under the lock — the ONE read seam for the
+// field, so a prompt built mid-run is race-free against a rename landing beside it. Empty is the
+// honest "this delegation has no name", and every caller reads that as "fall back to the task".
+func (a *Agent) displayName() string {
+	a.nameMu.RLock()
+	defer a.nameMu.RUnlock()
+	return a.name
 }
 
 // SetContextFiles replaces the workspace context-file names folded into the standing system

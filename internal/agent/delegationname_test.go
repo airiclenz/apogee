@@ -29,7 +29,9 @@ func namedDelegationScript(id, task, name string) []provider.Delta {
 // single run: it makes a gated tool call and then puts a question to the human, and each request
 // must name it by the name its spawning call gave it — alongside, never instead of, the task. The
 // unnamed row is the floor: the same run with no name leaves both requests exactly as they were
-// before names existed.
+// before names existed. The third row is the same claim for a name the model did NOT supply: a
+// delegation named out of band (ADR 0068) is renamed mid-run, and every prompt raised after the
+// rename must name it by what it is called NOW rather than by the name it was spawned with.
 func TestDelegationName_RidesApprovalAndAsk(t *testing.T) {
 	const (
 		parentInput = "delegate the audit"
@@ -39,24 +41,34 @@ func TestDelegationName_RidesApprovalAndAsk(t *testing.T) {
 	tests := []struct {
 		label string
 		given string
+		namer *stubNamer
 		want  string
 	}{
-		{"named delegation", "repo-scout", "repo-scout"},
-		{"unnamed delegation falls back to nothing", "", ""},
+		{"named delegation", "repo-scout", nil, "repo-scout"},
+		{"unnamed delegation falls back to nothing", "", nil, ""},
+		{"a generated name reaches both prompts", "", &stubNamer{reply: "Config Loader Audit"}, "Config Loader Audit"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.label, func(t *testing.T) {
-			sink := &recordingSink{}
+			sink := newLockedSink()
 			approver := &queueProbeApprover{allow: func(domain.ApprovalRequest) bool { return true }}
 			asker := &askProbeAsker{answer: func(domain.AskRequest) string { return "the blue one" }}
 			cfg := subAgentConfig(sink, domain.ModeAskBefore,
 				fakeTool{name: "touch_thing", result: "touched"},
 				tools.NewAskUser(asker))
 			cfg.Approver = approver
+			// The rename has to have LANDED before the child's first gated call, or the prompt
+			// would be built from the name the spawn carried and the row would prove nothing.
+			// Gating the child's own first reply is the one place that ordering can be pinned.
+			var gate func(context.Context)
+			if tc.namer != nil {
+				cfg.Namer = tc.namer
+				gate = func(context.Context) { sink.awaitRename() }
+			}
 
 			up := newRoutedResponder().
 				route(parentInput, nil, namedDelegationScript("c1", childTask, tc.given)).
-				route(childTask, nil, toolCallScript("t1", "touch_thing", `{}`)).
+				route(childTask, gate, toolCallScript("t1", "touch_thing", `{}`)).
 				route(childTask, nil, askUserCallScript("q1", "which one?")).
 				route(childTask, nil, contentScript("child done")).
 				route(parentInput, nil, contentScript("parent done"))

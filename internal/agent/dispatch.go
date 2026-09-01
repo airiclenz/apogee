@@ -355,6 +355,23 @@ func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, phase domain.S
 	a.cfg.Events.Emit(domain.SubAgentPhaseEvent{EventBase: base, Phase: phase, Result: result})
 }
 
+// emitSubAgentNamed surfaces the ONE rename a generated delegation name produces (ADR 0068). It is
+// stamped exactly as emitSubAgentPhase stamps a lifecycle boundary — the CHILD's identity, one
+// level deeper than this Agent and under the spawning call's id — because a reader applies the
+// rename to the run those events opened, which under a fan-out is one member of several. Turn is
+// the parent Turn the spawning call belongs to, read on the dispatch goroutine and handed in, so
+// the naming goroutine touches no loop state of its own.
+//
+// It is the naming act's whole wire presence: no usage, no tokens, no Turn of its own. The call
+// that produced the name is neither a Mechanism nor an Exchange (ADR 0022 addendum), so nothing
+// else about it belongs on the stream.
+func (a *Agent) emitSubAgentNamed(turn int, callID, name string) {
+	base := a.base(turn)
+	base.Depth++
+	base.CallID = callID
+	a.cfg.Events.Emit(domain.SubAgentNamedEvent{EventBase: base, Name: name})
+}
+
 // commitDelegation lands one finished delegation: the audit record its verdict earns, the
 // self-regulation signal, the post-tool-result hooks, and the append into history — the same
 // sequence, in the same order, the serial path runs inline for every call. Running it here, one
@@ -788,8 +805,10 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 // that allowed its key.
 //
 // The request names the asking agent's delegated task (empty at depth 0 — a.task) and, when the
-// delegation carried one, its short name (a.name), because a prompt raised during a fan-out may be
-// one of several queued behind each other and "which agent is asking" is otherwise unanswerable
+// delegation carried one — or the out-of-band namer generated one for it (ADR 0068) — its short
+// name, read under the lock through displayName because that rename can land while this very
+// prompt is being built. A prompt raised during a fan-out may be one of several queued behind each
+// other and "which agent is asking" is otherwise unanswerable
 // from the call alone (ADR 0039 decision 12). The queueing
 // itself is the Approver seam's (queuedApprovals): from here a gate is one blocking call whatever
 // the siblings are doing.
@@ -835,7 +854,7 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		Reason:       reason,
 		Remedy:       remedy,
 		SubAgentTask: a.task,
-		SubAgentName: a.name,
+		SubAgentName: a.displayName(),
 		CacheKey:     sessionKey,
 		// What that CacheKey's grain means for the human's answer: false on every request whose
 		// allow authorises no more than the call above, which is all but an MCP server's
@@ -928,7 +947,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		// The delegation's short name rides beside it, installed even when EMPTY: an unnamed child
 		// must report its own namelessness rather than let an outer value stand in for it, and ""
 		// is exactly the "fall back to the task" signal the prompt reads.
-		ctx = domain.WithSubAgentName(ctx, a.name)
+		ctx = domain.WithSubAgentName(ctx, a.displayName())
 	}
 
 	// Install the undo journal for EVERY call (ADR 0051), the same way the box and the permit

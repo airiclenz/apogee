@@ -119,7 +119,13 @@ cap-parameterised body of `Sanitize`; `Sanitize` stays as the `MaxRunes` wrapper
 **Regression guard.** `Sanitize`'s existing table tests pass byte-for-byte after the refactor; `title.Prompt` is untouched (diff shows no change to its body).
 **Commit:** `feat(domain,title): DelegationNamer seam, SubAgentNamedEvent and the delegation naming prompt`
 
-## 3. Engine: name an unnamed child concurrently, rename under lock, emit the event
+## 3. Engine: name an unnamed child concurrently, rename under lock, emit the event — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): consequential edit — internal/domain/approval.go: made necessary by the generated name reaching ApprovalRequest.SubAgentName; the field's doc said the name is only what the spawning call gave and is empty whenever the call carried none, which this item makes false.
+NOTES (2026-09-01): consequential edit — internal/domain/ask.go: made necessary by the same rename reaching AskRequest.SubAgentName; identical false sentence corrected.
+NOTES (2026-09-01): the event's `Turn` is the PARENT Turn the spawning call belongs to, read on the dispatch goroutine and handed to the goroutine — `runSubAgent` has no `turn` parameter, and adding one would have changed a signature four unlisted test files call. Depth+1 and CallID are exactly as the plan specifies.
+NOTES (2026-09-01): the naming goroutine emits concurrently with the run, so the package's `recordingSink` (unsynchronised by the single-goroutine Agent contract) cannot be used for these tests; `naming_test.go` adds a locked `lockedSink` that also signals the first rename, and `TestDelegationName_RidesApprovalAndAsk` was switched to it. Tests that assert the rename ITSELF gate the child's own reply on that signal — a scripted child finishes in microseconds and would otherwise see its own name correctly dropped as late.
+NOTES (2026-09-01): no `a.name` reader was found in the "usage-reading emitter" the plan names — `internal/agent` has exactly three sites (dispatch.go:838, :931 and the `newChildAgent` write), all now on `displayName()`/`setName()`. `run.SubAgentUsage.Name` is item 6's.
 
 Depends on item 2.
 **What:** `internal/agent/subagent.go` `runSubAgent`: after `a.children.register(call.ID, sub)`,
