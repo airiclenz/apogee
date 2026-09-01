@@ -88,6 +88,20 @@ type PromptSource struct {
 	File string
 }
 
+// SystemPromptLayer is one entry of `system-prompt-layers:` (ADR 0067) as the user wrote it: a
+// fragment of standing instruction, inline (text) or in a file (file). It is deliberately NOT a
+// PromptSource: a source is a RUNG of the prompt ladder — one of the candidates whole-entry
+// replacement chooses between — while a layer is never chosen, it is appended to whichever rung
+// won. Sharing the type would invite the two to be selected alike.
+//
+// A layer states exactly one of the two spellings; zero or both is a startup error (validate
+// below), because a layer is opt-in prose the user asked to be sent, and an entry that says
+// nothing is a YAML slip rather than a deliberate blank.
+type SystemPromptLayer struct {
+	Text string
+	File string
+}
+
 // SystemPromptSettings is the resolved system-prompt block (ADR 0023): the global prompt plus
 // the per-model overrides, keyed by the RESOLVED model name (the label the Validated-set surface
 // keys on too). It is one struct rather than three fields on [Options] for the same reason
@@ -100,9 +114,14 @@ type PromptSource struct {
 // `system-prompt-text`. An entry naming any other model is inert — the `unconfined-hosts`
 // posture: it describes a machine/model this run is not, so it is never selected and its file is
 // never read (it may only exist elsewhere).
+//
+// Layers are the one part that does not take part in that selection: whatever the ladder settled
+// on, the enabled layers are APPENDED to it in listed order (ADR 0067). They are not a rung, so
+// they never stand in for a missing prompt and never suppress the embedded default.
 type SystemPromptSettings struct {
 	Global PromptSource
 	Models map[string]PromptSource
+	Layers []SystemPromptLayer
 }
 
 // validate rejects a system-prompt block that is structurally impossible, at EVERY level —
@@ -117,7 +136,9 @@ type SystemPromptSettings struct {
 // to start over it would make one global config unusable everywhere else.
 //
 // The entries are walked in sorted order so the entry a message names is the same one on every
-// run, rather than whichever the map happened to yield first.
+// run, rather than whichever the map happened to yield first. The layers need no such ordering —
+// the list is already the order the file states them in, and their index is how a message names
+// them (ADR 0067).
 func (sp SystemPromptSettings) Validate() error {
 	if sp.Global.Text != "" && sp.Global.File != "" {
 		return errors.New("apogee: system-prompt-text and system-prompt-file are both set: " +
@@ -132,6 +153,18 @@ func (sp SystemPromptSettings) Validate() error {
 		case src.Text == "" && src.File == "":
 			return fmt.Errorf("apogee: system-prompt-models[%q] sets neither system-prompt-text nor "+
 				"system-prompt-file: give the entry a prompt, or remove it", model)
+		}
+	}
+	// The layers face the same structural question, named by POSITION rather than by key: the list
+	// has no names to quote, and the index is what a reader counts down the file to find.
+	for i, layer := range sp.Layers {
+		switch {
+		case layer.Text != "" && layer.File != "":
+			return fmt.Errorf("apogee: system-prompt-layers[%d] sets both text and file: keep the "+
+				"inline text or the file, not both", i)
+		case layer.Text == "" && layer.File == "":
+			return fmt.Errorf("apogee: system-prompt-layers[%d] sets neither text nor file: give the "+
+				"layer a prompt, or remove it", i)
 		}
 	}
 	return nil
@@ -439,7 +472,7 @@ var keyAccessors = []keyAccessor{
 		fromFlag: func(o *Options, flags Options) { o.Mode = flags.Mode },
 	},
 	{
-		// The first of the three keys that are ONE prompt (ADR 0023) and therefore one carrier. Its
+		// The first of the four keys that are ONE prompt (ADR 0023, ADR 0067) and therefore one carrier. Its
 		// zero value is no prompt at all — the promptless request apogee sent before the ADR — so the
 		// block needs no default beyond what the file states.
 		row:      mustKey("system-prompt-text"),
@@ -451,6 +484,12 @@ var keyAccessors = []keyAccessor{
 	},
 	{
 		row:      mustKey("system-prompt-models"),
+		fromFile: fileSystemPrompt,
+	},
+	{
+		// The fourth key of the same carrier (ADR 0067): it appends rather than selects, but it is
+		// read off the same block, so it shares the mapper its three siblings do.
+		row:      mustKey("system-prompt-layers"),
 		fromFile: fileSystemPrompt,
 	},
 	{
@@ -746,7 +785,7 @@ var keyAccessors = []keyAccessor{
 	},
 }
 
-// The file projections shared by the key groups that resolve into ONE carrier: three system-prompt
+// The file projections shared by the key groups that resolve into ONE carrier: four system-prompt
 // keys, two context-files keys, four present keys and seven ui keys. Every key of a block writes the
 // whole block — the Options field IS the block, and the block's mapper defaults whatever the file
 // left out — so the rows of one block differ in nothing but the key they are described by, and a
@@ -1220,9 +1259,15 @@ type fileConfig struct {
 	// spellings; a matching entry REPLACES the global prompt whole, and an entry naming another
 	// model is inert. They are three top-level keys rather than one `system-prompt:` block
 	// because the common case — one inline prompt — is then one line, not three.
+	//
+	// SystemPromptLayers is the fourth key and the one that does not select: its entries APPEND to
+	// whichever prompt the three above (or the embedded default) settled on, in listed order
+	// (ADR 0067). Absent ⇒ nothing is appended, which is what every config written before the key
+	// existed says.
 	SystemPromptText   string                             `yaml:"system-prompt-text"`
 	SystemPromptFile   string                             `yaml:"system-prompt-file"`
 	SystemPromptModels map[string]systemPromptEntryConfig `yaml:"system-prompt-models"`
+	SystemPromptLayers []systemPromptLayerConfig          `yaml:"system-prompt-layers"`
 	// ContextFiles configures the workspace context files folded into the standing system content
 	// at every session start — the AGENTS.md / CLAUDE.md behaviour. File-only (no flag/env), like
 	// the system-prompt keys above, and it is a BLOCK rather than loose keys because the two keys
@@ -1856,6 +1901,16 @@ type systemPromptEntryConfig struct {
 	File string `yaml:"system-prompt-file"`
 }
 
+// systemPromptLayerConfig is the on-disk schema for one `system-prompt-layers:` entry (ADR 0067).
+// Its keys are the BARE spellings `text:` and `file:`, not the top-level ones systemPromptEntryConfig
+// repeats: a per-model entry is a prompt standing where the global prompt would, so it is spelled
+// the same; a layer is not a prompt in that sense at all, and the short names keep a list of
+// fragments readable at the indentation a list of blocks already costs.
+type systemPromptLayerConfig struct {
+	Text string `yaml:"text"`
+	File string `yaml:"file"`
+}
+
 // toSystemPromptSettings maps the three on-disk system-prompt keys onto the resolved value (the
 // toPresentSettings shape), mapping the per-model entries across one by one so the on-disk schema
 // and the resolved one stay independently evolvable. It applies no defaults and rejects nothing:
@@ -1867,6 +1922,12 @@ func (fc fileConfig) toSystemPromptSettings() SystemPromptSettings {
 		s.Models = make(map[string]PromptSource, len(fc.SystemPromptModels))
 		for model, e := range fc.SystemPromptModels {
 			s.Models[model] = PromptSource{Text: e.Text, File: e.File}
+		}
+	}
+	if len(fc.SystemPromptLayers) > 0 {
+		s.Layers = make([]SystemPromptLayer, 0, len(fc.SystemPromptLayers))
+		for _, l := range fc.SystemPromptLayers {
+			s.Layers = append(s.Layers, SystemPromptLayer{Text: l.Text, File: l.File})
 		}
 	}
 	return s

@@ -60,7 +60,15 @@ rejected — additive-by-default (two-persona stacking, floor shift per 0064 §6
 key is stale. `grep -rn "system-prompt-text" docs/ CONTEXT.md ISSUES.md | grep -v layers` —
 hits outside 0023/0064 historical quotes are amended by this item or named in its prose.
 
-## 2. Parse system-prompt-layers into the config schema + settings row
+## 2. Parse system-prompt-layers into the config schema + settings row — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the golden settings frame cmd/apogee/testdata/frames/t16-settings-rows.txt now lacks the new row, so TestE2ELiveStateFollowsTheRunningSession fails until item 4 — which owns that file and its regeneration — lands. Every other test in ./cmd/apogee and ./internal/... passes.
+
+NOTES (2026-09-01): everyKeyFileConfig (config_test.go) gained a SystemPromptLayers entry so the "sets EVERY key of the schema" fixture stays honest; no assertion depends on it today.
+
+NOTES (2026-09-01): layer entries use the BARE yaml keys `text:`/`file:` (the plan's spelling), unlike systemPromptEntryConfig which repeats the full `system-prompt-text`/`-file` spellings; the reason is recorded on systemPromptLayerConfig.
+
+NOTES (2026-09-01): SystemPromptLayer is a type of its own rather than a reuse of PromptSource — a source is a rung the ladder selects between, a layer is never selected. Reason recorded on the type.
 
 **What:** Recast at the regression check (2026-09-01). internal/config: type
 `SystemPromptLayer{Text, File string}` beside PromptSource (config.go:86); `Layers

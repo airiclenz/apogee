@@ -346,7 +346,8 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"system-prompt-text":     "2 lines",
 		"system-prompt-file":     "", // unset, and an editable string row's blank is what the field seeds from
 		"system-prompt-models":   "1 model",
-		"use-default-prompt":     "false", // the fabricated session runs on a prompt of its own
+		"system-prompt-layers":   noneSettingValue, // unset: the additive channel is opt-in (ADR 0067)
+		"use-default-prompt":     "false",          // the fabricated session runs on a prompt of its own
 		"context-files.enable":   "true",
 		"context-files.names":    "[AGENTS.md, CLAUDE.md]",
 		"confine-to-workspace":   "false",
@@ -498,7 +499,8 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	}
 	// system-prompt-text is NOT among them since it became editable in its own multi-line field: the
 	// prose the file carries as a block is written in the pane now (tui.SettingText).
-	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models", "model-profiles"} {
+	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
+		"system-prompt-layers", "model-profiles"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}

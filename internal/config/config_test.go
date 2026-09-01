@@ -570,6 +570,7 @@ func everyKeyFileConfig() fileConfig {
 			Host: "box.local"},
 		SystemPromptText: "be brief", SystemPromptFile: "prompt.md",
 		SystemPromptModels: map[string]systemPromptEntryConfig{"qwen": {Text: "be terse"}},
+		SystemPromptLayers: []systemPromptLayerConfig{{Text: "prefer tables"}},
 		ContextFiles:       &contextFilesConfig{Enable: boolptr(false), Names: []string{"CLAUDE.md"}},
 		CursorShape:        "bar",
 		UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false),
@@ -3196,8 +3197,8 @@ func TestApplyConfigPresentPortRangeErrors(t *testing.T) {
 	}
 }
 
-// The three system-prompt keys parse into opts.systemPrompt (ADR 0023): the global prompt and the
-// per-model overrides, file-only like the blocks around them. This is the end-to-end proof that
+// The four system-prompt keys parse into opts.systemPrompt (ADR 0023, ADR 0067): the global prompt,
+// the per-model overrides and the appended layers, file-only like the blocks around them. This is the end-to-end proof that
 // the keys reach the composition root, which is where ResolveSystemPrompt then selects one.
 func TestApplyConfigSystemPrompt(t *testing.T) {
 	t.Parallel()
@@ -3230,6 +3231,34 @@ system-prompt-models:
 					"gpt-oss-20b":   {File: "~/prompts/gpt-oss.md"},
 				},
 			},
+		},
+		{
+			// The additive channel (ADR 0067), in listed order and beside a selected prompt: the
+			// layers are carried as written, both spellings, and neither replaces the global one.
+			name: "layers parse in listed order beside the selected prompt",
+			configYAML: `system-prompt-text: "be brief"
+system-prompt-layers:
+  - text: "prefer tables"
+  - file: ~/prompts/house-style.md
+  - text: "cite the file you read"
+`,
+			want: SystemPromptSettings{
+				Global: PromptSource{Text: "be brief"},
+				Layers: []SystemPromptLayer{
+					{Text: "prefer tables"},
+					{File: "~/prompts/house-style.md"},
+					{Text: "cite the file you read"},
+				},
+			},
+		},
+		{
+			// A layer needs no prompt above it: it appends to whatever the ladder settles on, which
+			// with nothing else configured is the embedded default (item 3 resolves that).
+			name: "layers alone reach the settings without a configured prompt",
+			configYAML: `system-prompt-layers:
+  - file: layers/house.md
+`,
+			want: SystemPromptSettings{Layers: []SystemPromptLayer{{File: "layers/house.md"}}},
 		},
 		{
 			name:       "no system-prompt key leaves the zero value — no prompt",
@@ -3282,6 +3311,21 @@ func TestSystemPromptSettingsValidate(t *testing.T) {
 			name:    "a model entry that sets neither spelling",
 			sp:      SystemPromptSettings{Models: map[string]PromptSource{"qwen2.5-coder": {}}},
 			wantErr: []string{`system-prompt-models["qwen2.5-coder"]`, "neither"},
+		},
+		{
+			name: "a layer alone",
+			sp:   SystemPromptSettings{Layers: []SystemPromptLayer{{Text: "prefer tables"}}},
+		},
+		{
+			// A layer is named by POSITION, since the list has no key to quote.
+			name:    "a layer that sets neither spelling",
+			sp:      SystemPromptSettings{Layers: []SystemPromptLayer{{}}},
+			wantErr: []string{"system-prompt-layers[0]", "neither"},
+		},
+		{
+			name:    "a layer that sets both spellings",
+			sp:      SystemPromptSettings{Layers: []SystemPromptLayer{{Text: "hi", File: "p.md"}}},
+			wantErr: []string{"system-prompt-layers[0]", "both"},
 		},
 		{
 			name: "a well-formed model entry beside a global prompt",

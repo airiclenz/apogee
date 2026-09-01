@@ -255,6 +255,16 @@ var KeyRegistry = []Key{
 		Structure: func(o Options) any { return o.SystemPrompt.Models },
 	},
 	{
+		// The additive channel (ADR 0067): a LIST of prose fragments, so it is structured like
+		// `system-prompt-models` and edited the same way — in the human's own editor, which is the
+		// only surface that can write a list of blocks. The row answers with the count, because a
+		// list of prompts has no one-line value to show.
+		Path: "system-prompt-layers", Kind: KindStructured,
+		Desc:      "Prompt fragments appended, in listed order, to whichever system prompt is selected.",
+		Read:      func(o Options) string { return countSummary(len(o.SystemPrompt.Layers), "layer") },
+		Structure: func(o Options) any { return o.SystemPrompt.Layers },
+	},
+	{
 		// The last rung of the prompt ladder (ADR 0064 §2), and therefore this row's home: it is
 		// read as part of the same question the three rows above answer. It changes nothing while
 		// any of them is set — the row says so rather than pretending an effect it does not have.
