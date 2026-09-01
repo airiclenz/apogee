@@ -15,6 +15,7 @@ package main
 // child on the board.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -364,6 +365,17 @@ func lastRuleRow(rows []string, h int) (int, bool) {
 	return 0, false
 }
 
+// reporter is the slice of *testing.T that [assertLastBodyRow] actually uses: the three methods it
+// calls and nothing else. The parameter is narrowed to it rather than left at testing.TB because TB
+// is sealed by an unexported method — no double can implement it — while this one a recorder
+// satisfies structurally, which is what lets the assertion's OWN failure branch be driven and read
+// (TestE2ESubAgentViewRuleMissing). A *testing.T satisfies it too, so every call site is unchanged.
+type reporter interface {
+	Helper()
+	Errorf(format string, args ...any)
+	Fatalf(format string, args ...any)
+}
+
 // assertLastBodyRow fails unless the last non-blank row of the transcript holds want — the other
 // half of "the view opened on the run": it opens FOLLOWING the latest line the child has written
 // (ADR 0063 D5), not parked at the top of a conversation the reader would have to scroll.
@@ -372,7 +384,7 @@ func lastRuleRow(rows []string, h int) (int, bool) {
 // the bottom and checked against idleRuleFromBottom — so a title or a body row opening with the
 // same glyph, or a layout change that moves the chrome, fails this assertion loudly instead of
 // quietly retargeting it at another row.
-func assertLastBodyRow(t testing.TB, f tuitest.Frame, want string) {
+func assertLastBodyRow(t reporter, f tuitest.Frame, want string) {
 	t.Helper()
 
 	rows := f.Rows()
@@ -475,8 +487,8 @@ func resultEndsWith(stub *stubllm.Server, suffix string) bool {
 }
 
 // TestE2ESubAgentViewRuleAnchor is assertLastBodyRow's own guard, asked of the pure scan the
-// assertion rests on. It cannot be asked of the assertion itself: testing.TB is sealed by an
-// unexported method, so no recording double can stand in for a *testing.T and catch the Fatalf.
+// assertion rests on. What the assertion DOES with a scan that reports nothing is the other half,
+// and TestE2ESubAgentViewRuleMissing asks that one.
 //
 // The residual this closes was a silent one — the old scan took the FIRST ▔ row on the frame, so a
 // session title or a body row opening with that glyph retargeted every assertion at the wrong end
@@ -534,6 +546,116 @@ func TestE2ESubAgentViewRuleAnchor(t *testing.T) {
 			}
 			if ok && got != tc.want {
 				t.Errorf("lastRuleRow found the rule on row %d; want row %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// caughtFailures is a stand-in [reporter] that keeps what a *testing.T would have printed instead
+// of failing the test doing the asking. The one thing it does differently on purpose is RETURN from
+// Fatalf where a real one aborts the goroutine — which is why assertLastBodyRow's fatal branch ends
+// in an explicit return: with that return in place, what the recorder sees after the Fatalf is what
+// a real caller past the abort sees, namely nothing.
+type caughtFailures struct {
+	fatal  []string
+	errors []string
+}
+
+func (c *caughtFailures) Helper() {}
+
+func (c *caughtFailures) Errorf(format string, args ...any) {
+	c.errors = append(c.errors, fmt.Sprintf(format, args...))
+}
+
+func (c *caughtFailures) Fatalf(format string, args ...any) {
+	c.fatal = append(c.fatal, fmt.Sprintf(format, args...))
+}
+
+// probeFrame paints rows into a fresh emulator and hands back the snapshot. It is how a frame is
+// built from outside internal/tuitest, whose Frame keeps its own cells: the emulator is exactly as
+// tall as the rows are many, so Frame.Height is len(rows) and idleRuleFromBottom counts against
+// this frame the way it counts against a driven one. The width is wider than any row here, so
+// nothing wraps into a row the scan would then read as its own.
+func probeFrame(t *testing.T, rows ...string) tuitest.Frame {
+	t.Helper()
+
+	s := tuitest.NewScreen(40, len(rows))
+	t.Cleanup(s.Close)
+	if _, err := s.Write([]byte(strings.Join(rows, "\r\n"))); err != nil {
+		t.Fatalf("paint the probe frame: %v", err)
+	}
+	return s.Snapshot()
+}
+
+// TestE2ESubAgentViewRuleMissing is the half of assertLastBodyRow that its call sites never take:
+// the branch it runs when the anchor cannot be located. TestE2ESubAgentViewRuleAnchor pins the scan
+// itself; this pins what the ASSERTION does with a scan that reports nothing — it has to stop, and
+// say which offset it looked at on which frame, rather than fall through and judge whichever row it
+// happened to land on. That fall-through is the silent failure the anchor exists to prevent, so the
+// branch that prevents it cannot itself go unexercised.
+//
+// The last case is the passing path, held next to the other two on purpose: it is what proves the
+// recorder is quiet unless the assertion speaks, and so that the two failures above are the
+// assertion's and not the harness's.
+func TestE2ESubAgentViewRuleMissing(t *testing.T) {
+	t.Parallel()
+
+	// The chrome under the transcript, seven rows counting the rule (idleRuleFromBottom).
+	const rule = "▔▔▔▔▔ a session ▔▔▔▔▔"
+	chrome := []string{"  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ dir", "▁▁▁▁▁"}
+	framed := func(body ...string) []string { return append(append([]string(nil), body...), chrome...) }
+
+	for _, tc := range []struct {
+		name  string
+		rows  []string
+		fatal bool
+	}{
+		{
+			name:  "no rule anywhere on the frame",
+			rows:  framed("the child's first line", childParkedLine, "", ""),
+			fatal: true,
+		},
+		{
+			name:  "a rule above the chrome's offset is not the anchor",
+			rows:  framed(rule, "the child's first line", childParkedLine, ""),
+			fatal: true,
+		},
+		{
+			name: "the anchored frame passes",
+			rows: framed("the child's first line", "a report the child drew", childParkedLine, rule),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := probeFrame(t, tc.rows...)
+			var rec caughtFailures
+
+			assertLastBodyRow(&rec, f, childParkedLine)
+
+			if len(rec.errors) > 0 {
+				t.Errorf("the assertion judged a row it never anchored: %q", rec.errors)
+			}
+			if !tc.fatal {
+				if len(rec.fatal) > 0 {
+					t.Errorf("an anchored frame still failed the assertion: %q", rec.fatal)
+				}
+				return
+			}
+			if len(rec.fatal) != 1 {
+				t.Fatalf("the assertion reported %d fatal failures; want exactly 1: %q", len(rec.fatal), rec.fatal)
+			}
+			// The announced sentence, restated here for the reason every wording in this file is:
+			// a rename above has to fail here. The numbers are derived so the sentence is the only
+			// thing being pinned.
+			want := fmt.Sprintf("no session-title rule %d rows above the bottom of this %d-row frame, "+
+				"so the transcript's end cannot be located:", idleRuleFromBottom, f.Height())
+			if !strings.Contains(rec.fatal[0], want) {
+				t.Errorf("the failure does not name the offset it looked at:\n got %q\nwant it to hold %q",
+					rec.fatal[0], want)
+			}
+			if !strings.Contains(rec.fatal[0], f.String()) {
+				t.Errorf("the failure does not print the frame it read:\n%s", rec.fatal[0])
 			}
 		})
 	}
