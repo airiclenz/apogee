@@ -167,6 +167,11 @@ type delegationWiring struct {
 	// FIRST resolved state news whichever way it goes — a named server that was never reachable
 	// degrades as visibly as one that stopped being.
 	stated bool
+	// failures counts CONSECUTIVE unusable beats against the currently routed server, and is what
+	// the unavailable NOTICE waits on (delegationFailureThreshold, land). It counts network
+	// verdicts only: a refused key source and a name the list does not carry are facts about the
+	// human's file and bypass it. A usable beat clears it.
+	failures int
 	// dialectAdvised records that this server has already been advised about its missing
 	// `effort-dialect:` — a fact about the ENTRY rather than about the routing state, so it is said
 	// once and not again each time the box goes down and comes back (dialectAdvice).
@@ -409,6 +414,19 @@ func (d *delegationWiring) observe(ctx context.Context) func() {
 	return func() { <-done }
 }
 
+// delegationFailureThreshold is how many CONSECUTIVE unusable beats an already-routed Sub-agent
+// server owes before the human is told it is unavailable. It is the session heartbeat's debounce
+// (internal/tui.offlineFailureThreshold, ADR 0024 D7) applied to the routing notice, and for the
+// same reason: one failed beat is not evidence of an absent server — discovery's own timeout can
+// elapse on a box that is merely saturated — and a pair of notices alternating between
+// "unavailable" and "routing to" every interval tells the human nothing they can act on.
+//
+// It debounces the NOTICE ONLY. Every unusable beat still pushes nil into the latch under the lock
+// (land), so a spawn in the debounce window falls back to the session's own Upstream exactly as it
+// did before: an unusable target is not an error (ADR 0045 §4), and holding routing engaged against
+// a server that just failed a beat would be the one change this must not make.
+const delegationFailureThreshold = 2
+
 // land installs what one beat resolved and says so when the routing state moved.
 //
 // The push is unconditional — a resolved target on a usable beat, nil on an unusable one — because
@@ -428,6 +446,12 @@ func (d *delegationWiring) observe(ctx context.Context) func() {
 // server the file no longer flags. Holding the mutex across the push costs nothing, because the seam
 // behind it takes one short lock of its own and calls nothing back into this holder.
 //
+// The NOTICE, and only the notice, is debounced: an already-routed server owes
+// delegationFailureThreshold consecutive unusable beats before the human is told it is unavailable,
+// and while that run is short the routing state is left unmoved so nothing goes out. The push above
+// is untouched by it — the nil lands on the first failed beat as it always did — so the debounce
+// buys quieter notices and changes nothing about where a delegation runs.
+//
 // The notice, by contrast, goes out AFTER the push and OUTSIDE the lock, and both matter: a notice
 // that preceded the latch would announce routing that is not in force yet, and the notice seam blocks
 // until the renderer's Update loop takes it — so holding the mutex across it would park the beat
@@ -442,7 +466,26 @@ func (d *delegationWiring) land(generation int, name string, target *apogee.Dele
 		d.mu.Unlock()
 		return
 	}
-	note := d.stateChange(name, target, keyErr)
+	note := ""
+	switch {
+	case target != nil:
+		// A usable beat is the end of any run of failures, whether or not one was ever noticed.
+		d.failures = 0
+		note = d.stateChange(name, target, keyErr)
+	case keyErr == nil && d.missingNotice == "":
+		// An unusable beat: the network verdict, and the only one worth debouncing. The state is
+		// left UNMOVED while the run is short — stateChange is what flips d.routed, so skipping it
+		// keeps the session "routed" for notice purposes even though the nil below has already
+		// unlatched it — and the second consecutive failure says it once.
+		d.failures++
+		if !d.routed || d.failures >= delegationFailureThreshold {
+			note = d.stateChange(name, target, keyErr)
+		}
+	default:
+		// A refused key source or a name the list does not carry: facts about the human's config
+		// rather than about the network, so they are said on the beat that finds them.
+		note = d.stateChange(name, target, keyErr)
+	}
 	advice := d.dialectAdvice(name, target)
 	if target != nil {
 		// The dial facts this landing resolved, kept for the naming call (routedBinding). It is

@@ -221,12 +221,13 @@ func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
 	run.drv.WaitQuiet(settled)
 	before := seatLastDelegationsLine(t, run.session)
 
-	// The far box goes away, and the next beat finds it gone. Beats land on a fixed ten-second
-	// cadence (internal/heartbeat.Interval), which is longer than the kit's default wait, so this
-	// one is given room for two of them.
+	// The far box goes away, and the notice waits for TWO consecutive failed beats
+	// (delegationFailureThreshold) before it says so. Beats land on a fixed ten-second cadence
+	// (internal/heartbeat.Interval), which is longer than the kit's default wait, so this one is
+	// given room for the pair plus the interval the first of them may already be into.
 	run.target.Close()
 	awaitNotice(t, run.drv, "sub-agents: "+seatTargetServer+" unavailable",
-		tuitest.Within(2*heartbeat.Interval))
+		tuitest.Within(3*heartbeat.Interval))
 
 	sent := len(run.session.Requests())
 	submit(run.drv, seatPlainPrompt)

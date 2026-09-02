@@ -87,7 +87,9 @@ go build ./... && go test ./internal/tui/ -run 'Cancel' -count=1 && go test ./cm
 
 ---
 
-## 3. Routing notices: debounce the unusable verdict like the session heartbeat
+## 3. Routing notices: debounce the unusable verdict like the session heartbeat — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the existing `TestDelegationNoticesOnlyOnARoutingStateChange` (up, up, down, down, up) keeps its exact notice list as the item says; only its two per-beat trailing comments moved to name which `down` now does the flip.
 
 **What.** Recast at the regression check (2026-09-02). Fixes `ISSUES.md:34-40` (defect: notices alternate every beat). `delegationWiring` (`cmd/apogee/delegation.go:133`) gains `failures int`. New constant `delegationFailureThreshold = 2` with a comment citing ADR 0024 D7 and `offlineFailureThreshold`. What the counter gates is the NOTICE alone, never the latch: on every beat `land` still performs the engine push `d.engine.SetDelegationTarget(target)` under the lock exactly as today — nil on an unusable beat — so a spawn in that window still falls back to the session server with `seatFallbackNote` (`internal/agent/subagent.go:596`). In `land` (`:439`), for an UNUSABLE beat only — `target == nil && keyErr == nil && d.missingNotice == ""`:
 - `failures++`; while `d.routed && failures < delegationFailureThreshold` → skip the `stateChange` call and leave `d.routed` / `d.stated` unmoved, so no notice goes out (the nil push still lands).

@@ -650,8 +650,8 @@ func TestDelegationNoticesOnlyOnARoutingStateChange(t *testing.T) {
 	}
 	beat(up)   // engaged: said once
 	beat(up)   // still engaged: nothing to say
-	beat(down) // lost: said once
-	beat(down) // still lost: nothing to say
+	beat(down) // one failure: debounced, nothing to say (delegationFailureThreshold)
+	beat(down) // the second consecutive failure: lost, said once
 	beat(up)   // recovered: said again
 
 	// The dialect advice rides the FIRST engagement and is not repeated on the recovery: it
@@ -671,6 +671,97 @@ func TestDelegationNoticesOnlyOnARoutingStateChange(t *testing.T) {
 		if notices.notes[i] != w {
 			t.Errorf("notice %d = %q; want %q", i, notices.notes[i], w)
 		}
+	}
+}
+
+// One failed beat is not evidence of an absent server (delegationFailureThreshold): the notice waits
+// for a second consecutive failure, so a box that drops a single beat and answers the next one costs
+// the human nothing to read. The LATCH does not wait with it — the nil push lands on that first
+// failed beat exactly as it always did, so a spawn in the window still falls back to the session's
+// own server (ADR 0045 §4).
+func TestDelegationOneUnusableBeatDoesNotUnroute(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
+	up := heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}
+	down := heartbeat.Beat{Failure: "connection refused"}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, up, spy, notices)
+
+	beat := func(observed heartbeat.Beat) {
+		t.Helper()
+		wiring.server.beat = beatSource(observed)
+		wiring.observe(context.Background())()
+	}
+	beat(up)
+	engaged := len(notices.notes)
+
+	beat(down)
+	if len(notices.notes) != engaged {
+		t.Errorf("notices after ONE failed beat = %q; want nothing new said", notices.notes)
+	}
+	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
+		t.Fatalf("pushes after one failed beat = %+v; want the nil push to land as before", spy.pushes)
+	}
+
+	beat(up)
+	want := []string{
+		"sub-agents: routing to grunt (cheap-7b)",
+		"sub-agents: grunt advertises no thinking-effort dialect — delegates there speak this session's; set effort-dialect: on its entry",
+	}
+	if len(notices.notes) != len(want) {
+		t.Fatalf("notices over up/down/up = %q; want only the engagement pair %q", notices.notes, want)
+	}
+	for i, w := range want {
+		if notices.notes[i] != w {
+			t.Errorf("notice %d = %q; want %q", i, notices.notes[i], w)
+		}
+	}
+}
+
+// Two consecutive failures ARE evidence, and then the human is told once. Asserted per beat rather
+// than over an accumulated list, because the whole defect this closes is WHICH beat speaks: a wiring
+// that flips on the first failure would produce the same final list.
+func TestDelegationTwoUnusableBeatsUnroute(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
+	up := heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}
+	down := heartbeat.Beat{Failure: "connection refused"}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, up, spy, notices)
+
+	beat := func(observed heartbeat.Beat) {
+		t.Helper()
+		wiring.server.beat = beatSource(observed)
+		wiring.observe(context.Background())()
+	}
+	beat(up)
+	engaged := len(notices.notes)
+
+	beat(down)
+	if len(notices.notes) != engaged {
+		t.Fatalf("notices after the FIRST failed beat = %q; want nothing new said", notices.notes)
+	}
+	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
+		t.Fatalf("pushes after the first failed beat = %+v; want the nil push to land as before", spy.pushes)
+	}
+
+	beat(down)
+	const unavailable = "sub-agents: grunt unavailable — delegations run on the session server"
+	if len(notices.notes) != engaged+1 || notices.notes[engaged] != unavailable {
+		t.Fatalf("notices after the SECOND failed beat = %q; want %q said once", notices.notes, unavailable)
+	}
+	if len(spy.pushes) != 3 || spy.pushes[2] != nil {
+		t.Errorf("pushes after the second failed beat = %+v; want another nil push", spy.pushes)
+	}
+
+	beat(up)
+	const engagedLine = "sub-agents: routing to grunt (cheap-7b)"
+	if len(notices.notes) != engaged+2 || notices.notes[engaged+1] != engagedLine {
+		t.Fatalf("notices after the recovery = %q; want %q said once", notices.notes, engagedLine)
 	}
 }
 
