@@ -508,8 +508,10 @@ func hostileHome(t *testing.T, stub *stubllm.Server) string {
 //
 // Three of them, in this order because each would otherwise rewrite the next one's match:
 //
-//   - the footer's whole tail past the model cell, whose padding is a fact about how long the temp
-//     path came out;
+//   - the footer's whole tail past the model cell. The fit spends the row's width on the segments
+//     it can seat (footerFit), so how long the temp path came out decides both the padding and
+//     whether the workdir is on the row at all — the anchor stops at the model for that reason,
+//     rather than at the separator that used to follow it;
 //   - the fixture root, by name and by its resolved form (on macOS /tmp is a symlink, and the path
 //     apogee prints is the resolved one);
 //   - the padding between a redacted PATH and the scroll rail at the end of its row. The rail's
@@ -517,9 +519,9 @@ func hostileHome(t *testing.T, stub *stubllm.Server) string {
 //     put the temp path's length back into the golden under another name. Only the rows that carry a
 //     path are touched; every other row keeps the alignment it was painted with.
 func hostileRedactions(sess *e2eSession, ws, model string) []tuitest.Redaction {
-	cell := "✦ " + model + " ✦ "
+	cell := glyphFooterSeparator + " " + model
 	redactions := []tuitest.Redaction{
-		{Pattern: regexp.MustCompile(regexp.QuoteMeta(cell) + ".*"), With: cell + "<workdir>"},
+		{Pattern: regexp.MustCompile(regexp.QuoteMeta(cell) + ".*"), With: cell + " <footer tail>"},
 	}
 	for _, root := range fixtureRoots(filepath.Dir(ws)) {
 		redactions = append(redactions,

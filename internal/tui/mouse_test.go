@@ -4497,10 +4497,13 @@ func TestClickOnTheFooterModeMarkerOpensTheModePicker(t *testing.T) {
 		}
 	})
 
+	// Six columns cannot seat the shortest marker on the ladder between the row's two margins, so
+	// the fit drops it whole (footerFit) — the one window that still leaves the footer with nothing
+	// to click. A merely narrow window no longer does: the left run gives way to keep the marker.
 	t.Run("a window too narrow for the marker", func(t *testing.T) {
-		narrow := step(t, base, tea.WindowSizeMsg{Width: 30, Height: 24})
+		narrow := step(t, base, tea.WindowSizeMsg{Width: 6, Height: 24})
 		if _, _, ok := narrow.footerModeSpan(narrow.width); ok {
-			t.Fatalf("30 columns still fit the marker; this case needs a window that drops it whole")
+			t.Fatalf("6 columns still fit the marker; this case needs a window that drops it whole")
 		}
 
 		for x := 0; x < narrow.width; x++ {

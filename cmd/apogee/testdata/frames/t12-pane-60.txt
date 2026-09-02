@@ -20,5 +20,5 @@
 ╭──────────────────────────────────────────────────────────╮
 │ queue a message…  ⏎ queue · ↑ recall · esc×2 stop        │
 ╰──────────────────────────────────────────────────────────╯
-  probe-target ✦ hostile-model ✦ <workdir>
+  probe-target ✦ hostile-model <footer tail>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

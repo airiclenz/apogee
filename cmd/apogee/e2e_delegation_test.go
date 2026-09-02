@@ -421,21 +421,23 @@ func sessionRecordsIn(t *testing.T, home string) []os.DirEntry {
 	return entries
 }
 
-// goldenRedactions are [e2eSession.Redactions] with the footer's workdir cell — and everything the
-// width leaves after it — replaced first.
+// goldenRedactions are [e2eSession.Redactions] with the footer's whole tail past the model cell
+// replaced first.
 //
 // The session's own redactions replace the workspace path where it appears WHOLE, and the footer
-// does not show it whole: it truncates the workdir from the left to the room it has, and drops the
-// mode marker beside it when there is none. How long a temp path is, and therefore how much of that
-// row survives, is a fact about the machine and not about the block this golden is of — so the whole
-// tail of the row goes, and a golden recorded on one box reads on another.
+// does not show it whole: it composes the row TO the width it has (footerFit), so a long enough
+// temp path is dropped from the row rather than shown, and what stands beside the model instead is
+// whatever the fit could seat. How long a temp path is, and therefore how much of that row
+// survives, is a fact about the machine and not about the block this golden is of — so the whole
+// tail of the row goes, anchored at the MODEL rather than at the separator the workdir used to
+// follow, and a golden recorded on one box reads on another.
 //
 // It goes FIRST because the session's redactions would otherwise rewrite the very path this one
 // anchors on.
 func goldenRedactions(sess *e2eSession) []tuitest.Redaction {
-	cell := "✦ " + sess.stub.Model + " ✦ "
+	cell := glyphFooterSeparator + " " + sess.stub.Model
 	return append([]tuitest.Redaction{
-		tuitest.Redact(regexp.QuoteMeta(cell)+".*", cell+"<workdir>"),
+		tuitest.Redact(regexp.QuoteMeta(cell)+".*", cell+" <footer tail>"),
 	}, sess.Redactions()...)
 }
 

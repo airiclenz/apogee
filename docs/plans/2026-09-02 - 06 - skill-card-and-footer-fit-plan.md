@@ -273,7 +273,33 @@ marker's own floor; a footer whose effort word is already absent skipping straig
 
 ---
 
-## 5. The footer paints from `footerFit`
+## 5. The footer paints from `footerFit` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the painter, the pointer and the fit are one value — `Model.footerContent` and
+`Model.footerModeSpan` both read the new `Model.footerRow`, the single call to `footerFit`;
+`Model.footerLeftText` now returns the five plain segments unjoined (as a `footerInput`) and the
+join happens in the fit. The model slot is `footerRun(m.upstreamSegments()...)`, never `[0]`.
+NOTES (2026-09-02): deviation — `cmd/apogee/e2e_smoke_test.go` is not on the item's **Files:** list,
+but both smoke tests (in-process and PTY) pinned the retired rule verbatim ("the narrow footer does
+not truncate with an ellipsis") and failed on the new fit. Revised to the new rule: at 60 columns the
+row ends on the whole `◐ ask before` marker, still names the server, ends on no dangling `✦`, and
+the wide row states strictly more segments than the narrow one. The item's Tests list is a floor, so
+the sites were folded in rather than left red.
+NOTES (2026-09-02): the guard's warning fired — the golden redactions in
+`cmd/apogee/e2e_hostile_test.go` and `cmd/apogee/e2e_delegation_test.go` anchored on the model's
+TRAILING ` ✦ `, a separator the fit may now drop, so they stopped matching and eight goldens carried
+a machine-dependent footer row. Both anchors moved to the model cell itself (`✦ <model>` → `✦
+<model> <footer tail>`), which is stable whether or not the workdir seats, and the eight frames were
+re-recorded with `-update`. Only the footer row changed in each.
+NOTES (2026-09-02): `cmd/apogee/e2e_subagent_view_test.go` needed no edit — its `  model ✦ dir`
+rows are synthetic fixture rows, not painted footers.
+NOTES (2026-09-02): the two in-code sentences item 6 sweeps (`internal/tui/model.go:2913` and
+`:3043`, "the mode marker drops WHOLE") are left verbatim so item 6's grep still finds them; they
+now describe only the marker's own floor.
+NOTES (2026-09-02): pre-existing, untouched — `TestE2EHostileSurfacesKeepTheirOwnRows` still reports
+(without failing) that the footer's workdir segment is not escape-stripped, so a directory name
+carrying a CSI paints in its own colour. Unrelated to the fit; the seam covers host, model and
+effort only.
 
 **What.** Closes `ISSUES.md:30-35`: on a narrow window the mode marker vanishes today, so the human
 cannot see which blast radius the session is running in. Depends on item 4.

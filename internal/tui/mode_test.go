@@ -63,6 +63,46 @@ func TestModelShiftTabCyclesMode(t *testing.T) {
 	}
 }
 
+// TestFooterDropsSegmentsBeforeTheModeMarker is the fit's pin on the row a human actually reads.
+// The footer's one job on a narrow window is to keep saying which blast radius the session runs in,
+// and the old shape had it exactly backwards: the marker dropped WHOLE the moment both ends did not
+// fit, so the fact that matters most was the first to go. The row now spends its columns in the
+// order it is read for — the effort word first, then the workdir, then the host — and the marker
+// stays whole at every width in this sweep, Auto's blast-radius word beside it.
+//
+// The left run is asserted VERBATIM at each width, not merely searched: a segment that leaves takes
+// its separator with it, so no rung of the ladder may open or close on a dangling ✦.
+func TestFooterDropsSegmentsBeforeTheModeMarker(t *testing.T) {
+	m := footerFactsModel(t)
+	marker := footerModeText(modeMarker(domain.ModeAuto), confinedWord)
+
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{
+		{120, "test-host ✦ test-model ✦ high ✦ /ws/proj"}, // everything the session knows
+		{80, "test-host ✦ test-model ✦ high ✦ /ws/proj"},
+		{60, "test-host ✦ test-model ✦ /ws/proj"}, // priority 3: the effort word
+		{40, "test-model"}, // then the workdir, then the host
+	} {
+		t.Run(fmt.Sprintf("width %d", tc.width), func(t *testing.T) {
+			flat := ansiPattern.ReplaceAllString(m.footerContent(tc.width), "")
+
+			if !strings.HasSuffix(flat, marker+bodyIndent) {
+				t.Fatalf("footer = %q, want it to end %q — the marker is what the row never gives up",
+					flat, marker+bodyIndent)
+			}
+			left := strings.TrimSpace(strings.TrimSuffix(flat, marker+bodyIndent))
+			if left != tc.want {
+				t.Errorf("footer's left run = %q, want %q", left, tc.want)
+			}
+			if strings.HasPrefix(left, glyphAssistant) || strings.HasSuffix(left, glyphAssistant) {
+				t.Errorf("footer's left run = %q, want no dangling %q", left, glyphAssistant)
+			}
+		})
+	}
+}
+
 // TestModeColorDistinct proves each autonomy mode maps to its own footer-marker colour, so the
 // four markers are visually distinguishable.
 func TestModeColorDistinct(t *testing.T) {

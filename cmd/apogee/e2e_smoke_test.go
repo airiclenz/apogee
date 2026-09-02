@@ -127,8 +127,8 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	submit(drv, "/version")
 	drv.WaitText(apogee.Version())
 
-	// Step 9 — narrower and wider: everything reflows, and the footer gives way from the LEFT with
-	// an ellipsis rather than clipping the mode marker it ends with.
+	// Step 9 — narrower and wider: everything reflows, and the footer gives way from the LEFT —
+	// dropping whole segments in priority order — rather than giving up the mode marker it ends with.
 	drv.Resize(60, 20)
 	drv.WaitQuiet(settled)
 	narrow := drv.Frame()
@@ -136,16 +136,18 @@ func TestE2ESmokeInProcess(t *testing.T) {
 		t.Fatalf("the frame is %d columns after a resize to 60", narrow.Width())
 	}
 	narrowFooter := footerRow(t, narrow)
-	if !strings.Contains(narrowFooter, "…") {
-		t.Errorf("the narrow footer does not truncate with an ellipsis: %q", narrowFooter)
-	}
-	// The marker is dropped WHOLE or kept whole; what must never happen is half of it on screen.
-	if marker := "◐ ask before"; strings.Contains(narrowFooter, "◐") &&
-		!strings.Contains(narrowFooter, marker) {
-		t.Errorf("the narrow footer clipped the mode marker mid-word: %q", narrowFooter)
+	// The marker is the one thing the row never gives up, and it is on screen WHOLE — half of it
+	// would name a blast radius the session is not in.
+	marker := "◐ ask before"
+	if !strings.HasSuffix(narrowFooter, marker) {
+		t.Errorf("the narrow footer does not end on the whole mode marker: %q", narrowFooter)
 	}
 	if !strings.Contains(narrowFooter, "probe-target") {
 		t.Errorf("the narrow footer dropped the server it is about: %q", narrowFooter)
+	}
+	// A segment the fit drops leaves WITH its separator, so the left run never ends on a stray ✦.
+	if left := strings.TrimSpace(strings.TrimSuffix(narrowFooter, marker)); strings.HasSuffix(left, glyphFooterSeparator) {
+		t.Errorf("the narrow footer's left run ends on a dangling %q: %q", glyphFooterSeparator, narrowFooter)
 	}
 	drv.Resize(120, 40)
 	drv.WaitQuiet(settled)
@@ -153,8 +155,14 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	if wide.Width() != 120 {
 		t.Fatalf("the frame is %d columns after a resize to 120", wide.Width())
 	}
-	if got := footerRow(t, wide); strings.Contains(got, "…") {
-		t.Errorf("the wide footer is still truncated: %q", got)
+	wideFooter := footerRow(t, wide)
+	if strings.Contains(wideFooter, "…") {
+		t.Errorf("the wide footer is still truncated: %q", wideFooter)
+	}
+	// The window it had is what the two rows differ by: the wide one states facts the narrow one
+	// spent its columns on the marker instead of.
+	if strings.Count(wideFooter, glyphFooterSeparator) <= strings.Count(narrowFooter, glyphFooterSeparator) {
+		t.Errorf("the wide footer states no more than the narrow one: %q vs %q", wideFooter, narrowFooter)
 	}
 
 	// Step 10 — Ctrl+C twice ends it, cleanly. (The terminal-left-clean half is the PTY test's.)
@@ -262,15 +270,15 @@ func TestE2ESmokePTY(t *testing.T) {
 	drv.WaitText(apogee.BaseVersion())
 
 	// Step 9 — a real resize: TIOCSWINSZ on the pty and the SIGWINCH that comes with it. The frame
-	// reflows and the footer gives way from the left with an ellipsis.
+	// reflows and the footer gives way from the left, dropping whole segments to keep its marker.
 	drv.Resize(60, 20)
 	drv.WaitQuiet(settled)
 	narrow := drv.Frame()
 	if narrow.Width() != 60 {
 		t.Fatalf("the frame is %d columns after a SIGWINCH to 60", narrow.Width())
 	}
-	if got := footerRow(t, narrow); !strings.Contains(got, "…") {
-		t.Errorf("the narrow footer does not truncate with an ellipsis: %q", got)
+	if got := footerRow(t, narrow); !strings.HasSuffix(got, "◐ ask before") {
+		t.Errorf("the narrow footer does not end on the whole mode marker: %q", got)
 	}
 
 	// Step 10 — Ctrl+C twice, and then the terminal itself is the assertion.

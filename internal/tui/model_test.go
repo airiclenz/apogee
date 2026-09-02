@@ -5889,7 +5889,10 @@ func TestDisplayModel(t *testing.T) {
 // make every remaining cell a link to somebody else's URL.
 //
 // Both widths are checked because the narrow branch composes its line separately (truncate + pad),
-// and a strip that only covered the roomy branch would leave the other one painting the escape.
+// and a strip that only covered the roomy branch would leave the other one painting the escape. The
+// narrow width is below the mode marker's OWN floor, the only window the fit still falls back to
+// that branch on: at thirty columns the marker now seats (footerFit), so a pair of widths either
+// side of thirty would both take the marker's branch and leave the fallback covered by nothing.
 func TestFooterContentStripsEscapes(t *testing.T) {
 	t.Parallel()
 	opts := testOpts
@@ -5902,7 +5905,7 @@ func TestFooterContentStripsEscapes(t *testing.T) {
 	// The line's own styling is CSI, which ansiPattern takes out; an OSC introducer is not, so what
 	// survives that strip is exactly what a producer smuggled through.
 	roomy := ansiPattern.ReplaceAllString(m.footerContent(80), "")
-	narrow := ansiPattern.ReplaceAllString(m.footerContent(30), "")
+	narrow := ansiPattern.ReplaceAllString(m.footerContent(8), "")
 	assertNoESCIn(t, "footer", roomy, narrow)
 
 	if !strings.Contains(roomy, "qwen") || !strings.Contains(roomy, "medium") {
@@ -5937,18 +5940,19 @@ func TestFooterMarkerSaysWhetherAutoIsConfined(t *testing.T) {
 
 	footer := m.footerContent(120)
 	flat = ansiPattern.ReplaceAllString(footer, "")
-	if want := "auto · unconfined" + bodyIndent; !strings.HasSuffix(flat, want) {
+	want := "auto · unconfined" + bodyIndent
+	if !strings.HasSuffix(flat, want) {
 		t.Errorf("footer after /confine off = %q, want it to end %q", flat, want)
 	}
 	if run := m.th.footerText.Foreground(m.th.errorFg).Render(" · " + unconfinedWord); !strings.Contains(footer, run) {
 		t.Errorf("footer does not carry %q in the error tone: %q", unconfinedWord, footer)
 	}
 
-	// A window too narrow for both ends drops the marker WHOLE — the confinement word cannot be the
-	// half that survives, because a clipped marker would name a blast radius the session is not in.
-	if narrow := ansiPattern.ReplaceAllString(m.footerContent(30), ""); strings.Contains(narrow, "auto") ||
-		strings.Contains(narrow, confinedWord) {
-		t.Errorf("narrow footer = %q, want the whole mode marker dropped", narrow)
+	// A narrow window no longer costs the human the one fact they read the footer for: the marker
+	// is what the row never gives up (footerFit), so at thirty columns it is still there WHOLE,
+	// blast-radius word and all — the left run is what gave way to seat it.
+	if narrow := ansiPattern.ReplaceAllString(m.footerContent(30), ""); !strings.HasSuffix(narrow, want) {
+		t.Errorf("narrow footer = %q, want it to end %q", narrow, want)
 	}
 }
 
@@ -5964,6 +5968,70 @@ func TestFooterMarkerCarriesNoConfinementWordBelowAuto(t *testing.T) {
 				t.Errorf("footer = %q, want it to end %q with no confinement word", flat, want)
 			}
 		})
+	}
+}
+
+// footerFactsModel builds the model the footer's fit is exercised on: every one of the four
+// outward-in facts named — host alias, model id, effort word, workdir — and Auto's marker with its
+// blast-radius word beside it, the widest marker the row ever has to seat. Nothing is dropped
+// because nothing was missing, so which segment leaves at which width is the fit's doing alone.
+func footerFactsModel(t *testing.T) Model {
+	t.Helper()
+	opts := testOpts
+	opts.Workspace = "/ws/proj"
+	opts.Mode = domain.ModeAuto
+	opts.Confinement = capableHost
+	serverSeams(&opts).beat = (&fakeHeartbeat{}).beat
+
+	m := newTestModelEng(t, &fakeEngine{effortProfile: domain.EffortHigh, confine: true}, opts)
+	beat := upBeat("test-model", 32768)
+	beat.EffortSupport = provider.EffortSupport{
+		Supported: true,
+		Dialect:   provider.EffortDialectReasoning,
+		Efforts:   []string{"low", "medium", "high"},
+		Default:   "medium",
+	}
+	return foldBeatMsg(t, m, beat)
+}
+
+// TestFooterFitsTheWindowExactly is the footer's counterpart to TestStatusLineIndentFitsNarrowWindow:
+// the bodyIndent lead and the marker's trailing margin are part of the row's width BUDGET, not an
+// overhang, so the line the painter emits spends the window exactly — never a column more, which
+// would wrap the footer onto a second row and push the bottom rule off the alternate screen.
+//
+// The sweep crosses all three shapes the fit composes: windows too narrow to seat the marker at all
+// (and narrower than the lead margin itself), windows where the ladder has dropped segments to seat
+// it, and roomy ones where nothing is given up.
+func TestFooterFitsTheWindowExactly(t *testing.T) {
+	m := footerFactsModel(t)
+
+	for _, w := range []int{0, 1, 2, 3, 10, 20, 40, 80} {
+		if got := m.th.measure.Width(m.footerContent(w)); got != w {
+			t.Errorf("footer at width %d renders %d columns, want exactly %d: %q",
+				w, got, w, ansiPattern.ReplaceAllString(m.footerContent(w), ""))
+		}
+	}
+}
+
+// TestFooterOfflineKeepsItsErrorToneAtEveryWidth pins the tone the offline word is read by. It is
+// priority 0 in the fit — the row gives up every fact about the session before it gives up the word
+// for a state a send is refused in — and it is painted as its own styled run beside the fact line
+// rather than inside it. A narrow window used to fold the whole row through one Render and cost the
+// word its error tone at exactly the width the row is most cramped; the layout hands it its own run
+// at every width instead.
+func TestFooterOfflineKeepsItsErrorToneAtEveryWidth(t *testing.T) {
+	m := footerFactsModel(t)
+	m.hb.offline = true
+
+	for _, w := range []int{120, 40} {
+		footer := m.footerContent(w)
+		if run := m.th.footerText.Foreground(m.th.errorFg).Render(" " + glyphAssistant + " " + offlineLabel); !strings.Contains(footer, run) {
+			t.Errorf("footer at width %d does not carry %q as its own error-toned run: %q",
+				w, offlineLabel, footer)
+		}
+		if flat := ansiPattern.ReplaceAllString(footer, ""); !strings.Contains(flat, offlineLabel) {
+			t.Errorf("footer at width %d = %q, want the offline word kept", w, flat)
+		}
 	}
 }
 
@@ -6320,7 +6388,10 @@ func TestFooterModeMarkerSpanAgreesWithThePaintedCells(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newTestModelEng(t, tc.eng, confineOpts(capableHost, tc.mode))
 
-			for _, w := range []int{80, 120} {
+			// Thirty columns is the case the fit changed: the marker used to drop whole there, and
+			// now the left run gives way to seat it — so the pointer must address its cells on a
+			// narrow window exactly as it does on a roomy one.
+			for _, w := range []int{30, 80, 120} {
 				text, col, ok := m.footerModeSpan(w)
 				if !ok {
 					t.Fatalf("width %d: the marker does not fit, want it drawn", w)
