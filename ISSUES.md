@@ -25,9 +25,17 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [ ] sometimes unsensible values like '77259 tok/s' are displayed. That number cannot be true.
+- [ ] sometimes unsensible values like '1514218 tok/s' are displayed. That number cannot be true.
 
 - [ ] when the context usage gauge does not fit and isn't displauyed, the black background is not painted all the way to the right side (where the gauge would be).
+
+- [ ] getting a lot of log-noise that might not be true:
+· sub-agents: OR-deepseek unavailable — delegations run on the session server
+· sub-agents: routing to OR-deepseek (~deepseek/deepseek-v4-flash-latest)
+· sub-agents: OR-deepseek unavailable — delegations run on the session server
+· sub-agents: routing to OR-deepseek (~deepseek/deepseek-v4-flash-latest)
+· sub-agents: OR-deepseek unavailable — delegations run on the session server
+· sub-agents: routing to OR-deepseek (~deepseek/deepseek-v4-flash-latest)
 
 
 ## Parked / deferred work
@@ -879,3 +887,15 @@ shipped — none is a regression, and none blocked the plan's acceptance.
   `registryWithMCP` at `cmd/apogee/wire_tools.go:277-280` off `cmd/apogee/wire_live.go:118`), and
   item 13's guard forbids the `apogee.Config` route the engine's own roster build would read
   (`internal/agent/construct.go:486`); both Drivers therefore behave as `fixed`.
+
+### Readable, scoping `/inspect` — residue (plan `2026-09-01 - 03 - inspector-readable-wire`)
+
+**Status:** recorded 2026-09-02 at the close of
+`docs/plans/2026-09-01 - 03 - inspector-readable-wire-plan.md`. One open gap in the readable wire
+rendering that plan shipped — not a regression, and it did not block the plan's acceptance.
+
+- [ ] **The scoped-empty sentence is pinned only against its own constant.** Both halves of
+  `TestInspectorScopedEmptyNamesEveryCause` (`internal/tui/inspector_test.go:842-843,850-851`)
+  compare the row to `inspectorScopedEmptyRow` / `inspectorDisarmedRow` rather than to the literal
+  sentence, so a typo introduced in `inspectorScopedEmptyRow` (`internal/tui/inspector.go:138`) —
+  the row's whole job is naming all three causes and the way back — would leave the tests green.

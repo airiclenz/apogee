@@ -606,6 +606,27 @@ point is a **minor** bump, not a breaking change.
   flight at once. It is what makes the generated-delegation-name e2e deterministic instead of a
   coin toss against the child it names.
 
+- Every Inspector record now carries a **readable rendering of the wire beside the pretty-JSON
+  one**, computed once at the fold and never on the paint path. A request becomes the single line
+  its envelope spells (`<n> messages · <m> tools · model <model>`, a missing field omitted, an
+  undecodable body or one carrying none of the three falling back to the pretty lines whole); a
+  response becomes the passages its deltas spell — consecutive `reasoning_content` deltas as one
+  `· thinking` passage, consecutive `content` deltas as one `· ` passage (an empty delta breaks
+  neither), a named tool call as its own `· tool call <name> <id[:12]>` passage with the arguments
+  elided, and every line that is not a delta chunk (`[DONE]`, a blank, a malformed document, a
+  usage-only chunk, an in-band error) kept in its pretty form. Passages are hard-wrapped at column
+  96 with the kind prefix on the first row and two spaces under it, and `maxWireRecordLines` is
+  applied to each rendering separately with its own hidden count.
+
+- `/inspect` opens on the readable rendering of the wire traffic and `ctrl+r` flips it to the pretty-printed protocol and back — per pane, in memory, forgotten when the pane closes. The hint names what the chord would switch to, and `/usage` is key-identical: the toggle is `/inspect`'s alone.
+
+- `/inspect` now follows the run view: with a delegation's view open the pane lists that run's wire records alone, titled with the run's name, and closing the view gives the whole ring back. A viewed run the ring holds nothing for says so in one row naming every cause; with capture off the pane still names the key that arms it.
+
+- The manual, `layout.md` and `CONTEXT.md` now describe the **readable** `/inspect` — each request
+  summarised as `N messages · N tools · model …`, each response as the passages its stream spells
+  (thinking and reply as wrapped prose, tool calls named) — with `ctrl+r` flipping to the raw
+  pretty-printed protocol and back, and the pane scoped to the sub-agent whose run view is open.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
