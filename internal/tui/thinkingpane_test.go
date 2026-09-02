@@ -390,3 +390,22 @@ func TestThinkingOpensOnTheNewestRecord(t *testing.T) {
 		t.Errorf("window [%d,%d) of %d rows, want the last full window", spec.rowTop, spec.rowTop+spec.maxRows, len(spec.rows))
 	}
 }
+
+// TestDismissingTheThinkingPaneDropsTheScroll pins the other half of where the verb lands: closing
+// the pane takes the scroll with it, so the next /thinking opens on the newest record again rather
+// than on the window the last reading was left at. Both ways of closing spend dismissThinking's one
+// body (dismissReport), so proving it here proves it for esc and for a click outside alike.
+func TestDismissingTheThinkingPaneDropsTheScroll(t *testing.T) {
+	m := thinkingPaneModel(t, 40)
+	m.thinkingPane.top = 7
+
+	closed := m.dismissThinking()
+
+	if closed.thinkingPane.open {
+		t.Error("the dismissed pane is still on the frame")
+	}
+	if closed.thinkingPane.top != 0 {
+		t.Errorf("top = %d after dismissal, want 0 — the next /thinking opens on the newest record",
+			closed.thinkingPane.top)
+	}
+}
