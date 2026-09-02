@@ -25,6 +25,12 @@ still remembers.
   opens a code fence. A bare `/rename` later re-reads the session — your opening
   request plus the most recent ones — and names it for what it has become, so
   one that moved on to another task gets named for where it ended up.
+- Nothing removes a saved session but you: the store keeps every record for ever
+  unless the `sessions:` block gives it a bound. Name a `max-age`, a `max-count`,
+  or both and a silent sweep at startup discards what falls outside them — never
+  the session you are resuming, and never a file it cannot read. See
+  [keeping the session store bounded](configuration.md#keeping-the-session-store-bounded--sessions)
+  for the two keys.
 - That same `auto-title:` switch also names **delegations**. A sub-agent the model
   spawned without giving it a name gets a short one from the same kind of call off to
   the side — asked of the server that child itself runs on, while it works — and the

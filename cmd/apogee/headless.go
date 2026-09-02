@@ -449,6 +449,13 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		store = session.NewStore(roots.sessions)
 	}
 
+	// The startup session sweep (wire.go), run here for the reason the daemon runs it: a host that
+	// only ever runs `apogee headless` never passes the TUI's boot, so this is the only beat on
+	// which its retention policy is ever applied. No id is kept — a headless run resumes nothing,
+	// and the record it is about to mint is not in the store yet. A --no-save run leaves store nil
+	// and the sweep is inert.
+	gcSessions(store, opts.Sessions)
+
 	// Ctrl-C and SIGTERM end the run rather than the process: the cancellation flows out of Once
 	// as a run failure carrying whatever the run had reached, so an interrupted run still prints
 	// its partial answer and still saves its record.

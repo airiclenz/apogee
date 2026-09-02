@@ -108,6 +108,12 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, []string, error) {
 	// Best-effort and silent, exactly as it is there — GC is never a reason a daemon fails to start.
 	gcScratchDirs(roots.scratch, time.Now())
 
+	// The session sweep, on the same beat and for the same reason (wire.go): a host that only ever
+	// runs daemons never passes the TUI's boot, so this is where its retention policy is applied.
+	// A daemon resumes nothing — every Firing mints its own record — so no id is kept.
+	store := session.NewStore(roots.sessions)
+	gcSessions(store, opts.Sessions)
+
 	return &daemonWiring{
 		opts:      opts,
 		manualIDs: manualIDs,
@@ -117,7 +123,7 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, []string, error) {
 		// daemon itself could measure an api-key command against.
 		keys:     config.NewKeyResolver(""),
 		confiner: newConfiner(),
-		store:    session.NewStore(roots.sessions),
+		store:    store,
 		adopted:  make(map[string]daemon.Entry),
 	}, retiredNotices, nil
 }

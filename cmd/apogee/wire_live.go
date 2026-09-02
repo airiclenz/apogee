@@ -209,6 +209,19 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		return err
 	}
 
+	// The startup session sweep (wire.go), the scratch sweep's sibling — and the one thing that
+	// cannot move earlier: --continue names no id, so the record it resolves to is only known once
+	// resolveResume has run. Swept at wire.go's boot beat instead, a policy tight enough to reach
+	// that record would delete it a moment before it is read and `apogee --continue` would die on
+	// "no saved sessions for this workspace". Running it HERE, with the resolved id passed as the
+	// one to keep, is what makes the manual's "never removes the session being resumed" true for
+	// both --resume <id> and --continue.
+	var keepSessions []string
+	if w.resumed != nil {
+		keepSessions = append(keepSessions, w.resumed.Meta.ID)
+	}
+	gcSessions(w.store, w.opts.Sessions, keepSessions...)
+
 	// The engine seam the renderer drives. It is a HOLDER rather than the Agent itself, because
 	// construction is no longer something startup always gets to do: with no startup server
 	// determined the TUI opens pre-bound and the engine arrives with the human's first pick (ADR

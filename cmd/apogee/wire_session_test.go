@@ -1,16 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -585,5 +588,136 @@ func TestSessionHostWithoutScratchRootIsInert(t *testing.T) {
 	host.Activate(session.Meta{ID: "some-id"})
 	if called {
 		t.Error("scratchMoved called on a host with no scratch root")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The boot sweep (session retention)
+// ----------------------------------------------------------------------------
+
+// The configured policy, applied to the store the way a boot applies it: an age rule discards what
+// is older than the cut, a count rule keeps the newest N, and a config that names neither knob
+// leaves every record exactly where it was — retention is opt-in, so the unconfigured default is
+// still the store apogee has always kept.
+func TestGCSessionsAppliesTheConfiguredPolicy(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+
+	titles := func(t *testing.T, store *session.Store) []string {
+		t.Helper()
+		metas, err := store.List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		var out []string
+		for _, m := range metas {
+			out = append(out, m.Title)
+		}
+		return out
+	}
+
+	t.Run("age", func(t *testing.T) {
+		t.Parallel()
+		store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+		saveAt(t, store, "/ws", now.Add(-100*time.Hour), "stale")
+		saveAt(t, store, "/ws", now.Add(-time.Hour), "recent")
+
+		gcSessions(store, config.SessionSettings{MaxAge: 48 * time.Hour})
+
+		if got := titles(t, store); !slices.Equal(got, []string{"recent"}) {
+			t.Errorf("after a 48h sweep the store holds %v; want only the recent record", got)
+		}
+	})
+
+	t.Run("count", func(t *testing.T) {
+		t.Parallel()
+		store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+		saveAt(t, store, "/ws", now.Add(-3*time.Hour), "oldest")
+		saveAt(t, store, "/ws", now.Add(-2*time.Hour), "middle")
+		saveAt(t, store, "/ws", now.Add(-time.Hour), "newest")
+
+		gcSessions(store, config.SessionSettings{MaxCount: 2})
+
+		if got := titles(t, store); !slices.Equal(got, []string{"newest", "middle"}) {
+			t.Errorf("after a max-count 2 sweep the store holds %v; want the two newest", got)
+		}
+	})
+
+	t.Run("both knobs absent", func(t *testing.T) {
+		t.Parallel()
+		store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+		saveAt(t, store, "/ws", now.Add(-10000*time.Hour), "ancient")
+		saveAt(t, store, "/ws", now.Add(-time.Hour), "recent")
+
+		gcSessions(store, config.SessionSettings{})
+
+		if got := titles(t, store); len(got) != 2 {
+			t.Errorf("an unconfigured sweep left %v; want every record kept", got)
+		}
+	})
+
+	t.Run("the kept id survives", func(t *testing.T) {
+		t.Parallel()
+		store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+		stale := saveAt(t, store, "/ws", now.Add(-100*time.Hour), "stale but open")
+		saveAt(t, store, "/ws", now.Add(-time.Hour), "recent")
+
+		gcSessions(store, config.SessionSettings{MaxAge: 48 * time.Hour, MaxCount: 1}, stale)
+
+		if _, err := store.Load(stale); err != nil {
+			t.Errorf("the id passed as active was swept out from under the run: %v", err)
+		}
+	})
+
+	t.Run("no store directory", func(t *testing.T) {
+		t.Parallel()
+		root := filepath.Join(t.TempDir(), "sessions")
+		// A first-ever start sweeps a directory that does not exist yet: silent, and it creates
+		// nothing on the way past.
+		gcSessions(session.NewStore(root), config.SessionSettings{MaxAge: time.Hour, MaxCount: 1})
+		if _, err := os.Stat(root); !os.IsNotExist(err) {
+			t.Errorf("the sweep touched a missing sessions root (stat err = %v)", err)
+		}
+		gcSessions(nil, config.SessionSettings{MaxCount: 1}) // --no-save headless: no store, no panic
+	})
+}
+
+// The ORDERING, on the real boot path: a `--continue` target that does not rank inside `max-count`
+// store-wide still resumes, because the sweep runs after resolveResume and is handed the resolved
+// record's id to keep. Driven through wireSession rather than through resolveResume and the sweep
+// called in hand-picked order — the wrong ordering passes that composition and fails only here.
+func TestWireSessionSweepsAfterResolvingContinue(t *testing.T) {
+	t.Parallel()
+	w := urlGuardWiring(t, config.Options{
+		ContinueSession: true,
+		Sessions:        config.SessionSettings{MaxCount: 1},
+	})
+
+	// The store as the boot will find it: this workspace's only session is the OLDEST record in
+	// it, so a max-count of 1 applied before the resume is resolved would delete exactly the
+	// record --continue is about to ask for.
+	now := time.Now().UTC()
+	store := session.NewStore(w.roots.sessions)
+	target := saveAt(t, store, w.roots.workspace, now.Add(-72*time.Hour), "the one to continue")
+	saveAt(t, store, "/elsewhere", now.Add(-2*time.Hour), "another workspace")
+	saveAt(t, store, "/elsewhere", now.Add(-time.Hour), "another workspace, newer")
+
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession --continue under a max-count sweep: %v", err)
+	}
+
+	if w.resumed == nil || w.resumed.Meta.ID != target {
+		t.Fatalf("--continue resumed %+v; want the record %q the workspace's only session is", w.resumed, target)
+	}
+	if _, err := store.Load(target); err != nil {
+		t.Errorf("the continued record was swept: %v", err)
+	}
+	// And the sweep did run: the two out-of-budget records from the other workspace are gone.
+	metas, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 || metas[0].ID != target {
+		t.Errorf("after the boot sweep the store holds %d records (%v); want only the continued one", len(metas), metas)
 	}
 }

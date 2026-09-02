@@ -482,3 +482,24 @@ func ensureScratchDir(root, id string) string {
 	}
 	return dir
 }
+
+// ----------------------------------------------------------------------------
+// Session retention (the boot sweep)
+// ----------------------------------------------------------------------------
+
+// gcSessions applies the configured retention policy to the session store once per boot — the
+// sibling of gcScratchDirs above, and deliberately its posture: silent and best-effort, so a sweep
+// that could not read a directory or could not remove a record is never a reason a start fails.
+// Nothing is printed even when records go: the policy is opt-in, so its effect is not a surprise to
+// the only person who could have asked for it.
+//
+// keep names the records this run must not lose — the id a --resume or --continue start resolved,
+// so the session being opened is never swept out from under the run that is opening it. A fresh
+// start has no such id and passes none. Store.Prune is itself a no-op for a policy that names
+// neither knob (it walks no directory), which is what makes the unconfigured default free.
+func gcSessions(store *session.Store, policy config.SessionSettings, keep ...string) {
+	if store == nil {
+		return // headless --no-save: no store, nothing to sweep
+	}
+	_, _ = store.Prune(session.Retention{MaxAge: policy.MaxAge, MaxCount: policy.MaxCount}, keep...)
+}

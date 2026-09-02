@@ -686,7 +686,11 @@ as must the editable-key sweep `TestSpliceScalarSettingRoundTripsEveryEditableKe
 
 ---
 
-## 16. The boot sweep, in all three Drivers
+## 16. The boot sweep, in all three Drivers — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the plan's Files list names `cmd/apogee/wire_live_test.go`; it needed no edit. The `--continue` ordering test is in `cmd/apogee/wire_session_test.go` as the plan's Tests section says, and drives the real path through `w.wireSession(ctx)` by reusing that file's existing `urlGuardWiring` helper unchanged.
+NOTES (2026-09-02): the ordering guard was mutation-checked — moving the sweep to before `resolveResume` (and dropping the keep id) makes `TestWireSessionSweepsAfterResolvingContinue` fail with "no saved sessions for this workspace", the exact failure the guard exists to catch.
+NOTES (2026-09-02): headless and the daemon pass no keep id — neither Driver resumes a record (headless mints a fresh id that is not yet in the store), so there is nothing for them to keep. `gcSessions` treats a nil store (headless `--no-save`) as inert.
 
 **Depends on items 14 and 15.**
 
