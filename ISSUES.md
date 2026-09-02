@@ -27,6 +27,13 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 - [ ] Load-skill tool calls must be collapsed the same way sub agents do. Load-skills must not be folded intot the other Tools super-groups but always stay their own group (such as sub-agents). The name must be updated to a friendly name instead of "load_skill"
 
+- [ ] when the horizontal space becomes to littlem the current mode is not displayed any longer. These are the lements in the bottom most status bar - each with its priority. Remove lowest priorities first and never remove priority 0:
+  - server-name - priority 1 
+  - model-name - priority 0
+  - thinging effort - priority 3
+  - workspace-folder - priority 2
+  - mode - priority 0
+
 
 ## Parked / deferred work
 
@@ -90,12 +97,8 @@ archived plans and ADRs it names — only the open remainder above lives here.
 
 **Status:** recorded 2026-07-24 at the session-system close-out
 ([ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md)). Named
-out of scope in the plan and left for later — neither is a live gap.
+out of scope in the plan and left for later — it is not a live gap.
 
-- **[P2] Retention / pruning policy** — today the store never prunes: `~/.apogee/sessions/`
-  grows unbounded and the only discard is the browser's `d` (manual delete). A retention policy
-  (age- or count-based, opt-in via config) is deferred; the design intent is that pruning stays
-  manual until there is a real need, so any auto-prune ships default-off.
 - **[P2] Cross-instance file lock** — concurrent apogee instances are **last-write-wins per
   file**. Ids are per-instance unique, so a clobber requires the *same* session resumed into two
   instances at once; documented and accepted, not locked. A cross-instance lock (or a
@@ -329,14 +332,6 @@ acceptance or a future-task re-verification, NOT a live hole.
   network is open by default, and `confine=false` is the only blanket loosen. Recorded as a
   conscious v1.0.0 acceptance. If read-confinement or default-deny egress is ever wanted it is an
   ADDITIVE box tightening (landlock read-handling + a per-host network filter), not a v1 change.
-
-- **[L4 enhancement] Optional env-allowlist scrub for stdio MCP launches.** A configured stdio
-  MCP server inherits Apogee's full process environment (all secrets) — see the trust note in
-  `internal/mcp/transport.go`. This is **intended** (a trusted, host-configured launch), so v1
-  documents the trust rather than scrubbing (a blanket scrub would break MCP servers needing
-  inherited PATH/HOME/runtime vars). **Deferred — optional**: a future per-server `EnvAllowlist`
-  (mirroring `safeGitEnv`) for a host that wants to run a less-trusted stdio MCP server. Additive,
-  post-v1.
 
 - **[L5 accepted cost, 2026-08-12] The exec fence refuses an in-repo virtualenv and
   `node_modules/.bin`, with no way to switch it off.** Every exec site now refuses an `argv[0]`
@@ -809,114 +804,3 @@ B3–B5) are recorded by the report and by that plan's out-of-scope list, not he
 
 The full findings, with the candidates this plan took and the ones it left, are in
 [`docs/reviews/architecture-review-2026-08-30.html`](docs/reviews/architecture-review-2026-08-30.html).
-
----
-
-### Capped-delegate wrap-up — residue (plan `2026-09-01 - 02`)
-
-**Status:** recorded 2026-09-01 at the close of
-`docs/plans/2026-09-01 - 02 - capped-delegate-wrap-up-plan.md`. Open gaps in the wrap-up Turn that
-plan shipped — none is a regression, and none blocked the plan's acceptance.
-
-- [ ] **`when.system` is compiled at construction, not at parse time.** `Match.validate`
-  (`internal/stubllm/script.go:349`) compiles `last_message` only, so a `system:` regexp that does
-  not compile surfaces from `newMatcher` (`internal/stubllm/match.go:48`) with its turn index
-  rather than from the YAML parse the way a bad `last_message` does. The two members are
-  asymmetric; a script author reading a parse error for one and a construction error for the other
-  has no rule to predict which.
-- [ ] **The wrap-up's empty-text guard and `replyFault` disagree about whitespace.** The latched
-  final-answer exit tests `resp.Text() != ""` (`internal/agent/loop.go:228`) while `replyFault`
-  tests `strings.TrimSpace(resp.Text()) == ""` (`internal/agent/loop.go:547`). A wrap-up reply
-  whose text is whitespace only and that also carries a tool call therefore commits an assistant
-  message — exactly the "empty assistant message buries the partial result" case the guard exists
-  to prevent.
-- [ ] **Nothing pins that a wrap-up can never return `StatusTurnComplete`.** `finishAtStepCap`'s
-  completed branch (`internal/agent/agent.go:643-645`) forces `StepCapped` on `err == nil &&
-  !res.Faulted` without asserting the Exchange actually closed. It relies on the `|| a.wrapUp`
-  invariant at `internal/agent/loop.go:212`; no test holds that invariant in place, so a future
-  edit to the latched exit could return an open Turn to the parent as a capped result.
-- [ ] **The unbounded sub-test's `unwanted` check goes vacuous if the fixture gains a line
-  break.** `cmd/apogee/e2e_delegation_test.go:327-328` compares the raw `childReportWords`
-  (`:62`) against a flattened frame, while the sibling assertion at `:279` flattens the needle
-  first. Identical today because the fixture wording holds no break; the moment it wraps, the
-  assertion silently stops proving that the capped and uncapped runs stay tellable apart.
-- [ ] **The live shakeout's menu-pair check can fail spuriously.** The withdrawal assertion reads
-  `menus[len(menus)-2]` (`internal/agent/live_delegate_cap_test.go:321`) as "the request before the
-  wrap-up carried a menu". If an overflow fold re-fires the pre-request hooks inside the wrap-up
-  Turn itself, two zero-menu entries land and the check fails on a run that behaved correctly.
-- [ ] **`layout.md` still words the collapsed step-cap row without the closing report.**
-  `layout.md:938` reads `· stopped at its step cap` with no hint that a report now follows the cap.
-  TUI rendering was out of the plan's scope, so the spec text lags the shipped behaviour; either
-  the row's wording moves or the spec says why it deliberately does not.
-
----
-
-### Sub-agent naming and seat choice — residue (plan `2026-09-01 - 02 - sub-agent-naming-and-seat-choice`)
-
-**Status:** recorded 2026-09-02 at the close of
-`docs/plans/2026-09-01 - 02 - sub-agent-naming-and-seat-choice-plan.md`. Open gaps in the
-out-of-band delegation naming (ADR 0068) and the model-chosen Delegation seat (ADR 0069) that plan
-shipped — none is a regression, and none blocked the plan's acceptance.
-
-- [ ] **The status-line phrase is verified only at its seam.** `transcript.runName`
-  (`internal/tui/transcript.go:509`) is asserted directly, and the activity slot reads it at
-  `internal/tui/model.go:3324,3331` and `internal/tui/activity.go:197`; no test composes the
-  rendered `<generated name> · reading` for a run whose name arrived by rename.
-- [ ] **The seat fallback note is pinned twice and nothing fails if the two copies drift.** The
-  engine owns the literal as `seatFallbackNote` (`internal/agent/subagent.go:186`); `internal/tui`
-  pins its own copy of the same sentence (`internal/tui/toolregistry_test.go:135`), as does
-  `cmd/apogee/e2e_seat_test.go:61`. Nothing ties either copy back to the engine's constant.
-- [ ] **An all-`run_on: "session"` reply in a ROUTED session is sized by the target's cap, not the
-  session server's.** `fanOutWidthFor` (`internal/agent/dispatch.go:113-119`) reads an unsplit
-  reply as `fanOutWidth`'s row verbatim — the rule item 12's guard mandates for every single-seat
-  reply — while [ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md)
-  decision 7's "a single-seat reply keeps its seat's cap" reads the other way for that one corner.
-  The shape was unreachable before this run, so it is a scope gap rather than a regression.
-- [ ] **`sub-agents-choice: model` is inert in headless runs and daemon Firings.** The gate reaches
-  the tools only through the TUI's `toolSetSpec` (`cmd/apogee/wire_tools.go:76`, set by
-  `registryWithMCP` at `cmd/apogee/wire_tools.go:277-280` off `cmd/apogee/wire_live.go:118`), and
-  item 13's guard forbids the `apogee.Config` route the engine's own roster build would read
-  (`internal/agent/construct.go:486`); both Drivers therefore behave as `fixed`.
-
-### Readable, scoping `/inspect` — residue (plan `2026-09-01 - 03 - inspector-readable-wire`)
-
-**Status:** recorded 2026-09-02 at the close of
-`docs/plans/2026-09-01 - 03 - inspector-readable-wire-plan.md`. One open gap in the readable wire
-rendering that plan shipped — not a regression, and it did not block the plan's acceptance.
-
-- [ ] **The scoped-empty sentence is pinned only against its own constant.** Both halves of
-  `TestInspectorScopedEmptyNamesEveryCause` (`internal/tui/inspector_test.go:842-843,850-851`)
-  compare the row to `inspectorScopedEmptyRow` / `inspectorDisarmedRow` rather than to the literal
-  sentence, so a typo introduced in `inspectorScopedEmptyRow` (`internal/tui/inspector.go:138`) —
-  the row's whole job is naming all three causes and the way back — would leave the tests green.
-
-### Structural feedback and pruning — residue (plan `2026-09-02 - 00 - structural-feedback-and-pruning`)
-
-**Status:** recorded 2026-09-02 at the close of
-`docs/plans/2026-09-02 - 00 - structural-feedback-and-pruning-plan.md`. One open coverage gap in
-the off-ramp default that plan shipped — not a regression, and it did not block the plan's
-acceptance.
-
-- [ ] **The /settings toggle list's off-ramp floor has no cmd-side test.** `ListMechanisms`
-  (`cmd/apogee/wire_options.go:222-233`) unions `mechanisms.OffRampFloor(enabled)` into the rows it
-  answers, so an off-ramp whose key is simply absent from the `mechanisms:` block reads ON in the
-  pane. The floor itself (`internal/mechanisms/retired.go:60`) and the sibling startup projection
-  `withOffRampFloor` (`cmd/apogee/wire_live.go:440`, pinned at `cmd/apogee/wire_live_test.go:309`)
-  are both covered; nothing asserts that this list applies the same floor, so a row could silently
-  regress to reading OFF for an armed Mechanism.
-
-### Breadcrumb, gauge and the Tools umbrella — residue (plan `2026-09-02 - 01 - tui-breadcrumb-gauge-umbrella`)
-
-**Status:** recorded 2026-09-02 at the close of
-`docs/plans/2026-09-02 - 01 - tui-breadcrumb-gauge-umbrella-plan.md`. One piece of production code
-left without a caller by the retirement of the same-type group shape — not a regression, and it did
-not block the plan's acceptance.
-
-- [ ] **`toolCallRun` has no production caller.** With `resolveBlock`'s same-label branch deleted,
-  `toolCallRun` (`internal/tui/toolbranch.go:346-357`) is reached only from four tests that assert
-  run boundaries (`internal/tui/render_test.go:216-219`, `internal/tui/toolblock_test.go:105`,
-  `internal/tui/toolshape_test.go:550`, `internal/tui/subagentblock_test.go:493`), and three
-  doc comments still cite it as a resolution helper (`internal/tui/render.go:309,477,548`,
-  `internal/tui/blocktarget.go:70`). It was left standing because the retiring item's deletion list
-  is explicit and does not name it; golangci-lint's `unused` does not flag it while the tests call
-  it.

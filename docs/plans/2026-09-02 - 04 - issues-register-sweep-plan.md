@@ -819,7 +819,11 @@ the guard that the template still parses to defaults, and nothing more.
 
 ---
 
-## 19. Retire the closed entries from `ISSUES.md`
+## 19. Retire the closed entries from `ISSUES.md` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the working tree already carried an uncommitted, owner-hand-written OPEN entry in "Open defects" (the mode indicator dropping out of the status bar at narrow widths, with the per-element priority list). Per the dispatch DECISION it was left exactly as written and rides along in this item's commit, so `grep -c '^- \[ \]' ISSUES.md` returns 12, not the Acceptance's 11 — the extra line is that new entry (`ISSUES.md:30`); the 11 the Acceptance enumerates (legend `:22`, the open `load_skill` defect `:28`, the hero-tape knob, the eight driver-parity gaps) are all present and untouched.
+NOTES (2026-09-02): consequential edit — ISSUES.md:100 ("Session system follow-ons" Status prose): "neither is a live gap" → "it is not a live gap", made necessary by removing the `[P2] Retention / pruning policy` bullet, which left the section with a single deferral.
+NOTES (2026-09-02): removed exactly what the item names — the six "Capped-delegate wrap-up — residue" bullets, the four "Sub-agent naming and seat choice — residue" bullets and the whole "Readable, scoping `/inspect`", "Structural feedback and pruning" and "Breadcrumb, gauge and the Tools umbrella" residue sections (all five sections went entirely, headings, Status lines and the trailing `---` separator included, as none kept a bullet), plus the `[P2] Retention / pruning policy` bullet and the `[L4 enhancement]` bullet. "Test drivers — residue" (`:727`) is not one of this plan's five sections and stays. The historical L2/L3/L4 narration at the foot of the security-Lows section is left as written — it records what the 2026-08-11 triage tested, not an open deferral.
 
 **Depends on items 1–18.**
 
