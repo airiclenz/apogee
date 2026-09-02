@@ -283,5 +283,7 @@ catalogued mechanism with `on`/`off` beside each; `⏎` or `space` flips the hig
 and applying it on that keypress, and the list **stays open** so a posture is set in one visit. `esc`
 goes back. Switching one off writes `<id>: false` rather than deleting the line, and — as ever — a
 non-empty `mechanisms:` block means manual control, so the Validated set measured for the bound model
-is no longer applied on top.
+is no longer applied on top. The two **off-ramps** (`empty_response_recovery`, `tool_use_enforcer`)
+read as `on` even when the block never names them: they ship enabled and only an explicit
+`<id>: false` turns one off ([ADR 0070](../adr/0070-off-ramp-mechanisms-ship-on-by-default.md)).
 

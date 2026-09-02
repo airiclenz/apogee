@@ -655,7 +655,9 @@ leaving the agent's structure intact. It disables the `proactive-nudge` and
 `response-repair` Mechanisms and makes the **Library inert** (no inject, no observe, no
 write), but **keeps the exempt off-ramps** (e.g. `empty_response_recovery`) so the floor is
 *functional* — a baseline that quit at the first stumble would pass the hard constraint
-trivially. Budget, Compaction, and the rest of the loop still run: Bypass is the honest
+trivially. Since [ADR 0070](docs/adr/0070-off-ramp-mechanisms-ship-on-by-default.md) those same
+off-ramps are also what a **default** run arms, so the Bypass floor and the shipped default no
+longer disagree about them. Budget, Compaction, and the rest of the loop still run: Bypass is the honest
 "Mechanisms-off" floor, **not** a naked model. It is also the bench's **aggregate control
 arm** — the same code path users can run — against which the hard-constraint non-inferiority
 gate is proved. See [ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md).
@@ -979,7 +981,10 @@ A unit of gated, self-regulating behaviour that fires at a defined **Hook point*
 the loop to help a small LLM. The catalogue of Mechanisms is the current best guess at
 what helps, decided by evidence (the external bench), not a fixed contract. Every
 Mechanism is *gated* (by conversation state, resource pressure, prompt shape, or model
-output) and subject to self-regulation unless declared exempt.
+output) and subject to self-regulation unless declared exempt. Every catalogued Mechanism
+**ships off** until an A/B bench run turns it on (rule D1) — with one exception, the
+[Off-ramps](#off-ramp-exempt-mechanism), which ship **on**
+([ADR 0070](docs/adr/0070-off-ramp-mechanisms-ship-on-by-default.md)).
 _Avoid_: "intervention" (that is the bench's per-Turn experiment — a different surface,
 see [Intervention](#intervention)), "transform"/"analyzer"/"injector" as a *kind* (these
 were the retired proxy-era taxonomy — see below), "rule".
@@ -1077,7 +1082,12 @@ cleared when productive activity resumes.
 A Mechanism never subject to Adaptive Suppression or the Turn Budget, because suppressing
 it would leave the model with **no way out of a failed Turn** (e.g. `empty_response_recovery`
 — without it an empty response just ends the conversation). Exempt status is declared in
-the Mechanism descriptor.
+the Mechanism descriptor. Off-ramps are also the **one exception to D1's default-off rule**:
+they ship **enabled**, a `mechanisms:` block that never names one arms it anyway, and only an
+explicit `<id>: false` turns one off
+([ADR 0070](docs/adr/0070-off-ramp-mechanisms-ship-on-by-default.md)). They are recovery
+guarantees, not small-model tuning — they fire only on a failed Turn and survive Bypass — so
+the bench gate D1 asks of every other Capability does not apply to them.
 _Avoid_: "always-on Mechanism" (a structurally-always-on Transform is not the same as an
 off-ramp — the former is just untracked, the latter is a deliberate recovery guarantee).
 

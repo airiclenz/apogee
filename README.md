@@ -164,9 +164,10 @@ a stray key cannot do it — stops a run. The full tour is in
   them where one asked for it: a qwen3.8 build is offered the default-off
   Console family out of the box, and nothing else is.
 - **Small-model mechanisms** — context compaction is built in and structural,
-  not one of them; all 21 catalogued mechanisms ship off until bench evidence
-  turns them on, and Validated sets apply the measured winners per model
-  automatically.
+  not one of them; the two off-ramps (empty-reply and narrated-instead-of-acted
+  recovery) ship on as recovery guarantees, every other catalogued mechanism
+  ships off until bench evidence turns it on, and Validated sets apply the
+  measured winners per model automatically.
 - **MCP support** — connect external tool servers over stdio, SSE, or
   streamable-http.
 - **A settings screen and a watched config** — `/settings` shows every

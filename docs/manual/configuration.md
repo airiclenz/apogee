@@ -50,8 +50,8 @@ file's timestamp and size on a one-second ticker — no daemon, no filesystem-no
 dependency (ADR 0041).
 
 Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
-until its A/B bench run proves it a win, so enabling one is a deliberate config
-choice:
+until its A/B bench run proves it a win — bar the two **off-ramps**, which ship
+**on** (below) — so enabling one is a deliberate config choice:
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -64,6 +64,20 @@ mechanisms:
 The `syntax` mechanism is only the RETRY half: every write tool already appends its own
 in-process syntax verdict to the success result it hands the model, always on and not
 configurable, and enabling `syntax` adds the automatic correction Turn on top of it.
+
+The two **off-ramps** — `empty_response_recovery` and `tool_use_enforcer` — are the one
+exception to that default: they ship **enabled**, so a `mechanisms:` block that never names
+one arms it anyway and so does a config file with no block at all. They are recovery
+guarantees rather than small-model tuning — each fires only after a Turn has already
+failed, and both survive `--bypass` — so the bench gate the other mechanisms wait on does
+not apply to them. To turn one off, name it explicitly false:
+
+```yaml
+mechanisms:
+  tool_use_enforcer: false   # the narration off-ramp, off for this install
+```
+
+See [ADR 0070](../adr/0070-off-ramp-mechanisms-ship-on-by-default.md).
 
 An unknown ID is a startup error that lists the IDs this build knows; `--bypass`
 still wins (an enabled non-off-ramp mechanism does not fire under bypass). The same
@@ -153,8 +167,9 @@ workspace root — the fence every file tool is scoped to, so it decides what th
 write at all, not merely which directory a session opens in.
 
 `APOGEE_BYPASS` earns a paragraph of its own, because it gives something up. It turns apogee's
-**Mechanisms off for the whole session**: every catalogued mechanism is skipped wherever it would
-have fired, and the Validated set your bound model would otherwise be given is not applied either —
+**Mechanisms off for the whole session**: every catalogued mechanism bar the exempt off-ramps is
+skipped wherever it would have fired, and the Validated set your bound model would otherwise be
+given is not applied either —
 so a small model runs with none of the help apogee exists to give it. That is the point of it.
 Bypass is the honest "Mechanisms-off" floor every mechanism is measured against on the bench
 ([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code path

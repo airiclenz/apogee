@@ -158,8 +158,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// Config.Mechanisms, and run the ordering / incompatibility / requirements gates. The disabled-key
 	// validation must stay here because the engine only ever sees the enabled IDs, so a typo'd DISABLED
 	// key — never constructed — must still fail loudly at this startup boundary. With nothing enabled
-	// the list is empty and the engine arms nothing, so a config without a mechanisms block behaves
-	// exactly as before.
+	// the resolver still returns the OFF-RAMP FLOOR (ADR 0070), so a config without a mechanisms
+	// block arms the two recovery guarantees and nothing else; every other Capability stays off
+	// until it is named.
 	//
 	// The list is hoisted into a local because it outlives this assignment: it is the MANUAL
 	// choice, model-independent by construction, and the rebind seam re-runs the

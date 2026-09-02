@@ -8,7 +8,8 @@ import (
 )
 
 // empty_response_recovery registers the empty-reply off-ramp's catalogue row (Phase-4 item 6).
-// Default-off (D1).
+// Default-ON: an off-ramp is the one exception to D1's default-off rule (ADR 0070, OffRampFloor) —
+// see the descriptor below.
 func init() {
 	register(row{
 		descriptor: emptyResponseRecoveryDescriptor,

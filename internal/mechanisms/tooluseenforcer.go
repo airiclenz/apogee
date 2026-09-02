@@ -8,8 +8,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// tool_use_enforcer registers the narration off-ramp's catalogue row (Phase-4 item 6). Default-off
-// (D1).
+// tool_use_enforcer registers the narration off-ramp's catalogue row (Phase-4 item 6). Default-ON:
+// an off-ramp is the one exception to D1's default-off rule (ADR 0070, OffRampFloor) — see the
+// descriptor below.
 func init() {
 	register(row{
 		descriptor: toolUseEnforcerDescriptor,

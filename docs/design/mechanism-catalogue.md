@@ -28,7 +28,11 @@ figures. Every quantitative claim below is quoted from the sim catalogue, not re
 `post-response` / `pre-tool-exec` / `post-tool-result` / `history-rewrite`; Capability
 `off-ramp` / `proactive-nudge` / `response-repair`; SuppressionPolicy `strikes-3` / `exempt`.
 Bypass keeps only `off-ramp` (ADR 0006 / D5); every catalogued Mechanism ships default-off
-until bench-proven (D1).
+until bench-proven (D1). **Amended 2026-09-02 (ADR 0070):** D1's default-off rule now exempts
+the `off-ramp` Capability — `tool_use_enforcer` and `empty_response_recovery` ship **ON**, armed
+unless a `mechanisms:` block names one explicitly `false`. They fire only after a Turn has
+already failed and survive Bypass already, so the bench gate D1 asks of a tuning Mechanism does
+not apply to them; every other Capability keeps D1 unchanged.
 
 ---
 
@@ -171,8 +175,8 @@ low-confidence metadata label does not inject); observe records on any identifie
 
 | apogee ID | Port wave (item) | Verdict + one-line rationale | Prior evidence (sim @pin) | Bench validation |
 |---|---|---|---|---|
-| `tool_use_enforcer` | Wave 1 — **item 6** | PORT — recovery guarantee; without it a text-only turn has no off-ramp | `catalogue.md` §tool_use_enforcer (3-retry cap; de-exempt siblings recorded) | pending (leave-one-out, ADR 0009) |
-| `empty_response_recovery` | Wave 1 — **item 6** | PORT — recovery guarantee; without it an empty turn ends the conversation | `catalogue.md` §empty_response_recovery (escalating-temp retries) | pending |
+| `tool_use_enforcer` | Wave 1 — **item 6** | PORT — recovery guarantee; without it a text-only turn has no off-ramp; **default ON — ADR 0070** | `catalogue.md` §tool_use_enforcer (3-retry cap; de-exempt siblings recorded) | pending (leave-one-out, ADR 0009) |
+| `empty_response_recovery` | Wave 1 — **item 6** | PORT — recovery guarantee; without it an empty turn ends the conversation; **default ON — ADR 0070** | `catalogue.md` §empty_response_recovery (escalating-temp retries) | pending |
 | `validate` | Wave 1 — **item 5** | PORT — tool-call validation; carried most of the measured win | `catalogue.md` response cascade (validate→syntax→autofix short-circuit) | pending |
 | `syntax` | Wave 1 — **item 5** | PORT — write-content syntax check (Go parser + generic) | `catalogue.md` §syntax (per-Session fail counter) | pending |
 | `autofix` | Wave 1 — **item 5** | PORT — formatter write-back; gofmt in-process, others optional (§3a) | `catalogue.md` §autofix (LookPath-cached formatter table) | pending |
@@ -191,7 +195,7 @@ low-confidence metadata label does not inject); observe records on any identifie
 | `list_nudge` | Wave 4 — **item 12** | PORT — completion nudge (C4); list-without-read → read | `catalogue.md` §list_nudge (threshold 2, cap 3) | pending |
 | `tool_use_directive` | Wave 4 — **item 12** | PORT — completion nudge (C4); action-intent + no tool use → use tools | `catalogue.md` §tool_use_directive (de-exempted 2026-05-23) | pending |
 | `library` | Library — **item 14** | PORT — cross-session learning; observe + confidence-gated inject | `catalogue.md` §library + ADR 0009 sim (Bayesian `(obs-succ+1)/(obs+2)`, gate 0.5/2 obs) | pending (longitudinal: improves-over-sessions AND never-below-baseline) |
-| `guided_decomposition` | — not a port; post-`v1.0.0` catalogue extension (`docs/plans/archived/guided-decomposition-plan.md`, 2026-07-05) | **NEW (apogee-native⁵)** — ADR 0014: steer the oversized primary call to enumerate self-contained subtasks, then pace the fan-out at one batch per Turn through the `sub_agent` recursion point; ships default-off (D1) like every Mechanism | none from the sim — no counterpart exists there, so no prior A/B figures carry over; ADR 0014 (grill 2026-07-05, amendment 2026-08-07) is the whole evidence trail | pending — the ADR 0009 non-inferiority gate is run over the **`guided_decomposition` + `tool_result_cap` stack**, never the Mechanism alone (Requires coupling); the 2026-08-07 batch amendment obliges a re-pass before any default flip |
+| `guided_decomposition` | — not a port; post-`v1.0.0` catalogue extension (`docs/plans/archived/guided-decomposition-plan.md`, 2026-07-05) | **NEW (apogee-native⁵)** — ADR 0014: steer the oversized primary call to enumerate self-contained subtasks, then pace the fan-out at one batch per Turn through the `sub_agent` recursion point; ships default-off (D1) like every non-off-ramp Mechanism | none from the sim — no counterpart exists there, so no prior A/B figures carry over; ADR 0014 (grill 2026-07-05, amendment 2026-08-07) is the whole evidence trail | pending — the ADR 0009 non-inferiority gate is run over the **`guided_decomposition` + `tool_result_cap` stack**, never the Mechanism alone (Requires coupling); the 2026-08-07 batch amendment obliges a re-pass before any default flip |
 
 ---
 
@@ -280,7 +284,7 @@ apogee rather than ported still lands a line here when it ships (so far one —
 | apogee ID | Shipped in item | Bench validation |
 |---|---|---|
 | `validate`, `syntax`, `autofix` | 5 | pending |
-| `tool_use_enforcer`, `empty_response_recovery` | 6 | pending |
+| `tool_use_enforcer`, `empty_response_recovery` | 6 | pending (default ON since ADR 0070 — recovery guarantees, exempt from D1's bench gate) |
 | `truncate_history` | 7 | pending |
 | `correct_tool_result` | — (DEFER, owner-ratified 2026-07-04) | n/a until a bench-discovered trigger |
 | `tool_result_cap` | 9 | pending |
