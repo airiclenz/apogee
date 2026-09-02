@@ -39,31 +39,38 @@ import (
 // the ring and what it says; the entries below are the shared module's functions under this pane's
 // own name.
 //
-// Its rows are FLAT — one payload line per row, elided at the pane's width like every other
-// unwrapped row (popupRowBlocks) — rather than wrapped: a single JSON line longer than the pane's
-// whole row budget seats NOTHING when rows wrap (popupRowWindowFrom), and a raw-protocol view that
-// goes blank on a big request body is worse than one that cuts a long line off at the border.
+// Its rows are FLAT AT THE PANE — one stored line per row, elided at the pane's width like every
+// other unwrapped row (popupRowBlocks) — rather than wrapped there: a single JSON line longer than
+// the pane's whole row budget seats NOTHING when rows wrap (popupRowWindowFrom), and a raw-protocol
+// view that goes blank on a big request body is worse than one that cuts a long line off at the
+// border. The one rendering that arrives already broken to width is the READABLE one: it carries
+// prose rather than protocol, so it is hard-wrapped at readableWrapColumn when the record is folded
+// (wrapReadable) and reaches the pane as flat rows like everything else.
 
 // wireRecord is one half of one Upstream round-trip as the Inspector holds it: which half, the
-// Turn, depth and spawning call id of the agent that made the call, and the payload —
-// escape-stripped and pretty-printed ONCE, when the event was folded.
+// Turn, depth and spawning call id of the agent that made the call, and the payload in BOTH of the
+// renderings the pane can show — escape-stripped and rendered ONCE, when the event was folded: the
+// pretty-printed protocol (lines) and the readable one (readable, wireReadableLines).
 //
 // depth and callID together name the WIRE STREAM the half belongs to (domain.EventBase): a
 // fan-out interleaves runs in one ring, and the call id is what separates two siblings a shared
 // depth would braid. Turn orders the halves inside a stream; it does not identify one.
 //
-// The lines are kept formatted rather than raw for one reason: the pane re-derives its rows on
-// every frame, and a frame is painted for every streamed token, so parsing twenty JSON bodies per
-// repaint would put the Inspector's cost on a hot path it has no business being on. It bounds
-// memory as a side effect — hidden says how many lines the cap dropped, so the pane can state the
-// cut rather than make it silently.
+// Both renderings are kept formatted rather than raw for one reason: the pane re-derives its rows
+// on every frame, and a frame is painted for every streamed token, so parsing twenty JSON bodies
+// per repaint would put the Inspector's cost on a hot path it has no business being on — which is
+// why the readable rendering is folded here too rather than derived from lines at the paint. It
+// bounds memory as a side effect — hidden and readableHidden say how many lines each cap dropped,
+// so the pane can state the cut rather than make it silently.
 type wireRecord struct {
-	direction string
-	turn      int
-	depth     int
-	callID    string
-	lines     []string
-	hidden    int
+	direction      string
+	turn           int
+	depth          int
+	callID         string
+	lines          []string
+	hidden         int
+	readable       []string
+	readableHidden int
 }
 
 // inspectorPane is the /inspect overlay's state — a reportPane (reportpane.go) under the name of the
@@ -85,8 +92,10 @@ const maxWireRecords = 20
 // maxWireRecordLines is how much of ONE record the ring keeps. A tool-carrying request body runs
 // to a few hundred pretty-printed lines and a pane shows a dozen at a time, so a cap here bounds
 // both the memory the ring holds and the rows a frame composes, and what it costs is a tail the
-// reader would have had to page a hundred windows to reach. The cut is never silent: the dropped
-// count goes on the record and the pane spells it in the package's one elision phrase.
+// reader would have had to page a hundred windows to reach. It applies to EACH of the record's two
+// renderings separately, because they are different lengths of the same traffic and a count taken
+// off one would misstate the other. The cut is never silent: the dropped count goes on the record —
+// one per rendering — and the pane spells it in the package's one elision phrase.
 const maxWireRecordLines = 100
 
 // maxInspectorRows is the pane's own taste for how many rows it shows at once — a little taller
@@ -144,7 +153,9 @@ func (m Model) foldWire(e domain.Event) Model {
 	if !ok {
 		return m
 	}
-	lines, hidden := wirePayloadLines(stripEscapes(we.Payload))
+	payload := stripEscapes(we.Payload)
+	lines, hidden := wirePayloadLines(payload)
+	readable, readableHidden := wireReadableLines(we.Direction, payload)
 	keep := m.wire
 	if len(keep) >= maxWireRecords {
 		keep = keep[len(keep)-maxWireRecords+1:]
@@ -152,12 +163,14 @@ func (m Model) foldWire(e domain.Event) Model {
 	next := make([]wireRecord, 0, len(keep)+1)
 	next = append(next, keep...)
 	m.wire = append(next, wireRecord{
-		direction: we.Direction,
-		turn:      we.Turn,
-		depth:     we.Depth,
-		callID:    we.CallID,
-		lines:     lines,
-		hidden:    hidden,
+		direction:      we.Direction,
+		turn:           we.Turn,
+		depth:          we.Depth,
+		callID:         we.CallID,
+		lines:          lines,
+		hidden:         hidden,
+		readable:       readable,
+		readableHidden: readableHidden,
 	})
 	return m
 }
@@ -200,6 +213,239 @@ func prettyWireLine(line string) []string {
 		return []string{line}
 	}
 	return strings.Split(buf.String(), "\n")
+}
+
+// ----------------------------------------------------------------------------
+// The readable rendering (the second one every record carries)
+// ----------------------------------------------------------------------------
+//
+// The pretty-printed protocol above answers "what exactly went over the wire". The readable
+// rendering answers the question the reader usually opened the pane WITH — what did the model say,
+// think and call — and it answers it from the same bytes: a request becomes the one line that
+// describes its envelope, and a response becomes the passages its deltas spell, because a stream
+// that arrives as three hundred one-token JSON documents is a sentence nobody can read as one.
+//
+// It is computed at the FOLD, beside the pretty one and never instead of it (foldWire): the pane
+// picks a rendering per frame, and neither is ever derived on the paint path.
+
+// The readable rendering's row prefixes: the first row of a passage carries the one that names its
+// kind, every row after it carries readableContinuationIndent, and a passage read back off the pane
+// is therefore one paragraph rather than a column of unattributed lines.
+const (
+	readableThinkingPrefix     = "· thinking "
+	readableTextPrefix         = "· "
+	readableToolCallPrefix     = "· tool call "
+	readableContinuationIndent = "  "
+)
+
+// readableWrapColumn is the width the readable rendering is hard-wrapped to, in runes, when the
+// record is folded. The pane elides rather than wraps (the header comment above), so prose that
+// arrived as one 4000-rune passage would show as one cut-off row; wrapping it here is what makes it
+// readable at every pane width the frame can grant, at the cost of a fixed column rather than the
+// live one — which is the trade the pane's flat rows already made.
+const readableWrapColumn = 96
+
+// maxToolCallIDRunes is how much of a tool call's wire id the readable rendering keeps: enough to
+// tell two calls of the same tool apart in one stream, short enough that the name stays the thing
+// the eye lands on. The arguments are elided entirely — raw mode has them in full.
+const maxToolCallIDRunes = 12
+
+// sseChunk is the streamed-completion chunk as the readable rendering reads it, narrowed to the
+// members it classifies by. It MIRRORS the provider's own decode shape
+// (internal/provider/stream.go) rather than importing it because that type is unexported there; the
+// mirror is deliberately partial — a member the classifier does not read is a member this pane does
+// not need to track.
+type sseChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				ID       string `json:"id"`
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"delta"`
+	} `json:"choices"`
+}
+
+// wireReadableLines renders one payload the readable way for the ring: a request as its envelope
+// summary, a response as the passages its deltas spell, capped at maxWireRecordLines with its own
+// dropped count — the same bound the pretty rendering takes, counted separately because the two are
+// different lengths of the same traffic.
+//
+// It never fails and never drops a line it could not classify: a request body it cannot summarise
+// falls back to wirePayloadLines whole (count and all), and any response line that is not a delta
+// chunk goes through in its pretty form. What the reader is looking at is what a server actually
+// sent, and the one thing this pane may never do is hide the part that did not fit the shape.
+func wireReadableLines(direction, payload string) (lines []string, hidden int) {
+	if direction == domain.WireDirectionRequest {
+		summary, ok := wireRequestSummary(payload)
+		if !ok {
+			return wirePayloadLines(payload)
+		}
+		return []string{summary}, 0
+	}
+	lines = wireResponsePassages(payload)
+	if len(lines) > maxWireRecordLines {
+		hidden = len(lines) - maxWireRecordLines
+		lines = lines[:maxWireRecordLines]
+	}
+	return lines, hidden
+}
+
+// wireRequestSummary reduces a request body to the one line that says what was asked of the model:
+// how many messages the conversation was replayed as, how many tools it was offered, and which
+// model it went to. A field the body does not carry is left out rather than reported as zero, and a
+// body carrying none of the three is no summary at all — ok is false, and the caller shows the body
+// as it stands.
+//
+// The lengths are counted off json.RawMessage rather than a decoded shape on purpose: this is a
+// VIEW of a request some provider dialect built, and a summary that failed whenever a message
+// carried a member this pane never modelled would fail on exactly the bodies worth looking at.
+func wireRequestSummary(payload string) (summary string, ok bool) {
+	var body struct {
+		Messages *[]json.RawMessage `json:"messages"`
+		Tools    *[]json.RawMessage `json:"tools"`
+		Model    *string            `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(payload)), &body); err != nil {
+		return "", false
+	}
+	var parts []string
+	if body.Messages != nil {
+		parts = append(parts, strconv.Itoa(len(*body.Messages))+" messages")
+	}
+	if body.Tools != nil {
+		parts = append(parts, strconv.Itoa(len(*body.Tools))+" tools")
+	}
+	if body.Model != nil {
+		parts = append(parts, "model "+*body.Model)
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	return strings.Join(parts, " · "), true
+}
+
+// wireResponsePassages turns a captured response — the stream's raw data payloads newline-joined
+// (domain.WireEvent) — into the passages it spells. Consecutive deltas of one kind are one passage,
+// because a token is not a thought and a stream that showed one row per token would be the raw
+// rendering with extra steps; an empty delta contributes nothing and does NOT break the run, since
+// a keep-alive chunk in the middle of a sentence did not end the sentence.
+//
+// A tool call is its own passage, named and identified but never argued: the arguments arrive as
+// fragments across chunks and raw mode already has them in full. Anything that is not a delta chunk
+// at all — the [DONE] sentinel, a blank line, a truncated document, a usage-only chunk, an in-band
+// error member — closes the open passage and goes through in its pretty form, which for a line that
+// is not JSON is the line exactly as it arrived (prettyWireLine).
+func wireResponsePassages(payload string) []string {
+	trimmed := strings.Trim(payload, "\n")
+	if trimmed == "" {
+		return nil
+	}
+	var (
+		rows   []string
+		prefix string
+		text   string
+	)
+	// closePassage renders the open run, if there is one, and leaves nothing open behind it.
+	closePassage := func() {
+		if prefix == "" {
+			return
+		}
+		rows = append(rows, wrapReadable(prefix, text)...)
+		prefix, text = "", ""
+	}
+	// extend adds one delta to the open run of its kind, opening a run when the kind changed.
+	extend := func(kind, delta string) {
+		if delta == "" {
+			return
+		}
+		if prefix != kind {
+			closePassage()
+			prefix = kind
+		}
+		text += delta
+	}
+	for _, raw := range strings.Split(trimmed, "\n") {
+		var chunk sseChunk
+		if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &chunk); err != nil || len(chunk.Choices) == 0 {
+			closePassage()
+			rows = append(rows, prettyWireLine(raw)...)
+			continue
+		}
+		delta := chunk.Choices[0].Delta
+		extend(readableThinkingPrefix, delta.ReasoningContent)
+		extend(readableTextPrefix, delta.Content)
+		for _, call := range delta.ToolCalls {
+			if call.Function.Name == "" {
+				continue
+			}
+			closePassage()
+			rows = append(rows, wrapReadable(readableToolCallPrefix, toolCallLabel(call.Function.Name, call.ID))...)
+		}
+	}
+	closePassage()
+	return rows
+}
+
+// toolCallLabel names one call in the readable rendering: the tool's name, and as much of the wire
+// id as tells two calls of it apart. A fragment that carried no id at all is named on its own
+// rather than trailed by an empty column.
+func toolCallLabel(name, id string) string {
+	short := []rune(id)
+	if len(short) > maxToolCallIDRunes {
+		short = short[:maxToolCallIDRunes]
+	}
+	if len(short) == 0 {
+		return name
+	}
+	return name + " " + string(short)
+}
+
+// wrapReadable breaks one passage into the rows the ring stores: the prefix on the first row, two
+// spaces on every row after it, nothing wider than readableWrapColumn runes, and a break taken at a
+// space wherever the passage offers one within the budget and mid-word where it does not — a
+// 4000-rune JSON blob a model streamed as prose still has to fit.
+//
+// Newlines inside the passage are the model's own paragraphing and start a row of their own; the
+// count is in RUNES rather than display cells, which is the measure the fold can take without a
+// theme and close enough for a rendering the pane elides at its real width anyway.
+func wrapReadable(prefix, text string) []string {
+	var rows []string
+	lead := prefix
+	for _, segment := range strings.Split(text, "\n") {
+		for {
+			row, rest := cutReadable(lead, segment)
+			rows = append(rows, strings.TrimRight(row, " "))
+			lead = readableContinuationIndent
+			if rest == "" {
+				break
+			}
+			segment = rest
+		}
+	}
+	return rows
+}
+
+// cutReadable takes the next row off one segment: everything that fits after lead, and whatever is
+// left over. It prefers the last space at or before the budget and cuts mid-rune-run only when the
+// segment offers none, so a wrapped paragraph breaks on words wherever words exist.
+func cutReadable(lead, segment string) (row, rest string) {
+	budget := max(readableWrapColumn-len([]rune(lead)), 1)
+	runes := []rune(segment)
+	if len(runes) <= budget {
+		return lead + segment, ""
+	}
+	for i := budget; i > 0; i-- {
+		if runes[i] != ' ' {
+			continue
+		}
+		return lead + string(runes[:i]), strings.TrimLeft(string(runes[i:]), " ")
+	}
+	return lead + string(runes[:budget]), string(runes[budget:])
 }
 
 // The report module's functions under this pane's name (reportpane.go). Each one is the shared body

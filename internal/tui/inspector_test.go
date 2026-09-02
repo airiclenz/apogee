@@ -434,3 +434,201 @@ func TestInspectorLeavesEveryOtherKeyAlone(t *testing.T) {
 		t.Errorf("draft = %q, want the key to have reached the box behind the pane", got)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The readable rendering (wireReadableLines)
+// ----------------------------------------------------------------------------
+
+// TestReadableRequestSummarisesTheEnvelope pins what a request becomes in the readable rendering:
+// ONE line naming how much conversation was replayed, how many tools were offered and which model
+// was asked — and a field the body does not carry is left out rather than reported as a zero.
+func TestReadableRequestSummarisesTheEnvelope(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{
+			name:    "all three fields",
+			payload: `{"model":"gpt-oss-20b","messages":[{"role":"system"},{"role":"user"}],"tools":[{"type":"function"}]}`,
+			want:    "2 messages · 1 tools · model gpt-oss-20b",
+		},
+		{
+			name:    "tools absent",
+			payload: `{"model":"gpt-oss-20b","messages":[{"role":"user"}]}`,
+			want:    "1 messages · model gpt-oss-20b",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines, hidden := wireReadableLines(domain.WireDirectionRequest, tc.payload)
+
+			if hidden != 0 {
+				t.Errorf("hidden = %d, want nothing dropped from a one-line summary", hidden)
+			}
+			if len(lines) != 1 || lines[0] != tc.want {
+				t.Errorf("readable = %q, want the single summary line %q", lines, tc.want)
+			}
+		})
+	}
+}
+
+// TestReadableRequestFallsBackToTheBody is the rule that keeps the rendering honest on a body it
+// cannot summarise: a request carrying none of messages/tools/model — and an undecodable one alike
+// — is shown exactly as raw mode shows it, dropped count and all. A readable view that answered a
+// body it did not understand with an empty pane would hide the body worth reading.
+func TestReadableRequestFallsBackToTheBody(t *testing.T) {
+	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
+
+	rec := m.wire[0]
+	if !slices.Equal(rec.readable, rec.lines) {
+		t.Errorf("readable = %q, want the pretty lines %q verbatim", rec.readable, rec.lines)
+	}
+	if rec.readableHidden != rec.hidden {
+		t.Errorf("readableHidden = %d, want the pretty count %d", rec.readableHidden, rec.hidden)
+	}
+
+	lines, _ := wireReadableLines(domain.WireDirectionRequest, "not json at all")
+	if len(lines) != 1 || lines[0] != "not json at all" {
+		t.Errorf("readable = %q, want the undecodable body verbatim", lines)
+	}
+}
+
+// TestReadableMergesConsecutiveDeltas pins the passage rule: a stream that arrives as one JSON
+// document per token is read back as the sentences it spelled, one passage per kind, and an empty
+// delta in the middle of a run contributes nothing without breaking it — a keep-alive chunk did not
+// end the sentence.
+func TestReadableMergesConsecutiveDeltas(t *testing.T) {
+	payload := strings.Join([]string{
+		`{"choices":[{"delta":{"reasoning_content":"weighing "}}]}`,
+		`{"choices":[{"delta":{"reasoning_content":""}}]}`,
+		`{"choices":[{"delta":{"reasoning_content":"the options"}}]}`,
+		`{"choices":[{"delta":{"content":"here is "}}]}`,
+		`{"choices":[{"delta":{"content":"the answer"}}]}`,
+	}, "\n")
+
+	lines, hidden := wireReadableLines(domain.WireDirectionResponse, payload)
+
+	want := []string{
+		readableThinkingPrefix + "weighing the options",
+		readableTextPrefix + "here is the answer",
+	}
+	if hidden != 0 {
+		t.Errorf("hidden = %d, want nothing dropped from five short deltas", hidden)
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want one passage per kind %q", lines, want)
+	}
+}
+
+// TestReadableNamesAToolCallWithoutItsArguments pins the ratified tool-call identity: the function
+// name and the first twelve runes of the enclosing call id, on a passage of its own. The arguments
+// are elided — they arrive as fragments across chunks and raw mode has them in full — and the
+// passage closes the run it interrupted rather than joining it.
+func TestReadableNamesAToolCallWithoutItsArguments(t *testing.T) {
+	payload := strings.Join([]string{
+		`{"choices":[{"delta":{"content":"calling"}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"id":"call_abcdefghijklmnop","function":{"name":"read_file","arguments":"{\"path\":\"secret.txt\"}"}}]}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\"}"}}]}}]}`,
+	}, "\n")
+
+	lines, _ := wireReadableLines(domain.WireDirectionResponse, payload)
+
+	want := []string{
+		readableTextPrefix + "calling",
+		readableToolCallPrefix + "read_file call_abcdefg",
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want the named call on its own passage %q", lines, want)
+	}
+	if joined := strings.Join(lines, "\n"); strings.Contains(joined, "secret.txt") {
+		t.Errorf("the arguments reached the readable rendering:\n%s", joined)
+	}
+}
+
+// TestReadableKeepsWhatIsNotADeltaChunk is the other half of the classifier's contract: a line that
+// spells no delta is never dropped and never guessed at. A usage-only chunk and an in-band error
+// keep their pretty form, a malformed document and the stream's sentinel arrive exactly as the
+// server sent them, and each of them closes the passage it followed.
+func TestReadableKeepsWhatIsNotADeltaChunk(t *testing.T) {
+	usage := `{"choices":[],"usage":{"total_tokens":7}}`
+	malformed := `{"choices":[{"delta":`
+	payload := strings.Join([]string{
+		`{"choices":[{"delta":{"content":"done"}}]}`,
+		usage,
+		malformed,
+		"[DONE]",
+	}, "\n")
+
+	lines, _ := wireReadableLines(domain.WireDirectionResponse, payload)
+
+	want := append([]string{readableTextPrefix + "done"}, prettyWireLine(usage)...)
+	want = append(want, malformed, "[DONE]")
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want the unclassifiable lines kept %q", lines, want)
+	}
+}
+
+// TestReadableWrapsALongPassage pins the fold-time wrap: a passage longer than readableWrapColumn
+// is broken into rows no wider than it, the kind prefix on the FIRST row only and two spaces under
+// it, so the pane — which elides rather than wraps — shows the whole passage instead of its head.
+func TestReadableWrapsALongPassage(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{name: "no space to break on", text: strings.Repeat("a", 400)},
+		{name: "broken on words", text: strings.TrimSpace(strings.Repeat("word ", 80))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := `{"choices":[{"delta":{"content":` + strconv.Quote(tc.text) + `}}]}`
+
+			lines, _ := wireReadableLines(domain.WireDirectionResponse, payload)
+
+			if len(lines) < 5 {
+				t.Fatalf("a 400-rune passage wrapped into %d rows, want at least 5", len(lines))
+			}
+			if !strings.HasPrefix(lines[0], readableTextPrefix) {
+				t.Errorf("first row = %q, want the kind prefix %q", lines[0], readableTextPrefix)
+			}
+			for i, line := range lines {
+				if n := len([]rune(line)); n > readableWrapColumn {
+					t.Errorf("row %d is %d runes wide, want at most %d", i, n, readableWrapColumn)
+				}
+				if i == 0 {
+					continue
+				}
+				if strings.HasPrefix(line, readableTextPrefix) {
+					t.Errorf("row %d = %q, want the prefix on the first row only", i, line)
+				}
+				if !strings.HasPrefix(line, readableContinuationIndent) {
+					t.Errorf("row %d = %q, want the continuation indent %q", i, line, readableContinuationIndent)
+				}
+			}
+		})
+	}
+}
+
+// TestReadableCountsItsOwnHiddenLines pins the ratified cap: maxWireRecordLines applies to EACH
+// rendering separately, with its own dropped count. A streamed reply is hundreds of pretty-printed
+// lines and a handful of readable ones, and a pane that borrowed the pretty count would announce an
+// elision the readable rows never made.
+func TestReadableCountsItsOwnHiddenLines(t *testing.T) {
+	chunks := make([]string, 0, 20)
+	for range 20 {
+		chunks = append(chunks, `{"choices":[{"delta":{"content":"x"}}]}`)
+	}
+	m := inspectorModel(t, wireEvent(domain.WireDirectionResponse, strings.Join(chunks, "\n"), 1, 0))
+
+	rec := m.wire[0]
+	if len(rec.lines) != maxWireRecordLines || rec.hidden <= 0 {
+		t.Fatalf("pretty rendering kept %d lines with %d hidden, want the cap with a dropped tail", len(rec.lines), rec.hidden)
+	}
+	if want := []string{readableTextPrefix + strings.Repeat("x", 20)}; !slices.Equal(rec.readable, want) {
+		t.Errorf("readable = %q, want the merged passage %q", rec.readable, want)
+	}
+	if rec.readableHidden != 0 {
+		t.Errorf("readableHidden = %d, want nothing dropped from a one-row rendering", rec.readableHidden)
+	}
+}
