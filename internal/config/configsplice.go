@@ -210,10 +210,10 @@ func writeConfigAtomically(path string, data []byte) error {
 		return fmt.Errorf("apogee: create a temporary config beside %q: %w", path, err)
 	}
 	name := tmp.Name()
-	defer os.Remove(name) // a no-op once the rename below has moved it into place
+	defer func() { _ = os.Remove(name) }() // a no-op once the rename below has moved it into place
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("apogee: write %q: %w", name, err)
 	}
 	if err := tmp.Close(); err != nil {

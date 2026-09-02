@@ -263,6 +263,7 @@ func resolveEnvKey(entry, variable string) (string, error) {
 	value, set := os.LookupEnv(name)
 	switch {
 	case !set:
+		//nolint:staticcheck // ST1005: ends with the api-key-cmd: and api-key-env: key spellings by design.
 		return "", fmt.Errorf("apogee: server %q: api-key-env: names %s, and that variable is not set in "+
 			"apogee's environment — export it in the shell apogee starts from, or point the entry at another "+
 			"key source; an entry that should send no key at all names none of api-key:, api-key-cmd: and "+

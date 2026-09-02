@@ -1703,6 +1703,7 @@ func ValidateServers(servers []ServerEntry) error {
 				"cap from the reply budget", i+1, s.Name, s.MaxOutputTokens)
 		}
 		if !isResponseReserveShare(s.ResponseReserve) {
+			//nolint:staticcheck // ST1005: ends with the response-reserve: key's own colon by design.
 			return fmt.Errorf("apogee: servers: entry %d (%q): response-reserve: %v is not a share of "+
 				"this server's context window — give the part of that window to hold back for the model's "+
 				"reply, above 0 and below 1 (0.2 ⇒ a fifth), or remove the key to take the top-level "+
@@ -1954,13 +1955,13 @@ func (fc fileConfig) toSystemPromptSettings() SystemPromptSettings {
 	if len(fc.SystemPromptModels) > 0 {
 		s.Models = make(map[string]PromptSource, len(fc.SystemPromptModels))
 		for model, e := range fc.SystemPromptModels {
-			s.Models[model] = PromptSource{Text: e.Text, File: e.File}
+			s.Models[model] = PromptSource(e)
 		}
 	}
 	if len(fc.SystemPromptLayers) > 0 {
 		s.Layers = make([]SystemPromptLayer, 0, len(fc.SystemPromptLayers))
 		for _, l := range fc.SystemPromptLayers {
-			s.Layers = append(s.Layers, SystemPromptLayer{Text: l.Text, File: l.File})
+			s.Layers = append(s.Layers, SystemPromptLayer(l))
 		}
 	}
 	return s

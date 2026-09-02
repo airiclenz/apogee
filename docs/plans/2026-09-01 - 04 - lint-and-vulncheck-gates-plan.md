@@ -122,7 +122,10 @@ GOOS=windows go vet ./internal/platform/...
 
 **Commit:** `refactor(security,platform): lint-clean under golangci-lint standard set`
 
-## 4. Lint clean: `internal/config`
+## 4. Lint clean: `internal/config` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): all 11 findings the uncapped linter reports for the package are fixed; the five ST1005 sites the run reported are exactly the five the item names (config.go response-reserve, configmigrate.go server:/llama-launcher:/model-profile:, keyresolve.go api-key-env:), each keeping its wording behind a reasoned nolint line. Line numbers moved since the plan's base commit (config.go:1673→1706, :1924/:1930→1957/:1963, registry.go:658→676); the linter's output was the locator, per the plan header.
+NOTES (2026-09-02): `configsplice.go` `defer os.Remove(name)` became `defer func() { _ = os.Remove(name) }()` with its trailing comment kept inline, so the temp file is still unlinked only after the rename; `registry.go`'s read-only `defer f.Close()` took the same deferred idiom, and the two error-path closes (`configmigrate.go` backup write, `configsplice.go` temp write) became bare `_ = …Close()`.
 
 Depends on item 2.
 

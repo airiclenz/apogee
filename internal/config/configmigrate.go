@@ -225,6 +225,7 @@ func verifyFold(before, after fileConfig, updated []byte, entry ServerEntry) err
 	case after.Server != entry.Name:
 		return errors.New("the edit did not point server: at the entry")
 	case !sameApartFrom(before, after, serversKey, serverKey):
+		//nolint:staticcheck // ST1005: ends with the server: key's own colon by design.
 		return errors.New("the edit would have changed more than servers: and server:")
 	}
 	return nil
@@ -375,7 +376,7 @@ func backUpConfig(path string, data []byte, now time.Time) (string, error) {
 		return "", fmt.Errorf("the backup %s could not be written (%v)", backup, err)
 	}
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		return "", fmt.Errorf("the backup %s could not be written (%v)", backup, err)
 	}
 	if err := f.Close(); err != nil {
@@ -466,6 +467,7 @@ func refuseRetiredLauncherKey(path string, data []byte) error {
 	// the off state (ValidateServers refuses one). So that config's fix is the deletion alone —
 	// pasting the value back would hand the user a config the next launch refuses.
 	if strings.EqualFold(value, "off") {
+		//nolint:staticcheck // ST1005: a refusal that closes with a paragraph break and the fix in prose.
 		return fmt.Errorf("apogee: %s still sets the retired top-level llama-launcher: key%s — the "+
 			"launcher now belongs to the servers: entry it fronts, so it follows the session from server "+
 			"to server.\n\n"+
@@ -578,6 +580,7 @@ func refuseRetiredProfileKey(path string, data []byte) error {
 	// A bare `model-profile:` configured nothing in the first place — there is no block to move, so
 	// pasting one back would hand the user a shape they never wrote.
 	if block == "" {
+		//nolint:staticcheck // ST1005: a refusal that closes with a paragraph break and the fix in prose.
 		return fmt.Errorf("apogee: %s still sets the retired global %s: key%s — a profile belongs to a "+
 			"MODEL now, so it is keyed by a pattern the model name contains: %s: {\"<pattern>\": {...}}.\n\n"+
 			"Delete that line. With no block under it, it configured nothing.", path, retiredProfileKey, where,

@@ -673,7 +673,7 @@ func validateSystemPromptFile(value string) error {
 		}
 		return fmt.Errorf("apogee: invalid system-prompt-file %q: it cannot be read", value)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if info, err := f.Stat(); err == nil && info.IsDir() {
 		return fmt.Errorf("apogee: invalid system-prompt-file %q: it is a directory, not a prompt file", value)
 	}
