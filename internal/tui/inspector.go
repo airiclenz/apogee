@@ -382,7 +382,7 @@ func wireResponsePassages(payload string) []string {
 		if prefix == "" {
 			return
 		}
-		rows = append(rows, wrapReadable(prefix, text)...)
+		rows = append(rows, wrapReadable(prefix, text, readableWrapColumn)...)
 		prefix, text = "", ""
 	}
 	// extend adds one delta to the open run of its kind, opening a run when the kind changed.
@@ -411,7 +411,7 @@ func wireResponsePassages(payload string) []string {
 				continue
 			}
 			closePassage()
-			rows = append(rows, wrapReadable(readableToolCallPrefix, toolCallLabel(call.Function.Name, call.ID))...)
+			rows = append(rows, wrapReadable(readableToolCallPrefix, toolCallLabel(call.Function.Name, call.ID), readableWrapColumn)...)
 		}
 	}
 	closePassage()
@@ -432,20 +432,27 @@ func toolCallLabel(name, id string) string {
 	return name + " " + string(short)
 }
 
-// wrapReadable breaks one passage into the rows the ring stores: the prefix on the first row, two
-// spaces on every row after it, nothing wider than readableWrapColumn runes, and a break taken at a
-// space wherever the passage offers one within the budget and mid-word where it does not — a
-// 4000-rune JSON blob a model streamed as prose still has to fit.
+// wrapReadable breaks one passage into rows: the prefix on the first row, two spaces on every row
+// after it, nothing wider than column runes, and a break taken at a space wherever the passage
+// offers one within the budget and mid-word where it does not — a 4000-rune JSON blob a model
+// streamed as prose still has to fit.
 //
 // Newlines inside the passage are the model's own paragraphing and start a row of their own; the
-// count is in RUNES rather than display cells, which is the measure the fold can take without a
-// theme and close enough for a rendering the pane elides at its real width anyway.
-func wrapReadable(prefix, text string) []string {
+// count is in RUNES rather than display cells, which is the measure a caller can take without a
+// theme.
+//
+// The column is a PARAMETER rather than the constant it began as, because the two callers measure
+// different things by it. The /inspect ring wraps at fold time, before any width is known, and
+// passes readableWrapColumn — the fixed column its rows have always used, and its rendering does
+// not change by a byte. The /thinking pane wraps at paint time and passes the pane's real row
+// budget for that frame (thinkingpane.go): its rows are prose with no raw toggle behind them, so a
+// column wider than the pane would be text the popup's truncation cuts off unrecoverably.
+func wrapReadable(prefix, text string, column int) []string {
 	var rows []string
 	lead := prefix
 	for _, segment := range strings.Split(text, "\n") {
 		for {
-			row, rest := cutReadable(lead, segment)
+			row, rest := cutReadable(lead, segment, column)
 			rows = append(rows, strings.TrimRight(row, " "))
 			lead = readableContinuationIndent
 			if rest == "" {
@@ -457,11 +464,12 @@ func wrapReadable(prefix, text string) []string {
 	return rows
 }
 
-// cutReadable takes the next row off one segment: everything that fits after lead, and whatever is
-// left over. It prefers the last space at or before the budget and cuts mid-rune-run only when the
-// segment offers none, so a wrapped paragraph breaks on words wherever words exist.
-func cutReadable(lead, segment string) (row, rest string) {
-	budget := max(readableWrapColumn-len([]rune(lead)), 1)
+// cutReadable takes the next row off one segment: everything that fits after lead within column
+// runes, and whatever is left over. It prefers the last space at or before the budget and cuts
+// mid-rune-run only when the segment offers none, so a wrapped paragraph breaks on words wherever
+// words exist.
+func cutReadable(lead, segment string, column int) (row, rest string) {
+	budget := max(column-len([]rune(lead)), 1)
 	runes := []rune(segment)
 	if len(runes) <= budget {
 		return lead + segment, ""

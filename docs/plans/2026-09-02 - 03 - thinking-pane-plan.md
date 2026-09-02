@@ -208,7 +208,14 @@ become a surface here: no render path reads it yet.
 
 **Commit:** `refactor(tui): retire the reasoning tail for a bounded per-run thinking board`
 
-## 2. The thinking rows — plain text at the pane's own width
+## 2. The thinking rows — plain text at the pane's own width — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the LOSS test paints the pane through `renderPopup` via a local
+`paintThinkingPane` helper composing the spec in `reportSpec`'s shape, not through `m.View()` as the
+item's Tests line words it — the pane's `reportKind`, command and frame wiring land in item 3, so
+`m.View()` cannot paint it yet. The truncation path under test (`popup.go`'s `truncateToWidth` at
+the pane's inner width) is the same one, and the test does fail against a constant 96-column wrap at
+width 80 (verified by temporarily substituting `readableWrapColumn`).
 
 **What.** New `internal/tui/thinkingpane.go` (the pane whole, as `usage.go` and `inspector.go`
 each hold one pane whole; `thinking.go` from item 1 holds the board behind the fold):

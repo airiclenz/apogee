@@ -462,6 +462,22 @@
 // on; the board is that retention and a strict superset of it, so the tail is retired rather than
 // kept beside it.
 //
+// thinkingpane.go is the /thinking pane itself — the report that READS that board (usage.go and
+// inspector.go each hold one pane the same way), keeping no state of its own: the rows are derived
+// for the frame that asks for them. It is deliberately the opposite of /inspect: plain wrapped
+// prose with no prefixes, no JSON, no tool-call passages and no ctrl+r toggle, one heading row per
+// record naming the Turn (and the delegate, [Model.runLabel]) and the record's text beneath it. Two
+// rules carry the weight. The rows are composed at the pane's REAL width for that frame
+// ([Model.thinkingWrapColumn]: the inner width less the marker column and the overflow bar's, the
+// bar's reserved whether or not it is drawn), because report rows are TRUNCATED to the inner width
+// and never re-wrapped (popup.go) — a fixed column would cut text off a narrow terminal in the one
+// pane with no raw rendering to recover it from, and the width-dependent row list is exactly the
+// drift [Model.reportSpec]'s clamp already corrects each frame. And the SCOPE is the view's
+// ([Model.inThinkingScope]): the main agent's thinking alone at the top level, the viewed
+// delegation's alone under a run view, applied to the committed records and the in-flight one
+// alike, with the live record at the TAIL — its own arrival position under the board's newest-last
+// order, so a fan-out's partial text is never seated between records that completed after it began.
+//
 // spinner.go paints the glyph that phrase runs beside, and the animation is this package's own
 // rather than a charm.land/bubbles/v2/spinner widget: the widget renders frames[i] through one
 // fixed style, which leaves no room for a glyph CHOSEN per frame or a colour COMPUTED per frame,
