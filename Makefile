@@ -47,6 +47,23 @@ ARGS ?=
 ACTIONLINT_VERSION := v1.7.12
 ACTIONLINT = go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 
+# golangci-lint runs the standard linter set over the module, configured by `.golangci.yml`.
+# Pinned by MODULE VERSION and fetched by `go run` for the same reason actionlint is: no
+# third-party GitHub Action in the workflow's context, and no second version literal to drift.
+# CI runs `make lint` rather than its own copy of the command. After the first run the module
+# cache serves the tool, so an offline build still lints.
+GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+# govulncheck reports known vulnerabilities in the module's dependencies, filtered to the ones
+# actually reachable from this code. Pinned by MODULE VERSION and fetched by `go run` like the
+# two tools above; CI runs `make vulncheck` so the version literal here is the only one. Unlike
+# them this target NEEDS THE NETWORK every run: it queries the Go vulnerability database, which
+# is not cached. Offline, the target fails with the tool's own error — that is by design, since
+# a vulnerability gate that silently passes when it cannot reach the database is not a gate.
+GOVULNCHECK_VERSION := v1.7.0
+GOVULNCHECK = go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+
 # The default endpoint for `make live-eval` (override: make live-eval LIVE_ENDPOINT=...).
 # Set APOGEE_LIVE_MODEL in the environment to pin the model (and bust the result cache on a swap).
 # The default is a local server, matching the addresses the live tests document themselves. A
@@ -197,6 +214,16 @@ vet:
 .PHONY: actionlint
 actionlint:
 	$(ACTIONLINT) .github/workflows/*.yml
+
+## lint: run golangci-lint (standard set, .golangci.yml) over the module
+.PHONY: lint
+lint:
+	$(GOLANGCI_LINT) run ./...
+
+## vulncheck: scan the dependency graph for known vulnerabilities (needs the network)
+.PHONY: vulncheck
+vulncheck:
+	$(GOVULNCHECK) ./...
 
 ## cross: build every release target (CGO off); fails on the first broken one
 .PHONY: cross

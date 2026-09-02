@@ -1,0 +1,28 @@
+# golangci-lint configuration. Pinned by module version in the Makefile
+# (GOLANGCI_LINT_VERSION); `make lint` and CI both run this file.
+version: "2"
+
+linters:
+  # The standard set only — no gosec/revive/... The gate exists to keep the
+  # tree clean under the checks golangci-lint ships as its default.
+  default: standard
+  settings:
+    staticcheck:
+      # Setting `checks` REPLACES golangci-lint's own default list, so the six
+      # style checks it disables by default are restated here. `-QF*` drops the
+      # whole quickfix group: those are refactoring suggestions, not defects.
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF*
+
+issues:
+  # golangci-lint caps its own output by default (50 per linter, 3 per message).
+  # A gate that hides findings is worse than no gate: report every one.
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -69,7 +69,10 @@ grep -n 'golang.org/x/text v0.39.0' go.mod
 
 **Commit:** `fix(deps): bump golang.org/x/text to v0.39.0 (GO-2026-5970)`
 
-## 2. `.golangci.yml` and the `make lint` / `make vulncheck` targets
+## 2. `.golangci.yml` and the `make lint` / `make vulncheck` targets — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the plan's parenthetical "156 at base 6e9c461b" now reads 157 — one errcheck site (`internal/stubllm/server_test.go:834`, `resp.Body.Close`) landed after the base commit. The binding acceptance holds: `make lint`'s count EQUALS the explicit uncapped run (diff produced no output), so both `issues:` caps are lifted. Item 9 owns the extra site under its "fix every finding the linter reports for these packages" scope, which makes its "18 at base" read 19.
+NOTES (2026-09-02): no CHANGELOG entry in this sidecar — item 13's text assigns the single `[Unreleased] → Added` entry for the two gates, the `.golangci.yml` and the x/text bump to item 13's sidecar.
 
 Depends on item 1 (`make vulncheck` must exit 0 here).
 
