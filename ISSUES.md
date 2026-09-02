@@ -916,3 +916,19 @@ acceptance.
   `withOffRampFloor` (`cmd/apogee/wire_live.go:440`, pinned at `cmd/apogee/wire_live_test.go:309`)
   are both covered; nothing asserts that this list applies the same floor, so a row could silently
   regress to reading OFF for an armed Mechanism.
+
+### Breadcrumb, gauge and the Tools umbrella — residue (plan `2026-09-02 - 01 - tui-breadcrumb-gauge-umbrella`)
+
+**Status:** recorded 2026-09-02 at the close of
+`docs/plans/2026-09-02 - 01 - tui-breadcrumb-gauge-umbrella-plan.md`. One piece of production code
+left without a caller by the retirement of the same-type group shape — not a regression, and it did
+not block the plan's acceptance.
+
+- [ ] **`toolCallRun` has no production caller.** With `resolveBlock`'s same-label branch deleted,
+  `toolCallRun` (`internal/tui/toolbranch.go:346-357`) is reached only from four tests that assert
+  run boundaries (`internal/tui/render_test.go:216-219`, `internal/tui/toolblock_test.go:105`,
+  `internal/tui/toolshape_test.go:550`, `internal/tui/subagentblock_test.go:493`), and three
+  doc comments still cite it as a resolution helper (`internal/tui/render.go:309,477,548`,
+  `internal/tui/blocktarget.go:70`). It was left standing because the retiring item's deletion list
+  is explicit and does not name it; golangci-lint's `unused` does not flag it while the tests call
+  it.

@@ -723,6 +723,22 @@ point is a **minor** bump, not a breaking change.
   0016 and ADR 0045 §2), with README, `CONTEXT.md`, the manual, the mechanism catalogue, the shipped
   `config.yaml` template and the enable-seam comments amended to state the new default.
 
+- **The run view's breadcrumb is a band of the frame, not a prompt block.** The sticky header is
+  painted on the `surface` role — the same black field the input box's interior and the status line
+  stand on (the new `breadcrumb` theme style) — rather than borrowing the prompt block's gray, and
+  it is now two rows: the trail, and a blank unpainted spacer beneath it that freezes with the trail
+  and holds the view's first block off the band, exactly as the frame's gap row holds the transcript
+  off the bottom block. The at-rest paint is unchanged (the spacer takes over from the rail
+  separator that used to sit there), so the view still reads crumb, blank row, task.
+
+- Fixed: the status line stays one unbroken black band when the window is too narrow to seat the context gauge — the dropped right slot's columns are painted on the status bar's own field instead of being padded later with the terminal's default background.
+
+- Any run of two or more consecutive tool calls now folds under the `✦ Tools (N calls)` umbrella, so a batch of three terminals reads as one header over a `┕ Terminal (3)` type row instead of a `✦ Terminal (3)` block of its own; a lone call still stands alone and sub-agent groups keep their own shape. A type row whose members' stats do not add up but whose outcomes all read the same now shows that one reading (four `exit 0`s aggregate to `exit 0`) instead of an empty slot.
+
+- **TUI — the same-type tool group shape is retired.** The `✦ Terminal (4)` block is gone from the code and from the canon: every run of 2+ groupable calls is the `✦ Tools (N calls)` umbrella with one type row per run. `renderToolBlock` now takes ONE view — the lone call it is the only shape for — and `resolveBlock`'s same-label branch, `shapeToolRun` and `renderToolGroup` are deleted. `docs/layout/tool-layout.md` drops the two "(same type)" sketches and gains a single-run super-group sketch; its Vocabulary now defines **run** and a **super-group** as 2+ groupable calls, one run or several.
+
+- `make check` is green again: the `members` field and `memberExpanded` method left dead on `blockState` when the same-type group shape was retired are removed, so golangci-lint's `unused` check reports nothing.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
