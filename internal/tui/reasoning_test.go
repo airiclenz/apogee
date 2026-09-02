@@ -44,7 +44,7 @@ func TestReasoningTailAppendsStrippedChunksInOrder(t *testing.T) {
 		},
 		{
 			name:   "a DEL and a bidi override go the way the escape did",
-			chunks: []string{"safe\x7f‮txet"},
+			chunks: []string{"safe\x7f\u202etxet"}, // U+202E right-to-left override
 			want:   "safetxet",
 		},
 	} {

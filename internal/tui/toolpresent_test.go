@@ -2772,7 +2772,7 @@ func TestEditRegionsCrossTheEscapeSeamStripped(t *testing.T) {
 			Leading:  []string{link},
 			Removed:  []string{"a\x1b[31m"},
 			Inserted: []string{"b\x7f"},
-			Trailing: []string{"tail‮"},
+			Trailing: []string{"tail\u202e"}, // U+202E right-to-left override
 		}}}}, workspaceRoot{})
 
 	for _, line := range tv.Details.all() {

@@ -209,7 +209,11 @@ git diff --stat -- internal/tools/network_test.go   # only the five flagged lite
 
 **Commit:** `refactor(tools): lint-clean under golangci-lint standard set`
 
-## 8. Lint clean: `internal/tui`
+## 8. Lint clean: `internal/tui` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the SA4006 site the item text located at `picker_test.go:2845` is at `:2904` in the tree — per the plan header the linter's output is the locator, never the number; all 18 reported sites were fixed and the count matches the item's "18 sites in 10 files".
+
+NOTES (2026-09-02): deleting `firstVisibleLine` left `charm.land/bubbles/v2/viewport` imported and unused in `model_test.go` (it was that helper's only package reference — the file's other `viewport` hits are `m.viewport` field accesses and two comment mentions); the import is removed in the same edit, without which the package does not compile. `gofmt` realigned the trailing-comment column on `settings_test.go:1176`, a line already changed, so no unflagged line moved.
 
 Depends on item 2.
 

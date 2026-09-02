@@ -736,7 +736,7 @@ func TestRunViewDecisionPanesKeepEnter(t *testing.T) {
 		for _, r := range "42" {
 			m = step(t, m, keyRune(r))
 		}
-		m = step(t, m, keyEnter())
+		step(t, m, keyEnter())
 
 		select {
 		case got := <-reply:

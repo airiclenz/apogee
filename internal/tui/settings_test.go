@@ -1173,7 +1173,7 @@ func TestSettingsModeSubListAppliesTheLiveRung(t *testing.T) {
 
 	m = openSettingsPane(t, step(t, m, keyShiftTab())) // the engine is on allow-edits; the file says ask-before
 	m = step(t, m, keyEnter())                         // the sub-list opens on the live rung
-	m = step(t, m, keyEnter())                         // confirm the row marked "(current)"
+	step(t, m, keyEnter())                             // confirm the row marked "(current)"
 
 	want := []settingEdit{{path: settingKeyMode, value: "allow-edits"}}
 	if !reflect.DeepEqual(log.applies, want) {
@@ -1445,7 +1445,7 @@ func TestSettingsPaneToggleAppliesWhatItPersisted(t *testing.T) {
 
 	// A refused write is not applied: the file is unchanged, so the session must be too.
 	log.err = errors.New("config.yaml is read-only")
-	m = step(t, m, keyEnter())
+	step(t, m, keyEnter())
 	if len(log.applies) != 1 {
 		t.Errorf("applies = %+v, want only the first: a refused write has nothing to apply", log.applies)
 	}
@@ -3268,8 +3268,7 @@ func TestConfigWatchReArmsUntilTheWatchEnds(t *testing.T) {
 		t.Fatalf("a landed report yielded %T, want the next wait on the same chain", cmdMsg(cmd))
 	}
 
-	next, cmd = stepCmd(t, m, configChangedMsg{alive: false})
-	m = next
+	_, cmd = stepCmd(t, m, configChangedMsg{alive: false})
 	if cmd != nil {
 		t.Errorf("the ended watch re-armed %T; nothing will ever report again", cmdMsg(cmd))
 	}

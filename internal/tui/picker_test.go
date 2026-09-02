@@ -522,7 +522,7 @@ func TestHeartbeatObservedRebindRecordsNothing(t *testing.T) {
 	rec := &fakeRecorder{saved: true}
 	m, rb := seededModelRecording(t, rec)
 
-	m = foldBeatMsg(t, m, upBeat("other-model", 16384))
+	foldBeatMsg(t, m, upBeat("other-model", 16384))
 
 	if len(rb.calls) != 1 {
 		t.Fatalf("rebind calls = %v, want the observed change applied", rb.calls)
@@ -2010,7 +2010,7 @@ func TestPickerEmptyFilterIsTheIdentityView(t *testing.T) {
 	}
 
 	m = step(t, m, keyDown()) // the second offered row, as it always was
-	m, _ = stepCmd(t, m, keyEnter())
+	stepCmd(t, m, keyEnter())
 	if len(rb.calls) != 1 || rb.calls[0].model != "third-model" {
 		t.Errorf("rebind calls = %+v, want the second row of the unfiltered offering", rb.calls)
 	}
@@ -2901,7 +2901,7 @@ func TestSubAgentsServerConfiguredAutoEntryWinsTheName(t *testing.T) {
 		for i := 0; i < len(autoNamedServers)-1; i++ { // onto the configured `auto` entry
 			m, _ = stepCmd(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 		}
-		m, _ = stepCmd(t, m, keyEnter())
+		stepCmd(t, m, keyEnter())
 
 		if want := []string{subAgentsAutoLabel}; !reflect.DeepEqual(host.retargets, want) {
 			t.Errorf("retargets = %v, want the configured entry %v", host.retargets, want)

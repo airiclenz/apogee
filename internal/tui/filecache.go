@@ -87,7 +87,7 @@ func walkWorkspaceFiles(root string, limit int) []string {
 	if err != nil {
 		return nil
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	var out []string
 	_ = fs.WalkDir(r.FS(), ".", func(p string, d fs.DirEntry, err error) error {

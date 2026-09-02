@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -2588,7 +2587,7 @@ func TestModelAskMultiSelectWithNothingCheckedSendsTheHighlightedRow(t *testing.
 	m, reply := newMultiAskModel(t)
 
 	m = step(t, m, keyDown())
-	m, _ = stepCmd(t, m, keyEnter())
+	stepCmd(t, m, keyEnter())
 	if got := takeAnswer(t, reply); got != "beta" {
 		t.Errorf("answer = %q, want the highlighted label %q", got, "beta")
 	}
@@ -2603,7 +2602,7 @@ func TestModelAskMultiSelectFreeTextReplacesTheChecks(t *testing.T) {
 		m = step(t, m, keySpace()) // alpha ticked, then abandoned for free text
 		m = typeInput(t, m, "neither")
 
-		m, _ = stepCmd(t, m, keyEnter())
+		stepCmd(t, m, keyEnter())
 		if got := takeAnswer(t, reply); got != "neither" {
 			t.Errorf("answer = %q, want only the typed text %q", got, "neither")
 		}
@@ -4710,11 +4709,6 @@ func TestModelNoBuilderByValue(t *testing.T) {
 // Transcript scroll-follow, sticky header and auto-grow input (P2.7 — TUI presentation pass)
 // ----------------------------------------------------------------------------
 
-// firstVisibleLine returns the viewport's top visible line, styling stripped.
-func firstVisibleLine(vp viewport.Model) string {
-	return strings.SplitN(ansiPattern.ReplaceAllString(vp.View(), ""), "\n", 2)[0]
-}
-
 // A reply longer than the screen keeps its tail in view as it streams — the transcript follows
 // generated output — with the prompt it belongs to overlaid at the top row as the sticky header.
 // This is the reported bug: the reply used to stream out of sight below a prompt pinned to the top.
@@ -5337,7 +5331,7 @@ func TestWheelOnShortTranscriptDoesNotDetach(t *testing.T) {
 }
 
 // firstViewLine returns the top line of the full View (styling stripped). The sticky-header
-// overlay writes to View, not the viewport, so firstVisibleLine (viewport-only) cannot see it.
+// overlay writes to View, not the viewport, so the viewport alone cannot see it.
 func firstViewLine(m Model) string {
 	return strings.SplitN(plain(m.View()), "\n", 2)[0]
 }

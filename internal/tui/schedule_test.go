@@ -357,7 +357,7 @@ func TestScheduleModePickerTakesAuto(t *testing.T) {
 	m, _ = typeCommand(t, m, "/schedule tidy the logs")
 	m = step(t, m, keyEnter())
 	m = step(t, m, keyDown())
-	m = step(t, m, keyEnter())
+	step(t, m, keyEnter())
 
 	if len(sch.added) != 1 {
 		t.Fatalf("Add calls = %d, want 1", len(sch.added))

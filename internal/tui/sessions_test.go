@@ -250,7 +250,7 @@ func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 		}
 		// A per-Turn save writes the resumed view back over the record — which is exactly what the
 		// next round loads, so anything persisted here compounds.
-		m = driveOneSave(t, m, domain.Session{})
+		driveOneSave(t, m, domain.Session{})
 		calls := host.savedCalls()
 		storeMeta(host, "sess-1", "france question", "/ws/a", time.Now(), 0, calls[len(calls)-1].transcript)
 	}
@@ -1242,7 +1242,7 @@ func TestSessionBrowserFilteredVerbsActOnTheRowShown(t *testing.T) {
 		if cmd == nil {
 			t.Fatal("y dispatched no record write")
 		}
-		m = runWrites(t, m, cmd)
+		runWrites(t, m, cmd)
 
 		if _, still := host.stored["parser"]; still {
 			t.Error("the filtered row's session survived the delete")

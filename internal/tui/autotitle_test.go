@@ -778,7 +778,7 @@ func TestRenameBareSendsTheWholeUserSide(t *testing.T) {
 		m = idle(t, m)
 	}
 
-	m, cmd := sendPrompt(t, m, "/rename")
+	_, cmd := sendPrompt(t, m, "/rename")
 	if cmd == nil {
 		t.Fatal("bare /rename dispatched no naming call")
 	}
