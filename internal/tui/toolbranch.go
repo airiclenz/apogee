@@ -343,25 +343,6 @@ func renderSubDetails(th theme, tv toolView, indent, width int) []string {
 	return paintToolBody(th, tv, tv.Details.all(), subDetailFrame(indent), width)
 }
 
-// toolCallRun returns the consecutive tool-call entries starting at entries[i] that fold into one
-// grouped block, as the painters' input records ([paintInput]). WHICH entries those are is
-// [sameLabelRun]'s answer — same sub-agent depth, same friendly Label, every member groupable —
-// asked here for the records the painter needs, so a run and the umbrella that lists such runs as
-// its rows (toolSuperGroup) cannot come to disagree about where a run ends. It
-// returns nil when entries[i] is not a groupable tool call, and a one-record run when nothing
-// follows it — the caller renders both as single blocks.
-//
-// It answers with the records rather than with the views alone because the block needs both halves
-// of what it folds: the views its rows say (toolViews), and the per-member state its rows read and
-// its key names (memberFlags, blockKey). Stating the run once is what keeps those two over one value.
-func toolCallRun(entries []entry, i int) []paintInput {
-	n := sameLabelRun(entries, i)
-	if n == 0 {
-		return nil
-	}
-	return paintInputs(entries[i : i+n])
-}
-
 // toolViews is the presentation view of each record in view order — what a block's rows are drawn
 // from, taken off the records the run was stated as. It is a copy for [paintInput]'s own reason: a
 // painter draws what it is handed and can reach nothing it could write through (ADR 0011).

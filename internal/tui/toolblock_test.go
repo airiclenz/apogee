@@ -102,8 +102,8 @@ func TestRenderSplitsEditFromReplace(t *testing.T) {
 		Arguments: []byte(`{"path":"a.go","oldText":"x","newText":"y"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "replaced text in a.go"}})
 
-	if run := toolCallRun(tr.entries, 0); len(run) != 1 {
-		t.Fatalf("toolCallRun over Edit then Replace = %d views, want 1 — the labels differ", len(run))
+	if run := sameLabelRun(tr.entries, 0); run != 1 {
+		t.Fatalf("sameLabelRun over Edit then Replace = %d calls, want 1 — the labels differ", run)
 	}
 	got := renderPlain(tr, 80)
 	for _, want := range []string{"┝ Edit ", "┕ Replace "} {

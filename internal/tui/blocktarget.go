@@ -67,7 +67,7 @@ type lineTarget struct {
 // and which of the block's entries a click there flips, said as an OFFSET from the block's head. A
 // single block marks everything 0 — it has one entry and the head is it — and a grouped block marks
 // each member row with the member's index, which is that call's offset by construction
-// (toolCallRun walks adjacent entries forward, so views[n] is entries[head+n]).
+// (sameLabelRun walks adjacent entries forward, so views[n] is entries[head+n]).
 //
 // The offset is relative for the reason the kinds carry no entry index at all: a painter knows the
 // shape it is drawing and not where in the scrollback it sits, and [transcript.renderView] alone

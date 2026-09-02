@@ -490,8 +490,8 @@ func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 			t.Fatalf("entry %d heads a span of %d; the premise here is a head with none", i, span)
 		}
 	}
-	if run := toolCallRun(tr.entries, 0); run != nil {
-		t.Fatalf("toolCallRun over the two refused delegations = %d views, want none — a solo call heads no run", len(run))
+	if run := sameLabelRun(tr.entries, 0); run != 0 {
+		t.Fatalf("sameLabelRun over the two refused delegations = %d calls, want none — a solo call heads no run", run)
 	}
 
 	want := strings.Join([]string{

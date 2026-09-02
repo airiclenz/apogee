@@ -306,7 +306,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		// the resolver hands THAT to its painter and to its key, so what a block paints and what its
 		// memo names are one value (paintcache.go). The entries themselves stay with the walk, which
 		// is the only part that needs them — where a block ENDS is a question about the list
-		// (subAgentGroupAt, subAgentSpan, toolSuperGroup, toolCallRun), never about a paint.
+		// (subAgentGroupAt, subAgentSpan, toolSuperGroup, sameLabelRun), never about a paint.
 		in := root.painted(t.entries[i])
 		// One question, asked once: what block starts here? The answer carries its shape, the records
 		// it covers, its paint and the index the walk resumes at ([resolvedBlock]), so the step past a
@@ -474,7 +474,7 @@ func (r paintRoot) inputs(entries []entry) []paintInput {
 }
 
 // rebase rewrites a block's painter records to the root's level, in place — the records are built
-// fresh for the block being resolved ([paintInputs], toolCallRun), never shared with the entries
+// fresh for the block being resolved ([paintInputs]), never shared with the entries
 // they were read off. It is the one place the rebase reaches a multi-entry block, so a block's head
 // and its span can never be painted at levels that disagree, and it is what the paint key reads:
 // the records the rows are drawn from are the records the key names (paintcache.go).
@@ -545,7 +545,7 @@ type resolvedBlock struct {
 // of them is a block of its own.
 //
 // It reads the entry LIST, because where a block ends is a question about the list (subAgentGroupAt,
-// subAgentSpan, toolSuperGroup, toolCallRun); everything it hands back speaks in paint records
+// subAgentSpan, toolSuperGroup, sameLabelRun); everything it hands back speaks in paint records
 // instead, which is what keeps a painter to what it needs to draw and nothing it could write through
 // (paintcache.go, ADR 0011).
 func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, blink bool, root paintRoot) resolvedBlock {

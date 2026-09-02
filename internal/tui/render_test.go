@@ -213,11 +213,11 @@ func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
 		tr.entries[1].tool.Label = tr.entries[0].tool.Label
 		tr.entries[1].tool.Details = toolBody{}
 
-		if run := toolCallRun(tr.entries, 0); len(run) != 1 {
-			t.Errorf("toolCallRun over the first read = %d views, want 1 — a Firing breaks the run", len(run))
+		if run := sameLabelRun(tr.entries, 0); run != 1 {
+			t.Errorf("sameLabelRun over the first read = %d calls, want 1 — a Firing breaks the run", run)
 		}
-		if run := toolCallRun(tr.entries, 1); run != nil {
-			t.Errorf("toolCallRun at the firing block = %v, want nil — it heads no group of its own", run)
+		if run := sameLabelRun(tr.entries, 1); run != 0 {
+			t.Errorf("sameLabelRun at the firing block = %d calls, want 0 — it heads no group of its own", run)
 		}
 	})
 

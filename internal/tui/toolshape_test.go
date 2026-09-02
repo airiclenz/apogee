@@ -547,8 +547,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "ok\nPASS\ndone"}})
 
-		if run := toolCallRun(tr.entries, 0); len(run) != 2 {
-			t.Fatalf("toolCallRun over the two Terminal calls = %d views, want 2 — a body no longer breaks a run", len(run))
+		if run := sameLabelRun(tr.entries, 0); run != 2 {
+			t.Fatalf("sameLabelRun over the two Terminal calls = %d calls, want 2 — a body no longer breaks a run", run)
 		}
 		if !tr.setTypeExpanded(0, true) {
 			t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")

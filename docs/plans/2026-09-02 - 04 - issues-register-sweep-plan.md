@@ -556,7 +556,11 @@ while a non-off-ramp id absent from the block comes back `Enabled: false`. Model
 
 ---
 
-## 13. Retire `toolCallRun`
+## 13. Retire `toolCallRun` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the four rewritten guards translate 1:1 — `toolCallRun` returned `paintInputs` over exactly `sameLabelRun`'s `n` entries and nil at `n == 0`, so `len(run) != K` became `run != K` and `run != nil` became `run != 0`; every assertion and every painted-output check after it is unchanged, and the messages say "calls" rather than "views" because `sameLabelRun` answers a count, not records.
+NOTES (2026-09-02): the three enumeration comments that listed `toolCallRun` among the list-questions (`internal/tui/render.go:309`, `:548`, `internal/tui/blocktarget.go:70`) name `sameLabelRun` in its place — the same question, now asked directly; `internal/tui/render.go:477` simply drops it, leaving `([paintInputs])`, since that sentence is about where records are built.
+NOTES (2026-09-02): `ISSUES.md:922-923` still carries the entry this item retires — left untouched exactly as the item's regression guard directs (`ISSUES.md` and `docs/plans/` are not this item's files); the register sweep is item 19's.
 
 **What.** With `resolveBlock`'s same-label branch gone, `toolCallRun`
 (`internal/tui/toolbranch.go:346-363`) has no production caller — verified repo-wide: the only
