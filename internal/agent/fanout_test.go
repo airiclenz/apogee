@@ -521,9 +521,10 @@ func seatCalls(runOn ...string) []domain.ToolCall {
 // TestFanOutWidth_MixedSeatsTakeTheSmallerCap pins the seat-aware width (ADR 0069): a reply the
 // model SPLIT across both Delegation seats is sized by the smaller of the two servers' caps,
 // because one pool runs the whole group and a wider one would overrun whichever server the children
-// in flight happen to be on. Every reply that is not split — one seat, no target to split onto, no
-// `run_on` on the menu, below depth 0 — falls through to fanOutWidth unchanged, which is what the
-// rows without a mixed reply are here to prove.
+// in flight happen to be on. A reply that is not split keeps its own seat's cap: an all-session
+// reply is sized by the session server even with a target latched (ADR 0069 decision 7), and every
+// other unsplit reply — no target to split onto, no `run_on` on the menu, below depth 0 — falls
+// through to fanOutWidth unchanged, which is what the rows without a mixed reply are here to prove.
 func TestFanOutWidth_MixedSeatsTakeTheSmallerCap(t *testing.T) {
 	t.Parallel()
 
@@ -562,8 +563,23 @@ func TestFanOutWidth_MixedSeatsTakeTheSmallerCap(t *testing.T) {
 			runOn: []string{"sub-agents-server", "sub-agents-server", "", ""}, want: 3,
 		},
 		{
-			name:       "one seat: every call on the session seat is fanOutWidth's row verbatim",
+			name:       "one seat: every call on the session seat keeps the SESSION's cap (ADR 0069 decision 7)",
 			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true,
+			runOn: []string{"session", "session", "session"}, want: 2,
+		},
+		{
+			name:       "one seat: every call explicitly on the target seat keeps the target's cap",
+			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true,
+			runOn: []string{"sub-agents-server", "sub-agents-server", "sub-agents-server"}, want: 3,
+		},
+		{
+			name:       "one seat: all-session with nothing latched is the session cap it always was",
+			sessionCap: 2, target: nil, seatChoice: true,
+			runOn: []string{"session", "session", "session"}, want: 2,
+		},
+		{
+			name:       "one seat: all-session with seat choice disarmed runs on the target and keeps its cap",
+			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: false,
 			runOn: []string{"session", "session", "session"}, want: 3,
 		},
 		{

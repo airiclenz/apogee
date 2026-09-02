@@ -99,7 +99,10 @@ func (a *Agent) fanOutWidth(delegations int) int {
 // sized by min(session cap, target cap) — the smaller of the two, because ONE pool runs the whole
 // group and a pool wider than either server's cap would overrun that server whichever children
 // happened to be in flight. A reply that lands entirely on one seat is not split at all and keeps
-// that seat's own width, which is fanOutWidth's rule verbatim.
+// THAT seat's own width: for the Sub-agent server that is fanOutWidth's rule verbatim, and for the
+// session seat it is the session server's cap even while a target is latched — ADR 0069 decision
+// 7's "a single-seat reply keeps its seat's cap", which fanOutWidth cannot honour on its own
+// because delegationCap answers with the latched target's cap whenever a target exists.
 //
 // The smaller cap is deliberately the whole rule rather than a per-seat accounting: two pools, or
 // slots counted per seat, would buy width in the mixed case at the price of a second scheduler in
@@ -116,6 +119,18 @@ func (a *Agent) fanOutWidthFor(calls []domain.ToolCall) int {
 	}
 	target := a.delegationTarget()
 	if !a.seatsAreSplit(calls, target) {
+		// ADR 0069 decision 7, the one case fanOutWidth gets wrong: with a target latched
+		// delegationCap answers with the TARGET's cap, but a reply whose every call asked for
+		// the session seat runs entirely on the session server and must be sized by ITS cap.
+		// Gated beside the target on publishesSeatChoice exactly as seatsAreSplit is — under
+		// `sub-agents-choice: fixed` run_on is ignored (subagent.go), so an all-session reply
+		// still runs on the target and keeps the target's cap.
+		if target != nil && publishesSeatChoice(a.tools) && a.allAskedSession(calls) {
+			if width := a.parallelAgentsCap(); width > 1 {
+				return min(width, len(calls))
+			}
+			return 1
+		}
 		return a.fanOutWidth(len(calls))
 	}
 	// A split reply always has a usable target — a child only lands on the far seat because one is
@@ -153,6 +168,21 @@ func (a *Agent) seatsAreSplit(calls []domain.ToolCall, target *DelegationTarget)
 		onSubAgentsServer = true
 	}
 	return onSession && onSubAgentsServer
+}
+
+// allAskedSession reports whether EVERY call in the reply EXPLICITLY asked for the session seat.
+// The explicitness is the whole point: askedSeat answers seatConfigured for a call that named no
+// seat and for one whose argument does not parse, and neither is an ask — both land wherever the
+// configured default routes them, which with a target latched is the Sub-agent server. So a reply
+// mixing an explicit `run_on: "session"` with an unnamed call is not an all-session reply and is
+// sized by the ordinary rule.
+func (a *Agent) allAskedSession(calls []domain.ToolCall) bool {
+	for _, call := range calls {
+		if a.askedSeat(call) != seatSession {
+			return false
+		}
+	}
+	return true
 }
 
 // askedSeat reports the Delegation seat one call named, seatConfigured for every call that named

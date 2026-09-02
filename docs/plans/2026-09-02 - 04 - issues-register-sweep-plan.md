@@ -278,7 +278,9 @@ TestDelegationRecognisersReadThroughTheRoutingNote && go test ./cmd/apogee/ -run
 
 ---
 
-## 7. A single-seat reply keeps its seat's cap
+## 7. A single-seat reply keeps its seat's cap — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): consequential edit — internal/agent/fanout_test.go: the table test's own doc comment claimed every unsplit reply "falls through to fanOutWidth unchanged", which this item's change makes false; re-worded in the same edit (file already in the item's Files list).
 
 **What.** ADR 0069 decision 7 says "a single-seat reply keeps its seat's cap", but `fanOutWidthFor`
 (`internal/agent/dispatch.go:113-127`) sends every unsplit reply through `fanOutWidth` →
