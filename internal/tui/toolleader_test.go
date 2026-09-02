@@ -20,7 +20,7 @@ import (
 // below it catches the opposite failure, a toolLabel role that paints nothing at all.
 func TestToolHeaderLabelStyled(t *testing.T) {
 	th := newTheme(scheme.Default())
-	block := renderToolBlock(th, []toolView{{Label: "Read", Target: "main.go"}}, 80, blockState{}).lines
+	block := renderToolBlock(th, toolView{Label: "Read", Target: "main.go"}, 80, blockState{}).lines
 	head := block[0]
 
 	if got, want := ansi.Strip(head), "✦ Read"; got != want {
@@ -288,7 +288,7 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := renderToolBlock(th, []toolView{tc.view}, tc.width,
+			lines := renderToolBlock(th, tc.view, tc.width,
 				blockState{expanded: tc.expanded}).lines
 			branch := strip(lines[1])
 
@@ -344,7 +344,7 @@ func TestDemotedLineKeepsTheSpellingItWasWrittenWith(t *testing.T) {
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: printed + "\n"}, ws)
 
 	th := newTheme(scheme.Default())
-	lines := renderToolBlock(th, []toolView{tv}, width, blockState{expanded: true}).lines
+	lines := renderToolBlock(th, tv, width, blockState{expanded: true}).lines
 	branch, body := strip(lines[1]), strip(strings.Join(lines[2:], "\n"))
 
 	if !strings.Contains(branch, "exit 0") {
@@ -396,7 +396,7 @@ func TestGitCommitSlotIsTheShortHashAtEveryWidth(t *testing.T) {
 				Arguments: []byte(`{"message":"` + subject + `"}`)}, "", workspaceRoot{})
 			tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: output + "\n"}, workspaceRoot{})
 
-			lines := renderToolBlock(th, []toolView{tv}, tc.width, blockState{expanded: true}).lines
+			lines := renderToolBlock(th, tv, tc.width, blockState{expanded: true}).lines
 			branch, body := strip(lines[1]), strip(strings.Join(lines[2:], "\n"))
 
 			if !strings.Contains(branch, hash) {

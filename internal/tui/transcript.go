@@ -1502,8 +1502,8 @@ func (t *transcript) closeSuperGroup(head int) bool {
 
 // toolRun is one RUN of tool calls: the maximal stretch of adjacent entries carrying the same
 // friendly Label at the same sub-agent depth, every one of them foldable into a member row
-// (groupable). It is the unit both folded shapes are built from — a same-label group IS one run, and
-// a super-group is two or more of them under one umbrella — and a lone call is a run of 1
+// (groupable). It is the unit the umbrella is built from — one row per run, and an umbrella is one
+// such run of 2+ calls or two or more runs under one header — and a lone call is a run of 1
 // (docs/layout/tool-layout.md, "Vocabulary").
 //
 // It is stated as an index pair rather than as the views it covers because the INDEX is what the

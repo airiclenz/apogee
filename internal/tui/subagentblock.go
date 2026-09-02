@@ -272,7 +272,7 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 func renderSubAgentRun(th theme, head paintInput, span []paintInput, width int, blink bool) blockPaint {
 	view := collapsedSubAgentView(head, span)
 	view.finished = subAgentFinished(head)
-	block := renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
+	block := renderToolBlock(th, view, railedWidth(width, head.depth), blockState{
 		elides: true,
 		live:   !subAgentReported(head) || anyOpenCall(span),
 		blink:  blink,
@@ -401,8 +401,8 @@ const subAgentGroupLabel = "Sub-Agent"
 
 // renderSubAgentGroup paints a folded group of adjacent delegations — "✦ Sub-Agent (3)" over one
 // row per agent, the agent's name on the left and its verdict in the outcome slot
-// (docs/layout/tool-layout.md, Rules). It is the same list the same-label group is
-// (renderToolGroup), and the member rows go through the very painter that block's do, so a
+// (docs/layout/tool-layout.md, Rules). It is the same list the umbrella is
+// (renderSuperGroup), and the member rows go through the very painter that block's do, so a
 // delegation reads as a row of a list wherever it is folded.
 //
 // What is NOT here is the half that makes a delegation different: its RUN. A framed member's span is

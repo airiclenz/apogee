@@ -625,19 +625,22 @@
 // (trimBlankLines) and interior blank runs collapse outside fenced code, so layout.md's "exactly
 // one empty line between blocks" holds; a tool header drops its square brackets for a bold-gold
 // label (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and
-// consecutive same-label calls at the same depth fold into one block (toolCallRun /
-// groupable) headed by "✦ Label (N)". Grouping is render-time only — the append-only entry list, the
-// call/result pairing, and transcript.hasOpenToolCall are untouched, so a call arriving mid-stream
-// joins its group on the next repaint. What a call CARRIES has stopped mattering to it: a Terminal
-// call and its output group like a batch of reads, each member held to one row with its body behind an
+// consecutive groupable calls at the same depth fold under one umbrella (toolSuperGroup /
+// groupable) headed by "✦ Tools (N calls)", one type row per run of a single label — a run of four
+// terminals and a read followed by a terminal take that same shape (plan "2026-09-02 - 01"; the
+// separate "✦ Label (N)" group it replaced is gone). Grouping is render-time only — the append-only
+// entry list, the call/result pairing, and transcript.hasOpenToolCall are untouched, so a call
+// arriving mid-stream joins its umbrella on the next repaint. What a call CARRIES has stopped
+// mattering to it: a Terminal call and its output group like a batch of reads, each member held to
+// one row with its body behind an
 // indicator of its own (renderGroupMember), and a presenter that needs its block left alone says so
 // outright (toolView.solo — the answered ask_user record, and the sub_agent call whose block heads
 // a whole run even when the run came to nothing).
 //
-// The shape a tool call takes is uniform, and one renderer draws it: [renderToolBlock] takes a
-// slice of [toolView] — a lone call is a slice of one — and emits a ✦ header carrying the **label
-// alone, never a target**, then one ┝/┕ branch per call led by that call's target
-// ([renderToolBranch]). A call's outcome is split in two, and that split — not any line count —
+// The shape a tool call takes is uniform, and one renderer draws it: [renderToolBlock] takes ONE
+// [toolView] — a lone call, the only shape a groupable call keeps outside the umbrella — and emits
+// a ✦ header carrying the **label alone, never a target**, then a ┝/┕ branch led by that call's
+// target ([renderToolBranch]). A call's outcome is split in two, and that split — not any line count —
 // is the grammar: the one-line [toolView] Summary fills the branch row's right-aligned outcome
 // slot, a dotted ⋯ leader flexing between it and the target ("┕ main.go ⋯⋯⋯ 154 lines",
 // "┕ main.go ⋯⋯⋯ +2 −2"; an in-flight call has none yet and lets the dots run to the row's edge),
@@ -649,9 +652,9 @@
 // counts — the reason the standalone and grouped paths were converged rather than kept in sync —
 // and a body of one line lays out exactly like a body of ten. Where they part is the ROW BUDGET a
 // group imposes and the STATE it hands out: a collapsed member is one line wearing its own ▶ at the
-// block's right edge, and a member opens ALONE — the group header toggles nothing, each member is
-// painted by its own entry's expanded flag and every row it paints is marked back to that entry
-// ([renderToolGroup], [renderExpandedMember], [blockPaint.addFor]) — where a block of one spends up
+// block's right edge, and a member opens ALONE — the umbrella header carries no member's state, each
+// member is painted by its own entry's expanded flag and every row it paints is marked back to that entry
+// ([renderSuperGroup], [renderExpandedMember], [blockPaint.addFor]) — where a block of one spends up
 // to three rows collapsed and toggles from ANY row it paints, header, leader row and body alike, the
 // whole-surface rule the prompt block already followed. The `+N more lines` marker is the one row
 // that does not: it belongs to the collapsed paint, so a click there only ever opens. Whichever
@@ -945,7 +948,7 @@
 // both read had long earned (blocktarget_test.go is the suite named for it);
 // subagentblock.go the run span, its railed frame and the collapsed sub-agent umbrella;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
-// banner beside the presented-block painter; toolblock.go the tool block, group and super-group
+// banner beside the presented-block painter; toolblock.go the tool block and the super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the
 // promote-guard that flexes it; blockstate.go the [blockState] a painter is told and the
 // predicates that decide what a collapsed block hides; toolbranch.go the ┝/┕ branch rows and the

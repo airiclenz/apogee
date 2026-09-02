@@ -577,17 +577,19 @@ so the shell returns to the screen it had.
 **A tool block's shape is specced in [`docs/layout/tool-layout.md`](docs/layout/tool-layout.md),
 and that file is canon.** It draws every row of one — the target on the left, the dotted leader, the
 outcome slot flush against the row's right edge, the state indicator past it — and it rules on
-everything that follows from that shape: what a run of same-label calls folds into, what a
-mixed-type **super-group** (`✦ Tools (N calls)`) folds into, the two fold states a call has and the
+everything that follows from that shape: what a run of 2+ groupable calls folds into — the
+**super-group** (`✦ Tools (N calls)`), one type row per run of a single tool, whether that is one
+run or several of different tools — the two fold states a call has and the
 `see less…` footer that closes an open one, what a click and the keyboard block cursor reach, the
 order things give way in when a row runs out of room, and the per-tool table of labels, collapsed
 detail, outcome stat and expanded rows. Where that file and this one disagree about a tool block,
 **that file wins**. What stays here is the grammar every block obeys, tool or not: the row budget,
 the colour roles, how a path is spelled, what a body may say, and the blank line between blocks.
 
-**The label.** A tool header is `✦ ` plus the tool's label, plus — on a grouped block — the member
-count `(N)`, **and nothing else — never a target**. That holds for every block alike: a grouped
-run, a lone call, a call still in flight, and the stray-result `result` header. The target always
+**The label.** A tool header is `✦ ` plus the tool's label, **and nothing else — never a target**;
+the super-group's umbrella header is `✦ Tools` plus its total call count `(N calls)`, and the member
+count `(N)` belongs to a **type row** inside it rather than to a header. That holds for every block
+alike: a lone call, a call still in flight, and the stray-result `result` header. The target always
 leads the first branch line instead, so the block reshapes around its targets rather than under
 them. The label carries no brackets and is rendered **bold in the scheme's `tool-header` role**
 (`#E0D090` under `dark`) — a role of its own rather than the `code` role inline code and fenced

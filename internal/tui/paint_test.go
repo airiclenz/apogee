@@ -861,12 +861,17 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
-			lines := renderToolBlock(th, views, width, blockState{}).lines
-			if len(lines) != len(views)+1 {
-				t.Fatalf("the block painted %d rows, want the header and its %d branches:\n%s",
-					len(lines), len(views), strings.Join(mapStrip(lines), "\n"))
+			// One block per view: a run of two folds under the umbrella now, so the branch row
+			// each of these calls paints is the LONE block's (renderToolBlock takes one view).
+			var branches []string
+			for _, tv := range views {
+				lines := renderToolBlock(th, tv, width, blockState{}).lines
+				if len(lines) != 2 {
+					t.Fatalf("the block painted %d rows, want the header and its one branch:\n%s",
+						len(lines), strings.Join(mapStrip(lines), "\n"))
+				}
+				branches = append(branches, lines[1])
 			}
-			branches := lines[1:]
 
 			// A leader row fills its room exactly — the dots take up whatever the target and the
 			// outcome leave — so a tab measured as nothing would show up here as a row of the

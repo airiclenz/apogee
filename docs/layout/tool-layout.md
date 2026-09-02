@@ -46,22 +46,24 @@ record of a shape the screen no longer has.
   join a super-group — a sub-agent block or group breaks the run.
 - dotted lines like `⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯` must be painted in a damped color
   (new `tool-leader` scheme role, dark + light values)
-- **time order is always kept.** Calls are never reordered to merge same-type
-  calls; a super-group gets one row per *consecutive run* of the same type
-  (`read_file, terminal, read_file` = three rows).
+- **time order is always kept.** Calls are never reordered to merge calls of
+  one tool type that were not adjacent; a super-group gets one row per
+  *consecutive run* (`read_file, terminal, read_file` = three rows).
 
 ## Vocabulary
 
-- **group** — 2+ consecutive calls of the same tool type.
-- **super-group** — 2+ adjacent runs of different tool types (a lone call
-  counts as a run of 1). Breakers are today's group breakers: any non-tool
+- **run** — the maximal stretch of adjacent calls of one tool type; a lone
+  call is a run of 1. A run is never a block of its own: it is one **type row**
+  of the super-group below.
+- **super-group** — 2+ groupable calls, whether that is one run of a single
+  tool type or adjacent runs of different types. Breakers: any non-tool
   entry between calls (narration, note, approval, error), and any sub-agent
   block. The umbrella header reads `✦ Tools (N calls)` — N = total calls,
-  painted in the faint count tone. It forms **live**, the moment a second
-  different-label run starts; the running call is its last row, wearing the
-  spinner star.
+  painted in the faint count tone. It forms **live**, the moment the second
+  groupable call is placed; the running call is its last row, wearing the
+  spinner star. Only a LONE groupable call stays a standalone block.
 - `<tool-header>` — short human label of one call ("Read", "Terminal", …).
-- `<tool-type-header>` — the same label for a run of same-type calls; plurality is carried by `(<group-count>)`.
+- `<tool-type-header>` — the tool's label on a type row, standing for the whole run; plurality is carried by `(<group-count>)`.
 - `<tool-details>` — the one-line collapsed summary of one call. Usually the key argument (path, pattern, command). It may differ from what opening the call shows: a sub-agent shows its *name* here and its task/result inside its run view.
 - `<tool-details-row-1..n>` — the expanded content of one call (diff, output, listing, …).
 - `<tool-top-level-details>` — the right-aligned outcome slot. It carries the
@@ -157,31 +159,9 @@ where a collapsed call that hides body counts it in that same slot:
                                                                       see less…
 ```
 
-## Grouped tools collapsed (same type)
+## Grouped tools collapsed (super-group)
 
-```text
-✦ <tool-type-header> (<group-count>)
-  ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
-  ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
-  ┕ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
-```
-
-## Grouped tools partly expanded (same type)
-
-```text
-✦ <tool-type-header> (<group-count>)
-  ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
-  ┝ <tool-details-row-1>                                                      ▼
-  │ <tool-details-row-2>
-  │ <...>
-  │ <tool-details-row-n>
-  │                                                                   see less…
-  ┕ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
-```
-
-## Grouped tools collapsed (different types / super-group)
-
-One row per consecutive same-type run, in time order. A row's
+One row per consecutive run, in time order. A row's
 `<tool-top-level-details>` aggregates its run.
 
 ```text
@@ -191,7 +171,18 @@ One row per consecutive same-type run, in time order. A row's
   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
 ```
 
-## Grouped tools expanded 1st step (different types / super-group)
+## Grouped tools collapsed (one run, super-group)
+
+A run of 2+ calls of ONE tool type takes that same shape: the umbrella header
+over a single type row. It keeps the row count of the retired `✦ Terminal (4)`
+group it replaced — one header, one row — and reads the same everywhere.
+
+```text
+✦ Tools (4 calls)
+  ┕ Terminal (4) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 ▶
+```
+
+## Grouped tools expanded 1st step (super-group)
 
 ```text
 ✦ Tools (N calls)
@@ -203,7 +194,7 @@ One row per consecutive same-type run, in time order. A row's
   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
 ```
 
-## Grouped tools expanded 2nd step (different types / super-group)
+## Grouped tools expanded 2nd step (super-group)
 
 ```text
 ✦ Tools (N calls)

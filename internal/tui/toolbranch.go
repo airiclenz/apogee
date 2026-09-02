@@ -346,8 +346,8 @@ func renderSubDetails(th theme, tv toolView, indent, width int) []string {
 // toolCallRun returns the consecutive tool-call entries starting at entries[i] that fold into one
 // grouped block, as the painters' input records ([paintInput]). WHICH entries those are is
 // [sameLabelRun]'s answer — same sub-agent depth, same friendly Label, every member groupable —
-// asked here for the records the painter needs, so the same-label group and the super-group that
-// lists such runs as its rows (toolSuperGroup) cannot come to disagree about where a run ends. It
+// asked here for the records the painter needs, so a run and the umbrella that lists such runs as
+// its rows (toolSuperGroup) cannot come to disagree about where a run ends. It
 // returns nil when entries[i] is not a groupable tool call, and a one-record run when nothing
 // follows it — the caller renders both as single blocks.
 //
@@ -379,7 +379,7 @@ func toolViews(ins []paintInput) []toolView {
 // row no longer has to hold everything the call has to say: it shows one leader row and keeps its
 // body behind its own indicator (renderGroupMember, design call 3). So a batch of Terminal calls
 // with output and a batch of edits with their diffs group exactly as a batch of reads always has,
-// which is what a scrollback of ten same-label calls needed most.
+// which is what a scrollback of ten calls of one tool needed most.
 //
 // A call with NO target still keeps its own block: there the detail lines ARE the branches
 // (renderToolBranch), so there is no leader row to lead. And solo is the
@@ -409,7 +409,7 @@ func renderOrphanResult(th theme, text string, width int, expanded bool) blockPa
 	for _, ln := range splitLines(text) {
 		details = append(details, detailLine{Text: ln})
 	}
-	return renderToolBlock(th, []toolView{{Label: "result", Details: newToolBody(details)}}, width,
+	return renderToolBlock(th, toolView{Label: "result", Details: newToolBody(details)}, width,
 		blockState{expanded: expanded})
 }
 

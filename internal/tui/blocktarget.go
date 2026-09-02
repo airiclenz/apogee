@@ -21,7 +21,7 @@ package tui
 // targetHeader is named for the line it started on and is no longer only that line: a single tool
 // block wears it on EVERY row it paints — its header, its leader row, its body — and a grouped
 // block's MEMBER rows wear it too, each naming its own call rather than the block's head, which is
-// how a group of ten opens one of them (renderToolBlock, renderToolGroup). What the kind means has
+// how an umbrella of ten opens one of them (renderToolBlock, renderSuperGroup). What the kind means has
 // not moved: it is the toggle, whatever line it lands on.
 //
 // targetBreadcrumb is the run view's header row (transcript.setRoot, render.go): the ← main › name

@@ -1527,9 +1527,10 @@ func expandedFlags(m Model) []bool {
 // same reason modelWithToolBlock drops it: the blocks then sit high enough to be aimed at.
 //
 // An approval note stands between the two calls, and it is what keeps them TWO blocks: consecutive
-// same-label calls fold into one group however much body they carry (groupable, render.go), and a
-// group has no header to click. Anything that is not a tool call ends a run, so the note both
-// separates them and is the least eventful thing that can (TestRenderGroupBreakers).
+// groupable calls fold under one umbrella however much body they carry (groupable, render.go), so
+// two of them would be one block with no branch row of its own to click. Anything that is not a
+// tool call ends a run, so the note both separates them and is the least eventful thing that can
+// (TestRenderGroupBreakers).
 func modelWithTwoToolBlocks(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
@@ -3225,8 +3226,8 @@ func modelWithSubAgentGroup(t *testing.T) Model {
 // TestSubAgentGroupMemberClickOpensItsSpan is the folded list's interaction: a member row is its own
 // click surface, so a click opens THAT delegation's span — as its run view, which is the one shape a
 // framed delegation opens into (ADR 0063) — and its siblings come nowhere near it. The breadcrumb
-// brings the list back. The group header itself toggles nothing — a list has no state of its own,
-// exactly as the same-label group's header has none.
+// brings the list back. The group header itself toggles nothing — a collapsed list has no state of
+// its own to flip.
 func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 	// The prompt is entries[0], so the three delegations head at 1, 3 and 5.
 	const first, middle, last = 1, 3, 5

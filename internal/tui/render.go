@@ -84,7 +84,7 @@ func (p *blockPaint) add(lines []string, kind targetKind) {
 }
 
 // addFor appends lines belonging to the block's member'th entry — [blockPaint.add] with the offset
-// said out loud, for the one painter whose lines do not all belong to its head (renderToolGroup).
+// said out loud, for the one painter whose lines do not all belong to its head (renderSuperGroup).
 // It exists rather than a stamping pass over finished lines because the lines and their marks have
 // to be one act (ADR 0030): a second walk deriving whose row is whose would be a second accounting,
 // and the two would part company the first time the member shape changed.
@@ -654,11 +654,12 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 		}
 	}
 	// Any run of 2+ groupable calls folds under one umbrella (toolSuperGroup) — a single same-label
-	// run and adjacent runs of DIFFERENT tools alike — which is asked before the same-label run
-	// below because a same-label run is a ROW of the umbrella rather than a block of its own. The
-	// question is only ever asked at a block head — the walk's index is one by construction, since
-	// every shape either advances by a single entry or steps over a whole block — and
-	// toolSuperGroup is only correct there: asked mid-run it would answer with a partial first run.
+	// run and adjacent runs of DIFFERENT tools alike, because a run is a ROW of the umbrella rather
+	// than a block of its own, and only a LONE groupable call falls through to the single block
+	// below. The question is only ever asked at a block head — the walk's index is one by
+	// construction, since every shape either advances by a single entry or steps over a whole
+	// block — and toolSuperGroup is only correct there: asked mid-run it would answer with a
+	// partial first run.
 	//
 	// The umbrella covers its calls and nothing else (superGroup.calls), so the walk steps
 	// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
@@ -678,38 +679,6 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 					blockState{live: live, blink: blink}).railed(th, in.depth)
 			},
 			next: head + calls,
-		}
-	}
-	// Consecutive same-label tool calls fold into one block at render time, so a batch of
-	// reads is one header plus one leader row per file. The entry list is untouched: a
-	// call that arrives mid-stream joins its group on the next repaint for free, and a run
-	// is same-depth by construction, so the label logic above fires exactly as before.
-	//
-	// The group's liveness is the group's, not its head's: a batch of reads whose first call
-	// has landed and whose last has not is still working, and the one star over them all says
-	// so. The run is entries[head:head+len(run)] by construction (toolCallRun walks adjacent
-	// entries forward), so the views' own entries are what the rule reads — and the same
-	// construction is what lets the members' EXPANDED flags be read off the run in view order
-	// and their rows be marked back by offset (blockPaint.addFor).
-	//
-	// Every one of those flags is in the paint key already: blockKey spans the whole run and
-	// spanFlags packs expanded at bit 0 of each covered entry, so opening the tenth member of a
-	// group is a different key and a fresh paint (paintcache.go).
-	if run := root.rebase(toolCallRun(t.entries, head)); len(run) > 1 {
-		live := anyOpenCall(run)
-		return resolvedBlock{
-			shape: shapeToolRun,
-			ins:   run,
-			live:  live,
-			draw: func() blockPaint {
-				return renderToolBlock(th, toolViews(run), railedWidth(width, in.depth), blockState{
-					expanded: in.expanded,
-					live:     live,
-					blink:    blink,
-					members:  memberFlags(run),
-				}).railed(th, in.depth)
-			},
-			next: head + len(run),
 		}
 	}
 	// One entry, one block. Which kinds can still be waiting, and which head a prompt stop, are the
@@ -836,7 +805,7 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 		if in.headsRun() && in.expanded && !subAgentFramed(in, 0) {
 			view = unframedSubAgentView(in)
 		}
-		return renderToolBlock(th, []toolView{view}, inner, blockState{
+		return renderToolBlock(th, view, inner, blockState{
 			expanded: in.expanded,
 			live:     !in.done,
 			blink:    blink,
@@ -848,7 +817,7 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 		// this session's Exchange and the session is idle while a Firing runs, so an animated header
 		// here would claim work is happening in this session. What says the run is going is the
 		// block's own static summary (schedule.go, scheduleRunningSummary).
-		return renderToolBlock(th, []toolView{in.tool}, inner, blockState{
+		return renderToolBlock(th, in.tool, inner, blockState{
 			expanded: in.expanded,
 			glyph:    scheduleTagGlyph,
 		}).railed(th, in.depth)

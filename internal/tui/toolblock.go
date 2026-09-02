@@ -7,12 +7,13 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 )
 
-// renderToolBlock renders one tool-call block — a single call or a whole grouped run — in the
-// one uniform shape layout.md sketches: a ✦ header carrying the **label alone — never a target**
-// (plus the ▶/▼ state indicator, below, where the header is one), then one ┝/┕
-// branch per call whose first column is that call's target. The target never sits on the header,
-// so the target COLUMN does not move the moment a second call joins the block — what changes around
-// it is the block's shape, never the place a reader's eye is already resting (layout.md, "What stays
+// renderToolBlock renders one tool-call block — a LONE call, which is the only shape a groupable
+// call keeps outside the umbrella — in the one uniform shape layout.md sketches: a ✦ header
+// carrying the **label alone — never a target** (plus the ▶/▼ state indicator, below, where the
+// header is one), then one ┝/┕ branch whose first column is the call's target. The target never
+// sits on the header, so the target COLUMN does not move the moment a second call arrives and the
+// two fold under an umbrella instead — what changes around it is the block's shape, never the place
+// a reader's eye is already resting (layout.md, "What stays
 // standalone"). The caller frames the block for depth (renderView
 // and renderEntryLines apply the rail) — width is already the railed inner column.
 //
@@ -24,15 +25,12 @@ import (
 // target on the left, the outcome slot flush against the row's right edge, and a dotted leader
 // flexing between the two (leaderRow). The outcomes therefore line up down the block's edge without
 // a target column to pad to — the leader absorbs whatever the targets differ by, which is what lets
-// a block of one and a block of ten put their outcomes in the same place. An empty slice renders
-// nothing — every caller passes at least one view, and a renderer on the repaint path must not be
-// the thing that panics if one ever does not.
+// this block and an umbrella's member rows put their outcomes in the same place.
 //
-// A block of MANY is a different shape from a block of one, and it hands off at the top
-// (renderToolGroup): its header carries the member count and no state of its own, and each member
-// is held to a single row with an indicator of its own at the block's right edge. The two shapes
-// share this entry point — and the row shape itself — because what a caller has is a slice of views
-// and which shape that is, is this function's answer.
+// A run of 2+ groupable calls is NOT this shape: it folds under the umbrella instead
+// ([renderSuperGroup]), one type row per run and one member row per call. That is why this function
+// takes ONE view rather than a slice — there is no longer a count for it to answer for, and a
+// countless header over many branch rows is a shape no canon names.
 //
 // state is the SINGLE block's view state, and its expanded half changes exactly one thing: an
 // expanded block paints its retained body whole while a collapsed one paints the compact shape,
@@ -50,8 +48,8 @@ import (
 // header. It has no exception: the `+N more lines` count rides the leader row's outcome slot
 // (collapsedRemainder), so the block emits no line that means anything other than "toggle me".
 //
-// The surface exists when the collapsed paint HIDES something — either inside the views
-// (blockHidesWhenCollapsed) or outside them (state.elides, the sub-agent run's span) — because a
+// The surface exists when the collapsed paint HIDES something — either inside the view
+// (blockHidesWhenCollapsed) or outside it (state.elides, the sub-agent run's span) — because a
 // block with nothing to reveal has nothing to toggle, so a short bodiless call keeps a click's
 // selection meaning down every row it paints. The mark is state-independent by design: an expanded
 // block still marks its rows, which is what lets the same click collapse it again.
@@ -64,73 +62,25 @@ import (
 // from the row (th.toolIndicator) so it reads as chrome beside the text rather than as the last word
 // of it. The one shape that keeps the glyph on its HEADER is the targetless one, which paints no
 // branch row for it to sit at the edge of (docs/layout/tool-layout.md, "Single tool collapsed").
-func renderToolBlock(th theme, views []toolView, width int, state blockState) blockPaint {
-	if len(views) == 0 {
-		return blockPaint{}
-	}
-	// The promote-guard runs before anything is asked of the views, both shapes through the one
-	// call: what it changes is what the block hides, and every question below is asked of that.
-	views = guardPromotions(th, views, toolRowCells(th, width), branchMarker(true))
-	if len(views) > 1 {
-		return renderToolGroup(th, views, width, state)
-	}
+func renderToolBlock(th theme, view toolView, width int, state blockState) blockPaint {
+	// The promote-guard runs before anything is asked of the view: what it changes is what the
+	// block hides, and every question below is asked of that.
+	view = guardPromotions(th, []toolView{view}, toolRowCells(th, width), branchMarker(true))[0]
 	// toggle is the block's whole click surface in one value — targetHeader when there is something
 	// behind the block and targetNone when there is not — settled once and spent on every row the
 	// block emits, so the header, the branches and the body cannot come to disagree about whether
 	// this block is clickable.
 	toggle := targetNone
-	label := th.toolLabel.Render(views[0].Label)
-	if state.elides || blockHidesWhenCollapsed(th, views, width) {
+	label := th.toolLabel.Render(view.Label)
+	if state.elides || blockHidesWhenCollapsed(th, []toolView{view}, width) {
 		toggle = targetHeader
-		if views[0].Target == "" {
+		if view.Target == "" {
 			label += " " + th.toolIndicator.Render(stateIndicator(state.expanded))
 		}
 	}
 	var out blockPaint
 	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), toggle)
-	for i, tv := range views {
-		out.join(renderToolBranch(th, tv, state.branchMarkerIn(i, len(views)), width, state.expanded, toggle))
-	}
-	return out
-}
-
-// renderToolGroup paints a folded run of same-label calls — the sketch's "✦ Terminal (3)" block
-// (docs/layout/tool-layout.md). It is a list, and everything about the shape follows from that: the
-// header names the label and how many calls carry it, and a COLLAPSED member gets exactly ONE row
-// so ten grouped calls read as ten lines rather than as ten blocks that happen to share a star.
-//
-// The header wears the count in the faint indicator tone rather than the label's bold gold
-// (design call 6): "(3)" is the block's own arithmetic, not part of the tool's name, and a reader
-// scanning the gold down the left edge should not read the number as one. It wears no state
-// indicator and is NOT a click target, because a group has no single state to toggle — expansion
-// belongs to the members, each of which owns its own.
-//
-// That ownership is the whole of what this function does with state beyond the star: each member is
-// painted by ITS OWN entry's flag (state.memberExpanded, filled by renderView from the run's
-// entries), and each member's rows are marked for its OWN entry (blockPaint.addFor, whose offset is
-// the member index because views[n] is entries[head+n]). So one member opens inside a group of ten
-// and the other nine hold still, in the paint and under the mouse alike.
-//
-// A member that hides nothing — a short target, no body — is marked targetNone and keeps a click's
-// selection meaning, the same rule the single block's header answers to (blockHidesWhenCollapsed).
-//
-// state's own expanded flag reaches nothing here: it is the head entry's, and inside a group the
-// head is just the first member.
-func renderToolGroup(th theme, views []toolView, width int, state blockState) blockPaint {
-	label := th.toolLabel.Render(views[0].Label) + " " +
-		th.toolIndicator.Render(fmt.Sprintf(groupCountFormat, len(views)))
-	var out blockPaint
-	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetNone)
-	room := toolRowCells(th, width)
-	for i, tv := range views {
-		rows, hides := renderGroupMember(th, tv, branchMarker(i == len(views)-1), memberGutter, width, room,
-			state.memberExpanded(i))
-		kind := targetNone
-		if hides {
-			kind = targetHeader
-		}
-		out.addFor(i, rows, kind)
-	}
+	out.join(renderToolBranch(th, view, state.branchMarkerIn(0, 1), width, state.expanded, toggle))
 	return out
 }
 
@@ -160,12 +110,10 @@ const (
 	superCallNoun   = "call"
 )
 
-// renderSuperGroup paints the umbrella: a run of 2+ groupable calls — one same-type run, or
+// renderSuperGroup paints the umbrella: a run of 2+ groupable calls — one run of a single tool, or
 // adjacent runs of different tools — folded under one "✦ Tools (N calls)" header, one row per run
-// in time order (docs/layout/tool-layout.md, "Grouped tools collapsed (different types /
-// super-group)"). It is the same list the same-label group is,
-// one level up — the rows stand for runs instead of for calls — and everything about the shape
-// follows from that:
+// in time order (docs/layout/tool-layout.md, "Grouped tools collapsed (super-group)"). It is a LIST whose rows stand for RUNS rather than for calls, and everything
+// about the shape follows from that:
 //
 //   - a TYPE ROW is the leader row about a whole run (leaderRowIn): the label and its "(N)" where a
 //     call would put its target, the run's aggregate in the outcome slot (runAggregate), and a ▶/▼
@@ -232,9 +180,8 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState)
 }
 
 // typeRowText is a type row's left content as it is MEASURED: the run's label, and the "(N)" beside
-// it for a run of more than one. A run of 1 counts nothing, which is the rule the same-label group's
-// header already answers to (groupCountFormat) — the number exists to say that a row stands for more
-// than the single call it otherwise looks like.
+// it for a run of more than one. A run of 1 counts nothing (groupCountFormat) — the number exists
+// to say that a row stands for more than the single call it otherwise looks like.
 func typeRowText(views []toolView) string {
 	if len(views) == 0 {
 		return ""
@@ -289,7 +236,7 @@ func superRunViews(ins []paintInput, g superGroup) []toolRunView {
 }
 
 // member's own entry is in, and reports whether the COLLAPSED paint hides anything — which is both
-// what makes the member wear an indicator and what makes its rows a click target (renderToolGroup).
+// what makes the member wear an indicator and what makes its rows a click target (renderSuperGroup).
 //
 // Collapsed, it is one screen row whatever the call is carrying — leaderRow's shape, the same one
 // the ungrouped branch line takes: the branch marker, the call's target, the dotted leader, and the
