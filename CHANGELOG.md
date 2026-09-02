@@ -627,6 +627,26 @@ point is a **minor** bump, not a breaking change.
   (thinking and reply as wrapped prose, tool calls named) — with `ctrl+r` flipping to the raw
   pretty-printed protocol and back, and the pane scoped to the sub-agent whose run view is open.
 
+- Bumped `golang.org/x/text` to v0.39.0, closing GO-2026-5970 (infinite loop on invalid input) which `govulncheck` reported as reachable from `security.normalizeHostName` via `idna.Profile.ToASCII`.
+
+- `internal/config` is clean under the pinned `golangci-lint` standard set: unchecked `Close`/`Remove` sites take the discarded-close idiom, two struct literals become the conversions `staticcheck` names, and the five deliberately announced error strings keep their wording behind `//nolint:staticcheck // ST1005: <reason>`.
+
+- `internal/provider`, `internal/domain`, `internal/judge`, `internal/library` and `internal/keystore` are clean under the pinned `golangci-lint` standard set: discarded `Close`/`Fprintln` returns take the explicit discard idiom, the tool-spec wire literal becomes a `chatToolFunction(t)` conversion, and an ineffectual slice re-slice in a domain test is dropped.
+
+- `internal/present`, `internal/scheme` and `internal/skills` are clean under the pinned `golangci-lint` standard set: the read-only document, connection, `os.Root` and bounded-read handles take the explicit discard idiom on close, and the two best-effort cleanup removes on an error path (`os.Remove` of a half-written scheme, `os.RemoveAll` of a half-copied skill) discard their return explicitly.
+
+- `internal/tools` is clean under the `golangci-lint` standard set: twelve deferred read-handle closes take the standing discard idiom, and the five bidi/zero-width URL-safety test fixtures spell their invisible characters as `\uXXXX` escapes (identical bytes).
+
+- `internal/tui` is clean under the `golangci-lint` standard set: the fourteen discarded-model assignments in the package's tests drop the ineffectual `m = …` (no assertion changed), the dead `firstVisibleLine` test helper is deleted, `walkWorkspaceFiles`' deferred `os.Root` close takes the standing discard idiom, and the two bidi test fixtures spell their invisible character as a `\u202e` escape (identical bytes).
+
+- `internal/agent`, `internal/mcp`, `internal/stubllm` and `internal/mechanisms` are clean under the `golangci-lint` standard set: discarded `Close` results now use the standing idiom, and the file-hint fixture's bidi-override character is written as its `\u202e` escape with the literal's bytes unchanged.
+
+- `cmd/apogee` production files are clean under the `golangci-lint` standard set: the fifteen unchecked `fmt.Fprint*` status writes to each command's injected output writer now discard explicitly (`_, _ = fmt.Fprintln(...)`). Announced output text is unchanged.
+
+- Lint: the root tests, `cmd/apogee` tests, `cmd/stubllm` and `internal/tuitest` are clean under the `golangci-lint` standard set — discarded closes use the deferred-discard idiom, `TestMain`'s env/cleanup calls discard explicitly, one same-type assertion dropped, and `tuitest`'s `Screen().Write` now checks its error.
+
+- `make lint` and `make vulncheck` gates: `golangci-lint` (standard set, configured by the new `.golangci.yml`, QF* quickfixes off) and `govulncheck` now run from `make check` and from the CI check job, each pinned by module version and fetched with `go run` the way `actionlint` is. `govulncheck` needs the network and fails with the tool's own error when the vulnerability database is unreachable.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
