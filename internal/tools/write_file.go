@@ -105,7 +105,8 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	content := fmt.Sprintf("wrote %d bytes to %s%s", len(args.Content), args.Path, resolved)
+	content := fmt.Sprintf("wrote %d bytes to %s%s", len(args.Content), args.Path, resolved) +
+		syntaxTrailer(args.Path, args.Content)
 	if readErr != nil {
 		return okInsertedRegion(call.ID, content, args.Content), nil
 	}

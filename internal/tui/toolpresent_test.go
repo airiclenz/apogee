@@ -3491,3 +3491,27 @@ func detailDump(lines []detailLine) string {
 	}
 	return b.String()
 }
+
+// A write result now carries the tool's syntax verdict on the lines behind its sentence
+// (internal/tools, syntaxTrailer). The card is unmoved by it: write_file's detail hook is
+// firstLineDetail, which takes the FIRST line and only that, so the trailer reaches the model and
+// never the pane.
+func TestWriteCardShowsOnlyTheFirstLineOfASyntaxTrailer(t *testing.T) {
+	const trailed = "wrote 31 bytes to main.go\nsyntax check: 1 problem(s)\n  line 4: expected declaration, found '}'"
+
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
+		Arguments: []byte(`{"path":"main.go","content":"package main\n"}`)}, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: trailed}, workspaceRoot{})
+
+	if got := firstLineDetail(trailed).Summary.Text; got != "wrote 31 bytes to main.go" {
+		t.Errorf("detail = %q, want the tool's own sentence alone", got)
+	}
+	if got := tv.Summary.Text; got != "1 line" {
+		t.Errorf("summary = %q, want the written line count the branch always showed", got)
+	}
+	for _, d := range tv.Details.all() {
+		if strings.Contains(d.Text, "syntax check") {
+			t.Errorf("body line %q, want the trailer kept off the card entirely", d.Text)
+		}
+	}
+}

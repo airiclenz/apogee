@@ -58,7 +58,17 @@ test -z "$(grep -rn 'syntaxengine\|checkSyntax' internal/mechanisms/)"
 
 ---
 
-## 2. Write tools append a syntax trailer to their success result
+## 2. Write tools append a syntax trailer to their success result — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's test fixture reads "a `.go` fixture written with a missing brace"
+alongside the assertion `syntax check: 1 problem`; go/parser reports TWO errors for every missing
+closing brace ("expected ';'" + "expected '}'"), so the one-problem fixtures are unbalanced-brace Go
+files with a stray extra `}` — a mismatched brace either way, and the only shape that yields the
+single located problem the assertion names.
+NOTES (2026-09-02): the TUI case asserts through `firstLineDetail` directly plus the view's body,
+because `write_file`'s `argStat` (`writtenLinesStat`) re-applies "1 line" over the branch slot and a
+result carrying `domain.EditRegions` skips the detail hook entirely (`absorbProse`) — so the
+trailer's absence from the card is what the case pins, on the summary-less path where it could leak.
 
 **What:** after a write lands, `write_file`, `edit_existing_file` (both paths), `single_find_and_replace` and `multi_find_and_replace` run `syntaxcheck.Check(path, finalContent)` and append a trailer to the success content. One helper in a new `internal/tools/syntaxtrailer.go`: `syntaxTrailer(path, content string) string` returns `""` when `Language` is empty or the result is valid, else `"\nsyntax check: N problem(s)\n  line L: message"` per error (≤ 10 lines, then `  … and M more`). For Go the header reads `syntax check:`; for every other language it reads `syntax check (heuristic):` — the bracket heuristic is known to false-positive on JS/TS regex literals (`code-audit-2026-08-25.md:25`), so its wording must not read as authoritative. The trailer is appended AFTER the `resolvedTargetNote` tail on all five success returns (`write_file.go:110,112`, `file_edit.go:116,122`, `find_replace.go:126,267`), so every existing `"<msg> → resolves to <real>"` equality stays true; the final-content variables are `args.Content`, `patched`/`args.Content`, `updated`, `content`. `okEditRegions`/`okInsertedRegion` signatures are unchanged — the trailer is folded into the `content` argument by each caller. The result stays a success with its Summary; the TUI card still shows only the first line (`firstLineDetail` for all four tools in `internal/tui/toolregistry.go:211-258`), so the trailer reaches the model only. Depends on item 1.
 **Files:** `internal/tools/syntaxtrailer.go`, `internal/tools/syntaxtrailer_test.go`, `internal/tools/write_file.go`, `internal/tools/file_edit.go`, `internal/tools/find_replace.go`, `internal/tools/write_file_test.go`, `internal/tools/file_edit_test.go`, `internal/tools/find_replace_test.go`, `internal/tools/doc.go`, `CONTEXT.md`, `docs/manual/configuration.md`

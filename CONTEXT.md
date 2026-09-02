@@ -1286,7 +1286,12 @@ whose outcome the view used to re-derive carry one (`read_file`, `list_dir`,
 `grep`, `view_diff`, `web_search`, `git_status`, and — as **Edit regions** — the four writing tools
 `write_file`, `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`) — `read_file`'s
 carries the locate facts too, the substring asked for and the absolute line numbers it fell
-on. A summary is **never sent to the model** — it is display data a host consumes, and the
+on. The model-facing complement is the **syntax trailer**: the four writing tools append their
+in-process syntax verdict on the bytes they just wrote to the prose half of the same success result
+(`internal/tools/syntaxtrailer.go` over `internal/syntaxcheck`), so the model reads what its edit
+did to the file while the host's card still shows only the tool's own first line — the write always
+lands, and the trailer is feedback, never a refusal.
+A summary is **never sent to the model** — it is display data a host consumes, and the
 summary *value* has no wire form; what the transcript codec may mirror into the session record are
 the **facts** a variant carries, which is what the neutral codec in `internal/session` does for the
 **Edit regions** below

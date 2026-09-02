@@ -548,3 +548,89 @@ func TestEditExistingFile_NoRegionsNoSummary(t *testing.T) {
 		})
 	}
 }
+
+// Both of edit_existing_file's write paths — the whole-content replacement and the patch apply —
+// carry the syntax verdict on the bytes they left behind. The result stays a success either way:
+// the edit landed, and the trailer is what the model reads to decide whether to fix it.
+func TestEditExistingFile_Execute_AppendsTheSyntaxTrailer(t *testing.T) {
+	t.Parallel()
+
+	t.Run("whole content", func(t *testing.T) {
+		t.Parallel()
+
+		root := tempRoot(t)
+		path := writeTempFile(t, root, "main.go", "package main\n\nfunc main() {}\n")
+		const broken = "package main\n\nfunc main() {}\n}\n"
+
+		result, err := NewEditExistingFile(root).Execute(context.Background(),
+			callWith(t, "c1", map[string]any{"path": "main.go", "content": broken}))
+		if err != nil {
+			t.Fatalf("Execute returned a Go error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("result is an error: %q — a broken edit still lands", result.Content)
+		}
+		if _, ok := result.Summary.(domain.EditRegions); !ok {
+			t.Errorf("Summary = %#v, want the Edit regions a successful edit always carries", result.Summary)
+		}
+		if !strings.HasPrefix(result.Content, "updated main.go\n") {
+			t.Errorf("Content = %q, want the trailer behind the tool's own sentence", result.Content)
+		}
+		if !strings.Contains(result.Content, "syntax check: 1 problem") || !strings.Contains(result.Content, "line 4:") {
+			t.Errorf("Content = %q, want the located syntax problem", result.Content)
+		}
+		if got := string(mustRead(t, path)); got != broken {
+			t.Errorf("file = %q, want exactly the bytes the call asked for", got)
+		}
+	})
+
+	t.Run("patch", func(t *testing.T) {
+		t.Parallel()
+
+		root := tempRoot(t)
+		writeTempFile(t, root, "main.go", "package main\n\nfunc main() {\n\tprintln(1)\n}\n")
+
+		patch := strings.Join([]string{
+			"*** Begin Patch",
+			"*** Update File: main.go",
+			"@@",
+			"-\tprintln(1)",
+			"+\tprintln(1)",
+			"+}",
+			"*** End Patch",
+		}, "\n")
+
+		result, err := NewEditExistingFile(root).Execute(context.Background(),
+			callWith(t, "c1", map[string]any{"path": "main.go", "content": patch}))
+		if err != nil {
+			t.Fatalf("Execute returned a Go error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("result is an error: %q — a broken patch apply still lands", result.Content)
+		}
+		if !strings.HasPrefix(result.Content, "applied patch to main.go (1 hunk)\n") {
+			t.Errorf("Content = %q, want the trailer behind the tool's own sentence", result.Content)
+		}
+		if !strings.Contains(result.Content, "syntax check: 1 problem") {
+			t.Errorf("Content = %q, want the located syntax problem", result.Content)
+		}
+	})
+}
+
+// A language the checker does not know reads exactly as it always did: no trailer, no extra line,
+// nothing for a model to answer.
+func TestEditExistingFile_Execute_NoTrailerForAnUnknownLanguage(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeTempFile(t, root, "notes.txt", "old")
+
+	result, err := NewEditExistingFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "notes.txt", "content": "func main( {"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.Content != "updated notes.txt" {
+		t.Errorf("Content = %q, want the bare sentence for a path with no known language", result.Content)
+	}
+}

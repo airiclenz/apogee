@@ -112,14 +112,16 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		if len(hunks) > 1 {
 			suffix = "s"
 		}
-		content := fmt.Sprintf("applied patch to %s (%d hunk%s)%s", args.Path, len(hunks), suffix, resolved)
+		content := fmt.Sprintf("applied patch to %s (%d hunk%s)%s", args.Path, len(hunks), suffix, resolved) +
+			syntaxTrailer(args.Path, patched)
 		return okEditRegions(call.ID, content, string(original), patched), nil
 	}
 
 	if err := safeWriteFile(ctx, args.Path, t.root, []byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	return okEditRegions(call.ID, "updated "+args.Path+resolved, string(original), args.Content), nil
+	return okEditRegions(call.ID, "updated "+args.Path+resolved+syntaxTrailer(args.Path, args.Content),
+		string(original), args.Content), nil
 }
 
 // ----------------------------------------------------------------------------

@@ -123,7 +123,8 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	return okEditRegions(call.ID, "replaced text in "+args.Path+resolved, string(content), updated), nil
+	return okEditRegions(call.ID, "replaced text in "+args.Path+resolved+syntaxTrailer(args.Path, updated),
+		string(content), updated), nil
 }
 
 // ----------------------------------------------------------------------------
@@ -263,7 +264,8 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	if n > 1 {
 		suffix = "s"
 	}
-	message := fmt.Sprintf("applied %d replacement%s to %s%s", n, suffix, args.Path, resolved)
+	message := fmt.Sprintf("applied %d replacement%s to %s%s", n, suffix, args.Path, resolved) +
+		syntaxTrailer(args.Path, content)
 	return okEditRegions(call.ID, message, string(raw), content), nil
 }
 

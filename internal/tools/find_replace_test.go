@@ -525,3 +525,80 @@ func TestFindReplace_NoRegionsNoSummary(t *testing.T) {
 		})
 	}
 }
+
+// Both find-replace tools report the syntax verdict on the file they leave behind. The single
+// tool's fixture is Go — the real parser, so the header states its verdict plainly.
+func TestSingleFindReplace_Execute_AppendsTheSyntaxTrailer(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	path := writeTempFile(t, root, "main.go", "package main\n\nfunc main() {}\n// end\n")
+
+	result, err := NewSingleFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "main.go", "oldText": "// end", "newText": "}"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("result is an error: %q — a breaking replacement still lands", result.Content)
+	}
+	if _, ok := result.Summary.(domain.EditRegions); !ok {
+		t.Errorf("Summary = %#v, want the Edit regions a successful replacement always carries", result.Summary)
+	}
+	if !strings.HasPrefix(result.Content, "replaced text in main.go\n") {
+		t.Errorf("Content = %q, want the trailer behind the tool's own sentence", result.Content)
+	}
+	if !strings.Contains(result.Content, "syntax check: 1 problem") || !strings.Contains(result.Content, "line 4:") {
+		t.Errorf("Content = %q, want the located syntax problem", result.Content)
+	}
+	if want := "package main\n\nfunc main() {}\n}\n"; string(mustRead(t, path)) != want {
+		t.Errorf("file = %q, want exactly the bytes the replacement produced", mustRead(t, path))
+	}
+}
+
+// The multi tool's fixture is JavaScript, whose verdict comes from the bracket heuristic — known to
+// false-positive on a regex literal — so its header must name itself a heuristic rather than let a
+// model read a guess as a finding.
+func TestMultiFindReplace_Execute_NamesTheHeuristicInItsTrailer(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeTempFile(t, root, "app.js", "function f() {\n  return 1;\n}\n")
+
+	result, err := NewMultiFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "app.js", "replacements": []map[string]any{
+			{"oldText": "return 1;", "newText": "return 2;"},
+			{"oldText": "}\n", "newText": ""},
+		}}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("result is an error: %q — a breaking replacement still lands", result.Content)
+	}
+	if !strings.HasPrefix(result.Content, "applied 2 replacements to app.js\n") {
+		t.Errorf("Content = %q, want the trailer behind the tool's own sentence", result.Content)
+	}
+	if !strings.Contains(result.Content, "syntax check (heuristic): ") {
+		t.Errorf("Content = %q, want the heuristic header for javascript", result.Content)
+	}
+}
+
+// A file whose language the checker does not know reads exactly as it always did.
+func TestMultiFindReplace_Execute_NoTrailerForAnUnknownLanguage(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeTempFile(t, root, "notes.txt", "alpha\n")
+
+	result, err := NewMultiFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "notes.txt", "replacements": []map[string]any{
+			{"oldText": "alpha", "newText": "func main( {"},
+		}}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.Content != "applied 1 replacement to notes.txt" {
+		t.Errorf("Content = %q, want the bare sentence for a path with no known language", result.Content)
+	}
+}

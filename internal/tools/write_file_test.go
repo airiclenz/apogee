@@ -375,3 +375,72 @@ func TestWriteFile_Execute_ToolErrors(t *testing.T) {
 		})
 	}
 }
+
+// A write that breaks the file it writes still LANDS: the result stays a success, keeps its
+// summary, and the file holds exactly the bytes asked for. What changes is that the model is told,
+// on the same result, that what it just wrote does not parse — structural feedback where it acted,
+// not a refusal it has to argue with.
+func TestWriteFile_Execute_AppendsTheSyntaxTrailer(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	const broken = "package main\n\nfunc main() {}\n}\n"
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "main.go", "content": broken}))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("result is an error: %q — a broken write still lands", result.Content)
+	}
+	if _, ok := result.Summary.(domain.EditRegions); !ok {
+		t.Errorf("Summary = %#v, want the Edit regions a successful write always carries", result.Summary)
+	}
+	if !strings.HasPrefix(result.Content, "wrote 31 bytes to main.go\n") {
+		t.Errorf("Content = %q, want the trailer behind the tool's own sentence", result.Content)
+	}
+	if !strings.Contains(result.Content, "syntax check: 1 problem") || !strings.Contains(result.Content, "line 4:") {
+		t.Errorf("Content = %q, want the located syntax problem", result.Content)
+	}
+
+	written, err := os.ReadFile(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(written) != broken {
+		t.Errorf("file = %q, want exactly the bytes the call asked for", written)
+	}
+}
+
+// The trailer rides BEHIND the resolved-target disclosure, so the sentence that says where the
+// write really landed is still the first line of the result and still says what it always said.
+func TestWriteFile_Execute_SyntaxTrailerFollowsTheResolvedTarget(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	real := filepath.Join(root, "real")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "target.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("real", "target.go"), filepath.Join(root, "code.go")); err != nil {
+		t.Skipf("symlinks unavailable on this host: %v", err)
+	}
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "code.go", "content": "package main\n\nfunc main() {}\n}\n"}))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	head, tail, found := strings.Cut(result.Content, "\n")
+	if want := "wrote 31 bytes to code.go → resolves to " + realPath(t, filepath.Join(real, "target.go")); head != want {
+		t.Errorf("first line = %q, want the unchanged disclosure %q", head, want)
+	}
+	if !found || !strings.HasPrefix(tail, "syntax check: ") {
+		t.Errorf("Content = %q, want the trailer on the lines after the disclosure", result.Content)
+	}
+}

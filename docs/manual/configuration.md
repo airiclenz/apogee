@@ -57,9 +57,13 @@ choice:
 # ~/.apogee/config.yaml
 mechanisms:
   validate: true   # tool-call validation + auto-retry
-  syntax: true     # write-content syntax check
+  syntax: true     # write-content syntax check + auto-retry
   autofix: true    # formatter pass on tool-call payloads
 ```
+
+The `syntax` mechanism is only the RETRY half: every write tool already appends its own
+in-process syntax verdict to the success result it hands the model, always on and not
+configurable, and enabling `syntax` adds the automatic correction Turn on top of it.
 
 An unknown ID is a startup error that lists the IDs this build knows; `--bypass`
 still wins (an enabled non-off-ramp mechanism does not fire under bypass). The same

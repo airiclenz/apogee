@@ -299,6 +299,11 @@
 // precisely because a per-tool copy could drift on what a region is while painting into the same
 // body. Beside it, okEditRegions is the success result those tools return through, and the one
 // place the shared "a pair with no regions attaches no summary" rule is applied.
+// syntaxtrailer.go is syntaxTrailer, the in-process syntax verdict the four writing tools append
+// to their own success sentence: internal/syntaxcheck run over the bytes just written, rendered as
+// the trailing "syntax check:" lines the model reads. It is prose only — never an error, never a
+// refusal — and it lives beside regions.go for the same reason: one wording for all five write
+// returns rather than a per-tool copy that could drift.
 // git_stage.go is stageGitPaths, the best-effort git index update move_file and delete_file
 // share: one index probe for the source path's trackedness, one `git add -A` over :(literal)
 // pathspecs, and the note a caller appends to its result so the model reads that the index
