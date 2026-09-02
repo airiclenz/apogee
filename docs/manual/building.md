@@ -20,9 +20,11 @@ A `Makefile` wraps the common Go invocations:
 | `make install` | Build, then copy the binary to a directory on your `PATH` |
 | `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
 | `make test` | Run the test suite with the race detector |
+| `make lint` | Run `golangci-lint` (the standard linter set, configured by `.golangci.yml`) over the module |
+| `make vulncheck` | Run `govulncheck` over the dependency graph — needs the network |
 | `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
 | `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
-| `make check` | The full acceptance gate — gofmt, vet, build, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
+| `make check` | The full acceptance gate — gofmt, vet, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
 | `make release-smoke VERSION=v0.18.0` | Verify a **published** release from the outside (see [Releasing](#releasing)) |
 | `make help` | List every target |
 
@@ -84,6 +86,13 @@ Cutting a release is four acts, in this order, and only the first two are automa
 `scripts/check-pins.sh` — every GitHub Action must be pinned to a 40-character commit SHA
 with its `# vX.Y.Z` tag in the comment beside it — and `actionlint` over the workflow files.
 Both also run in CI, so a workflow cannot regress between one push and the next.
+It also lints the module itself: `make lint` runs `golangci-lint`'s standard set under
+`.golangci.yml`, pinned by module version and fetched with `go run` exactly the way
+`actionlint` is, so it needs no separately installed tool. And `make vulncheck` runs
+`govulncheck` against the Go vulnerability database, which reports only the known
+vulnerabilities your code actually reaches; it is the one gate that needs the network, and
+it fails with the tool's own error when the database is unreachable rather than passing
+quietly. Both run in CI too.
 Windows-tagged tests run on a `windows-latest` job; `make check` on a Linux or macOS box
 compiles them (`GOOS=windows go vet`) but cannot run them.
 

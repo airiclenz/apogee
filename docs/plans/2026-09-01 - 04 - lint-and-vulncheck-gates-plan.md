@@ -325,7 +325,9 @@ grep -nE '^\s+(lint|vulncheck):' .github/workflows/ci.yml                     # 
 
 **Commit:** `build(ci): run golangci-lint and govulncheck in make check and CI`
 
-## 13. Docs: the manual and the test-drivers gate tables name the two gates
+## 13. Docs: the manual and the test-drivers gate tables name the two gates — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item offered two shapes for `docs/design/test-drivers.md`; both were used where each fits — the claim table's T-21 row now names `golangci-lint` and `govulncheck` alongside `actionlint`/`check-pins.sh` (no new T-number invented), and the "Gates and budgets" set table gains a new "lint and dependency vulnerabilities" row beside "workflow gates". Both tables keep their column shape.
 
 Depends on item 12.
 

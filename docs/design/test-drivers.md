@@ -793,7 +793,7 @@ accepted proxies with no open work.
 | Flicker during streaming (T-24) | `--tui-trace` counters: bytes written and full-frame repaints per streamed token, pinned against a ceiling | `TestE2EStreamRepaintCeiling` | Felt flicker — the repaint ceiling is the accepted proxy |
 | Desktop hand-off (T-19) | a logging fake opener installed through the `openerLookPath` package var, which is what `present.Opener.LookPath` resolves to; assert argv and wording. The refused half is the log's ABSENCE of a launch | `TestE2EPresentOpensOnlyTheAllowedFormats`; `TestE2EPresentServesWithoutLeakingTheToken` | What a real desktop application does with the file |
 | Upgrade path of an installed apogee (T-21) | post-release `make release-smoke` — archives, `SHA256SUMS`, `--version`, `brew upgrade` when `brew` is present | `make release-smoke` | `brew upgrade` before the release it upgrades to exists |
-| Tag job and action pins (T-21) | `actionlint` plus `scripts/check-pins.sh`, both run from `make check` | `make check` | — |
+| Tag job and action pins (T-21) | `actionlint` plus `scripts/check-pins.sh`, both run from `make check`; the same gate turns the two module-wide checks on the tree itself — `golangci-lint` under `.golangci.yml` (`make lint`) and `govulncheck` over the dependency graph (`make vulncheck`) | `make check` | A vulnerability the Go vulnerability database does not yet carry, and any defect the standard linter set does not model |
 | Landlock residual honesty on an older ABI (T-11) | the negative direction only — the `ubuntu-latest` check job asserts `probe` discloses no residual on a modern kernel | CI job `check` | The residual itself: it needs a 5.13–6.1 kernel, and GitHub offers no runner in that window (the `ubuntu-22.04` image runs the 6.8 HWE kernel) |
 | Behaviour against a real model (T-22) | stays env-gated under `make live-eval`; unset means skip, never a silent pass | `TestE2ELiveModel` | — (needs a live tool-capable endpoint) |
 | A claim the manual makes about the environment (T-23) | no driver needed — read the manual's own section and the source that ANSWERS it. The read set is `internal/config`'s `Env… = "APOGEE_…"` constants widened by whatever `cmd/apogee` spells out; the drift is asserted in BOTH directions, and the section's own count word with it | `TestManualListsEveryEnvironmentOverride` | — |
@@ -866,6 +866,7 @@ whose twenty-five seconds ARE the claim (see below).
 | judge | no | always, unless `APOGEE_JUDGE_ENDPOINT` / `APOGEE_LIVE_ENDPOINT` is set — it joins `make live-eval` |
 | newcomer container | no | needs BOTH `docker` on PATH and the judge gate, and Linux (the host can bind on the docker bridge gateway there only, which is where the stub upstream listens); local-only, outside the budget |
 | workflow gates | not a Go test | `scripts/check-pins.sh` and `actionlint` run from `make check` and from the CI check job |
+| lint and dependency vulnerabilities | not a Go test | `golangci-lint` (`.golangci.yml`) and `govulncheck` run from `make lint` and `make vulncheck`, which `make check` and the CI check job both call; `govulncheck` needs the network and fails offline by design |
 | release smoke | not a Go test | `make release-smoke VERSION=vX.Y.Z`, by hand, only once the release is published |
 
 No build tags and no `-short`: a test that only runs when someone remembers a flag is a test nobody
