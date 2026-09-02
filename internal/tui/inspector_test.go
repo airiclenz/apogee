@@ -631,6 +631,82 @@ func TestReadableMergesConsecutiveDeltas(t *testing.T) {
 	}
 }
 
+// TestReadableClassifiesTheReasoningSpellingAsThinking pins the second wire spelling of the one
+// thinking channel: Ollama and OpenRouter send `reasoning` where llama.cpp sends
+// `reasoning_content`, and before this the mirrored delta read only the latter — an Ollama reply's
+// reasoning reached extend as two empty strings and rendered as NOTHING AT ALL, which is exactly
+// what this pane's never-hide contract forbids.
+func TestReadableClassifiesTheReasoningSpellingAsThinking(t *testing.T) {
+	payload := `{"choices":[{"delta":{"reasoning":"weighing the options"}}]}`
+
+	lines, hidden := wireReadableLines(domain.WireDirectionResponse, payload)
+
+	want := []string{readableThinkingPrefix + "weighing the options"}
+	if hidden != 0 {
+		t.Errorf("hidden = %d, want nothing dropped from one short delta", hidden)
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want the reasoning delta classified as thinking %q", lines, want)
+	}
+}
+
+// TestReadableMergesConsecutiveReasoningDeltas holds the alias to the same passage discipline the
+// canonical spelling gets: a run of `reasoning` deltas is one passage, not one row per chunk.
+func TestReadableMergesConsecutiveReasoningDeltas(t *testing.T) {
+	payload := strings.Join([]string{
+		`{"choices":[{"delta":{"reasoning":"weighing "}}]}`,
+		`{"choices":[{"delta":{"reasoning":""}}]}`,
+		`{"choices":[{"delta":{"reasoning":"the options"}}]}`,
+		`{"choices":[{"delta":{"content":"here is the answer"}}]}`,
+	}, "\n")
+
+	lines, _ := wireReadableLines(domain.WireDirectionResponse, payload)
+
+	want := []string{
+		readableThinkingPrefix + "weighing the options",
+		readableTextPrefix + "here is the answer",
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want one thinking passage per run %q", lines, want)
+	}
+}
+
+// TestReadableJoinsBothReasoningSpellingsIntoOnePassage pins that the two spellings are ONE channel:
+// a stream that switches spelling mid-reply (a proxy in front of a mixed roster) still reads as a
+// single thinking passage, because the precedence is decided per chunk and nothing latches onto the
+// spelling the first chunk happened to use.
+func TestReadableJoinsBothReasoningSpellingsIntoOnePassage(t *testing.T) {
+	payload := strings.Join([]string{
+		`{"choices":[{"delta":{"reasoning_content":"weighing "}}]}`,
+		`{"choices":[{"delta":{"reasoning":"the options"}}]}`,
+	}, "\n")
+
+	lines, _ := wireReadableLines(domain.WireDirectionResponse, payload)
+
+	want := []string{readableThinkingPrefix + "weighing the options"}
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want both spellings on one passage %q", lines, want)
+	}
+}
+
+// TestReadableKeepsContentWhenReasoningIsNotAString is why the mirrored field is json.RawMessage: a
+// server is free to send a non-string under `reasoning` (OpenRouter's terminal chunk sends null),
+// and a string-typed field would fail the whole chunk's Unmarshal — dropping its CONTENT along with
+// its reasoning, into the prettyWireLine fallback.
+func TestReadableKeepsContentWhenReasoningIsNotAString(t *testing.T) {
+	payload := strings.Join([]string{
+		`{"choices":[{"delta":{"reasoning":{"text":"weighing"},"content":"here is "}}]}`,
+		`{"choices":[{"delta":{"reasoning":null,"content":"the answer"}}]}`,
+	}, "\n")
+
+	lines, _ := wireReadableLines(domain.WireDirectionResponse, payload)
+
+	want := []string{readableTextPrefix + "here is the answer"}
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want the content classified despite the non-string reasoning %q", lines, want)
+	}
+}
+
 // TestReadableNamesAToolCallWithoutItsArguments pins the ratified tool-call identity: the function
 // name and the first twelve runes of the enclosing call id, on a passage of its own. The arguments
 // are elided — they arrive as fragments across chunks and raw mode has them in full — and the

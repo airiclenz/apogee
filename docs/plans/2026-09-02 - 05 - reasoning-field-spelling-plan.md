@@ -173,7 +173,12 @@ connection: nothing may latch onto the first spelling it sees.
 
 `fix(provider): decode the reasoning field as the thinking channel`
 
-## 2. Teach /inspect's readable view the same spelling
+## 2. Teach /inspect's readable view the same spelling — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the mirror keeps the two channel fields directly on `sseDelta` (no embedded
+struct) — the item prescribes "the same `thinking()` helper over a `json.RawMessage` field" on a
+named `sseDelta`, and ADR 0010 keeps the provider's `reasoningChannel` provider-local, so shape and
+precedence match without a second embedded type in package tui.
 
 **What.** Recast at the regression check (2026-09-02). `internal/tui/inspector.go:285-297`
 mirrors the provider's `sseChunk` (that type is unexported, so it is copied rather than imported — the comment at line 280 says so). The mirror

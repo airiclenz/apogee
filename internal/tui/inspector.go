@@ -281,20 +281,55 @@ const maxToolCallIDRunes = 12
 // members it classifies by. It MIRRORS the provider's own decode shape
 // (internal/provider/stream.go) rather than importing it because that type is unexported there; the
 // mirror is deliberately partial — a member the classifier does not read is a member this pane does
-// not need to track.
+// not need to track. Partial in WIDTH only: the members it does mirror match the provider's named
+// shape and precedence exactly, so a payload the engine classified one way cannot read as another
+// here.
 type sseChunk struct {
 	Choices []struct {
-		Delta struct {
-			Content          string `json:"content"`
-			ReasoningContent string `json:"reasoning_content"`
-			ToolCalls        []struct {
-				ID       string `json:"id"`
-				Function struct {
-					Name string `json:"name"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
+		Delta sseDelta `json:"delta"`
 	} `json:"choices"`
+}
+
+// sseDelta is the incremental payload of one streamed choice, mirroring the provider's own
+// sseDelta. It is a named type rather than an inline struct so the thinking-channel precedence can
+// hang on it as a method, exactly as it does there.
+//
+// ReasoningContent and Reasoning are ONE channel in two wire spellings, not two channels:
+// llama.cpp, vLLM and LM Studio send `reasoning_content`, while Ollama and OpenRouter send
+// `reasoning` for the same thinking stream. Neither may be "simplified" away — dropping either
+// spelling makes a whole server's reasoning render as nothing at all, which is precisely what this
+// pane's never-hide contract forbids. Reasoning is json.RawMessage and not a string on purpose: a
+// server is free to send a non-string under that key (OpenRouter's terminal chunk sends null), and
+// a string field would fail the whole chunk's Unmarshal — dropping its CONTENT along with its
+// reasoning, straight into the prettyWireLine fallback.
+type sseDelta struct {
+	Content          string          `json:"content"`
+	ReasoningContent string          `json:"reasoning_content"`
+	Reasoning        json.RawMessage `json:"reasoning"`
+	ToolCalls        []struct {
+		ID       string `json:"id"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	} `json:"tool_calls"`
+}
+
+// thinking returns this delta's reasoning under the same precedence the provider applies:
+// reasoning_content wins wherever it is NON-EMPTY, and the `reasoning` alias is read only
+// otherwise. The test is non-emptiness and never key presence — LM Studio always sends a
+// reasoning_content key and leaves it empty when the model did not reason, so a presence test would
+// block the fallback outright. Anything under `reasoning` that is not a JSON string — null, an
+// object, an absent field — reads as no reasoning at all rather than as literal bytes. The
+// precedence is per chunk: nothing latches onto the first spelling a stream happens to use.
+func (d sseDelta) thinking() string {
+	if d.ReasoningContent != "" {
+		return d.ReasoningContent
+	}
+	var text string
+	if err := json.Unmarshal(d.Reasoning, &text); err != nil {
+		return ""
+	}
+	return text
 }
 
 // wireReadableLines renders one payload the readable way for the ring: a request as its envelope
@@ -404,7 +439,7 @@ func wireResponsePassages(payload string) []string {
 			continue
 		}
 		delta := chunk.Choices[0].Delta
-		extend(readableThinkingPrefix, delta.ReasoningContent)
+		extend(readableThinkingPrefix, delta.thinking())
 		extend(readableTextPrefix, delta.Content)
 		for _, call := range delta.ToolCalls {
 			if call.Function.Name == "" {
