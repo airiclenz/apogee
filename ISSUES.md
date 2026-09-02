@@ -850,3 +850,32 @@ plan shipped — none is a regression, and none blocked the plan's acceptance.
   `layout.md:938` reads `· stopped at its step cap` with no hint that a report now follows the cap.
   TUI rendering was out of the plan's scope, so the spec text lags the shipped behaviour; either
   the row's wording moves or the spec says why it deliberately does not.
+
+---
+
+### Sub-agent naming and seat choice — residue (plan `2026-09-01 - 02 - sub-agent-naming-and-seat-choice`)
+
+**Status:** recorded 2026-09-02 at the close of
+`docs/plans/2026-09-01 - 02 - sub-agent-naming-and-seat-choice-plan.md`. Open gaps in the
+out-of-band delegation naming (ADR 0068) and the model-chosen Delegation seat (ADR 0069) that plan
+shipped — none is a regression, and none blocked the plan's acceptance.
+
+- [ ] **The status-line phrase is verified only at its seam.** `transcript.runName`
+  (`internal/tui/transcript.go:509`) is asserted directly, and the activity slot reads it at
+  `internal/tui/model.go:3324,3331` and `internal/tui/activity.go:197`; no test composes the
+  rendered `<generated name> · reading` for a run whose name arrived by rename.
+- [ ] **The seat fallback note is pinned twice and nothing fails if the two copies drift.** The
+  engine owns the literal as `seatFallbackNote` (`internal/agent/subagent.go:186`); `internal/tui`
+  pins its own copy of the same sentence (`internal/tui/toolregistry_test.go:135`), as does
+  `cmd/apogee/e2e_seat_test.go:61`. Nothing ties either copy back to the engine's constant.
+- [ ] **An all-`run_on: "session"` reply in a ROUTED session is sized by the target's cap, not the
+  session server's.** `fanOutWidthFor` (`internal/agent/dispatch.go:113-119`) reads an unsplit
+  reply as `fanOutWidth`'s row verbatim — the rule item 12's guard mandates for every single-seat
+  reply — while [ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md)
+  decision 7's "a single-seat reply keeps its seat's cap" reads the other way for that one corner.
+  The shape was unreachable before this run, so it is a scope gap rather than a regression.
+- [ ] **`sub-agents-choice: model` is inert in headless runs and daemon Firings.** The gate reaches
+  the tools only through the TUI's `toolSetSpec` (`cmd/apogee/wire_tools.go:76`, set by
+  `registryWithMCP` at `cmd/apogee/wire_tools.go:277-280` off `cmd/apogee/wire_live.go:118`), and
+  item 13's guard forbids the `apogee.Config` route the engine's own roster build would read
+  (`internal/agent/construct.go:486`); both Drivers therefore behave as `fixed`.

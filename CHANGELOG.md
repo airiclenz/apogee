@@ -444,6 +444,168 @@ point is a **minor** bump, not a breaking change.
   `ErrNoOpenExchange`, is pinned by `example_test.go`'s compile-surface block, and an
   `apogee_test.go` assertion proves it is the same sentinel the engine returns.
 
+- ADR 0068 records that a delegation the model left unnamed is named out of band, on the child's
+  own Upstream: an engine-injected `domain.DelegationNamer` the host implements, fired concurrently
+  with the child and bounded by its lifetime, gated by the existing `auto-title` key, never over a
+  name the call gave, silent on every failure, and announced as one `SubAgentNamedEvent` — the one
+  property ADR 0022's naming-call addendum did not have, and whose amendment this is. CONTEXT.md's
+  *Sub-agent* entry gains the three-deep name rule and a *Delegation name* term beside it, and the
+  sessions and headless manuals say the same switch names an unnamed delegation.
+
+- **The domain seam for naming an unnamed delegation (ADR 0068).** `internal/domain/naming.go`
+  adds `DelegationNaming` (the delegated task and whether the child is routed) and the
+  `DelegationNamer` interface the host implements; `domain.Config` gains `Namer` beside
+  `Approver`, and a nil namer means naming never fires — the bench, an embedder and every existing
+  test compose exactly as before. `domain.SubAgentNamedEvent` is the one event the naming act
+  emits, stamped with the CHILD run's identity exactly as `SubAgentPhaseEvent` is, so a rename can
+  be attributed to one member of a concurrent fan-out. Nothing fires the seam yet.
+
+- **`internal/title` names a delegation as well as a session.** `DelegationPrompt` builds the
+  naming completion from the delegated task alone, on a new embedded
+  `prompts/delegation-instruction.txt` asking for 2 to 4 lowercase words, and shares Prompt's
+  sampling, token backstop and no-reasoning ask. `SanitizeTo(raw, maxRunes)` is the
+  cap-parameterised cleanup pipeline; `Sanitize` is that pipeline at `MaxRunes` and is unchanged
+  byte-for-byte. New exported `MaxDelegateRunes = 40` is the status line's width.
+
+- **The TUI folds the new variant.** `SubAgentNamedEvent` fires the mid-Turn progress save (a run's
+  name is part of the run, not view state) and re-resolves a run view's prompt-box legend, so the
+  box never invites a message to a name the run no longer wears. Painting the new name into the
+  delegation head lands with item 5.
+
+- **A delegation the model leaves unnamed is now named while it runs.** When a `sub_agent` call
+  carries no `name`, the engine starts ONE out-of-band naming call on the host-supplied
+  `Config.Namer` (ADR 0068), concurrently with the child and bounded by its lifetime: the namer is
+  told the delegated task and whether the child runs on the Sub-agent server, the reply is cleaned
+  through the shared title sanitiser at the delegation width, and the result is announced once as a
+  `SubAgentNamedEvent` stamped with the child's own run identity (Depth+1, the spawning call's id).
+  A delegation the model named is never renamed, and every failure is silent — an error, a reply
+  with nothing usable in it, or a reply that comes back after the run was reported all leave the
+  run wearing the delegated task's first line. The agent's display name is now lock-guarded, so an
+  Approval or `ask_user` prompt raised after the rename names the child by what it is called now.
+  The naming call is neither a Turn nor a Mechanism: it moves no context gauge, spends no
+  conversation tokens, and never consults Bypass. A nil `Namer` fires nothing at all.
+
+- An unnamed delegation is now named by the host, out of band: one small completion on the CHILD's
+  own Upstream — the Sub-agent server for a routed child, this session's own server otherwise —
+  built per call like the session-naming one, with retries off and the "answer without thinking" ask
+  spelled in the dialect of the server it dials (ADR 0068). It is gated by the same `auto-title:`
+  switch that names sessions, live: a `/settings` flip or a config-file edit reaches the namer from
+  the very next spawn. Unattended runs name their delegations through the same seam, bound to the
+  run's own server and gated by `auto-title:` as it stood at startup. The `auto-title` settings row
+  now says the key names both.
+
+- A delegation the model left unnamed now wears its generated name (ADR 0068) everywhere the run is shown — the collapsed `✦ Sub-Agent` row, the run-view breadcrumb, the `Message <name>…` invitation, the status-line phrase and the `/usage` row — and the name rides the saved record, so a resumed session paints it too.
+
+- A delegation the model left unnamed now reaches a headless run and a Firing's `run.Result` under
+  the name generated for it out of band (ADR 0068): the run driver's event tap folds
+  `SubAgentNamedEvent` onto the open run its call id names, so the reading filed when that run
+  closes carries the generated name in `SubAgentUsage.Name`. Headless `sub-agent:` lines therefore
+  print `sub-agent: 12k/32k · audit config keys` where they used to print the delegated task's
+  first line; a delegation whose own call named it, and one nothing ever named, print exactly the
+  line they always printed.
+
+- The `sub_agent` tool now ASKS the model to name its delegations: the `name` argument's schema
+  description says how long a name should be, shows one, and ends with the ask, in place of the
+  bare "Optional short name for this delegation, shown in the UI." It stays one short line and
+  `task` stays the only required argument — a call that names nothing is still valid, and is what
+  the out-of-band namer (ADR 0068) exists for. A name the call gives costs no completion and
+  arrives before the child does any work, so the schema asking for one is the cheaper half of the
+  same feature.
+
+- The generated-delegation-name journey is proved end to end (`cmd/apogee/e2e_naming_test.go`,
+  tuitest + stubllm): a real composition delegates without a name, the scripted server answers the
+  out-of-band naming call, and the name it invents is what the collapsed delegation block paints,
+  what a headless run's `sub-agent:` line closes with, and — with `auto-title: false` — a request
+  that is never made at all.
+
+- ADR 0069 records that the top-level model may pick a delegation's **Delegation seat** — the
+  session's own server or the Sub-agent server — through an optional depth-0 `run_on`
+  (`session` | `sub-agents-server`) on the `sub_agent` tool, gated by a root
+  `sub-agents-choice: fixed|model` that defaults to `fixed` and guided by a per-entry free-text
+  `description:` the Orientation block's Delegations line relays for both seats symmetrically,
+  from session-constant facts only. An absent `run_on` keeps the `sub-agents-server:` key's rule;
+  `run_on: session` in a routed session runs unrouted with the parent's posture; an ask the far
+  seat cannot honour falls back per ADR 0045 §4 and appends one note line as the last line of the
+  result body, ahead of ADR 0063 D3's steered trailer. A reply that spans both seats is sized by
+  `min(session cap, target cap)`. This ratifies ADR 0045's deferred *Model-chosen routing* item
+  (launcher actuation stays deferred), uses ADR 0066 decision 7's reserved consultation point, and
+  amends ADR 0039 decision 3 for mixed-seat width; CONTEXT.md gains a *Delegation seat* term and
+  the Parallel agents / Sub-agent server / Orientation block entries gain the new rules.
+
+- **A `servers:` entry can carry a `description:`, and a new root `sub-agents-choice:` key says who
+  picks where a delegation runs.** The description is free text, trimmed at the decode and never
+  validated — it exists for the top-level model, which will be shown it when choosing a delegation's
+  seat (ADR 0069). `sub-agents-choice:` takes `fixed` (the default, and what every session did
+  before: the `sub-agents-server:` key alone decides) or `model` (the top-level model may name a
+  seat per delegation); any other word is a startup error naming both values. The key registers as
+  an editable enum /settings row directly under `sub-agents-server`, and a committed edit is held
+  by the session — it applies at the next roster build. Nothing reads the gate yet: the tool
+  parameter and the routing it gates land with the rest of the seat-choice work.
+
+- **`sub_agent` can offer the model a `run_on` Delegation seat.** The tool now has two variants: the
+  plain one, whose published schema is byte-identical to the one it published before, and a
+  seat-choice one (`tools.HostTools.SubAgentSeatChoice`, ADR 0069) that adds an OPTIONAL `run_on`
+  enumerating exactly the two seats — `session` and `sub-agents-server` (exported as
+  `tools.RunOnSession` / `tools.RunOnSubAgentsServer`). `SubAgentArgs` gains `RunOn`, `task` stays
+  the only required argument, and a call that omits the seat means "the configured default decides",
+  so a model that is never offered the choice is never told about a seat it cannot pick.
+  `OffersSeatChoice()` reports which variant a tool is. Nothing resolves the seat yet — that lands
+  with the `sub-agents-choice` wiring.
+
+- **A delegation now runs on the seat its call names.** `runSubAgent` resolves the `run_on` argument
+  (ADR 0069): `session` builds the child on the parent's own Upstream with the parent's posture
+  however the session is routed, `sub-agents-server` routes it when a target is latched, and an
+  absent value leaves the `sub-agents-server` key deciding exactly as before. An ask for the far
+  seat that finds no usable target degrades to the session server (ADR 0045 §4) and appends
+  `note: ran on the session server — the sub-agents server was unavailable` as the last line of the
+  result BODY, ahead of ADR 0063 D3's steered trailer, which stays the final line. The choice is a
+  depth-0 offer: a child's roster carries the plain `sub_agent` tool, and a `run_on` named against a
+  tool that never published it — a child's, or any build under `sub-agents-choice: fixed` — is
+  ignored rather than honoured or refused. A value that is neither spelling is refused with
+  `invalid run_on "…": want "session" or "sub-agents-server"` before any child is built.
+
+- **A reply split across both Delegation seats is sized by the smaller cap, and the orientation
+  block tells the model what each seat is.** `fanOutWidthFor` classifies a depth-0 reply's
+  delegations by the seat each one named (ADR 0069): a reply whose children land on both the
+  session server and the Sub-agent server runs `min(session cap, target cap)` wide, so neither box
+  is oversubscribed, while a reply that lands on one seat keeps that seat's width exactly as before
+  (`fanOutWidth` is unchanged). Under `sub-agents-choice: model` the engine-owned orientation block
+  gains a Delegations bullet naming both seats symmetrically — `<model> on <entry name> —
+  <description>` for each, plus which seat an absent `run_on` equals — so the model chooses from
+  facts rather than from two opaque labels. The bullet is gated on the roster's own sub_agent tool
+  publishing `run_on`, so a child (whose tool never does) is never offered a choice it does not
+  have, and it carries no availability state: the far seat's display facts are installed through
+  the new `Agent.SetDelegationSeat` door and move only where the human moves the key, so the
+  standing system message stays prefix-cache stable across every heartbeat (ADR 0023 §6).
+  `domain.Config` and `agent.UpstreamSpec` gain `ServerName`/`ServerDescription` for the session
+  seat's half, installed by `SwitchUpstream` with the endpoint they describe.
+
+- **`sub-agents-choice:` now reaches the tools, the seat facts reach the engine, and
+  `/sub-agents-server` shows what each box is for.** Committing the gate (or launching under it)
+  builds the session's tool set with or without `sub_agent`'s `run_on` argument and hands it to the
+  engine through the one swap door (ADR 0037 binding F) — so the key applies to the next request and
+  is refusable mid-run exactly as `tools.disabled` is, over a value the file already carries. The
+  flagged `servers:` entry's name, `description:` and `model:` pin are pushed at the engine wherever
+  routing is decided — at composition, on a `servers:` re-read and on a `/sub-agents-server` pick —
+  and remembered across a late bind, so the orientation block can name the far Delegation seat
+  (ADR 0069); the session seat's half rides the Config at the bind and the `UpstreamSpec` on every
+  `/server` switch. The `/sub-agents-server` picker now prints an entry's `description:` after its
+  endpoint; `/server`'s rows are unchanged.
+
+- **The manual documents letting the model pick the delegation seat.** `description:` joins the
+  per-entry keys `servers:` takes, and a new *Letting the model pick the seat* section under
+  *The servers you run models on* covers `sub-agents-choice: fixed|model`, the `run_on` argument it
+  publishes, the orientation Delegations line the model chooses from, the
+  `note: ran on the session server — the sub-agents server was unavailable` a fallen-back
+  delegation carries back, and the smaller-cap width a reply split across both seats runs at
+  (ADR 0069). `/sub-agents-server`'s row in the command reference now says its picker prints each
+  entry's `description:` beside the endpoint.
+
+- stubllm fixtures can hold a turn's reply on a named gate (`await:`) that the test opens with
+  `Server.Release`, which is how a driver test states an order between two requests apogee has in
+  flight at once. It is what makes the generated-delegation-name e2e deterministic instead of a
+  coin toss against the child it names.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
