@@ -3,6 +3,8 @@ name: CI
 # Phase-0 CI (docs/plans/phase-0-detail-plan.md §2). Gates formatting + vetting now,
 # tests as they land (the capstone harness, P0.6). Cross-compiles the v1 platform matrix
 # so the single static binary keeps building everywhere, Windows fast-follow included.
+# Two further gates run as jobs of their own: `lint` (golangci-lint over the module) and
+# `vulncheck` (govulncheck over the dependency graph) — the same two `make check` runs.
 on:
   push:
     branches: [main]
@@ -69,6 +71,48 @@ jobs:
             echo "probe disclosed a confinement residual on a kernel that has none" >&2
             exit 1
           fi
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job runs Go tooling only and needs no git credential.
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.x'
+      - name: golangci-lint
+        # Pinned by MODULE VERSION rather than run as a third-party action, for the reasons
+        # the actionlint step gives: an action would be another SHA to keep current and
+        # another publisher trusted with this workflow's context, where `go run` fetches a
+        # checksum-verified module with the toolchain already installed. This calls the
+        # Makefile target rather than repeating the command, so the pinned version literal
+        # lives once — `GOLANGCI_LINT_VERSION` in the Makefile — and `make check` and CI
+        # literally run one command. A job of its own so it runs beside `check` rather than
+        # behind it, and so a lint failure is named by the job that found it.
+        run: make lint
+
+  vulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job runs Go tooling only and needs no git credential.
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.x'
+      - name: govulncheck
+        # Same pinning rationale as the actionlint and golangci-lint steps: a `go run` of a
+        # MODULE VERSION pinned in the Makefile (`GOVULNCHECK_VERSION`), not a third-party
+        # action, and the make target rather than a second copy of the command. Unlike the
+        # other two this one reaches the network for the vulnerability database, so it fails
+        # loudly when the database is unreachable — that is the intended behaviour, not a
+        # flake to be excused.
+        run: make vulncheck
 
   cross:
     name: cross-compile

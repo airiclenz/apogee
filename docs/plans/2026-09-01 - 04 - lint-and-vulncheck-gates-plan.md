@@ -301,7 +301,9 @@ go test -race -count=1 . ./cmd/... ./internal/tuitest/...
 
 **Commit:** `test(cmd,tuitest): lint-clean under golangci-lint standard set`
 
-## 12. Gate: `make check` and CI run `lint` and `vulncheck`
+## 12. Gate: `make check` and CI run `lint` and `vulncheck` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the two new CI jobs are placed between `check` and `cross` in `ci.yml`; job order is presentational only (they run in parallel).
 
 Depends on items 3, 4, 5, 6, 7, 8, 9, 10, 11.
 

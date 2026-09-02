@@ -262,7 +262,7 @@ dist:
 	@cd $(DIST_DIR) && $(SHA256) *.tar.gz *.zip > SHA256SUMS
 	@echo "dist OK -> $(DIST_DIR)/ ($(words $(CROSS_TARGETS)) archives + SHA256SUMS)"
 
-## check: the Phase-2 acceptance gate (fmt-check, vet, build, race tests, ADR-0010, cross, --help)
+## check: the Phase-2 acceptance gate (fmt-check, vet, lint, build, vulncheck, race tests, ADR-0010, cross, --help)
 .PHONY: check
 check:
 	@echo "==> gofmt (must be empty)"
@@ -271,8 +271,12 @@ check:
 	@go vet ./...
 	@echo "==> go vet (windows build tag: the Windows-tagged tests must still compile)"
 	@GOOS=windows go vet ./internal/platform/... ./internal/probe/...
+	@echo "==> golangci-lint"
+	@$(MAKE) --no-print-directory lint
 	@echo "==> go build ./..."
 	@go build ./...
+	@echo "==> govulncheck"
+	@$(MAKE) --no-print-directory vulncheck
 	@echo "==> go test -race ./..."
 	@go test -race -count=1 ./...
 	@echo "==> workflow action pins (SHA + version comment)"
