@@ -168,7 +168,9 @@ go test -race -count=1 ./internal/provider/... ./internal/domain/... ./internal/
 
 **Commit:** `refactor(provider,judge,library,keystore): lint-clean under golangci-lint standard set`
 
-## 6. Lint clean: `internal/present`, `internal/scheme`, `internal/skills`
+## 6. Lint clean: `internal/present`, `internal/scheme`, `internal/skills` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): all 18 sites the linter reported for these packages are exactly the 18 the item enumerates; no extra sites, no site skipped. Both best-effort cleanup removes (`scheme/store.go:157`, `skills/export.go:96`) already carried the one-line comment the item asks for, so none was added.
 
 Depends on item 2.
 

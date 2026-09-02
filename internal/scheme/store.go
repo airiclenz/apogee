@@ -154,7 +154,7 @@ func Export(name, userDir string) (string, error) {
 	if err != nil {
 		// A half-written scheme would both render wrong and block the retry that fixes
 		// it, so the failed attempt takes its own file with it.
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("apogee: write color-scheme %q: %w", path, err)
 	}
 	return path, nil

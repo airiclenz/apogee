@@ -166,7 +166,7 @@ func outboundIP() string {
 	if err != nil {
 		return ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	addr, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok || addr.IP == nil || addr.IP.IsUnspecified() {

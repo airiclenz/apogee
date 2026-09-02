@@ -93,7 +93,7 @@ func ExportShipped(id, libraryDir string) (string, error) {
 	if err := copyTree(src, dest); err != nil {
 		// A half-copied skill would load with pieces missing AND block the retry that fixes it, so
 		// the failed attempt takes its own folder with it (scheme.Export's cleanup).
-		os.RemoveAll(dest)
+		_ = os.RemoveAll(dest)
 		return "", fmt.Errorf("apogee: write skill %q: %w", dest, err)
 	}
 	return dest, nil

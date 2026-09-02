@@ -275,7 +275,7 @@ func loadDir(cat *Catalog, a skillAnchor) {
 		}
 		return
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	walkSkills(cat, sourceTree{
 		fsys: root.FS(),
 		name: dir,
@@ -425,7 +425,7 @@ func openAnchor(a skillAnchor) (*os.Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer base.Close()
+	defer func() { _ = base.Close() }()
 	return base.OpenRoot(a.rel)
 }
 
@@ -481,7 +481,7 @@ func readBounded(fsys fs.FS, p string, max int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, max+1))
 	if err != nil {
 		return nil, err

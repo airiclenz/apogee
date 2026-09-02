@@ -61,7 +61,7 @@ func fetch(t *testing.T, target string) (int, string, string) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", target, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -211,7 +211,7 @@ func TestDocServerServesEveryDocumentUnderARestrictivePolicy(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET %s: %v", served, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 				t.Fatalf("reading the response body: %v", err)
 			}
@@ -473,7 +473,7 @@ func TestDocServerRefusesNonFetchMethods(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s %s: %v", method, served, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("%s = %d, want 404", method, resp.StatusCode)
@@ -670,7 +670,7 @@ func TestDocServerShedsConnectionsBeyondTheCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dialling past the cap: %v", err)
 	}
-	defer extra.Close()
+	defer func() { _ = extra.Close() }()
 	if err := extra.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatalf("setting the read deadline: %v", err)
 	}
@@ -735,7 +735,7 @@ func TestDocServerCloseIsIdempotent(t *testing.T) {
 
 		client := &http.Client{Timeout: 5 * time.Second}
 		if resp, err := client.Get(served); err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Errorf("GET %s after Close() = %d, want a connection failure", served, resp.StatusCode)
 		}
 	})
@@ -862,7 +862,7 @@ func TestDocServerBindsTheConfiguredPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("taking a port for the test: %v", err)
 	}
-	defer occupied.Close()
+	defer func() { _ = occupied.Close() }()
 	port := occupied.Addr().(*net.TCPAddr).Port
 
 	root := t.TempDir()
@@ -930,7 +930,7 @@ func keepAliveFetch(t *testing.T, authority, served string) net.Conn {
 	if err != nil {
 		t.Fatalf("reading the response: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 		t.Fatalf("draining the response: %v", err)
@@ -955,7 +955,7 @@ func fetchEventually(t *testing.T, target string) int {
 	for {
 		resp, err := client.Get(target)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return resp.StatusCode
 		}
 		if time.Now().After(deadline) {

@@ -182,11 +182,11 @@ func openGranted(g grant) (*os.File, os.FileInfo, error) {
 
 	info, err := doc.Stat()
 	if err != nil {
-		doc.Close()
+		_ = doc.Close()
 		return nil, nil, err
 	}
 	if !info.Mode().IsRegular() {
-		doc.Close()
+		_ = doc.Close()
 		return nil, nil, errNotRegular
 	}
 	return doc, info, nil
@@ -227,7 +227,7 @@ func (s *DocServer) Serve(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("present: cannot serve %q: %w", path, err)
 	}
-	doc.Close()
+	_ = doc.Close()
 
 	token, err := newToken()
 	if err != nil {
@@ -358,7 +358,7 @@ func (s *DocServer) handle(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	defer doc.Close()
+	defer func() { _ = doc.Close() }()
 
 	// The content type is decided here rather than left to ServeContent's sniffing, so the answer
 	// is a function of the extension alone. ServeContent then only adds what it is good at: range
