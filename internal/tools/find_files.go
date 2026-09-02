@@ -183,7 +183,7 @@ func (t *FindFiles) reportable(target searchTarget, entry fs.DirEntry, rel strin
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	info, err := file.Stat()
 	return err == nil && info.Mode().IsRegular()

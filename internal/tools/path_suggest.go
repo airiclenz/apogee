@@ -46,7 +46,7 @@ func suggestSiblings(root, rel, given string) []string {
 	if err != nil {
 		return nil
 	}
-	defer parent.Close()
+	defer func() { _ = parent.Close() }()
 
 	entries, err := parent.ReadDir(-1)
 	if err != nil {

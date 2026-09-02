@@ -39,7 +39,7 @@ func readWorkspaceFileBounded(path, root string) ([]byte, string) {
 	if err != nil {
 		return nil, readFileErrorMessage(err, path)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return readOpenedBounded(f, path)
 }
 

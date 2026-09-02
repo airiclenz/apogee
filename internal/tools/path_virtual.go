@@ -139,7 +139,7 @@ func (v virtualTarget) readBounded() ([]byte, string) {
 	if err != nil {
 		return nil, readFileErrorMessage(err, v.name())
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return readOpenedBounded(f, v.name())
 }
 
@@ -149,7 +149,7 @@ func (v virtualTarget) stat() (fs.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return f.Stat()
 }
 

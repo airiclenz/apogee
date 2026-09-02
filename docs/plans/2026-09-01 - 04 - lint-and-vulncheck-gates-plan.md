@@ -188,7 +188,9 @@ go test -race -count=1 ./internal/present/... ./internal/scheme/... ./internal/s
 
 **Commit:** `refactor(present,scheme,skills): lint-clean under golangci-lint standard set`
 
-## 7. Lint clean: `internal/tools`
+## 7. Lint clean: `internal/tools` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the five ST1018 fixture lines were rewritten as `\u202e` / `\u200b` escapes with the literals' bytes unchanged; trailing comments name the characters on the three sites (network_test.go:367,368,384) whose surrounding prose does not — the pair at :241,:242 is already named by the comment two lines above. `gofmt -w` realigned the :367/:368 trailing-comment column; both lines were already changed, so `git diff --stat -- internal/tools/network_test.go` stays at exactly the five flagged lines (5 insertions, 5 deletions).
 
 Depends on item 2.
 

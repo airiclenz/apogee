@@ -453,7 +453,7 @@ func TestReadScopeOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open under the extra root: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if root != extra {
 		t.Errorf("root = %q, want %q", root, extra)
 	}

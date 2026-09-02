@@ -238,8 +238,8 @@ func TestWebFetch_HostileRedirectLocationIsRenderedInert(t *testing.T) {
 			// A right-to-left override and a zero-width space spoof what a reader sees of a URL
 			// the model is invited to follow.
 			name:        "bidi override and zero-width characters",
-			location:    "https://a.example/‮gnp.exe​",
-			wantAbsent:  []string{"‮", "​"},
+			location:    "https://a.example/\u202egnp.exe\u200b",
+			wantAbsent:  []string{"\u202e", "\u200b"},
 			wantPresent: []string{"Location: https://a.example/gnp.exe"},
 		},
 	}
@@ -364,8 +364,8 @@ func TestHTTPRequest_HostileResponseHeadersAreRenderedInert(t *testing.T) {
 		// Go's server maps CR/LF in a header value to spaces, so the injected lines arrive
 		// folded into one value — the same fold the web_fetch Location tests lean on.
 		w.Header().Set("X-Folded", "ok\r\nHTTP/1.1 200 OK\r\nX-Injected: yes")
-		w.Header().Set("X-Bidi", "report‮gnp.exe")
-		w.Header().Set("X-Zero", "gap​less")
+		w.Header().Set("X-Bidi", "report\u202egnp.exe") // U+202E RIGHT-TO-LEFT OVERRIDE
+		w.Header().Set("X-Zero", "gap\u200bless")       // U+200B ZERO WIDTH SPACE
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("body"))
 	}))
@@ -381,7 +381,7 @@ func TestHTTPRequest_HostileResponseHeadersAreRenderedInert(t *testing.T) {
 		t.Fatalf("result is error: %q", res.Content)
 	}
 
-	for _, s := range []string{"‮", "​", "\nHTTP/1.1 200 OK", "\nX-Injected"} {
+	for _, s := range []string{"\u202e", "\u200b", "\nHTTP/1.1 200 OK", "\nX-Injected"} { // U+202E right-to-left override, U+200B zero-width space
 		if strings.Contains(res.Content, s) {
 			t.Errorf("hostile header text survived into the render (%q): %q", s, res.Content)
 		}

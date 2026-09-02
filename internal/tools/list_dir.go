@@ -92,7 +92,7 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	if err != nil {
 		return errorResult(call.ID, directoryNotFoundMessage(err, root, rel, args.Path)), nil
 	}
-	defer handle.Close()
+	defer func() { _ = handle.Close() }()
 
 	info, err := handle.Stat()
 	if err != nil {
@@ -200,7 +200,7 @@ func (t *ListDir) collectSubdir(ctx context.Context, root, rel string, recursive
 	if err != nil {
 		return nil, nil
 	}
-	defer sub.Close()
+	defer func() { _ = sub.Close() }()
 	return t.collectEntries(ctx, sub, root, rel, recursive, maxDepth, depth)
 }
 

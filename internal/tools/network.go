@@ -257,7 +257,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 		// A transport error's text (*url.Error) embeds the FULL request URL — scrub it.
 		return netResponse{}, "request to host " + label + " failed: " + scrubURLError(err, target), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, truncated, err := readCappedBody(resp.Body)
 	if err != nil {

@@ -217,7 +217,7 @@ func (t *Grep) searchFile(target searchTarget, rel, display string, re *regexp.R
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if info, err := file.Stat(); err != nil || info.IsDir() || info.Size() > maxGrepFileBytes {
 		return
@@ -429,7 +429,7 @@ func (t *Grep) readContextLines(target searchTarget, openPath string, spans []li
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	surrounding := make(map[int]string)
 	scanner := bufio.NewScanner(file)
