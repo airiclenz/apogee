@@ -337,7 +337,7 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 		return RawResponse{}, err
 	}
 	defer cancel()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return RawResponse{}, c.statusError(resp, wire.carriesEffort())
@@ -582,12 +582,8 @@ func (c *Client) buildBody(req Request) chatRequest {
 		body.Tools = make([]chatTool, 0, len(req.Tools))
 		for _, t := range req.Tools {
 			body.Tools = append(body.Tools, chatTool{
-				Type: "function",
-				Function: chatToolFunction{
-					Name:        t.Name,
-					Description: t.Description,
-					Parameters:  t.Parameters,
-				},
+				Type:     "function",
+				Function: chatToolFunction(t),
 			})
 		}
 	}

@@ -245,7 +245,7 @@ func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	if err != nil {
 		return ModelInfo{}, fmt.Errorf("apogee: model discovery: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return ModelInfo{}, fmt.Errorf("apogee: model discovery: upstream HTTP %d", resp.StatusCode)
@@ -287,7 +287,7 @@ func (c *Client) discoverProps(ctx context.Context) (window, slots int, effort E
 	if err != nil {
 		return 0, 0, EffortSupport{}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, 0, EffortSupport{}

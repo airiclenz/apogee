@@ -81,7 +81,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			return
 		}
 		defer cancel()
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			yield(c.statusDelta(resp, wire.carriesEffort()))

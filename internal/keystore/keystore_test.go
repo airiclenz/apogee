@@ -119,14 +119,14 @@ func linkOrCopy(source, destination string) error {
 	if err != nil {
 		return err
 	}
-	defer from.Close()
+	defer func() { _ = from.Close() }()
 
 	to, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(to, from); err != nil {
-		to.Close()
+		_ = to.Close()
 		return err
 	}
 	return to.Close()
@@ -251,8 +251,8 @@ func recordInvocation(argv []string, stdin string) {
 	if err != nil {
 		return
 	}
-	defer file.Close()
-	fmt.Fprintln(file, string(line))
+	defer func() { _ = file.Close() }()
+	_, _ = fmt.Fprintln(file, string(line))
 }
 
 // securityFlags reads the `-s`/`-a`/`-w` values off a `security` command line; the boolean flags it

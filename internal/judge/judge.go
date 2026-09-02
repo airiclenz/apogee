@@ -98,7 +98,7 @@ func Client(ctx context.Context) (*provider.Client, string, error) {
 	)
 	model, err := resolveModel(ctx, client)
 	if err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, "", err
 	}
 	client.SetModel(model)
@@ -181,7 +181,7 @@ func ask(ctx context.Context, r Rubric, comparison string, artifacts []Artifact)
 		provider.WithAPIKey(apiKey()),
 		provider.WithRequestTimeout(requestTimeout),
 	)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	model, err := resolveModel(ctx, client)
 	if err != nil {

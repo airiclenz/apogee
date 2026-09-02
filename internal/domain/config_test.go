@@ -18,7 +18,6 @@ func TestModeLadder(t *testing.T) {
 	}
 
 	got[0] = domain.ModeAuto
-	got = got[:1]
 	if again := domain.ModeLadder(); !reflect.DeepEqual(again, want) {
 		t.Errorf("after mutating the result, ModeLadder() = %v, want the untouched %v", again, want)
 	}

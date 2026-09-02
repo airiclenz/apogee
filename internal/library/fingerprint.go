@@ -147,7 +147,7 @@ func weightsSignature(modelID string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hash := sha256.New()
 	var sizeHeader [8]byte

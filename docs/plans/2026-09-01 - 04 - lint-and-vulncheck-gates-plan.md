@@ -145,7 +145,10 @@ go test -race -count=1 ./internal/config/...
 
 **Commit:** `refactor(config): lint-clean under golangci-lint standard set`
 
-## 5. Lint clean: `internal/provider`, `domain`, `judge`, `library`, `keystore`
+## 5. Lint clean: `internal/provider`, `domain`, `judge`, `library`, `keystore` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): `keystore_test.go:255` — the item's guard spells the fix `_ = fmt.Fprintln(file, string(line))`, which does not compile (`Fprintln` returns `(int, error)`); written as `_, _ = fmt.Fprintln(...)`, matching the plan's ratified "unchecked status prints" call.
+NOTES (2026-09-02): `domain/config_test.go:21` — SA4006 resolved by DROPPING `got = got[:1]` per the ratified "discarded test models" call; the assertions that follow read `again`/`next`, and re-slicing a local slice header can never reach `ModeLadder`'s source, so no coverage is lost.
 
 Depends on item 2.
 
