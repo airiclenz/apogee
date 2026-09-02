@@ -324,8 +324,11 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		}
 		// childReportWords is the capped run's wording and only its own: an unbounded child is never
 		// asked to sum up, so a frame carrying it would mean a cap fired where none was set.
+		// The needle is flattened like the haystack: flat holds the frame with every run of
+		// whitespace collapsed, so a needle the renderer would have wrapped — childReportWords is
+		// long enough to — could never match its raw form, and the check would pass vacuously.
 		for _, unwanted := range []string{"step cap", "delegate-max-steps", childReportWords} {
-			if strings.Contains(flat, unwanted) {
+			if strings.Contains(flat, flatten(unwanted)) {
 				t.Errorf("an unbounded delegation still mentions %q:\n%s", unwanted, flat)
 			}
 		}

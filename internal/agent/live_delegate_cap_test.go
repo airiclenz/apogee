@@ -307,8 +307,11 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 
 	// And the request that Turn built: the menu is withdrawn WHOLESALE (toolMenu, Agent.wrapUp),
 	// which on a wire that carries no tool_choice is the entire prohibition. The child's LAST
-	// request is the wrap-up's; the one before it is a working Turn, and must still be armed —
-	// otherwise an empty menu throughout would satisfy the check while proving nothing.
+	// request is the wrap-up's; SOME earlier request must have carried an armed menu — otherwise
+	// an empty menu throughout would satisfy the check while proving nothing. The claim is
+	// deliberately not positional: menus is appended per PRE-REQUEST hook call, and an overflow
+	// fold re-runs those hooks inside one Turn (Agent.loop), so the entry before the wrap-up's can
+	// legitimately be a second zero on a correct run.
 	menus := probe.menuSizesAt(1)
 	if len(menus) < 2 {
 		t.Fatalf("the budget probe recorded %d requests at Depth 1; the shakeout needs the child's "+
@@ -318,8 +321,15 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 		t.Errorf("the child's wrap-up request offered %d tools, want 0 — the closing Turn withdraws "+
 			"the whole menu (menu sizes in request order: %v)", last, menus)
 	}
-	if prev := menus[len(menus)-2]; prev == 0 {
-		t.Errorf("the child's request before the wrap-up offered no tools either (menu sizes in "+
+	armed := false
+	for _, size := range menus[:len(menus)-1] {
+		if size != 0 {
+			armed = true
+			break
+		}
+	}
+	if !armed {
+		t.Errorf("the child's requests before the wrap-up offered no tools either (menu sizes in "+
 			"request order: %v); the withdrawal is only meaningful against an armed menu", menus)
 	}
 

@@ -163,7 +163,9 @@ tests (`:1042`, `:1109`) are not touched.
 
 ---
 
-## 3. Two delegation assertions that can go vacuous or spurious
+## 3. Two delegation assertions that can go vacuous or spurious — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the live check's failure message is kept as written except for one plural — "the child's requests before the wrap-up offered no tools either" — because the claim is now over every earlier request, not the one immediately before; the `menus` dump is unchanged.
 
 **What.** (a) `cmd/apogee/e2e_delegation_test.go:321-331` compares the raw `childReportWords` constant
 (`:59-62`) against a flattened frame, while the sibling at `:279-281` flattens the needle first
