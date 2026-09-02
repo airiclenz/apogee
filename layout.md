@@ -680,10 +680,15 @@ names, or a summary it wrote itself (`154 lines`, `replaced text in docs/plan.md
 mark it **solo** — nothing else, and in particular nothing about what it is carrying. A call with no
 target has nothing to lead a row with, since there the detail lines *are* the branches, so it keeps
 its own block. And a presenter may state outright that its record must never be an ordinary row in
-a list: the answered `Ask User` block, which is the permanent record of an exchange and reads as a
-card, and the `Sub-Agent` call, which heads a whole delegation and, per the canon spec, groups with
-other sub-agent calls alone rather than joining a super-group. That flag is the one deliberate
-never-group switch — it replaces an older rule that kept those two out by accident, through the
+a list. The RULE behind that flag is one rule: a call whose presenter marks it solo either is a
+record in its own right, or it **groups with its own kind** — a list of one tool's calls under its
+own umbrella — and a call that has its own list never joins the mixed one. Three calls say it, and
+the second and third are the own-kind half: the answered `Ask User` block, which is the permanent
+record of an exchange and reads as a card; the `Sub-Agent` call, which heads a whole delegation and,
+per the canon spec, groups with other sub-agent calls alone rather than joining a super-group; and
+the `Skill` fetch, which groups with other fetches under `✦ Skill (N)` for the same reason and no
+other (*Grouped Skills*, `docs/layout/tool-layout.md`). That flag is the one deliberate
+never-group switch — it replaces an older rule that kept the first two out by accident, through the
 bodies they happen to carry, and so also covers the sub-agent head that got no span at all because
 the delegation was refused at the depth bound. A Firing is not this session's tool call and never
 joins a run either (*The firing block*, below).

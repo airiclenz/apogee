@@ -365,8 +365,9 @@ func toolViews(ins []paintInput) []toolView {
 // A call with NO target still keeps its own block: there the detail lines ARE the branches
 // (renderToolBranch), so there is no leader row to lead. And solo is the
 // never-group mechanism the body exclusion used to be by accident — an answered question's record
-// is a card in its own right (askUserAnswerRecord) and a sub-agent call heads a whole run
-// (subAgentToolName), and both now say so instead of relying on the shape rule to keep them out.
+// is a card in its own right (askUserAnswerRecord), a sub-agent call heads a whole run
+// (subAgentToolName), and a skill fetch has a list of its own to join (loadSkillToolName, ownGroup);
+// all three now say so instead of relying on the shape rule to keep them out.
 //
 // It never counts detail lines: the block's shape does not depend on how many there are, and
 // neither may this.

@@ -28,9 +28,11 @@ transcript slot, and the collapsed row is the only shape a run wears in the
 conversation ([ADR 0063](../adr/0063-sub-agent-runs-are-user-addressable-views.md),
 `layout.md`, "Run view"). The `┊` rule below is stated as it was written — the
 closer drawn only where another grouped sub-agent follows an expanded one, and
-emitted by the seam that joins two blocks rather than by the group painter — but
-nothing opens a span in place any more, so no paint reaches it: it stands as the
-record of a shape the screen no longer has.
+emitted by the seam that joins two blocks rather than by the group painter — and
+no DELEGATION reaches it any more, since nothing opens a span in place. The rule
+itself is live rather than the record of a shape the screen no longer has: the
+**Grouped Skills** list below opens its members INLINE, and that is where the
+closer is drawn today.
 
 ## Rules
 
@@ -44,6 +46,12 @@ record of a shape the screen no longer has.
 - Sub-agent calls group with **each other** (`✦ Sub-Agent (N)`, one row per
   agent: name left, stat right; expanding a member opens its span) but never
   join a super-group — a sub-agent block or group breaks the run.
+- Skill fetches group with **each other** the same way (`✦ Skill (N)`, one row
+  per fetch: the loaded skill left, the outcome slot blank; expanding a member
+  opens its body inline) and never join a super-group either — a skill block or
+  group breaks the run exactly as a sub-agent one does. That is one rule stated
+  twice, not two: a call that groups with its OWN kind never joins the mixed
+  super-group.
 - dotted lines like `⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯` must be painted in a damped color
   (new `tool-leader` scheme role, dark + light values)
 - **time order is always kept.** Calls are never reordered to merge calls of
@@ -57,8 +65,9 @@ record of a shape the screen no longer has.
   of the super-group below.
 - **super-group** — 2+ groupable calls, whether that is one run of a single
   tool type or adjacent runs of different types. Breakers: any non-tool
-  entry between calls (narration, note, approval, error), and any sub-agent
-  block. The umbrella header reads `✦ Tools (N calls)` — N = total calls,
+  entry between calls (narration, note, approval, error), and any block that
+  groups with its own kind instead — a sub-agent block or group, a skill block
+  or group. The umbrella header reads `✦ Tools (N calls)` — N = total calls,
   painted in the faint count tone. It forms **live**, the moment the second
   groupable call is placed; the running call is its last row, wearing the
   spinner star. Only a LONE groupable call stays a standalone block.
@@ -214,7 +223,7 @@ group it replaced — one header, one row — and reads the same everywhere.
 
 - opening a sub-agent — from a click on its row or `enter` on the block cursor — opens its **run view** (`layout.md`, "Run view"), which takes the whole transcript slot under a `← main › <name>` breadcrumb and is left with `esc`. A member row of an `✦ Sub-Agent (N)` list opens the same way; the umbrella itself still opens **inline** to those rows.
 - the inline expanded shape that used to open a delegation's span in place — no `⤷ sub-agent` label on the open row, a colored vertical line down its left — was REMOVED on 2026-08-30 with the run view (ADR 0063), and its sketch went with it.
-- `┊` was only displayed if another grouped sub-agent followed after the expanded sub-agent, and the last sub-agent in the group (if expanded) did not show it. With nothing that opens a span in place, the closer has no occasion left and every grouped member is followed by the ordinary separator.
+- `┊` was only displayed if another grouped sub-agent followed after the expanded sub-agent, and the last sub-agent in the group (if expanded) did not show it. No DELEGATION draws it any more — a member opens its run view rather than a span in place, so every grouped sub-agent is followed by the ordinary separator — but the rule is the group's, not the delegation's, and **Grouped Skills** below is where it fires: a member that opens INLINE is closed by `┊` wherever another member of its list resumes after it, and the list's last member shows none however it ends.
 - a RUNNING sub-agent's `<tool-top-level-details>` reads `N tool calls · <used>/<window>` and names no ongoing action. The call in flight is deliberately not spelled there: it changed several times a second while the two cells beside it held still, and each of those calls already has a block of its own inside the run, one click away. The one live word the slot adds is `· delegating`, and only while the most recent call open inside the run is itself a sub-agent — work the child has handed on, which its own blocks cannot show since the nested run is collapsed too. A finished sub-agent's slot is its report's first line, or `· done` where the report became a body — unless the engine wrapped that report in an outcome envelope, which takes the slot instead: `· stopped at its step cap` where the step cap stopped the run mid-task, and `· steered by 2 messages` appended to whichever verdict stands where the human addressed the child while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its cause. A run routed to the Sub-agent server (ADR 0045) closes the slot with the model it ran on — `2 tool calls · 12k/32k · Found 4 gaps · qwen3-4b` — and only when that is not the session's own model; a same-model delegation shows no such cell. `<window>` is the CHILD's own window, so a routed run's fill is spelled against the Sub-agent server's window (`7k/8k`) rather than the session's (`7k/128k`); a run reporting no window of its own is spelled against the session's, which is what an unrouted child inherited. This holds for a lone sub-agent exactly as for a grouped member.
 - opening a sub-agent takes nothing back either: the row the reader leaves behind keeps the very `<tool-top-level-details>` it wore — the count, the fill, and the gist or `· done` — and the task, the report and the child's own blocks are what the run view shows. This holds for a lone sub-agent exactly as for a grouped member, running and finished alike; a view of a finished or scheduled run opens read-only.
 - a sub-agent the engine has not started yet is SCHEDULED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `scheduled` — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and opens like any other. A lone sub-agent starts immediately and never shows this.
@@ -243,6 +252,26 @@ Example for a fan-out wider than the `parallel-agents` cap: the first sub-agent 
 ✦ Sub-Agent (<group-count>)
   ┝ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┕ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ scheduled
+```
+
+
+## Grouped Skills
+
+- skill fetches group with **each other** exactly as sub-agent calls do — `✦ Skill (<group-count>)` over one `┝`/`┕` row per fetch — and never join the mixed `✦ Tools` super-group. Two adjacent fetches are the floor, as they are for a fan-out; a lone fetch keeps the standalone `✦ Skill` block it always had.
+- a member row leads with the **loaded skill** and its `<tool-top-level-details>` is deliberately blank, so the dots run to the `▶`. A fetch that loaded nothing keeps the query the model searched by on the row, which is the same slot saying the same thing: what this call is about.
+- expanding a member opens its body **INLINE**, under its own row, and that is the ONE way this group differs from the delegation group whose shape it borrows. A fetch heads no run, so there is no run view to take the transcript slot, no `← main › <name>` breadcrumb and nothing for `esc` to leave; the member's rows sit inside the list, and the list resumes below them.
+- because a member opens in place, the `┊` closer has its occasion here (Grouped Sub-agents, above): the seam between an expanded member and the row resuming the list after it is the closer, and the list's LAST member draws none however it ends.
+
+```text
+✦ Skill (<group-count>)
+  ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
+  ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  │ <tool-details-row-1>
+  │ <tool-details-row-2>
+  │ <...>
+  │                                                                 see less…
+┊
+  ┕ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
 ```
 
 
@@ -291,6 +320,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | present_document | Present | document title (path fallback) | — | path + title |
 | ask_user | Ask user | the question | `answered` / `pending` | question + choices + the answer |
 | sub_agent | Sub-agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed` | task text + result summary |
+| load_skill | Skill | the loaded skill (the query until one is) | — | the skill body |
 
 Notes:
 - **2026-08-19** — the five diff-bodied rows above now render through

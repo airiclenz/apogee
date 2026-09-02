@@ -659,8 +659,10 @@
 // mattering to it: a Terminal call and its output group like a batch of reads, each member held to
 // one row with its body behind an
 // indicator of its own (renderGroupMember), and a presenter that needs its block left alone says so
-// outright (toolView.solo — the answered ask_user record, and the sub_agent call whose block heads
-// a whole run even when the run came to nothing).
+// outright (toolView.solo — the answered ask_user record; the sub_agent call whose block heads a
+// whole run even when the run came to nothing; and the load_skill fetch, which folds into its own
+// "✦ Skill (N)" list instead, the second call that groups with its OWN kind rather than with
+// everyone).
 //
 // The shape a tool call takes is uniform, and one renderer draws it: [renderToolBlock] takes ONE
 // [toolView] — a lone call, the only shape a groupable call keeps outside the umbrella — and emits

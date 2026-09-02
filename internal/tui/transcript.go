@@ -1596,9 +1596,11 @@ func sameLabelRun(entries []entry, i int) int {
 // The breakers are the group's own, one rule stated once: anything that is not a call opening a run
 // at the umbrella's OWN depth ends it where it stands. That covers the non-tool entries a same-label
 // run already broke on — narration, a note, an approval, an error — and, through groupable's solo
-// mark, a sub-agent call, whose block heads a whole run of its own and never joins an umbrella (spec
-// Rules: "a sub-agent block or group breaks the run"); the deeper entries such a run leaves behind
-// break it by depth, as does a nested call at any other level.
+// mark, the two calls that group with their OWN kind: a sub-agent call, whose block heads a whole
+// run of its own, and a skill fetch, which folds into "✦ Skill (N)" (ownGroup); neither ever joins
+// an umbrella (spec Rules: "a sub-agent block or group breaks the run", and the same sentence for a
+// skill block or group). The deeper entries a delegation leaves behind break the run by depth, as
+// does a nested call at any other level.
 //
 // Membership is DERIVED here and stored nowhere, which is what makes formation live (design call 2):
 // the umbrella exists the moment the SECOND groupable call is placed, whether it opens a run of its

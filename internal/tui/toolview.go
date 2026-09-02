@@ -579,11 +579,14 @@ type toolView struct {
 	// neighbours (groupable, render.go). Grouping's own rule is about the SHAPE of a call — a target
 	// to lead a member's leader row — and says nothing about what the block MEANS; solo is where a
 	// presenter states that meaning, for a record whose block is a thing in its own right rather than
-	// one of a batch. Two calls say it today: the answered ask_user question, whose block keeps the
-	// permanent record of an exchange (askUserAnswerRecord) and reads as a card, not as a row in a
-	// list of questions; and the sub_agent call, whose block heads a whole run and frames the work
-	// beneath it (presentToolCall) — a fact about the call, so it holds from the moment the call is
-	// built, including for a delegation that never produced a run to frame.
+	// one of a batch — or for one that has a LIST OF ITS OWN to join, which is the same statement
+	// from the other side. Three calls say it today: the answered ask_user question, whose block
+	// keeps the permanent record of an exchange (askUserAnswerRecord) and reads as a card, not as a
+	// row in a list of questions; the sub_agent call, whose block heads a whole run and frames the
+	// work beneath it (presentToolCall) — a fact about the call, so it holds from the moment the call
+	// is built, including for a delegation that never produced a run to frame; and the load_skill
+	// fetch, which folds with other fetches under "✦ Skill (N)" (ownGroup) and so must not be folded
+	// into the mixed umbrella first.
 	//
 	// It is the presenter's word and not the painter's guess, which is the point: the body a record
 	// carries used to keep it out of a group as a side effect of the old shape rule, and a side effect

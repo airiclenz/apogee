@@ -164,7 +164,21 @@ that a skill member row opens INLINE, never a run view.
 
 ---
 
-## 3. The skill card's spec and register line
+## 3. The skill card's spec and register line — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the `┊` claim was checked on the tree, not taken on trust — a throwaway
+in-package probe rendered three fetches with the middle one expanded and the closer is drawn at
+column 0 between the open member's body and the resuming row. The probe file was deleted; the
+sketch in **Grouped Skills** is that exact shape.
+NOTES (2026-09-02): the DECISION named `docs/layout/tool-layout.md:217`; its TWIN in the same
+file's header (`:29-35`, "nothing opens a span in place any more, so no paint reaches it: it stands
+as the record of a shape the screen no longer has") states the identical stale claim and was
+corrected with it — leaving it would have contradicted the sentence the DECISION asked for.
+NOTES (2026-09-02): the sweep grep found no fourth stale enumeration. `render.go:600` and
+`subagentblock_test.go:133` cite the ISSUES.md entry this item retires; that citation is left as it
+stands — the house style throughout `internal/tui` cites closed register entries by their wording
+as the record of what the defect was (`ISSUES.md, 2026-08-11`, "Finished sub-agents print the
+sub-agent output twice", and a dozen more).
 
 **What.** The spec is canon and currently says neither thing. Depends on item 2.
 
