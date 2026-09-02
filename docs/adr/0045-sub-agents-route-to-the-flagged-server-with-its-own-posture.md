@@ -71,6 +71,26 @@ CHANGE (engaged/lost), never per spawn. Work never stalls on a dead grunt box
 ([ADR 0042](0042-external-programs-are-optional-enhancements-never-prerequisites.md)'s
 degrade-don't-block posture); the cost policy degrades visibly rather than silently.
 
+*Amended 2026-09-02 — the NOTICE is debounced; the rule above is not.* An already-routed
+server owes `delegationFailureThreshold` (2) CONSECUTIVE unusable beats before the human is
+told it is unavailable, and the first usable beat says so again at once — the session
+heartbeat's own debounce (ADR 0024 D7) applied to the routing notice, for the same reason:
+one timed-out `/v1/models` is not evidence of an absent server, and a pair of notices
+alternating between "unavailable" and "routing to" every interval tells the human nothing
+they can act on. A cold start still announces on the first unusable beat, and the notice
+stays one per routing STATE CHANGE. A `/v1/models` answered with HTTP 429 is SILENCE, not a
+verdict: the beat is not landed at all — no push, no notice, the failure run untouched — so
+the last verdict stays latched until a non-429 beat replaces it; timeouts, 5xx and refused
+connections remain unusable beats, and 401/403 stay unusable.
+
+*What the debounce does NOT change.* The threshold gates words, never beats: decision 3's
+"the latch is mutex-read at spawn and never idle-gated — beats land mid-Exchange" stands
+verbatim, and every unusable beat still pushes nil into the latch under the lock the moment
+it lands. So the fallback rule of this section is untouched — an unusable target is not an
+error, and a spawn inside the debounce window still falls back to the parent's Upstream with
+the parent's posture (`CONTEXT.md`'s Sub-agent entry says the same). Only the sentence the
+human reads waits.
+
 **5 — The receiving server's cap bounds the fan-out.** Routed ⇒ the flagged entry's cap
 (its pin, else its observed `total_slots`, else 1); fallback engaged ⇒ the parent server's
 cap, as today. Guided decomposition's batch width follows the same number — ADR 0039's

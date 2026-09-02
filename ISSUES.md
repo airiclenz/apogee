@@ -25,18 +25,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [ ] sometimes unsensible values like '1514218 tok/s' are displayed. That number cannot be true.
-
-- [ ] When a session is cancelled after the model already started reposnding, a new prompt will be printed above the response that was already sent. This breaks the order of actions as the response came before the newest prompt.
-
-- [ ] getting a lot of log-noise that might not be true:
-· sub-agents: OR-deepseek unavailable — delegations run on the session server
-· sub-agents: routing to OR-deepseek (~deepseek/deepseek-v4-flash-latest)
-· sub-agents: OR-deepseek unavailable — delegations run on the session server
-· sub-agents: routing to OR-deepseek (~deepseek/deepseek-v4-flash-latest)
-· sub-agents: OR-deepseek unavailable — delegations run on the session server
-· sub-agents: routing to OR-deepseek (~deepseek/deepseek-v4-flash-latest)
-
 - [ ] Load-skill tool calls must be collapsed the same way sub agents do. Load-skills must not be folded intot the other Tools super-groups but always stay their own group (such as sub-agents). The name must be updated to a friendly name instead of "load_skill"
 
 

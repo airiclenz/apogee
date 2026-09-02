@@ -157,6 +157,10 @@ endpoint and the failure, **and the typed message stays in the box**. Everything
 scrollback, `/clear`, `/sessions`, `/version`, `/confine`, Shift+Tab. An in-flight Exchange is
 never killed by a heartbeat.
 
+*Cross-reference (2026-09-02):* [ADR 0045](0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md) §4
+mirrors this debounce for the Sub-agent routing notice — two consecutive unusable beats before the
+server is called unavailable — but debounces the NOTICE only: routing beats are never idle-gated.
+
 **8. The beat carries the whole `/v1/models` offering, and nothing renders it.** Each beat stashes
 `AvailableModels` into TUI state. That is the deliberate data layer for the future `/model` picker
 and `/server` switch: the seams (`hb.models`, `RebindSpec`, `Agent.Rebind`) are prepared and

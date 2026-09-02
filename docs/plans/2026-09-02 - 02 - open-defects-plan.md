@@ -142,7 +142,13 @@ go build ./... && go test ./internal/provider/ ./internal/heartbeat/ -count=1 &&
 
 ---
 
-## 5. Register and ADR: close the three entries, amend ADR 0045 §4
+## 5. Register and ADR: close the three entries, amend ADR 0045 §4 — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's "leaving the `[P]` gauge line" describes a line that no longer
+exists in the working tree — the Open defects section's remaining `[ ]` load_skill entry was
+left untouched instead.
+NOTES (2026-09-02): docs-only item, so the sanity check is the item's own acceptance command
+rather than a compile.
 
 **What.** Depends on items 1–4. Remove the three `[ ]` lines from `ISSUES.md` "Open defects" (`:28`, `:32`, `:34-40`), leaving the `[P]` gauge line. Amend ADR 0045 §4 (`docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md`) with a dated paragraph: the unusable NOTICE is debounced over `delegationFailureThreshold` consecutive beats, mirroring ADR 0024 D7, and a 429 is silence; the notice remains one per state change. Add a one-line cross-reference under ADR 0024 D7 pointing at the amendment. Docs-only; no code.
 
