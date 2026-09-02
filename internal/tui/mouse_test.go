@@ -4466,8 +4466,8 @@ func footerMarkerCells(t *testing.T, m Model) (y, first, middle, last int) {
 }
 
 // TestClickOnTheFooterModeMarkerOpensTheModePicker is the marker's pointer contract: every cell of
-// it opens the mode picker, the cell beside it does not, and a window too narrow to draw the marker
-// leaves the whole footer row naming nothing.
+// it opens the mode picker, the cell beside it does not, and a window whose margins cannot seat the
+// marker at all leaves the whole footer row naming nothing.
 func TestClickOnTheFooterModeMarkerOpensTheModePicker(t *testing.T) {
 	base := newTestModel(t)
 	y, first, middle, last := footerMarkerCells(t, base)
@@ -4500,7 +4500,7 @@ func TestClickOnTheFooterModeMarkerOpensTheModePicker(t *testing.T) {
 	// Six columns cannot seat the shortest marker on the ladder between the row's two margins, so
 	// the fit drops it whole (footerFit) — the one window that still leaves the footer with nothing
 	// to click. A merely narrow window no longer does: the left run gives way to keep the marker.
-	t.Run("a window too narrow for the marker", func(t *testing.T) {
+	t.Run("a window that cannot seat the marker at all", func(t *testing.T) {
 		narrow := step(t, base, tea.WindowSizeMsg{Width: 6, Height: 24})
 		if _, _, ok := narrow.footerModeSpan(narrow.width); ok {
 			t.Fatalf("6 columns still fit the marker; this case needs a window that drops it whole")
