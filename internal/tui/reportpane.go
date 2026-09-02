@@ -67,12 +67,13 @@ import (
 // same code for all of them — which is what keeps "what a report does" a single answer rather than
 // three copies that drift a key at a time.
 //
-// The three functions that resolve something THROUGH a kind — [reportKind.pane],
-// [Model.reportState] and [Model.reportContent] — are exhaustive switches with a panicking default
+// The four functions that resolve something THROUGH a kind — [reportKind.pane], [Model.reportState],
+// [Model.reportContent] and [reportKind.follows] — are exhaustive switches with a panicking default
 // rather than an `if` over the odd one out. Written as an `if`, a kind that missed a branch compiled
 // and painted ANOTHER pane's state or content inside its own box: a wrong pane rather than a build
-// error. The default is unreachable for every declared kind, and TestReportKindsResolveDistinctly
-// walks them all to keep it so.
+// error. The default is unreachable for every declared kind: TestReportKindsResolveDistinctly walks
+// the kinds through the first three to keep it so, while [reportKind.follows] is reached only
+// through the reports the follow tests open, one kind at a time.
 type reportKind int
 
 const (
