@@ -885,6 +885,10 @@ point is a **minor** bump, not a breaking change.
   scrolling back onto the last full window re-arms it. `/usage` is unchanged — it keeps its
   clamp-only scroll.
 
+- The footer's fit is now a pure composer (`footerFit`): it spends a narrow window on the row's
+  facts in priority order — the effort word first, then the workdir, then the host, then the model
+  truncated and dropped — so the mode marker keeps its seat. Not yet wired to the painter.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
@@ -1351,6 +1355,26 @@ point is a **minor** bump, not a breaking change.
   unusable beat still falls a spawn back to the parent's Upstream. ADR 0024 D7 gains a
   cross-reference to it. The three defects this plan closed (`tok/s`, cancelled-reply order,
   routing-notice flap) leave `ISSUES.md`.
+
+- A skill fetch now paints as `✦ Skill` with the loaded skill's own name on its branch row and a blank outcome slot, instead of the raw `✦ load_skill` card the unregistered fallback drew. It never folds into the mixed `✦ Tools (N calls)` umbrella, live or on replay of a session recorded before the change.
+
+- **Adjacent skill fetches fold under one `✦ Skill (N)`.** Two or more `load_skill` calls in a row
+  now paint as one umbrella with a row per fetch — each naming the skill that answered — instead of
+  a stack of standalone cards, closing the second half of the `load_skill` card defect. The
+  delegation grouping rule is what does it: its derivation is now keyed on a TOOL NAME
+  (`ownGroup`/`ownGroupAt` over `groupBlock`), with `subAgentGroup`/`subAgentGroupAt` as wrappers,
+  so delegations and skill fetches fold by one mechanism and one painter. A skill member row opens
+  its body INLINE — a fetch heads no run, so it never opens a run view — and wears none of the
+  delegation-only markings.
+
+- **The footer keeps its mode marker on a narrow window.** The row is now composed TO the width it
+  has (`footerFit`): the effort word gives way first, then the workdir, then the host, and the model
+  truncates before it goes — the mode marker, the model and `✦ offline` are what the row never gives
+  up. The marker drops only where it cannot seat whole between the row's two margins, so a human on
+  a narrow window can still see which blast radius the session is running in, where the marker used
+  to vanish whole the moment both ends did not fit. One fix rides along: the offline word keeps its
+  own error tone at every width, where the old narrow branch folded the whole row through one style
+  and lost it.
 
 ## [0.19.0] — 2026-08-30
 
