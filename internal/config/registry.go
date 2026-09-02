@@ -401,6 +401,12 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return boolValue(o.AutoCompact) },
 	},
 	{
+		Path: "prune-tool-results", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Collapse stale tool results to one-line stubs when history outgrows its budget share.",
+		Read:     func(o Options) string { return boolValue(o.PruneToolResults) },
+	},
+	{
 		Path: "delegate-max-steps", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxSteps),
 		Editable: true,
 		Validate: validateDelegateMaxSteps,

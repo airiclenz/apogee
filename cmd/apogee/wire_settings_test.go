@@ -192,6 +192,15 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 			},
 		},
 		{
+			name: "prune-tool-results", key: "prune-tool-results", value: "false",
+			check: func(t *testing.T, spy *applySettingSpy) {
+				t.Helper()
+				if want := []bool{false}; !slices.Equal(spy.prune, want) {
+					t.Errorf("SetPruneToolResults = %v, want %v", spy.prune, want)
+				}
+			},
+		},
+		{
 			name: "context-files.enable on carries this run's names", key: "context-files.enable", value: "true",
 			wantNote: contextFileNote,
 			check: func(t *testing.T, spy *applySettingSpy) {
@@ -722,6 +731,7 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		URLAllowHosts:      []string{"boot.example.com"},
 		URLDenyHosts:       []string{"metadata.internal"},
 		AutoCompact:        true,
+		PruneToolResults:   true,
 		ContextFiles:       []string{"AGENTS.md"},
 		Servers:            []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
 		Mechanisms:         map[string]bool{"codeinfo": true},
@@ -803,6 +813,15 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				t.Helper()
 				if opts.AutoCompact {
 					t.Error("AutoCompact = true, want the toggle the session switched off")
+				}
+			},
+		},
+		{
+			name: "prune-tool-results", key: "prune-tool-results", value: "false",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if opts.PruneToolResults {
+					t.Error("PruneToolResults = true, want the toggle the session switched off")
 				}
 			},
 		},

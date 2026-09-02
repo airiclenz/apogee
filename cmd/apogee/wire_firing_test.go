@@ -56,6 +56,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		UI:                 config.UISettings{Inspector: true},
 		ContextFiles:       []string{"AGENTS.md"},
 		AutoCompact:        true,
+		PruneToolResults:   true,
 		DelegateMaxSteps:   12,
 		ContextWindow:      16384,
 		ResponseReserve:    0.2,
@@ -186,6 +187,9 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	}
 	if !cfg.Context.CompactionEnabled {
 		t.Error("Context.CompactionEnabled = false; the host's auto-compact setting did not reach the run")
+	}
+	if !cfg.Context.PruneToolResults {
+		t.Error("Context.PruneToolResults = false; the host's prune-tool-results setting did not reach the run")
 	}
 	// The delegate step cap is top-level rather than per-entry, so an unattended run takes the
 	// host's own key: a Firing is exactly the run where an unbounded delegation is nobody's to stop.

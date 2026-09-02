@@ -262,6 +262,13 @@ type Options struct {
 	// apogee.Config.Context.CompactionEnabled.
 	AutoCompact bool
 
+	// pruneToolResults gates stale-tool-result Pruning — collapsing the oldest, largest tool
+	// results outside the recent window to one-line stubs when history outgrows its share of the
+	// Budget (default true), loaded from the config file only. ApplyConfig sets it from settings;
+	// the composition roots fold it into apogee.Config.Context.PruneToolResults, sessions and
+	// Firings alike.
+	PruneToolResults bool
+
 	// delegateMaxSteps bounds a CHILD agent's one Exchange, in Turns (default 80; 0 = unbounded),
 	// loaded from the config file only. ApplyConfig sets it from settings; the composition root
 	// folds it into apogee.Config.Delegation.MaxSteps. It never bounds the main loop, which is the

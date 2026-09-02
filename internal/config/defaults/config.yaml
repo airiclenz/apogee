@@ -519,6 +519,20 @@ context-files:
 auto-compact: true
 
 # =============================================================================
+# Prune stale tool results. Long sessions fill up with the OUTPUT of tool calls the model has
+# already read and moved past — whole files, long searches, build logs — and that output crowds out
+# the conversation itself. When the history outgrows 60% of its share of the context window, apogee
+# replaces the oldest and largest of those results with a one-line stub,
+# `[pruned: N lines from <tool> <argument> — re-run the call if you need it]`, until the history is
+# back under 40%; the model can always re-run a call whose output it still needs. The four most
+# recent tool-calling turns are never touched, so the work in progress is left alone, and nothing
+# but tool output is ever pruned. Each pass prints one line in the transcript saying how many
+# results went and roughly how many tokens that freed. Like auto-compact it is STRUCTURAL — it
+# stays on even under --bypass — so set this to false only if you want to manage the window
+# yourself. Config-file only (no flag or env). Default: true.
+prune-tool-results: true
+
+# =============================================================================
 # How far a delegated sub-agent may run. A sub-agent works its task in one exchange of its own, and
 # nothing about that exchange is yours to watch: it reads, greps and edits until it decides it is
 # done, and a model that keeps deciding otherwise can spend an unbounded number of tokens on one

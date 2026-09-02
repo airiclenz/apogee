@@ -193,12 +193,14 @@ type liveSettings struct {
 	allowHosts     []string
 	denyHosts      []string
 
-	// bypass and autoCompact mirror the two engine toggles that are in force the moment their apply
-	// returns (`bypass:`, `auto-compact:`). The engine holds both and nothing re-resolves them, so
-	// they are held for the four above's reason: an unattended run raised from this session must run
-	// the floor and the compaction the human last chose, not the ones the process started with.
-	bypass      bool
-	autoCompact bool
+	// bypass, autoCompact and pruneToolResults mirror the three engine toggles that are in force the
+	// moment their apply returns (`bypass:`, `auto-compact:`, `prune-tool-results:`). The engine
+	// holds all three and nothing re-resolves them, so they are held for the four above's reason: an
+	// unattended run raised from this session must run the floor, the compaction and the pruning the
+	// human last chose, not the ones the process started with.
+	bypass           bool
+	autoCompact      bool
+	pruneToolResults bool
 
 	// delegateMaxSteps mirrors `delegate-max-steps:`, which is the WRITE alone for THIS session —
 	// the bound is read off the file into the Config the engine was constructed with, and there is
@@ -254,13 +256,14 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		// And the seven keys this holder only MIRRORS — the tool set's four, the engine's two toggles
 		// and the inspector — seeded from the same snapshot for the reason the rest are: a session
 		// nobody edits must hand back exactly the configuration it launched with.
-		searchEndpoint: opts.WebSearchEndpoint,
-		disabledTools:  opts.ToolsDisabled,
-		allowHosts:     opts.URLAllowHosts,
-		denyHosts:      opts.URLDenyHosts,
-		bypass:         opts.Bypass,
-		autoCompact:    opts.AutoCompact,
-		inspector:      opts.UI.Inspector,
+		searchEndpoint:   opts.WebSearchEndpoint,
+		disabledTools:    opts.ToolsDisabled,
+		allowHosts:       opts.URLAllowHosts,
+		denyHosts:        opts.URLDenyHosts,
+		bypass:           opts.Bypass,
+		autoCompact:      opts.AutoCompact,
+		pruneToolResults: opts.PruneToolResults,
+		inspector:        opts.UI.Inspector,
 
 		delegateMaxSteps: opts.DelegateMaxSteps,
 	}
@@ -683,6 +686,14 @@ func (s *liveSettings) setAutoCompact(on bool) {
 	s.autoCompact = on
 }
 
+// setPruneToolResults mirrors the `prune-tool-results:` toggle, for setBypass' reason and on its
+// terms.
+func (s *liveSettings) setPruneToolResults(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneToolResults = on
+}
+
 // setDelegateMaxSteps mirrors `delegate-max-steps:`. Like setInspector below there is no engine
 // seam this shadows — the bound is a field of the Config an Agent was constructed with — so the
 // store is the whole of what the value can reach in this process, and what it reaches is the next
@@ -741,6 +752,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.URLDenyHosts = slices.Clone(s.denyHosts)
 	next.Bypass = s.bypass
 	next.AutoCompact = s.autoCompact
+	next.PruneToolResults = s.pruneToolResults
 	next.UI.Inspector = s.inspector
 	next.DelegateMaxSteps = s.delegateMaxSteps
 
@@ -1190,6 +1202,23 @@ var settingsTable = []settingsEntry{
 			// session does — the engine holds the toggle, and a Firing builds an engine of its own.
 			if a.live != nil {
 				a.live.setAutoCompact(on)
+			}
+			return "", nil
+		},
+	},
+	{
+		key:     "prune-tool-results",
+		reaches: reachesTheEngine,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			on, err := settingBool(key, value)
+			if err != nil {
+				return "", err
+			}
+			a.engine.SetPruneToolResults(on)
+			// Mirrored onto the holder for auto-compact's reason above: a Firing raised from this
+			// session prunes the way the session does, off an engine it builds for itself.
+			if a.live != nil {
+				a.live.setPruneToolResults(on)
 			}
 			return "", nil
 		},

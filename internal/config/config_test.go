@@ -299,6 +299,7 @@ func TestResolvePrecedence(t *testing.T) {
 func wantDefaults() Options {
 	return Options{
 		Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
+		PruneToolResults: true,
 		SubAgentsChoice:  SubAgentsChoiceFixed,
 		UseShippedSkills: true,
 		UseDefaultPrompt: true,
@@ -518,7 +519,8 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"SubAgentsServer":    true,
 		"SubAgentsChoice":    true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
-		"UseProjectSkills": true, "AutoCompact": true, "DelegateMaxSteps": true,
+		"UseProjectSkills": true, "AutoCompact": true, "PruneToolResults": true,
+		"DelegateMaxSteps": true,
 		"UseShippedSkills": true,
 		"UseDefaultPrompt": true,
 		"AutoTitle":        true, "RememberModel": true,
@@ -564,6 +566,7 @@ func everyKeyFileConfig() fileConfig {
 		UnconfinedHosts:    []UnconfinedHost{{ID: "another-host", Acknowledged: "2026-08-20"}},
 		WebSearch:          "https://search.example.com",
 		UseProjectSkills:   boolptr(false), AutoCompact: boolptr(false), AutoTitle: boolptr(false),
+		PruneToolResults: boolptr(false),
 		UseShippedSkills: boolptr(false),
 		UseDefaultPrompt: boolptr(false),
 		DelegateMaxSteps: intptr(12),

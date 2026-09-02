@@ -162,7 +162,18 @@ go build ./...
 
 ---
 
-## 7. `prune-tool-results` config key, /settings row, manual and CONTEXT term
+## 7. `prune-tool-results` config key, /settings row, manual and CONTEXT term — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): `cmd/apogee/settingsrows.go` needed no edit — the Session section opens at
+`auto-compact` and the new registry row sits directly after it, so the row lands in that section by
+registry order; `TestSettingsRowsCarryTheirSection` proves it.
+NOTES (2026-09-02): `internal/config/configwrite_scalar_test.go` needed no edit — its
+round-trip sweep iterates `KeyRegistry`, so the new key is covered without a listed case; it passes
+against the new uncommented `prune-tool-results: true` template line.
+NOTES (2026-09-02): the plan's "a config with `prune-tool-results: false` reaches
+`ContextConfig.PruneToolResults == false`" test landed in `cmd/apogee/wire_boot_test.go`
+(`TestBootConfigCarriesThePruneToolResultsToggle`, modelled on the delegate-step-cap test) — a file
+outside the item's Files list, since that is where the boot phase's Config is observable.
 
 **What:** thread the file-only boolean `prune-tool-results` (default `true`) through every site `auto-compact` touches (scout table): `fileConfig` field + parse row (`internal/config/config.go:616-621,1168`), `Options.PruneToolResults` (`options.go:263`), registry row after `auto-compact` (`registry.go:397-402`, Desc: "Collapse stale tool results to one-line stubs when history outgrows its budget share."), `defaults/config.yaml` block after `auto-compact:` (`:509-519`), `settingsrows.go` Session section, live-apply row + holder setter in `wire_settings.go` (`:1180-1195`, `:679-681`), `wire_boot.go:290` wiring into `ContextConfig.PruneToolResults`, and the engine seam from item 6. Update the key-enumeration tests the scout lists (`config_test.go:516-528`, `settingsrows_test.go:375-405`, `wire_settings_test.go:475`, `configwrite_scalar_test.go:243`). Docs: `docs/manual/configuration.md` gains a `prune-tool-results` section after `auto-compact` (`:376-386`) stating the 60/40 band, the 4-Turn window, the stub wording and the transcript line; `CONTEXT.md` gains a **Pruning** entry beside the `tool_result_cap` entry (`:1243`) and one sentence in **Compaction** (`:1296-1313`) saying pruning runs first. Depends on item 6.
 **Regression guard.** `cmd/apogee/wire_firing.go:289` builds a Firing's `ContextConfig{CompactionEnabled: in.opts.AutoCompact}` — the second site that folds `auto-compact` into an engine (pinned by `wire_firing_test.go:188`); it gains `PruneToolResults: in.opts.PruneToolResults` too, so a scheduled Firing prunes like the session it was raised from, and the holder's mirror at `wire_settings.go:743` (`next.AutoCompact = s.autoCompact`) gains the `next.PruneToolResults` line so the field the /settings row writes is read.

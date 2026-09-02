@@ -1271,6 +1271,25 @@ elision (`context.TruncateToolResult`), so the model reads one idiom; the Mechan
 cap fires first when it is enabled.
 _Avoid_: "compression", "compaction" (capping is per-result and non-generative).
 
+**Pruning**:
+The **structural** conversation-level reducer that collapses *stale tool results* — and nothing
+else — to one-line stubs when history outgrows its share of the Budget. Like Compaction and unlike
+Tool-result capping it is **not a Mechanism**: it stays on under Bypass and is gated only by the
+file-only `prune-tool-results:` key (default on). It runs at a quiescent **Turn boundary**,
+rewriting committed history: above **60%** of the History allocation it stubs the oldest results
+first, largest first within a Turn, until the fill is back under **40%**, and it protects the four
+most recent tool-calling Turns entirely. Each stub reads
+`[pruned: N lines from <tool> <argument> — re-run the call if you need it]` — the recovery is the
+model's own re-run — and a pass reports itself to every Driver as one **`PruneEvent`** carrying the
+results stubbed and the tokens freed. It skips whenever the context window is unknown, since a
+fraction of an unknown allocation means nothing. Because it rewrites committed history it
+invalidates the upstream prefix cache
+([ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §6), which is why the
+band is wide rather than a single threshold.
+_Avoid_: "compaction" (Pruning is mechanical and drops nothing but tool output; Compaction is
+generative and summarises everything), "truncation" (capping and History truncation both shorten
+text in place; a prune replaces a whole result with a stub naming the call that produced it).
+
 **Tool summary**:
 The **structured half** of a tool's outcome, carried beside the prose half on the same
 tool result: `Content` is the prose half and is written for the **model** (its wording is
@@ -1332,7 +1351,9 @@ the estimate-driven trigger down for the rest of that Exchange rather than re-ru
 failing call at the next boundary — the main agent re-arms when its next Exchange opens, a child
 stands down for the delegation, and the emergency fold and `/compact` keep their own shot.
 `auto-compact: false` opts out of all of them; the on-demand
-`/compact` stays boundary-only. See
+`/compact` stays boundary-only. **Pruning** runs first: the cheap structural collapse of stale tool
+results clears what it can at a Turn boundary before the estimate-driven trigger is ever reached, so
+a model call is spent only on history that pruning could not relieve. See
 [ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md).
 _Avoid_: "compression", "truncation" (Compaction is generative and summarises).
 

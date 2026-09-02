@@ -712,6 +712,39 @@ func TestBootConfigCarriesTheDelegateStepCap(t *testing.T) {
 	}
 }
 
+// The `prune-tool-results:` key reaches the engine seam it gates: the boot phase folds
+// opts.PruneToolResults into ContextConfig.PruneToolResults verbatim, so a file that opts out
+// (`prune-tool-results: false`) leaves an Agent that never prunes. It is threaded rather than
+// re-resolved — Pruning is structural, so nothing but this key can turn it off. The Firing
+// Driver's half of the same claim is TestFiringConfigSetsEveryUnattendedField.
+func TestBootConfigCarriesThePruneToolResultsToggle(t *testing.T) {
+	t.Parallel()
+	for _, want := range []bool{true, false} {
+		t.Run(strconv.FormatBool(want), func(t *testing.T) {
+			t.Parallel()
+			opts := config.Options{
+				Mode:             "ask-before",
+				Workspace:        t.TempDir(),
+				ConfigDir:        t.TempDir(),
+				PruneToolResults: want,
+			}
+			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+			t.Cleanup(w.close)
+			if err := w.resolveConfig(); err != nil {
+				t.Fatalf("resolveConfig: %v", err)
+			}
+			if w.cfg.Context.PruneToolResults != want {
+				t.Errorf("Config.Context.PruneToolResults = %v; want the threaded %v",
+					w.cfg.Context.PruneToolResults, want)
+			}
+		})
+	}
+}
+
 // The global rungs ride Config rather than the assembly alone so every Driver prunes and lifts the
 // same roster from the same value (ADR 0057) — one row per Config assembly in the composition root:
 // the session's boot phase, `apogee headless`, and a daemon Firing, each fed the same two lists and

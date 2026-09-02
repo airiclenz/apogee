@@ -389,6 +389,20 @@ it stays on even under `--bypass` — so it is on by default; set `auto-compact:
 (a file-only key) to manage the window yourself with `/compact` instead, which opts
 out of the recovery too.
 
+Before Compaction is ever reached, **Pruning** clears the stale bulk out of the window.
+A long session fills up with the *output* of tool calls the model has already read and
+moved past — whole files, long searches, build logs — and that output crowds out the
+conversation itself. When the history outgrows **60%** of its budgeted share, apogee
+replaces the oldest and largest of those results with a one-line stub,
+`[pruned: N lines from <tool> <argument> — re-run the call if you need it]`, until the
+history is back under **40%**; the model can always re-run a call whose output it still
+needs. The four most recent tool-calling turns are never touched, so the work in progress
+is left alone, and nothing but tool output is ever pruned — your prompts, the replies and
+the system content all stay. Each pass prints one line in the transcript saying how many
+results went and roughly how many tokens that freed. Like Compaction it is structural — it
+stays on even under `--bypass` — so it is on by default; set `prune-tool-results: false`
+(a file-only key) to keep every result verbatim and manage the window yourself.
+
 A **delegated sub-agent** runs its task in one exchange of its own, and how long that
 exchange lasts is the sub-agent's call, not yours: it reads, greps and edits until it
 decides it is finished, and a model that keeps deciding otherwise can spend an unbounded

@@ -287,6 +287,9 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 			// unattended run is precisely the thing a runaway reply must not be able to become.
 			MaxOutputTokens:   in.entry.MaxOutputTokens,
 			CompactionEnabled: in.opts.AutoCompact,
+			// And the `prune-tool-results:` toggle beside it, so a scheduled Firing prunes stale
+			// tool results the way the session it was raised from does.
+			PruneToolResults: in.opts.PruneToolResults,
 		},
 		// The `delegate-max-steps` bound on a sub-agent's Exchange (default 80; 0 ⇒ unbounded).
 		// A Firing runs while nobody watches, which is exactly the case a runaway delegation

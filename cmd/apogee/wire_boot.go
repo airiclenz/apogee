@@ -270,7 +270,9 @@ func (w *rootWiring) resolveConfig() error {
 		// n_ctx); the same value drives the TUI's footer/gauge below. Unpinned it stays 0 until the
 		// first heartbeat rebind binds the observed window. CompactionEnabled carries the
 		// `auto-compact` key (default on) — the budget-driven automatic trigger (item 9); the
-		// on-demand /compact runs regardless of it.
+		// on-demand /compact runs regardless of it. PruneToolResults carries the
+		// `prune-tool-results` key (default on) — the structural stale-tool-result collapse that
+		// runs at a Turn boundary before Compaction is ever reached.
 		// MaxOutputTokens is the startup entry's own `max-output-tokens:` pin (0 ⇒ unpinned, and the
 		// engine derives the reply cap from the room its Budget reserves — ADR 0046). It is seeded
 		// here as well as at the bind, because this Config is also what a scheduled Firing copies:
@@ -288,6 +290,7 @@ func (w *rootWiring) resolveConfig() error {
 			ResponseReserveFraction: w.opts.ResponseReserve,
 			MaxOutputTokens:         w.opts.StartupMaxOutputTokens,
 			CompactionEnabled:       w.opts.AutoCompact,
+			PruneToolResults:        w.opts.PruneToolResults,
 		},
 		// And how far a delegation of this session's may run before the engine ends it: the
 		// `delegate-max-steps` key (default 80; 0 ⇒ unbounded, what a delegation cost before the

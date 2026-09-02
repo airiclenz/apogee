@@ -620,6 +620,12 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		row: mustKey("prune-tool-results"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.PruneToolResults = fc.PruneToolResults == nil || *fc.PruneToolResults
+		},
+	},
+	{
 		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
 		// absence of one, so presence cannot stand in for the positive value the way it does there.
 		row: mustKey("delegate-max-steps"),
@@ -1166,6 +1172,12 @@ type fileConfig struct {
 	// so an explicit `auto-compact: false` is distinguishable from an absent key (default true).
 	// Compaction is structural (it stays on under Bypass), so this is the only way to turn it off.
 	AutoCompact *bool `yaml:"auto-compact"`
+	// PruneToolResults gates stale-tool-result Pruning: when history outgrows its share of the
+	// Budget the engine collapses the oldest, largest tool results outside the recent window to
+	// one-line stubs. A pointer for auto-compact's reason — an explicit `prune-tool-results: false`
+	// is distinguishable from an absent key (default true). Pruning is structural like Compaction
+	// (it stays on under Bypass), so this key is the only way to turn it off.
+	PruneToolResults *bool `yaml:"prune-tool-results"`
 	// DelegateMaxSteps bounds a CHILD agent's one Exchange, in Turns: the engine ends the
 	// delegation when it reaches this many Turns and hands the parent what the child has.
 	// File-only (no flag/env), like auto-compact above it, and a POINTER for auto-compact's
