@@ -55,8 +55,11 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   all-or-nothing, the operator meets that refusal at startup. It still **starts in the workspace**
   (apogee's own working directory, which filesystem-style servers expect): with argv[0] absolute
   and fenced there is no relative lookup left for the working directory to decide. Its environment
-  is unchanged — the full process environment plus `cfg.Env`, the deliberate trust decision above
-  (`ISSUES.md` L4). The launched process is held in a **process group** (POSIX) / **Job Object**
+  is unchanged by default — the full process environment plus `cfg.Env`, the deliberate trust
+  decision above — with `EnvAllowlist` (`env-allowlist:`) as the per-server opt-in for a
+  less-trusted server: named non-nil, the launch inherits only those keys plus the platform's
+  essentials, PATH scoped away from the workspace as `safeGitEnv` scopes git's, and `cfg.Env` is
+  appended last either way. The launched process is held in a **process group** (POSIX) / **Job Object**
   (Windows) via `platform.NewProcessTeardown`, and `Close` reaps that container after the session's
   own shutdown, so a descendant the server spawned cannot outlive the session — the SDK's
   spec-shaped shutdown signals the leader alone. That `Cmd` carries a **session-scoped cancellable

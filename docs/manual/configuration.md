@@ -8,7 +8,7 @@ is there as a commented example, and the few that ship active carry the value
 apogee already recommends. Three keys carry all four layers —
 `server:` (`--server`, `APOGEE_SERVER`), `mode:` and `bypass:`. Every other key
 is **file-only** (no flag or env): the `servers:` list, the system prompt, the
-model profile, MCP servers, [the web-search
+model profile, [MCP servers](#external-mcp-servers--mcp-servers), [the web-search
 endpoint](#where-web_search-looks--web-search-endpoint) and the small-model
 mechanisms among them. Two raw overrides are not config keys at all — `--endpoint`
 / `APOGEE_ENDPOINT` runs one session against a server the file does not list,
@@ -265,6 +265,68 @@ exactly as they judge a `web_fetch` URL — a backend on `localhost` is refused 
 whatever your lists say. The key is file-only (no flag, no environment variable) and live:
 commit the `web-search-endpoint` row in `/settings`, or save the file, and the tool is re-pointed
 in place — the next call goes to the new endpoint, mid-session, with nothing rebuilt.
+
+## External MCP servers — `mcp-servers:`
+
+`mcp-servers:` is the list of external [Model Context Protocol](https://modelcontextprotocol.io)
+servers apogee connects on startup. It is **empty by default**, which leaves the whole feature
+dormant — no connections, no error, nothing on the model's menu. Each entry needs a `name` (unique;
+it becomes the prefix on every tool that server contributes, so the model sees `github__create_issue`
+and you can tell whose tool a call reached) and a `transport`, which is `stdio` for a local process
+apogee launches or `sse` / `streamable-http` for a server reached over http(s). A stdio entry takes
+`command`, optional `args`, and optional `env`; an http one takes `endpoint`.
+
+```yaml
+# ~/.apogee/config.yaml
+mcp-servers:
+  - name: github
+    transport: stdio
+    command: github-mcp-server
+    args: ["--stdio"]
+    env: ["GITHUB_TOKEN=…"]
+  - name: docs
+    transport: streamable-http
+    endpoint: https://mcp.example.com/
+```
+
+An MCP server is an **external process apogee cannot confine**, so its tools always ask for approval
+in auto mode, exactly as any other unfenceable reach does (see [Auto mode's blast
+radius](#auto-modes-blast-radius)). Its tool descriptions, schemas and results are untrusted input:
+they are shown to the model and rendered, never executed. An http(s) endpoint is one *you* wrote
+here rather than one a model chose, so it is exempt from the SSRF floor and the connection is pinned
+to that endpoint's own addresses — your [`url-safety:`](#what-the-network-tools-may-reach--url-safety)
+lists still judge it, and redirects are not followed. A `stdio` command is resolved on `PATH` through
+the same exec fence the tools use, so what launches is an absolute program that does not live inside
+the workspace; a server binary the model could have written is refused at startup rather than run.
+
+**What a stdio server inherits — `env-allowlist:`.** By default a launched server gets apogee's
+**whole environment**, every secret in it included, plus whatever `env:` adds. That is deliberate and
+not an oversight: you chose the command, at the same trust level as the toolchain apogee already
+invokes, and most servers need an inherited `PATH`, `HOME` or runtime variable to work at all. When
+you want to run a server you trust *less* than that, name the keys it may see:
+
+```yaml
+# ~/.apogee/config.yaml
+mcp-servers:
+  - name: scratch
+    transport: stdio
+    command: scratch-mcp-server
+    env-allowlist: ["PATH", "HOME", "LANG"]
+    env: ["SCRATCH_TOKEN=…"]
+```
+
+Only those keys are passed on, with `PATH` scoped away from the workspace so the server cannot be
+handed a program the model wrote — the same treatment the built-in `git` tool's environment gets.
+`env-allowlist: []` is meaningful and different from leaving the key out: an empty list passes
+nothing on beyond what the platform itself needs to start a process. Either way the server's own
+`env:` entries are appended **last**, so a variable you set for that server wins over an inherited
+one of the same name. Leaving the key out is today's behaviour, unchanged.
+
+The block is file-only (no flag, no environment variable) and it is **live**: save the file — or use
+`⏎` on the `mcp-servers:` row in [`/settings`](commands.md#the-settings-screen--settings), which
+opens your editor because no row can write a list this shape — and apogee reconnects, bringing the
+new set up before swapping the tools over, so a server that will not come back leaves the old
+connections serving and says why on the row.
 
 ## Skills a repository ships — `use-project-skills:`
 

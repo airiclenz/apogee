@@ -147,15 +147,17 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 // lifetime is the SESSION, and binding it to the sweep that dialled it would kill every server the
 // moment Connect returned.
 //
-// TRUST NOTE (security-review L4): a configured stdio MCP server is launched with Apogee's FULL
-// process environment (cmd.Environ()) plus the per-server cfg.Env, so it sees every secret the
-// Apogee process holds (API keys, tokens). This is DELIBERATE and is a conscious trust decision,
-// not a leak: the stdio command is chosen by the host in global config (the same trust level as
-// the toolchain Apogee invokes), and many MCP servers need inherited PATH/HOME/runtime vars to
-// function. It is broader than the git tool's allowlisted env (safeGitEnv) on purpose. An
-// optional env-allowlist scrub for stdio MCP launches is parked in ISSUES.md (L4) for a host that
-// wants to run a less-trusted stdio server; v1 treats a configured stdio MCP command as fully
-// trusted with the process environment.
+// TRUST NOTE (security-review L4): BY DEFAULT — no env-allowlist: key on the server — a configured
+// stdio MCP server is launched with Apogee's FULL process environment (cmd.Environ()) plus the
+// per-server cfg.Env, so it sees every secret the Apogee process holds (API keys, tokens). That
+// default is DELIBERATE and is a conscious trust decision, not a leak: the stdio command is chosen
+// by the host in global config (the same trust level as the toolchain Apogee invokes), and many
+// MCP servers need inherited PATH/HOME/runtime vars to function. It is broader than the git tool's
+// allowlisted env (safeGitEnv) on purpose. The opt-in for a host that wants to run a LESS-trusted
+// stdio server is cfg.EnvAllowlist (`env-allowlist:` in config): naming it scrubs the launch down
+// to those keys plus the platform's essentials, with PATH scoped away from the workspace exactly as
+// safeGitEnv scopes git's, and an explicitly empty list hands the child the platform floor alone.
+// cfg.Env is appended last either way, so a per-server variable still wins.
 func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
 	if strings.TrimSpace(cfg.Command) == "" {
 		return nil, nil, nil, nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)

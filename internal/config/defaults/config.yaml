@@ -416,7 +416,11 @@ context-files:
 # addresses — any OTHER private address it is later pointed at is still refused — and redirects
 # are not followed, so configure a redirecting server at the URL it redirects to. A stdio server
 # is a local process you launch — you chose the command — so no URL check applies; its tools still
-# ask in auto.
+# ask in auto. It also inherits apogee's WHOLE environment, secrets included — deliberate, since
+# the command is yours and most servers need PATH/HOME to run. To launch a LESS trusted one, add
+# `env-allowlist:` to that server: only the keys you name are inherited, with PATH scoped away from
+# the workspace; an empty list `[]` inherits nothing beyond what the platform itself needs, and the
+# server's own `env:` entries are appended last either way.
 #
 # mcp-servers:
 #   - name: github                       # the prefix on each tool's name; must be unique
@@ -424,6 +428,7 @@ context-files:
 #     command: github-mcp-server         # stdio: the executable to launch
 #     args: ["--stdio"]                  # stdio: optional arguments
 #     env: ["GITHUB_TOKEN=…"]            # stdio: optional KEY=VALUE environment entries
+#     env-allowlist: ["PATH", "HOME"]    # stdio: inherit only these (absent = everything)
 #   - name: docs
 #     transport: streamable-http         # sse | streamable-http: a remote http(s) server
 #     endpoint: https://mcp.example.com/ # the server URL (http://127.0.0.1:… is fine too)

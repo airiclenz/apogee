@@ -781,7 +781,12 @@ proving the fixture still launches (its selector rides `cfg.Env`, and the comman
 
 ---
 
-## 18. Document `env-allowlist` and narrow the trust note
+## 18. Document `env-allowlist` and narrow the trust note — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the template edit is the `env-allowlist:` example line beside `env:` (same comment column and style) PLUS four sentences in the block's own comment paragraph above it — the inline comment column is ~50 characters wide and cannot carry the pointer semantics (absent vs named vs `[]`, PATH scoping, `env:` appended last), which the paragraph states instead.
+NOTES (2026-09-02): the docs say an explicit `[]` "inherits nothing beyond what the platform itself needs" rather than the plan's "the platform floor alone", because that floor is empty on POSIX (`posixRules().envKeys` is nil, `internal/platform/host.go:57`) and non-empty only on Windows — a reader on macOS or Linux must not expect a floor that is not there.
+NOTES (2026-09-02): the new manual section sits between `web-search-endpoint:` and `use-project-skills:`, mirroring the config template's own order, and the intro's file-only enumeration (`docs/manual/configuration.md:11`) now links "MCP servers" to it — the same sentence already links the web-search endpoint to its section, and the link was dead weight to add elsewhere.
+NOTES (2026-09-02): the manual section's cross-links were checked against the anchors already used in the manual (`#auto-modes-blast-radius`, `#what-the-network-tools-may-reach--url-safety`, `commands.md#the-settings-screen--settings`); the `/settings` claim (an `mcp-servers:` edit opens the editor and reconnects) is `docs/manual/commands.md:260,271` restated, not a new claim.
 
 **Depends on item 17.**
 
