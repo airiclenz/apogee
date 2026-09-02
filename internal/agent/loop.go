@@ -228,11 +228,13 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// withdrawn, so a model that asks for a tool anyway is asking for something the request
 		// told it it cannot have, and a withdrawn menu that is still reachable is no withdrawal at
 		// all. The calls are DROPPED undispatched and the assistant message is committed without
-		// them. A wrap-up reply with no text is committed NOWHERE and emits no MessageEvent: an
-		// empty assistant message would become the child's last visible text and bury the partial
-		// result its capped Turns already earned, so that case falls back to the result instead
-		// (subagent.go). Outside the latch the text is never empty here, so nothing changes for it.
-		if text := resp.Text(); text != "" {
+		// them. A wrap-up reply with no text — empty OR whitespace-only, the same emptiness
+		// replyFault tests — is committed NOWHERE and emits no MessageEvent: a blank assistant
+		// message would become the child's last visible text and bury the partial result its
+		// capped Turns already earned, so that case falls back to the result instead
+		// (subagent.go). The committed and emitted text stays the raw reply, untrimmed. Outside
+		// the latch the text is never empty here, so nothing changes for it.
+		if text := resp.Text(); strings.TrimSpace(text) != "" {
 			a.conv.Append(assistantMessage(resp, nil))
 			a.cfg.Events.Emit(domain.MessageEvent{EventBase: a.base(turn), Text: text})
 		}

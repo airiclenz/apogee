@@ -1922,3 +1922,31 @@ func TestWrapUpWithNoTextCommitsNothing(t *testing.T) {
 		t.Error("MessageEvent emitted for a text-less wrap-up reply")
 	}
 }
+
+// TestWrapUpWithBlankTextCommitsNothing is the whitespace sibling: a wrap-up reply whose text is
+// nothing but spaces, and which asks for a tool anyway, is as empty as no text at all. The latched
+// exit measures emptiness the way replyFault does (strings.TrimSpace), so a blank final message
+// never becomes the child's last visible text and never buries the partial result. It also pins
+// the boundary finishAtStepCap relies on: the latched exit ends the EXCHANGE, never a bare Turn.
+func TestWrapUpWithBlankTextCommitsNothing(t *testing.T) {
+	a, _, sink, ran := wrapUpAgent(t, true,
+		narratedToolCallScript("t0", "read_thing", `{}`, "  \n\t "))
+
+	res := runWrapUpAgent(t, a)
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("Status = %q, want %q — the latched exit always closes the Exchange", res.Status, domain.StatusExchangeComplete)
+	}
+	if *ran != 0 {
+		t.Errorf("tool ran %d times, want 0 — a withdrawn menu must not be reachable", *ran)
+	}
+	if got := a.lastVisibleText(); got != "" {
+		t.Errorf("lastVisibleText = %q, want empty — a whitespace-only wrap-up commits nothing", got)
+	}
+	if got := len(assistantMessages(a)); got != 0 {
+		t.Errorf("assistant messages = %d, want 0", got)
+	}
+	if hasEvent[domain.MessageEvent](sink.events) {
+		t.Error("MessageEvent emitted for a whitespace-only wrap-up reply")
+	}
+}

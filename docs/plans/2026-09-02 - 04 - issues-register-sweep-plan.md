@@ -124,7 +124,11 @@ of the error table — proving a `system:`-only `when` block with a valid regexp
 
 ---
 
-## 2. The latched wrap-up exit trims, and always closes the Exchange
+## 2. The latched wrap-up exit trims, and always closes the Exchange — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the doc comment above the latched exit (`internal/agent/loop.go:229-235`) was re-worded in the same edit — it said "a wrap-up reply with no text", which the trim change makes incomplete; it now names the whitespace-only case and states that the text committed and emitted is the raw, untrimmed reply.
+NOTES (2026-09-02): `finishAtStepCap` was left untouched as the item directs; the Exchange-boundary invariant is pinned on the directly driven child in the new test (`res.Status == domain.StatusExchangeComplete`), and the two capped-path parent tests (`internal/agent/subagent_test.go:1042`, `:1109`) were not edited.
+NOTES (2026-09-02): the new test was confirmed non-vacuous — reverting only the `loop.go` condition fails it on all three assertions (lastVisibleText, assistant-message count, MessageEvent), and the condition was restored before finishing.
 
 **What.** Two defects on the same exit. (a) The latched final-answer branch tests
 `if text := resp.Text(); text != ""` (`internal/agent/loop.go:235`) while `replyFault` tests
