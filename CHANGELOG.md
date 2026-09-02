@@ -1169,6 +1169,43 @@ point is a **minor** bump, not a breaking change.
   the correct half all along), a member that carried no prompt at all still wears nothing, and
   `layout.md` records the corrected rule.
 
+- **The `tok/s` readout stops reporting fantasy numbers.** The generation clock now starts on a
+  Turn's first depth-0 OUTPUT event — a reasoning chunk as readily as a visible token — because
+  the server counts reasoning in the `completion_tokens` the reading divides. Timing only from
+  the first visible token divided the whole completion by the tail of the generation, so a model
+  that thought for twenty seconds and then spoke for one read as twenty times its real speed.
+  A window shorter than the new `throughputWindowFloor` (250 ms) now yields no reading at all
+  rather than a quotient of scheduling jitter — the `· N tok/s` suffix hides itself instead of
+  printing the reported `1514218 tok/s`. There is no display clamp: the measurement is fixed,
+  not the number that comes out of it.
+
+- **Cancelled replies keep their place.** What a reply had streamed when you stopped it is now
+  committed as an ordinary assistant entry BEFORE the `· cancelled` note, instead of being left as a
+  live preview that belonged to no entry. The next prompt therefore lands below the partial and the
+  note rather than above them, and the session record keeps the same order, so a resume reads back
+  what the screen showed. An Exchange cancelled before the first token still leaves the note alone.
+
+- **The `sub-agents: … unavailable` notice no longer flaps.** A Sub-agent server that drops a
+  single beat used to cost the human a pair of transcript lines every interval — `unavailable`
+  then `routing to …` — because the routing notice flipped on the first failed beat. It now waits
+  for `delegationFailureThreshold` (2) consecutive unusable beats before it says the server is
+  unavailable, the same debounce the session heartbeat's footer has taken since ADR 0024 D7, and
+  the first usable beat clears the count. Only the NOTICE waits: every unusable beat still pushes
+  nil into the engine's Delegation latch under the lock, so a spawn inside the debounce window
+  still falls back to the session's own server (ADR 0045 §4) exactly as before. A cold start still
+  announces the first unusable beat (ADR 0042), and a refused key source or a
+  `sub-agents-server:` naming no entry — facts about the file rather than the network — still
+  report at once.
+
+- Fixed: a rate-limited (HTTP 429) model list on the Sub-agent server no longer counts as a routing verdict — the beat is not landed at all, so the last verdict stays latched and no `sub-agents: … unavailable` notice goes out until a non-429 beat says otherwise. Discovery's non-200 error is now branchable by HTTP code (`errors.As` reaches the `*StatusError`) while its text keeps a single `apogee: ` prefix.
+
+- ADR 0045 §4 records the Sub-agent routing-notice debounce (two consecutive unusable beats
+  before "unavailable", the first usable beat back at once, HTTP 429 as silence) and states
+  explicitly that the debounce gates the notice only — beats are never idle-gated and every
+  unusable beat still falls a spawn back to the parent's Upstream. ADR 0024 D7 gains a
+  cross-reference to it. The three defects this plan closed (`tok/s`, cancelled-reply order,
+  routing-notice flap) leave `ISSUES.md`.
+
 ## [0.19.0] — 2026-08-30
 
 ### Added
