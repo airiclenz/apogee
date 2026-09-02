@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -810,4 +812,190 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 				got.Meta.DelegateUsage)
 		}
 	})
+}
+
+// pruneNow is the pinned clock every Prune test measures MaxAge against.
+var pruneNow = time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+
+// pruneStore seeds a store, clock pinned to pruneNow, with one sampleRecord per id/UpdatedAt
+// pair. The ids are minted-shaped so they double as filename stems.
+func pruneStore(t *testing.T, ages map[string]time.Duration) *Store {
+	t.Helper()
+	st := NewStore(t.TempDir())
+	st.now = func() time.Time { return pruneNow }
+	for id, age := range ages {
+		if err := st.Save(sampleRecord(id, pruneNow.Add(-age))); err != nil {
+			t.Fatalf("Save %s: %v", id, err)
+		}
+	}
+	return st
+}
+
+// storedIDs is the set of ids the store still lists, lexically sorted for a stable comparison.
+func storedIDs(t *testing.T, st *Store) []string {
+	t.Helper()
+	metas, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ids := make([]string, 0, len(metas))
+	for _, m := range metas {
+		ids = append(ids, m.ID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// The three ids the age/count tables share: one an hour old, one a day old, one a week old.
+const (
+	pruneNewID = "20260902T110000Z-aaaa1111"
+	pruneMidID = "20260901T120000Z-bbbb2222"
+	pruneOldID = "20260826T120000Z-cccc3333"
+)
+
+// pruneAges is the seed for the table below: newest first by construction.
+var pruneAges = map[string]time.Duration{
+	pruneNewID: time.Hour,
+	pruneMidID: 24 * time.Hour,
+	pruneOldID: 7 * 24 * time.Hour,
+}
+
+// Prune honours each rule and both together, and a zero Retention is a no-op — retention is
+// opt-in, so a store nobody configured keeps every record.
+func TestPruneRetentionRules(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		ret     Retention
+		keep    []string
+		removed int
+		want    []string
+	}{
+		{
+			name:    "zero retention removes nothing",
+			ret:     Retention{},
+			removed: 0,
+			want:    []string{pruneOldID, pruneNewID, pruneMidID},
+		},
+		{
+			name:    "age only discards past the cut",
+			ret:     Retention{MaxAge: 48 * time.Hour},
+			removed: 1,
+			want:    []string{pruneNewID, pruneMidID},
+		},
+		{
+			name:    "count only keeps the newest N",
+			ret:     Retention{MaxCount: 1},
+			removed: 2,
+			want:    []string{pruneNewID},
+		},
+		{
+			name:    "both rules apply together",
+			ret:     Retention{MaxAge: 48 * time.Hour, MaxCount: 1},
+			removed: 2,
+			want:    []string{pruneNewID},
+		},
+		{
+			name:    "a kept id survives a rule that would remove it",
+			ret:     Retention{MaxAge: 48 * time.Hour},
+			keep:    []string{pruneOldID},
+			removed: 0,
+			want:    []string{pruneOldID, pruneNewID, pruneMidID},
+		},
+		{
+			// The kept id is the oldest, so it is the one the count rule would have dropped:
+			// it survives, and the slot it occupies costs the next-oldest record instead.
+			name:    "a kept id still occupies one of the N slots",
+			ret:     Retention{MaxCount: 2},
+			keep:    []string{pruneOldID},
+			removed: 1,
+			want:    []string{pruneOldID, pruneNewID},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			st := pruneStore(t, pruneAges)
+
+			removed, err := st.Prune(tc.ret, tc.keep...)
+			if err != nil {
+				t.Fatalf("Prune: %v", err)
+			}
+			if removed != tc.removed {
+				t.Errorf("removed = %d, want %d", removed, tc.removed)
+			}
+			want := append([]string(nil), tc.want...)
+			sort.Strings(want)
+			if got := storedIDs(t, st); !slices.Equal(got, want) {
+				t.Errorf("survivors = %v, want %v", got, want)
+			}
+			for _, id := range want {
+				if _, err := st.Load(id); err != nil {
+					t.Errorf("Load(%s) after Prune: %v", id, err)
+				}
+			}
+		})
+	}
+}
+
+// A file Prune cannot read is never a candidate: a corrupt record and a foreign file both stay
+// on disk however aggressive the policy, because a sweep must not delete what it cannot judge.
+func TestPruneLeavesUnreadableFiles(t *testing.T) {
+	t.Parallel()
+	st := pruneStore(t, map[string]time.Duration{pruneNewID: time.Hour})
+	for name, body := range map[string]string{
+		"broken.json": "{not json",
+		"stray.json":  `{"foo":1}`,
+	} {
+		if err := os.WriteFile(filepath.Join(st.dir, name), []byte(body), filePerm); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	removed, err := st.Prune(Retention{MaxAge: time.Minute, MaxCount: 1})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed = %d, want 1 (only the readable record)", removed)
+	}
+	for _, name := range []string{"broken.json", "stray.json"} {
+		if _, err := os.Stat(filepath.Join(st.dir, name)); err != nil {
+			t.Errorf("%s: %v — an unreadable file must survive the sweep", name, err)
+		}
+	}
+}
+
+// A record's declared id need not be its filename stem, so a copied file carrying a live
+// record's id must never aim the sweep at the record it names: the copy is dropped as a
+// candidate, and the live record it impersonates stays on disk.
+func TestPruneIgnoresFileWhoseStemIsNotItsID(t *testing.T) {
+	t.Parallel()
+	st := pruneStore(t, map[string]time.Duration{pruneNewID: time.Hour})
+
+	// backup.json is a byte copy of the newest record, and therefore declares its id while
+	// sitting under another name — and it is old enough for the age rule to want it gone.
+	copied := sampleRecord(pruneNewID, pruneNow.Add(-7*24*time.Hour))
+	copied.RecordVersion = RecordVersion
+	data, err := json.Marshal(copied)
+	if err != nil {
+		t.Fatalf("marshal copy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(st.dir, "backup.json"), data, filePerm); err != nil {
+		t.Fatalf("write copy: %v", err)
+	}
+
+	removed, err := st.Prune(Retention{MaxAge: 48 * time.Hour})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed = %d, want 0 — the copy is not a candidate and the live record is inside the window", removed)
+	}
+	if _, err := st.Load(pruneNewID); err != nil {
+		t.Errorf("Load(%s) after Prune: %v — the copy must not have deleted the record it names", pruneNewID, err)
+	}
+	if _, err := os.Stat(filepath.Join(st.dir, "backup.json")); err != nil {
+		t.Errorf("backup.json: %v — a file the sweep skips must stay put", err)
+	}
 }

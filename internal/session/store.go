@@ -233,6 +233,32 @@ func (s *Store) save(rec Record) error {
 // wandered into the directory — is skipped, so one bad record never kills the browser. A
 // missing store directory is an empty list, not an error.
 func (s *Store) List() ([]Meta, error) {
+	found, err := s.scan()
+	if err != nil {
+		return nil, err
+	}
+	metas := make([]Meta, 0, len(found))
+	for _, f := range found {
+		metas = append(metas, f.meta)
+	}
+	return metas, nil
+}
+
+// stemmedMeta pairs a listed record's Meta with the filename stem it was read from. The two
+// need not agree: decodeRecord validates the id a record declares but never compares it to the
+// path the record came from, so a copied file (a hand-made backup.json carrying a live
+// record's id) declares an id that addresses ANOTHER file. Prune needs that distinction to
+// avoid deleting the wrong record; List does not, and drops the stem again.
+type stemmedMeta struct {
+	stem string
+	meta Meta
+}
+
+// scan reads every *.json in the store, decodes each to its Meta, and returns them paired with
+// their filename stems, sorted UpdatedAt descending. A file that fails to decode — corrupt, or
+// a foreign file that wandered into the directory — is skipped, so one bad record never kills
+// the browser and never gets swept. A missing store directory is an empty list, not an error.
+func (s *Store) scan() ([]stemmedMeta, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -240,7 +266,7 @@ func (s *Store) List() ([]Meta, error) {
 		}
 		return nil, fmt.Errorf("apogee: read sessions directory %q: %w", s.dir, err)
 	}
-	metas := make([]Meta, 0, len(entries))
+	found := make([]stemmedMeta, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -249,12 +275,12 @@ func (s *Store) List() ([]Meta, error) {
 		if err != nil {
 			continue // soft-skip: corrupt or foreign files must not fail the whole list
 		}
-		metas = append(metas, rec.Meta)
+		found = append(found, stemmedMeta{stem: strings.TrimSuffix(e.Name(), ".json"), meta: rec.Meta})
 	}
-	sort.SliceStable(metas, func(i, j int) bool {
-		return metas[i].UpdatedAt.After(metas[j].UpdatedAt)
+	sort.SliceStable(found, func(i, j int) bool {
+		return found[i].meta.UpdatedAt.After(found[j].meta.UpdatedAt)
 	})
-	return metas, nil
+	return found, nil
 }
 
 // Load returns the record stored under id (<dir>/<id>.json), wrapping a pre-plan bare
@@ -294,6 +320,78 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("apogee: delete session %q: %w", id, err)
 	}
 	return nil
+}
+
+// Retention is the session store's pruning policy: records not updated within MaxAge go, and
+// only the newest MaxCount survive. A zero field is that rule switched off, so the zero
+// Retention prunes nothing — retention is opt-in, and a caller that configured neither knob
+// keeps every session it ever wrote.
+type Retention struct {
+	MaxAge   time.Duration // discard records last updated before now-MaxAge; zero = no age rule
+	MaxCount int           // keep only this many newest records; zero = no count rule
+}
+
+// Prune applies r to the store and reports how many records it removed. Candidates are the
+// records scan can read, newest first: a corrupt or foreign file is never deleted, and neither
+// is a file whose name disagrees with the id the record inside it declares — deleting by that
+// id would take out the OTHER record, the live one the sweep meant to keep. MaxAge discards
+// records last updated before now-MaxAge; MaxCount then keeps the newest N. An id in keep is
+// never deleted, but it still occupies one of those N slots: the session being resumed is
+// retained, not exempted from the budget. Deletion goes through Delete, so the store lock and
+// the id validation apply. One failed delete does not abort the sweep — the first error is
+// returned alongside the count of what did go.
+func (s *Store) Prune(r Retention, keep ...string) (int, error) {
+	if r.MaxAge <= 0 && r.MaxCount <= 0 {
+		return 0, nil
+	}
+	found, err := s.scan()
+	if err != nil {
+		return 0, err
+	}
+	kept := make(map[string]bool, len(keep))
+	for _, id := range keep {
+		kept[id] = true
+	}
+	var cutoff time.Time
+	if r.MaxAge > 0 {
+		cutoff = s.now().UTC().Add(-r.MaxAge)
+	}
+	// Every kept record present in the store reserves one of MaxCount's slots up front, so
+	// retaining it costs the oldest record that would otherwise have filled that slot rather
+	// than raising the budget to N+1.
+	budget := r.MaxCount
+	for _, f := range found {
+		if f.stem == f.meta.ID && kept[f.meta.ID] {
+			budget--
+		}
+	}
+	if budget < 0 {
+		budget = 0
+	}
+	removed := 0
+	var firstErr error
+	for _, f := range found {
+		if f.stem != f.meta.ID {
+			continue // this file does not own the id it declares: deleting by it would hit another record
+		}
+		if kept[f.meta.ID] {
+			continue // the session being resumed is never swept out from under its own run
+		}
+		expired := r.MaxAge > 0 && f.meta.UpdatedAt.Before(cutoff)
+		overflow := r.MaxCount > 0 && budget <= 0
+		if !expired && !overflow {
+			budget--
+			continue
+		}
+		if err := s.Delete(f.meta.ID); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removed++
+	}
+	return removed, firstErr
 }
 
 // Rename sets a stored session's Title and re-stamps its UpdatedAt, persisting through the

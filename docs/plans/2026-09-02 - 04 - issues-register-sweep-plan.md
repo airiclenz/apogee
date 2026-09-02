@@ -596,7 +596,10 @@ stay untouched.
 
 ---
 
-## 14. The session store prunes by age and count
+## 14. The session store prunes by age and count — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): `Prune` reads its candidates through a new unexported `scan()` (stem + Meta, sorted UpdatedAt descending) that `List` now also calls, rather than through `List` itself — the item's regression guard authorizes enumerating the directory in `Prune`, and sharing one walk keeps the soft-skip rules single-sourced instead of duplicating them. `List`'s behaviour and signature are unchanged.
+NOTES (2026-09-02): a `keep` id present in the store reserves one of `MaxCount`'s slots BEFORE the newest-first walk, so retaining it costs the oldest record that would otherwise have filled that slot and the survivor count stays N — the literal reading of "still occupies one of the N kept slots". A positional reading (kept ids simply skipped in place) would have let N+1 records survive.
 
 **What.** `internal/session.Store` never prunes (`internal/session/store.go:160-305` — no
 Prune/GC/Count), so `~/.apogee/sessions/` grows unbounded. Add
