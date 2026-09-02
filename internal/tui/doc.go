@@ -244,12 +244,14 @@
 // ([Model.settingsPaint], whose geometry is the painter's own — renderPopupPlaced reports where the
 // rows landed rather than the mouse re-deriving it) — and, where the multi-line prompt field has
 // replaced that list, the field itself, over all of its rows ([Model.settingsTextPaint], which reads
-// the same placement plus the wrap the painter chose). A FOURTH and a FIFTH join them while /usage and
-// /inspect are open, and they are ONE rectangle written once (reportpane.go), not two: a report has
+// the same placement plus the wrap the painter chose). A FOURTH, a FIFTH and a SIXTH join them while
+// /usage, /inspect and /thinking are open, and they are ONE rectangle written once (reportpane.go),
+// not three: a report has
 // nothing to select, so a click inside it is only swallowed, a click outside dismisses it and then
 // goes on to whatever it named, and the wheel scrolls its rows ([Model.reportWindow], reading the
-// same painter's placement). They are also the two panes that can be up TOGETHER, so the report is
-// asked first and the raw-protocol pane right after it, in the order the slot draws them. The
+// same painter's placement). They are also the panes that can be up TOGETHER, so they are asked in
+// the order the slot draws them — the report first, the raw-protocol pane next, the thinking pane
+// last. The
 // handlers arbitrate by region, so no two of them coexist. Scope is the owner's rule, not an
 // accident of routing: the TRANSCRIPT selects in every state, while the PROMPT follows
 // [Model.inputEditable] — idle, ask, running — and stays inert at approval/errored, where a/d/s and
@@ -856,11 +858,11 @@
 // `ui.inspector` arms the capture, folded beside the transcript rather than into it (a wire record
 // is not a conversation entry), shown in the /usage report's shape and paired request-to-reply
 // within one (depth, callID) wire stream, since the one ring interleaves every run's traffic;
-// reportpane.go the pane both of those two ARE — the reportPane value ({open, top}), the key
+// reportpane.go the pane those two and /thinking ARE — the reportPane value ({open, top}), the key
 // contract, the dismiss, the budget→render path and the whole mouse family (rect, window, click,
-// wheel), written once and named twice, with every rectangle in the transcript-side slot a lookup
-// into the geometry View publishes while it stacks that slot (model.go) rather than a prefix sum of
-// its own; popup.go the one bordered pane every overlay — those three, the autocomplete
+// wheel), written once and named three times, with every rectangle in the transcript-side slot a
+// lookup into the geometry View publishes while it stacks that slot (model.go) rather than a prefix
+// sum of its own; popup.go the one bordered pane every overlay — those four, the autocomplete
 // dropdown, the ask and approval prompts — is painted through; logo.go the embedded start-up wordmark;
 // actuation.go the launcher-verb latch and the folds that close one out (ADR 0029) — at most one
 // world-changing call in flight per address, narrated while it blocks, with the next Beat rather

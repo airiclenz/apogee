@@ -1,17 +1,20 @@
 package tui
 
 import (
+	"fmt"
+
 	tea "charm.land/bubbletea/v2"
 )
 
 // ----------------------------------------------------------------------------
-// The read-only report panes — one module behind /usage and /inspect
+// The read-only report panes — one module behind /usage, /inspect and /thinking
 // ----------------------------------------------------------------------------
 //
 // A REPORT is the frame's lightest kind of overlay: a scrolled list of rows that answers a question
-// the human asked and decides nothing. Two of them exist — the /usage token accounting (usage.go)
-// and the /inspect raw-protocol view (inspector.go) — and everything about them except their ROWS is
-// the same pane, so it is written once here and named twice there.
+// the human asked and decides nothing. Three of them exist — the /usage token accounting (usage.go),
+// the /inspect raw-protocol view (inspector.go) and the /thinking plain-reasoning pane
+// (thinkingpane.go) — and everything about them except their ROWS is the same pane, so it is written
+// once here and named three times there.
 //
 // What a report is, stated once:
 //
@@ -44,9 +47,9 @@ import (
 // caret there as it would have with no report up, and one on the transcript starts its selection. The
 // report going away is a side effect of acting elsewhere, not an act of its own.
 //
-// The two reports are the ONLY panes of the transcript-side slot that can be up TOGETHER (View), and
-// the report is asked first (handleMouseClick), so a click on the /inspect pane dismisses the /usage
-// report before it reaches it. What makes that order safe is the PRE-CLICK frame, not the geometry:
+// The reports are the ONLY panes of the transcript-side slot that can be up TOGETHER (View), and they
+// are asked in the order the slot draws them (handleMouseClick), so a click on the /inspect pane
+// dismisses the /usage report before it reaches it. What makes that order safe is the PRE-CLICK frame, not the geometry:
 // the slot is bottom-anchored (frameOverlays.transcriptRows), so the lower pane's bottom edge is fixed
 // and losing the one above it grows the box UPWARD — by MORE rows than that one was drawn on whenever
 // it was drawn shorter than its grant (frameRowPlan), because the whole grant goes back into the
@@ -55,24 +58,39 @@ import (
 // frame drew when the button went down, and a click in the band the box grew into falls through to the
 // dismissal it was aimed at.
 
-// reportKind names one of the two read-only report panes. It is this module's ONE parameter: every
+// reportKind names one of the read-only report panes. It is this module's ONE parameter: every
 // function below takes it, resolves the pane's state and its content through it, and is otherwise the
-// same code for both — which is what keeps "what a report does" a single answer rather than two
-// copies that drift a key at a time.
+// same code for all of them — which is what keeps "what a report does" a single answer rather than
+// three copies that drift a key at a time.
+//
+// The three functions that resolve something THROUGH a kind — [reportKind.pane],
+// [Model.reportState] and [Model.reportContent] — are exhaustive switches with a panicking default
+// rather than an `if` over the odd one out. Written as an `if`, a kind that missed a branch compiled
+// and painted ANOTHER pane's state or content inside its own box: a wrong pane rather than a build
+// error. The default is unreachable for every declared kind, and TestReportKindsResolveDistinctly
+// walks them all to keep it so.
 type reportKind int
 
 const (
-	usageReport   reportKind = iota // /usage — the session's token accounting (usage.go)
-	inspectReport                   // /inspect — the raw wire traffic (inspector.go)
+	usageReport    reportKind = iota // /usage — the session's token accounting (usage.go)
+	inspectReport                    // /inspect — the raw wire traffic (inspector.go)
+	thinkingReport                   // /thinking — the model's plain reasoning (thinkingpane.go)
+	reportKinds                      // not a kind: the count, so a walk over the reports needs no hand-written list
 )
 
 // pane is the report's slot in the frame's row allocation — the one thing about a report the frame
 // knows before the pane is composed ([Model.popupBudget], framePane).
 func (r reportKind) pane() framePane {
-	if r == inspectReport {
+	switch r {
+	case usageReport:
+		return paneUsage
+	case inspectReport:
 		return paneInspector
+	case thinkingReport:
+		return paneThinking
+	default:
+		panic(fmt.Sprintf("tui: no frame pane for report kind %d", r))
 	}
-	return paneUsage
 }
 
 // reportPane is a report overlay's whole state: whether it is up, how far its row list is scrolled,
@@ -93,10 +111,16 @@ type reportPane struct {
 // mutates through it and returns its own copy, so nothing here puts a self-pointer on a Model that is
 // copied on every Update (ADR 0011).
 func (m *Model) reportState(r reportKind) *reportPane {
-	if r == inspectReport {
+	switch r {
+	case usageReport:
+		return &m.usagePane
+	case inspectReport:
 		return &m.inspector
+	case thinkingReport:
+		return &m.thinkingPane
+	default:
+		panic(fmt.Sprintf("tui: no pane state for report kind %d", r))
 	}
-	return &m.usagePane
 }
 
 // reportContent is everything ONE report says about itself that this module cannot know: what the box
@@ -119,10 +143,16 @@ type reportContent struct {
 // reportContent composes the named report's content for this frame. It is this module's ONE call into
 // the panes' own files, and the only place a report's kind decides anything about what it holds.
 func (m Model) reportContent(r reportKind) reportContent {
-	if r == inspectReport {
+	switch r {
+	case usageReport:
+		return usageContent(m.usageRows())
+	case inspectReport:
 		return m.inspectContent()
+	case thinkingReport:
+		return m.thinkingContent()
+	default:
+		panic(fmt.Sprintf("tui: no content for report kind %d", r))
 	}
-	return usageContent(m.usageRows())
 }
 
 // reportSpec composes a report's [popupSpec] for THIS frame — the content, the budget the frame
@@ -263,6 +293,8 @@ func (o frameOverlays) block(p framePane) string {
 		return o.usage
 	case paneInspector:
 		return o.inspector
+	case paneThinking:
+		return o.thinking
 	case paneDropdown:
 		return o.dropdown
 	}
@@ -275,7 +307,7 @@ func (o frameOverlays) block(p framePane) string {
 //
 // It is settingsPaneRect (mouse.go) asking the frame's published geometry under a different pane name:
 // the slot is walked ONCE, by the composer that draws it (stackTranscriptSlot, model.go), so the same
-// body answers for both reports and for every other tenant of the slot.
+// body answers for every report and for every other tenant of the slot.
 func (m Model) reportPaneRect(r reportKind) (y0, h int, ok bool) {
 	if !m.reportState(r).open {
 		// Asked before the frame is composed, because every click and every wheel notch asks: with no

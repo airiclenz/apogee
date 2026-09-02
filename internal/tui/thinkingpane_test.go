@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // thinkingBoardWith builds a board out of the given committed and in-flight records, in the order
@@ -255,8 +258,8 @@ func TestThinkingPaneLosesNoText(t *testing.T) {
 
 // paintThinkingPane paints the pane's rows through the popup module at the model's own width — the
 // same renderPopup path [Model.renderReport] takes, with every row granted a line so the assertion
-// is about TRUNCATION and not about the scroll window. The pane's own reportKind arrives with its
-// command (item 3), so the spec is composed here in the shape [Model.reportSpec] composes it.
+// is about TRUNCATION and not about the scroll window. The spec is composed here rather than through
+// [Model.reportSpec] so that every row is seated whatever the window grants.
 func paintThinkingPane(m Model) string {
 	c := m.thinkingContent()
 	return renderPopup(m.th, popupSpec{
@@ -287,4 +290,103 @@ func containsRunesInOrder(painted, want string) (rest string, ok bool) {
 		return "", true
 	}
 	return string(runes[i:]), false
+}
+
+// thinkingPaneModel opens the /thinking pane over more records than it can seat rows for, which is
+// the state the shared scroll and hit-test drivers are about. The scroll starts at the TOP rather
+// than where the verb opens it ([Model.runThinkingCommand] seats the last window), because a scroll
+// test needs rows below the window to move on to.
+func thinkingPaneModel(t *testing.T, records int) Model {
+	t.Helper()
+	m := newTestModel(t)
+	for i := range records {
+		m = m.foldEvent(reasoningAt(runRef{}, i, "turn "+strconv.Itoa(i)+" reasoning"))
+		m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(runRef{}, i)})
+	}
+	m.thinkingPane = reportPane{open: true}
+	m.layout()
+	return m
+}
+
+// TestThinkingCommand drives the verb the way a human types it — the exact announced name, then ⏎ —
+// and pins the three things opening it settles: the pane joins the frame's own pane set (so it is
+// drawn on rows something budgeted), it is scoped as the VIEW is, and it stays a report rather than
+// a modal — a printable key still reaches the box behind it.
+func TestThinkingCommand(t *testing.T) {
+	t.Run("the verb opens the pane and drives no worker", func(t *testing.T) {
+		m := newTestModel(t)
+		m = m.foldEvent(reasoningAt(runRef{}, 1, "weigh the options"))
+		m.input.SetValue("/thinking")
+		m, cmd := stepCmd(t, m, keyEnter())
+
+		if !m.thinkingPane.open {
+			t.Fatal("/thinking did not open the pane")
+		}
+		if m.state != stateIdle || cmd != nil {
+			t.Errorf("state = %v, cmd = %v; /thinking drives no worker", m.state, cmd)
+		}
+		if !m.openPanes().has(paneThinking) {
+			t.Error("the open pane is not in the frame's pane set — it would be drawn on rows nothing budgeted")
+		}
+		painted := strip(m.frameOverlays().thinking)
+		if !strings.Contains(painted, thinkingTitle) || !strings.Contains(painted, "weigh the options") {
+			t.Errorf("the frame does not stack the pane it opened:\n%s", painted)
+		}
+	})
+
+	t.Run("inside a run view it is the viewed run's thinking alone", func(t *testing.T) {
+		child := runRef{depth: 1, spawn: "call-a"}
+		m := newTestModel(t)
+		m = m.foldEvent(reasoningAt(runRef{}, 1, "the orchestrator's own thought"))
+		m = m.foldEvent(reasoningAt(child, 1, "the delegate's own thought"))
+		m.viewStack = []runView{{ref: child}}
+		m.input.SetValue("/thinking")
+		m = step(t, m, keyEnter())
+
+		painted := strip(m.frameOverlays().thinking)
+		if want := thinkingTitle + " — " + usageAgentFallback; !strings.Contains(painted, want) {
+			t.Errorf("the box is not titled %q:\n%s", want, painted)
+		}
+		if !strings.Contains(painted, "the delegate's own thought") {
+			t.Errorf("the viewed run's thinking is not in the pane:\n%s", painted)
+		}
+		if strings.Contains(painted, "the orchestrator's own thought") {
+			t.Errorf("the pane shows thinking from outside the viewed run:\n%s", painted)
+		}
+	})
+
+	t.Run("a printable key still reaches the box behind it", func(t *testing.T) {
+		m := thinkingPaneModel(t, 4)
+
+		m = step(t, m, keyRune('x'))
+
+		if !m.thinkingPane.open {
+			t.Error("a printable key closed the pane; it is a report, not a modal")
+		}
+		if got := m.input.Value(); got != "x" {
+			t.Errorf("draft = %q, want %q — the box behind a report stays live", got, "x")
+		}
+	})
+}
+
+// TestThinkingOpensOnTheNewestRecord pins where the verb lands: on the LAST full window, so the
+// Turn worth reading — the one the human just watched the model work through — is on the screen
+// without a page-down per record, and the scroll keys then move from THERE.
+func TestThinkingOpensOnTheNewestRecord(t *testing.T) {
+	m := thinkingPaneModel(t, 40)
+	m.thinkingPane = reportPane{} // reopen through the verb itself, which is what sets the scroll
+	next, _ := m.runThinkingCommand()
+	m = next.(Model)
+
+	spec, seated := m.thinkingSpec()
+	if !seated {
+		t.Fatal("the frame seated no pane for a full board")
+	}
+	if len(spec.rows) <= spec.maxRows {
+		t.Fatalf("precondition: %d rows into a window of %d — the board must overflow the pane for a scroll to mean anything",
+			len(spec.rows), spec.maxRows)
+	}
+	if spec.rowTop+spec.maxRows != len(spec.rows) {
+		t.Errorf("window [%d,%d) of %d rows, want the last full window", spec.rowTop, spec.rowTop+spec.maxRows, len(spec.rows))
+	}
 }

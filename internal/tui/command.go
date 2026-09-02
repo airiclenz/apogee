@@ -266,6 +266,7 @@ var commandSpecs = []commandSpec{
 	{name: "skills", summary: "list the available skills, or export a shipped one", takesArgs: true, runsBareAtAccept: true, whileRunning: true, parseArgs: verbGrammar(parseSkills)},
 	{name: "stop-server", summary: "stop the server this session is on", touchesServer: true},
 	{name: "sub-agents-server", summary: "pick the servers: entry that takes delegations (bare = pick)", takesArgs: true, runsBareAtAccept: true, whileRunning: true},
+	{name: "thinking", summary: "the model's plain thinking — the main agent, or the viewed run", whileRunning: true, noRecall: true},
 	{name: "undo", summary: "put back the files the last exchange wrote (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseUndo)},
 	{name: "unload-model", summary: "free the model of the server this session is on", touchesServer: true},
 	{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true},

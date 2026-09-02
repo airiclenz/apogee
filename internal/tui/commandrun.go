@@ -346,6 +346,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// shows was folded onto this Model when the engine reported it.
 		return m.runInspectCommand()
 
+	case "thinking":
+		// Open the plain-reasoning pane over the thinking board (thinkingpane.go). The /inspect shape
+		// exactly: synchronous, no engine call and no worker, safe mid-Exchange — every chunk it shows
+		// was folded onto this Model when the engine revealed it, and it is scoped as the view is,
+		// the viewed run's thinking alone inside a run view.
+		return m.runThinkingCommand()
+
 	case "color-scheme":
 		// List, switch or export a colour scheme (colorscheme.go, ADR 0040). Synchronous and
 		// idle-safe like /settings, whose write and apply seams the switch form reuses in full: no

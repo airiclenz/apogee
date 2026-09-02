@@ -7,7 +7,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The shared report pane — /usage and /inspect through one body (reportpane.go)
+// The shared report pane — /usage, /inspect and /thinking through one body (reportpane.go)
 // ----------------------------------------------------------------------------
 //
 // The assertions below drive the reports through the SHARED functions rather than through the names
@@ -22,13 +22,58 @@ type reportCase struct {
 	model Model
 }
 
-// reportCases opens one of each kind. Both start at the TOP with a full window still below them, so
-// every step and every clamp below has somewhere to be seen.
+// reportCases opens one of each kind. Every one of them starts at the TOP with a full window still
+// below it, so every step and every clamp below has somewhere to be seen.
 func reportCases(t *testing.T) []reportCase {
 	t.Helper()
 	return []reportCase{
 		{name: "/usage", kind: usageReport, model: usageReportModel(t, 40)},
 		{name: "/inspect", kind: inspectReport, model: inspectorPaneModel(t, 40)},
+		{name: "/thinking", kind: thinkingReport, model: thinkingPaneModel(t, 40)},
+	}
+}
+
+// TestReportKindsResolveDistinctly is the guard the module's fall-through cost: every declared
+// reportKind resolves to its OWN frame pane, its OWN state field and its OWN content. The three
+// resolvers were once `if r == inspectReport {…}` with /usage as the fall-through, so a kind that
+// missed a branch compiled and painted ANOTHER pane's state or rows inside its box — a wrong pane
+// rather than a build error. Walking the kinds is what makes a fourth report inherit this guard.
+func TestReportKindsResolveDistinctly(t *testing.T) {
+	m := newTestModel(t)
+
+	panes := map[framePane]reportKind{}
+	states := map[*reportPane]reportKind{}
+	titles := map[string]reportKind{}
+	for r := reportKind(0); r < reportKinds; r++ {
+		if other, seen := panes[r.pane()]; seen {
+			t.Errorf("report %d and report %d share the frame pane %d", r, other, r.pane())
+		}
+		panes[r.pane()] = r
+
+		state := m.reportState(r)
+		if other, seen := states[state]; seen {
+			t.Errorf("report %d and report %d share one state field: scrolling either would move both", r, other)
+		}
+		states[state] = r
+
+		title := m.reportContent(r).title
+		if title == "" {
+			t.Errorf("report %d composes no title: its box would name nothing", r)
+		}
+		if other, seen := titles[title]; seen {
+			t.Errorf("report %d and report %d both call themselves %q", r, other, title)
+		}
+		titles[title] = r
+	}
+
+	for want, name := range map[reportKind]string{
+		usageReport:    usageTitle,
+		inspectReport:  inspectorTitle,
+		thinkingReport: thinkingTitle,
+	} {
+		if got := m.reportContent(want).title; got != name {
+			t.Errorf("report %d is titled %q, want %q — the kind resolves to another pane's content", want, got, name)
+		}
 	}
 }
 
@@ -229,6 +274,7 @@ func TestFrameOverlayBlocksAnswerForEveryPane(t *testing.T) {
 		dropdown: "dropdown",
 	}
 	ov.inspector = "inspector"
+	ov.thinking = "thinking"
 
 	for p, want := range map[framePane]string{
 		panePrompt:    ov.prompt,
@@ -237,6 +283,7 @@ func TestFrameOverlayBlocksAnswerForEveryPane(t *testing.T) {
 		paneSettings:  ov.settings,
 		paneUsage:     ov.usage,
 		paneInspector: ov.inspector,
+		paneThinking:  ov.thinking,
 		paneDropdown:  ov.dropdown,
 	} {
 		if got := ov.block(p); got != want {

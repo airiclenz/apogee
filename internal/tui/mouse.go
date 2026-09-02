@@ -417,14 +417,21 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return usage, nil
 	}
 	m = usage
-	// The /inspect pane answers in the same currency (handleInspectorClick), and it is the one pane
-	// that can be up BESIDE the report — View draws it under the report, in the same slot — so it is
-	// asked right after it, in the order the two are drawn in.
+	// The /inspect pane answers in the same currency (handleInspectorClick), and it is one of the two
+	// panes that can be up BESIDE the report — View draws them under the report, in the same slot — so
+	// it is asked right after it, in the order they are drawn in.
 	inspector, claimed := m.handleInspectorClick(pre, msg)
 	if claimed {
 		return inspector, nil
 	}
 	m = inspector
+	// The /thinking pane closes that slot and so closes this chain of it: same currency again
+	// (handleThinkingClick), asked LAST of the three because it is drawn last of the three.
+	thinking, claimed := m.handleThinkingClick(pre, msg)
+	if claimed {
+		return thinking, nil
+	}
+	m = thinking
 	// The footer's mode marker is the frame's one CHROME control ([Model.handleFooterModeClick]): a
 	// click on it opens the mode picker. It is asked after the panes that draw OVER the transcript —
 	// they can cover any row, the footer's included, and a click on a pane belongs to the pane — and
@@ -1362,7 +1369,8 @@ func (m Model) highlightTranscript(view string) string {
 // foldMouseWheel routes one wheel notch: to whichever open pane holds the pointer, and to the
 // transcript everywhere else. The chain asks every pane the frame can have open, in this order —
 // the /settings pane (settingsWheel), the /usage report (usageWheel), the /inspect pane
-// (inspectorWheel), the /sessions browser (browserWheel), the /model | /server picker (pickerWheel),
+// (inspectorWheel), the /thinking pane (thinkingWheel), the /sessions browser (browserWheel),
+// the /model | /server picker (pickerWheel),
 // the approval menu and the ask offering (promptWheel), the "/" | "@" autocomplete dropdown
 // (dropdownWheel) — and each one takes the notch only when the pointer is inside its own rectangle.
 // Wherever two of those panes can never share a frame the order between them is arbitrary, because
@@ -1387,7 +1395,8 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		return next, nil
 	}
 	// A notch over the open /usage report scrolls its row list the same way, for the same reason
-	// (mouse.go) — the two panes never share a frame, so the order between them is arbitrary.
+	// (mouse.go) — the /settings pane and the reports never share a frame, so the order between them
+	// is arbitrary.
 	if next, handled := m.usageWheel(msg); handled {
 		return next, nil
 	}
@@ -1395,6 +1404,12 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	// It is asked after the report because it is drawn under it, and the two rectangles never
 	// overlap, so only one of them can hold the pointer.
 	if next, handled := m.inspectorWheel(msg); handled {
+		return next, nil
+	}
+	// A notch over the open /thinking pane scrolls its rows on those same terms, and it is asked
+	// after the /inspect pane because it is drawn under it — the rectangles never overlap, so only
+	// one of the three can hold the pointer.
+	if next, handled := m.thinkingWheel(msg); handled {
 		return next, nil
 	}
 	// A notch over the open /sessions browser walks its highlight (sessions.go). The panes never share

@@ -1708,8 +1708,8 @@ stays live and every other key — a printable one included — goes where it al
 what the frame already holds and calls nothing — which is exactly when the question gets asked, so
 it is the one pane that can be up beside an approval or ask prompt, seated below it, nearest the
 chrome. In the give-way order it sits between the `/settings` pane and the `/inspect` pane: it
-yields to every surface the human is acting **in**, and the two panes below it — the wire-traffic
-view, and the dropdown the next keystroke re-derives — yield before it.
+yields to every surface the human is acting **in**, and the panes below it — the wire-traffic view,
+and the dropdown the next keystroke re-derives among them — yield before it.
 
 ---
 

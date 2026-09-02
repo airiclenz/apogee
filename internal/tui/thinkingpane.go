@@ -3,6 +3,8 @@ package tui
 import (
 	"strconv"
 	"strings"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // The /thinking pane — the model's reasoning as plain text
@@ -77,7 +79,8 @@ func (m Model) thinkingWrapColumn() int {
 //
 // The scope filter is [Model.inThinkingScope], applied to the committed records and the in-flight
 // ones alike so the two halves of the list can never disagree about whose thinking this is. It is
-// defensive: item 3's claim route only opens the pane scoped as the view already is.
+// defensive: the verb only ever opens the pane scoped as the view already is
+// ([Model.runThinkingCommand]).
 //
 // The slice is FRESH (ADR 0011): the Model is copied by value on every Update, so a slice handed
 // back over the board's own backing array would let a later fold write into rows a frame is still
@@ -180,4 +183,66 @@ func (m Model) thinkingContent() reportContent {
 		rows:   rows,
 		kinds:  kinds,
 	}
+}
+
+// runThinkingCommand drives the /thinking verb: it opens the pane and does nothing else.
+// Synchronous like /usage and /inspect — no engine call, no worker, no I/O — and safe while a
+// worker works for the same reason: every chunk it shows was folded onto this Model when the engine
+// revealed it, and thinking a human wants to READ is thinking the agent is doing right now.
+//
+// It opens at the END of the list it is going to show — the SCOPED one, the viewed run's alone
+// under a run view ([Model.scopedThinking]). The records are newest-last, so the Turn worth reading
+// is the last one, and a pane that opened on the oldest of a session's records would ask for a
+// hundred page-downs before it said anything. The top is set past the last row and CLAMPED to the
+// last full window when the pane is composed ([Model.reportSpec]) — the window is the frame's
+// answer for this paint, not something this verb can know.
+func (m Model) runThinkingCommand() (tea.Model, tea.Cmd) {
+	rows, _ := m.thinkingRows(m.thinkingWrapColumn())
+	m.thinkingPane = reportPane{open: true, top: len(rows)}
+	m.layout()
+	return m, nil
+}
+
+// The report module's functions under this pane's name (reportpane.go). Each one is the shared body
+// with thinkingReport filled in: naming them here is what lets the frame, the keyboard and the
+// pointer go on addressing the /thinking pane as itself while there is only one report left to
+// maintain.
+
+// renderThinking paints the pane, or "" when it is closed or the frame cannot seat it.
+func (m Model) renderThinking() string { return m.renderReport(thinkingReport) }
+
+// thinkingSpec composes the pane's [popupSpec] for THIS frame — its rows, the budget the frame
+// granted and the window the scroll landed on ([Model.reportSpec]).
+func (m Model) thinkingSpec() (popupSpec, bool) {
+	return m.reportSpec(thinkingReport, m.thinkingContent())
+}
+
+// thinkingKey is the pane's whole key contract: esc closes it, ↑/↓ scroll a row at a time and
+// pgup/pgdown a drawn window at a time (reportKey). There is no sixth key — the pane has ONE
+// rendering, so the ctrl+r /inspect answers belongs to the live box behind this one.
+func (m Model) thinkingKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
+	return m.reportKey(thinkingReport, msg)
+}
+
+// dismissThinking takes the pane off the frame and gives its rows back to the transcript. The scroll
+// goes with it: the next /thinking opens on the newest record again, which is where the question is
+// asked from.
+func (m Model) dismissThinking() Model { return m.dismissReport(thinkingReport) }
+
+// thinkingPaneRect is where the open pane is drawn: the screen row its top border lands on and how
+// many rows it takes.
+func (m Model) thinkingPaneRect() (y0, h int, ok bool) { return m.reportPaneRect(thinkingReport) }
+
+// thinkingWindow is the row window the pane is showing as the frame DREW it.
+func (m Model) thinkingWindow() (reportWindow, bool) { return m.reportWindow(thinkingReport) }
+
+// handleThinkingClick answers a left-click while the pane is up: inside the box it is claimed and
+// nothing happens, outside it the pane is dismissed and the click goes on.
+func (m Model) handleThinkingClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+	return m.handleReportClick(thinkingReport, pre, msg)
+}
+
+// thinkingWheel scrolls the record list one row per notch while the pointer is over it.
+func (m Model) thinkingWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	return m.reportWheel(thinkingReport, msg)
 }

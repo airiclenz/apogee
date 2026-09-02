@@ -289,7 +289,25 @@ committed records and break arrival order.
 
 **Commit:** `feat(tui): render the /thinking pane's plain rows at the pane's own width`
 
-## 3. `/thinking` — the command, the pane, the sub-agent scope
+## 3. `/thinking` — the command, the pane, the sub-agent scope — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's Files list is a floor. `TestThinkingCommand`,
+`TestThinkingOpensOnTheNewestRecord` and the `thinkingPaneModel` helper `reportCases` needs went
+into internal/tui/thinkingpane_test.go — the pane's own test file, beside item 2's rows tests —
+rather than into one of the three listed test files.
+NOTES (2026-09-02): consequential edit — internal/tui/doc.go: made necessary by the third report
+joining the module (the package narration said the reports were "two panes that can be up
+TOGETHER", that reportpane.go was "written once and named twice", and that popup.go paints "those
+three" overlays).
+NOTES (2026-09-02): consequential edit — layout.md: made necessary by `paneThinking` joining the
+give-way order, which made "the two panes below it" false; the count claim is corrected without
+naming the new pane, which is item 4's work.
+NOTES (2026-09-02): consequential edit — internal/tui/thinkingpane.go and
+internal/tui/thinkingpane_test.go: two comments item 2 wrote deferred to "item 3" as a future
+("item 3's claim route", "arrives with its command (item 3)") and now name the landed verb instead.
+NOTES (2026-09-02): `reportKind` gained a `reportKinds` count sentinel (the `paneKinds` idiom) so
+`TestReportKindsResolveDistinctly` walks every declared kind rather than a hand-written list a
+fourth report could be left out of.
 
 **What.** Open the pane as the third report. `reportpane.go`: `thinkingReport` reportKind after
 `inspectReport`. Its three dispatch bodies — `pane()` (reportpane.go:71), `reportState()`
