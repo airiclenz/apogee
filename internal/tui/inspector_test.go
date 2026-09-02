@@ -1002,3 +1002,51 @@ func TestInspectScopedOpensOnTheViewedRunsNewestRecord(t *testing.T) {
 			spec.rowTop, spec.rowTop+spec.maxRows, len(spec.rows))
 	}
 }
+
+// TestInspectorFollowsTheTrafficArrivingUnderIt drives the pane the way a reader meets it — opened
+// through the VERB, which is what arms the follow, over a ring that goes on filling while the call
+// they are watching runs. The records it appends are MORE than a full window's worth, because the
+// clamp alone already tracks the tail until the list grows by that much, and they stay UNDER the
+// ring's cap, past which the oldest record rotates out for every new one and the list stops growing.
+func TestInspectorFollowsTheTrafficArrivingUnderIt(t *testing.T) {
+	var events []domain.Event
+	for i := range 6 {
+		events = append(events, wireEvent(domain.WireDirectionRequest, `{"n":`+strconv.Itoa(i)+`}`, i, 0))
+	}
+	m := inspectorModel(t, events...)
+	m.inspector = inspectorPane{} // open through the verb itself, which is what arms the follow
+	next, _ := m.runInspectCommand()
+	m = next.(Model)
+
+	spec, seated := m.inspectorSpec()
+	if !seated {
+		t.Fatal("the frame seated no pane for the ring")
+	}
+	if len(spec.rows) <= spec.maxRows {
+		t.Fatalf("precondition: %d rows into a window of %d — the ring must overflow the pane for a follow to mean anything",
+			len(spec.rows), spec.maxRows)
+	}
+
+	m = growInspectorRecords(t, m, 6)
+
+	grown, seated := m.inspectorSpec()
+	if !seated {
+		t.Fatal("the frame seated no pane for the grown ring")
+	}
+	if grown.rowTop+grown.maxRows != len(grown.rows) {
+		t.Errorf("window [%d,%d) of %d rows without a keystroke, want the last full window of the grown ring",
+			grown.rowTop, grown.rowTop+grown.maxRows, len(grown.rows))
+	}
+	newest := "request · turn " + strconv.Itoa(m.wire[len(m.wire)-1].turn)
+	if painted := strip(m.renderInspector()); !strings.Contains(painted, newest) {
+		t.Errorf("the pane does not draw the newest record %q:\n%s", newest, painted)
+	}
+
+	raw := step(t, m, ctrlR())
+	if !raw.inspector.raw {
+		t.Fatal("ctrl+r did not put the pane in raw mode")
+	}
+	if !raw.inspector.follow {
+		t.Error("ctrl+r took the follow with it — the chord flips the rendering and nothing else")
+	}
+}

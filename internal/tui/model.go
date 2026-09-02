@@ -178,21 +178,25 @@ type Model struct {
 
 	// usagePane is the /usage report overlay's state (usage.go): whether it is up, and how far the
 	// wheel has scrolled its row list. The rows themselves are derived at render time from the folds
-	// that already hold the per-agent totals, so the value is a bool and an int and its zero value is
-	// "closed at the top", the settings posture (ADR 0011). Unlike the panes above it, it is driven in
-	// every state: the verb is whileRunning and the pane reads Model state only.
+	// that already hold the per-agent totals, so the value is the report's own small struct and its
+	// zero value is "closed at the top", the settings posture (ADR 0011). It is the one report that
+	// does not follow its tail ([reportKind.follows]), so the follow flag it carries is never armed.
+	// Unlike the panes above it, it is driven in every state: the verb is whileRunning and the pane
+	// reads Model state only.
 	usagePane usagePane
 
-	// inspector is the /inspect pane's state (inspector.go): whether the raw-protocol view is up and
-	// how far its row list is scrolled. Two plain values whose zero value is "closed", the usagePane
-	// posture (ADR 0011), and driven in every state for the same reason: the verb is whileRunning and
-	// the pane reads Model state only.
+	// inspector is the /inspect pane's state (inspector.go): whether the raw-protocol view is up, how
+	// far its row list is scrolled, whether it is following the tail of the ring and which rendering
+	// ctrl+r left it on. Plain values whose zero value is "closed", the usagePane posture (ADR 0011),
+	// and driven in every state for the same reason: the verb is whileRunning and the pane reads Model
+	// state only.
 	inspector inspectorPane
 
 	// thinkingPane is the /thinking pane's state (thinkingpane.go): whether the plain-reasoning view
-	// is up and how far its row list is scrolled. The same two plain values under the same posture as
-	// its two siblings (ADR 0011) — the rows are derived from the thinking board at render time
-	// (thinking.go), so there is nothing here to keep in step with them — and driven in every state,
+	// is up, how far its row list is scrolled and whether it is following the tail. The same plain
+	// values under the same posture as its two siblings (ADR 0011) — the rows are derived from the
+	// thinking board at render time (thinking.go), so there is nothing here to keep in step with them
+	// — and driven in every state,
 	// because the verb is whileRunning and the pane reads Model state only. It is a reportPane under
 	// its own name rather than an alias of one: nothing else names this pane's state.
 	thinkingPane reportPane

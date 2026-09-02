@@ -287,7 +287,34 @@ full `./cmd/apogee/` e2e suite, not just the new test, before committing this it
 
 `test(stubllm): script and record either spelling of the thinking channel`
 
-## 4. Report panes follow the tail, as the transcript does
+## 4. Report panes follow the tail, as the transcript does — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the kind gate is ONE statement — `reportKind.follows()`, an exhaustive switch
+with a panicking default like the module's three other resolvers — read by `reportSpec`, `reportKey`
+and `reportWheel`, so a fourth report must state its own answer rather than inherit /usage's.
+NOTES (2026-09-02): deviation from the item's literal `reportWheel` formula. It prescribes
+`follow = m.reportState(r).top >= max(0, win.total-shown)` after the switch; a FOLLOWING pane's
+stored `top` is stale by design (the window is derived, not written), so a wheel-down over a pane
+already at the tail — which fires neither guarded branch — would read a stale small `top` and drop
+the follow. The follow is therefore re-derived from where the pane LANDED (`landed := win.start`,
+overwritten by whichever branch fires), still ONCE after the switch and still off the `win` already
+in hand. The two are identical in the case (d) the guard names — a detached pane whose rows dropped
+onto the tail has `top >= last` and re-arms either way — and this form additionally keeps the
+invariant total for a following pane that has grown.
+NOTES (2026-09-02): the comment rule reached the grep's whole list —
+`reportpane.go` (the doctrine bullets and the `reportSpec` clamp comment at :178-182, corrected to
+credit the follow rather than the clamp for where the verbs open), `model.go:179-198`,
+`doc.go:861`, `usage.go:39-41`, `inspector.go:87-89`/`:158`, `thinkingpane.go:197` and
+`layout.md:1698`/`:1763`/`:1785`/`:1819`/`:1823`/`:1846`. Both verbs keep their own name
+(`inspectorPane{…}`, `reportPane{…}`) and their existing `top`, adding only `follow: true`.
+NOTES (2026-09-02): consequential edit — docs/manual/commands.md: made necessary by the follow, a
+user-visible change to two shipped panes; the `/thinking` and `/inspect` rows said only that the
+pane opens on the newest record.
+NOTES (2026-09-02): bite verified — with the `reportSpec` follow branch temporarily disabled, both
+verb-level growth cases fail (`window [29,37) of 39` for /inspect, `[12,20) of 22` for /thinking)
+and pass with it restored; the file was restored byte-identically before the acceptance run.
+NOTES (2026-09-02): ISSUES.md is dirty in the working tree from unrelated owner edits (as item 3
+recorded); left exactly as found and not in FILES.
 
 **What.** Recast at the regression check (2026-09-02). `/thinking` and `/inspect` open on their
 newest row and then FREEZE: `reportPane.top`

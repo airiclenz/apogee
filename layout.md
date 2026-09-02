@@ -1697,7 +1697,9 @@ click **inside** the box does nothing at all, and is swallowed rather than dragg
 the transcript drawn under it. The **wheel** scrolls the rows one notch at a time where a session fanned
 out to more delegates than the pane was granted rows for, clamped at both ends — a scroll must not roll
 past the last row and land back on the first — and the column header scrolls with them, being a row of
-the list like any other.
+the list like any other. The report does not follow its tail as the other two panes do: a delegate row
+appearing while it is open leaves the window where the reader put it, because this pane is a reading of
+an accounting rather than a stream watched as it arrives.
 
 **The keyboard scrolls the same rows.** `↑`/`↓` move the window a row and `PgUp`/`PgDn` a whole
 window, through the same window and the same two ends the wheel stops at — the first row, and the
@@ -1760,7 +1762,10 @@ already broken to width — it carries prose rather than protocol, so it is wrap
 record is captured rather than at the pane, and its rows are flat like every other row here.
 
 **It opens on the newest record.** The rows are a log's order, so the record worth reading is the
-last one; the pane opens on the last full window and the keys move from there. Its keyboard is the
+last one; the pane opens on the last full window and **follows** it — records arriving while the pane
+is up are shown rather than landing below a frozen window, which is the transcript's own behaviour on a
+smaller list — and the keys move from there: scrolling up off the end detaches the pane and holds its
+window still, and scrolling back down onto the last full window puts it back on the tail. Its keyboard is the
 `/usage` report's plus one of its own — `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, `ctrl+r`
 to flip the rendering, and nothing else — and it is non-modal on the same terms: the box behind it
 stays live and every other key goes where it always went, a printable one included, because `ctrl+r`
@@ -1783,7 +1788,8 @@ cause.
 the pane and still lands where it was aimed, a click **inside** does nothing and is swallowed rather
 than dragging a selection across the transcript drawn under it, and the **wheel** scrolls the record
 list one row per notch, clamped at the first row and the last full window — the two ends the keys
-stop at. The `/usage` report is asked first where both are up, so a click on this pane dismisses the
+stop at — and it detaches and re-attaches the follow at those ends exactly as they do. The `/usage`
+report is asked first where both are up, so a click on this pane dismisses the
 report above it and is then swallowed here; the `/thinking` pane is asked after this one.
 
 ---
@@ -1816,12 +1822,15 @@ the border and never re-wrapped, and this pane has no second rendering to recove
 the wrap column is taken from the width the pane is actually drawn at: its inner width less the two
 cells every row's marker leads with and the scroll bar's column, reserved whether or not the bar is
 drawn so the text does not re-flow the moment the list overflows. A resize recomposes the rows and
-the scroll offset lands where the same clamp every report applies puts it. What it holds is bounded
+the scroll offset lands where the same clamp every report applies puts it — or, while the pane is
+following its tail, on the last full window of the rows the resize composed. What it holds is bounded
 rather than complete — a record keeps its last 64 KB, the board its 64 most recent turns and the
 oldest is dropped — because it lives in the frame and not on disk.
 
-**It opens on the newest record**, on the last full window, and its keyboard is the `/usage`
-report's exactly: `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, and nothing else. There is no
+**It opens on the newest record**, on the last full window, and **follows** it: the reasoning a turn
+streams while the pane is up is shown rather than landing below a frozen window, scrolling up off the
+end is what stops that, and scrolling back down onto the last full window is what resumes it. Its
+keyboard is the `/usage` report's exactly: `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, and nothing else. There is no
 `ctrl+r` — one rendering is the point of the pane, and raw bytes are `/inspect`'s job. It is
 non-modal on the same terms as the other two reports: the box behind it stays live and every other
 key, a printable one included, goes where it always went. The hint under the rows reads `↑/↓ scroll
@@ -1844,7 +1853,7 @@ returns to yields before the evidence of a call that has just gone wrong.
 dismisses the pane and still lands where it was aimed, a click **inside** does nothing and is
 swallowed rather than dragging a selection across the transcript drawn under it, and the **wheel**
 scrolls the rows one per notch, clamped at the first row and the last full window — the two ends the
-keys stop at. It is asked LAST of the three reports, in the slot's own draw order, so a click aimed
+keys stop at — and it detaches and re-attaches the follow at those ends exactly as they do. It is asked LAST of the three reports, in the slot's own draw order, so a click aimed
 here dismisses the panes above it first.
 
 ---

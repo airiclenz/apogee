@@ -31,9 +31,13 @@ import (
 //     shorter list corrects itself the first time it is moved instead of drifting.
 //   - Its scroll is clamped to the last FULL window rather than to the last row, so a report scrolled
 //     to its end shows a full pane of rows.
+//   - It FOLLOWS the tail while it is left at the end — /inspect and /thinking do ([reportKind.follows]),
+//     /usage keeps the clamp alone — so rows arriving under an open pane are shown rather than
+//     landing below a frozen window, and scrolling up off the end is what stops it. It is the
+//     transcript's own behaviour ([Model.detached], model.go) under a report's smaller contract.
 //   - Closing it takes the scroll with it, and /inspect's choice of rendering with it too: a
-//     reportPane's zero value is "closed at the top, readable", so the next open starts where the
-//     first one did.
+//     reportPane's zero value is "closed at the top, not following, readable", so the next open
+//     starts where the first one did.
 //
 // The POINTER does the two things the keyboard has no key for (handleReportClick, reportWheel): a
 // click OUTSIDE the box dismisses the report — the gesture esc already is, made with the hand that is
@@ -94,14 +98,45 @@ func (r reportKind) pane() framePane {
 }
 
 // reportPane is a report overlay's whole state: whether it is up, how far its row list is scrolled,
-// and — for /inspect, the one report whose records carry two renderings — which of them it is
-// showing. The rows themselves are derived at render time from the folds or the ring, so there is
-// nothing here to keep in step with them. Its zero value is "closed at the top, readable", so it
-// lives inline in the value-copied Model like the picker and the settings pane (ADR 0011).
+// whether it is FOLLOWING the tail of that list, and — for /inspect, the one report whose records
+// carry two renderings — which of them it is showing. The rows themselves are derived at render time
+// from the folds or the ring, so there is nothing here to keep in step with them. Its zero value is
+// "closed at the top, not following, readable", so it lives inline in the value-copied Model like the
+// picker and the settings pane (ADR 0011).
 type reportPane struct {
-	open bool
-	top  int  // the first row the window shows (popupSpec.rowTop) — what the wheel and the scroll keys move
-	raw  bool // /inspect only: show the pretty-printed protocol rather than the readable rendering (ctrl+r)
+	open   bool
+	top    int  // the first row the window shows (popupSpec.rowTop) — what the wheel and the scroll keys move
+	follow bool // the window is pinned to the tail, so rows arriving under it are shown ([reportKind.follows])
+	raw    bool // /inspect only: show the pretty-printed protocol rather than the readable rendering (ctrl+r)
+}
+
+// follows says whether the named report FOLLOWS the tail of its row list: whether a pane left at the
+// end keeps showing the end as rows arrive under it, rather than standing still while the reader
+// watches a frozen window. It is the report module's ONE statement of that scope, read by the three
+// functions that arm it or honour it ([Model.reportKey], [Model.reportWheel], [Model.reportSpec]).
+//
+// /inspect and /thinking follow, because they are windows onto a stream a reader opens WHILE it is
+// arriving — reasoning and wire traffic land under the pane as the agent works, and a pane that
+// froze on the record it opened on would say nothing about the call the reader is watching. It is
+// the transcript's own behaviour ([Model.detached], model.go) under a report's smaller contract.
+//
+// /usage does not. Its rows grow too — a delegate row per run that reports a count, plus the session
+// total (usageRows) — so this is a scope and not a statement about a static pane: it is a reading of
+// an accounting, asked and answered, rather than a stream a reader sits and watches, and its scroll
+// stays the clamp-only one it has always had.
+//
+// It is an exhaustive switch with a panicking default for the reason the three resolvers above are
+// (reportKind's doc): a fourth report has to state its own answer here rather than inherit /usage's
+// by falling through.
+func (r reportKind) follows() bool {
+	switch r {
+	case usageReport:
+		return false
+	case inspectReport, thinkingReport:
+		return true
+	default:
+		panic(fmt.Sprintf("tui: no follow answer for report kind %d", r))
+	}
 }
 
 // reportState points at the named report's state inside THIS Model value — the module's one statement
@@ -168,6 +203,21 @@ func (m Model) reportSpec(r reportKind, c reportContent) (popupSpec, bool) {
 	if !seated {
 		return popupSpec{}, false
 	}
+	// The scroll is clamped to the LAST full window rather than to the last row: a report scrolled to
+	// its end shows a full pane of rows, and a stale offset — the grant shrank with the window, or the
+	// rows dropped — is corrected here rather than painting one row over an empty pane. That clamp is
+	// the NOT-following path, and it stays: a detached pane is exactly where a stale offset is kept.
+	//
+	// A FOLLOWING pane ([reportKind.follows]) does not read the offset at all. Its window is DERIVED
+	// as the last full one on every paint, which is what keeps /inspect and /thinking on the tail
+	// while records arrive under them, and what lands an opening pane on the newest record — the verbs
+	// arm the follow and set the top past the last row (runInspectCommand, runThinkingCommand), so it
+	// is the follow rather than the clamp that answers for where they open.
+	last := max(0, len(c.rows)-shown)
+	rowTop := clampInt(m.reportState(r).top, 0, last)
+	if r.follows() && m.reportState(r).follow {
+		rowTop = last
+	}
 	return popupSpec{
 		title:       c.title,
 		body:        c.body,
@@ -175,15 +225,10 @@ func (m Model) reportSpec(r reportKind, c reportContent) (popupSpec, bool) {
 		rows:        c.rows,
 		rowKinds:    c.kinds,
 		selected:    -1, // a report has no selection: nothing here is chosen (the popup module's convention)
-		// The scroll is clamped to the LAST full window rather than to the last row: a report scrolled
-		// to its end shows a full pane of rows, and a stale offset — the grant shrank with the window,
-		// or a row arrived — is corrected here rather than painting one row over an empty pane. It is
-		// also what lands an opening /inspect on the newest record, whose verb sets the top past the
-		// last row and leaves the window to say where that is (runInspectCommand).
-		rowTop:    clampInt(m.reportState(r).top, 0, max(0, len(c.rows)-shown)),
-		hint:      c.hint,
-		maxRows:   shown,
-		scrollbar: m.popupScrollbarOn(),
+		rowTop:      rowTop,
+		hint:        c.hint,
+		maxRows:     shown,
+		scrollbar:   m.popupScrollbarOn(),
 	}, true
 }
 
@@ -268,7 +313,17 @@ func (m Model) reportKey(r reportKind, msg tea.KeyPressMsg) (bool, tea.Model, te
 	if byPage {
 		step *= max(1, shown)
 	}
-	m.reportState(r).top = clampInt(win.start+step, 0, max(0, win.total-shown))
+	last := max(0, win.total-shown)
+	state := m.reportState(r)
+	state.top = clampInt(win.start+step, 0, last)
+	// The follow is RE-DERIVED from where the key landed, never toggled: scrolling up off the end
+	// detaches the pane, and scrolling back down onto the last full window re-arms it. That is what
+	// keeps the invariant total in both directions — a pane is following exactly when its window sits
+	// at the tail — rather than a latch some path could leave set the wrong way (the transcript keeps
+	// its own the same way, every writer re-deriving it: [Model.detached], model.go).
+	if r.follows() {
+		state.follow = state.top >= last
+	}
 	return true, m, nil
 }
 
@@ -377,11 +432,23 @@ func (m Model) reportWheel(r reportKind, msg tea.MouseWheelMsg) (Model, bool) {
 	if !ok {
 		return m, true
 	}
+	landed := win.start
 	switch {
 	case msg.Button == tea.MouseWheelUp && win.start > 0:
-		m.reportState(r).top = win.start - 1
+		landed = win.start - 1
+		m.reportState(r).top = landed
 	case msg.Button == tea.MouseWheelDown && win.end < win.total:
-		m.reportState(r).top = win.start + 1
+		landed = win.start + 1
+		m.reportState(r).top = landed
+	}
+	// Re-derived ONCE, after the switch and never inside its two branches: neither of them fires on a
+	// notch that has nowhere to go, and a pane detached by a wheel-up whose rows then dropped past
+	// their cap would sit at the tail with nothing left to re-arm it. It is read off the window
+	// ALREADY in hand — the branches write only the top, so that window is still the one drawn — and
+	// a second [Model.reportWindow] here would recompose the whole pane on every notch the pointer
+	// makes over it.
+	if r.follows() {
+		m.reportState(r).follow = landed >= max(0, win.total-(win.end-win.start))
 	}
 	return m, true
 }

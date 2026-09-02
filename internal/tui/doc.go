@@ -858,7 +858,8 @@
 // `ui.inspector` arms the capture, folded beside the transcript rather than into it (a wire record
 // is not a conversation entry), shown in the /usage report's shape and paired request-to-reply
 // within one (depth, callID) wire stream, since the one ring interleaves every run's traffic;
-// reportpane.go the pane those two and /thinking ARE — the reportPane value ({open, top}), the key
+// reportpane.go the pane those two and /thinking ARE — the reportPane value ({open, top, follow,
+// raw}, the follow pinning /inspect and /thinking to the tail as the transcript is), the key
 // contract, the dismiss, the budget→render path and the whole mouse family (rect, window, click,
 // wheel), written once and named three times, with every rectangle in the transcript-side slot a
 // lookup into the geometry View publishes while it stacks that slot (model.go) rather than a prefix

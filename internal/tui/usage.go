@@ -37,7 +37,9 @@ import (
 // says. The entries below are that module's functions under this pane's own name.
 
 // usagePane is the /usage report overlay's state — a reportPane (reportpane.go) under the name of the
-// pane that keeps it: whether the report is up, and how far its row list is scrolled.
+// pane that keeps it: whether the report is up, and how far its row list is scrolled. It is the one
+// report that does NOT follow the tail of its rows ([reportKind.follows]): a delegate row arriving
+// while it is open leaves the window where the reader put it.
 type usagePane = reportPane
 
 // usageTitle names the pane, and usageHint spells the keys it owns.

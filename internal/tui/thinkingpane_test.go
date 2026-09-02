@@ -409,3 +409,39 @@ func TestDismissingTheThinkingPaneDropsTheScroll(t *testing.T) {
 			closed.thinkingPane.top)
 	}
 }
+
+// TestThinkingPaneFollowsTheReasoningArrivingUnderIt drives the pane the way a reader meets it —
+// opened through the VERB, which is what arms the follow, over a board that then goes on growing
+// while they watch. The records it appends are MORE than a full window's worth: the clamp alone
+// already tracks the tail until the list grows by that much, so a case that appended a few rows
+// would pass against a frozen pane and prove nothing.
+func TestThinkingPaneFollowsTheReasoningArrivingUnderIt(t *testing.T) {
+	m := thinkingPaneModel(t, 6)
+	m.thinkingPane = reportPane{} // open through the verb itself, which is what arms the follow
+	next, _ := m.runThinkingCommand()
+	m = next.(Model)
+
+	spec, seated := m.thinkingSpec()
+	if !seated {
+		t.Fatal("the frame seated no pane for a full board")
+	}
+	if len(spec.rows) <= spec.maxRows {
+		t.Fatalf("precondition: %d rows into a window of %d — the board must overflow the pane for a follow to mean anything",
+			len(spec.rows), spec.maxRows)
+	}
+
+	m = growThinkingRecords(t, m, 6)
+
+	grown, seated := m.thinkingSpec()
+	if !seated {
+		t.Fatal("the frame seated no pane for the grown board")
+	}
+	if grown.rowTop+grown.maxRows != len(grown.rows) {
+		t.Errorf("window [%d,%d) of %d rows without a keystroke, want the last full window of the grown board",
+			grown.rowTop, grown.rowTop+grown.maxRows, len(grown.rows))
+	}
+	newest := grown.rows[len(grown.rows)-1][0]
+	if painted := strip(m.renderThinking()); !strings.Contains(painted, newest) {
+		t.Errorf("the pane does not draw its newest row %q:\n%s", newest, painted)
+	}
+}

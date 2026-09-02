@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -307,5 +310,267 @@ func TestCtrlRIsTheInspectorsKeyAlone(t *testing.T) {
 	}
 	if !next.(Model).inspector.raw {
 		t.Error("ctrl+r did not flip /inspect to its raw rendering")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Following the tail (reportKind.follows)
+// ----------------------------------------------------------------------------
+
+// followCase is one report that FOLLOWS the tail of its rows, opened over more rows than the pane can
+// seat, together with a way to append MORE than a full window of rows to the list behind it — which
+// is the only state in which "does the pane move with them" is a question.
+type followCase struct {
+	name  string
+	kind  reportKind
+	model Model
+	grow  func(t *testing.T, m Model) Model
+}
+
+// followCases opens each of the two reports that follow. /usage is not among them and has its own
+// test below: it keeps the clamp alone (reportKind.follows).
+func followCases(t *testing.T) []followCase {
+	t.Helper()
+	return []followCase{
+		{
+			name:  "/inspect",
+			kind:  inspectReport,
+			model: inspectorPaneModel(t, 6),
+			// The ring holds maxWireRecords and rotates past it, which would take the oldest records
+			// away as fast as the new ones arrive and leave the list no longer than it started: the
+			// growth here stays UNDER that cap so there is real growth to follow.
+			grow: func(t *testing.T, m Model) Model {
+				t.Helper()
+				return growInspectorRecords(t, m, 6)
+			},
+		},
+		{
+			name:  "/thinking",
+			kind:  thinkingReport,
+			model: thinkingPaneModel(t, 6),
+			grow: func(t *testing.T, m Model) Model {
+				t.Helper()
+				return growThinkingRecords(t, m, 6)
+			},
+		},
+	}
+}
+
+// growInspectorRecords folds wire records onto the ring until the pane's row list has grown by more
+// than a full window, and fails when the ring's cap is reached first — past it the oldest record
+// rotates out for every new one and the list stops growing, which would leave every claim below
+// about "the rows that arrived" unprovable rather than false.
+func growInspectorRecords(t *testing.T, m Model, first int) Model {
+	t.Helper()
+	spec, seated := m.reportSpec(inspectReport, m.reportContent(inspectReport))
+	if !seated {
+		t.Fatal("the frame seated no /inspect pane to grow under")
+	}
+	before := len(spec.rows)
+	for i := first; ; i++ {
+		if i >= maxWireRecords {
+			t.Fatalf("the ring's %d-record cap was reached before the list grew a full window of %d rows",
+				maxWireRecords, spec.maxRows)
+		}
+		m = m.foldEvent(wireEvent(domain.WireDirectionRequest, fmt.Sprintf(`{"n":%d}`, i), i, 0))
+		if rows, _ := m.inspectorRows(); len(rows)-before > spec.maxRows {
+			return m
+		}
+	}
+}
+
+// growThinkingRecords folds completed turns onto the board until its row list has grown by more than
+// a full window. The board caps at maxThinkingRecords, far above what this needs.
+func growThinkingRecords(t *testing.T, m Model, first int) Model {
+	t.Helper()
+	spec, seated := m.reportSpec(thinkingReport, m.reportContent(thinkingReport))
+	if !seated {
+		t.Fatal("the frame seated no /thinking pane to grow under")
+	}
+	before := len(spec.rows)
+	for i := first; ; i++ {
+		if i >= maxThinkingRecords {
+			t.Fatalf("the board's %d-record cap was reached before the list grew a full window of %d rows",
+				maxThinkingRecords, spec.maxRows)
+		}
+		m = m.foldEvent(reasoningAt(runRef{}, i, "record "+strconv.Itoa(i)+" reasoning"))
+		m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(runRef{}, i)})
+		if rows, _ := m.thinkingRows(m.thinkingWrapColumn()); len(rows)-before > spec.maxRows {
+			return m
+		}
+	}
+}
+
+// reportWindowOrFail is the window the frame drew for an open report, failing when it drew none.
+func reportWindowOrFail(t *testing.T, m Model, r reportKind) reportWindow {
+	t.Helper()
+	win, ok := m.reportWindow(r)
+	if !ok {
+		t.Fatal("the open report reports no window")
+	}
+	return win
+}
+
+// TestFollowingReportsTrackTheTail is the behaviour the transcript has and these panes lacked: a pane
+// left at the end of its rows keeps showing the end as rows arrive under it, one scrolled up off the
+// end holds the window the reader put it on, and scrolling back down onto the last full window puts
+// it back on the tail. The invariant is TOTAL in both directions — following is exactly "the window
+// is at the tail" — so no path can leave the flag saying one thing while the window does another.
+func TestFollowingReportsTrackTheTail(t *testing.T) {
+	for _, tc := range followCases(t) {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.model
+			m.reportState(tc.kind).follow = true
+			win := reportWindowOrFail(t, m, tc.kind)
+			if win.end != win.total || win.start == 0 {
+				t.Fatalf("precondition: window [%d,%d) of %d rows — a following pane must open at the tail of a list that overflows it",
+					win.start, win.end, win.total)
+			}
+
+			t.Run("rows arriving under it are shown", func(t *testing.T) {
+				grown := reportWindowOrFail(t, tc.grow(t, m), tc.kind)
+				if grown.total <= win.total {
+					t.Fatalf("the list did not grow: %d rows, was %d", grown.total, win.total)
+				}
+				if grown.end != grown.total || grown.start <= win.start {
+					t.Errorf("window [%d,%d) of %d rows after the growth, want the last full window of the longer list",
+						grown.start, grown.end, grown.total)
+				}
+			})
+
+			t.Run("scrolling up off the end holds the window across the same growth", func(t *testing.T) {
+				up := pressReport(t, m, tc.kind, keyUp())
+				if up.reportState(tc.kind).follow {
+					t.Fatal("↑ off the end left the pane following: the reader scrolled away from the tail")
+				}
+				held := reportWindowOrFail(t, tc.grow(t, up), tc.kind)
+				if held.start != win.start-1 {
+					t.Errorf("window starts at %d after the growth, want it held at the row the reader scrolled to (%d)",
+						held.start, win.start-1)
+				}
+			})
+
+			t.Run("scrolling back onto the last full window re-arms it", func(t *testing.T) {
+				back := pressReport(t, pressReport(t, m, tc.kind, keyUp()), tc.kind, keyDown())
+				if !back.reportState(tc.kind).follow {
+					t.Fatal("scrolling back onto the last full window did not re-arm the follow")
+				}
+				grown := reportWindowOrFail(t, tc.grow(t, back), tc.kind)
+				if grown.end != grown.total {
+					t.Errorf("window [%d,%d) of %d rows, want the re-armed pane back on the tail",
+						grown.start, grown.end, grown.total)
+				}
+			})
+		})
+	}
+}
+
+// wheelReport rolls one notch with the pointer over the named report and returns the model it left,
+// failing when the pane did not claim the notch at all.
+func wheelReport(t *testing.T, m Model, r reportKind, button tea.MouseButton) Model {
+	t.Helper()
+	y0, h, ok := m.reportPaneRect(r)
+	if !ok {
+		t.Fatal("the report is not on the frame")
+	}
+	next, handled := m.reportWheel(r, tea.MouseWheelMsg{X: 10, Y: y0 + h/2, Button: button})
+	if !handled {
+		t.Fatal("the report did not claim a notch over its own box")
+	}
+	return next
+}
+
+// TestTheWheelDetachesAndReArmsTheFollow pins the wheel at both ends of the same invariant the keys
+// answer to — and the notch that fires NEITHER of its two guarded writes. Rolling down over a pane
+// already at the tail moves nothing, and a follow re-derived only inside those writes would leave a
+// pane detached by a wheel-up, whose rows then dropped past their cap onto the tail, with nothing
+// left to re-arm it.
+func TestTheWheelDetachesAndReArmsTheFollow(t *testing.T) {
+	for _, tc := range followCases(t) {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.model
+			m.reportState(tc.kind).follow = true
+			win := reportWindowOrFail(t, m, tc.kind)
+
+			up := wheelReport(t, m, tc.kind, tea.MouseWheelUp)
+			if up.reportState(tc.kind).follow {
+				t.Fatal("a notch up left the pane following: the reader rolled away from the tail")
+			}
+			held := reportWindowOrFail(t, tc.grow(t, up), tc.kind)
+			if held.start != win.start-1 {
+				t.Errorf("window starts at %d after the growth, want it held at the row the wheel left it on (%d)",
+					held.start, win.start-1)
+			}
+
+			back := wheelReport(t, up, tc.kind, tea.MouseWheelDown)
+			if !back.reportState(tc.kind).follow {
+				t.Fatal("a notch back onto the last full window did not re-arm the follow")
+			}
+			if grown := reportWindowOrFail(t, tc.grow(t, back), tc.kind); grown.end != grown.total {
+				t.Errorf("window [%d,%d) of %d rows, want the re-armed pane back on the tail",
+					grown.start, grown.end, grown.total)
+			}
+
+			t.Run("a notch that moves nothing still answers for where the pane sits", func(t *testing.T) {
+				// The pane's window is at the tail while the flag says otherwise — where a wheel-up
+				// detaches a pane whose rows then drop past their cap leaves it. Rolling down fires
+				// neither guarded write, and the follow must come back on all the same.
+				stuck := m
+				stuck.reportState(tc.kind).top = win.start
+				stuck.reportState(tc.kind).follow = false
+				if got := reportWindowOrFail(t, stuck, tc.kind); got.end != got.total {
+					t.Fatalf("precondition: window [%d,%d) of %d rows — the detached pane must sit at the tail",
+						got.start, got.end, got.total)
+				}
+				rolled := wheelReport(t, stuck, tc.kind, tea.MouseWheelDown)
+				if !rolled.reportState(tc.kind).follow {
+					t.Error("a notch down over a pane already at the tail left it detached with no way back")
+				}
+				if got := rolled.reportState(tc.kind).top; got != win.start {
+					t.Errorf("top = %d after a notch that had nowhere to go, want it left at %d", got, win.start)
+				}
+			})
+		})
+	}
+}
+
+// TestTheUsageReportDoesNotFollowItsTail is the kind gate, and the whole of what keeps this item off
+// the third report: /usage's rows GROW too — a delegate row per run that reports a count — but the
+// ratified scope of the follow is the two panes a reader watches arrive, so this one keeps the
+// clamp-only scroll it has always had. Both halves are gated: no key or notch ARMS the follow here,
+// and a flag set behind the module's back is not HONOURED either.
+func TestTheUsageReportDoesNotFollowItsTail(t *testing.T) {
+	if usageReport.follows() {
+		t.Fatal("/usage follows its tail — the ratified scope is /inspect and /thinking alone")
+	}
+	m := usageReportModel(t, 40)
+
+	down := pressReport(t, m, usageReport, keyDown())
+	if down.usagePane.follow {
+		t.Error("↓ armed the follow on /usage")
+	}
+	end := down
+	for range 3 {
+		end = pressReport(t, end, usageReport, keyPgDown())
+	}
+	if end.usagePane.follow {
+		t.Error("paging to the end armed the follow on /usage")
+	}
+	if wheeled := wheelReport(t, down, usageReport, tea.MouseWheelDown); wheeled.usagePane.follow {
+		t.Error("a wheel notch armed the follow on /usage")
+	}
+
+	grown := delegate(t, down, "late", "late survey", childTotals, 0)
+	grown.layout()
+	if got := reportWindowOrFail(t, grown, usageReport); got.start != down.usagePane.top {
+		t.Errorf("window starts at %d after a delegate row arrived, want it left at %d where the reader put it",
+			got.start, down.usagePane.top)
+	}
+
+	forced := m
+	forced.usagePane.follow = true
+	if got := reportWindowOrFail(t, forced, usageReport); got.start != 0 {
+		t.Errorf("window starts at %d with the follow set by hand, want the clamped top (0) — /usage does not honour it",
+			got.start)
 	}
 }

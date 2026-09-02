@@ -193,12 +193,13 @@ func (m Model) thinkingContent() reportContent {
 // It opens at the END of the list it is going to show — the SCOPED one, the viewed run's alone
 // under a run view ([Model.scopedThinking]). The records are newest-last, so the Turn worth reading
 // is the last one, and a pane that opened on the oldest of a session's records would ask for a
-// hundred page-downs before it said anything. The top is set past the last row and CLAMPED to the
-// last full window when the pane is composed ([Model.reportSpec]) — the window is the frame's
-// answer for this paint, not something this verb can know.
+// hundred page-downs before it said anything. The top is set past the last row and the pane opens
+// FOLLOWING ([reportKind.follows]), so the window is the last full one on every paint
+// ([Model.reportSpec]) — the frame's answer for this paint, not something this verb can know — and
+// the reasoning the agent is streaming right now goes on arriving under a pane that shows it.
 func (m Model) runThinkingCommand() (tea.Model, tea.Cmd) {
 	rows, _ := m.thinkingRows(m.thinkingWrapColumn())
-	m.thinkingPane = reportPane{open: true, top: len(rows)}
+	m.thinkingPane = reportPane{open: true, top: len(rows), follow: true}
 	m.layout()
 	return m, nil
 }

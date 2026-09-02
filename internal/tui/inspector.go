@@ -85,8 +85,8 @@ type wireRecord struct {
 }
 
 // inspectorPane is the /inspect overlay's state — a reportPane (reportpane.go) under the name of the
-// pane that keeps it: whether the pane is up, how far its record list is scrolled, and which of the
-// two renderings ctrl+r left it showing.
+// pane that keeps it: whether the pane is up, how far its record list is scrolled, whether it is
+// following the tail of the ring, and which of the two renderings ctrl+r left it showing.
 type inspectorPane = reportPane
 
 // inspectorTitle names the pane; inspectorHint and inspectorRawHint spell the keys it owns, one per
@@ -154,12 +154,13 @@ const inspectorNoReplyRow = "· no response recorded — a non-streaming reply i
 // It opens at the END of the list it is actually going to show — the SCOPED one where a run view is
 // open (inspectorRows). The rows are newest-last (a log's order), so the record worth
 // reading is the last one, and a pane that opened on the oldest of twenty bodies would ask for a
-// hundred page-downs before it said anything. The top is set past the last row and CLAMPED to the
-// last full window when the pane is composed (inspectorSpec) — the window is the frame's answer for
-// this paint, not something this verb can know.
+// hundred page-downs before it said anything. The top is set past the last row and the pane opens
+// FOLLOWING ([reportKind.follows]), so the window is the last full one on every paint — the frame's
+// answer for this paint, not something this verb can know — and the records the agent goes on
+// sending arrive under a pane that is already looking at them.
 func (m Model) runInspectCommand() (tea.Model, tea.Cmd) {
 	rows, _ := m.inspectorRows()
-	m.inspector = inspectorPane{open: true, top: len(rows)}
+	m.inspector = inspectorPane{open: true, top: len(rows), follow: true}
 	m.layout()
 	return m, nil
 }
