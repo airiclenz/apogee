@@ -145,7 +145,7 @@ func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
 	// ActiveID is non-empty exactly when there is a resumable session — a resumed one, or a fresh
 	// one that reached at least one Turn (an empty conversation is never written).
 	if w.host.ActiveID() != "" {
-		fmt.Fprintln(os.Stdout, "Session saved · resume with: apogee --continue   (or /sessions inside apogee)")
+		_, _ = fmt.Fprintln(os.Stdout, "Session saved · resume with: apogee --continue   (or /sessions inside apogee)")
 	}
 	return err
 }

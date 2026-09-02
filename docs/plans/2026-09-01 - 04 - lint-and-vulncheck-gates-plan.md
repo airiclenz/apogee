@@ -259,7 +259,9 @@ git diff --stat -- internal/mechanisms/filehint_test.go   # only the flagged lit
 
 **Commit:** `refactor(agent,mcp,stubllm,mechanisms): lint-clean under golangci-lint standard set`
 
-## 10. Lint clean: `cmd/apogee` production files
+## 10. Lint clean: `cmd/apogee` production files — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the coding-standards Go extension says "never discard with `_`"; the plan's ratified "unchecked status prints" call overrides it for these fifteen status writes to injected output writers (`_, _ =`, no errcheck exclusion) — followed the plan.
 
 Depends on item 2.
 

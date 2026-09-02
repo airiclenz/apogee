@@ -166,7 +166,7 @@ func probeModelCommand() *cobra.Command {
 			// forge a hyperlink — on the diagnostic that judges it. The strip sits at this render
 			// seam rather than in internal/probe, exactly as the TUI strips at its own: the probe
 			// keeps producing raw text, and every sink that prints it strips on its behalf.
-			fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(result.Report()))
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(result.Report()))
 			return nil
 		},
 	}

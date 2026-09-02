@@ -441,7 +441,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// tests and nothing else). The product goes to real stdout; notices and the summary below
 	// travel by PrintErrln, which does target the err stream.
 	if text := sanitize.StripEscapes(res.FinalText); text != "" {
-		fmt.Fprintln(cmd.OutOrStdout(), text)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), text)
 	}
 	// Each delegated run's own context fill, one line apiece and ahead of the summary: the summary
 	// speaks for the Firing as a whole, and a sub-agent fills a window of its OWN, which no

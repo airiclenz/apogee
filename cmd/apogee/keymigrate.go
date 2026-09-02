@@ -95,7 +95,7 @@ func (w *rootWiring) prepareKeyMigration(probe func(workspaceRoot string) (secre
 		if !errors.Is(err, keystore.ErrNoStore) {
 			reason = err.Error()
 		}
-		fmt.Fprintln(notices, plaintextKeyNotice(w.configPath(), reason, names))
+		_, _ = fmt.Fprintln(notices, plaintextKeyNotice(w.configPath(), reason, names))
 		return
 	}
 	w.secrets = store

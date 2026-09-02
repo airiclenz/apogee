@@ -137,7 +137,7 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 			// precisely BECAUSE they distrust it must not be able to repaint the terminal on
 			// the diagnostic that judges it. The strip sits at this render seam rather than in
 			// internal/probe, exactly as the TUI strips at its own.
-			fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(host.Report()))
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(host.Report()))
 			return nil
 		},
 	}

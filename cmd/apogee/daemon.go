@@ -168,7 +168,7 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 	// the server, and with the Mechanisms, a session on this host would (ADR 0031). Notices go to
 	// stderr; the daemon's own narration goes to stdout, which is what a supervisor journals.
 	if err := config.ApplyConfig(opts, changed, os.Getenv, os.ReadFile, func(msg string) {
-		fmt.Fprintln(errOut, msg)
+		_, _ = fmt.Fprintln(errOut, msg)
 	}); err != nil {
 		return err
 	}
@@ -218,7 +218,7 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 	// it too.
 	defer func() {
 		if notice := wiring.closeConfiner(); notice != "" {
-			fmt.Fprintln(errOut, notice)
+			_, _ = fmt.Fprintln(errOut, notice)
 		}
 	}()
 	// A `mechanisms:` key naming a Mechanism this release RETIRED is tolerated rather than refused
@@ -240,7 +240,7 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 	// Firing is what this process exists to run.
 	if notice := probe.ResidualNotice(probe.BackendName(wiring.confiner),
 		wiring.confiner.Capabilities(), domain.ModeAuto, opts.ConfineToWorkspace); notice != "" {
-		fmt.Fprintln(errOut, notice)
+		_, _ = fmt.Fprintln(errOut, notice)
 	}
 
 	// The facts internal/daemon's validation cannot learn from the file, resolved once: config.yaml
@@ -617,7 +617,7 @@ func (l *daemonLog) line(format string, args ...any) {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	fmt.Fprintf(l.out, "%s %s\n", stamp, message)
+	_, _ = fmt.Fprintf(l.out, "%s %s\n", stamp, message)
 }
 
 // notify renders one scheduler Event. It is [schedule.Config.Notify] for the daemon's Scheduler,

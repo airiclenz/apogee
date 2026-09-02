@@ -80,7 +80,7 @@ func probeTerminalCommand() *cobra.Command {
 			// like both siblings: every row is built from what the TERMINAL wrote back when the
 			// probe asked, so printing it raw would hand the measured terminal a second chance
 			// to act on its own answers instead of being described by them.
-			fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(report.Report()))
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(report.Report()))
 			if report.Mismatch() {
 				return errProbeTerminalMismatch
 			}

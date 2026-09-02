@@ -198,7 +198,7 @@ func runDaemonInstall(goos, configDir string, configPassed bool, out io.Writer) 
 	}
 	grace, notice := installGrace(filepath.Join(home, daemonDirName, schedulesFileName))
 	if notice != "" {
-		fmt.Fprintln(out, notice)
+		_, _ = fmt.Fprintln(out, notice)
 	}
 
 	plan, err := daemonInstallPlan(goos, userHome, home, executable, pinned, grace)
@@ -214,11 +214,11 @@ func runDaemonInstall(goos, configDir string, configPassed bool, out io.Writer) 
 		return err
 	}
 
-	fmt.Fprintln(out, installSummary(plan.UnitPath, existed, changed))
-	fmt.Fprintf(out, "stop escalation: %s (shutdown-grace %s + %s)\n",
+	_, _ = fmt.Fprintln(out, installSummary(plan.UnitPath, existed, changed))
+	_, _ = fmt.Fprintf(out, "stop escalation: %s (shutdown-grace %s + %s)\n",
 		stopWindow(grace), grace, stopMargin)
-	fmt.Fprintf(out, "\nactivate it with:\n\n    %s\n\n", daemonActivation(plan))
-	fmt.Fprintln(out, "re-run `apogee daemon install` after changing shutdown-grace or moving the binary.")
+	_, _ = fmt.Fprintf(out, "\nactivate it with:\n\n    %s\n\n", daemonActivation(plan))
+	_, _ = fmt.Fprintln(out, "re-run `apogee daemon install` after changing shutdown-grace or moving the binary.")
 
 	return nil
 }
