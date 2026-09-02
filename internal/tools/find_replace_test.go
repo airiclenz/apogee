@@ -602,3 +602,134 @@ func TestMultiFindReplace_Execute_NoTrailerForAnUnknownLanguage(t *testing.T) {
 		t.Errorf("Content = %q, want the bare sentence for a path with no known language", result.Content)
 	}
 }
+
+// A single_find_and_replace that misses by whitespace alone answers with the region it found, the
+// file is byte-unchanged, and the report is the one closestRegion renders.
+func TestSingleFindReplace_NotFoundReportsTheClosestRegion(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	original := "package main\n\nfunc main() {\n\tprintln(\"hi\")\n}\n"
+	path := writeTempFile(t, root, "main.go", original)
+
+	result, err := NewSingleFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{
+			"path":    "main.go",
+			"oldText": "func main() {\n  println(\"hi\")\n}",
+			"newText": "func main() {}",
+		}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true")
+	}
+	if want := closestRegion(original, "func main() {\n  println(\"hi\")\n}"); result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+	if !strings.Contains(result.Content, "with different whitespace") {
+		t.Errorf("Content = %q, want the whitespace-difference report", result.Content)
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file changed on a not-found failure: %q", string(got))
+	}
+}
+
+// A near miss that is not a whitespace difference names the closest window and its score.
+func TestSingleFindReplace_NotFoundReportsTheClosestWindow(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	original := "alpha\nbeta\ngamma\ndelta\n"
+	path := writeTempFile(t, root, "notes.txt", original)
+
+	result, err := NewSingleFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{
+			"path": "notes.txt", "oldText": "beta\nGAMMA", "newText": "x",
+		}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+
+	if !strings.Contains(result.Content, "closest match at lines 2–3 (1 of 2 lines match)") {
+		t.Errorf("Content = %q, want the scored closest window", result.Content)
+	}
+	if !strings.Contains(result.Content, "  2 | beta") {
+		t.Errorf("Content = %q, want the numbered excerpt", result.Content)
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file changed on a not-found failure: %q", string(got))
+	}
+}
+
+// A found-more-than-once refusal names the line of every occurrence it counted.
+func TestSingleFindReplace_FoundTwiceNamesItsLines(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	original := "needle\nfiller\nneedle\n"
+	path := writeTempFile(t, root, "dup.txt", original)
+
+	result, err := NewSingleFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "dup.txt", "oldText": "needle", "newText": "x"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+
+	if want := "old text found 2 times (must appear exactly once) — at lines 1, 3"; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file changed on a duplicate failure: %q", string(got))
+	}
+}
+
+// multi_find_and_replace keeps its "replacement #N: " prefix in front of the report, and nothing is
+// written when a later replacement misses.
+func TestMultiFindReplace_NotFoundKeepsThePrefix(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	original := "alpha\nbeta\ngamma\n"
+	path := writeTempFile(t, root, "notes.txt", original)
+
+	result, err := NewMultiFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{
+			"path": "notes.txt", "replacements": []map[string]any{
+				{"oldText": "alpha", "newText": "ALPHA"},
+				{"oldText": "beta\nGAMMA", "newText": "x"},
+			},
+		}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+
+	if !strings.HasPrefix(result.Content, "replacement #2: old text not found in file — closest match") {
+		t.Errorf("Content = %q, want the prefixed closest-region report", result.Content)
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file changed despite the failure: %q", string(got))
+	}
+}
+
+// A replacement that becomes ambiguous mid-run names the lines of every occurrence, prefix intact.
+func TestMultiFindReplace_FoundTwiceNamesItsLines(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeTempFile(t, root, "notes.txt", "needle\nfiller\nneedle\n")
+
+	result, err := NewMultiFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{
+			"path": "notes.txt", "replacements": []map[string]any{{"oldText": "needle", "newText": "x"}},
+		}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+
+	want := "replacement #1: old text found 2 times (must appear exactly once) — at lines 1, 3"
+	if result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+}

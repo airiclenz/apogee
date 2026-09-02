@@ -116,3 +116,33 @@ func TestErrorEnrichmentBuildsFromCatalogue(t *testing.T) {
 		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, errorEnrichmentID)
 	}
 }
+
+// A find-replace not-found report quotes a numbered window of the file under its message. The
+// excerpt is FILE TEXT, not the tool's verdict: a Python window holding `except ImportError:` must
+// not turn two plain not-found failures into an import-error hint, because classifyError ranks the
+// import signals above the missing-file fallback it would otherwise reach. Only the message line is
+// classified, so both failures stay missing-file and neither is enriched.
+func TestErrorEnrichmentIgnoresTheExcerptUnderTheMessage(t *testing.T) {
+	t.Parallel()
+	report := "old text not found in file — closest match at lines 3–5 (1 of 3 lines match); " +
+		"the file is unchanged:\n" +
+		"  3 | try:\n" +
+		"  4 |     import yaml\n" +
+		"  5 | except ImportError:"
+	history := []domain.Message{
+		userMsg("fix a.py"),
+		assistantCall(writeCall("w1", "a.py", "x")),
+		toolResult("w1", report),
+		assistantCall(writeCall("w2", "a.py", "y")),
+	}
+
+	result := &domain.ToolResult{CallID: "w2", Content: report, IsError: true}
+	enriched := enrich(t, history, writeCall("w2", "a.py", "y"), result)
+
+	if enriched {
+		t.Errorf("a not-found whose excerpt mentions ImportError must stay missing-file; got %q", result.Content)
+	}
+	if strings.Contains(result.Content, errorEnrichmentMarker) {
+		t.Errorf("result gained the enrichment marker: %q", result.Content)
+	}
+}

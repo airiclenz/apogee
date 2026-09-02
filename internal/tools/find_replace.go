@@ -112,10 +112,11 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 
 	count := countOccurrences(string(content), args.OldText)
 	if count == 0 {
-		return errorResult(call.ID, "old text not found in file"), nil
+		return errorResult(call.ID, closestRegion(string(content), args.OldText)), nil
 	}
 	if count > 1 {
-		return errorResult(call.ID, fmt.Sprintf("old text found %d times (must appear exactly once)", count)), nil
+		return errorResult(call.ID, fmt.Sprintf("old text found %d times (must appear exactly once)%s",
+			count, occurrenceNote(string(content), args.OldText))), nil
 	}
 
 	updated := strings.Replace(string(content), args.OldText, args.NewText, 1)
@@ -242,10 +243,11 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	for i, r := range args.Replacements {
 		count := countOccurrences(content, r.OldText)
 		if count == 0 {
-			return errorResult(call.ID, fmt.Sprintf("replacement #%d: old text not found in file", i+1)), nil
+			return errorResult(call.ID, fmt.Sprintf("replacement #%d: %s", i+1, closestRegion(content, r.OldText))), nil
 		}
 		if count > 1 {
-			return errorResult(call.ID, fmt.Sprintf("replacement #%d: old text found %d times (must appear exactly once)", i+1, count)), nil
+			return errorResult(call.ID, fmt.Sprintf("replacement #%d: old text found %d times (must appear exactly once)%s",
+				i+1, count, occurrenceNote(content, r.OldText))), nil
 		}
 
 		content = strings.Replace(content, r.OldText, r.NewText, 1)

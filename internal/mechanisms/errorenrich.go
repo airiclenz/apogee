@@ -72,6 +72,20 @@ func classifyError(content string) errorCategory {
 	}
 }
 
+// messageLine is the part of a tool-result content the enrichment sniff classifies: everything
+// before the first line break. A refusal may carry a multi-line EXCERPT of the file under its
+// message — find-replace's closest-region report quotes the numbered window it came nearest to —
+// and file text is not the tool's own words. Classifying the whole content would let a Python
+// window holding `except ImportError:` turn a plain not-found into an import-error hint, because
+// classifyError ranks the import signals above the missing-file fallback. Only the header line
+// carries the tool's own verdict, so only the header line is read.
+func messageLine(content string) string {
+	if i := strings.IndexByte(content, '\n'); i >= 0 {
+		return content[:i]
+	}
+	return content
+}
+
 // containsAny reports whether s contains any of the substrings.
 func containsAny(s string, subs ...string) bool {
 	for _, sub := range subs {
@@ -120,7 +134,7 @@ func (errorEnrichmentMechanism) PostToolResult(_ context.Context, call domain.To
 		return nil
 	}
 	content := result.Content()
-	cat := classifyError(content)
+	cat := classifyError(messageLine(content))
 	if cat == errUnknown || cat == errMissingFile {
 		return nil
 	}
@@ -162,7 +176,7 @@ func priorWriteErrorMatches(conv domain.ConversationView, np, currentCallID stri
 			if !ok || !contentMatchesAny(res.Content, generalErrorSignals) {
 				continue
 			}
-			if classifyError(res.Content) == cat {
+			if classifyError(messageLine(res.Content)) == cat {
 				found = true
 				return false
 			}

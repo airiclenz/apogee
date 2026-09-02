@@ -290,6 +290,13 @@
 // missing path's parent THROUGH the fence and answers the prefix-matching entries spelled the way
 // the model spelled the path, and notFoundMessage, which appends them to a tool's own not-found
 // wording — one helper rather than a near-miss search copied into every read tool.
+// nearmatch.go is the same courtesy on the WRITE side, for the text a find-replace could not
+// find: closestRegion, which answers with the file region that came closest — a
+// whitespace-only difference named by its line range, else the best-scoring window of trimmed
+// lines — quoted back as numbered, escaped, capped rows, and occurrenceLines, which names the
+// line of every occurrence a "found N times" refusal counted. Report only: no near match is ever
+// applied, the file is never written, and with nothing to point at the message is the former
+// bare sentence to the byte.
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
 // argument a given writer lands on. regions.go is the one Edit-region builder the four writing
