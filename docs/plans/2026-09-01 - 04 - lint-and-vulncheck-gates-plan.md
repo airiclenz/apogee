@@ -96,7 +96,12 @@ grep -c 'QF1' /tmp/lint.txt                                               # 0
 
 **Commit:** `build: pinned golangci-lint and govulncheck targets with a v2 config`
 
-## 3. Lint clean: `internal/security`, `internal/platform`
+## 3. Lint clean: `internal/security`, `internal/platform` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the uncapped run reported exactly the 26 sites the item lists, in the 8 listed files — no extra site, no site the item named that the linter did not report. All 26 are now clean (`0 issues.`, exit 0).
+NOTES (2026-09-02): `winlabel/journal_state_test.go:54` — the ineffectual `got = append(got, …)` was removed as a WHOLE statement; dropping only the `got =` would leave a bare `append(...)` expression that does not compile. The `got[0].Path` mutation above it still carries the "a caller mutated its copy" premise the surviving assertion reads.
+NOTES (2026-09-02): `confinetest.go:86/92` — the two success subtests now assert the `runWriteProbe` error with `t.Fatalf`, matching the sibling subtests' style; no assertion was invented anywhere else.
+NOTES (2026-09-02): no CHANGELOG entry in this sidecar — item 13's text assigns the single `[Unreleased]` entry for the whole plan.
 
 Depends on item 2.
 

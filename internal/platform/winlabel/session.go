@@ -110,7 +110,7 @@ func (j *Journal) record(entry Entry) (bool, error) {
 // error that matters, and a stale on-disk entry costs at worst the pre-unwind behaviour —
 // Retire rewrites or removes the whole file on success, and only a crash before that
 // resurrects the phantom.
-func (j *Journal) unwind(path string) {
+func (j *Journal) unwind(path string) { //nolint:unused // used by the windows build (walk_windows.go)
 	entries, removed := unwindEntry(j.rec.Entries, path, foldPath)
 	if !removed {
 		return

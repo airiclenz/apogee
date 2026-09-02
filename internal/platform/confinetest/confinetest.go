@@ -83,13 +83,17 @@ func Probe(t *testing.T, c domain.Confiner, sh Shell, failFastPreamble string, n
 
 	t.Run("write_in_workspace_succeeds", func(t *testing.T) {
 		target := filepath.Join(ws, "probe.txt")
-		runWriteProbe(t, c, sh, box, target)
+		if err := runWriteProbe(t, c, sh, box, target); err != nil {
+			t.Fatalf("write in workspace %q: %v", target, err)
+		}
 		assertFileExists(t, target)
 	})
 
 	t.Run("write_in_writable_path_succeeds", func(t *testing.T) {
 		target := filepath.Join(writable, "probe.txt")
-		runWriteProbe(t, c, sh, box, target)
+		if err := runWriteProbe(t, c, sh, box, target); err != nil {
+			t.Fatalf("write in writable path %q: %v", target, err)
+		}
 		assertFileExists(t, target)
 	})
 
@@ -238,7 +242,7 @@ func ProbeNetwork(t *testing.T, c domain.Confiner, sh Shell) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go acceptAll(ln)
 	addr := ln.Addr().String()
 
@@ -400,6 +404,6 @@ func acceptAll(ln net.Listener) {
 		if err != nil {
 			return
 		}
-		conn.Close()
+		_ = conn.Close()
 	}
 }

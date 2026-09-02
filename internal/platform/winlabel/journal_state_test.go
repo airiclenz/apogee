@@ -51,7 +51,6 @@ func TestJournalEntriesReturnsACopy(t *testing.T) {
 		t.Fatalf("Entries() = %+v, want the one journalled root", got)
 	}
 	got[0].Path = `C:\somewhere-else`
-	got = append(got, Entry{Path: `D:\extra`, Root: true})
 
 	after := j.Entries()
 	if len(after) != 1 || after[0].Path != `C:\work` {

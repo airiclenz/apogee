@@ -43,7 +43,7 @@ type hostRules struct {
 	// sets and wired to the real OS resolver (GetFinalPathNameByHandle) by Current on
 	// Windows; nil means final forms cannot be resolved here, which the backend refuses
 	// on rather than guesses about.
-	finalPath func(string) (string, bool)
+	finalPath func(string) (string, bool) //nolint:unused // used by the windows build (platform_windows.go, confiner_windows.go)
 }
 
 // posixRules is the POSIX rule set (Linux, macOS and the other Unix targets): `sh -c`,

@@ -121,7 +121,7 @@ func SafeWriteFile(root, input string, data []byte, perm os.FileMode, permitted 
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	// Before ANY mutation: a symlinked parent would redirect the MkdirAll below as readily
 	// as it would redirect the write itself.
@@ -312,12 +312,12 @@ func stagingName() (string, error) {
 // on error, so a failed write never leaks a descriptor.
 func stageAndClose(f *os.File, data []byte, mode os.FileMode, applyMode bool) error {
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if applyMode {
 		if err := f.Chmod(mode); err != nil {
-			f.Close()
+			_ = f.Close()
 			return err
 		}
 	}
@@ -349,7 +349,7 @@ func SafeReadFile(root, input string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	data, err := r.ReadFile(rel)
 	if err != nil {
@@ -377,7 +377,7 @@ func SafeOpen(root, input string) (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	f, err := r.Open(rel)
 	if err != nil {
@@ -431,12 +431,12 @@ func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput, permitted string) er
 	if err != nil {
 		return err
 	}
-	defer dr.Close()
+	defer func() { _ = dr.Close() }()
 	sr, err := os.OpenRoot(srcRoot)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	// Before ANY mutation, and before the source is even opened: a symlinked parent on the
 	// DESTINATION chain would land the copy somewhere the argument never named, exactly as it
@@ -450,7 +450,7 @@ func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput, permitted string) er
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	return stageCopy(dr, dstRel, src, mode)
 }
@@ -477,11 +477,11 @@ func openCopySource(sr *os.Root, rel, input string) (*os.File, os.FileMode, erro
 	}
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, 0, err
 	}
 	if !info.Mode().IsRegular() {
-		f.Close()
+		_ = f.Close()
 		return nil, 0, fmt.Errorf("not a regular file: %s", input)
 	}
 	return f, info.Mode().Perm(), nil
@@ -521,11 +521,11 @@ func stageCopy(dr *os.Root, dstRel string, src io.Reader, mode os.FileMode) erro
 // the handle — always, including on error, so a failed copy never leaks a descriptor.
 func copyAndClose(dst *os.File, src io.Reader, mode os.FileMode) error {
 	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
+		_ = dst.Close()
 		return err
 	}
 	if err := dst.Chmod(mode); err != nil {
-		dst.Close()
+		_ = dst.Close()
 		return err
 	}
 	return dst.Close()
@@ -566,7 +566,7 @@ func SafeRename(root, oldInput, newInput string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	// Before ANY mutation: BOTH ends of a rename are mutated — the old name is unlinked, the new
 	// one created — so a symlinked parent on either chain would move a file the operator never
@@ -611,7 +611,7 @@ func SafeRemove(root, input, permitted string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	// Before ANY mutation: the unlink lands wherever the parent chain leads, so a symlinked
 	// parent would remove a file under a name the operator never approved — `docs/config` erasing

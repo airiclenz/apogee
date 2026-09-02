@@ -555,7 +555,7 @@ func TestSafeOpen_ReadsWithinRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SafeOpen within root: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	got, err := io.ReadAll(f)
 	if err != nil {
@@ -620,7 +620,7 @@ func TestSafeOpen_HandleSurvivesRename(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SafeOpen: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// The flip: b.txt takes over a.txt's NAME while the handle is held.
 	if err := os.Rename(filepath.Join(root, "b.txt"), filepath.Join(root, "a.txt")); err != nil {

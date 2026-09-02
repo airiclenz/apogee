@@ -94,7 +94,7 @@ func AcquireLock(path string) (release func(), err error) {
 		if held {
 			pid = readLockPID(file)
 		}
-		file.Close()
+		_ = file.Close()
 		if held {
 			return nil, &LockHeldError{Path: path, PID: pid}
 		}

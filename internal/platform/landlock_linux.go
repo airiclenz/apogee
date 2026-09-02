@@ -299,7 +299,7 @@ func applyLandlock(box domain.ConfinementBox) error {
 		return fmt.Errorf("apogee: confined-exec: landlock_create_ruleset: %w", errno)
 	}
 	fd := int(rulesetFD)
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 
 	// Allow writes beneath the workspace root and each extra writable path. The box's
 	// in-child semantics: handle the write-class accesses globally, then re-grant them
@@ -371,7 +371,7 @@ func allowWriteBeneath(rulesetFD int, root string, access uint64) error {
 		}
 		return fmt.Errorf("apogee: confined-exec: open %q: %w", root, err)
 	}
-	defer unix.Close(rootFD)
+	defer func() { _ = unix.Close(rootFD) }()
 
 	rule := unix.LandlockPathBeneathAttr{
 		Allowed_access: access,
