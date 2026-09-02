@@ -2268,7 +2268,7 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 //
 // They sit in two slots, and every one of them is FLUSH on the chrome its slot abuts: the ones named
 // in transcriptSlotPanes go directly above the ▔ hairline (the frame's blank gap row falls above
-// them, not between them and the chrome), the last two directly above the input box.
+// them, not between them and the chrome), the last three directly above the input box.
 //
 // They are gathered as ONE value because two readers need them and must never disagree: View
 // composes them into the frame, and [Model.transcriptRows] measures them to say how many screen
