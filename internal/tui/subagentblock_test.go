@@ -1667,6 +1667,33 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 		}
 	})
 
+	// The status line is the surface the rename reaches LAST and the only one composed per frame:
+	// the phrase is pure and the name is resolved against the transcript when the row is painted
+	// (Model.runningPhrase), so a name that arrived as an event rather than in the call's arguments
+	// has to reach the row through the run head the fold rewrote. Asserted off the rendered phrase,
+	// never off transcript.runName, because the row is what the human reads.
+	t.Run("the status line names it", func(t *testing.T) {
+		m := newTestModel(t)
+		m = m.foldEvent(domain.ToolCallEvent{
+			Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"survey the tests"}`)},
+		})
+		m = m.foldEvent(domain.TokenEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Text:      "working on it",
+		})
+		if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), subAgentActivityName+" · responding · 0s"; got != want {
+			t.Fatalf("phrase before the rename = %q, want the unnamed %q", got, want)
+		}
+
+		m = m.foldEvent(domain.SubAgentNamedEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Name:      name,
+		})
+		if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), name+" · responding · 0s"; got != want {
+			t.Errorf("phrase after the rename = %q, want %q", got, want)
+		}
+	})
+
 	// A rename for a run this view never saw — a record replayed without the head, a child whose
 	// event beat its parent's tool call in — renames nothing rather than renaming the last run it
 	// finds, and appends nothing either.

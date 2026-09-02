@@ -211,7 +211,10 @@ new sentence adjacent; `go build ./...` (no code touched).
 
 ---
 
-## 5. The status line names a run whose name arrived by rename
+## 5. The status line names a run whose name arrived by rename — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the subtest asserts the phrase BEFORE the rename too (the generic `subAgentActivityName` word), so the rename is what the second assertion measures; confirmed non-vacuous by deleting only the `SubAgentNamedEvent` fold, which fails it with `"sub-agent · responding · 0s"`, and restoring it before finishing.
+NOTES (2026-09-02): the fixture is the activity-test shape (`newTestModel` + a `sub_agent` `ToolCallEvent` + a depth-1 `TokenEvent`) rather than the enclosing test's `build` helper, because `runningPhrase` reads the Model's activity board, which a bare `*transcript` never fills.
 
 **What.** `transcript.runName` (`internal/tui/transcript.go:509`) is asserted directly
 (`internal/tui/transcript_test.go:3349`), and `activity.text` composes `name + " · " + phrase`
