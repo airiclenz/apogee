@@ -234,7 +234,13 @@ git diff --stat -- internal/tui/reasoning_test.go internal/tui/toolpresent_test.
 
 **Commit:** `test(tui): lint-clean under golangci-lint standard set`
 
-## 9. Lint clean: `internal/agent`, `internal/mcp`, `internal/stubllm`, `internal/mechanisms`
+## 9. Lint clean: `internal/agent`, `internal/mcp`, `internal/stubllm`, `internal/mechanisms` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's site list named 18 findings; the uncapped linter reports 19 for these packages — `internal/stubllm/server_test.go:834` (`defer resp.Body.Close()`) is a capped-away sibling of the four listed `server_test.go` sites and was folded in under the enumeration-is-a-floor rule and the header's "fix every finding the linter reports" scope. It is in a file the item already lists, so the FILES list is unchanged.
+
+NOTES (2026-09-02): the four non-deferred `mcp/transport_test.go` sites (:200, :221, :241, :309) are error paths that `t.Fatal` immediately after; they took the bare `_ = resp.Body.Close()` form per the standing idiom, the other fourteen took `defer func() { _ = h.Close() }()`.
+
+NOTES (2026-09-02): `filehint_test.go:240` carries a trailing `// U+202E RIGHT-TO-LEFT OVERRIDE` comment naming the character, matching item 7's convention, because no surrounding prose names it; `git diff --stat` on that file is exactly 1 insertion / 1 deletion.
 
 Depends on item 2.
 

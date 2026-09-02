@@ -235,7 +235,7 @@ func captureStderr(t *testing.T, f func()) string {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	os.Stderr = w
 	// A t.Fatal or t.Skip inside f is a runtime.Goexit, which unwinds past the restore below
 	// exactly as a panic does. This cleanup runs on every exit path: it closes the write end — which

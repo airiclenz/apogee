@@ -1453,7 +1453,7 @@ func TestNewChildAgent_CompactsMidExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
-	defer child.Close()
+	defer func() { _ = child.Close() }()
 	if !child.midExchangeCompaction {
 		t.Error("a child agent does not compact mid-Exchange; its whole life is one Exchange, so it would never fold")
 	}

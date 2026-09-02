@@ -348,7 +348,7 @@ func TestServerAPIKeyGateRefusesAnUnauthenticatedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authenticated request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("authenticated status = %d, want 200", resp.StatusCode)
 	}
@@ -364,7 +364,7 @@ func TestServerAdvertisesTheScriptedModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get models: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var models modelsReply
 	if err := json.NewDecoder(resp.Body).Decode(&models); err != nil {
@@ -581,7 +581,7 @@ func postWith(t *testing.T, client *http.Client, server *Server, body string) re
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := readAll(resp)
 	if err != nil {
@@ -613,7 +613,7 @@ func postStream(t *testing.T, server *Server, prompt string) []string {
 	if err != nil {
 		t.Fatalf("post stream: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if contentType := resp.Header.Get("Content-Type"); contentType != "text/event-stream" {
 		t.Fatalf("content type = %q, want text/event-stream", contentType)
@@ -831,7 +831,7 @@ func TestServerAwaitHoldsTheReplyUntilReleased(t *testing.T) {
 				failed <- err
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			raw, err := readAll(resp)
 			if err != nil {
 				failed <- err

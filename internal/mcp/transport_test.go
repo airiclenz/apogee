@@ -179,7 +179,7 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 		if err != nil {
 			t.Fatalf("GET the pinned endpoint: %v; want it to connect", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d; want 200", resp.StatusCode)
 		}
@@ -197,7 +197,7 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 		}}
 		resp, err := client.Get(endpoint)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Fatal("the blanket floor connected to a loopback endpoint; the pin case proves nothing")
 		}
 		if !errors.Is(err, security.ErrSSRFBlocked) {
@@ -218,7 +218,7 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 
 		resp, err := client.Get(endpoint)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Fatal("a rebound connect succeeded; want the SSRF floor to refuse it")
 		}
 		if !errors.Is(err, security.ErrSSRFBlocked) {
@@ -238,7 +238,7 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 
 		resp, err := client.Get("http://10.9.8.7:9/mcp")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Fatal("a dial to an unpinned private address succeeded; want the SSRF floor to refuse it")
 		}
 		if !errors.Is(err, security.ErrSSRFBlocked) {
@@ -294,7 +294,7 @@ func TestGuardedClient_ProxiedEndpointPinsBothHosts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET the proxied endpoint: %v; want it to connect", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d; want 200", resp.StatusCode)
 		}
@@ -306,7 +306,7 @@ func TestGuardedClient_ProxiedEndpointPinsBothHosts(t *testing.T) {
 	t.Run("an unproxied private address is still refused", func(t *testing.T) {
 		resp, err := client.Get("http://10.9.8.7:9/mcp")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Fatal("a direct dial to an unpinned private address succeeded; want the SSRF floor to refuse it")
 		}
 		if !errors.Is(err, security.ErrSSRFBlocked) {
@@ -471,7 +471,7 @@ func TestGuardedClient_DoesNotFollowRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET the redirecting endpoint: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
 		t.Errorf("status = %d; want the 302 itself (redirects are not followed)", resp.StatusCode)
 	}

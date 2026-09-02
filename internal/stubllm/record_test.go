@@ -297,7 +297,7 @@ func postTo(t *testing.T, client *http.Client, baseURL, model, prompt string, st
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if _, err := readAll(resp); err != nil {
 		t.Fatalf("read reply: %v", err)
 	}
