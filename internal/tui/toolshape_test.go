@@ -564,3 +564,78 @@ func TestRenderGroupBreakers(t *testing.T) {
 		}
 	})
 }
+
+// skillFetch drives one load_skill call and its result onto tr — the query the model searched by,
+// and the text the tool answered with.
+func skillFetch(tr *transcript, id, query, content string) {
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "load_skill",
+		Arguments: []byte(`{"query":` + strconv.Quote(query) + `}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: content}})
+}
+
+// A skill fetch paints as a card of its own, headed by the friendly label rather than by the raw
+// tool id it used to show ("✦ load_skill"), with the SKILL that answered on the branch instead of
+// the query that asked for it and the outcome slot deliberately blank — the ratified row for this
+// tool (docs/layout/tool-layout.md). The body is the skill's own text, behind the collapse
+// indicator every block with more to say wears.
+func TestRenderSkillFetchCard(t *testing.T) {
+	tr := &transcript{}
+	skillFetch(tr, "c1", "how do I format Go",
+		"<skill: Coding Standards>\nUse gofmt as the sole formatter.\n</skill>\n")
+
+	want := strings.Join([]string{
+		"✦ Skill",
+		groupMemberLine("  ┕ Coding Standards ⋯ +3 more lines"),
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("skill card mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	// The blank slot is the table's `—` and not an accident of the wording: nothing the result said
+	// reached the outcome slot, so the dots run from the skill's name to the indicator.
+	if tr.entries[0].tool.Summary.Text != "" {
+		t.Errorf("outcome slot = %q; the table gives a skill fetch a blank one", tr.entries[0].tool.Summary.Text)
+	}
+}
+
+// A fetch that loaded NOTHING has no skill to name, so the query the model searched by stays on the
+// row: the retarget is anchored on the `<skill: …>` opener the tool writes, and a miss leaves the
+// card saying what was asked for rather than inventing what came back.
+func TestRenderSkillFetchMissKeepsTheQuery(t *testing.T) {
+	tr := &transcript{}
+	skillFetch(tr, "c1", "how do I fly a kite",
+		`no skill matches "how do I fly a kite". Carry on without one, or call load_skill again describing the task differently.`)
+
+	want := strings.Join([]string{
+		"✦ Skill",
+		groupMemberLine("  ┕ how do I fly a kite ⋯ +1 more line"),
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("missed skill card mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// Two adjacent fetches never fold into the mixed "✦ Tools (N calls)" umbrella. The guard is worth
+// stating twice over: each view carries a non-empty Target — which is what would otherwise make it
+// groupable, and what the unregistered fallback never gave it — and the never-group mark keeps it
+// out anyway, at every index the umbrella could form from.
+func TestSkillFetchesNeverJoinTheToolsSuperGroup(t *testing.T) {
+	tr := &transcript{}
+	skillFetch(tr, "c1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+	skillFetch(tr, "c2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
+
+	for i, e := range tr.entries {
+		if e.tool.Target == "" {
+			t.Errorf("entry %d has no target; the never-group mark, not an empty target, is what must keep it out", i)
+		}
+		if !e.tool.solo {
+			t.Errorf("entry %d is not solo; a skill fetch groups with its own kind, never with everyone", i)
+		}
+		if groupable(e.tool) {
+			t.Errorf("entry %d is groupable; it would fold into a Tools umbrella", i)
+		}
+		if g := toolSuperGroup(tr.entries, i); g != nil {
+			t.Errorf("toolSuperGroup(entries, %d) = %v; a run of skill fetches heads no umbrella", i, g)
+		}
+	}
+}

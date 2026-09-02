@@ -1990,3 +1990,37 @@ func TestTranscriptCodecReplaysAFinishedDelegationGreen(t *testing.T) {
 			live, back)
 	}
 }
+
+// TestTranscriptCodecReDerivesSkillFetchSolo proves the third verdict decode does not take from the
+// file. A skill fetch is solo BY NAME, the way a delegation head is (presentToolCall): it groups
+// with its own kind, never with the reads and greps around it. So a blob written before the mark
+// existed — every session recorded up to now, where load_skill had no registry entry at all — must
+// still replay refusing that fold, or a reload would bury the instructions the run took on inside a
+// mixed "✦ Tools (2 calls)" umbrella the live paint never showed.
+//
+// Hand-written bytes with no "solo" member, because the case IS an old file: a re-encode would
+// carry today's true and prove nothing.
+func TestTranscriptCodecReDerivesSkillFetchSolo(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"version":1,"entries":[` +
+		`{"kind":"toolCall","callID":"k1","done":true,"tool":{"label":"Skill","verb":"loading a skill",` +
+		`"target":"Coding Standards","name":"load_skill"}},` +
+		`{"kind":"toolCall","callID":"k2","done":true,"tool":{"label":"Skill","verb":"loading a skill",` +
+		`"target":"Brew Release","name":"load_skill"}}` +
+		`]}`)
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("decoded %d entries; want the 2 skill fetches", len(got))
+	}
+	for i, e := range got {
+		if !e.tool.solo {
+			t.Errorf("entry %d decoded with solo=false; a skill fetch is solo by rule, whatever the file says", i)
+		}
+		if groupable(e.tool) {
+			t.Errorf("entry %d is groupable after decode; it would fold into a Tools umbrella", i)
+		}
+	}
+}

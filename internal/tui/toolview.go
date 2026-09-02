@@ -675,6 +675,13 @@ type toolOutcome struct {
 	// second half of a promotion and blank on every other outcome: a summary the block WORDED is
 	// already the typed value, so there is nothing to fall back to.
 	Stat statValue
+
+	// Target retargets the branch row from what the CALL asked for to what the RESULT turned out to
+	// be — the one fact a request cannot state. load_skill is what it is for: the model calls it
+	// with a query and the card has to name the skill that answered. It is applied only when
+	// non-empty (absorbProse), so an outcome that leaves it blank keeps the target the registry's
+	// own extractor settled at present time and no other tool moves.
+	Target string
 }
 
 // summaryOnly is the outcome of a tool whose whole result is one plain line in the PRESENTER's
@@ -757,7 +764,10 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	// shape rule alone would read two refusals in a row as one "Sub-Agent (2)". So the fact is
 	// stated here, where the call is recognised, against the same constant the span rule matches on
 	// (subAgentToolName) so the two cannot drift apart.
-	tv.solo = call.Tool == subAgentToolName
+	// A skill fetch is the second call that never joins a Tools super-group, for the other half of
+	// the same reason: it groups with its OWN kind (loadSkillToolName), and a mixed umbrella would
+	// bury the instructions the run just took on among the reads around them.
+	tv.solo = call.Tool == subAgentToolName || call.Tool == loadSkillToolName
 	args := parseArgs(call.Arguments)
 	// A delegation's name is recorded beside the Target rather than read back out of it: the header
 	// text is the same string on a named call, but only this says a name was GIVEN, which is the
@@ -1175,6 +1185,9 @@ func (tv *toolView) absorbProse(p toolPresenter, known bool, result domain.ToolR
 		tv.stat = out.Stat
 		tv.Details = tv.Details.with(out.Details)
 		tv.solo = tv.solo || out.Solo
+		if out.Target != "" {
+			tv.Target = out.Target
+		}
 		return
 	}
 	if known && p.detail != nil {

@@ -163,6 +163,14 @@ type toolPresenter struct {
 // subAgentToolName sits beside the span rule that reads it.
 const askUserToolName = "ask_user"
 
+// loadSkillToolName is the raw tool id of the second call that never joins a Tools super-group. A
+// skill fetch groups with its OWN kind — one `✦ Skill (N)` umbrella over one row per fetch — and a
+// presenter that marks a call solo is how that is said (toolView.solo, presentToolCall); folding
+// one into a mixed umbrella beside the reads and greps around it would bury the instructions the
+// run just took on. The transcript codec re-derives the same verdict off this same constant
+// (fromWireToolView), so a session recorded before the mark existed replays never-group.
+const loadSkillToolName = "load_skill"
+
 // toolRegistry is the open, name-keyed catalogue. Each later tool adds one entry here; the
 // renderer and the transcript never grow a per-tool branch. It covers the full built-in set
 // (internal/tools DefaultToolsWithHost); only a dynamic tool (an MCP server's) falls to the
@@ -438,6 +446,13 @@ var toolRegistry = map[string]toolPresenter{
 		target: presentDocumentTarget, // the document's title, falling back to its path
 		detail: firstLineDetail,       // "Presented <path>: opened on the user's machine."
 		stat:   blankStat,
+	},
+	loadSkillToolName: {
+		label:   "Skill",
+		verb:    "loading a skill",
+		target:  stringArg("query"), // the words the model searched by, until a skill answers to them
+		outcome: loadSkillOutcome,   // the loaded skill's own name, retargeting the row
+		stat:    blankStat,          // the table's `—`: the target already says which skill loaded
 	},
 }
 
@@ -1288,6 +1303,42 @@ func askUserAnswerRecord(args map[string]any, content string) toolOutcome {
 	out.Details = askExchangeLines(args, content)
 	out.Solo = true
 	return out
+}
+
+// loadSkillOutcome renders a skill fetch. The row's target is the SKILL, not the search: the model
+// calls load_skill with a query ("how do I cut a release"), and what the card has to say once the
+// answer lands is which skill the run is now carrying. So this reads the display name off the
+// `<skill: …>` opener the tool writes (internal/tools/renderSkillLookup) and hands it back as the
+// outcome's Target, which absorbProse applies over the query the call was presented with.
+//
+// It is ANCHORED and TOTAL, the pattern this file's opening note licenses: the opener is a token
+// the tool formats deliberately and is the result's first line when — and only when — a skill was
+// loaded. A miss (no match, or a list of candidates) has no opener, so the Target comes back empty
+// and the QUERY stands on the row, which is the honest reading of a fetch that loaded nothing.
+//
+// The body is today's floor unchanged — every line of the result, as the unregistered fallback laid
+// it out (toolView.absorbProse) — so registering the tool changes what the card is LABELLED and
+// TARGETED by without changing what it shows beneath.
+func loadSkillOutcome(_ map[string]any, content string) toolOutcome {
+	raw := splitLines(strings.TrimRight(content, "\n"))
+	lines := make([]detailLine, 0, len(raw))
+	for _, ln := range raw {
+		lines = append(lines, detailLine{Text: ln})
+	}
+	return toolOutcome{Target: loadedSkillName(content), Details: lines}
+}
+
+// loadedSkillName reads the display name out of the `<skill: …>` opener a found skill is wrapped
+// in, or "" when the result carries none. The opener is the first line by construction, so only the
+// first line is read: a body that happens to contain the same shape further down is the SKILL's own
+// text, and letting it name the row would let a skill rename another one's card.
+func loadedSkillName(content string) string {
+	const opener, closer = "<skill: ", ">"
+	line := firstLine(content)
+	if !strings.HasPrefix(line, opener) || !strings.HasSuffix(line, closer) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, opener), closer))
 }
 
 // askExchangeLines lays the answered exchange out beneath the branch, in three groups: the

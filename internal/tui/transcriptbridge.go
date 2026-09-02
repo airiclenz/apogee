@@ -386,8 +386,14 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	// "✦ Ask User (2)" while running and as two blocks after a reload. Both halves are read off the
 	// same name the presenter uses (askUserToolName), so the two rules cannot drift apart.
 	//
+	// A SKILL FETCH is the third, and it is settled by name exactly as a delegation head is: the
+	// presenter marks it solo the moment the call is recognised (presentToolCall), because a fetch
+	// groups with its own kind rather than with the reads around it. Matching the same constant
+	// here (loadSkillToolName) is what lets a session recorded before the mark existed replay
+	// never-group instead of folding into its neighbour's umbrella.
+	//
 	// Nothing else is re-derived here; every other Solo is a result-time verdict decode cannot reach.
-	if tv.headsRun() || (tv.name == askUserToolName && done && len(w.Details) > 0) {
+	if tv.headsRun() || tv.name == loadSkillToolName || (tv.name == askUserToolName && done && len(w.Details) > 0) {
 		tv.solo = true
 	}
 	if len(w.Details) > 0 {

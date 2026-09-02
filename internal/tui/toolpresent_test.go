@@ -3338,7 +3338,8 @@ func TestGitDiffRangeBodySurvivesATypedSummary(t *testing.T) {
 // the walk, so a driver that matched nothing cannot pass — and never its boundary: python_exec,
 // git_branch and git_log floor on the same helper, and a closed list would leave them unguarded the
 // day one of them started numbering. The half is not "all outputBody" either — diagnostics
-// registers no `body` hook at all and the delegation report floors on `outputDetail` — which is why
+// registers no `body` hook at all, the delegation report floors on `outputDetail`, and a skill
+// fetch lays its lines out from its own `outcome` hook (loadSkillOutcome) — which is why
 // membership is decided by what the entry's body READS LIKE rather than by which hook drew it.
 // git_diff_range answers in both halves for the same reason its two tests do: output the diff walk
 // can place is the numbered reading, and output it refuses is this plain one (ratified call 9).
@@ -3523,5 +3524,68 @@ func TestWriteCardShowsOnlyTheFirstLineOfASyntaxTrailer(t *testing.T) {
 		if strings.Contains(d.Text, "syntax check") {
 			t.Errorf("body line %q, want the trailer kept off the card entirely", d.Text)
 		}
+	}
+}
+
+// A skill fetch is presented by the CALL and retargeted by the RESULT: the model searches with a
+// query, and the row has to name the skill that answered it. That is the one thing a request cannot
+// state, so the outcome hook hands the display name back as a Target and absorbProse applies it
+// (toolOutcome.Target). A result with no `<skill: …>` opener — no match, or a list of candidates —
+// hands back nothing, and the query the call was presented with stands.
+func TestSkillFetchTargetsTheSkillItLoaded(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "a loaded skill names the row",
+			content: "<skill: Coding Standards>\nUse gofmt as the sole formatter.\n</skill>\n",
+			want:    "Coding Standards",
+		},
+		{
+			name:    "the opener carries the files line with it",
+			content: "<skill: Brew Release>\nfiles: /skills/brew-release — this skill's bundled files\nTag it.\n</skill>\n",
+			want:    "Brew Release",
+		},
+		{
+			name:    "no match leaves the query standing",
+			content: `no skill matches "fly a kite". Carry on without one, or call load_skill again describing the task differently.`,
+			want:    "fly a kite",
+		},
+		{
+			name:    "a candidate list leaves the query standing",
+			content: "no single skill clearly matches \"fly a kite\". These did match:\n- kites: how to fly one\n",
+			want:    "fly a kite",
+		},
+		{
+			// The opener is the first line by construction, so only the first line is read: a body
+			// quoting the wrapper further down is the SKILL's own text and may not rename the card.
+			name:    "an opener inside the body names nothing",
+			content: "the catalogue is empty\n<skill: Not This One>\n",
+			want:    "fly a kite",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call := domain.ToolCall{ID: "k1", Tool: "load_skill", Arguments: []byte(`{"query":"fly a kite"}`)}
+			tv := presentToolCall(call, "", workspaceRoot{})
+			if tv.Label != "Skill" {
+				t.Fatalf("label = %q, want %q", tv.Label, "Skill")
+			}
+			tv.enrichWithResult(domain.ToolResult{CallID: "k1", Content: tc.content}, workspaceRoot{})
+			if tv.Target != tc.want {
+				t.Errorf("target = %q, want %q", tv.Target, tc.want)
+			}
+			if tv.Summary.Text != "" {
+				t.Errorf("outcome slot = %q; the table gives a skill fetch a blank one", tv.Summary.Text)
+			}
+			if !tv.solo {
+				t.Error("a skill fetch must be solo: it groups with its own kind, never with everyone")
+			}
+		})
 	}
 }
