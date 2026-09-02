@@ -25,9 +25,9 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [ ] Load-skill tool calls must be collapsed the same way sub agents do. Load-skills must not be folded intot the other Tools super-groups but always stay their own group (such as sub-agents). The name must be updated to a friendly name instead of "load_skill"
+- [P] Load-skill tool calls must be collapsed the same way sub agents do. Load-skills must not be folded into the other Tools super-groups but always stay their own group (such as sub-agents). The name must be updated to a friendly name instead of "load_skill"
 
-- [ ] when the horizontal space becomes to littlem the current mode is not displayed any longer. These are the lements in the bottom most status bar - each with its priority. Remove lowest priorities first and never remove priority 0:
+- [P] when the horizontal space becomes to little in the bottom most status bar, the current mode is not displayed any longer. These are the lements in the bottom most status bar - each with its priority. Remove lowest priorities first and never remove priority 0:
   - server-name - priority 1 
   - model-name - priority 0
   - thinging effort - priority 3
