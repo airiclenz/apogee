@@ -3214,7 +3214,12 @@ func (m Model) statusLine() string {
 	}
 	gap := m.width - m.th.measure.Width(left) - m.th.measure.Width(right)
 	if gap < 1 {
-		return m.th.measure.Truncate(left, max(0, m.width), "")
+		// Too narrow for the right slot: the slot is dropped, but the BAND is not. Squaring the
+		// truncated left slot onto the status bar's own field keeps the row exactly one window wide
+		// with every cell painted, so the columns the gauge would have held stay black instead of
+		// being padded later with the terminal's default background — "the black field runs past it
+		// to the edge regardless" (layout.md).
+		return squareOnField(m.th.measure, m.th.statusBar, left, max(0, m.width))
 	}
 	return left + m.th.statusBar.Render(strings.Repeat(" ", gap)) + right
 }

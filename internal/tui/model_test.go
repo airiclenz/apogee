@@ -4306,8 +4306,8 @@ func TestStatusLineQuietSuffixGivesWayFirst(t *testing.T) {
 	if !strings.Contains(got, "thinking · 3m 10s") {
 		t.Errorf("status line at 24 columns = %q, want the phrase and its clock kept intact", got)
 	}
-	if w := ansi.StringWidth(m.statusLine()); w > m.width {
-		t.Errorf("status line renders %d columns, want at most %d", w, m.width)
+	if w := ansi.StringWidth(m.statusLine()); w != m.width {
+		t.Errorf("status line renders %d columns, want exactly %d", w, m.width)
 	}
 }
 
@@ -4351,8 +4351,14 @@ func TestStatusLineIndentFitsNarrowWindow(t *testing.T) {
 	for _, width := range []int{0, 1, 2, 3, 10, 40} {
 		m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 24})
 
-		if got := ansi.StringWidth(m.statusLine()); got > width {
-			t.Errorf("status line at width %d renders %d columns; want at most %d", width, got, width)
+		if width == 0 {
+			if got := ansi.StringWidth(m.statusLine()); got > 0 {
+				t.Errorf("status line at width 0 renders %d columns; want nothing", got)
+			}
+			continue
+		}
+		if got := ansi.StringWidth(m.statusLine()); got != m.width {
+			t.Errorf("status line at width %d renders %d columns; want exactly %d", width, got, m.width)
 		}
 	}
 }
@@ -4385,6 +4391,63 @@ func TestStatusLineGaugeEndsShortOfEdge(t *testing.T) {
 	if got := ansi.StringWidth(line); got != m.width {
 		t.Errorf("status line renders %d columns, want exactly %d (the margin rides inside the width)", got, m.width)
 	}
+}
+
+// gaugeMarks are the glyphs only the context gauge puts on the status line: the per-cent sign of
+// its numeric prefix, the full block of a filled cell, and every partial-cell eighth. A row holding
+// any of them still shows the gauge.
+var gaugeMarks = "%\u2588" + string(gaugeEighths)
+
+// TestStatusLineDroppedRightSlotKeepsTheField proves the band survives the drop: at a window too
+// narrow to seat the right slot the gauge goes, but the black field still runs to the last column.
+// The pre-fix code returned the truncated left slot bare, so every column past it was padded later
+// by the frame with the terminal's default background and the band broke exactly where the gauge
+// would have sat — contradicting layout.md's "the black field runs past it to the edge regardless".
+func TestStatusLineDroppedRightSlotKeepsTheField(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter()) // running, so the gauge displaces a hint that would otherwise show
+	m = step(t, m, eventMsg{Event: domain.UsageEvent{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}})
+	if m.contextGauge() == "" {
+		t.Fatal("context gauge unlit after usage: nothing in the right slot to drop")
+	}
+
+	widths := []int{3, 10, 12, widestDroppedGauge(t, m)}
+
+	for _, width := range widths {
+		narrow := step(t, m, tea.WindowSizeMsg{Width: width, Height: 24})
+		line := narrow.statusLine()
+
+		if got := ansi.StringWidth(line); got != narrow.width {
+			t.Errorf("status line at width %d renders %d columns, want exactly %d", width, got, narrow.width)
+		}
+		if cells := statusCells(t, narrow); strings.ContainsAny(cells, gaugeMarks) {
+			t.Errorf("status line at width %d = %q, want the gauge dropped whole", width, cells)
+		}
+		if col, ok := firstCellWithoutBackground(line); !ok {
+			t.Errorf("status line at width %d has a bare (no-background) cell at column %d: %q",
+				width, col, statusCells(t, narrow))
+		}
+	}
+}
+
+// widestDroppedGauge reports the widest window at which the right slot still does not fit and the
+// gauge is dropped — the last column before the band's two-slot layout takes over, and the width
+// the bare-return bug showed at most plainly. It scans upward rather than recomputing the slot
+// arithmetic, so it follows the real composition wherever that moves.
+func widestDroppedGauge(t *testing.T, m Model) int {
+	t.Helper()
+	widest := 0
+	for width := 1; width <= 200; width++ {
+		if strings.ContainsAny(statusCells(t, step(t, m, tea.WindowSizeMsg{Width: width, Height: 24})), gaugeMarks) {
+			break
+		}
+		widest = width
+	}
+	if widest == 0 {
+		t.Fatal("the gauge is painted at every width: no dropped-slot width to assert on")
+	}
+	return widest
 }
 
 // assertStatusRightTail pins the right slot's last columns, styling stripped and untrimmed, and

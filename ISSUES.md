@@ -27,8 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 - [ ] sometimes unsensible values like '1514218 tok/s' are displayed. That number cannot be true.
 
-- [P] when the context usage gauge does not fit and isn't displauyed, the black background is not painted all the way to the right side (where the gauge would be).
-
 - [ ] When a session is cancelled after the model already started reposnding, a new prompt will be printed above the response that was already sent. This breaks the order of actions as the response came before the newest prompt.
 
 - [ ] getting a lot of log-noise that might not be true:

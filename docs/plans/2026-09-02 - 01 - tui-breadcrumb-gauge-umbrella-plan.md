@@ -67,7 +67,11 @@ go test ./cmd/apogee/ -run 'TestE2ESubAgentView'
 
 **Commit:** `feat(tui): paint the run-view breadcrumb on the surface field with a blank row beneath`
 
-## 2. Status line: dropped gauge leaves the black field unbroken
+## 2. Status line: dropped gauge leaves the black field unbroken — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's test names widths "3, 10, 12 and the largest width at which contextGauge() is still dropped"; the largest such width is found by a scan helper (widestDroppedGauge) rather than by recomputing the slot arithmetic, so it tracks the real composition. The gauge-absence assertion uses a gaugeMarks glyph set ("%", the full block and every gaugeEighths partial) because at low context fill the bar carries no full block at all.
+NOTES (2026-09-02): squareOnField truncates when the content is over width, so the truncated-left step is folded into the one call (squareOnField(m.th.measure, m.th.statusBar, left, max(0, m.width))) rather than truncating first and squaring after — same result, one pass.
+NOTES (2026-09-02): bite check confirmed against the pre-item tree — TestStatusLineDroppedRightSlotKeepsTheField failed at widths 3 and 39, and both tightened tests (TestStatusLineIndentFitsNarrowWindow, TestStatusLineQuietSuffixGivesWayFirst) failed too.
 
 **What:** fix — `ISSUES.md:30`: when the right slot does not fit, `statusLine` (`internal/tui/model.go:3214–3217`) returns `Truncate(left, m.width)` bare, so columns `width(left)..m.width-1` are padded later by `joinFrame`/`squareLine` with unstyled spaces and the band breaks where the gauge would sit — contradicting `layout.md` "The black field runs past it to the edge regardless". Replace the early return with `squareOnField(m.th.measure, m.th.statusBar, <truncated left>, m.width)` (`internal/tui/boxdraw.go:37`), so the row is exactly `m.width` cells, all on the `statusBar` field, in every width. The with-gauge branch is untouched. Remove the entry from `ISSUES.md`.
 
