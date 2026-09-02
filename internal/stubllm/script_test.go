@@ -96,6 +96,11 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 			want: "when.last_message is not a regexp",
 		},
 		{
+			name: "a when.system regexp that does not compile",
+			yaml: "turns:\n  - when: {system: \"(unclosed\"}\n    text: hi\n",
+			want: "when.system is not a regexp",
+		},
+		{
 			name: "a nameless tool call",
 			yaml: "turns:\n  - tool_calls:\n      - arguments: '{}'\n",
 			want: "tool call 0 needs a name",
@@ -185,6 +190,21 @@ func TestEmptyReplyTurnIsLegal(t *testing.T) {
 
 	if got := script.Turns[0].finishReason(); got != "stop" {
 		t.Errorf("finish reason = %q, want stop", got)
+	}
+}
+
+// TestSystemOnlyWhenBlockParses pins the other side of the when.system compile: a when block that
+// sets only system, with a regexp that compiles, is a complete and legal match.
+func TestSystemOnlyWhenBlockParses(t *testing.T) {
+	t.Parallel()
+
+	script, err := Parse([]byte("turns:\n  - when: {system: \"you are .*\"}\n    text: hi\n"))
+	if err != nil {
+		t.Fatalf("parse refused a system-only when block: %v", err)
+	}
+
+	if got := script.Turns[0].When.System; got != "you are .*" {
+		t.Errorf("when.system = %q, want %q", got, "you are .*")
 	}
 }
 

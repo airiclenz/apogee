@@ -360,16 +360,21 @@ func (t Turn) finishReason() string {
 	return "stop"
 }
 
-// validate reports whether a Match can select anything.
+// validate reports whether a Match can select anything, and compiles every regexp it sets so an
+// unplayable pattern fails at the YAML line that wrote it rather than at the turn that matches.
 func (m Match) validate() error {
 	if m.LastMessage == "" && m.ToolResult == "" && m.System == "" {
 		return errors.New("a when block sets last_message, tool_result, system, or any combination")
 	}
-	if m.LastMessage == "" {
-		return nil
+	if m.LastMessage != "" {
+		if _, err := regexp.Compile(m.LastMessage); err != nil {
+			return fmt.Errorf("when.last_message is not a regexp: %w", err)
+		}
 	}
-	if _, err := regexp.Compile(m.LastMessage); err != nil {
-		return fmt.Errorf("when.last_message is not a regexp: %w", err)
+	if m.System != "" {
+		if _, err := regexp.Compile(m.System); err != nil {
+			return fmt.Errorf("when.system is not a regexp: %w", err)
+		}
 	}
 	return nil
 }
