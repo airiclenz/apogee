@@ -27,7 +27,9 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 - [ ] sometimes unsensible values like '1514218 tok/s' are displayed. That number cannot be true.
 
-- [ ] when the context usage gauge does not fit and isn't displauyed, the black background is not painted all the way to the right side (where the gauge would be).
+- [P] when the context usage gauge does not fit and isn't displauyed, the black background is not painted all the way to the right side (where the gauge would be).
+
+- [ ] When a session is cancelled after the model already started reposnding, a new prompt will be printed above the response that was already sent. This breaks the order of actions as the response came before the newest prompt.
 
 - [ ] getting a lot of log-noise that might not be true:
 · sub-agents: OR-deepseek unavailable — delegations run on the session server
@@ -36,6 +38,8 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 · sub-agents: routing to OR-deepseek (~deepseek/deepseek-v4-flash-latest)
 · sub-agents: OR-deepseek unavailable — delegations run on the session server
 · sub-agents: routing to OR-deepseek (~deepseek/deepseek-v4-flash-latest)
+
+- [ ] Load-skill tool calls must be collapsed the same way sub agents do. Load-skills must not be folded intot the other Tools super-groups but always stay their own group (such as sub-agents). The name must be updated to a friendly name instead of "load_skill"
 
 
 ## Parked / deferred work
@@ -899,3 +903,18 @@ rendering that plan shipped — not a regression, and it did not block the plan'
   compare the row to `inspectorScopedEmptyRow` / `inspectorDisarmedRow` rather than to the literal
   sentence, so a typo introduced in `inspectorScopedEmptyRow` (`internal/tui/inspector.go:138`) —
   the row's whole job is naming all three causes and the way back — would leave the tests green.
+
+### Structural feedback and pruning — residue (plan `2026-09-02 - 00 - structural-feedback-and-pruning`)
+
+**Status:** recorded 2026-09-02 at the close of
+`docs/plans/2026-09-02 - 00 - structural-feedback-and-pruning-plan.md`. One open coverage gap in
+the off-ramp default that plan shipped — not a regression, and it did not block the plan's
+acceptance.
+
+- [ ] **The /settings toggle list's off-ramp floor has no cmd-side test.** `ListMechanisms`
+  (`cmd/apogee/wire_options.go:222-233`) unions `mechanisms.OffRampFloor(enabled)` into the rows it
+  answers, so an off-ramp whose key is simply absent from the `mechanisms:` block reads ON in the
+  pane. The floor itself (`internal/mechanisms/retired.go:60`) and the sibling startup projection
+  `withOffRampFloor` (`cmd/apogee/wire_live.go:440`, pinned at `cmd/apogee/wire_live_test.go:309`)
+  are both covered; nothing asserts that this list applies the same floor, so a row could silently
+  regress to reading OFF for an armed Mechanism.

@@ -647,6 +647,82 @@ point is a **minor** bump, not a breaking change.
 
 - `make lint` and `make vulncheck` gates: `golangci-lint` (standard set, configured by the new `.golangci.yml`, QF* quickfixes off) and `govulncheck` now run from `make check` and from the CI check job, each pinned by module version and fetched with `go run` the way `actionlint` is. `govulncheck` needs the network and fails with the tool's own error when the vulnerability database is unreachable.
 
+- **The syntax checker is its own package, `internal/syntaxcheck`.** The pure checker that lived as
+  `internal/mechanisms/syntaxengine.go` — the Go parser path, the bracket/string/truncation
+  heuristic for every other language, and the Python indent check — moves out unchanged behind an
+  exported API (`Check(path, content) Result`, `Language(path) string`, `Result{Valid, Language,
+  Errors}`, `Error{Line, Column, Message}`). It imports only the standard library and holds no
+  package state, so a consumer outside `internal/mechanisms` can reach it without pulling in the
+  Mechanism registry. The `syntax` and `autofix` Mechanisms call through the new package; behaviour
+  is unchanged.
+
+- Write tools now append an in-process syntax verdict to their own success result: `write_file`,
+  `edit_existing_file` (both the whole-content and the patch path), `single_find_and_replace` and
+  `multi_find_and_replace` run the `internal/syntaxcheck` checker over the bytes they just wrote and
+  append a `syntax check:` trailer naming each located problem (capped at ten, then a count of the
+  rest). The write always lands and the result stays a success — the trailer is feedback, never a
+  refusal — and it reaches the model only: the TUI card still shows the tool's own first line. Go
+  carries the real parser's verdict; every other language is headed `syntax check (heuristic):`,
+  because the bracket heuristic is known to false-positive. A path whose language the checker does
+  not know, and content it finds valid, read exactly as they did before.
+
+- `single_find_and_replace` and `multi_find_and_replace` now answer a not-found with the region of
+  the file that came closest: a whitespace-only difference is named by its line range, otherwise the
+  best-scoring window of lines is quoted as numbered rows (capped at 12). The near match is report
+  only — it is never applied, and the file is never written. A "found N times" refusal now names the
+  line of every occurrence it counted.
+
+- `error_enrichment` classifies only a failure's message line, so the file excerpt a not-found report
+  now quotes cannot be read as the tool's own verdict.
+
+- `internal/context` gained the pure stale-tool-result pruning policy (`Prune`): once the history passes 60% of its Budget share it rewrites old tool results into a one-line `[pruned: N lines from <tool> <arg> — re-run the call if you need it]` stub, oldest Turn and largest result first, until the history is back under 40% — the four most recent tool-calling Turns and the protected prefix are never touched. `domain.Budget.HistoryExceedsFraction` is the movable-line twin of `HistoryExceedsAllocation` behind it. Not yet wired to the engine.
+
+- **`PruneEvent` — one host note per pruning pass, on every Driver.** The engine's coming
+  stale-tool-result pruning gets its notice surface first: `domain.PruneEvent{EventBase; Results
+  int; Tokens int}`, re-exported from the root facade, carrying only what the engine counted —
+  how many tool results a pass replaced and roughly how many tokens that freed. Every Driver
+  renders those two numbers verbatim as the same line, `pruned N tool results (~T tokens)`, so a
+  human comparing a terminal against a session record never finds two spellings of one event and
+  no surface holds a chars-per-token ratio of its own. The TUI appends it as a dim host note
+  placed at the run that emitted it (`transcript.addPrune`, beside `addError`), so a delegate's
+  prune lands inside the delegate's block instead of interrupting the parent's conversation; the
+  status gauge, the activity phrase, the retained reasoning tail and the delegation progress save
+  all leave it alone, each now saying so in its own doc comment. A Firing folds it into the saved
+  scrollback as a Note entry (`internal/run`'s `transcriptFold`), stamped with the emitting run's
+  depth and spawning call. `apogee headless` prints it on stderr from a sink of its own
+  (`pruneNoticeSink`), which WRAPS whatever `Config.Events` already carries rather than replacing
+  it: a prune happens mid-run and leaves no trace on the result, so without the line a human
+  watching an unattended run would see the window quietly shrink with nothing said. The print
+  deliberately lives in the command and not in `internal/run`'s event tap, because that tap is
+  also the daemon's Firing path and a line there would reach a daemon's stderr on every Firing.
+  The Inspector needs nothing — it folds `WireEvent` only.
+
+- The engine now prunes stale tool results at Turn boundaries: when the conversation history grows past 60% of its Budget share, tool output from all but the four most recent tool-calling Turns is rewritten into a one-line `[pruned: N lines from <tool> <arg> — re-run the call if you need it]` stub until the history is back under 40%. It is structural like Compaction — it runs under Bypass, on parent and delegated child alike — costs no upstream call, and reports each pass as one transcript line. Children inherit the live gate at spawn; the `prune-tool-results` config key exposes it.
+
+- `prune-tool-results:` (file-only, default on) gates stale-tool-result Pruning: when the
+  conversation history outgrows 60% of its budgeted share, the oldest and largest tool results
+  outside the four most recent tool-calling turns collapse to
+  `[pruned: N lines from <tool> <arg> — re-run the call if you need it]` stubs until the history is
+  back under 40%. It has a `/settings` row that applies live, travels onto the runs a session
+  raises, and is documented in the configuration manual and CONTEXT.md.
+
+- The two off-ramp Mechanisms — `empty_response_recovery` and `tool_use_enforcer` — are now enabled
+  by default. They are recovery guarantees that fire only when a reply comes back empty or narrated
+  instead of acted on, they already survive Bypass, and a session that had them off was the one
+  posture where the floor and Bypass disagreed. A `mechanisms:` block that never names them arms
+  them anyway; an explicit `empty_response_recovery: false` / `tool_use_enforcer: false` still turns
+  one off. A validated set that omits an off-ramp no longer switches it off, a per-server
+  `sub-agents:` posture map arms the floor beside whatever it names, and a library embedder or bench
+  arm that hands the engine no `EnableMechanisms` list gets the same two. Every other Capability
+  keeps defaulting off.
+
+- **ADR 0070 — off-ramp Mechanisms ship on by default.** The `off-ramp` Capability is now the one
+  exception to the catalogue's D1 default-off rule: `empty_response_recovery` and
+  `tool_use_enforcer` are armed unless a `mechanisms:` block names one explicitly `false`. Recorded
+  in `docs/adr/0070-off-ramp-mechanisms-ship-on-by-default.md` (amending ADR 0006, ADR 0015, ADR
+  0016 and ADR 0045 §2), with README, `CONTEXT.md`, the manual, the mechanism catalogue, the shipped
+  `config.yaml` template and the enable-seam comments amended to state the new default.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
