@@ -890,3 +890,66 @@ func TestServerAwaitHoldsTheReplyUntilReleased(t *testing.T) {
 		}
 	})
 }
+
+// TestServerWritesTheScriptedSpellingOfTheThinkingChannel pins `reasoning_field` at the BYTES on
+// both paths. Bytes rather than a decoded struct is the whole point: what this knob exists for is
+// reproducing the wire an Ollama or OpenRouter server writes, so a test that decoded the reply
+// through a client that already reads both spellings would pass whichever key had been emitted.
+//
+// The delta is matched WHOLE — `"delta":{"reasoning_content":"thinking"}` — because that also pins
+// the exclusivity the emitters promise: the other spelling is `omitempty` and absent, not present
+// and empty, so an unset key streams the bytes it streamed before this knob existed.
+func TestServerWritesTheScriptedSpellingOfTheThinkingChannel(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		field  string
+		delta  string
+		absent string
+	}{
+		{
+			name:   "the default spelling, as llama.cpp and vLLM write it",
+			field:  "",
+			delta:  `"delta":{"reasoning_content":"thinking"}`,
+			absent: `"reasoning":`,
+		},
+		{
+			name:   "the bare spelling, as Ollama and OpenRouter write it",
+			field:  "reasoning",
+			delta:  `"delta":{"reasoning":"thinking"}`,
+			absent: `"reasoning_content":`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// One chunk, so the whole channel is in one delta and the assertion is over the
+			// key rather than over the chunking.
+			server := New(t, Script{Model: "stub-model", Turns: []Turn{{
+				Text:           "done",
+				Reasoning:      "thinking",
+				ReasoningField: tc.field,
+				ChunkRunes:     32,
+				Repeat:         true,
+			}}})
+
+			stream := strings.Join(postStream(t, server, "hi"), "\n")
+			if !strings.Contains(stream, tc.delta) {
+				t.Errorf("the stream carries no %s:\n%s", tc.delta, stream)
+			}
+			if strings.Contains(stream, tc.absent) {
+				t.Errorf("the stream carries %s, and a server writes one spelling:\n%s", tc.absent, stream)
+			}
+
+			body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, server.Model)
+			whole := post(t, server, body).body
+			if want := strings.TrimPrefix(tc.delta, `"delta":{`); !strings.Contains(whole, strings.TrimSuffix(want, "}")) {
+				t.Errorf("the whole reply carries no %s:\n%s", want, whole)
+			}
+			if strings.Contains(whole, tc.absent) {
+				t.Errorf("the whole reply carries %s, and a server writes one spelling:\n%s", tc.absent, whole)
+			}
+		})
+	}
+}

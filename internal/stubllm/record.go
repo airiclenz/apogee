@@ -384,7 +384,7 @@ func (c *capture) fillFromStream(turn *Turn) string {
 	var arrivals []time.Time
 	var chunkRunes []int
 	var calls callSet
-	var finish string
+	var finish, reasoningField string
 
 	for _, event := range c.events {
 		if event.data == doneSentinel {
@@ -405,8 +405,9 @@ func (c *capture) fillFromStream(turn *Turn) string {
 				chunkRunes = append(chunkRunes, len([]rune(content)))
 				carried = true
 			}
-			if thought := choice.Delta.ReasoningContent; thought != "" {
+			if thought, spelling := capturedReasoning(choice.Delta.ReasoningContent, choice.Delta.Reasoning); thought != "" {
 				reasoning.WriteString(thought)
+				reasoningField = spelling
 				carried = true
 			}
 			for _, fragment := range choice.Delta.ToolCalls {
@@ -423,6 +424,7 @@ func (c *capture) fillFromStream(turn *Turn) string {
 	}
 
 	turn.Text, turn.Reasoning, turn.ToolCalls = text.String(), reasoning.String(), calls.done()
+	turn.ReasoningField = reasoningField
 	turn.TokenDelay = medianGap(arrivals)
 	if runes := median(chunkRunes); runes > 0 {
 		turn.ChunkRunes = runes
@@ -439,7 +441,10 @@ func (c *capture) fillFromWhole(turn *Turn) string {
 	}
 
 	choice := reply.Choices[0]
-	turn.Text, turn.Reasoning = choice.Message.Content, choice.Message.ReasoningContent
+	turn.Text = choice.Message.Content
+	if thought, spelling := capturedReasoning(choice.Message.ReasoningContent, choice.Message.Reasoning); thought != "" {
+		turn.Reasoning, turn.ReasoningField = thought, spelling
+	}
 	for _, call := range choice.Message.ToolCalls {
 		turn.ToolCalls = append(turn.ToolCalls, ToolCall{
 			ID:        call.ID,
@@ -451,6 +456,26 @@ func (c *capture) fillFromWhole(turn *Turn) string {
 		turn.Usage = usageFrom(reply.Usage)
 	}
 	return choice.FinishReason
+}
+
+// capturedReasoning is the thinking channel one captured payload carried, paired with the
+// `reasoning_field` value that reproduces its spelling — EMPTY for `reasoning_content`, which is
+// what an unset key already means, so a recording of a `reasoning_content` server is written
+// exactly as it was before this knob existed.
+//
+// The precedence is the provider's: `reasoning_content` wins wherever it is non-empty, and the
+// bare `reasoning` Ollama and OpenRouter send is read only where it is not. It is tested for
+// NON-EMPTINESS and never for presence, because LM Studio always sends the key and leaves it
+// empty when the model did not reason. This is the recorder's ONE decode site for the channel: a
+// third spelling is a line here and nowhere else.
+func capturedReasoning(content, bare string) (text, field string) {
+	if content != "" {
+		return content, ""
+	}
+	if bare != "" {
+		return bare, reasoningFieldBare
+	}
+	return "", ""
 }
 
 // callSet reassembles tool calls from the fragments a stream splits them into, keeping them in

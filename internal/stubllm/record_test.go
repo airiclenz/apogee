@@ -163,6 +163,86 @@ func TestRecorderRecordsANonStreamedReplyAsText(t *testing.T) {
 	}
 }
 
+// TestRecorderCapturesTheSpellingTheChannelArrivedIn pins that a recording is a transcript of
+// the wire and not of one spelling of it: a session against an Ollama or OpenRouter server, whose
+// thinking channel is the bare `reasoning`, has to replay as that same field. A recorder that
+// only read `reasoning_content` would drop the channel from the fixture altogether, which is the
+// silent loss this test exists to make loud.
+//
+// Both transports are driven, because the recorder reads the stream and the whole reply through
+// two different decode paths and only one shared precedence helper.
+func TestRecorderCapturesTheSpellingTheChannelArrivedIn(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		stream bool
+	}{
+		{name: "streamed", stream: true},
+		{name: "whole", stream: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			origin := New(t, Script{Model: "rec-model", Turns: []Turn{{
+				Text:           "the file list, then",
+				Reasoning:      "The user wants the file list.",
+				ReasoningField: "reasoning",
+			}}})
+			path := filepath.Join(t.TempDir(), "fixture.yaml")
+			proxy := recorderProxy(t, origin.URL, path)
+
+			postTo(t, http.DefaultClient, proxy.URL, origin.Model, "look around", tc.stream)
+			if err := proxy.recorder.Close(); err != nil {
+				t.Fatalf("close recorder: %v", err)
+			}
+
+			script, err := Load(path)
+			if err != nil {
+				t.Fatalf("the recorded fixture does not load: %v\n%s", err, read(t, path))
+			}
+			got := script.Turns[0]
+			if got.Reasoning != "The user wants the file list." {
+				t.Errorf("reasoning = %q, want the text the bare field carried", got.Reasoning)
+			}
+			if got.ReasoningField != "reasoning" {
+				t.Errorf("reasoning_field = %q, want reasoning — the spelling it was captured in",
+					got.ReasoningField)
+			}
+		})
+	}
+}
+
+// TestRecorderLeavesTheDefaultSpellingUnwritten is the other half: `reasoning_content` is what an
+// unset key already means, so a recording of one of those servers must not GAIN a
+// `reasoning_field:` line. Every fixture recorded before the knob existed stays byte-identical.
+func TestRecorderLeavesTheDefaultSpellingUnwritten(t *testing.T) {
+	t.Parallel()
+
+	origin := New(t, Script{Model: "rec-model", Turns: []Turn{{
+		Text:      "the file list, then",
+		Reasoning: "The user wants the file list.",
+	}}})
+	path := filepath.Join(t.TempDir(), "fixture.yaml")
+	proxy := recorderProxy(t, origin.URL, path)
+
+	postTo(t, http.DefaultClient, proxy.URL, origin.Model, "look around", true)
+	if err := proxy.recorder.Close(); err != nil {
+		t.Fatalf("close recorder: %v", err)
+	}
+
+	if fixture := read(t, path); strings.Contains(fixture, "reasoning_field") {
+		t.Errorf("the fixture names reasoning_field, and the default spelling is unwritten:\n%s", fixture)
+	}
+	script, err := Load(path)
+	if err != nil {
+		t.Fatalf("the recorded fixture does not load: %v", err)
+	}
+	if got := script.Turns[0]; got.ReasoningField != "" {
+		t.Errorf("reasoning_field = %q, want empty", got.ReasoningField)
+	}
+}
+
 // TestRecorderRefusesAnUnusableConfiguration pins the two mistakes worth catching before a
 // session is driven through a recorder rather than after it.
 func TestRecorderRefusesAnUnusableConfiguration(t *testing.T) {

@@ -1,0 +1,24 @@
+# The upstream TestE2EThinkingPaneShowsEitherWireSpelling talks to, in the bare spelling Ollama
+# and OpenRouter write the thinking channel in: `reasoning`. Its pair, thinking.yaml, scripts the
+# SAME turn and the SAME reasoning text in the `reasoning_content` llama.cpp, vLLM and LM Studio
+# send — the two files differ by that one key and nothing else, so a difference in the pane can
+# only be the wire spelling.
+model: thinking-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched
+    # BEFORE the prompt's own turn or it would take it.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Choosing between two options
+    # The one turn that reasons. The reasoning is what the /thinking pane must show.
+    - when:
+        last_message: ^Which option is better
+      reasoning: Weighing the two options before answering.
+      reasoning_field: reasoning
+      text: The second option.
+      token_delay: 1ms
+      chunk_runes: 6
+    # Anything apogee asks on its own account. Never consumed, so the turns above stay the script.
+    - repeat: true
+      text: OK.

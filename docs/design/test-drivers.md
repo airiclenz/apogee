@@ -29,7 +29,8 @@ test step may be **manual** only where the table below says no driver observes i
 `internal/stubllm` is the ONE scripted upstream apogee's tests talk to (ADR 0062). A test names
 the replies it wants as a `Script` and gets an OpenAI-compatible HTTP server that plays them back
 through the wire shapes a real llama.cpp or OpenRouter endpoint uses — SSE content deltas, a
-reasoning channel, two-fragment tool calls, a terminal usage object with the cached-prompt
+reasoning channel in either of its two wire spellings, two-fragment tool calls, a terminal usage
+object with the cached-prompt
 breakdown, plain HTTP failures, and a stall. The package imports nothing of apogee's: the code
 under test reaches it through `internal/provider` exactly as it reaches a real server.
 
@@ -92,9 +93,15 @@ the only way to script it.
 | `hang` | stalls for the duration, then answers as the empty-reply turn does; a cancelled request context releases it at once |
 | *(none of the above)* | the empty-reply turn |
 
-`reasoning` (the `reasoning_content` channel, streamed before the content) and `usage` accompany a
+`reasoning` (the thinking channel, streamed before the content) and `usage` accompany a
 text or tool-call turn; they are refused on an `http` or `hang` turn, which never reach the
-completion shape at all. `usage.cached` reaches the wire as `prompt_tokens_details.cached_tokens`
+completion shape at all. `reasoning_field` names the WIRE SPELLING that channel goes out in —
+either `reasoning_content`, which is what llama.cpp, vLLM and LM Studio send and what an unset key
+means, or the bare `reasoning` that Ollama and OpenRouter send for the very same channel. Exactly
+one of the two reaches the wire, so a turn that does not set it streams the bytes it always did;
+any other value, and the key on a turn with no `reasoning` or on an `http` or `hang` turn, is a
+parse error naming the key. It exists because apogee has to decode both spellings, and a decoder
+is only proven by a server that writes both. `usage.cached` reaches the wire as `prompt_tokens_details.cached_tokens`
 **only above zero** — an absent breakdown means "this server does not report caching" while a
 present zero means "nothing was cached", and both shapes have to be scriptable.
 `finish_reason` defaults to `stop`, or to `tool_calls` when the turn emits any.
@@ -226,7 +233,9 @@ $ apogee --endpoint http://127.0.0.1:41234        # in another terminal: drive t
 ```
 
 Each completed `/v1/chat/completions` request becomes one turn, carrying what the reply actually
-did: the content and reasoning deltas re-joined, the tool-call fragments reassembled into whole
+did: the content and reasoning deltas re-joined — with `reasoning_field` set when the channel
+arrived in the bare `reasoning` spelling, so the fixture replays as the server wrote it — the
+tool-call fragments reassembled into whole
 calls, the `usage` object including `cached_tokens`, the measured pacing (the **median** gap
 between deltas as `token_delay`, the median delta size as `chunk_runes`), and a non-2xx reply as
 an `http` turn. A non-streamed reply is recorded as a text turn with no `token_delay` — there were

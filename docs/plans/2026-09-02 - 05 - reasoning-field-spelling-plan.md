@@ -217,7 +217,13 @@ and ADR 0010 keeps wire types provider-local.
 
 `fix(tui): classify the reasoning field as thinking in /inspect`
 
-## 3. stubllm emits and records either spelling; e2e drives /thinking
+## 3. stubllm emits and records either spelling; e2e drives /thinking — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the recorder writes `reasoning_field` ONLY for the bare spelling — `reasoning_content` leaves it unset, which is what an unset key already means, so recordings of llama.cpp-style servers stay byte-identical rather than gaining a line each. Pinned by TestRecorderLeavesTheDefaultSpellingUnwritten.
+NOTES (2026-09-02): doc grep rule applied to test-drivers.md lines 32, 95 and 229. Line 65 (the example script) and line 183 (captures "refused as `reasoning` is", still true) were read and deliberately left: neither enumerates the turn keys nor the recorder's output.
+NOTES (2026-09-02): added TestE2EThinkingFixturesDifferOnlyInTheSpelling beyond the item's Tests list — the two fixtures being identical but for one key is the claim both subtests rest on, and nothing else would catch that drift.
+NOTES (2026-09-02): bite verified — with the provider's alias temporarily disabled, the `reasoning` subtest fails and the `reasoning_content` subtest passes; the provider file was restored unmodified (`git diff internal/provider/` empty).
+NOTES (2026-09-02): ISSUES.md is dirty in the working tree from unrelated owner typo edits; left exactly as found and not in FILES.
 
 **What.** The stub upstream only ever writes `reasoning_content` (`internal/stubllm/server.go:404`
 streaming, `:447` whole) and only ever reads it back (`record.go:408` streaming, `:442` whole), so

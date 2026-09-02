@@ -91,9 +91,19 @@ type Turn struct {
 	TokenDelay time.Duration `yaml:"token_delay,omitempty"`
 	// ChunkRunes is how many runes one delta carries; zero means defaultChunkRunes.
 	ChunkRunes int `yaml:"chunk_runes,omitempty"`
-	// Reasoning is the chain-of-thought channel (`reasoning_content`), streamed BEFORE the
-	// content, exactly as the servers that emit it do.
+	// Reasoning is the chain-of-thought channel, streamed BEFORE the content, exactly as the
+	// servers that emit it do. ReasoningField names the wire spelling it goes out in.
 	Reasoning string `yaml:"reasoning,omitempty"`
+	// ReasoningField is the WIRE SPELLING this Turn's Reasoning is written in: either
+	// `reasoning_content` — the default, and what an empty value means — or the bare
+	// `reasoning` that Ollama and OpenRouter send for the same channel. It exists because a
+	// stub that only ever wrote one of the two could not reproduce half the servers apogee
+	// meets, and the decoders that read both have to be driven over both to be proven.
+	//
+	// It is a SPELLING and not a kind: the turn is the same turn either way, and exactly one
+	// of the two fields reaches the wire, so a Turn that leaves this unset streams and encodes
+	// byte-identically to one written before the key existed.
+	ReasoningField string `yaml:"reasoning_field,omitempty"`
 	// ToolCalls are the calls this Turn emits. Each is streamed as two fragments — the
 	// id-bearing head and an argument tail — the split real servers send.
 	ToolCalls []ToolCall `yaml:"tool_calls,omitempty"`
@@ -268,7 +278,47 @@ func (t Turn) validate() error {
 			return err
 		}
 	}
+	if err := t.validateReasoningField(); err != nil {
+		return err
+	}
 	return t.validateCaptures()
+}
+
+// The two wire spellings of the thinking channel a Turn can be scripted in. `reasoning_content`
+// is what llama.cpp, vLLM and LM Studio send and what an unset `reasoning_field` means; the bare
+// `reasoning` is what Ollama and OpenRouter send for the very same channel.
+const (
+	reasoningFieldContent = "reasoning_content"
+	reasoningFieldBare    = "reasoning"
+)
+
+// spellsBareReasoning reports whether this Turn writes its thinking channel as the bare
+// `reasoning`. It is the ONE place the default is resolved, so both emitters — the streamed
+// deltas and the whole message — agree by construction, and a third spelling would be a branch
+// here and nowhere else.
+func (t Turn) spellsBareReasoning() bool { return t.ReasoningField == reasoningFieldBare }
+
+// validateReasoningField reports the first thing wrong with a Turn's `reasoning_field`. Every
+// message NAMES the key, because the failure a strict parser cannot catch for us is a fixture
+// that meant to change the spelling and instead changed nothing.
+func (t Turn) validateReasoningField() error {
+	if t.ReasoningField == "" {
+		return nil
+	}
+	if t.ReasoningField != reasoningFieldContent && t.ReasoningField != reasoningFieldBare {
+		return fmt.Errorf("reasoning_field is %q — a turn spells the thinking channel %s (the default) or %s",
+			t.ReasoningField, reasoningFieldContent, reasoningFieldBare)
+	}
+	if t.HTTP != nil {
+		return errors.New("an http turn carries no reasoning, so it carries no reasoning_field")
+	}
+	if t.Hang > 0 {
+		return errors.New("a hang turn carries no reasoning, so it carries no reasoning_field")
+	}
+	if t.Reasoning == "" {
+		return errors.New("reasoning_field spells a turn's reasoning, and this turn has none")
+	}
+	return nil
 }
 
 // validateCaptures reports the first thing wrong with this Turn's captures, including a

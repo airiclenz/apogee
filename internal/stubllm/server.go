@@ -401,7 +401,7 @@ func writeStream(ctx context.Context, w http.ResponseWriter, t Turn, model strin
 func streamDeltas(t Turn) []sseDelta {
 	var deltas []sseDelta
 	for _, part := range splitRunes(t.Reasoning, t.chunkRunes()) {
-		deltas = append(deltas, sseDelta{ReasoningContent: part})
+		deltas = append(deltas, reasoningDelta(t, part))
 	}
 	for _, part := range splitRunes(t.Text, t.chunkRunes()) {
 		deltas = append(deltas, sseDelta{Content: part})
@@ -410,6 +410,16 @@ func streamDeltas(t Turn) []sseDelta {
 		deltas = append(deltas, toolCallDeltas(i, call)...)
 	}
 	return deltas
+}
+
+// reasoningDelta is one chunk of the thinking channel in the spelling this Turn scripts. Exactly
+// one of the two fields is ever set, which is what real servers do and what makes an unset
+// `reasoning_field` stream the bytes it streamed before the key existed.
+func reasoningDelta(t Turn, part string) sseDelta {
+	if t.spellsBareReasoning() {
+		return sseDelta{Reasoning: part}
+	}
+	return sseDelta{ReasoningContent: part}
 }
 
 // toolCallDeltas splits one call into the two fragments real servers send: an id-bearing head
@@ -441,13 +451,15 @@ func writeWhole(w http.ResponseWriter, t Turn, model string) {
 		Object: "chat.completion",
 		Model:  model,
 		Choices: []wholeChoice{{
-			Message: wholeMessage{
-				Role:             "assistant",
-				Content:          t.Text,
-				ReasoningContent: t.Reasoning,
-			},
+			Message:      wholeMessage{Role: "assistant", Content: t.Text},
 			FinishReason: t.finishReason(),
 		}},
+	}
+	// The same one-of-two rule the streamed path follows, on the whole reply's message.
+	if t.spellsBareReasoning() {
+		reply.Choices[0].Message.Reasoning = t.Reasoning
+	} else {
+		reply.Choices[0].Message.ReasoningContent = t.Reasoning
 	}
 	for i, call := range t.ToolCalls {
 		reply.Choices[0].Message.ToolCalls = append(reply.Choices[0].Message.ToolCalls, wireToolCall{

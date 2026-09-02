@@ -23,8 +23,9 @@ func TestScriptRoundTripsThroughYAML(t *testing.T) {
 		Model: "stub-model",
 		Turns: []Turn{
 			{
-				Reasoning: "thinking about it",
-				ToolCalls: []ToolCall{{ID: "tc_1", Name: "list_dir", Arguments: `{"path":"."}`}},
+				Reasoning:      "thinking about it",
+				ReasoningField: "reasoning",
+				ToolCalls:      []ToolCall{{ID: "tc_1", Name: "list_dir", Arguments: `{"path":"."}`}},
 			},
 			{
 				When:         &Match{LastMessage: "^weather", ToolResult: "list_dir", System: "^You are apogee"},
@@ -114,6 +115,29 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 			name: "an unknown key",
 			yaml: "turns:\n  - chunk_rune: 3\n",
 			want: "field chunk_rune not found",
+		},
+		// The `reasoning_field` cases. Every message names the key, because the mistake it
+		// guards is a fixture that meant to change the wire spelling and silently did not.
+		{
+			name: "an unknown reasoning_field spelling",
+			yaml: "turns:\n  - reasoning: thinking\n    reasoning_field: reasoning_text\n    text: hi\n",
+			want: `reasoning_field is "reasoning_text" — a turn spells the thinking channel ` +
+				"reasoning_content (the default) or reasoning",
+		},
+		{
+			name: "reasoning_field on a turn with no reasoning",
+			yaml: "turns:\n  - reasoning_field: reasoning\n    text: hi\n",
+			want: "reasoning_field spells a turn's reasoning, and this turn has none",
+		},
+		{
+			name: "reasoning_field on an http turn",
+			yaml: "turns:\n  - http: {status: 503}\n    reasoning_field: reasoning\n",
+			want: "an http turn carries no reasoning, so it carries no reasoning_field",
+		},
+		{
+			name: "reasoning_field on a hang turn",
+			yaml: "turns:\n  - hang: 10ms\n    reasoning_field: reasoning\n",
+			want: "a hang turn carries no reasoning, so it carries no reasoning_field",
 		},
 		{
 			name: "a capture pattern with no group",

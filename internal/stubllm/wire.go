@@ -90,9 +90,13 @@ type sseChoice struct {
 	FinishReason string   `json:"finish_reason,omitempty"`
 }
 
+// sseDelta is the incremental payload of one streamed choice. It carries BOTH wire spellings of
+// the thinking channel, and the emitters fill exactly one of them (Turn.spellsBareReasoning), so
+// a script that does not choose produces the bytes it always did.
 type sseDelta struct {
 	Content          string        `json:"content,omitempty"`
 	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	Reasoning        string        `json:"reasoning,omitempty"`
 	ToolCalls        []sseToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -125,10 +129,13 @@ type wholeChoice struct {
 	FinishReason string       `json:"finish_reason"`
 }
 
+// wholeMessage is the assistant message of a non-streamed reply. Its two reasoning fields are
+// the sseDelta's, for the same reason and under the same rule: exactly one is ever filled.
 type wholeMessage struct {
 	Role             string         `json:"role"`
 	Content          string         `json:"content"`
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Reasoning        string         `json:"reasoning,omitempty"`
 	ToolCalls        []wireToolCall `json:"tool_calls,omitempty"`
 }
 
