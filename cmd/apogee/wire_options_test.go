@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 )
 
 // The Mechanism write seam, pinned where it is BUILT rather than through the renderer's fake: the
@@ -92,4 +97,62 @@ func TestWriteMechanismReportsWhichHalfFailed(t *testing.T) {
 			t.Errorf("the apply's refusal unwrote the splice:\n%s", body)
 		}
 	})
+}
+
+// The read half of the same seam: what the `/settings` Mechanism list SAYS about an off-ramp whose
+// key the `mechanisms:` block never names. That row is armed — an off-ramp reads ON unless the block
+// says `false` (ADR 0070) — and the list has to show the posture the run is actually in. The floor
+// itself (mechanisms.OffRampFloor) and the sibling startup projection (withOffRampFloor) are both
+// pinned; this list is the third reader of the same rule and nothing asserted it applied it, so a row
+// could regress to reading OFF for a Mechanism the engine is running.
+func TestListMechanismsAppliesTheOffRampFloor(t *testing.T) {
+	t.Parallel()
+
+	w := urlGuardWiring(t, config.Options{})
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+	// The list re-reads the FILE rather than the resolution this run started on, so the block is
+	// written here — and it names one ordinary Mechanism and no off-ramp at all, which is exactly the
+	// posture the floor exists for.
+	const named = "autofix"
+	path := filepath.Join(w.roots.config, "config.yaml")
+	if err := os.WriteFile(path, []byte("mechanisms:\n  "+named+": true\n"), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	// The OFF half's id is taken from the catalogue rather than hard-coded: a row that later joins the
+	// off-ramp Capability would otherwise turn this half into a silent contradiction of the one above.
+	var ordinary string
+	for _, d := range mechanisms.Descriptors() {
+		if d.Capability != domain.CapOffRamp && string(d.ID) != named {
+			ordinary = string(d.ID)
+			break
+		}
+	}
+	if ordinary == "" {
+		t.Fatalf("the catalogue offers no ordinary Mechanism beside %s; the OFF half cannot be asserted", named)
+	}
+
+	enabled := map[string]bool{}
+	for _, toggle := range w.options().ListMechanisms() {
+		enabled[toggle.ID] = toggle.Enabled
+	}
+
+	floor := mechanisms.OffRampFloor(nil)
+	if len(floor) == 0 {
+		t.Fatal("the off-ramp floor is empty; every assertion below would pass vacuously")
+	}
+	for _, id := range floor {
+		if on, listed := enabled[string(id)]; !listed || !on {
+			t.Errorf("%s = (enabled %v, listed %v), want an armed row: an off-ramp the block never "+
+				"names is ON (ADR 0070), and the pane must not say the recovery is off", id, on, listed)
+		}
+	}
+	if !enabled[named] {
+		t.Errorf("%s reads OFF; the block names it true and the list is answered from the file", named)
+	}
+	if on, listed := enabled[ordinary]; !listed || on {
+		t.Errorf("%s = (enabled %v, listed %v), want a listed row reading OFF: the floor arms the "+
+			"off-ramps, not every Mechanism the block leaves out", ordinary, on, listed)
+	}
 }

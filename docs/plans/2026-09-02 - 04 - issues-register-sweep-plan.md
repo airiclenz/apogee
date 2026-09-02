@@ -530,7 +530,10 @@ otherwise leave it.
 
 ---
 
-## 12. The /settings toggle list applies the off-ramp floor
+## 12. The /settings toggle list applies the off-ramp floor — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the OFF half's id is derived from `mechanisms.Descriptors()` (first non-`CapOffRamp` id beside the one the block names) rather than hard-coded, so a row that later joins the off-ramp Capability cannot turn that half into a silent contradiction of the ON half.
+NOTES (2026-09-02): the list reads the config FILE, so the seam is driven through `urlGuardWiring` + `wireSession` (the modelled `wire_live_test.go:295-314` setup) and the `mechanisms:` block is written to `w.roots.config/config.yaml` before the call; mutation-checked by dropping the floor union from `ListMechanisms`.
 
 **What.** `ListMechanisms` (`cmd/apogee/wire_options.go:222-234`) unions
 `mechanisms.OffRampFloor(enabled)` into the rows it answers, so an off-ramp whose key is simply absent
