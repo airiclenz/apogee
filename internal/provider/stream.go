@@ -19,7 +19,8 @@ type DeltaKind string
 const (
 	// DeltaContent carries a chunk of assistant text.
 	DeltaContent DeltaKind = "content"
-	// DeltaThinking carries a chunk of the reasoning channel (reasoning_content).
+	// DeltaThinking carries a chunk of the reasoning channel (`reasoning_content`, or its
+	// `reasoning` alias — see reasoningChannel).
 	DeltaThinking DeltaKind = "thinking"
 	// DeltaToolCall carries one fully-accumulated tool call. Nothing is emitted mid-stream:
 	// every call of the reply is yielded, in wire-index order, immediately before the
@@ -210,7 +211,10 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 		}
 
 		choice := chunk.Choices[0]
-		textBytes += len(choice.Delta.Content) + len(choice.Delta.ReasoningContent)
+		// The cap counts the CHOSEN reasoning field, never both: a proxy that duplicates the
+		// channel into both spellings would otherwise be capped at half the real limit.
+		thinking := choice.Delta.thinking()
+		textBytes += len(choice.Delta.Content) + len(thinking)
 		if textBytes > maxReplyTextBytes {
 			// Terminal and NOT Retryable: the same request re-streamed would overflow again.
 			// Returning here runs the deferred body close and wire-capture flush, as on every
@@ -225,7 +229,7 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 			})
 			return
 		}
-		if choice.Delta.ReasoningContent != "" && !yield(Delta{Kind: DeltaThinking, Thinking: choice.Delta.ReasoningContent}) {
+		if thinking != "" && !yield(Delta{Kind: DeltaThinking, Thinking: thinking}) {
 			return
 		}
 		if choice.Delta.Content != "" && !yield(Delta{Kind: DeltaContent, Content: choice.Delta.Content}) {
@@ -382,18 +386,24 @@ func (o *openToolCalls) flush(yield func(Delta) bool) bool {
 // sseChunk is one decoded SSE data event from a streamed completion.
 type sseChunk struct {
 	Choices []struct {
-		Delta struct {
-			Content          string        `json:"content"`
-			ReasoningContent string        `json:"reasoning_content"`
-			ToolCalls        []sseToolCall `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
+		Delta        sseDelta `json:"delta"`
+		FinishReason string   `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *usageJSON `json:"usage"`
 	// Error is the in-band failure member: present only when the server reported an error
 	// inside an otherwise-successful stream. Absent on every healthy chunk, so a server that
 	// never sends one keeps byte-identical behaviour.
 	Error *wireError `json:"error"`
+}
+
+// sseDelta is the incremental payload of one streamed choice. It is a named type rather than
+// an inline struct so the thinking-channel precedence can hang on it as a method: the embedded
+// reasoningChannel carries both wire spellings and the thinking() helper that picks between
+// them, identically to the whole reply's chatResponseMessage.
+type sseDelta struct {
+	reasoningChannel
+	Content   string        `json:"content"`
+	ToolCalls []sseToolCall `json:"tool_calls"`
 }
 
 // sseToolCall is a tool-call fragment within a streamed delta: the first fragment carries

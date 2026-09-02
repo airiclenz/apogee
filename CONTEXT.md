@@ -470,7 +470,9 @@ axis-named), "server profile" (collides with the launcher's own `servers:` confi
 **Thinking channel** (a model's private reasoning):
 The reasoning stream a model emits separately from its user-facing answer — either **delimited**
 inline (`<think>…</think>`), **harmony** (gpt-oss's `<|channel|>analysis…<|message|>…`), or split
-out by the Upstream into a `reasoning_content` field. Apogee **strips** inline channels from
+out by the Upstream into its own wire field — spelled `reasoning_content` by llama.cpp, vLLM and
+LM Studio, and `reasoning` by Ollama and OpenRouter. Apogee decodes both spellings as the one
+channel, preferring `reasoning_content` wherever it is non-empty. Apogee **strips** inline channels from
 visible content and preserves them as reasoning in history; it never sends them back Upstream.
 Harmony is a *content-stripping* concern only — a harmony model's tool calls arrive **native**
 (the Upstream parses harmony server-side), so there is no harmony tool-call text parser.

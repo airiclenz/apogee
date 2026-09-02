@@ -450,7 +450,8 @@ type ModelProfile struct {
 	Pattern string
 
 	// Thinking selects the model's inline reasoning-channel style. A zero Thinking (ThinkingNone)
-	// leaves the Upstream-split reasoning_content path untouched (the default).
+	// leaves the Upstream-split reasoning path (`reasoning_content` or its `reasoning` alias)
+	// untouched (the default).
 	Thinking ThinkingProfile
 
 	// Tools is this model's roster axis — delta lists against the DEFAULT tool set, so a tool can
@@ -507,7 +508,7 @@ const (
 // the private reasoning the loop strips from visible content and preserves as reasoning in
 // history. A zero ThinkingProfile (ThinkingNone) means no inline channel — content passes
 // through untouched, the right default when the Upstream already splits reasoning into a
-// separate reasoning_content field.
+// separate wire field (`reasoning_content`, or its `reasoning` alias).
 type ThinkingProfile struct {
 	// Style selects the stripping strategy: ThinkingNone (no inline channel, the default),
 	// ThinkingDelimited (a literal Start/End token pair), or ThinkingHarmony (gpt-oss channels,
@@ -532,7 +533,8 @@ type ThinkingStyle string
 
 const (
 	// ThinkingNone is the default: no inline channel (the model emits none, or the Upstream
-	// already split reasoning into reasoning_content). "" is treated the same.
+	// already split reasoning into `reasoning_content` or its `reasoning` alias). "" is treated
+	// the same.
 	ThinkingNone ThinkingStyle = "none"
 	// ThinkingDelimited is a literal Start/End token pair bracketing reasoning (e.g.
 	// <think>…</think>). The exact tokens vary per model and even per build — the live smoke

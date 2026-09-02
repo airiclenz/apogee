@@ -825,13 +825,21 @@ func TestStream_ReplyTextIsCapped(t *testing.T) {
 
 // TestStream_ThinkingCountsTowardTheCap proves the reasoning channel is summed into the same
 // budget — a model that never leaves its thinking channel cannot stream without bound either.
+// Both wire spellings of the channel are held to it: an Ollama/OpenRouter stream cannot buy
+// itself an unbounded reply by spelling the field the other way.
 func TestStream_ThinkingCountsTowardTheCap(t *testing.T) {
 	t.Parallel()
 
-	srv := chunkedTextServer("reasoning_content")
-	defer srv.Close()
+	for _, field := range []string{"reasoning_content", "reasoning"} {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
 
-	assertReplyTextCapFires(t, srv)
+			srv := chunkedTextServer(field)
+			defer srv.Close()
+
+			assertReplyTextCapFires(t, srv)
+		})
+	}
 }
 
 // TestStream_CtxCancelEndsTheBody pins the contract Stream documents: the caller's ctx is the
@@ -1006,5 +1014,162 @@ func TestWireObserver_StreamRecordsSanitisedErrorBody(t *testing.T) {
 	}
 	if strings.Contains(responses[0], apiKey) || !strings.Contains(responses[0], "[REDACTED]") {
 		t.Errorf("error record = %q, want the sanitised body", responses[0])
+	}
+}
+
+// collectThinkingAndContent drains a stream and returns the joined thinking and content the
+// consumer saw, plus how many thinking deltas arrived — the count is what proves a chunk
+// carrying BOTH spellings yields its reasoning once and only once.
+func collectThinkingAndContent(t *testing.T, body string) (thinking, content string, thinkingDeltas int) {
+	t.Helper()
+
+	srv := sseServer(body)
+	defer srv.Close()
+
+	for _, delta := range collectStream(NewClient(srv.URL, "m"), Request{}) {
+		switch delta.Kind {
+		case DeltaThinking:
+			thinking += delta.Thinking
+			thinkingDeltas++
+		case DeltaContent:
+			content += delta.Content
+		case DeltaError, DeltaContextOverflow:
+			t.Fatalf("unexpected terminal delta: %+v", delta)
+		}
+	}
+	return thinking, content, thinkingDeltas
+}
+
+// TestStream_ThinkingChannelSpellings covers the server matrix the thinking channel actually
+// arrives in: llama.cpp and vLLM spell it reasoning_content, Ollama and OpenRouter spell it
+// reasoning, and a duplicating proxy sends both. All three must reach the consumer as the same
+// joined thinking text — and the both-case must yield it ONCE, never twice.
+func TestStream_ThinkingChannelSpellings(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		delta        string
+		wantThinking string
+		wantDeltas   int
+	}{
+		{
+			name:         "reasoning_content only (llama.cpp, vLLM)",
+			delta:        `{"reasoning_content":"hmm"}`,
+			wantThinking: "hmm",
+			wantDeltas:   1,
+		},
+		{
+			name:         "reasoning only (Ollama, OpenRouter)",
+			delta:        `{"reasoning":"hmm"}`,
+			wantThinking: "hmm",
+			wantDeltas:   1,
+		},
+		{
+			name:         "both spellings on one chunk",
+			delta:        `{"reasoning_content":"hmm","reasoning":"hmm"}`,
+			wantThinking: "hmm",
+			wantDeltas:   1,
+		},
+		{
+			name:         "empty reasoning_content beside a populated reasoning (LM Studio shape)",
+			delta:        `{"reasoning_content":"","reasoning":"hmm"}`,
+			wantThinking: "hmm",
+			wantDeltas:   1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			body := "data: {\"choices\":[{\"delta\":" + tc.delta + "}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n"
+
+			thinking, content, deltas := collectThinkingAndContent(t, body)
+			if thinking != tc.wantThinking {
+				t.Errorf("thinking = %q, want %q", thinking, tc.wantThinking)
+			}
+			if deltas != tc.wantDeltas {
+				t.Errorf("thinking delta count = %d, want %d — the channel must not be yielded twice", deltas, tc.wantDeltas)
+			}
+			if content != "hi" {
+				t.Errorf("content = %q, want hi", content)
+			}
+		})
+	}
+}
+
+// TestStream_ThinkingSpellingIsPerChunk pins that nothing latches onto the first spelling it
+// sees: a stream that opens in reasoning_content and continues in reasoning yields both, in
+// order. Real mixed rosters and duplicating proxies produce exactly this.
+func TestStream_ThinkingSpellingIsPerChunk(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"reasoning_content":"first "}}]}
+
+data: {"choices":[{"delta":{"reasoning":"second "}}]}
+
+data: {"choices":[{"delta":{"reasoning":"third"}}]}
+
+data: {"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`
+
+	thinking, content, _ := collectThinkingAndContent(t, body)
+	if thinking != "first second third" {
+		t.Errorf("thinking = %q, want %q", thinking, "first second third")
+	}
+	if content != "answer" {
+		t.Errorf("content = %q, want answer", content)
+	}
+}
+
+// TestStream_NullReasoningYieldsNoThinking pins OpenRouter's terminal chunk shape: it spells
+// the channel as JSON null, which decodes to the four bytes "null" rather than to "". Nothing
+// but the empty string may reach the consumer as thinking.
+func TestStream_NullReasoningYieldsNoThinking(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"content":"hi","reasoning":null}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`
+
+	thinking, content, deltas := collectThinkingAndContent(t, body)
+	if deltas != 0 || thinking != "" {
+		t.Errorf("thinking = %q over %d deltas, want none — a null reasoning is no reasoning", thinking, deltas)
+	}
+	if content != "hi" {
+		t.Errorf("content = %q, want hi", content)
+	}
+}
+
+// TestStream_NonStringReasoningKeepsTheChunk is why the field is decoded as json.RawMessage: a
+// server that spells reasoning as an OBJECT must not cost the chunk its content. A string-typed
+// field would fail the whole Unmarshal and the chunk would be dropped as malformed.
+func TestStream_NonStringReasoningKeepsTheChunk(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"content":"kept","reasoning":{"effort":"high"}}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`
+
+	thinking, content, deltas := collectThinkingAndContent(t, body)
+	if content != "kept" {
+		t.Errorf("content = %q, want kept — the chunk was dropped, not decoded", content)
+	}
+	if deltas != 0 || thinking != "" {
+		t.Errorf("thinking = %q over %d deltas, want none — a non-string reasoning is no reasoning", thinking, deltas)
 	}
 }

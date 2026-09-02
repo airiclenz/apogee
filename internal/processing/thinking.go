@@ -8,7 +8,7 @@ import "strings"
 // tokens are matched literally (not as regular expressions). A nil *ThinkingConfig means
 // the model emits no inline channel — content passes through untouched, which is also the
 // right default when the server already split reasoning into the response's separate
-// reasoning_content field (provider.RawResponse.Thinking).
+// reasoning field (`reasoning_content`, or its `reasoning` alias — provider.RawResponse.Thinking).
 type ThinkingConfig struct {
 	// StartToken opens a thinking span; EndToken closes it. Both must be non-empty for
 	// stripping to run — an empty token degrades to the no-op pass-through.
@@ -39,8 +39,8 @@ type Stripped struct {
 //
 // One case goes beyond the oracle: an EndToken reached with no opener of its own closes an
 // implicit span opened where the walk currently stands — position 0 for the first such closer.
-// Chat templates that pre-open the thinking channel (and servers that split reasoning into
-// reasoning_content) consume the opener, so the model's content starts mid-think and carries
+// Chat templates that pre-open the thinking channel (and servers that split reasoning out into
+// `reasoning_content` or its `reasoning` alias) consume the opener, so the model's content starts mid-think and carries
 // only the orphan closer — seen live as a bare "</mm:think>" leaking from minimax-m3. The text
 // before that closer is reasoning, never visible content. A model that re-opens the channel the
 // same implicit way emits the shape again, so every orphan closer is absorbed, not just the

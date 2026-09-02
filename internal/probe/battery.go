@@ -80,8 +80,8 @@ type Battery struct {
 }
 
 // ThinkingObservation records how the model surfaced private reasoning, if at all: through the
-// Upstream's own reasoning_content split (Channel), or inline in the visible content under a
-// recognisable style. It feeds the suggested model-profile's thinking block and nothing else.
+// Upstream's own reasoning split (Channel — `reasoning_content` or its `reasoning` alias), or
+// inline in the visible content under a recognisable style. It feeds the suggested model-profile's thinking block and nothing else.
 type ThinkingObservation struct {
 	Channel bool
 	Style   string // "" | "delimited" | "harmony"
@@ -316,7 +316,8 @@ func probeCandidates(ctx context.Context, chat Chat) []string {
 }
 
 // observeThinking reads the battery's replies for how the model surfaced reasoning: the
-// Upstream's own reasoning_content split, or an inline channel in the visible content. It only
+// Upstream's own reasoning split (`reasoning_content` or its `reasoning` alias), or an inline
+// channel in the visible content. It only
 // ever REPORTS — the suggested model-profile is printed for the user to paste, never applied
 // (ADR 0021 §5).
 func observeThinking(responses ...provider.RawResponse) ThinkingObservation {

@@ -90,18 +90,57 @@ type chatToolFunction struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-// chatCompletionResponse is the whole (non-streamed) reply. reasoning_content is the
-// thinking channel some servers emit; usage is absent on servers that omit it, and logprobs
-// is absent on every server that was not asked for it (or cannot supply it).
+// reasoningChannel is the thinking channel as it arrives on the wire, in BOTH the spellings
+// real servers use: llama.cpp, vLLM and LM Studio send `reasoning_content`, while Ollama and
+// OpenRouter send `reasoning` for the same channel. It is EMBEDDED into every decoded shape
+// that can carry the channel — the streamed delta and the whole message alike — so the
+// precedence below is written once and cannot drift between the two decode sites.
+//
+// Reasoning is json.RawMessage and not a string on purpose: a server is free to spell
+// `reasoning` as something other than a string (OpenRouter's own /models endpoint sends an
+// object under that key, and its terminal stream chunk sends null), and a string field would
+// fail the whole payload's Unmarshal — losing that chunk's CONTENT along with its reasoning.
+type reasoningChannel struct {
+	ReasoningContent string          `json:"reasoning_content"`
+	Reasoning        json.RawMessage `json:"reasoning"`
+}
+
+// thinking returns this payload's reasoning under the ratified precedence: reasoning_content
+// wins wherever it is NON-EMPTY, and the `reasoning` alias is read only otherwise. The test is
+// non-emptiness and never key presence — LM Studio always sends a reasoning_content key and
+// leaves it empty when the model did not reason, so a presence test would block the fallback
+// outright. Anything under `reasoning` that is not a JSON string — null, an object, an absent
+// field — reads as no reasoning at all rather than as literal bytes. The precedence is per
+// payload: nothing latches onto the first spelling a stream happens to use.
+func (r reasoningChannel) thinking() string {
+	if r.ReasoningContent != "" {
+		return r.ReasoningContent
+	}
+	var text string
+	if err := json.Unmarshal(r.Reasoning, &text); err != nil {
+		return ""
+	}
+	return text
+}
+
+// chatResponseMessage is the assistant message of one choice in a whole (non-streamed) reply.
+// It is a named type rather than an inline struct so the thinking-channel precedence can hang
+// on it as a method (see reasoningChannel). It is deliberately NOT chatMessage: that name is
+// already the request-side message above.
+type chatResponseMessage struct {
+	reasoningChannel
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls"`
+}
+
+// chatCompletionResponse is the whole (non-streamed) reply. The thinking channel some servers
+// emit rides on the message (see reasoningChannel); usage is absent on servers that omit it,
+// and logprobs is absent on every server that was not asked for it (or cannot supply it).
 type chatCompletionResponse struct {
 	Choices []struct {
-		Message struct {
-			Content          string     `json:"content"`
-			ReasoningContent string     `json:"reasoning_content"`
-			ToolCalls        []ToolCall `json:"tool_calls"`
-		} `json:"message"`
-		LogProbs     *logProbsJSON `json:"logprobs"`
-		FinishReason string        `json:"finish_reason"`
+		Message      chatResponseMessage `json:"message"`
+		LogProbs     *logProbsJSON       `json:"logprobs"`
+		FinishReason string              `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *usageJSON `json:"usage"`
 	// Error is the in-band failure member: present only when the server framed an upstream
@@ -199,7 +238,7 @@ func (r chatCompletionResponse) toRawResponse() RawResponse {
 	if len(r.Choices) > 0 {
 		choice := r.Choices[0]
 		out.Content = choice.Message.Content
-		out.Thinking = choice.Message.ReasoningContent
+		out.Thinking = choice.Message.thinking()
 		out.ToolCalls = choice.Message.ToolCalls
 		out.FinishReason = choice.FinishReason
 		out.TopCandidates = topCandidates(choice.LogProbs)

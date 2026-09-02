@@ -163,7 +163,8 @@ type Usage struct {
 }
 
 // RawResponse is the assembled non-streaming reply: the assistant text, an optional
-// thinking channel (reasoning_content), any tool calls, the finish reason, and usage.
+// thinking channel (`reasoning_content`, or its `reasoning` alias), any tool calls, the
+// finish reason, and usage.
 // "Raw" because tool-call arguments stay unparsed — processing/ parses them downstream.
 type RawResponse struct {
 	Content      string

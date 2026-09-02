@@ -1051,3 +1051,90 @@ func TestNewClientTrimsWhitespaceAroundTheEndpoint(t *testing.T) {
 		t.Errorf("request URL = %q; want %q — a padded endpoint reached the wire", rt.url, want)
 	}
 }
+
+// respondTo runs a non-streaming Respond against a server that answers with body verbatim.
+func respondTo(t *testing.T, body string) RawResponse {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	got, err := NewClient(srv.URL, "m").Respond(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	return got
+}
+
+// TestRespond_ThinkingChannelSpellings mirrors the streamed matrix on the whole-reply path:
+// every server spelling of the thinking channel reaches RawResponse.Thinking, with
+// reasoning_content winning wherever it is non-empty.
+func TestRespond_ThinkingChannelSpellings(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		message string
+		want    string
+	}{
+		{
+			name:    "reasoning_content only (llama.cpp, vLLM)",
+			message: `{"content":"hello","reasoning_content":"thinking hard"}`,
+			want:    "thinking hard",
+		},
+		{
+			name:    "reasoning only (Ollama, OpenRouter)",
+			message: `{"content":"hello","reasoning":"thinking hard"}`,
+			want:    "thinking hard",
+		},
+		{
+			name:    "both spellings, reasoning_content wins",
+			message: `{"content":"hello","reasoning_content":"thinking hard","reasoning":"ignored"}`,
+			want:    "thinking hard",
+		},
+		{
+			name:    "empty reasoning_content beside a populated reasoning (LM Studio shape)",
+			message: `{"content":"hello","reasoning_content":"","reasoning":"thinking hard"}`,
+			want:    "thinking hard",
+		},
+		{
+			name:    "null reasoning is no reasoning (OpenRouter terminal shape)",
+			message: `{"content":"hello","reasoning":null}`,
+			want:    "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := respondTo(t, `{"choices":[{"message":`+tc.message+`,"finish_reason":"stop"}]}`)
+			if got.Thinking != tc.want {
+				t.Errorf("Thinking = %q, want %q", got.Thinking, tc.want)
+			}
+			if got.Content != "hello" {
+				t.Errorf("Content = %q, want hello", got.Content)
+			}
+		})
+	}
+}
+
+// TestRespond_NonStringReasoningKeepsTheReply is the whole-reply half of the json.RawMessage
+// defence: a server spelling reasoning as an object must not cost the caller the entire reply.
+func TestRespond_NonStringReasoningKeepsTheReply(t *testing.T) {
+	t.Parallel()
+
+	got := respondTo(t, `{"choices":[{"message":{"content":"kept","reasoning":{"effort":"high"}},"finish_reason":"stop"}]}`)
+	if got.Content != "kept" {
+		t.Errorf("Content = %q, want kept — a non-string reasoning cost the reply", got.Content)
+	}
+	if got.Thinking != "" {
+		t.Errorf("Thinking = %q, want empty — a non-string reasoning is no reasoning", got.Thinking)
+	}
+	if got.FinishReason != "stop" {
+		t.Errorf("FinishReason = %q, want stop", got.FinishReason)
+	}
+}

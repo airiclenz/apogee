@@ -603,8 +603,8 @@ func (a *Agent) emptyReplyFault(resp *domain.Response) string {
 // no usable calls — recovers a text-format tool call from that stripped content,
 // removing the call's markup from the committed text and assigning it a deterministic
 // Turn-derived ID (so snapshot/resume and tests stay stable, unlike the oracle's wall-clock ID).
-// The model's reasoning (the Upstream-split reasoning_content joined with any stripped inline
-// channel) rides on the Response so assistantMessage can preserve it in history. For a native,
+// The model's reasoning (the Upstream-split channel — `reasoning_content` or its `reasoning`
+// alias — joined with any stripped inline channel) rides on the Response so assistantMessage can preserve it in history. For a native,
 // no-inline-thinking profile the stripper and text parser are no-ops, so visible == reply.content
 // and calls == nativeCalls — byte-identical to the pre-profile path.
 func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep reply, nativeCalls []domain.ToolCall) *domain.Response {
@@ -661,8 +661,8 @@ func (a *Agent) dispatchableCalls(turn int, calls []domain.ToolCall) []domain.To
 	return kept
 }
 
-// joinThinking combines the Upstream-split reasoning (reply.thinking, the reasoning_content
-// field) with the reasoning the stripper lifted out of the inline content, Upstream first and
+// joinThinking combines the Upstream-split reasoning (reply.thinking, the `reasoning_content`
+// field or its `reasoning` alias) with the reasoning the stripper lifted out of the inline content, Upstream first and
 // blank-line joined. Either being empty returns the other unchanged, so a native reply with no
 // inline channel returns reply.thinking untouched (the byte-identical anchor).
 func joinThinking(upstream, inline string) string {

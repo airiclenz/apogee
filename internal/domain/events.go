@@ -70,8 +70,8 @@ type TokenEvent struct {
 // ReasoningEvent is one newly-revealed chunk of the model's reasoning channel — the
 // observability seam for "the model is thinking", which the visible TokenEvent stream by
 // design never shows. It is emitted for BOTH reasoning paths: the provider's native
-// channel (reasoning_content) and an inline <think>/harmony span held off the visible
-// stream. Chunks arrive in order and concatenate to the reasoning the Turn's assistant
+// channel (`reasoning_content`, or its `reasoning` alias) and an inline <think>/harmony span
+// held off the visible stream. Chunks arrive in order and concatenate to the reasoning the Turn's assistant
 // message preserves; a Turn that reasons without emitting visible text produces
 // ReasoningEvents and no TokenEvents. The concatenation is a liveness view, not a
 // byte-exact copy: on the inline path a channel token split across deltas is revealed as
