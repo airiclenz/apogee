@@ -367,6 +367,62 @@ func (u UISettings) Validate() error {
 	return nil
 }
 
+// SessionSettings is the resolved `sessions:` block — the retention policy the session store is
+// swept against. It is one struct rather than loose fields on [Options] for UISettings' reason: the
+// two keys describe ONE subsystem and travel together, from the on-disk block through resolution to
+// whichever Driver runs the sweep.
+//
+// Both keys are OFF at their zero value, and off is the shipped default: a session store that never
+// forgets is what apogee has always done, so neither key changes anything for a config that does not
+// name it. The two are also INDEPENDENT rules rather than one policy with two spellings — an age cut
+// and a count cut answer different questions ("how long is this worth keeping" and "how many is too
+// many"), so naming one says nothing about the other and a store may be swept by either, both, or
+// neither.
+type SessionSettings struct {
+	// maxAge is how old a session record may get before a sweep discards it, as time.ParseDuration
+	// spells one (`720h`, `30m`). Zero — the default, and what an absent key resolves to — turns the
+	// age rule off entirely: no record is ever too old. It is resolved to a DURATION here, the
+	// posture ui.stall-after takes, because every consumer wants a duration and nothing downstream
+	// would gain from a second parse of the same text.
+	MaxAge time.Duration
+	// maxCount is how many session records a sweep may leave standing, newest first. Zero — the
+	// default, and what an absent key resolves to — turns the count rule off entirely: no number of
+	// records is too many.
+	MaxCount int
+	// unparsedMaxAge is a `max-age:` value time.ParseDuration could make nothing of, kept as it was
+	// written so Validate can name the text the human typed rather than the value it failed to
+	// become. Empty on every config that resolves — including one that never named the key — because
+	// the yaml seam applies no judgement of its own (toSessionSettings) and Validate is the one place
+	// a sessions block is refused.
+	unparsedMaxAge string
+}
+
+// defaultSessionSettings is the resolved `sessions:` block with nothing configured: both rules off,
+// which is a store that keeps everything. The off-state is a true ZERO — a sweep asked for it does
+// nothing and removes nothing — so the block costs a config that leaves it alone exactly nothing.
+func defaultSessionSettings() SessionSettings { return SessionSettings{} }
+
+// Validate rejects a `sessions:` block whose age is not a length of time to keep a record for, or
+// whose count is not a number of records to keep. Catching them here makes a typo a startup error
+// that names the key; left to the sweep they would silently resolve to "off" and the user would be
+// left wondering why their retention policy did nothing — and, unlike a cosmetic key, a retention
+// policy that quietly did nothing is only discovered by the disk filling up.
+func (s SessionSettings) Validate() error {
+	if s.unparsedMaxAge != "" {
+		return fmt.Errorf("apogee: invalid sessions.max-age %q: want a length of time like 720h or 30m, "+
+			"or 0 to keep sessions for ever", s.unparsedMaxAge)
+	}
+	if s.MaxAge < 0 {
+		return fmt.Errorf("apogee: invalid sessions.max-age %s: want 0 or more, where 0 keeps sessions "+
+			"for ever", s.MaxAge)
+	}
+	if s.MaxCount < 0 {
+		return fmt.Errorf("apogee: invalid sessions.max-count %d: want 0 or more, where 0 keeps every "+
+			"session", s.MaxCount)
+	}
+	return nil
+}
+
 // keyAccessor binds one registry row to the plumbing that carries its key through resolution:
 // which sources the key is read FROM, and where a value read from each of them is written TO. The
 // registry says what a key IS; this table says how it travels, and the two are one row apart so a
@@ -734,6 +790,16 @@ var keyAccessors = []keyAccessor{
 		fromFile: fileUI,
 	},
 	{
+		// The two `sessions:` keys are one carrier, the `ui:` block's shape — and independent rules
+		// within it: naming an age does not bound the count (toSessionSettings).
+		row:      mustKey("sessions.max-age"),
+		fromFile: fileSessions,
+	},
+	{
+		row:      mustKey("sessions.max-count"),
+		fromFile: fileSessions,
+	},
+	{
 		// Carried as the raw NAME: ResolveOptions validates it against the vocabulary internal/domain
 		// owns, so this seam neither parses nor refuses it.
 		row:      mustKey("cursor-shape"),
@@ -818,6 +884,8 @@ func filePresent(o *Options, fc fileConfig) { o.Present = fc.present() }
 
 func fileUI(o *Options, fc fileConfig) { o.UI = fc.ui() }
 
+func fileSessions(o *Options, fc fileConfig) { o.Sessions = fc.sessions() }
+
 // present, ui and contextFiles are the three optional blocks as the file leaves them: the block it
 // carries, or — where it names no block at all — the block its own mapper builds from nothing,
 // which is that block's defaults. Reaching the defaults through the mapper rather than restating
@@ -836,6 +904,14 @@ func (fc fileConfig) ui() UISettings {
 		u = *fc.UI
 	}
 	return u.toUISettings()
+}
+
+func (fc fileConfig) sessions() SessionSettings {
+	var c sessionsConfig
+	if fc.Sessions != nil {
+		c = *fc.Sessions
+	}
+	return c.toSessionSettings()
 }
 
 func (fc fileConfig) contextFiles() contextFilesSettings {
@@ -1321,6 +1397,13 @@ type fileConfig struct {
 	// and the scroll bar shown. A pointer so an absent block falls through to those defaults rather
 	// than being an explicit zero setting, which would read as `spinner-color: false`.
 	UI *uiConfig `yaml:"ui"`
+	// Sessions bounds the session store: how old a saved session may get and how many may stand
+	// before a startup sweep discards the rest. File-only (no flag/env), like the blocks above — a
+	// retention policy is a fact about this machine's disk, not about one invocation. Absent ⇒ both
+	// rules off, which is a store that keeps everything (the shipped behaviour). A pointer for the
+	// `ui:` block's reason: an absent block falls through to those defaults rather than being an
+	// explicit zero setting.
+	Sessions *sessionsConfig `yaml:"sessions"`
 }
 
 // UnconfinedHost is one Host acknowledgement (CONTEXT: Host acknowledgement): the user's
@@ -2087,6 +2170,46 @@ func (u uiConfig) toUISettings() UISettings {
 	return s
 }
 
+// sessionsConfig is the on-disk schema for the `sessions:` block. It mirrors SessionSettings with
+// yaml tags; toSessionSettings maps it across so the on-disk shape and the resolved value stay
+// independently evolvable (as uiConfig does for UISettings).
+type sessionsConfig struct {
+	// MaxAge is how long a session record is worth keeping — a length of time as
+	// `time.ParseDuration` spells it (`720h`, `30m`), or `0` to turn the age rule off. A pointer for
+	// `ui.stall-after`'s reason: it is the explicit `0` — the documented spelling of "keep for
+	// ever" — that must be distinguishable from an absent key, even though both resolve to the same
+	// off-state today. It stays a raw string at this seam because the parse can FAIL, and text no
+	// duration can be made of is carried AS WRITTEN for SessionSettings.Validate to quote.
+	MaxAge *string `yaml:"max-age"`
+	// MaxCount is how many session records a sweep may leave standing, or `0` to turn the count rule
+	// off. A pointer for MaxAge's reason above.
+	MaxCount *int `yaml:"max-count"`
+}
+
+// toSessionSettings maps the on-disk sessions block onto the resolved value, applying the defaults
+// for the keys the block leaves out. A block that sets one key therefore leaves the other at its
+// default, which is what keeps the two rules independent from the on-disk shape onward: naming an
+// age says nothing about a count, and naming a count says nothing about an age.
+func (c sessionsConfig) toSessionSettings() SessionSettings {
+	s := defaultSessionSettings()
+	if c.MaxAge != nil {
+		// An empty value reads as an absent key, `ui.stall-after`'s posture: what the pointer buys is
+		// telling an explicit `0` from a block that never named the key. This seam judges nothing —
+		// text no duration can be made of is kept for Validate to refuse and to quote.
+		if text := strings.TrimSpace(*c.MaxAge); text != "" {
+			if age, err := time.ParseDuration(text); err == nil {
+				s.MaxAge = age
+			} else {
+				s.unparsedMaxAge = text
+			}
+		}
+	}
+	if c.MaxCount != nil {
+		s.MaxCount = *c.MaxCount // a negative count is refused by SessionSettings.Validate, not here
+	}
+	return s
+}
+
 // toolsConfig is the on-disk `tools:` block — the tool roster this config runs with, as a PAIR of
 // delta lists against the default menu: the built-in tools to leave OFF it, and the ones to put
 // back ON it (ADR 0057 decision 2).
@@ -2713,6 +2836,13 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// startup error: silently resolving it to another style would leave the user staring at a
 	// spinner their config did not ask for, with nothing pointing at the typo.
 	if err := opts.UI.Validate(); err != nil {
+		return notices, err
+	}
+	// A `sessions:` block whose age is not a length of time, or whose count is not a number of
+	// records, is the same kind of loud startup error — and a louder one to get wrong silently: a
+	// retention policy that quietly resolved to "off" is discovered by the disk filling up months
+	// later, with nothing pointing at the typo.
+	if err := opts.Sessions.Validate(); err != nil {
 		return notices, err
 	}
 	// A `cursor-shape:` naming a shape no terminal cursor has is the same kind of loud startup

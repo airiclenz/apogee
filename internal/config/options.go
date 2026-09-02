@@ -367,6 +367,12 @@ type Options struct {
 	// straight to the renderer as tui.Options.
 	UI UISettings
 
+	// sessions is the resolved `sessions:` block — how old a saved session may get and how many may
+	// stand before a startup sweep discards the rest. Loaded from the config file only, like ui
+	// above, and already validated by ApplyConfig; both rules are off at their zero value, which is
+	// a store that keeps everything.
+	Sessions SessionSettings
+
 	// cursorShape is the resolved `cursor-shape:` key — the shape the prompt's caret is drawn with,
 	// as the user spelled it (empty ⇒ the renderer's default). Loaded from the config file only,
 	// like ui above, and already validated by ApplyConfig; runRoot parses it into the renderer's

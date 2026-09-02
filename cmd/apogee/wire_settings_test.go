@@ -371,6 +371,7 @@ const startupOnlyContract = "takes effect at the next start."
 // are exempt rather than reaching for one.
 var settingKeysWithNoMemberToReach = []string{
 	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "working-window",
+	"sessions.max-age", "sessions.max-count",
 }
 
 // The four START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam

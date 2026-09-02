@@ -1325,6 +1325,20 @@ var settingsTable = []settingsEntry{
 		apply:   applyInspector,
 	},
 	{
+		// The retention sweep runs once while a session is being WIRED, so nothing here can re-sweep
+		// the store for a session already open — and there is no holder to mirror onto either, since
+		// a Firing raises no sweep of its own. The write is therefore the whole of the apply, and the
+		// Description's closing sentence carries the promise.
+		key:     "sessions.max-age",
+		reaches: reachesWithoutAMember,
+		apply:   applyTheWriteAlone,
+	},
+	{
+		key:     "sessions.max-count",
+		reaches: reachesWithoutAMember,
+		apply:   applyTheWriteAlone,
+	},
+	{
 		key:     "editor",
 		reaches: reachesWithoutAMember,
 		apply: func(a settingsApplier, key, value string) (string, error) {
@@ -1607,11 +1621,13 @@ func applyValidatedSets(a settingsApplier, key, value string) (string, error) {
 // applyTheWriteAlone is the apply for a key whose whole live effect IS the write the pane has
 // already made, so there is nothing left here to dispatch.
 func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
-	// `response-reserve` is the key that is genuinely START-UP only: it is read straight off the
-	// file into the budget the session opens with and has no setter anywhere behind it. There is
-	// no seam this build could reach and none it is a candidate for.
+	// `response-reserve` and the two `sessions:` keys are the ones that are genuinely START-UP only:
+	// the reserve is read straight off the file into the budget the session opens with, and the
+	// retention rules are read while the session is being wired, so the store has already been swept
+	// by the time a pane can edit them. None of the three has a setter anywhere behind it — there is
+	// no seam this build could reach and none they are candidates for.
 	//
-	// So it takes `editor`'s answer rather than the default refusal, for `editor`'s reason turned
+	// So they take `editor`'s answer rather than the default refusal, for `editor`'s reason turned
 	// around: the write IS everything this session can do about the key, and a refusal would
 	// report a failure over a save that did exactly what the key promises. The promise is the
 	// Description's own closing sentence ("takes effect at the next start"), which the pane's

@@ -633,7 +633,15 @@ whose stem differs from the id it declares never causes another record's deletio
 
 ---
 
-## 15. `sessions.max-age` and `sessions.max-count`
+## 15. `sessions.max-age` and `sessions.max-count` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the two rows are `Editable: true` (the item's binding call), which makes `cmd/apogee`'s dispatcher guard `TestEveryEditableSettingKeyHasAnApply` fail without a `settingsTable` entry per key — "an editable key with no apply shows the human a failed save". Two entries were added in `cmd/apogee/wire_settings.go`, both `reaches: reachesWithoutAMember` with `applyTheWriteAlone` (the sweep runs while a session is WIRED, so nothing this session can do about the key beyond the write the pane already made), and both paths were added to `settingKeysWithNoMemberToReach` in `cmd/apogee/wire_settings_test.go`. Neither file is in the item's Files list; the work is forced by the item's own `Editable` call, not chosen.
+NOTES (2026-09-02): consequential edit — cmd/apogee/wire_settings.go: made necessary by the two new write-alone applies; `applyTheWriteAlone`'s doc comment said "`response-reserve` is THE key that is genuinely START-UP only", which the two `sessions:` keys make false — re-worded in the same edit to name all three and why each has no seam.
+NOTES (2026-09-02): consequential edit — cmd/apogee/settingsrows_test.go: made necessary by the two new registry rows; `TestSettingsRowsFormatEffectiveValues` enumerates a pinned value per registry key and fails on a count mismatch ("this table pins 48 values for 50 registry keys"). The two rows were added with the values the fixture resolves — `0s` and `0`, each off-state printing itself.
+NOTES (2026-09-02): the `Read` projections follow `ui.stall-after`'s precedent (`Duration.String()`), so the off-state renders `0s` rather than blank and the value seeding an edit field is one the next commit persists unchanged; `Default` is `"0s"`/`"0"` for the same reason, and because the two dispatcher guards drive every editable key through its declared `Default`.
+NOTES (2026-09-02): registry order was kept as the item directs (immediately after `ui.skill-suggestions`, matching the template's block placement), which puts both rows inside the `/settings` pane's **Interface** section — sections are runs over the registry order (`cmd/apogee/settingsrows.go`), and `settingSections` is not this item's file. A "Sessions" section opening at `sessions.max-age` would be a one-line addition there if the owner wants the rows under their own header.
+NOTES (2026-09-02): the manual section landed immediately above `## The servers you run models on`, and states the invariant item 16 must honour ("never removes the session being resumed", `--continue`/`/resume` resolved first) as the item directs.
+NOTES (2026-09-02): the refusal half of the new parse test was mutation-checked — deleting only the `opts.Sessions.Validate()` call in `ApplyConfig` fails all three refusal cases; restored before finishing.
 
 **What.** Add the `sessions:` block, both keys absent-by-default so behaviour is unchanged out of the
 box: `sessionsConfig{ MaxAge *string \`yaml:"max-age"\`; MaxCount *int \`yaml:"max-count"\` }` on

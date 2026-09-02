@@ -3982,6 +3982,130 @@ func TestApplyConfigStallAfter(t *testing.T) {
 	}
 }
 
+// The `sessions:` block, in every shape it takes: both keys together, either one alone, the absent
+// block that is the shipped behaviour, and the two refusals — a count below zero and a max-age that
+// is no length of time at all. The pair is what pins the rules INDEPENDENT: a block naming one key
+// leaves the other at its off-state, so a config that bounds the age has not silently bounded the
+// count as well.
+func TestApplyConfigSessionsRetention(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		yaml    string
+		want    SessionSettings
+		wantErr string
+	}{
+		{
+			name: "both keys round-trip",
+			yaml: "sessions:\n  max-age: 720h\n  max-count: 200\n",
+			want: SessionSettings{MaxAge: 720 * time.Hour, MaxCount: 200},
+		},
+		{
+			name: "an age alone leaves the count off",
+			yaml: "sessions:\n  max-age: 30m\n",
+			want: SessionSettings{MaxAge: 30 * time.Minute},
+		},
+		{
+			name: "a count alone leaves the age off",
+			yaml: "sessions:\n  max-count: 5\n",
+			want: SessionSettings{MaxCount: 5},
+		},
+		{
+			name: "an explicit zero pair is the off-state said out loud",
+			yaml: "sessions:\n  max-age: 0\n  max-count: 0\n",
+			want: SessionSettings{},
+		},
+		{name: "no sessions block at all keeps everything", yaml: "", want: SessionSettings{}},
+		{name: "the block without either key keeps everything", yaml: "sessions:\n", want: SessionSettings{}},
+		{
+			name:    "a negative age is refused",
+			yaml:    "sessions:\n  max-age: -1h\n",
+			wantErr: "invalid sessions.max-age -1h",
+		},
+		{
+			name:    "text that is no duration is refused, quoted as written",
+			yaml:    "sessions:\n  max-age: fortnightly\n",
+			wantErr: `invalid sessions.max-age "fortnightly"`,
+		},
+		{
+			name:    "a negative count is refused",
+			yaml:    "sessions:\n  max-count: -1\n",
+			wantErr: "invalid sessions.max-count -1",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.yaml)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("ApplyConfig accepted %q; want it refused", tt.yaml)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.Sessions != tt.want {
+				t.Errorf("opts.sessions = %+v; want %+v", opts.Sessions, tt.want)
+			}
+		})
+	}
+}
+
+// The two `sessions:` rows the /settings surface edits, checked where the registry's own mechanical
+// guards cannot reach: that each hook refuses exactly what startup refuses and accepts the spellings
+// the key documents. The empty value is the field's way of saying "the default", and `0` is the
+// documented spelling of "off" — both must be writable, or a human clearing the field would be told
+// their own default is invalid.
+func TestSessionsSettingKeyValidators(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		path, value, wantIn string
+	}{
+		{path: "sessions.max-age", value: "720h"},
+		{path: "sessions.max-age", value: "30m"},
+		{path: "sessions.max-age", value: "0"},
+		{path: "sessions.max-age", value: "0s"},
+		{path: "sessions.max-age", value: ""},
+		{path: "sessions.max-count", value: "0"},
+		{path: "sessions.max-count", value: "200"},
+		{path: "sessions.max-age", value: "fortnightly", wantIn: "invalid sessions.max-age"},
+		{path: "sessions.max-age", value: "-1h", wantIn: "invalid sessions.max-age"},
+		{path: "sessions.max-age", value: "720", wantIn: "invalid sessions.max-age"}, // a bare number that is not 0 has no unit
+		{path: "sessions.max-count", value: "-1", wantIn: "invalid sessions.max-count"},
+		{path: "sessions.max-count", value: "many", wantIn: "invalid sessions.max-count"},
+	} {
+		t.Run(tt.path+"="+tt.value, func(t *testing.T) {
+			t.Parallel()
+			row, ok := LookupKey(tt.path)
+			if !ok || row.Validate == nil {
+				t.Fatalf("%s has no validate hook", tt.path)
+			}
+			err := row.Validate(tt.value)
+			if tt.wantIn == "" {
+				if err != nil {
+					t.Fatalf("validate %s = %q: %v; want it accepted", tt.path, tt.value, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("validate %s = %q: want a refusal naming the key", tt.path, tt.value)
+			}
+			if !strings.Contains(err.Error(), tt.wantIn) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantIn)
+			}
+		})
+	}
+}
+
 // A `color-scheme:` naming a scheme that does not exist is NOT a startup error — the one ui key
 // that is deliberately forgiving (ADR 0040 design call 8). The name travels through resolution as
 // written and the palette is resolved later, where an unresolvable one costs a warning and the

@@ -405,9 +405,13 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.stall-after":         "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
 		"ui.inspector":           "true",  // armed for THIS run, which is the only thing a startup-only key can report
 		"ui.skill-suggestions":   "false", // turned off in the fixture: a bool row reports the value, never the default
-		"cursor-shape":           "block", // unset, so the declared default is what is in force
-		"editor":                 "code -w",
-		"bypass":                 "true",
+		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
+		// count's is "0", each a spelling the key takes back.
+		"sessions.max-age":   "0s",
+		"sessions.max-count": "0",
+		"cursor-shape":       "block", // unset, so the declared default is what is in force
+		"editor":             "code -w",
+		"bypass":             "true",
 		// The explicit `false` entry is not an enabled one; the two default-on off-ramps are (ADR 0070).
 		"mechanisms":            "4 mechanisms",
 		"validated-sets.enable": "true",

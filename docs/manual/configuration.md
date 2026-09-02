@@ -571,6 +571,32 @@ because the rungs below this key are not this key's to record. If nothing on the
 program this machine has, the `⏎` jump refuses on the row and names all three ways to set one
 rather than repeating a "not found in `$PATH`" you cannot act on.
 
+## Keeping the session store bounded — `sessions:`
+
+Every session apogee runs is saved under `~/.apogee/sessions/`, and nothing has ever removed one —
+which is what makes `--continue` and `/resume` work months later, and also what makes the folder
+grow for as long as you use apogee. The `sessions:` block is the sweep. Both of its keys are **off
+unless you name them**, so a config that leaves the block out keeps every session it always kept.
+
+```yaml
+# ~/.apogee/config.yaml
+sessions:
+  max-age: 720h    # 30 days
+  max-count: 200
+```
+
+`max-age` discards sessions last updated longer ago than the duration it names — written the way Go
+spells one (`720h`, `30m`), with `0` meaning *keep them for ever*. `max-count` keeps at most that
+many sessions, newest first, and `0` means *keep every one*. The two are independent rules, so you
+may set either or both; with both set, a session survives only if it clears both.
+
+The sweep runs **once at startup**, silently: it reports nothing, and a file it cannot read is left
+exactly where it is rather than being removed on a guess. It never removes the session being
+resumed — a `--continue` or a `/resume` pick is resolved first, so the session you are opening is
+kept whatever the rules say about it. An edit through `/settings` therefore takes effect at the next
+start rather than in the session you are in. Config-file only (no flag or environment variable);
+what a session record holds and how one is resumed is on the [sessions page](sessions.md).
+
 ## The servers you run models on
 
 The `servers:` list is the **single definition** of what apogee can talk to — one

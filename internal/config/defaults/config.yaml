@@ -786,6 +786,21 @@ ui:
   # skill-suggestions: true   # false = never paint the skill-suggestion band above the input box
 
 # =============================================================================
+# Keeping the session store bounded — every session you run is saved under ~/.apogee/sessions/ and
+# nothing has ever removed one, so the folder grows for as long as you use apogee. These two keys
+# are the sweep: apogee applies them once at startup, silently, and never touches the session it is
+# resuming. Both are OFF unless you name them — leave this block out and the store keeps everything,
+# exactly as it always has. They are independent rules, so you may set either or both.
+#   max-age    discard sessions last updated longer ago than this — a length of time written the way
+#              Go spells one (720h = 30 days, 30m); 0 keeps them for ever
+#   max-count  keep at most this many sessions, newest first; 0 keeps every one
+# Config-file only (no flag or env).
+#
+# sessions:
+#   max-age: 720h    # 30 days
+#   max-count: 200
+
+# =============================================================================
 # The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:
 # block (the default) | underline | bar. Nothing blinks, and there is no key to make it blink. The
 # shape the terminal itself is configured with cannot be inherited while apogee runs: a full-screen

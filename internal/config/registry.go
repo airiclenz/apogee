@@ -552,6 +552,30 @@ var KeyRegistry = []Key{
 		Read: func(o Options) string { return boolValue(o.UI.SkillSuggestions) },
 	},
 	{
+		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
+		// posture above, for the same reason: one key is not a vocabulary, and the kind carries the
+		// shape while the hook carries the contract the kind cannot.
+		Path: "sessions.max-age", Kind: KindString, Default: "0s",
+		Editable: true,
+		Validate: validateSessionsMaxAge,
+		Desc: "Discard saved sessions older than this at startup; 0 keeps them for ever. " +
+			"Takes effect at the next start.",
+		// The age as a DURATION prints itself (`720h0m0s`), a spelling the key takes back — so the
+		// value seeding an edit field is one the next commit persists unchanged.
+		Read: func(o Options) string { return o.Sessions.MaxAge.String() },
+	},
+	{
+		// A count, and the range is the whole contract — present.port's shape with a floor and no
+		// ceiling: how many records are too many is the user's call, and only a negative one is
+		// meaningless.
+		Path: "sessions.max-count", Kind: KindInt, Default: "0",
+		Editable: true,
+		Validate: validateSessionsMaxCount,
+		Desc: "Keep at most this many saved sessions, newest first; 0 keeps every one. " +
+			"Takes effect at the next start.",
+		Read: func(o Options) string { return strconv.Itoa(o.Sessions.MaxCount) },
+	},
+	{
 		Path: "cursor-shape", Kind: KindEnum, Default: "block", EnumValues: cursorShapeValues,
 		Editable: true,
 		Validate: validateCursorShapeName,
@@ -806,6 +830,28 @@ func validateSpinnerName(value string) error {
 // means "the default" and the `0` that means "off" are the seam's calls, not this hook's.
 func validateStallAfter(value string) error {
 	return uiConfig{StallAfter: &value}.toUISettings().Validate()
+}
+
+// validateSessionsMaxAge refuses a `sessions.max-age:` that is not a length of time to keep a
+// record for, through the startup path itself: the yaml seam that reads the text
+// (toSessionSettings) and the check that judges what it made of it (SessionSettings.Validate). It is
+// validateStallAfter's shape for validateStallAfter's reason — going through the seam is what keeps
+// the two answers one answer, so the empty value that means "the default" and the `0` that means
+// "for ever" are the seam's calls rather than this hook's.
+func validateSessionsMaxAge(value string) error {
+	return sessionsConfig{MaxAge: &value}.toSessionSettings().Validate()
+}
+
+// validateSessionsMaxCount refuses a `sessions.max-count:` that is not a number of records to keep,
+// through the same check startup makes on the parsed block (SessionSettings.Validate) rather than a
+// second range literal — validatePresentPort's shape.
+func validateSessionsMaxCount(value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("apogee: invalid sessions.max-count %q: want a number of sessions to keep "+
+			"(0 — the default — keeps every one)", value)
+	}
+	return SessionSettings{MaxCount: n}.Validate()
 }
 
 // validateColorSchemeName refuses a name that could not be a scheme's file name — empty, or one
