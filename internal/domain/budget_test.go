@@ -70,6 +70,49 @@ func TestBudgetHistoryExceedsAllocation(t *testing.T) {
 	}
 }
 
+// TestBudgetHistoryExceedsFraction pins the movable line: the same strict >, the same inert
+// cases as HistoryExceedsAllocation, and — at fraction 1.0 — the same answer as the sibling,
+// so a reducer reading a fraction and a trigger reading the allocation cannot disagree.
+func TestBudgetHistoryExceedsFraction(t *testing.T) {
+	t.Parallel()
+	// 400 chars ⇒ 100 estimated tokens at 4 chars/token.
+	msgs := []Message{{Role: RoleUser, Content: strings.Repeat("x", 400)}}
+	tests := []struct {
+		name     string
+		budget   Budget
+		fraction float64
+		want     bool
+	}{
+		{"above the fraction trips", Budget{CharsPerToken: 4, History: 200}, 0.4, true},
+		{"at exactly the fraction does not trip (strict >)", Budget{CharsPerToken: 4, History: 200}, 0.5, false},
+		{"below the fraction does not trip", Budget{CharsPerToken: 4, History: 200}, 0.6, false},
+		{"zero History allocation never trips", Budget{CharsPerToken: 4}, 0.4, false},
+		{"negative History allocation never trips", Budget{CharsPerToken: 4, History: -5}, 0.4, false},
+		{"uncalibrated ratio is inert", Budget{History: 50}, 0.4, false},
+		{"non-positive fraction is inert", Budget{CharsPerToken: 4, History: 200}, 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.budget.HistoryExceedsFraction(msgs, tc.fraction); got != tc.want {
+				t.Errorf("%+v.HistoryExceedsFraction(msgs, %v) = %v, want %v",
+					tc.budget, tc.fraction, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("fraction 1.0 agrees with HistoryExceedsAllocation", func(t *testing.T) {
+		t.Parallel()
+		for _, history := range []int{0, -5, 50, 99, 100, 101, 200} {
+			b := Budget{CharsPerToken: 4, History: history}
+			if got, want := b.HistoryExceedsFraction(msgs, 1.0), b.HistoryExceedsAllocation(msgs); got != want {
+				t.Errorf("History=%d: HistoryExceedsFraction(msgs, 1.0) = %v, HistoryExceedsAllocation = %v",
+					history, got, want)
+			}
+		}
+	})
+}
+
 // TestPromptChars_CountsContentToolArgsAndMenu proves the char measure sums message contents,
 // tool-call arguments, and the tool menu's names/descriptions/schemas — the same components on both
 // sides of the ratio.

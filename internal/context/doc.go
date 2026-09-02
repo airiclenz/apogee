@@ -1,7 +1,8 @@
 // Package context manages the model's working context: Budget allocation, the
-// context builder, generative Compaction (the default reducer), and tool-result
-// capping. It is three of the four context-reduction seams; the fourth, History
-// truncation, is a separate off-by-default Mechanism (package mechanisms).
+// context builder, generative Compaction (the default reducer), stale-tool-result
+// Pruning, and tool-result capping. It is three of the four context-reduction seams;
+// the fourth, History truncation, is a separate off-by-default Mechanism (package
+// mechanisms).
 //
 // Generative Compaction is implemented (Compact): it summarizes a conversation and
 // replaces the folded history with a single summary message, keeping the protected
@@ -13,6 +14,17 @@
 // (the summarizer's system prompt), summary-tail-instruction.txt (what the transcript is for) and
 // summary-message-prefix.txt (the label on the folded summary) — hold the wording as editable prose
 // inside the same single binary.
+//
+// Stale-tool-result Pruning is implemented (Prune, prune.go): the cheap, NON-generative
+// reducer that rewrites old tool results into a one-line stub naming the call that produced
+// them, so a long Exchange is relieved of dumps the model has finished with without spending
+// an upstream call. It is pure policy — trigger and per-result sizes both measured through the
+// Budget (Budget.HistoryExceedsFraction), a 60%-of-History start and a 40% stop, the most
+// recent PruneKeepTurns tool-calling Turns never touched, oldest Turn and largest result
+// first. Its wide band is deliberate: the rewrite is committed to history, which costs the
+// upstream server's prefix cache once per prune (ADR 0023 §6), so rare and larger beats
+// frequent and small. WHEN it runs (a Turn boundary), whether it is enabled, and what the
+// user is told about it are the engine's business, not this package's.
 //
 // Budget allocation and honest token accounting are implemented (Allocate, TokenEstimator):
 // Allocate splits the discovered context window across the parts of a request (response reserve,

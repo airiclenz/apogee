@@ -40,6 +40,20 @@ func (b Budget) HistoryExceedsAllocation(msgs []Message) bool {
 	return b.EstimateTokens(PromptChars(msgs, nil)) > b.History
 }
 
+// HistoryExceedsFraction reports whether the estimated token size of msgs has outgrown
+// the given fraction of the Budget's History allocation. It is HistoryExceedsAllocation
+// with a movable line: the same PromptChars measure and the same calibrated ratio, so a
+// reducer that fires at one fraction and stops at another is reading ONE scale, and its
+// trigger cannot drift from the per-message sizes it then compares. A non-positive
+// History (the window is unknown) or a non-positive fraction never trips, for the same
+// reason the sibling stays inert on an un-measured guess.
+func (b Budget) HistoryExceedsFraction(msgs []Message, fraction float64) bool {
+	if b.History <= 0 || fraction <= 0 {
+		return false
+	}
+	return float64(b.EstimateTokens(PromptChars(msgs, nil))) > float64(b.History)*fraction
+}
+
 // PromptChars is a stable character measure of a request's prompt — the message contents and
 // tool-call arguments plus the tool menu's names, descriptions, and schemas — used both as the
 // estimator's calibration sample (internal/context.TokenEstimator.Calibrate) and as the basis
