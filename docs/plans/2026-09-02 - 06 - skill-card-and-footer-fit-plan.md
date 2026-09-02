@@ -100,7 +100,23 @@ a wire record with `Solo:false` replays solo. Adjust the registry-walking tests
 
 ---
 
-## 2. Adjacent skill fetches group under one `✦ Skill (N)` umbrella
+## 2. Adjacent skill fetches group under one `✦ Skill (N)` umbrella — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the plan named `internal/tui/doc.go` under **Files:** for "the new file, if any"
+— no new file was needed (the generalised derivation stayed in `transcript.go` beside the rule it
+replaces), so `doc.go` and its `docmap_test` are untouched.
+
+NOTES (2026-09-02): `resolveBlock`'s grouped-delegation body was extracted verbatim into
+`(*transcript).resolveGroup(..., shape blockShape)` so the skill branch resolves through the SAME
+block rule rather than a second copy of it — the plan's "one grouping mechanism" derived call
+applied to the resolver as well as to the derivation. The delegation branch is now a one-line call
+to it; behaviour is unchanged (the four delegation pins the plan names all pass).
+
+NOTES (2026-09-02): a skill group interrupted by an expanded member paints the spec's `┊` seam
+(docs/layout/tool-layout.md:217, "another grouped sub-agent followed after the expanded sub-agent").
+The comment beside `closes` said nothing draws it any more since ADR 0063 — still true of
+delegations, made false in general by this item, so that comment was corrected in place
+(`internal/tui/render.go`, already in FILES). The seam itself is left as the spec words it.
 
 **What.** Closes the rest of `ISSUES.md:28`. After item 1 a skill fetch is solo, so two adjacent
 fetches paint as two standalone blocks; the defect asks for the delegation shape — one umbrella,

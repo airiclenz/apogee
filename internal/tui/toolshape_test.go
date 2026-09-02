@@ -639,3 +639,55 @@ func TestSkillFetchesNeverJoinTheToolsSuperGroup(t *testing.T) {
 		}
 	}
 }
+
+// The umbrella is broken by exactly what breaks a fan-out's: anything that is not a fetch standing
+// at the group's own depth. A narration between two of them leaves two lone cards — the shape a
+// single fetch has always had — rather than one list spanning the sentence.
+func TestSkillGroupBreaksAtANarration(t *testing.T) {
+	tr := &transcript{}
+	skillFetch(tr, "c1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+	tr.apply(domain.MessageEvent{Text: "now the release"})
+	skillFetch(tr, "c2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
+
+	want := strings.Join([]string{
+		"✦ Skill",
+		groupMemberLine("  ┕ Coding Standards ⋯ +3 more lines"),
+		"",
+		"✦ now the release",
+		"",
+		"✦ Skill",
+		groupMemberLine("  ┕ Brew Release ⋯ +3 more lines"),
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("the narration did not break the group:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// Mixed traffic keeps TIME ORDER and its three shapes apart: the reads either side fold into their
+// own "✦ Tools" umbrellas, the fetches between them into one "✦ Skill (2)", and nothing crosses —
+// the never-group mark keeps a fetch out of the umbrella (presentToolCall) and the umbrella's own
+// rule ends a run where the fetch stands.
+func TestSkillGroupSitsBetweenTwoToolUmbrellas(t *testing.T) {
+	tr := &transcript{}
+	readCall(tr, "r1", "a.go", 1, 5, 0)
+	readCall(tr, "r2", "b.go", 1, 5, 0)
+	skillFetch(tr, "c1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+	skillFetch(tr, "c2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
+	readCall(tr, "r3", "c.go", 1, 5, 0)
+	readCall(tr, "r4", "d.go", 1, 5, 0)
+
+	want := strings.Join([]string{
+		"✦ Tools (2 calls)",
+		groupMemberLine("  ┕ Read (2) ⋯ 10 lines"),
+		"",
+		"✦ Skill (2)",
+		groupMemberLine("  ┝ Coding Standards ⋯"),
+		groupMemberLine("  ┕ Brew Release ⋯"),
+		"",
+		"✦ Tools (2 calls)",
+		groupMemberLine("  ┕ Read (2) ⋯ 10 lines"),
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("mixed traffic mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}

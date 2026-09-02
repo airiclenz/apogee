@@ -129,6 +129,72 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	})
 }
 
+// Adjacent skill fetches fold under ONE "✦ Skill (N)" umbrella, one row per fetch, in the very
+// shape the fan-out above pins for delegations (ISSUES.md, "load_skill renders as a raw tool") —
+// because it is the same derivation and the same painter, asked of another tool name (ownGroup,
+// renderSubAgentGroup). Each row carries the SKILL that answered, off the retarget item 1 landed,
+// and none of the delegation-only markings: no ✓ for having reported, no run to open.
+func TestRenderSkillGroupSketchStates(t *testing.T) {
+	build := func(fetches ...[3]string) *transcript {
+		tr := &transcript{}
+		for _, f := range fetches {
+			skillFetch(tr, f[0], f[1], "<skill: "+f[2]+">\nUse gofmt.\n</skill>\n")
+		}
+		return tr
+	}
+	standards := [3]string{"c1", "format Go", "Coding Standards"}
+	release := [3]string{"c2", "cut a release", "Brew Release"}
+	grill := [3]string{"c3", "grill me", "Grill Me"}
+
+	t.Run("two fetches are one umbrella", func(t *testing.T) {
+		want := strings.Join([]string{
+			"✦ Skill (2)",
+			groupMemberLine("  ┝ Coding Standards ⋯"),
+			groupMemberLine("  ┕ Brew Release ⋯"),
+		}, "\n")
+		if got := renderPlain(build(standards, release), 80); got != want {
+			t.Errorf("two fetches mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("three fetches are one umbrella", func(t *testing.T) {
+		want := strings.Join([]string{
+			"✦ Skill (3)",
+			groupMemberLine("  ┝ Coding Standards ⋯"),
+			groupMemberLine("  ┝ Brew Release ⋯"),
+			groupMemberLine("  ┕ Grill Me ⋯"),
+		}, "\n")
+		if got := renderPlain(build(standards, release, grill), 80); got != want {
+			t.Errorf("three fetches mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	// A fetch heads no run, so a member row opens the skill's own text IN PLACE — the inline expand
+	// every other folded call gets (renderGroupMember) — and never a run view. The list is not
+	// re-headed by the interruption either: the rows after the open member resume headerless.
+	t.Run("a member opens inline, never a run view", func(t *testing.T) {
+		tr := build(standards, release)
+		if tr.entries[0].headsRun() || tr.entries[0].opensRun() {
+			t.Fatal("a skill fetch heads a run; opensRun/headsRun must stay keyed on sub_agent")
+		}
+		if !tr.setExpanded(0, true) {
+			t.Fatal("setExpanded(0, true) = false; a skill member expands in place")
+		}
+		got := renderPlain(tr, 80)
+		for _, line := range []string{"✦ Skill (2)", "│ Use gofmt.", groupMemberLine("  ┕ Brew Release ⋯")} {
+			if !strings.Contains(got, line) {
+				t.Errorf("the open group is missing %q:\n%s", line, got)
+			}
+		}
+		if n := strings.Count(got, "✦ Skill"); n != 1 {
+			t.Errorf("the open member re-headed the list: %d headers in\n%s", n, got)
+		}
+		if strings.Contains(got, subAgentOpenMarker) {
+			t.Errorf("the skill group drew the run marker %q:\n%s", subAgentOpenMarker, got)
+		}
+	})
+}
+
 // A fan-out's results arrive as ONE trailing burst, in call order, once every child has joined (ADR
 // 0039 decision 4) — so the pairing that marks a call done says nothing about when that delegation
 // actually stopped working, and a member that finished first would read as working for as long as

@@ -68,6 +68,7 @@ const (
 	shapeSubAgentRun                     // renderSubAgentRun — the call plus the run nested under it
 	shapeToolSuper                       // renderSuperGroup — the umbrella over a run of 2+ groupable calls
 	shapeSubAgentGroup                   // renderSubAgentGroup — the folded list of adjacent delegations
+	shapeSkillGroup                      // renderSubAgentGroup — the folded list of adjacent skill fetches
 )
 
 // entryState is the half of one entry a painter reads that MOVES: the view flags a click flips, the

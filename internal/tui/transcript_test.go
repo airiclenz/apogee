@@ -2484,6 +2484,15 @@ func subAgentCard(name string, depth int) entry {
 	}, "", workspaceRoot{})}
 }
 
+// skillCard is a load_skill call entry built by the PRESENTER, for subAgentCard's reason: the name
+// the grouping rule keys on and the solo mark that keeps a fetch out of a mixed umbrella are the
+// ones the live path sets rather than facts this test asserts about itself.
+func skillCard(query string, depth int) entry {
+	return entry{kind: entryToolCall, depth: depth, tool: presentToolCall(domain.ToolCall{
+		ID: "c1", Tool: "load_skill", Arguments: []byte(`{"query":"` + query + `"}`),
+	}, "", workspaceRoot{})}
+}
+
 // A super-group forms at TWO groupable calls at one depth — one same-label run of 2+, or adjacent
 // runs of different labels, a lone call counting as a run of 1 — and ends at the first thing that is
 // not such a run: a non-tool entry, a sub-agent block, a call standing at another depth, a call the
@@ -2685,20 +2694,20 @@ func TestTranscriptSubAgentGroupFormation(t *testing.T) {
 		name    string
 		entries []entry
 		at      int
-		want    []subAgentBlock
+		want    []groupBlock
 	}{
 		{
 			name:    "two span-less delegations are a group",
 			entries: []entry{subAgentCard("scout", 0), subAgentCard("builder", 0)},
 			at:      0,
-			want:    []subAgentBlock{{at: 0, span: 0}, {at: 1, span: 0}},
+			want:    []groupBlock{{at: 0, span: 0}, {at: 1, span: 0}},
 		},
 		{
 			name: "the walk steps over each delegation's span",
 			entries: []entry{subAgentCard("scout", 0), toolCallCard("Read", "a.go", 1),
 				toolCallCard("Read", "b.go", 1), subAgentCard("builder", 0), toolCallCard("Terminal", "go build", 1)},
 			at:   0,
-			want: []subAgentBlock{{at: 0, span: 2}, {at: 3, span: 1}},
+			want: []groupBlock{{at: 0, span: 2}, {at: 3, span: 1}},
 		},
 		{
 			name:    "a lone delegation heads no group",
@@ -2754,7 +2763,7 @@ func TestTranscriptSubAgentGroupAtEveryMember(t *testing.T) {
 		subAgentCard("builder", 0),
 		subAgentCard("checker", 0),
 	}
-	want := []subAgentBlock{{at: 0, span: 1}, {at: 2, span: 0}, {at: 3, span: 0}}
+	want := []groupBlock{{at: 0, span: 1}, {at: 2, span: 0}, {at: 3, span: 0}}
 	for pos, member := range want {
 		group, at, ok := subAgentGroupAt(entries, member.at)
 		if !ok {
@@ -2786,13 +2795,124 @@ func TestTranscriptSubAgentGroupNeverJoinsAnUmbrella(t *testing.T) {
 		subAgentCard("builder", 0),
 		toolCallCard("Terminal", "go build", 0),
 	}
-	want := []subAgentBlock{{at: 1, span: 0}, {at: 2, span: 0}}
+	want := []groupBlock{{at: 1, span: 0}, {at: 2, span: 0}}
 	if got := subAgentGroup(entries, 1); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the two delegations = %v; want the group %v", got, want)
 	}
 	for at := 0; at < len(entries); at++ {
 		if got := toolSuperGroup(entries, at); got != nil {
 			t.Errorf("toolSuperGroup(…, %d) = %v; a delegation neither heads an umbrella nor lets one span it", at, got)
+		}
+	}
+}
+
+// The group rule is keyed on a NAME, not on delegations: adjacent skill fetches fold under one
+// umbrella by the very walk a fan-out folds by (ownGroup), with the same floor of two and the same
+// breakers. A fetch heads no run, so every member's span is 0 and the walk steps by one — the case
+// the shared step has to survive.
+func TestTranscriptSkillGroupFormation(t *testing.T) {
+	t.Parallel()
+
+	note := entry{kind: entryNote, text: "cancelled"}
+	cases := []struct {
+		name    string
+		entries []entry
+		at      int
+		want    []groupBlock
+	}{
+		{
+			name:    "two adjacent fetches are a group",
+			entries: []entry{skillCard("format Go", 0), skillCard("cut a release", 0)},
+			at:      0,
+			want:    []groupBlock{{at: 0, span: 0}, {at: 1, span: 0}},
+		},
+		{
+			name:    "a lone fetch heads no group",
+			entries: []entry{skillCard("format Go", 0), toolCallCard("Read", "a.go", 0)},
+			at:      0,
+		},
+		{
+			name:    "a narration between two fetches breaks the group",
+			entries: []entry{skillCard("format Go", 0), note, skillCard("cut a release", 0)},
+			at:      0,
+		},
+		{
+			name:    "a call to another tool breaks the group",
+			entries: []entry{skillCard("format Go", 0), toolCallCard("Read", "a.go", 0), skillCard("cut", 0)},
+			at:      0,
+		},
+		{
+			name:    "a fetch at another depth is no neighbour",
+			entries: []entry{skillCard("format Go", 0), skillCard("cut a release", 1)},
+			at:      0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := ownGroup(tc.entries, tc.at, loadSkillToolName); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("ownGroup(…, %d, load_skill) = %v; want %v", tc.at, got, tc.want)
+			}
+		})
+	}
+}
+
+// The two participants never mix, and the delegation rule is unmoved by the second one existing:
+// a run of fetches heads no sub-agent group, a run of delegations heads no skill group, and a fetch
+// standing between two delegations breaks their list exactly as any other call does.
+func TestTranscriptGroupsAreKeyedOnTheirOwnTool(t *testing.T) {
+	t.Parallel()
+
+	fetches := []entry{skillCard("format Go", 0), skillCard("cut a release", 0)}
+	for at := range fetches {
+		if got := subAgentGroup(fetches, at); got != nil {
+			t.Errorf("subAgentGroup(fetches, %d) = %v; a fetch is no delegation", at, got)
+		}
+	}
+
+	delegations := []entry{subAgentCard("scout", 0), subAgentCard("builder", 0)}
+	for at := range delegations {
+		if got := ownGroup(delegations, at, loadSkillToolName); got != nil {
+			t.Errorf("ownGroup(delegations, %d, load_skill) = %v; a delegation is no fetch", at, got)
+		}
+	}
+
+	split := []entry{subAgentCard("scout", 0), skillCard("format Go", 0), subAgentCard("builder", 0)}
+	if got := subAgentGroup(split, 0); got != nil {
+		t.Errorf("subAgentGroup(split, 0) = %v; a fetch between two delegations ends their list", got)
+	}
+	if _, _, ok := ownGroupAt(split, 1, loadSkillToolName); ok {
+		t.Error("the lone fetch between two delegations reports a group of its own")
+	}
+}
+
+// ownGroupAt answers about the group an entry BELONGS to at every member of it, for the second
+// participant exactly as it does for the first — which is what keeps a fetch list from growing a
+// second "✦ Skill (N)" header at every row.
+func TestTranscriptSkillGroupAtEveryMember(t *testing.T) {
+	t.Parallel()
+
+	entries := []entry{
+		skillCard("format Go", 0), skillCard("cut a release", 0), skillCard("grill me", 0),
+		toolCallCard("Read", "a.go", 0),
+	}
+	want := []groupBlock{{at: 0, span: 0}, {at: 1, span: 0}, {at: 2, span: 0}}
+	for pos, member := range want {
+		group, at, ok := ownGroupAt(entries, member.at, loadSkillToolName)
+		if !ok {
+			t.Fatalf("entries[%d] belongs to no group; it is member %d of one", member.at, pos)
+		}
+		if !reflect.DeepEqual(group, want) {
+			t.Errorf("the group at entries[%d] = %v; want %v", member.at, group, want)
+		}
+		if at != pos {
+			t.Errorf("entries[%d] reports position %d in its group; want %d", member.at, at, pos)
+		}
+	}
+	for _, outside := range []int{3, 7, -1} {
+		if _, _, ok := ownGroupAt(entries, outside, loadSkillToolName); ok {
+			t.Errorf("entries[%d] reports a skill group; it heads none", outside)
 		}
 	}
 }

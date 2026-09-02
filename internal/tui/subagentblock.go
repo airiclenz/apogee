@@ -374,7 +374,7 @@ func subAgentPromptDetails(task string) []detailLine {
 
 // subAgentMember is one row of a folded sub-agent group as the painter needs it: the delegation's
 // own call entry, the run nested beneath it, and where that entry sits relative to the block's
-// head. It is the paint-time reading of [subAgentBlock], which names the same member by index — the
+// head. It is the paint-time reading of [groupBlock], which names the same member by index — the
 // indexes are what a click resolves through and the entries are what is drawn, so the two shapes
 // are kept apart rather than one being made to serve both (renderView builds these).
 //
@@ -433,29 +433,38 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 	for _, m := range members {
 		marker, spanned := branchMarker(m.last), subAgentFramed(m.head, len(m.span))
 		view := m.head.tool
-		// A QUEUED member is none of the readings below: it has no work to summarise and
-		// nothing to open, so it says the one word and takes the ordinary member painter with an
-		// empty body — which is what leaves it without an indicator and without a click target
-		// (scheduledSubAgentView). It cannot be spanned by construction: a delegation with entries
-		// behind it has started.
-		//
-		// A FRAMED member has no open reading to differ from: expanding it opens its run view
-		// (ADR 0063), so the row it leaves behind in the list is the collapsed one whatever its own
-		// fold flag says.
-		switch {
-		case subAgentScheduled(m.head, len(m.span)):
-			view = scheduledSubAgentView(m.head)
-		case spanned:
-			view = collapsedSubAgentView(m.head, m.span)
-		case m.head.expanded:
-			// An OPEN member that never ran is unframed exactly as a lone one is, and shows the
-			// prompt it carried for the same reason (unframedSubAgentView): folding changes the
-			// frame around a delegation and never what the delegation shows of itself. It is asked
-			// here rather than inside the member painter so the promote-guard below sees the body
-			// the row is actually about to hide.
-			view = unframedSubAgentView(m.head)
+		// Every reading below is a DELEGATION's, so a member that heads no run takes none of them
+		// and stands as the view its own presenter built. That is the whole of what another tool's
+		// group needs from this painter (a skill fetch, resolveBlock): an unspanned, ungated member
+		// falls to the shared renderGroupMember below — the inline expand every other folded call
+		// gets — and the ✓ a delegation earns by reporting is not a mark this row can wear, because
+		// what it would be reading (subAgentFinished, off the pairing) is true of every settled
+		// call there is.
+		if m.head.tool.headsRun() {
+			// A QUEUED member is none of the readings below: it has no work to summarise and
+			// nothing to open, so it says the one word and takes the ordinary member painter with an
+			// empty body — which is what leaves it without an indicator and without a click target
+			// (scheduledSubAgentView). It cannot be spanned by construction: a delegation with entries
+			// behind it has started.
+			//
+			// A FRAMED member has no open reading to differ from: expanding it opens its run view
+			// (ADR 0063), so the row it leaves behind in the list is the collapsed one whatever its own
+			// fold flag says.
+			switch {
+			case subAgentScheduled(m.head, len(m.span)):
+				view = scheduledSubAgentView(m.head)
+			case spanned:
+				view = collapsedSubAgentView(m.head, m.span)
+			case m.head.expanded:
+				// An OPEN member that never ran is unframed exactly as a lone one is, and shows the
+				// prompt it carried for the same reason (unframedSubAgentView): folding changes the
+				// frame around a delegation and never what the delegation shows of itself. It is asked
+				// here rather than inside the member painter so the promote-guard below sees the body
+				// the row is actually about to hide.
+				view = unframedSubAgentView(m.head)
+			}
+			view.finished = subAgentFinished(m.head)
 		}
-		view.finished = subAgentFinished(m.head)
 		view = guardPromotions(th, []toolView{view}, room, marker)[0]
 		rows, hides := renderSubAgentMemberRows(th, view, marker, width, room, m.head.expanded, spanned)
 		kind := targetNone

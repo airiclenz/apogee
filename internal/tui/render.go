@@ -564,64 +564,7 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// open (transcript.go), so the block that stops at one steps past a member with no span rather
 	// than into a railed one, and a framed member's span is skipped whole, by the rule below.
 	if grp, pos, ok := subAgentGroupAt(t.entries, head); ok {
-		end := len(grp) - 1
-		for k := pos; k < len(grp); k++ {
-			if t.entries[grp[k].at].expanded {
-				end = k
-				break
-			}
-		}
-		// The key covers this block's members and everything still ahead of them in the group:
-		// the header's star asks the whole list whether any delegate is still working, and a
-		// member's row changes shape the moment its delegation grows a span to reveal, so a key
-		// stopping at the last row it paints would serve a stale one (paintcache.go).
-		tail := grp[len(grp)-1]
-		cover := tail.at + 1 + tail.span - head
-		// One record per covered entry, stated once and read by both the key and the rows: a
-		// member's own record sits at its offset from the head and its span is the records behind
-		// it, so what the paint reads is exactly what the key named (paintcache.go).
-		ins := root.inputs(t.entries[head : head+cover])
-		members := make([]subAgentMember, 0, end-pos+1)
-		for k := pos; k <= end; k++ {
-			at := grp[k].at - head
-			members = append(members, subAgentMember{
-				head:   ins[at],
-				span:   ins[at+1 : at+1+grp[k].span],
-				offset: at,
-				last:   k == len(grp)-1,
-			})
-		}
-		// count opens the header, and only the group's FIRST block carries one.
-		count := 0
-		if pos == 0 {
-			count = len(grp)
-		}
-		live := anyOpenCall(ins)
-		// The walk resumes ON the member the block stopped at when that member is open — its span
-		// follows as blocks of its own — and past that member's whole span when it is collapsed,
-		// which is what elides it.
-		open := t.entries[grp[end].at].expanded
-		next := grp[end].at + 1
-		if !open {
-			next += grp[end].span
-		}
-		return resolvedBlock{
-			shape: shapeSubAgentGroup,
-			ins:   ins,
-			live:  live,
-			draw: func() blockPaint {
-				return renderSubAgentGroup(th, count, members, railedWidth(width, in.depth),
-					blockState{live: live, blink: blink}).railed(th, in.depth)
-			},
-			next: next,
-			// pos > 0 is this block RESUMING a list an open member ended — precisely the spec's
-			// "another grouped sub-agent follows the expanded one", and so the one seam in the whole
-			// transcript that closes with a ┊. Nothing draws that ┊ since ADR 0063: the only member
-			// that can be open is unframed, it rails no span, and railJoin's closer arm needs the
-			// deeper preceding depth a span would have left behind.
-			closes:   pos > 0,
-			openTail: open,
-		}
+		return t.resolveGroup(th, head, in, width, blink, root, grp, pos, shapeSubAgentGroup)
 	}
 	// A sub-agent run is ONE block, always (layout.md, ADR 0063): its head paints with the
 	// cascading summary and the whole span is then skipped outright, which is what elides the
@@ -652,6 +595,21 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 			},
 			next: head + span + 1, // the span is elided whole: it is read in the run's own view
 		}
+	}
+	// Adjacent SKILL FETCHES fold the same way delegations do, under one "✦ Skill (N)"
+	// (ISSUES.md, "load_skill renders as a raw tool"): a fetch is the run taking instructions on,
+	// and two of them in a row are one act with two rows, not two cards. It is one mechanism with
+	// two participants — the same derivation asked of another tool name (ownGroupAt) and the same
+	// painter — so nothing here restates what a group is.
+	//
+	// It is asked AFTER the two delegation branches because a delegation head answers those and
+	// this rule must never see one, and BEFORE the umbrella because the presenter marks a fetch
+	// solo (presentToolCall): a mixed "✦ Tools" would bury the instructions the run just took on
+	// among the reads around them. A member row opens INLINE and never a run view — opensRun and
+	// headsRun stay keyed on sub_agent, so a fetch heads no run to open and the ordinary member
+	// painter is what its expanded row falls to (renderSubAgentGroup).
+	if grp, pos, ok := ownGroupAt(t.entries, head, loadSkillToolName); ok {
+		return t.resolveGroup(th, head, in, width, blink, root, grp, pos, shapeSkillGroup)
 	}
 	// Any run of 2+ groupable calls folds under one umbrella (toolSuperGroup) — a single same-label
 	// run and adjacent runs of DIFFERENT tools alike, because a run is a ROW of the umbrella rather
@@ -761,6 +719,76 @@ func previewTail(s string) string {
 		cut = nl
 	}
 	return s[cut+1 : end]
+}
+
+// resolveGroup turns one folded list of same-tool calls into the block that paints it — the shape
+// both [subAgentGroupAt] and the skill list resolve through, so a fan-out of delegations and a run
+// of skill fetches are laid out by ONE rule and can never come to disagree about where a group's
+// block ends. shape names which of them this is, for the paint key alone (paintcache.go): what is
+// drawn is settled by the members themselves, and [renderSubAgentGroup] reads each row exactly as
+// the lone block it folded from.
+func (t *transcript) resolveGroup(th theme, head int, in paintInput, width int, blink bool,
+	root paintRoot, grp []groupBlock, pos int, shape blockShape) resolvedBlock {
+	end := len(grp) - 1
+	for k := pos; k < len(grp); k++ {
+		if t.entries[grp[k].at].expanded {
+			end = k
+			break
+		}
+	}
+	// The key covers this block's members and everything still ahead of them in the group:
+	// the header's star asks the whole list whether any delegate is still working, and a
+	// member's row changes shape the moment its delegation grows a span to reveal, so a key
+	// stopping at the last row it paints would serve a stale one (paintcache.go).
+	tail := grp[len(grp)-1]
+	cover := tail.at + 1 + tail.span - head
+	// One record per covered entry, stated once and read by both the key and the rows: a
+	// member's own record sits at its offset from the head and its span is the records behind
+	// it, so what the paint reads is exactly what the key named (paintcache.go).
+	ins := root.inputs(t.entries[head : head+cover])
+	members := make([]subAgentMember, 0, end-pos+1)
+	for k := pos; k <= end; k++ {
+		at := grp[k].at - head
+		members = append(members, subAgentMember{
+			head:   ins[at],
+			span:   ins[at+1 : at+1+grp[k].span],
+			offset: at,
+			last:   k == len(grp)-1,
+		})
+	}
+	// count opens the header, and only the group's FIRST block carries one.
+	count := 0
+	if pos == 0 {
+		count = len(grp)
+	}
+	live := anyOpenCall(ins)
+	// The walk resumes ON the member the block stopped at when that member is open — its span
+	// follows as blocks of its own — and past that member's whole span when it is collapsed,
+	// which is what elides it.
+	open := t.entries[grp[end].at].expanded
+	next := grp[end].at + 1
+	if !open {
+		next += grp[end].span
+	}
+	return resolvedBlock{
+		shape: shape,
+		ins:   ins,
+		live:  live,
+		draw: func() blockPaint {
+			return renderSubAgentGroup(th, count, members, railedWidth(width, in.depth),
+				blockState{live: live, blink: blink}).railed(th, in.depth)
+		},
+		next: next,
+		// pos > 0 is this block RESUMING a list an open member ended — precisely the spec's
+		// "another grouped sub-agent follows the expanded one", and so the one seam in the whole
+		// transcript that closes with a ┊. No DELEGATION draws it since ADR 0063: the only member
+		// that can be open is unframed, it rails no span, and railJoin's closer arm needs the
+		// deeper preceding depth a span would have left behind. A skill fetch has the occasion
+		// back — it expands in place, over a body the rail runs down — and the seam it draws is
+		// the one the spec wrote (docs/layout/tool-layout.md, Grouped Sub-agents).
+		closes:   pos > 0,
+		openTail: open,
+	}
 }
 
 // renderEntryLines renders one committed entry — stated as the record of what a painter may read of
