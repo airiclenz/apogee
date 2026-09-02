@@ -60,6 +60,21 @@ type Spec struct {
 	// time.Now. It exists so a test pins both without touching the machine clock — the
 	// injectable-clock shape session.Store and the TUI's session host already use.
 	Now func() time.Time
+
+	// DelegationTarget is the Sub-agent server every delegation this Firing spawns routes to
+	// (ADR 0045), resolved WHOLE by the caller — endpoint, key, model, window, fan-out width,
+	// profile, posture — exactly as the TUI's heartbeat resolves it. nil ⇒ nothing is routed
+	// and every child runs on the session's own Upstream with the session's posture, which is
+	// what every Firing did before this field existed. The engine still reads no config
+	// (ADR 0031): the Driver resolves the target, this seam only carries it.
+	DelegationTarget *agent.DelegationTarget
+
+	// DelegationSeat is what the orientation block TELLS the model about that far seat — the
+	// host's own words for it (ADR 0069). nil ⇒ the block names only the session seat. It is
+	// carried independently of the target above, because the two are different kinds of fact:
+	// the target is the dial a spawn builds from, this is display text. A seat named without a
+	// target describes a place nothing routes to, and that is the Driver's call to make.
+	DelegationSeat *agent.DelegationSeat
 }
 
 // Result reports what one Firing did. It is returned even when the run failed, so a caller
@@ -246,6 +261,17 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		return Result{}, fmt.Errorf("apogee: construct the firing's agent: %w", err)
 	}
 	defer func() { _ = a.Close() }()
+
+	// The caller's routing, latched BEFORE the first Turn so the Firing's very first
+	// delegation is already routed — there is no heartbeat here to install it later. Both
+	// fields nil ⇒ neither setter is called and the run is byte-for-byte what it was before
+	// this seam existed.
+	if spec.DelegationTarget != nil {
+		a.SetDelegationTarget(spec.DelegationTarget)
+	}
+	if spec.DelegationSeat != nil {
+		a.SetDelegationSeat(spec.DelegationSeat)
+	}
 
 	// The prompt carries the same @file and /skill grammars a chat message does
 	// (internal/refs), so a Firing's references resolve in the loop exactly as a session's do.

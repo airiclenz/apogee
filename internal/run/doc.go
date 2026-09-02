@@ -77,8 +77,9 @@
 // Context fill IS reported, at two grains, because neither survives the run otherwise. The
 // Firing's own fill lands on the record's Meta.CtxUsed, and each SUB-AGENT run's final fill
 // lands per run on Result.SubAgents. The second is not a decomposition of the first: a
-// delegated run fills a window of its own (it inherits the parent's Config verbatim, so the
-// same limit, never the same fill), so its reading is neither the Firing's nor summable into
+// delegated run fills a window of its own (it inherits the parent's Config verbatim, or the
+// Spec's DelegationTarget's window when one routes it, so a limit of its own and never the
+// same fill), so its reading is neither the Firing's nor summable into
 // it, and a nested run's reading is its own rather than its spawner's.
 //
 // Token SPEND is reported at those same two grains, for the same reason and by the same

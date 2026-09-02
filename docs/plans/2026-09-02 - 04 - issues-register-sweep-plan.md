@@ -317,7 +317,12 @@ DISARMED with a target latched (target cap, unchanged).
 
 ---
 
-## 8. `run.Spec` carries a Delegation target and seat
+## 8. `run.Spec` carries a Delegation target and seat — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): consequential edit — internal/run/doc.go: made necessary by the routing seam; the package doc claimed a delegated run "inherits the parent's Config verbatim, so the same limit", which a routed spawn (target window, working window, reply cap, profile, posture) makes false — re-worded in the same edit to name the Spec's DelegationTarget window.
+NOTES (2026-09-02): the tests use `internal/stubllm` as the item directs, not the package's own `harness_test.go` httptest `upstream` — the two coexist; no existing test was moved.
+NOTES (2026-09-02): the session server's script carries a deliberate TRAP turn (a `when:` turn answering the child's fresh conversation), so the routed test fails on the request log rather than on an unmatched HTTP 500. Confirmed non-vacuous by disabling only the `SetDelegationTarget` call, which fails all three of that test's routing assertions; restored before finishing.
+NOTES (2026-09-02): the seat half asserts "carried, not routed" only, exactly as the item's regression guard directs — a latched seat has no exported getter, and neither a `Tools`-nil Firing nor the plain `tools.NewSubAgent()` registry these tests register publishes `run_on`, so nothing the seat RENDERS is observable from `run.Once`.
 
 **What.** `run.Once` calls `agent.New(cfg)` (`internal/run/run.go:244`) and never exposes the constructed
 Agent, and `run.Spec` (`internal/run/run.go:28-63`) has no field for routing — the only doors are

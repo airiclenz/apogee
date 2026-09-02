@@ -9,13 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -551,6 +554,169 @@ func TestOnceIgnoresASubAgentsAnswer(t *testing.T) {
 	if res.FinalText != "" {
 		t.Errorf("Result.FinalText = %q, want empty — a sub-agent's answer is its parent's, "+
 			"never the Firing's", res.FinalText)
+	}
+}
+
+// The routing fixture the three Spec-seam tests below share. The delegated task's own words are
+// what tell the two conversations apart on the wire: the parent's requests never carry them —
+// its first is the user's prompt and its second the delegation's result — so "which server
+// answered the CHILD" is readable straight off a request log.
+const (
+	routedTask      = "list every open issue on the tracker"
+	routedSubAnswer = "the sub-agent found four open issues"
+	routedAnswer    = "the day is summarised"
+)
+
+// delegatingSession scripts the SESSION server for a Firing that delegates once: the sub_agent
+// call, then the answer once the result is back. Its first turn is a TRAP — it answers the
+// child's fresh conversation, which reaches this server only when nothing routed the child away
+// — so a test that expects routing fails on the request log rather than on an unmatched 500,
+// which would say the script was wrong instead of that the routing was.
+func delegatingSession() stubllm.Script {
+	return stubllm.Script{Model: "session-model", Turns: []stubllm.Turn{
+		{When: &stubllm.Match{LastMessage: regexp.QuoteMeta(routedTask)}, Text: routedSubAnswer},
+		{ToolCalls: []stubllm.ToolCall{{
+			ID: "call_1", Name: tools.SubAgentToolName, Arguments: `{"task":"` + routedTask + `"}`,
+		}}},
+		{Text: routedAnswer},
+	}}
+}
+
+// delegatingSpec is the Firing those tests fire: Plan mode against up, with sub_agent registered
+// so the scripted call has something to dispatch.
+func delegatingSpec(t *testing.T, up *stubllm.Server) Spec {
+	t.Helper()
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(tools.NewSubAgent()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	spec := planSpec(up.URL, "summarise the day")
+	spec.Config.Model = up.Model
+	spec.Config.Tools = registry
+	return spec
+}
+
+// childRequests counts the requests up answered whose last message carries the delegated task —
+// the child's own fresh conversation, and nothing the parent ever sends.
+func childRequests(up *stubllm.Server) int {
+	n := 0
+	for _, r := range up.Requests() {
+		if len(r.Messages) > 0 && strings.Contains(r.Messages[len(r.Messages)-1].Content, routedTask) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestOnceRoutesADelegationToTheSpecsTarget is the item's headline: a Driver that resolved a
+// Sub-agent server hands it to the Firing on the Spec, and the delegated child is built against
+// THAT server while the parent's own conversation stays on the session one. It is the seam the
+// TUI reached through Agent.SetDelegationTarget and no other Driver could.
+func TestOnceRoutesADelegationToTheSpecsTarget(t *testing.T) {
+	t.Parallel()
+
+	sessionUp := stubllm.New(t, delegatingSession())
+	targetUp := stubllm.New(t, stubllm.Script{Model: "grunt-model", Turns: []stubllm.Turn{
+		{Text: routedSubAnswer},
+	}})
+
+	spec := delegatingSpec(t, sessionUp)
+	spec.DelegationTarget = &agent.DelegationTarget{
+		Endpoint: targetUp.URL,
+		Model:    targetUp.Model,
+	}
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if res.FinalText != routedAnswer {
+		t.Fatalf("Result.FinalText = %q, want %q — the parent never finished", res.FinalText, routedAnswer)
+	}
+	if got := childRequests(targetUp); got != 1 {
+		t.Errorf("the target server answered %d of the child's requests, want 1 — the Spec's "+
+			"DelegationTarget did not reach the Agent (target log %v)", got, targetUp.Requests())
+	}
+	if got := childRequests(sessionUp); got != 0 {
+		t.Errorf("the session server answered %d of the child's requests, want 0 — the child was "+
+			"built on the session Upstream despite a latched target", got)
+	}
+	if got := len(sessionUp.Requests()); got != 2 {
+		t.Errorf("the session server answered %d requests, want 2 (the parent's two Turns)", got)
+	}
+}
+
+// TestOnceWithoutARoutingSpecRunsEveryDelegationOnTheSessionServer is the other half of the
+// seam: both fields nil is what every Firing did before it existed, and a second server standing
+// ready proves the nil is a NO-OP rather than a default that routes somewhere.
+func TestOnceWithoutARoutingSpecRunsEveryDelegationOnTheSessionServer(t *testing.T) {
+	t.Parallel()
+
+	sessionUp := stubllm.New(t, delegatingSession())
+	idleUp := stubllm.New(t, stubllm.Script{Model: "grunt-model", Turns: []stubllm.Turn{
+		{Text: routedSubAnswer},
+	}})
+
+	spec := delegatingSpec(t, sessionUp)
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if res.FinalText != routedAnswer {
+		t.Fatalf("Result.FinalText = %q, want %q — the parent never finished", res.FinalText, routedAnswer)
+	}
+	if got := len(idleUp.Requests()); got != 0 {
+		t.Errorf("the second server answered %d requests, want 0 — an unset DelegationTarget "+
+			"routed something (log %v)", got, idleUp.Requests())
+	}
+	if got := childRequests(sessionUp); got != 1 {
+		t.Errorf("the session server answered %d of the child's requests, want 1 — the child did "+
+			"not run on the session Upstream", got)
+	}
+	if got := len(sessionUp.Requests()); got != 3 {
+		t.Errorf("the session server answered %d requests, want 3 (the parent's two Turns and the "+
+			"child's one)", got)
+	}
+}
+
+// TestOnceCarriesASeatWithoutRoutingAnything pins the two fields as INDEPENDENT. A seat is
+// display text — what the orientation block tells the model about the far server (ADR 0069) —
+// and carrying one moves no delegation: without a target beside it every child still runs on the
+// session Upstream. What the engine RENDERED from the seat is not observable from here (the
+// Delegations line needs a registry that publishes run_on, which a Firing's own roster does not
+// build), so this asserts the routing half alone; the rendered seat is the seat-choice Driver's
+// test, not this seam's.
+func TestOnceCarriesASeatWithoutRoutingAnything(t *testing.T) {
+	t.Parallel()
+
+	sessionUp := stubllm.New(t, delegatingSession())
+	idleUp := stubllm.New(t, stubllm.Script{Model: "grunt-model", Turns: []stubllm.Turn{
+		{Text: routedSubAnswer},
+	}})
+
+	spec := delegatingSpec(t, sessionUp)
+	spec.DelegationSeat = &agent.DelegationSeat{
+		Name:        "grunt-box",
+		Description: "fast local 27B — search and edits",
+		Model:       "grunt-model",
+	}
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if res.FinalText != routedAnswer {
+		t.Fatalf("Result.FinalText = %q, want %q — the parent never finished", res.FinalText, routedAnswer)
+	}
+	if got := len(idleUp.Requests()); got != 0 {
+		t.Errorf("the second server answered %d requests, want 0 — a seat without a target routed "+
+			"a delegation (log %v)", got, idleUp.Requests())
+	}
+	if got := childRequests(sessionUp); got != 1 {
+		t.Errorf("the session server answered %d of the child's requests, want 1 — the child did "+
+			"not run on the session Upstream", got)
 	}
 }
 
