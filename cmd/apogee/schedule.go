@@ -123,7 +123,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	//
 	// The rebind notices are dropped — they are a launch's narration, and a Firing's narration is the
 	// session record it leaves behind.
-	cfg, _, err := firingConfig(ctx, firingInputs{
+	cfg, routing, _, err := firingConfig(ctx, firingInputs{
 		opts:      opts,
 		entry:     entry,
 		apiKey:    binding.APIKey,
@@ -160,6 +160,12 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		ScheduleName: f.ScheduleName,
 		Store:        w.store,
 		RecordID:     recordID,
+		// The routing the composer resolved off the LIVE Options above, latched through run.Spec's
+		// seam (internal/run): a Firing raised in this session delegates to the entry the session
+		// delegates to, including one a `/sub-agents-server` pick moved it to since launch
+		// (liveSettings.subAgentsServer). Both fields are nil when no key named one.
+		DelegationTarget: routing.target,
+		DelegationSeat:   routing.seat,
 	})
 	// Everything the run learned about itself, mapped onto the scheduler's report in one place so
 	// both ends of this function tell the surface the same story. The library reads none of it — it

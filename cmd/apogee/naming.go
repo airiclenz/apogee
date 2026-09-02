@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/title"
@@ -45,8 +46,10 @@ type delegationNamer struct {
 	// naming call on the session's own server still produces the name.
 	session func() (upstreamBinding, provider.EffortDialect)
 	// routed answers the Sub-agent server's last-landed binding and dialect, and false when no
-	// target has ever landed. nil is the same answer for a Driver that has no Sub-agent server at
-	// all — an unattended Firing, a bench — and keeps the fallback one branch rather than two.
+	// target has ever landed. nil is the same answer for a Driver whose run has no Sub-agent server
+	// at all — a bench, or a Firing composed with no `sub-agents-server:` resolved — and keeps the
+	// fallback one branch rather than two. An unattended run that DID resolve one reads a constant
+	// here, since nothing can move it mid-run (newFiringNamer).
 	routed func() (upstreamBinding, provider.EffortDialect, bool)
 	// enabled is the live `auto-title:` switch, seeded from the launch Options and flipped by the
 	// host when the pane or the file moves the key (tui.Options.OnAutoTitle). It is read at call
@@ -68,15 +71,33 @@ func newDelegationNamer(
 	return namer
 }
 
-// newFiringNamer builds the namer an unattended run carries: one server, bound before the run
-// starts and never moved, so both readers collapse to the constant the Firing was composed on and
-// the gate is whatever `auto-title:` said at startup. A Firing has no live settings door to flip it
-// through — there is no pane and no session — which is exactly why the value is read once here and
-// the same atomic still answers at call time.
-func newFiringNamer(binding upstreamBinding, dialect provider.EffortDialect, autoTitle bool) *delegationNamer {
+// newFiringNamer builds the namer an unattended run carries: both servers are bound before the run
+// starts and neither moves, so each reader collapses to a constant and the gate is whatever
+// `auto-title:` said at startup. A Firing has no live settings door to flip any of it through —
+// there is no pane and no session — which is exactly why the values are read once here and the same
+// atomic still answers at call time.
+//
+// routed is the Sub-agent server this run resolved (firingConfig), and nil when it resolved none. It
+// is passed rather than left out because ADR 0068 decision 2 is the whole point of the reader: a
+// routed child's grunt box is already warm for this run, so it answers the question about its own
+// work — and a Firing that fell back to the session server would put an extra call on the expensive
+// box for every spawn, which is precisely the cost that decision exists to avoid.
+func newFiringNamer(
+	binding upstreamBinding,
+	dialect provider.EffortDialect,
+	routed *apogee.DelegationTarget,
+	autoTitle bool,
+) *delegationNamer {
+	var routedUpstream func() (upstreamBinding, provider.EffortDialect, bool)
+	if routed != nil {
+		routedUpstream = func() (upstreamBinding, provider.EffortDialect, bool) {
+			return upstreamBinding{Endpoint: routed.Endpoint, Model: routed.Model, APIKey: routed.APIKey},
+				routed.EffortDialect, true
+		}
+	}
 	return newDelegationNamer(
 		func() (upstreamBinding, provider.EffortDialect) { return binding, dialect },
-		nil, autoTitle)
+		routedUpstream, autoTitle)
 }
 
 // setEnabled flips the `auto-title:` gate. It is the host's half of [tui.Options.OnAutoTitle], and

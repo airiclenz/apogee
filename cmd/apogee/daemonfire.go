@@ -214,7 +214,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults
 	// answer with. The rebind notices are dropped — they are a launch's narration, and a Firing's
 	// narration is the session record it leaves behind.
-	cfg, _, err := firingConfig(ctx, firingInputs{
+	cfg, routing, _, err := firingConfig(ctx, firingInputs{
 		opts:      w.opts,
 		entry:     server,
 		keys:      w.keys,
@@ -239,6 +239,11 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		ScheduleName: f.ScheduleName,
 		Store:        w.store,
 		RecordID:     recordID,
+		// The routing the composer resolved off this daemon's own Options, latched through run.Spec's
+		// seam (internal/run): a scheduled Firing delegates to the `sub-agents-server:` entry exactly
+		// as a session does, and both fields are nil when no key named one.
+		DelegationTarget: routing.target,
+		DelegationSeat:   routing.seat,
 	})
 	// Everything the run learned about itself, mapped onto the scheduler's report in one place so
 	// both ends of this function tell the daemon's log the same story. The library reads none of it

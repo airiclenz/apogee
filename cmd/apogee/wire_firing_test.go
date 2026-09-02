@@ -6,11 +6,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -67,6 +69,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	entry := config.ServerEntry{
 		Name:            "box",
 		Endpoint:        "http://box.example/v1",
+		Description:     "the workhorse in the closet",
 		Model:           "entry-model",
 		ParallelAgents:  3,
 		MaxOutputTokens: 4096,
@@ -79,7 +82,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	probed := false
 	manual := mechanisms.KnownIDs()[:1]
 
-	cfg, _, err := firingConfig(context.Background(), firingInputs{
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts:      opts,
 		entry:     entry,
 		apiKey:    "sk-handed-over",
@@ -113,6 +116,13 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	}
 	if cfg.Mode != domain.ModeAuto {
 		t.Errorf("Config.Mode = %v; want the mode the Firing runs in", cfg.Mode)
+	}
+	// The same entry in the human's own words, which is what the orientation block names the SESSION
+	// seat by when the model is offered a seat to choose (ADR 0069).
+	if cfg.ServerName != entry.Name || cfg.ServerDescription != entry.Description {
+		t.Errorf("Config server identity = (%q, %q); want the bound entry's own (%q, %q) — without them "+
+			"the orientation block can only call this box \"this server\"",
+			cfg.ServerName, cfg.ServerDescription, entry.Name, entry.Description)
 	}
 
 	// The roots half, plus the scratch dir the record id names — a run whose model has no writable
@@ -238,7 +248,7 @@ func TestFiringConfigMountsNoEscapingSkillRoot(t *testing.T) {
 	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
 	escaping := filepath.Join(roots.workspace, ".apogee", "skills")
 
-	cfg, _, err := firingConfig(context.Background(), firingInputs{
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts: config.Options{Bypass: true},
 		// Both bounds pinned so the composition settles with no discovery round trip: this test is
 		// about the mount, not about what a server would answer.
@@ -284,7 +294,7 @@ func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	t.Cleanup(func() { discoverSlots, discoverDialect = prevSlots, prevDialect })
 
 	entry := config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", APIKey: "sk-from-the-entry", Model: "entry-model"}
-	cfg, _, err := firingConfig(context.Background(), firingInputs{
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts:     config.Options{Bypass: true},
 		entry:    entry,
 		roots:    roots,
@@ -345,7 +355,7 @@ func TestFiringConfigCarriesTheShippedSkillGate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, _, err := firingConfig(context.Background(), firingInputs{
+			cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 				opts:  config.Options{Bypass: true, UseShippedSkills: tt.on},
 				entry: config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1, EffortDialect: "reasoning"},
 				// The one shared seam left nil on purpose: this is the headless and daemon shape, where
@@ -375,7 +385,7 @@ func TestFiringConfigCarriesTheShippedSkillGate(t *testing.T) {
 func TestFiringConfigLeavesTheDriverSeamsNil(t *testing.T) {
 	t.Parallel()
 
-	cfg, _, err := firingConfig(context.Background(), firingInputs{
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts:     config.Options{Bypass: true},
 		entry:    config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1},
 		apiKey:   "sk-test",
@@ -407,7 +417,7 @@ func TestFiringConfigNamesNoScratchDirWithoutARoot(t *testing.T) {
 	roots := firingRoots(t)
 	roots.scratch = ""
 
-	cfg, _, err := firingConfig(context.Background(), firingInputs{
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts:     config.Options{Bypass: true},
 		entry:    config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1},
 		apiKey:   "sk-test",
@@ -422,5 +432,173 @@ func TestFiringConfigNamesNoScratchDirWithoutARoot(t *testing.T) {
 
 	if cfg.ScratchDir != "" {
 		t.Errorf("Config.ScratchDir = %q on a host with no scratch root, want \"\" — an unnamed path must never be fenced writable", cfg.ScratchDir)
+	}
+}
+
+// stubBeat is the Sub-agent server's observation a test dictates, plus the record of whether it was
+// taken at all — a run that names no `sub-agents-server:` must ask nothing, since a third round trip
+// per Firing for a question nobody posed is exactly what the gate exists to avoid.
+type stubBeat struct {
+	called bool
+	beat   heartbeat.Beat
+}
+
+func (s *stubBeat) discover(context.Context, string, string, string) heartbeat.Beat {
+	s.called = true
+	return s.beat
+}
+
+// Where an unattended run's delegations go (ADR 0045), resolved by the composer off the same
+// `sub-agents-server:` key a session resolves. Every failure is a NOTICE with the target left nil —
+// a Firing runs while nobody is watching, so refusing to start over a grunt box that is merely down
+// would turn a scheduled run into a silent gap in the record (ADR 0042's visible degrade).
+func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
+	known := string(mechanisms.KnownIDs()[0])
+	grunt := config.ServerEntry{
+		Name:        "grunt",
+		Endpoint:    "http://grunt.example/v1",
+		Description: "the cheap box",
+		Model:       "grunt-model",
+		APIKey:      "sk-grunt",
+	}
+	armed := grunt
+	armed.Mechanisms = map[string]bool{known: true}
+	defective := grunt
+	defective.Mechanisms = map[string]bool{"no-such-mechanism": true}
+
+	for _, tc := range []struct {
+		name       string
+		named      string
+		entry      config.ServerEntry
+		beat       heartbeat.Beat
+		wantBeat   bool
+		wantTarget bool
+		wantSeat   bool
+		wantNotice string
+		// noticePrefix compares the head of the sentence only, for the one case whose tail is the
+		// whole Mechanism catalogue — a list this test has no business pinning.
+		noticePrefix bool
+		wantArmed    bool
+	}{
+		{
+			name:  "no key names no seat and asks nothing",
+			entry: grunt,
+		},
+		{
+			name:       "a name the list does not carry degrades and says which",
+			named:      "typo",
+			entry:      grunt,
+			wantNotice: `sub-agents: no servers entry named "typo" — delegations run on the session server (configured: grunt)`,
+		},
+		{
+			name:       "a reachable entry is routed to",
+			named:      "grunt",
+			entry:      grunt,
+			beat:       heartbeat.Beat{Reachable: true, TotalSlots: 5, ContextWindow: 4096},
+			wantBeat:   true,
+			wantTarget: true,
+			wantSeat:   true,
+			wantNotice: "sub-agents: routing to grunt (grunt-model)",
+		},
+		{
+			name:       "an unreachable entry keeps its seat and routes nothing",
+			named:      "grunt",
+			entry:      grunt,
+			beat:       heartbeat.Beat{Failure: "dial tcp: refused"},
+			wantBeat:   true,
+			wantSeat:   true,
+			wantNotice: "sub-agents: grunt unavailable — delegations run on the session server",
+		},
+		{
+			name:  "a defective mechanisms map is a notice, never an error",
+			named: "grunt",
+			entry: defective,
+			wantNotice: "sub-agents: delegations run on the session server — apogee: unknown mechanism " +
+				`"no-such-mechanism"`,
+			noticePrefix: true,
+		},
+		{
+			name:       "a mechanisms map travels to the child as the entry's own",
+			named:      "grunt",
+			entry:      armed,
+			beat:       heartbeat.Beat{Reachable: true, TotalSlots: 2},
+			wantBeat:   true,
+			wantTarget: true,
+			wantSeat:   true,
+			wantArmed:  true,
+			wantNotice: "sub-agents: routing to grunt (grunt-model)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			beats := &stubBeat{beat: tc.beat}
+			prev := discoverDelegationBeat
+			discoverDelegationBeat = beats.discover
+			t.Cleanup(func() { discoverDelegationBeat = prev })
+
+			_, routing, notices, err := firingConfig(context.Background(), firingInputs{
+				opts: config.Options{
+					Bypass:          true,
+					Servers:         []config.ServerEntry{tc.entry},
+					SubAgentsServer: tc.named,
+				},
+				entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", ParallelAgents: 1, EffortDialect: "reasoning"},
+				apiKey:   "sk-test",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
+				recordID: "2026-09-02T09-00-00-firing",
+			})
+			if err != nil {
+				t.Fatalf("firingConfig: %v; routing must degrade with a notice, never refuse the run", err)
+			}
+
+			if beats.called != tc.wantBeat {
+				t.Errorf("the Sub-agent beat fired = %v, want %v", beats.called, tc.wantBeat)
+			}
+			if got := routing.target != nil; got != tc.wantTarget {
+				t.Fatalf("routing.target non-nil = %v, want %v", got, tc.wantTarget)
+			}
+			if got := routing.seat != nil; got != tc.wantSeat {
+				t.Fatalf("routing.seat non-nil = %v, want %v", got, tc.wantSeat)
+			}
+			if tc.wantNotice == "" {
+				if len(notices) != 0 {
+					t.Errorf("notices = %q; a run that names no Sub-agent server has nothing to say", notices)
+				}
+			} else if !slices.ContainsFunc(notices, func(n string) bool {
+				if tc.noticePrefix {
+					return strings.HasPrefix(n, tc.wantNotice)
+				}
+				return n == tc.wantNotice
+			}) {
+				t.Errorf("notices = %q; want %q among them", notices, tc.wantNotice)
+			}
+
+			if tc.wantSeat {
+				want := apogee.DelegationSeat{Name: "grunt", Description: "the cheap box", Model: "grunt-model"}
+				if *routing.seat != want {
+					t.Errorf("routing.seat = %+v; want the entry's own words %+v", *routing.seat, want)
+				}
+			}
+			if !tc.wantTarget {
+				return
+			}
+			if routing.target.Model != "grunt-model" || routing.target.Endpoint != grunt.Endpoint {
+				t.Errorf("routing.target dials %q at %q; want the named entry's own",
+					routing.target.Model, routing.target.Endpoint)
+			}
+			if routing.target.APIKey != "sk-grunt" {
+				t.Errorf("routing.target carries %q; want the NAMED entry's own key source, not the run's",
+					routing.target.APIKey)
+			}
+			if want := tc.beat.TotalSlots; routing.target.ParallelAgents != want {
+				t.Errorf("routing.target.ParallelAgents = %d; want the %d the beat reported",
+					routing.target.ParallelAgents, want)
+			}
+			if got := routing.target.Mechanisms != nil; got != tc.wantArmed {
+				t.Errorf("routing.target.Mechanisms non-nil = %v, want %v — an entry with a `mechanisms:` "+
+					"map must not leave its children inheriting the parent's catalogue", got, tc.wantArmed)
+			}
+		})
 	}
 }

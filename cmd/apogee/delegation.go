@@ -65,7 +65,22 @@ func (h delegationHost) Targets() []tui.ServerChoice {
 // owns the latch, the second heartbeat and the posture keys (delegationWiring.Retarget). It refuses
 // a name the live list does not carry, and an entry whose `mechanisms:` map this build does not
 // know, and changes nothing when it does.
-func (h delegationHost) Retarget(name string) error { return h.w.delegation.Retarget(name) }
+//
+// A pick that LANDED is mirrored onto the live settings projection, beside the `servers:` list and
+// the `sub-agents-choice:` gate that projection already carries. A Firing raised from this session
+// composes its own routing off that projection (firingConfig), so without the mirror a retarget
+// would move the session's delegations and leave every later `/schedule` Firing routing to the
+// entry the process launched with — which is exactly what firingInputs' own `opts` contract rules
+// out (wire_firing.go).
+func (h delegationHost) Retarget(name string) error {
+	if err := h.w.delegation.Retarget(name); err != nil {
+		return err
+	}
+	if h.w.live != nil {
+		h.w.live.setSubAgentsServer(h.w.delegation.targetName())
+	}
+	return nil
+}
 
 // RecordChoice persists that choice as the `sub-agents-server:` key, and answers whether it wrote: a
 // name in no `servers:` entry is skipped silently, which only this layer can tell, and the empty
@@ -539,6 +554,21 @@ func (d *delegationWiring) routedBinding() (upstreamBinding, provider.EffortDial
 	return d.targetBinding, d.targetDialect, d.targetBound
 }
 
+// targetName is the `servers:` name routing resolves against right now — the file's key as the last
+// re-read left it, or whatever a `/sub-agents-server` pick moved it to, and "" while nothing is
+// named. It is the answer to "which entry would a run composed at this instant delegate to", which
+// is what the live settings projection mirrors so a Firing raised from this session composes on the
+// same name (delegationHost.Retarget, reloadServers).
+//
+// It reads d.target rather than d.server.entry.Name deliberately: a name the list does not carry
+// installs no server, and a projection that answered "" there would silently downgrade a Firing to
+// the ordinary no-key path instead of letting it render the missing-name notice the session renders.
+func (d *delegationWiring) targetName() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.target
+}
+
 // stateChange folds one resolved target into the routing state and answers the notice that change is
 // worth, or "" when nothing changed. Called with the mutex held.
 //
@@ -557,20 +587,43 @@ func (d *delegationWiring) stateChange(name string, target *apogee.DelegationTar
 		return ""
 	}
 	d.routed, d.stated = routed, true
+	// The sentence itself is not this holder's: an unattended run resolves the same four states with
+	// no holder at all (firingConfig), and one routing vocabulary spoken by two Drivers is what
+	// ADR 0031's parity means. What stays here is the STATE machine — which changes are worth saying.
+	return delegationStateNotice(name, target, d.missingNotice, keyErr)
+}
+
+// delegationStateNotice renders one resolved routing state as the sentence the human is told, and it
+// is the single source of the four sentences routing can say: where delegations are going, a key
+// naming no entry, a config the run could not act on, and a server that cannot take them.
+//
+// It is a free function rather than a method because BOTH Drivers that resolve routing say these
+// words. The session resolves a state every beat and says only the changes (stateChange above); an
+// unattended run resolves exactly one state, at composition time, and says it once (firingConfig) —
+// and a second copy of the vocabulary is how one Driver ends up telling a human something the other
+// never would.
+//
+// missing is the held missing-name sentence, "" when the name is empty or names an entry. configErr
+// is a refusal the run could not route AROUND — the entry's key source, or a `mechanisms:` map this
+// build does not know — carried through whole rather than summarized: it is the only place the human
+// is told why a server they flagged is taking no delegations, and "unavailable" would send them
+// looking at a network that is working.
+func delegationStateNotice(
+	name string,
+	target *apogee.DelegationTarget,
+	missing string,
+	configErr error,
+) string {
 	switch {
-	case routed:
+	case target != nil:
 		return "sub-agents: routing to " + name + " (" + target.Model + ")"
-	case d.missingNotice != "":
-		// A key naming no entry, which is a fact about the FILE rather than about a server: it is
-		// held rather than recomputed here, because the list it was rendered against is the one the
-		// human would have to fix, and relist re-renders it whenever that list moves.
-		return d.missingNotice
-	case keyErr != nil:
-		// The resolver's own sentence, which already names the entry and quotes what the command
-		// said. It is carried through whole rather than summarized: it is the only place the human
-		// is told why a server they flagged is taking no delegations, and "unavailable" would send
-		// them looking at a network that is working.
-		return "sub-agents: delegations run on the session server — " + keyErr.Error()
+	case missing != "":
+		// A key naming no entry, which is a fact about the FILE rather than about a server: the
+		// session HOLDS it rather than recomputing it, because the list it was rendered against is
+		// the one the human would have to fix, and relist re-renders it whenever that list moves.
+		return missing
+	case configErr != nil:
+		return "sub-agents: delegations run on the session server — " + configErr.Error()
 	default:
 		return "sub-agents: " + name + " unavailable — delegations run on the session server"
 	}

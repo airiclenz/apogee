@@ -2706,3 +2706,46 @@ func TestSeededPromptPersistsThroughTheSettingsWrite(t *testing.T) {
 			resolved.SystemPrompt.Global.Text)
 	}
 }
+
+// A `/sub-agents-server` pick moves the running session's delegations, and a Firing raised after it
+// must follow (ADR 0037's live apply, firingInputs' own `opts` contract). The projection mirrors the
+// name because the authoritative value lives behind the routing wiring's lock: without the mirror a
+// `/schedule` Firing would keep composing against the entry the process launched with, however often
+// the human re-pointed the key.
+func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
+		{Name: "other-grunt", Endpoint: "http://127.0.0.1:3333"},
+	}
+	live := newLiveSettings(config.Options{Servers: entries, SubAgentsServer: "grunt"}, nil)
+	wiring, err := newDelegationWiring(
+		"grunt", staticServerList(entries), validCfg(t), &delegationSpy{}, noProfiles, nil,
+		config.NewKeyResolver(""))
+	if err != nil {
+		t.Fatalf("newDelegationWiring: %v", err)
+	}
+	host := delegationHost{w: &rootWiring{live: live, delegation: wiring}}
+
+	if opts, _, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "grunt" {
+		t.Fatalf("firingSources at launch names %q; want the key the file carried", opts.SubAgentsServer)
+	}
+
+	if err := host.Retarget("other-grunt"); err != nil {
+		t.Fatalf("Retarget: %v", err)
+	}
+	if opts, _, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "other-grunt" {
+		t.Errorf("firingSources after the retarget names %q; want the entry the pick moved to — a Firing "+
+			"raised now would delegate to the box the human just moved off", opts.SubAgentsServer)
+	}
+
+	// The opt-out travels too: the picker's `auto` row clears the key, and a Firing raised after it
+	// runs its delegations on its own server exactly as a config naming none would.
+	if err := host.Retarget(""); err != nil {
+		t.Fatalf("Retarget to the opt-out: %v", err)
+	}
+	if opts, _, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "" {
+		t.Errorf("firingSources after the opt-out names %q; want no Sub-agent server at all", opts.SubAgentsServer)
+	}
+}

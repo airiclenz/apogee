@@ -157,6 +157,23 @@ var discoverDialect = func(ctx context.Context, endpoint, model, apiKey string) 
 	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx).EffortSupport.Dialect
 }
 
+// discoverDelegationBeat is the seam onto the ONE observation an unattended run takes of its
+// Sub-agent server: the whole Beat this time rather than a field of it, because the routing
+// resolution reads several — reachability, the model actually bound, the window and the slot count
+// (resolveDelegationTarget). Like the two probes above it stands in for the beat an unattended run
+// has no heartbeat to take, it is one beat with no retry, and it is a variable so the composition is
+// provable without a live server; production never reassigns it.
+//
+// It never reports an error, for discoverSlots' reason: an unreachable server, a cancelled context
+// and a server with nothing bound are all "no target", which leaves the run unrouted — the fallback
+// every Firing took before this seam existed (ADR 0045 §4's floor).
+//
+// It fires ONLY when `sub-agents-server:` names an entry. A run that delegates to its own server
+// asks nothing here, so the default composition path costs no third round trip.
+var discoverDelegationBeat = func(ctx context.Context, endpoint, model, apiKey string) heartbeat.Beat {
+	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx)
+}
+
 // errHeadlessNoPrompt is the usage refusal when neither the argument nor stdin carries anything.
 // A headless run cannot ask what the user meant, so an empty prompt is refused rather than sent.
 var errHeadlessNoPrompt = errors.New(
@@ -408,7 +425,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// What comes back beside the Config is the per-model rebind's narration: a validated set
 	// applying, being offered or being suppressed, and a built-in Model profile announcing itself.
 	// It goes to stderr, where it cannot contaminate the answer.
-	cfg, notices, err := firingConfig(cmd.Context(), firingInputs{
+	cfg, routing, notices, err := firingConfig(cmd.Context(), firingInputs{
 		opts:      *opts,
 		entry:     startupEntry(*opts),
 		roots:     roots,
@@ -445,7 +462,17 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// run.Once's own tap wraps this one in turn (run.Spec).
 	cfg.Events = pruneNoticeSink{inner: cfg.Events, out: cmd.ErrOrStderr()}
 
-	res, runErr := runOnce(ctx, run.Spec{Config: cfg, Prompt: prompt, Store: store, RecordID: recordID})
+	// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a
+	// headless run delegates to the `sub-agents-server:` entry exactly as a session does, and both
+	// fields are nil when no key named one — the unrouted floor every Firing had before this.
+	res, runErr := runOnce(ctx, run.Spec{
+		Config:           cfg,
+		Prompt:           prompt,
+		Store:            store,
+		RecordID:         recordID,
+		DelegationTarget: routing.target,
+		DelegationSeat:   routing.seat,
+	})
 
 	// A refusal that stopped the Firing before it began is exit 2, not exit 1 — nothing was sent
 	// and nothing was saved, so what a script must do about it is fix the invocation, not read an

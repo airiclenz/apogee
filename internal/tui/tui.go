@@ -576,9 +576,10 @@ type LauncherActs struct {
 // it and the second heartbeat that discovers what that box is serving are all things this package
 // never reads.
 //
-// A nil host means this Driver routes nothing: no pane offers the pick, and delegations run wherever
-// the composition root left them. That is the posture of every hand-built Options and of every
-// Driver that is not the interactive TUI (ADR 0031).
+// A nil host means this Driver offers no PICK: no pane retargets anything, and delegations run
+// wherever the composition root left them — which for an unattended run is whatever its own
+// composition resolved. That is the posture of every hand-built Options and of every Driver that is
+// not the interactive TUI (ADR 0031).
 type DelegationHost interface {
 	// Retarget points every delegation spawned from now on at the `servers:` entry name names, and
 	// with an EMPTY name at this session's own upstream — the opt-out, and the default a config
@@ -1217,9 +1218,9 @@ type Options struct {
 	// session's delegations at another `servers:` entry, without a relaunch and without the file
 	// having to change first.
 	//
-	// nil ⇒ this Driver routes nothing — a bench or a headless run composes no picker, and nothing
+	// nil ⇒ this Driver offers no pick — a bench or a headless run composes no picker, and nothing
 	// in the renderer offers to retarget (ADR 0031's degrade, the posture of every hand-built
-	// Options).
+	// Options). Where its delegations GO is still its own composition's answer.
 	Delegation DelegationHost
 
 	// Schedules is the scheduler this session's Schedules live in (the [Scheduler] seam the binary

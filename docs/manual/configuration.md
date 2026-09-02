@@ -625,11 +625,15 @@ key names the entry every delegation runs on: your conversation stays on the
 session's server while sub-agents fill that one, and each delegated run says
 which model it ran on. Any entry may be named, the one this session is on
 included, and leaving the key unset is what apogee did before it existed —
-delegations share the session's server. If the named server's API key cannot be
-resolved, delegations fall back to the session's own server and the reason is
-reported once. A name no entry carries is not refused either: apogee says which
-name went missing, lists the names your file does carry, and routes to the
-session's server.
+delegations share the session's server. Unattended runs honour the key too: an
+`apogee headless` prompt, a daemon Schedule's firing and a `/schedule` Firing
+each resolve the named entry once while they compose and delegate there — and a
+Firing raised from a session that has re-pointed the key with
+`/sub-agents-server` follows the pick rather than the file as it was at launch.
+If the named server's API key cannot be resolved, delegations
+fall back to the session's own server and the reason is reported once. A name no
+entry carries is not refused either: apogee says which name went missing, lists
+the names your file does carry, and routes to the session's server.
 
     sub-agents: no servers entry named "rented-bx" — delegations run on the session server (configured: workstation, rented-box)
 

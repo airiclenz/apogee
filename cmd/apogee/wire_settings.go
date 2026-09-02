@@ -136,6 +136,15 @@ type liveSettings struct {
 	// process and a `/settings` flip would govern nothing until the next start.
 	seatChoice config.SubAgentsChoice
 
+	// subAgentsServer is the `sub-agents-server:` key as routing resolves it NOW — the name the file
+	// last carried, or whatever a `/sub-agents-server` pick moved it to. It is MIRRORED here rather
+	// than owned: the routing wiring holds the authoritative value behind its own lock
+	// (delegationWiring.targetName), and this holder only has to be able to answer for it, for the
+	// seatChoice above's reason — a Firing raised from this session composes its own routing off
+	// this projection, so a name left in the launch snapshot would send every `/schedule` Firing to
+	// the entry the process launched with however often the human re-pointed the key.
+	subAgentsServer string
+
 	// manualIDs and mechanisms are the two halves of the `mechanisms:` block: the validated enabled
 	// ids the engine arms, and the block itself, whose mere non-emptiness is what suppresses a matched
 	// Validated set (whole-set-or-nothing, ADR 0016). They move together or the suppression rule and
@@ -243,6 +252,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		entryName:          opts.HostAlias,
 		servers:            opts.Servers,
 		seatChoice:         opts.SubAgentsChoice,
+		subAgentsServer:    opts.SubAgentsServer,
 		manualIDs:          manualIDs,
 		mechanisms:         opts.Mechanisms,
 		validatedEnable:    opts.ValidatedSetsEnable,
@@ -643,6 +653,17 @@ func (s *liveSettings) setSubAgentsChoice(choice config.SubAgentsChoice) {
 	s.seatChoice = choice
 }
 
+// setSubAgentsServer mirrors the `sub-agents-server:` name routing now resolves against, pushed by
+// the two seams that can move it: the `/sub-agents-server` pick (delegationHost.Retarget) and a
+// re-read of the file (reloadServers). The store is the whole of what it can reach from here — the
+// latch, the second heartbeat and the far seat all live in the routing wiring, which has already
+// moved by the time this is called — and what it feeds is the run composed NEXT (firingConfig).
+func (s *liveSettings) setSubAgentsServer(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.subAgentsServer = name
+}
+
 // setValidatedSets installs a re-read `validated-sets:` block — the surface's off-switch and its
 // carry-over map, the two inputs resolveValidatedSet keys a match on, moved together for
 // setMechanisms' reason.
@@ -775,6 +796,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.ModelProfiles = slices.Clone(s.modelProfiles)
 	next.RememberModel = s.rememberModel
 	next.SubAgentsChoice = s.seatChoice
+	next.SubAgentsServer = s.subAgentsServer
 
 	// The `context-files:` block is TWO keys and ONE resolved list, so it is collapsed here exactly
 	// as ApplyConfig collapses it at startup: the names while the switch is on, and no list at all
@@ -1829,6 +1851,12 @@ func (a settingsApplier) reloadServers() (bool, error) {
 		if err := a.delegation.relist(file.SubAgentsServer, file.Servers); err != nil {
 			return false, err
 		}
+		// What the re-read RESOLVED to, mirrored onto the projection a Firing composes from
+		// (delegationHost.Retarget's reason). It is read back off the wiring rather than taken from
+		// the file, because the two are not the same answer: a save about some other entry leaves a
+		// `/sub-agents-server` pick standing, and a projection that took the file's key as gospel
+		// would send the next `/schedule` Firing to the server the human just moved off.
+		a.live.setSubAgentsServer(a.delegation.targetName())
 	}
 	moved := a.live.setServers(file.Servers)
 	// One thing in that list the engine holds and can be PUSHED: the fan-out width of the server this

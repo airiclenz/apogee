@@ -353,7 +353,14 @@ server and none reaches the second.
 
 ---
 
-## 9. A Firing resolves and latches its sub-agent seat
+## 9. A Firing resolves and latches its sub-agent seat — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the target and seat are returned as ONE `firingRouting` value rather than two extra results — the pair is what a Driver forwards into `run.Spec`, and `delegationSetter`'s own rule (one thing decides both) is what a single value keeps a caller from splitting.
+NOTES (2026-09-02): `schedule.go` passes the routing into `run.Spec` too, not only headless and the daemon as the item's sentence names. Its call was already listed among the callers to update, and the item's own live-name guard exists precisely so a `/schedule` Firing routes to the retargeted entry — resolving the routing there and discarding it would spend the beat and route nothing.
+NOTES (2026-09-02): the four routing sentences are single-sourced into `delegationStateNotice` (delegation.go), which `stateChange` now calls; a Firing says the same words a session says, and a successful resolution says "sub-agents: routing to <name> (<model>)" rather than staying silent — ADR 0045 §4's "the first resolved state is always news, whichever way it goes", applied to the one state an unattended run resolves.
+NOTES (2026-09-02): the live `sub-agents-server:` mirror is read back off the routing wiring (`delegationWiring.targetName`) rather than taken from the file at `relist`, because a save about an unrelated entry must not revert a `/sub-agents-server` pick.
+NOTES (2026-09-02): consequential edit — internal/tui/tui.go: made necessary by the routing seam; the `DelegationHost` doc claimed a nil host means "this Driver routes nothing — a bench or a headless run", which a routed headless run makes false — re-worded to "offers no pick" in the same edit.
+NOTES (2026-09-02): consequential edit — docs/manual/configuration.md: made necessary by the routing seam; the `sub-agents-server:` section described a session-only key, so one sentence now states that headless, daemon and `/schedule` Firings honour it and that a retarget follows them.
 
 **Depends on item 8.**
 

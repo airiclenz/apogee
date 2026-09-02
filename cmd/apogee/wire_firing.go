@@ -84,13 +84,14 @@ type firingInputs struct {
 //
 // It composes; it does not decide. The mode gate, the roots, the `mechanisms:` validation, the
 // scratch sweep and every notice a Driver prints in its own voice stay with the Driver — what comes
-// back is a Config and the per-model rebind notices, which headless prints on stderr and the other
-// two Drivers drop (their narration is the session record they leave behind).
+// back is a Config, this run's routing (firingRouting) and the per-model rebind notices, which
+// headless prints on stderr and the other two Drivers drop (their narration is the session record
+// they leave behind).
 //
 // Tools, Events, Approver, Asker and Presenter are deliberately left nil: run.Once pins its own,
 // and handing it any of them is how a run acquires a human it does not have. Tools stays nil too
 // because a Firing reaches no external MCP server (ADR 0034), so the engine builds its own registry.
-func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string, error) {
+func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRouting, []string, error) {
 	// The bound entry's own `model:` unless the Driver overlaid one. On a launcher-fronted server an
 	// empty model is legitimate — it means "whatever is serving" — so this is a fallback, not a
 	// default that has to hold a name.
@@ -104,15 +105,19 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 	// configuration means one credential whichever Driver reads it. A source that refuses fails the
 	// run before a single token is spent: an unattended run that degraded to sending no key would
 	// put the prompt on the wire unauthenticated and report a 401 as the model's answer.
+	//
+	// The resolver is hoisted rather than built inside the branch because a second thing asks it: the
+	// Sub-agent server's entry resolves its OWN key through the same one (resolveFiringRouting), and
+	// two resolvers would run one `api-key-cmd:` twice where the two entries name the same source.
+	keys := in.keys
+	if keys == nil {
+		keys = config.NewKeyResolver(in.roots.workspace)
+	}
 	apiKey := in.apiKey
 	if apiKey == "" {
-		keys := in.keys
-		if keys == nil {
-			keys = config.NewKeyResolver(in.roots.workspace)
-		}
 		resolved, err := keys.Resolve(in.entry)
 		if err != nil {
-			return apogee.Config{}, nil, err
+			return apogee.Config{}, firingRouting{}, nil, err
 		}
 		apiKey = resolved
 	}
@@ -141,7 +146,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 	specOpts.ResponseReserve = config.ResolveResponseReserve(in.entry.ResponseReserve, in.opts.ResponseReserve)
 	spec, notices, err := rebindSpecFor(specOpts, in.roots, in.manualIDs, model, 0, pinnedWindow, in.entry.MaxOutputTokens)
 	if err != nil {
-		return apogee.Config{}, nil, err
+		return apogee.Config{}, firingRouting{}, nil, err
 	}
 
 	// The share the run actually divides its window by, read back OFF the spec rather than resolved
@@ -206,15 +211,21 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		effortDialect = observe(ctx, in.entry.Endpoint, spec.Model, apiKey)
 	}
 
-	return apogee.Config{
-		Endpoint:     in.entry.Endpoint,
-		Model:        spec.Model,
-		APIKey:       apiKey,
-		Mode:         in.mode,
-		Bypass:       in.opts.Bypass,
-		ConfigDir:    in.roots.config,
-		LibraryDir:   in.roots.library,
-		WorkspaceDir: in.roots.workspace,
+	cfg := apogee.Config{
+		Endpoint: in.entry.Endpoint,
+		Model:    spec.Model,
+		APIKey:   apiKey,
+		// The bound entry in the HUMAN's own words, for the orientation block to name the SESSION
+		// seat by when the model is offered a seat to choose (ADR 0069, wire_server.go's shape). An
+		// unattended run needs them for the same reason a session does: the bullet that names the
+		// far seat is unreadable beside a near one the model can only call "this server".
+		ServerName:        in.entry.Name,
+		ServerDescription: in.entry.Description,
+		Mode:              in.mode,
+		Bypass:            in.opts.Bypass,
+		ConfigDir:         in.roots.config,
+		LibraryDir:        in.roots.library,
+		WorkspaceDir:      in.roots.workspace,
 		// This run's own scratch dir, named after the record it will be saved under (wire.go): the
 		// model is offered writable scratch INSIDE the box rather than putting its working files
 		// wherever else it can reach, and the dir is reclaimed on the same 14-day schedule a
@@ -295,14 +306,118 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		// A Firing runs while nobody watches, which is exactly the case a runaway delegation
 		// must not be able to become.
 		Delegation: apogee.DelegationConfig{MaxSteps: in.opts.DelegateMaxSteps},
-		// And the namer an unnamed delegation is named by (ADR 0068), so a Firing's saved record
-		// reads the same way a session's transcript does rather than carrying a wall of task first
-		// lines (ADR 0031's Driver parity). It is bound to the run's OWN server — this composition
-		// routes nothing, so no child is ever routed and the seat question never arises — and gated
-		// by `auto-title:` as it stood at startup, an unattended run having no live door to flip it
-		// through.
-		Namer: newFiringNamer(
-			upstreamBinding{Endpoint: in.entry.Endpoint, Model: spec.Model, APIKey: apiKey},
-			effortDialect, in.opts.AutoTitle),
-	}, notices, nil
+	}
+
+	// Where this run's delegations go, resolved off the same `sub-agents-server:` key a session
+	// resolves and handed back for the Driver to latch through run.Spec. It is resolved AFTER the
+	// Config above because the named entry's Mechanism catalogue is built out of it (subAgentCatalogue),
+	// and every way it can fail leaves the run unrouted with a notice — never an error.
+	routing, routingNotice := resolveFiringRouting(ctx, in, keys, cfg)
+	if routingNotice != "" {
+		notices = append(notices, routingNotice)
+	}
+
+	// And the namer an unnamed delegation is named by (ADR 0068), so a Firing's saved record reads
+	// the same way a session's transcript does rather than carrying a wall of task first lines
+	// (ADR 0031's Driver parity). Both of its Upstreams are constants for the run — the run's own
+	// server, and the Sub-agent server resolved just above when one was named — because an unattended
+	// run has no live door to move either through; the gate is `auto-title:` as it stood at startup
+	// for the same reason.
+	cfg.Namer = newFiringNamer(
+		upstreamBinding{Endpoint: in.entry.Endpoint, Model: spec.Model, APIKey: apiKey},
+		effortDialect, routing.target, in.opts.AutoTitle)
+
+	return cfg, routing, notices, nil
+}
+
+// firingRouting is where ONE unattended run's delegations go, and what its model is told about that
+// far seat. The two travel together for delegationSetter's reason (delegation.go): one thing decides
+// both — which `servers:` entry this run delegates to — and a caller that carried one without the
+// other could route children to a box the orientation block never named, or name a box nothing
+// routes to.
+//
+// Both zero is the DEFAULT and the floor: no `sub-agents-server:` key, or a key that resolved to
+// nothing, leaves the run exactly as every Firing was before it could route at all — children on the
+// run's own Upstream, one seat in the orientation block (ADR 0045 §4).
+//
+// It is a value rather than two returns because a Driver hands it straight on: run.Spec has a field
+// for each (internal/run), and the pair is what a Driver forwards rather than something it reads.
+type firingRouting struct {
+	// target is the Sub-agent server every delegation this run spawns is built against — endpoint,
+	// key, model, window, fan-out width, profile and posture, resolved WHOLE here exactly as the
+	// TUI's second heartbeat resolves it (resolveDelegationTarget). nil ⇒ nothing is routed.
+	target *apogee.DelegationTarget
+	// seat is what the orientation block TELLS the model about that far seat — the host's own words
+	// for the box (ADR 0069). It is installed whenever the named ENTRY resolved, reachable or not:
+	// the seat is display text a human wrote down, while reachability is a fact about right now that
+	// a delegation's own result note reports (delegationSeatOf).
+	seat *apogee.DelegationSeat
+}
+
+// resolveFiringRouting answers where an unattended run's delegations go, taking ONE beat against the
+// named Sub-agent server to find out — the routing a session gets from a second heartbeat, without
+// the live machinery an unattended run has nowhere to put (ADR 0045).
+//
+// It reads the `sub-agents-server:` name and the `servers:` list off in.opts rather than off
+// firingInputs fields of their own, deliberately: both are already there, and a Driver that filled
+// the Options while omitting a routing field would silently downgrade a routed run to an unrouted one
+// with nothing to compile against. The session Driver's projection mirrors the LIVE name onto that
+// same key (liveSettings.subAgentsServer), so a `/sub-agents-server` retarget follows the Firings the
+// session raises afterwards.
+//
+// Nothing here is an error. Every way routing can fail to resolve — no key at all, a name the list
+// does not carry, an entry whose `mechanisms:` map this build refuses, a key source that would not
+// answer, a server that is unreachable or has no model bound — leaves the target nil, the run
+// delegating to its own Upstream, and ONE notice saying so (delegationStateNotice). That is the same
+// visible degrade a session takes (ADR 0042), and the reason is stronger here: a Firing runs while
+// nobody is watching, so refusing to start over a grunt box that is merely down would turn a
+// scheduled run into a silent gap in the record.
+//
+// base is the run's own composed Config, read for exactly what building the named entry's Mechanism
+// catalogue needs — the state roots, with that entry's endpoint and `model:` swapped on so the
+// identity a Library observation is filed under is the SUB-AGENT server's (subAgentCatalogue).
+func resolveFiringRouting(
+	ctx context.Context,
+	in firingInputs,
+	keys *config.KeyResolver,
+	base apogee.Config,
+) (firingRouting, string) {
+	name := in.opts.SubAgentsServer
+	if name == "" {
+		// The default: no key, nothing observed, nothing said. No beat is taken either — a run that
+		// delegates to its own server has no second box to ask about.
+		return firingRouting{}, ""
+	}
+	entries := in.opts.Servers
+	entry, found := config.SubAgentsServerTarget(entries, name)
+	if !found {
+		return firingRouting{}, missingNameNotice(name, entries)
+	}
+
+	// The same build a session's startup and its config reloads go through, so a routed Firing arms
+	// the entry's own `mechanisms:` map rather than inheriting the parent's by accident — and refuses
+	// the same defective maps, which here is a notice rather than the session's refusal to load.
+	server, err := newSubAgentServer(entry, base)
+	if err != nil {
+		return firingRouting{}, delegationStateNotice(name, nil, "", err)
+	}
+	// The far seat, installed on the ENTRY rather than on the observation below: the words are the
+	// human's and they do not move when the box does (ADR 0069, delegationSeatOf).
+	seat := delegationSeatOf(server)
+
+	// That entry's OWN key source — never the run's, which authenticates against another server.
+	apiKey, err := keys.Resolve(entry)
+	if err != nil {
+		return firingRouting{seat: seat}, delegationStateNotice(name, nil, "", err)
+	}
+
+	// One beat, no retry: the composition happens once and there is no later beat to widen on, which
+	// is the contract discoverSlots and discoverDialect already set for an unattended run.
+	observed := discoverDelegationBeat(ctx, entry.Endpoint, entry.Model, apiKey)
+	// And the one resolution the session's own beat lands, reused whole rather than re-derived: the
+	// pin-else-observe ladder is ADR 0045 decision 4, and a second copy of it is how one Driver ends
+	// up routing to a window the other would not.
+	target := resolveDelegationTarget(entry, apiKey, observed, in.opts.ModelProfiles, server.catalogue)
+	return firingRouting{target: target, seat: seat},
+		delegationStateNotice(name, target, "", nil)
 }

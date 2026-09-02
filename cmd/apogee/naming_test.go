@@ -10,6 +10,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/title"
@@ -397,8 +398,9 @@ func TestRunRootWiresTheAutoTitleHookToTheNamer(t *testing.T) {
 
 // Driver parity (ADR 0031): an unattended run names its unnamed delegations too, so a Firing's
 // saved record reads like a session's transcript rather than like a wall of task first lines. It
-// binds to the run's OWN server — nothing is routed here — and reads the `auto-title:` value the
-// startup resolved, an unattended run having no live door to flip it through.
+// binds to the run's OWN server — this composition names no `sub-agents-server:`, so nothing is
+// routed and there is no other box to ask — and reads the `auto-title:` value the startup resolved,
+// an unattended run having no live door to flip it through.
 func TestFiringConfigCarriesTheDelegationNamer(t *testing.T) {
 	t.Parallel()
 
@@ -415,7 +417,7 @@ func TestFiringConfigCarriesTheDelegationNamer(t *testing.T) {
 
 			srv, got := titleServer(t, "scout the config keys")
 			entry := config.ServerEntry{Name: "box", Endpoint: srv.URL, Model: "entry-model"}
-			cfg, _, err := firingConfig(context.Background(), firingInputs{
+			cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 				opts: config.Options{
 					Bypass:    true,
 					AutoTitle: tc.autoTitle,
@@ -440,8 +442,8 @@ func TestFiringConfigCarriesTheDelegationNamer(t *testing.T) {
 				t.Fatal("Config.Namer is nil; an unattended run would name none of its delegations")
 			}
 
-			// Routed is asked as TRUE deliberately: a Firing composes no routing, so the ask has
-			// nowhere else to go and must land on the run's own server rather than nowhere.
+			// Routed is asked as TRUE deliberately: this Firing resolved no Sub-agent server, so the
+			// ask has nowhere else to go and must land on the run's own server rather than nowhere.
 			name, err := cfg.Namer.NameDelegation(context.Background(),
 				domain.DelegationNaming{Task: "scout every config key", Routed: true})
 			if err != nil {
@@ -464,5 +466,76 @@ func TestFiringConfigCarriesTheDelegationNamer(t *testing.T) {
 				t.Errorf("call carried %q; want the run's own resolved key", got.Authorization)
 			}
 		})
+	}
+}
+
+// ADR 0068 decision 2 off the TUI: once an unattended run resolves a Sub-agent server, a ROUTED
+// child's naming call goes to that box — the machine already warm for the work answers the question
+// about the work — while an unrouted child's still goes to the run's own. Without the routed reader
+// every Firing spawn would put a second call on the expensive box, which is the exact cost that
+// decision exists to avoid.
+func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
+	session, sessionCall := titleServer(t, "session name")
+	grunt, gruntCall := titleServer(t, "grunt name")
+
+	entry := config.ServerEntry{Name: "box", Endpoint: session.URL, Model: "entry-model"}
+	gruntEntry := config.ServerEntry{
+		Name:     "grunt",
+		Endpoint: grunt.URL,
+		Model:    "grunt-model",
+		APIKey:   "sk-grunt",
+	}
+
+	beats := &stubBeat{beat: heartbeat.Beat{Reachable: true}}
+	prev := discoverDelegationBeat
+	discoverDelegationBeat = beats.discover
+	t.Cleanup(func() { discoverDelegationBeat = prev })
+
+	cfg, routing, _, err := firingConfig(context.Background(), firingInputs{
+		opts: config.Options{
+			Bypass:          true,
+			AutoTitle:       true,
+			Servers:         []config.ServerEntry{entry, gruntEntry},
+			SubAgentsServer: "grunt",
+		},
+		entry:     entry,
+		apiKey:    "sk-firing",
+		roots:     firingRoots(t),
+		manualIDs: []apogee.MechanismID{mechanisms.KnownIDs()[0]},
+		confiner:  fenceableHost,
+		mode:      domain.ModePlan,
+		width:     func(context.Context, string, string, string) int { return 0 },
+		dialect: func(context.Context, string, string, string) provider.EffortDialect {
+			return provider.EffortDialectNone
+		},
+		recordID: "2026-09-02T10-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+	if routing.target == nil {
+		t.Fatal("the composer resolved no target; the fixture no longer sets up a routed run")
+	}
+
+	if _, err := cfg.Namer.NameDelegation(context.Background(),
+		domain.DelegationNaming{Task: "grep every config key", Routed: true}); err != nil {
+		t.Fatalf("NameDelegation for a routed child: %v", err)
+	}
+	if gruntCall.Model != "grunt-model" || gruntCall.Authorization != "Bearer sk-grunt" {
+		t.Errorf("the routed call reached the Sub-agent server as (%q, %q); want the target's own model and key",
+			gruntCall.Model, gruntCall.Authorization)
+	}
+	if sessionCall.Model != "" {
+		t.Errorf("the run's own server saw a routed child's naming call (model %q); want the grunt box to answer "+
+			"for its own work (ADR 0068 decision 2)", sessionCall.Model)
+	}
+
+	if _, err := cfg.Namer.NameDelegation(context.Background(),
+		domain.DelegationNaming{Task: "grep every config key"}); err != nil {
+		t.Fatalf("NameDelegation for an unrouted child: %v", err)
+	}
+	if sessionCall.Model != "entry-model" || sessionCall.Authorization != "Bearer sk-firing" {
+		t.Errorf("the unrouted call reached (%q, %q); want the run's own binding",
+			sessionCall.Model, sessionCall.Authorization)
 	}
 }
