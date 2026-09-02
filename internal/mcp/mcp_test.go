@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -436,6 +437,151 @@ func TestBuildStdioTransport_CancelArmsTheCmdsTeardown(t *testing.T) {
 	case <-time.After(bound):
 		t.Fatalf("cmd.Wait did not return within %v of the cancel; the stdio Cmd's context is inert, so cmd.Cancel and cmd.WaitDelay never fire", bound)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The optional per-server env allowlist (stdio)
+// ----------------------------------------------------------------------------
+
+// buildStdioCmd builds the transport for cfg and hands back the *exec.Cmd alone — the process is
+// never started, so only the environment the Cmd was BUILT with is under test. workspaceRoot is
+// the fence the allowlist's PATH is scoped against.
+func buildStdioCmd(t *testing.T, workspaceRoot string, cfg ServerConfig) *exec.Cmd {
+	t.Helper()
+	_, cmd, td, cancel, err := buildTransport(context.Background(), cfg, security.URLGuard{}, workspaceRoot)
+	if err != nil {
+		t.Fatalf("buildTransport: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		td.Release()
+	})
+	return cmd
+}
+
+// hasEnvKey reports whether env carries a "KEY=" entry, and its value when it does.
+func hasEnvKey(env []string, key string) (string, bool) {
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, key+"="); ok {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+// TestBuildStdioTransport_EnvAllowlistScopesTheChildEnvironment pins the whole EnvAllowlist
+// contract on the Cmd buildStdioTransport returns: an absent list is today's behaviour byte for
+// byte, a named list drops everything it does not name, and an explicit empty list leaves the
+// platform floor alone. The `env:` entries are appended last in every case, so a per-server
+// variable wins over an inherited one.
+func TestBuildStdioTransport_EnvAllowlistScopesTheChildEnvironment(t *testing.T) {
+	const (
+		allowedKey = "APOGEE_MCP_ALLOWED"
+		secretKey  = "APOGEE_MCP_SECRET"
+		perServer  = "APOGEE_MCP_PER_SERVER=from-config"
+	)
+	// t.Setenv rules out t.Parallel here, which is what the whole file's env claims need: the
+	// allowlist is read out of the REAL process environment (ScopeEnv's nil lookup).
+	t.Setenv(allowedKey, "keep-me")
+	t.Setenv(secretKey, "leak-me")
+	root := t.TempDir()
+
+	t.Run("an absent allowlist with no env leaves the Cmd inheriting verbatim", func(t *testing.T) {
+		cfg := stdioServerConfig(t)
+		cfg.Env = nil
+
+		cmd := buildStdioCmd(t, root, cfg)
+
+		if cmd.Env != nil {
+			t.Errorf("cmd.Env = %q, want nil so exec inherits the process environment unchanged", cmd.Env)
+		}
+	})
+
+	t.Run("an absent allowlist with env inherits everything and appends env last", func(t *testing.T) {
+		cfg := stdioServerConfig(t)
+		cfg.Env = []string{perServer}
+
+		cmd := buildStdioCmd(t, root, cfg)
+
+		if _, ok := hasEnvKey(cmd.Env, secretKey); !ok {
+			t.Errorf("cmd.Env is missing %s; the default launch inherits the FULL environment", secretKey)
+		}
+		if got := cmd.Env[len(cmd.Env)-1]; got != perServer {
+			t.Errorf("last cmd.Env entry = %q, want the per-server %q", got, perServer)
+		}
+	})
+
+	t.Run("a named allowlist drops what it does not name and keeps env last", func(t *testing.T) {
+		cfg := stdioServerConfig(t)
+		cfg.Env = []string{perServer}
+		cfg.EnvAllowlist = &[]string{allowedKey}
+
+		cmd := buildStdioCmd(t, root, cfg)
+
+		if value, ok := hasEnvKey(cmd.Env, allowedKey); !ok || value != "keep-me" {
+			t.Errorf("cmd.Env %q, want %s=keep-me to survive the allowlist", cmd.Env, allowedKey)
+		}
+		if _, ok := hasEnvKey(cmd.Env, secretKey); ok {
+			t.Errorf("cmd.Env = %q, want %s dropped — it is not on the allowlist", cmd.Env, secretKey)
+		}
+		if got := cmd.Env[len(cmd.Env)-1]; got != perServer {
+			t.Errorf("last cmd.Env entry = %q, want the per-server %q", got, perServer)
+		}
+	})
+
+	t.Run("an allowlisted PATH is scoped away from the workspace", func(t *testing.T) {
+		inside := filepath.Join(root, "bin")
+		t.Setenv("PATH", inside+string(os.PathListSeparator)+"/usr/bin")
+		cfg := stdioServerConfig(t)
+		cfg.Env = nil
+		cfg.EnvAllowlist = &[]string{"PATH"}
+
+		cmd := buildStdioCmd(t, root, cfg)
+
+		value, ok := hasEnvKey(cmd.Env, "PATH")
+		if !ok {
+			t.Fatalf("cmd.Env = %q, want an allowlisted PATH", cmd.Env)
+		}
+		if strings.Contains(value, inside) {
+			t.Errorf("PATH = %q, want the workspace entry %q scoped out", value, inside)
+		}
+	})
+
+	t.Run("an explicit empty allowlist leaves the platform floor alone", func(t *testing.T) {
+		cfg := stdioServerConfig(t)
+		cfg.Env = nil
+		cfg.EnvAllowlist = &[]string{}
+
+		cmd := buildStdioCmd(t, root, cfg)
+
+		if want := platform.Current().ScopeEnv(root, nil, nil); !reflect.DeepEqual(cmd.Env, want) {
+			t.Errorf("cmd.Env = %q, want the platform floor alone %q", cmd.Env, want)
+		}
+		for _, key := range []string{allowedKey, secretKey} {
+			if _, ok := hasEnvKey(cmd.Env, key); ok {
+				t.Errorf("cmd.Env = %q, want %s dropped by the empty allowlist", cmd.Env, key)
+			}
+		}
+	})
+}
+
+// TestConnect_StdioServerLaunchesUnderAnEmptyEnvAllowlist proves the scrub is survivable end to
+// end and not merely well-shaped: the hermetic fixture connects with the narrowest allowlist there
+// is. Its own selector rides cfg.Env (appended after the floor) and its command is an absolute
+// os.Executable(), so nothing the empty list drops is needed to reach a tool listing.
+func TestConnect_StdioServerLaunchesUnderAnEmptyEnvAllowlist(t *testing.T) {
+	cfg := stdioServerConfig(t)
+	cfg.EnvAllowlist = &[]string{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	c, err := Connect(ctx, []ServerConfig{cfg}, security.URLGuard{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Connect under an empty env-allowlist: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	findTool(t, c.Tools(), "fixture__echo")
 }
 
 // assertNoGoroutineIn fails unless every goroutine naming frame has left it before the deadline.

@@ -2085,6 +2085,46 @@ func TestApplyConfigMCPServers(t *testing.T) {
 	}
 }
 
+// The optional per-server `env-allowlist:` round-trips as a POINTER, so the three states stay
+// distinguishable on disk: absent leaves the stdio launch inheriting apogee's whole environment,
+// an explicit `[]` hands the child the platform floor alone, and a named list scopes it to those
+// keys. Only the pointer can tell the first two apart.
+func TestApplyConfigMCPServerEnvAllowlist(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "")
+	const configYAML = `mcp-servers:
+  - name: inherits
+    transport: stdio
+    command: a-mcp
+  - name: floor
+    transport: stdio
+    command: b-mcp
+    env-allowlist: []
+  - name: named
+    transport: stdio
+    command: c-mcp
+    env-allowlist: [PATH, HOME]
+`
+	writeConfigHome(t, home, configYAML)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	want := []mcp.ServerConfig{
+		{Name: "inherits", Transport: mcp.TransportStdio, Command: "a-mcp"},
+		{Name: "floor", Transport: mcp.TransportStdio, Command: "b-mcp", EnvAllowlist: &[]string{}},
+		{Name: "named", Transport: mcp.TransportStdio, Command: "c-mcp", EnvAllowlist: &[]string{"PATH", "HOME"}},
+	}
+	if !reflect.DeepEqual(opts.MCPServers, want) {
+		t.Errorf("mcpServers = %+v; want %+v", opts.MCPServers, want)
+	}
+	if opts.MCPServers[0].EnvAllowlist != nil {
+		t.Errorf("an absent env-allowlist parsed to %v; want nil so the default launch is untouched",
+			*opts.MCPServers[0].EnvAllowlist)
+	}
+}
+
 // The `tools:` block round-trips: the disabled roster parses into opts.toolsDisabled in file
 // order, an absent block leaves the whole roster standing, and a name matching no tool is a NOTICE
 // rather than a startup error — the rest of the list still applies, so pruning a roster can never

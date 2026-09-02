@@ -2270,18 +2270,23 @@ type mcpServerConfig struct {
 	Args      []string `yaml:"args"`
 	Env       []string `yaml:"env"`
 	Endpoint  string   `yaml:"endpoint"`
+	// EnvAllowlist is a pointer so an absent key stays distinguishable from an explicitly empty
+	// list: absent leaves the stdio launch inheriting apogee's whole environment (the documented
+	// default), `env-allowlist: []` hands the child the platform floor alone.
+	EnvAllowlist *[]string `yaml:"env-allowlist"`
 }
 
 // toServerConfig maps the on-disk MCP server schema onto the mcp.ServerConfig value the client
 // connects with.
 func (m mcpServerConfig) toServerConfig() mcp.ServerConfig {
 	return mcp.ServerConfig{
-		Name:      m.Name,
-		Transport: mcp.Transport(m.Transport),
-		Command:   m.Command,
-		Args:      m.Args,
-		Env:       m.Env,
-		Endpoint:  m.Endpoint,
+		Name:         m.Name,
+		Transport:    mcp.Transport(m.Transport),
+		Command:      m.Command,
+		Args:         m.Args,
+		Env:          m.Env,
+		Endpoint:     m.Endpoint,
+		EnvAllowlist: m.EnvAllowlist,
 	}
 }
 

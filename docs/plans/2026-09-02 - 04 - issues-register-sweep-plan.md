@@ -742,7 +742,11 @@ rather than through `resolveResume` and the sweep called in hand-picked order.
 
 ---
 
-## 17. An optional per-server env allowlist for stdio MCP launches
+## 17. An optional per-server env allowlist for stdio MCP launches — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's `internal/config/config.go:2140-2150` / `:2152-2163` line numbers predate items 14–16; `mcpServerConfig` and `toServerConfig` were edited at their current sites (`:2266` / `:2280`). The field mapping and the pointer semantics are exactly as specified.
+NOTES (2026-09-02): the `ServerConfig` type doc's transport-field enumeration ("stdio uses Command/Args/Env") gained `EnvAllowlist` in the same edit — the enumeration the new field makes incomplete, in a file the item lists. The TRUST NOTE itself is untouched: narrowing it is item 18's.
+NOTES (2026-09-02): the Tests list is a floor — one subtest beyond it pins that an allowlisted PATH is scoped away from the workspace, which is the security property that makes `ScopeEnv` the right helper rather than a plain filter.
 
 **What.** A configured stdio MCP server inherits apogee's full environment — deliberate, and stated in
 the trust note at `internal/mcp/transport.go:137-145`. Add the opt-in the note parks: `EnvAllowlist

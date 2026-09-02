@@ -59,7 +59,7 @@ const (
 // configuration; the Client connects to each. Name is the registry alias that qualifies the
 // server's tool names (so two servers' identically named tools stay distinct and the human sees
 // which server a call reaches). Exactly one transport's fields are meaningful per Transport:
-// stdio uses Command/Args/Env; SSE / streamable-http use Endpoint.
+// stdio uses Command/Args/Env/EnvAllowlist; SSE / streamable-http use Endpoint.
 type ServerConfig struct {
 	// Name is the server alias — the prefix on each surfaced tool's registry name. Required and
 	// must be unique across the configured set (the Client rejects a duplicate or empty name).
@@ -73,6 +73,19 @@ type ServerConfig struct {
 	Command string
 	Args    []string
 	Env     []string
+
+	// EnvAllowlist optionally narrows what a stdio server INHERITS, for a host that wants to run
+	// a less-trusted stdio server than the full-environment default the trust note on
+	// buildStdioTransport describes. The pointer is load-bearing — it tells an absent key from an
+	// explicitly empty one:
+	//
+	//   nil            the default: the child inherits apogee's whole environment (plus Env).
+	//   &[]string{...} only the named keys survive, plus the platform's own essentials, with PATH
+	//                  scoped away from the workspace exactly as the git tool's allowlist is.
+	//   &[]string{}    the platform floor alone — nothing of apogee's environment carries over.
+	//
+	// Env is appended last in every case, so a per-server variable always wins.
+	EnvAllowlist *[]string
 
 	// Endpoint is the http(s) URL of an SSE / streamable-http server. It passes the host's
 	// scheme/host allow-deny before connecting, and its own resolved addresses are what the
@@ -153,7 +166,13 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, program, cfg.Args...)
-	if len(cfg.Env) > 0 {
+	switch {
+	case cfg.EnvAllowlist != nil:
+		// The opt-in scrub: only the named keys (plus the platform's essentials) reach the child,
+		// with PATH scoped away from the workspace as safeGitEnv scopes git's. cfg.Env is appended
+		// last so a per-server variable still wins over an inherited one of the same name.
+		cmd.Env = append(stdioHost.ScopeEnv(workspaceRoot, *cfg.EnvAllowlist, nil), cfg.Env...)
+	case len(cfg.Env) > 0:
 		cmd.Env = append(cmd.Environ(), cfg.Env...)
 	}
 	// Built before the SDK starts the command, as the facility requires: on POSIX the process
@@ -162,6 +181,11 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 	td := platform.NewProcessTeardown(cmd)
 	return &mcpsdk.CommandTransport{Command: cmd, TerminateDuration: stdioTerminateDuration}, cmd, td, cancel, nil
 }
+
+// stdioHost is the platform facility a stdio server's env-allowlist is scoped through (the
+// allowlisted keys, the platform's own essentials, PATH scoped away from the workspace). It is a
+// package var so a test can substitute a fake, the idiom internal/tools' shellHost follows.
+var stdioHost platform.Host = platform.Current()
 
 // stdioTerminateDuration is how long the SDK's stdio shutdown waits at each rung of its ladder
 // (stdin close → SIGTERM → SIGKILL) before escalating. Zero means the SDK's own 5s default, which
