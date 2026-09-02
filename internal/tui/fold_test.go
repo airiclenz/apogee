@@ -48,7 +48,7 @@ type foldCase struct {
 	wantPendingDepth int       // whose buffer that is — the nesting level the tokens streamed at
 	wantPhrase       string    // the activity phrase after the fold ("" = the slot is left idle)
 	wantStats        statsFold // the stats after the fold (the zero value = foldStats moved nothing)
-	wantReasoning    string    // the retained reasoning tail after the fold ("" = it holds nothing)
+	wantBoard        string    // the in-flight thinking the board holds after the fold ("" = none)
 	// wantProgressSave is progressSaveTrigger's answer for this Event: whether folding it leaves
 	// the record worth re-persisting mid-Turn. It rides the variant table rather than a table of
 	// its own so the coverage guard below holds the predicate to the same standard as the folds —
@@ -82,13 +82,12 @@ func foldCases() []foldCase {
 		},
 		{
 			name: "ReasoningEvent is activity plus retention — the transcript never shows reasoning",
-			// The scrollback gets nothing and the phrase gets "thinking", as it always did; what is
-			// new is that the chunk is RETAINED, escape-stripped, in the tail behind the fold
-			// (reasoning.go). Nothing renders that tail — the assertion below is the only reader in
-			// the program.
-			event:         domain.ReasoningEvent{Text: "hmm"},
-			wantPhrase:    "thinking",
-			wantReasoning: "hmm",
+			// The scrollback gets nothing and the phrase gets "thinking", as it always did; the
+			// chunk is RETAINED, escape-stripped, in this run's in-flight record on the thinking
+			// board behind the fold (thinking.go), which is what the /thinking pane reads.
+			event:      domain.ReasoningEvent{Text: "hmm"},
+			wantPhrase: "thinking",
+			wantBoard:  "hmm",
 			// The generation clock starts here as readily as on a token: reasoning is output the
 			// server counts in completion_tokens, so the throughput window has to include it.
 			wantStats: statsFold{genStarted: true},
@@ -97,19 +96,19 @@ func foldCases() []foldCase {
 			name: "ReasoningEvent at Depth 1 retains at its own depth and starts no generation clock",
 			// The mirror of the Depth-1 TokenEvent row: a delegate's thinking is not the
 			// conversation the gauge times, so foldStats leaves the clock alone (foldStats).
-			event:         domain.ReasoningEvent{EventBase: domain.EventBase{Depth: 1}, Text: "hmm"},
-			wantPhrase:    subAgentActivityName + " · thinking",
-			wantReasoning: "hmm",
+			event:      domain.ReasoningEvent{EventBase: domain.EventBase{Depth: 1}, Text: "hmm"},
+			wantPhrase: subAgentActivityName + " · thinking",
+			wantBoard:  "hmm",
 		},
 		{
-			name:       "StreamResetEvent discards the pending buffer, the reasoning tail, and says retrying",
+			name:       "StreamResetEvent discards the pending buffer, the run's thinking record, and says retrying",
 			event:      domain.StreamResetEvent{},
 			wantPhrase: "retrying",
 		},
 		{
-			name: "MessageEvent commits an assistant entry, ends the reasoning tail, and keeps thinking",
-			// The committed message carries the Turn's reasoning itself (reasoning_content), so the
-			// view's copy has served its purpose and goes.
+			name: "MessageEvent commits an assistant entry, ends the run's thinking record, and keeps thinking",
+			// The Turn is over, so the run's in-flight record is committed to the board's history
+			// and nothing is left live (thinking.go).
 			event:       domain.MessageEvent{Text: "done"},
 			wantEntries: 1,
 			wantPhrase:  "thinking",
@@ -379,8 +378,8 @@ func TestFoldEventFoldsEveryVariant(t *testing.T) {
 			if got := statsOf(m); got != tc.wantStats {
 				t.Errorf("stats = %+v, want %+v", got, tc.wantStats)
 			}
-			if got := m.reasoning.text; got != tc.wantReasoning {
-				t.Errorf("retained reasoning = %q, want %q", got, tc.wantReasoning)
+			if got := liveThinking(m.thinking); got != tc.wantBoard {
+				t.Errorf("in-flight thinking = %q, want %q", got, tc.wantBoard)
 			}
 		})
 	}

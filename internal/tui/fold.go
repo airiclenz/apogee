@@ -11,10 +11,10 @@ import (
 // ----------------------------------------------------------------------------
 //
 // EVERY engine Event enters the view through foldEvent and nowhere else. The Update loop's
-// eventMsg case hands the Event straight here, so the four folds a view update is made of —
-// the status-line stats, the retained reasoning tail, the transcript, the live activity phrase —
-// have one caller, in one order, in one file, instead of switches in as many files ordered by a
-// comment.
+// eventMsg case hands the Event straight here, so the five folds a view update is made of —
+// the status-line stats, the thinking board, the Inspector's wire ring, the transcript, the live
+// activity phrase — have one caller, in one order, in one file, instead of switches in as many
+// files ordered by a comment.
 //
 // The order is load-bearing, and it is a DATA dependency rather than prose: the activity's
 // ToolResultEvent rule needs to know whether any tool call is still open, transcript.apply is
@@ -33,15 +33,15 @@ import (
 // suffix hidden) instead of a clamped or invented one.
 const throughputWindowFloor = 250 * time.Millisecond
 
-// foldEvent folds one engine Event into the view: the live token stats, the retained reasoning
-// tail, then the transcript, then the activity phrase. It mutates the local copy and returns it,
-// like every Update fold; repainting the viewport is the caller's (the eventMsg case's).
+// foldEvent folds one engine Event into the view: the live token stats, the thinking board, the
+// wire ring, then the transcript, then the activity phrase. It mutates the local copy and returns
+// it, like every Update fold; repainting the viewport is the caller's (the eventMsg case's).
 func (m Model) foldEvent(e domain.Event) Model {
 	m = m.foldStats(e)
 	// Order-free, and placed here rather than woven into the dependency below because it has none:
-	// the reasoning tail reads nothing the other folds establish, and nothing in the view reads what
-	// it writes — it is retention behind the fold and no surface at all (reasoning.go).
-	m = m.foldReasoning(e)
+	// the thinking board reads nothing the other folds establish, and nothing but the /thinking
+	// pane reads what it writes (thinking.go).
+	m = m.foldThinking(e)
 	// Order-free for the same reason, and deliberately NOT part of the transcript fold below: a wire
 	// record is not a conversation entry (inspector.go), so it lands in the Inspector's own ring
 	// beside the transcript and disturbs no entry pairing. It reads nothing the other folds

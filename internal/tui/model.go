@@ -354,13 +354,13 @@ type Model struct {
 	// safe in the value-copied Model (ADR 0011).
 	lastEvent time.Time
 
-	// reasoning is the current Turn's reasoning as the view RETAINS it — a bounded, escape-stripped
-	// tail of the chunks domain.ReasoningEvent reveals, for one agent at a time (reasoning.go).
-	// NOTHING RENDERS IT. It is the seam a future reasoning display reads, landed ahead of that
-	// display so the retention rules settle where they can be tested rather than inside a renderer;
-	// what the status line says about reasoning today it says from the ARRIVAL of the event (act,
-	// above), never from these bytes.
-	reasoning reasoningTail
+	// thinking is the session's thinking as the view RETAINS it — one bounded, escape-stripped
+	// record per agent per Turn of the chunks domain.ReasoningEvent reveals, completed records
+	// newest last beside the in-flight one for each run currently thinking (thinking.go). It is
+	// what the /thinking pane reads and composes its rows out of; the pane keeps nothing of its
+	// own. What the status line says about reasoning it still says from the ARRIVAL of the event
+	// (act, above), never from these bytes.
+	thinking thinkingBoard
 
 	// liveStats is what the status line reports about the conversation the session is holding right
 	// now: the context gauge's fill, the generation clock, and the last completion's throughput. It
@@ -1815,10 +1815,10 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// sticky "stopping", which only this path clears, and any delegate slot whose child never got
 	// to report (activity.go). Idle renders an empty left slot.
 	m.acts = nil
-	// Whatever the model was reasoning about died with the worker: a stop and a fault emit no
-	// closing MessageEvent, so this is the boundary that keeps a cancelled Turn's reasoning from
-	// outliving it (reasoning.go).
-	m.reasoning.reset()
+	// The run is over however it ended, and what each agent thought before dying is the point of
+	// the /thinking pane: a stop and a fault emit no closing MessageEvent, so this is the boundary
+	// that commits every in-flight record instead of losing it (thinking.go).
+	m.thinking.commitAll()
 	// The run is over however it ended, so a first Esc still waiting for its confirming press has
 	// nothing left to stop: disarm here instead of waiting out escStopWindow. statusRight's armed
 	// branch sits above every occupant, so a stamp left standing would hold "press esc again to

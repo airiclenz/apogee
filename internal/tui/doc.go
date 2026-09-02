@@ -438,22 +438,29 @@
 // HUMAN never show it, because the silence there is the human's own. It is also the first thing the
 // left slot gives up on a narrow row, dropped whole rather than truncated (layout.md).
 //
-// reasoning.go retains what that phrase is ABOUT, and renders none of it. NOTHING IN THE VIEW
-// READS [Model.reasoning] — no tail row, no transcript entry, no config key — and the "thinking"
-// above still comes from the ARRIVAL of a [domain.ReasoningEvent] rather than from these bytes. It
-// is the retention seam a future reasoning display will be built on, landed ahead of that display
-// on purpose: the three rules such a display would live or die by settle here, where they are
-// testable, instead of inside a renderer already painting. The chunk is escape-stripped at THIS
-// seam (a ReasoningEvent's Text is raw model output that may carry ESC bytes — the invariant
-// below, extended to reasoning's one entrance); the buffer is BOUNDED to the last
-// [reasoningTailCap] bytes, dropped from the front on a rune boundary, because the Model is copied
-// on every Update (ADR 0011) and a Turn may reason for an hour; and it holds ONE agent's reasoning
-// at a time, keyed on the same depth-and-spawn identity the activity line uses, since a fan-out's
-// delegates interleave their chunks in one stream and a concatenation of them is a sentence nobody
-// wrote. [Model.foldReasoning] is the fourth fold foldEvent runs and the only writer, with a
-// StreamResetEvent (the Turn is superseded) and a MessageEvent (the Turn is committed, and its
-// reasoning_content is the canonical copy) each ending a tail, beside the worker boundaries
-// launchExchange and finishWorker.
+// thinking.go retains what that phrase is ABOUT — the session's thinking, which the /thinking pane
+// reads and nothing else does. The "thinking" above still comes from the ARRIVAL of a
+// [domain.ReasoningEvent] rather than from these bytes, which is why a status line needs none of
+// this. [Model.thinking] is a BOARD: one record per agent per Turn, holding the escape-stripped
+// chunks that agent revealed, completed records newest last beside the in-flight one for each run
+// currently thinking. Four rules, and the pane lives by all of them. The chunk is escape-stripped
+// at THIS seam (a ReasoningEvent's Text is raw model output that may carry ESC bytes — the
+// invariant below, extended to thinking's one entrance). A record is BOUNDED to the last
+// [thinkingRecordCap] bytes, dropped from the front on a rune boundary, and the board to the newest
+// [maxThinkingRecords] completed records, because the Model is copied on every Update (ADR 0011)
+// and a Turn may reason for an hour. A record holds ONE agent's thinking, keyed on the same
+// depth-and-spawn identity the activity line uses, since a fan-out's delegates interleave their
+// chunks in one stream and a concatenation of them is a sentence nobody wrote — which is also why
+// the in-flight record is per RUN rather than one shared slot that each interleaved chunk would
+// shred. And a record is one TURN's, so a chunk under a new Turn index commits the one before it.
+// [Model.foldThinking] is the only writer among the folds, with a StreamResetEvent (that run's Turn
+// is superseded, so its record is dropped) and a MessageEvent (that run's Turn is committed) each
+// ending an in-flight record, beside the worker boundaries launchExchange and finishWorker, which
+// commit every one of them: a stop or a fault sends no closing message, and what an agent thought
+// before dying is the point of the pane. It succeeds the single-buffer reasoning tail this seam
+// first landed as, whose stated purpose was to be the retention a reasoning display would be built
+// on; the board is that retention and a strict superset of it, so the tail is retired rather than
+// kept beside it.
 //
 // spinner.go paints the glyph that phrase runs beside, and the animation is this package's own
 // rather than a charm.land/bubbles/v2/spinner widget: the widget renders frames[i] through one
@@ -611,10 +618,10 @@
 //
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
-// loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the four
+// loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the five
 // folds a view update is made of — [Model.foldStats] (which moved there out of model.go, a file it
-// belonged to only because [Model] does), [Model.foldReasoning], transcript.apply, then
-// [Model.foldActivity] — in the one order that works. That order used to be enforced by three comments in three files; it is now a
+// belonged to only because [Model] does), [Model.foldThinking], [Model.foldWire], transcript.apply,
+// then [Model.foldActivity] — in the one order that works. That order used to be enforced by three comments in three files; it is now a
 // data dependency, because foldEvent reads the open-tool-call fact transcript.apply establishes and
 // PASSES it to foldActivity, which can no longer ask for it early. TestFoldEventCoversEveryEventVariant
 // parses internal/domain/events.go and fails on a variant with no row in the fold table, so a new

@@ -89,7 +89,7 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	m.state = stateRunning
 	m.setPlaceholder(m.legendFor(runningPlaceholder)) // the empty box now invites a queued message, not a send
 	m.setActivity(runRef{}, actThinking, "")
-	m.reasoning.reset() // a new Exchange never inherits the last one's reasoning (reasoning.go)
+	m.thinking.commitAll() // the last Exchange's thinking is finished, not inherited (thinking.go)
 	tick := m.spin.arm()
 	return m, tea.Batch(cmd, tick)
 }
