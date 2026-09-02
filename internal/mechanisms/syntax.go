@@ -3,17 +3,17 @@ package mechanisms
 // The syntax-check MECHANISM: its catalogue row, hook, and the correction it asks for — the
 // same file shape as validate.go / autofix.go, one file per registered Mechanism.
 //
-// The checker it calls is not here. syntaxengine.go holds the pure engine (parse a payload,
-// report breakage) with no catalogue row and no Mechanism of its own; this file is the only
-// thing that decides WHEN that engine runs and what the loop does with its verdict. The pair
-// was `syntax.go` / `syntaxcheck.go` until ADR 0043 — two names that said nothing about which
-// half was which.
+// The checker it calls is not here and not in this package. internal/syntaxcheck holds the pure
+// engine (parse a payload, report breakage) with no catalogue row and no Mechanism of its own;
+// this file is the only thing that decides WHEN that engine runs and what the loop does with its
+// verdict.
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/syntaxcheck"
 )
 
 // syntax registers the write-content syntax-check Mechanism's catalogue row (Phase-4 item 5).
@@ -83,16 +83,16 @@ func validateWriteSyntax(calls []domain.ToolCall) []robustnessIssue {
 		if !ok {
 			continue
 		}
-		if detectLanguage(path) == "" {
+		if syntaxcheck.Language(path) == "" {
 			continue
 		}
-		result := checkSyntax(path, content)
-		if result.valid {
+		result := syntaxcheck.Check(path, content)
+		if result.Valid {
 			continue
 		}
-		for _, e := range result.errors {
+		for _, e := range result.Errors {
 			issues = append(issues, robustnessIssue{
-				message: fmt.Sprintf("syntax error in %s at line %d: %s", path, e.line, e.message),
+				message: fmt.Sprintf("syntax error in %s at line %d: %s", path, e.Line, e.Message),
 			})
 		}
 	}

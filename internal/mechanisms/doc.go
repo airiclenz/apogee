@@ -39,7 +39,7 @@
 // only row that declares a needs (the Library store the engine derives). readloop.go detects a
 // path read over and over without progress and hints at it; readrepeat.go catches the redundant
 // re-read in the response about to be sent. syntax.go is the write-content syntax-check Mechanism
-// (the checker itself is syntaxengine.go, below). toolfilter.go narrows the tool menu before the
+// (the checker itself is the internal/syntaxcheck package). toolfilter.go narrows the tool menu before the
 // request goes out. toolloop.go is tool_loop_interceptor, the identical-repeat-turn detector, and
 // the file that declares this package's prompt-asset embed and its mustPrompt loader (the prompts/
 // directory, below) — cot.go, decompose.go, emptyresponse.go and library.go load their own assets
@@ -50,7 +50,7 @@
 //
 // # The shared plumbing, one line each
 //
-// Eight files that register nothing. They hold the registry itself, the roll of retired IDs, and the
+// Seven files that register nothing. They hold the registry itself, the roll of retired IDs, and the
 // helpers more than one Mechanism needs, so a shape lives once instead of once per Mechanism (D5).
 //
 // catalogue.go is the registry: the row, the package-private register() every Mechanism file
@@ -71,9 +71,7 @@
 // read-tool set, tool-call path extraction, and the conversation predicates the off-ramps gate on.
 // robustness.go carries the Wave-1 robustness helpers: the robustnessIssue type, the correction
 // message built from a set of issues, the write-tool sets, and the write payload accessors that
-// read and rewrite a call's path/content. syntaxengine.go is the pure syntax checker — the Go
-// parser path and the bracket/string/truncation heuristic for everything else — called by
-// syntax.go and registering nothing itself.
+// read and rewrite a call's path/content.
 //
 // # The prompt assets
 //

@@ -1,9 +1,11 @@
-package mechanisms
-
-// The syntax-check ENGINE: a pure checker over a write payload, no catalogue row, no Mechanism.
-// It registers nothing and decides nothing about the loop — syntax.go owns the Mechanism that
-// calls in here and acts on the verdict. Named `syntaxcheck.go` until ADR 0043, which cured the
-// pair: `syntax.go` is the Mechanism (matching validate.go / autofix.go), this is its engine.
+// Package syntaxcheck is the pure syntax ENGINE over a file payload: it detects the language a
+// path implies and reports unambiguous breakage. It registers nothing, holds no package state,
+// decides nothing about the agent loop, and imports only the standard library — each caller
+// decides what a verdict means. It lived as internal/mechanisms/syntaxengine.go (and
+// syntaxcheck.go before ADR 0043) while the syntax Mechanism was its only consumer; it moved out
+// of internal/mechanisms so a consumer elsewhere can reach the checker without importing the
+// Mechanism registry.
+package syntaxcheck
 
 import (
 	"fmt"
@@ -22,27 +24,27 @@ import (
 // is deliberately conservative — it reports only unambiguous breakage — because a false positive
 // would defer a needless correction and cost a Turn.
 
-// syntaxResult is the outcome of a syntax check: valid, the detected language, and any errors.
-type syntaxResult struct {
-	valid    bool
-	language string
-	errors   []syntaxError
+// Result is the outcome of a syntax check: valid, the detected language, and any errors.
+type Result struct {
+	Valid    bool
+	Language string
+	Errors   []Error
 }
 
-// syntaxError is one located syntax problem.
-type syntaxError struct {
-	line    int
-	column  int
-	message string
+// Error is one located syntax problem.
+type Error struct {
+	Line    int
+	Column  int
+	Message string
 }
 
-// checkSyntax validates content by the language its path implies. Empty content is treated as
+// Check validates content by the language its path implies. Empty content is treated as
 // valid (there is nothing to break); an unrecognised extension yields an empty language and a
 // valid result, so the caller skips it.
-func checkSyntax(path, content string) syntaxResult {
-	lang := detectLanguage(path)
+func Check(path, content string) Result {
+	lang := Language(path)
 	if strings.TrimSpace(content) == "" {
-		return syntaxResult{valid: true, language: lang}
+		return Result{Valid: true, Language: lang}
 	}
 	switch lang {
 	case "go":
@@ -52,8 +54,8 @@ func checkSyntax(path, content string) syntaxResult {
 	}
 }
 
-// detectLanguage maps a file extension to a language identifier, or "" when unrecognised.
-func detectLanguage(path string) string {
+// Language maps a file extension to a language identifier, or "" when unrecognised.
+func Language(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go":
 		return "go"
@@ -117,18 +119,18 @@ func hasHashComments(lang string) bool {
 }
 
 // checkGoSyntax parses Go source with the standard parser and reports exact syntax errors.
-func checkGoSyntax(content string) syntaxResult {
+func checkGoSyntax(content string) Result {
 	fset := token.NewFileSet()
 	if _, err := parser.ParseFile(fset, "check.go", content, parser.AllErrors); err == nil {
-		return syntaxResult{valid: true, language: "go"}
+		return Result{Valid: true, Language: "go"}
 	} else {
-		result := syntaxResult{language: "go"}
+		result := Result{Language: "go"}
 		if errList, ok := err.(scanner.ErrorList); ok {
 			for _, e := range errList {
-				result.errors = append(result.errors, syntaxError{line: e.Pos.Line, column: e.Pos.Column, message: e.Msg})
+				result.Errors = append(result.Errors, Error{Line: e.Pos.Line, Column: e.Pos.Column, Message: e.Msg})
 			}
 		} else {
-			result.errors = append(result.errors, syntaxError{line: 1, message: err.Error()})
+			result.Errors = append(result.Errors, Error{Line: 1, Message: err.Error()})
 		}
 		return result
 	}
@@ -173,8 +175,8 @@ func isIdentifierRune(r rune) bool {
 
 // checkBrackets validates bracket/paren/brace balance, unclosed strings, and common truncation
 // patterns for languages without a bundled parser.
-func checkBrackets(content, lang string) syntaxResult {
-	result := syntaxResult{language: lang}
+func checkBrackets(content, lang string) Result {
+	result := Result{Language: lang}
 
 	lines := strings.Split(content, "\n")
 	type bracketInfo struct {
@@ -303,19 +305,19 @@ func checkBrackets(content, lang string) syntaxResult {
 				stack = append(stack, bracketInfo{'{', lineNo})
 			case ')':
 				if len(stack) == 0 || stack[len(stack)-1].char != '(' {
-					result.errors = append(result.errors, syntaxError{line: lineNo, message: "unmatched closing parenthesis ')'"})
+					result.Errors = append(result.Errors, Error{Line: lineNo, Message: "unmatched closing parenthesis ')'"})
 				} else {
 					stack = stack[:len(stack)-1]
 				}
 			case ']':
 				if len(stack) == 0 || stack[len(stack)-1].char != '[' {
-					result.errors = append(result.errors, syntaxError{line: lineNo, message: "unmatched closing bracket ']'"})
+					result.Errors = append(result.Errors, Error{Line: lineNo, Message: "unmatched closing bracket ']'"})
 				} else {
 					stack = stack[:len(stack)-1]
 				}
 			case '}':
 				if len(stack) == 0 || stack[len(stack)-1].char != '{' {
-					result.errors = append(result.errors, syntaxError{line: lineNo, message: "unmatched closing brace '}'"})
+					result.Errors = append(result.Errors, Error{Line: lineNo, Message: "unmatched closing brace '}'"})
 				} else {
 					stack = stack[:len(stack)-1]
 				}
@@ -324,7 +326,7 @@ func checkBrackets(content, lang string) syntaxResult {
 	}
 
 	if inString != 0 {
-		result.errors = append(result.errors, syntaxError{line: len(lines), message: fmt.Sprintf("unclosed string literal (opened with %c)", inString)})
+		result.Errors = append(result.Errors, Error{Line: len(lines), Message: fmt.Sprintf("unclosed string literal (opened with %c)", inString)})
 	}
 	for i := len(stack) - 1; i >= 0; i-- {
 		var name string
@@ -336,7 +338,7 @@ func checkBrackets(content, lang string) syntaxResult {
 		case '{':
 			name = "brace '{'"
 		}
-		result.errors = append(result.errors, syntaxError{line: stack[i].line, message: fmt.Sprintf("unclosed %s", name)})
+		result.Errors = append(result.Errors, Error{Line: stack[i].line, Message: fmt.Sprintf("unclosed %s", name)})
 	}
 
 	checkTruncation(lines, lang, &result)
@@ -344,13 +346,13 @@ func checkBrackets(content, lang string) syntaxResult {
 		checkPythonIndent(lines, &result)
 	}
 
-	result.valid = len(result.errors) == 0
+	result.Valid = len(result.Errors) == 0
 	return result
 }
 
 // checkTruncation flags a file whose last non-blank line ends on an incomplete expression — the
 // shape a truncated generation leaves.
-func checkTruncation(lines []string, lang string, result *syntaxResult) {
+func checkTruncation(lines []string, lang string, result *Result) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed == "" {
@@ -367,7 +369,7 @@ func checkTruncation(lines []string, lang string, result *syntaxResult) {
 			strings.HasSuffix(trimmed, "=") ||
 			strings.HasSuffix(trimmed, "=>") ||
 			strings.HasSuffix(trimmed, "->") {
-			result.errors = append(result.errors, syntaxError{line: i + 1, message: "file appears truncated (ends with incomplete expression)"})
+			result.Errors = append(result.Errors, Error{Line: i + 1, Message: "file appears truncated (ends with incomplete expression)"})
 		}
 		break
 	}
@@ -411,7 +413,7 @@ func stripTrailingComment(s, lang string) string {
 
 // checkPythonIndent flags a block-opening line (ending in ':') whose following line is not
 // indented past it — the missing-indented-block shape.
-func checkPythonIndent(lines []string, result *syntaxResult) {
+func checkPythonIndent(lines []string, result *Result) {
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasSuffix(trimmed, ":") {
@@ -433,7 +435,7 @@ func checkPythonIndent(lines []string, result *syntaxResult) {
 				continue
 			}
 			if leadingSpaces(lines[i+1]) <= leadingSpaces(line) {
-				result.errors = append(result.errors, syntaxError{line: i + 2, message: fmt.Sprintf("expected indented block after line %d", i+1)})
+				result.Errors = append(result.Errors, Error{Line: i + 2, Message: fmt.Sprintf("expected indented block after line %d", i+1)})
 			}
 		}
 	}

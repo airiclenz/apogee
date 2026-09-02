@@ -352,7 +352,7 @@ func TestAutofixWithoutPermitNeverSpawns(t *testing.T) {
 // The ladder is built by hand in the production shape (external rung first, in-process rung behind
 // it) because the real in-process tail cannot serve as the witness: go/format.Source only succeeds
 // on content whose parse errors come from the missing package clause, and it never adds one, so its
-// output never reduces checkSyntax's error count.
+// output never reduces syntaxcheck.Check's error count.
 func TestAutofixWithoutPermitStillRunsInProcessRungs(t *testing.T) {
 	t.Parallel()
 	externalRan := false

@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/syntaxcheck"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -35,7 +36,7 @@ const defaultFormatterTimeout = 3 * time.Second
 
 // autofixMechanism is the post-response formatter repair (catalogue Table A `autofix`; ported
 // from apogee-sim internal/autofix @pin). For each file-writing tool call whose content is
-// syntax-broken (checkSyntax reports issues) it runs the language's formatter ladder and keeps
+// syntax-broken (syntaxcheck.Check reports issues) it runs the language's formatter ladder and keeps
 // the output only when it REDUCES the issue count (the sim's AttemptFix gate), writing the
 // repaired payload back through Response.SetToolCallArguments so the tool the loop dispatches
 // receives it. Clean content is never touched — autofix is a repairer, not a beautifier — and a
@@ -230,12 +231,12 @@ func (m autofixMechanism) attemptFix(ctx context.Context, gate spawnGate, path, 
 	if !sanitizePath(path) {
 		return content, false
 	}
-	lang := detectLanguage(path)
+	lang := syntaxcheck.Language(path)
 	if lang == "" {
 		return content, false
 	}
-	original := checkSyntax(path, content)
-	if original.valid {
+	original := syntaxcheck.Check(path, content)
+	if original.Valid {
 		return content, false
 	}
 	for _, repair := range m.repairs[lang] {
@@ -248,7 +249,7 @@ func (m autofixMechanism) attemptFix(ctx context.Context, gate spawnGate, path, 
 		if !ok {
 			continue
 		}
-		if len(checkSyntax(path, out).errors) < len(original.errors) {
+		if len(syntaxcheck.Check(path, out).Errors) < len(original.Errors) {
 			return out, true
 		}
 	}

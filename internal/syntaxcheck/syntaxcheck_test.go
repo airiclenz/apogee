@@ -1,4 +1,4 @@
-package mechanisms
+package syntaxcheck
 
 import (
 	"strings"
@@ -286,9 +286,9 @@ func TestCheckSyntaxAcceptsValidCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := checkSyntax(tt.path, tt.content)
-			if !got.valid {
-				t.Errorf("checkSyntax(%q, …).valid = false, want true; errors = %v", tt.path, formatErrors(got.errors))
+			got := Check(tt.path, tt.content)
+			if !got.Valid {
+				t.Errorf("Check(%q, …).Valid = false, want true; errors = %v", tt.path, formatErrors(got.Errors))
 			}
 		})
 	}
@@ -394,18 +394,18 @@ func TestCheckSyntaxReportsEachBrokenShape(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := checkSyntax(tt.path, tt.content)
-			if got.valid {
-				t.Fatalf("checkSyntax(%q, %q).valid = true, want false", tt.path, tt.content)
+			got := Check(tt.path, tt.content)
+			if got.Valid {
+				t.Fatalf("Check(%q, %q).Valid = true, want false", tt.path, tt.content)
 			}
 			found := false
-			for _, e := range got.errors {
-				if strings.Contains(e.message, tt.want) && e.line == tt.line {
+			for _, e := range got.Errors {
+				if strings.Contains(e.Message, tt.want) && e.Line == tt.line {
 					found = true
 				}
 			}
 			if !found {
-				t.Errorf("errors = %v, want one containing %q on line %d", formatErrors(got.errors), tt.want, tt.line)
+				t.Errorf("errors = %v, want one containing %q on line %d", formatErrors(got.Errors), tt.want, tt.line)
 			}
 		})
 	}
@@ -415,17 +415,17 @@ func TestCheckSyntaxReportsEachBrokenShape(t *testing.T) {
 // checker stays conservative — it under-reports instead of inventing breakage.
 func TestCheckSyntaxUnclosedBlockCommentReportsNothing(t *testing.T) {
 	t.Parallel()
-	got := checkSyntax("a.c", "int main(void) {\n    return 0;\n}\n/* trailing note with a stray { brace\n")
-	if !got.valid {
-		t.Errorf("valid = false, want true; errors = %v", formatErrors(got.errors))
+	got := Check("a.c", "int main(void) {\n    return 0;\n}\n/* trailing note with a stray { brace\n")
+	if !got.Valid {
+		t.Errorf("Valid = false, want true; errors = %v", formatErrors(got.Errors))
 	}
 }
 
 // formatErrors renders a result's errors for a failure message.
-func formatErrors(errs []syntaxError) []string {
+func formatErrors(errs []Error) []string {
 	out := make([]string, 0, len(errs))
 	for _, e := range errs {
-		out = append(out, e.message)
+		out = append(out, e.Message)
 	}
 	return out
 }

@@ -441,8 +441,8 @@ var fileHintLangPatterns = []struct {
 }
 
 // fileHintLanguageExt returns the file extension of the first language named in text, or "" —
-// apogee-sim detectLanguageKeyword @pin (renamed to avoid colliding with the package's existing
-// syntax-check detectLanguage).
+// apogee-sim detectLanguageKeyword @pin (renamed when the package still carried the syntax
+// checker's own language sniff, now syntaxcheck.Language).
 func fileHintLanguageExt(text string) string {
 	lower := strings.ToLower(text)
 	for _, lp := range fileHintLangPatterns {
