@@ -14,7 +14,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // firingRoots is one throwaway set of state roots, each a real directory so the scratch dir the
@@ -379,30 +381,144 @@ func TestFiringConfigCarriesTheShippedSkillGate(t *testing.T) {
 	}
 }
 
-// The delegates run.Once pins for itself stay nil, and so does the tool registry: a Firing reaches
-// no external MCP server (ADR 0034), and handing the runner an Approver, an Asker, a Presenter or an
-// Events sink is how an unattended run acquires a human it does not have (ADR 0033 decision 2).
+// The delegates run.Once pins for itself stay nil whatever the configuration says: handing the
+// runner an Approver, an Asker, a Presenter or an Events sink is how an unattended run acquires a
+// human it does not have (ADR 0033 decision 2).
+//
+// The tool registry stays nil with them on every path but ONE. `sub-agents-choice:` shapes the
+// sub_agent schema rather than any field of the Config the engine reads (ADR 0031), so the only way
+// an unattended run can publish `run_on` is to hand over a roster assembled by the host — which is
+// why the gate is also the guard: under `fixed`, and with the key absent, Tools stays nil
+// byte-for-byte and the engine goes on building its own roster off the delegates run.Once pins.
+// A Firing reaches no external MCP server either way (ADR 0034), so the assembled registry is the
+// built-in set alone.
 func TestFiringConfigLeavesTheDriverSeamsNil(t *testing.T) {
 	t.Parallel()
 
-	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
-		opts:     config.Options{Bypass: true},
-		entry:    config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1},
-		apiKey:   "sk-test",
+	for _, tc := range []struct {
+		name      string
+		choice    config.SubAgentsChoice
+		wantTools bool
+	}{
+		{name: "the key absent leaves the engine its own roster"},
+		{name: "fixed leaves the engine its own roster", choice: config.SubAgentsChoiceFixed},
+		{
+			name:      "model hands over a roster that publishes the seat",
+			choice:    config.SubAgentsChoiceModel,
+			wantTools: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+				opts:     config.Options{Bypass: true, SubAgentsChoice: tc.choice},
+				entry:    config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1},
+				apiKey:   "sk-test",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
+				recordID: "2026-08-24T11-00-00-firing",
+			})
+			if err != nil {
+				t.Fatalf("firingConfig: %v", err)
+			}
+
+			if cfg.Events != nil || cfg.Approver != nil || cfg.Asker != nil || cfg.Presenter != nil {
+				t.Error("the composer wired a delegate run.Once pins for itself")
+			}
+			if got := cfg.Tools != nil; got != tc.wantTools {
+				t.Fatalf("cfg.Tools non-nil = %v, want %v — the seat gate is the only thing that "+
+					"may hand the runner a registry", got, tc.wantTools)
+			}
+			if !tc.wantTools {
+				return
+			}
+			// Read off the registry the composer actually returned, never off a fixture: what the
+			// model is offered is the schema this object publishes.
+			if !seatChoiceOffered(t, cfg.Tools) {
+				t.Error("the composed registry publishes no run_on; `model` is the whole of what " +
+					"offers an unattended run's model a seat")
+			}
+		})
+	}
+}
+
+// The other half of the gate. Publishing `run_on` is worth nothing unless the model is told what the
+// two values mean, and that clause list is rendered only when the Agent's OWN sub_agent tool
+// published the argument (delegationSeats). This drives the real headless path — the composer's
+// Config and routing through run.Once, exactly as `apogee headless` does — and reads the Delegations
+// bullet back off the wire, which is the one place a claim about what apogee announced can be made.
+func TestFiringOrientationNamesBothSeatsUnderSeatChoice(t *testing.T) {
+	session := stubllm.New(t, stubllm.Script{
+		Model: "session-model",
+		Turns: []stubllm.Turn{{Text: "nothing to delegate"}},
+	})
+	grunt := config.ServerEntry{
+		Name:        "grunt",
+		Endpoint:    "http://grunt.example/v1",
+		Description: "the cheap box",
+		Model:       "grunt-model",
+		APIKey:      "sk-grunt",
+	}
+	beats := &stubBeat{beat: heartbeat.Beat{Reachable: true, TotalSlots: 2}}
+	prev := discoverDelegationBeat
+	discoverDelegationBeat = beats.discover
+	t.Cleanup(func() { discoverDelegationBeat = prev })
+
+	cfg, routing, _, err := firingConfig(context.Background(), firingInputs{
+		opts: config.Options{
+			Bypass:          true,
+			Servers:         []config.ServerEntry{grunt},
+			SubAgentsServer: "grunt",
+			SubAgentsChoice: config.SubAgentsChoiceModel,
+			// The orientation block rides ALONG on a standing system message (ADR 0023 §6
+			// amendment), so a run with no prompt at all states no block. The text is stated here
+			// rather than left to the embedded default for e2e_seat_test.go's reason: a fixture
+			// leaning on apogee's own wording would be asserting about that wording too.
+			SystemPrompt: config.SystemPromptSettings{
+				Global: config.PromptSource{Text: "You are apogee, a terminal coding agent."},
+			},
+		},
+		entry: config.ServerEntry{
+			Name:           "box",
+			Endpoint:       session.URL,
+			Model:          session.Model,
+			Description:    "the session box",
+			APIKey:         "sk-test",
+			ParallelAgents: 1,
+			EffortDialect:  "reasoning",
+		},
 		roots:    firingRoots(t),
 		confiner: fenceableHost,
 		mode:     domain.ModePlan,
-		recordID: "2026-08-24T11-00-00-firing",
+		recordID: "2026-09-02T10-00-00-firing",
 	})
 	if err != nil {
 		t.Fatalf("firingConfig: %v", err)
 	}
-
-	if cfg.Events != nil || cfg.Approver != nil || cfg.Asker != nil || cfg.Presenter != nil {
-		t.Error("the composer wired a delegate run.Once pins for itself")
+	if routing.target == nil || routing.seat == nil {
+		t.Fatalf("routing resolved target=%v seat=%v; the fixture names a reachable Sub-agent server",
+			routing.target, routing.seat)
 	}
-	if cfg.Tools != nil {
-		t.Error("the composer wired a tool registry; a Firing takes the engine's own (no MCP)")
+
+	if _, err := run.Once(context.Background(), run.Spec{
+		Config:           cfg,
+		Prompt:           "say something",
+		DelegationTarget: routing.target,
+		DelegationSeat:   routing.seat,
+	}); err != nil {
+		t.Fatalf("run.Once: %v", err)
+	}
+
+	line := seatFirstDelegationsLine(t, session)
+	for _, want := range []string{
+		`run_on "session" = ` + session.Model + " on box — the session box",
+		`run_on "sub-agents-server" = grunt-model on grunt — the cheap box`,
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the Firing's Delegations line does not state %q:\n%s", want, line)
+		}
 	}
 }
 

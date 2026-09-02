@@ -88,9 +88,12 @@ type firingInputs struct {
 // headless prints on stderr and the other two Drivers drop (their narration is the session record
 // they leave behind).
 //
-// Tools, Events, Approver, Asker and Presenter are deliberately left nil: run.Once pins its own,
-// and handing it any of them is how a run acquires a human it does not have. Tools stays nil too
-// because a Firing reaches no external MCP server (ADR 0034), so the engine builds its own registry.
+// Events, Approver, Asker and Presenter are deliberately left nil: run.Once pins its own, and
+// handing it any of them is how a run acquires a human it does not have. Tools is left nil too and
+// the engine builds its own registry — EXCEPT under `sub-agents-choice: model`, where the gate
+// shapes the sub_agent SCHEMA rather than anything on the Config the engine reads (ADR 0031), so a
+// Firing that must publish `run_on` has to hand over a roster assembled here. Either way a Firing
+// still reaches no external MCP server (ADR 0034): the assembled registry carries no MCP tools.
 func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRouting, []string, error) {
 	// The bound entry's own `model:` unless the Driver overlaid one. On a launcher-fronted server an
 	// empty model is legitimate — it means "whatever is serving" — so this is a fallback, not a
@@ -326,6 +329,21 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	cfg.Namer = newFiringNamer(
 		upstreamBinding{Endpoint: in.entry.Endpoint, Model: spec.Model, APIKey: apiKey},
 		effortDialect, routing.target, in.opts.AutoTitle)
+
+	// And the one thing an unattended run cannot get from the engine: the `run_on` argument on
+	// sub_agent. `sub-agents-choice:` shapes the published schema rather than any Config field (ADR
+	// 0031 — the engine reads no config), so under `model` the roster is assembled HERE, with the
+	// gate on and no MCP tools (a Firing reaches no MCP server, ADR 0034). The gate is read off the
+	// Options every Driver already fills rather than off a firingInputs field of its own, so a
+	// Driver that filled opts cannot silently leave the seat unpublished.
+	//
+	// Under `fixed`, and with the key absent, Tools stays nil byte-for-byte and run.Once's own nil
+	// Asker and Presenter go on shaping the engine's roster exactly as before. That is the guard,
+	// not an optimisation: a registry handed over on the default path would decide the roster from
+	// this Config's delegates rather than from the ones the runner pins.
+	if in.opts.SubAgentsChoice == config.SubAgentsChoiceModel {
+		cfg.Tools = registryWithMCP(in.roots.workspace, cfg, true, nil)
+	}
 
 	return cfg, routing, notices, nil
 }

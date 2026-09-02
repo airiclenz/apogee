@@ -439,7 +439,13 @@ beat fires only when `sub-agents-server:` is set, so the default path gains no t
 
 ---
 
-## 10. Publish the seat where a Firing can honour it
+## 10. Publish the seat where a Firing can honour it — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the `tools.HostTools` literal inside `registryWithMCP` is extracted into `hostToolsFor(cfg, seatChoice)` exactly as the item's regression guard directs ("extracted into a helper the test can read"); `registryWithMCP`'s behaviour is unchanged.
+NOTES (2026-09-02): the orientation half is a test of its own (`TestFiringOrientationNamesBothSeatsUnderSeatChoice`) rather than a case inside `TestFiringConfigLeavesTheDriverSeamsNil`, because the Delegations bullet is observable only on the wire — it is driven through the real headless path (`firingConfig` → `run.Once` with the routing latched) against a `stubllm` session server and read back off the request's system messages with the file's existing `seatFirstDelegationsLine` helper. Its fixture states `system-prompt-text:` outright: the orientation block rides ALONG on a standing system message (ADR 0023 §6), so a run with no system prompt states no block at all.
+NOTES (2026-09-02): both field-by-field pins were confirmed non-vacuous by dropping one field from each composer (`SecretEnvVars` in `hostToolsFor`, `VirtualReadRoots` in `hostTools`), which fails the matching test naming that field; both files were restored before finishing.
+NOTES (2026-09-02): consequential edit — cmd/apogee/daemonfire.go: made necessary by the seat gate; the `daemonWiring` doc claimed "Tools stays nil because a Firing reaches no external MCP server (ADR 0034) — the engine builds its own registry instead", which `sub-agents-choice: model` makes false — re-worded in the same edit to state the exception and keep the ADR 0034 claim.
+NOTES (2026-09-02): consequential edit — cmd/apogee/headless_test.go: made necessary by the seat gate; the `cfg.Tools != nil` failure message gave "a headless run takes the engine's own (no MCP)" as the universal reason, which now holds only with the gate off — the message names the default path instead. The assertion itself is unchanged and still green (the fixture sets no `sub-agents-choice:`).
 
 **Depends on item 9.**
 

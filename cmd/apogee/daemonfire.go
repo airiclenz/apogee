@@ -42,9 +42,10 @@ import (
 // lock belong with the reader that has to survive the swap.
 //
 // The delegates that assume a human are never composed at all. run.Once pins its own fail-safe
-// denier and leaves ask_user and present_document unregistered (ADR 0033, decision 2), and Tools
-// stays nil because a Firing reaches no external MCP server (ADR 0034) — the engine builds its own
-// registry instead.
+// denier and leaves ask_user and present_document unregistered (ADR 0033, decision 2), and Tools is
+// left nil for the engine to build its own registry — except under `sub-agents-choice: model`, the
+// one gate that shapes the sub_agent schema rather than a Config field, where firingConfig hands
+// over a roster of its own. A Firing reaches no external MCP server either way (ADR 0034).
 type daemonWiring struct {
 	// opts is the host's resolved configuration: the startup server selection flattened onto it,
 	// the `servers:` list a schedule binds into by name, and every file-only key an unattended run

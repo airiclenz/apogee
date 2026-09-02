@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -315,5 +317,52 @@ func TestRegistryWithMCPCarriesTheSeatChoiceGate(t *testing.T) {
 	}
 	if got, want := len(plain.All()), len(offered.All()); got != want {
 		t.Errorf("the gate moved the roster: %d tools off, %d on — it may only move a schema", got, want)
+	}
+}
+
+// stubHostAsker is a host question-asker that answers nothing — enough to make Config.Asker
+// non-zero, which is all the composition pin below reads it for.
+type stubHostAsker struct{}
+
+func (stubHostAsker) Ask(context.Context, domain.AskRequest) (domain.AskAnswer, error) {
+	return domain.AskAnswer{}, nil
+}
+
+// registryWithMCP is one of TWO hand-assemblies of tools.HostTools — the engine's own hostTools
+// (internal/agent) is the other, and the two are field-identical bar SubAgentSeatChoice, which the
+// engine has no Config field for (ADR 0031). Nothing structural holds them that way, and a tool-NAMES
+// equivalence between the two registries cannot: a name depends only on the roster rungs and the
+// three nil-gated delegates, so dropping the URLGuard, the SecretEnvVars scrub, the ExtraReadRoots
+// mounts or the VirtualReadRoots ones — the very hazards this file's other tests each name one of —
+// leaves every tool name identical while the user's policy quietly stops applying.
+//
+// So the pin is field-by-field rather than by name: with every Config field this composer reads set
+// to something non-zero, EVERY field of the struct it returns must come back non-zero. A field added
+// to tools.HostTools and missed by this composer fails here;
+// TestHostToolsFillsEveryHostField (internal/agent) is the same pin on the engine's side.
+func TestHostToolsForFillsEveryHostField(t *testing.T) {
+	t.Parallel()
+
+	cfg := validCfg(t)
+	cfg.URLAllowHosts = []string{"allowed.example"}
+	cfg.URLDenyHosts = []string{"denied.example"}
+	cfg.WebSearchEndpoint = "https://search.example/v1"
+	cfg.Asker = stubHostAsker{}
+	cfg.Presenter = stubPresenter{}
+	cfg.SkillLookup = skills.NewProvider(skills.Sources{UseShippedSkills: true})
+	cfg.DisabledTools = []string{"run_terminal_cmd"}
+	cfg.EnabledTools = []string{"web_search"}
+	cfg.Profile.Tools = domain.ToolRosterDelta{Enabled: []string{"console_open"}}
+	cfg.SecretEnvVars = []string{"SOME_PROVIDER_KEY"}
+	cfg.ExtraReadRoots = func() []string { return []string{t.TempDir()} }
+	cfg.VirtualReadRoots = func() map[string]fs.FS { return nil }
+
+	host := reflect.ValueOf(hostToolsFor(cfg, true))
+	for i := range host.NumField() {
+		if host.Field(i).IsZero() {
+			t.Errorf("hostToolsFor left tools.HostTools.%s zero for a Config that sets every field "+
+				"it reads — the MCP-aware assembly must carry every host policy the engine's own "+
+				"build would have", host.Type().Field(i).Name)
+		}
 	}
 }

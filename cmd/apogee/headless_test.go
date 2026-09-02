@@ -513,7 +513,8 @@ func TestHeadlessComposesTheRunnerSpec(t *testing.T) {
 		t.Errorf("Config.Events = %T; want the headless prune-notice sink", cfg.Events)
 	}
 	if cfg.Tools != nil {
-		t.Error("the command wired a tool registry; a headless run takes the engine's own (no MCP)")
+		t.Error("the command wired a tool registry; with `sub-agents-choice:` unset a headless run " +
+			"takes the engine's own")
 	}
 	if cfg.Confiner == nil {
 		t.Error("no Confiner was wired; the run would not be fenced")

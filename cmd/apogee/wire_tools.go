@@ -238,7 +238,25 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // else entirely — a reconnect, a model switch — carries the gate this session is actually on.
 func registryWithMCP(workspace string, cfg apogee.Config, seatChoice bool,
 	mcpTools []apogee.Tool) *apogee.ToolRegistry {
-	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{
+	registry := tools.NewDefaultRegistryWithHost(workspace, hostToolsFor(cfg, seatChoice))
+	for _, t := range mcpTools {
+		if err := registry.Register(t); err != nil {
+			fmt.Fprintf(os.Stderr, "apogee: skipping MCP tool %q: %v\n", t.Name(), err)
+		}
+	}
+	return registry
+}
+
+// hostToolsFor is the host layer registryWithMCP hands the built-in tool set — every policy the
+// ENGINE would have derived from the same Config (internal/agent's hostTools), plus the seat-choice
+// gate the engine has no field for.
+//
+// It is a function of its own rather than a literal inside the assembly above so a test can read the
+// composition back: the two composers are field-identical bar SubAgentSeatChoice, and a field added
+// to tools.HostTools that only one of them fills is how a configured URL deny, credential scrub or
+// read root silently stops applying on the MCP path (TestHostToolsForFillsEveryHostField).
+func hostToolsFor(cfg apogee.Config, seatChoice bool) tools.HostTools {
+	return tools.HostTools{
 		// The `url-safety:` host layer, off the same Config the engine would have read it from and
 		// through the same constructor — this hand-assembly must not be the one path on which a
 		// configured deny quietly stops applying, or connecting an MCP server would re-open a host
@@ -278,11 +296,5 @@ func registryWithMCP(workspace string, cfg apogee.Config, seatChoice bool,
 		// this hand-assembly must not be the one path on which connecting an MCP server takes the
 		// seat choice away from the model.
 		SubAgentSeatChoice: seatChoice,
-	})
-	for _, t := range mcpTools {
-		if err := registry.Register(t); err != nil {
-			fmt.Fprintf(os.Stderr, "apogee: skipping MCP tool %q: %v\n", t.Name(), err)
-		}
 	}
-	return registry
 }

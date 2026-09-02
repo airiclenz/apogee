@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +23,48 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/security"
 )
+
+// hostTools is one of TWO hand-assemblies of tools.HostTools — cmd/apogee's MCP-aware
+// registryWithMCP (hostToolsFor) is the other, and the two are field-identical bar
+// SubAgentSeatChoice. Nothing structural holds them that way, and a tool-NAMES equivalence between
+// the two registries cannot: a name depends only on the roster rungs and the three nil-gated
+// delegates, so a dropped URLGuard, SecretEnvVars scrub or read-root mount leaves every tool name
+// identical while the user's policy quietly stops applying on one of the two paths.
+//
+// So the pin is field-by-field: with every Config field this composer reads set to something
+// non-zero, every field of the struct it returns must come back non-zero — SubAgentSeatChoice
+// excepted, the one field the engine may leave zero because apogee.Config carries nothing for it
+// (`sub-agents-choice:` shapes the sub_agent schema, and the engine reads no config — ADR 0031).
+// TestHostToolsForFillsEveryHostField (cmd/apogee) is the same pin on the host's side.
+func TestHostToolsFillsEveryHostField(t *testing.T) {
+	t.Parallel()
+
+	host := reflect.ValueOf(hostTools(domain.Config{
+		URLAllowHosts:     []string{"allowed.example"},
+		URLDenyHosts:      []string{"denied.example"},
+		WebSearchEndpoint: "https://search.example/v1",
+		Asker:             stubAsker{},
+		Presenter:         stubPresenter{},
+		SkillLookup:       stubSkillLookup{},
+		DisabledTools:     []string{"run_terminal_cmd"},
+		EnabledTools:      []string{"web_search"},
+		Profile:           domain.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"console_open"}}},
+		SecretEnvVars:     []string{"SOME_PROVIDER_KEY"},
+		ExtraReadRoots:    func() []string { return []string{t.TempDir()} },
+		VirtualReadRoots:  func() map[string]fs.FS { return nil },
+	}))
+	for i := range host.NumField() {
+		name := host.Type().Field(i).Name
+		if name == "SubAgentSeatChoice" {
+			continue
+		}
+		if host.Field(i).IsZero() {
+			t.Errorf("hostTools left tools.HostTools.%s zero for a Config that sets every field it "+
+				"reads — a host policy that stops here is one the operator configured and never got",
+				name)
+		}
+	}
+}
 
 // TestHostToolsCarriesSecretEnvVars covers the credential half of that translation: the variables a
 // host resolved out of its configured `api-key-env:` entries (two servers naming distinct ones) have
