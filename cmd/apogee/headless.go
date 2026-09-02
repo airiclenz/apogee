@@ -116,7 +116,7 @@ type pruneNoticeSink struct {
 // in a scrollback.
 func (s pruneNoticeSink) Emit(e domain.Event) {
 	if pe, ok := e.(domain.PruneEvent); ok {
-		fmt.Fprintf(s.out, "pruned %d tool results (~%d tokens)\n", pe.Results, pe.Tokens)
+		_, _ = fmt.Fprintf(s.out, "pruned %d tool results (~%d tokens)\n", pe.Results, pe.Tokens)
 	}
 	if s.inner != nil {
 		s.inner.Emit(e)
