@@ -17,6 +17,8 @@ package heartbeat
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/provider"
@@ -54,6 +56,13 @@ type Beat struct {
 	Reachable bool
 	// Failure says why the server could not be read, and is "" when Reachable.
 	Failure string
+	// Throttled reports that the model list came back HTTP 429: the server ANSWERED, it just would
+	// not answer THIS question now. Reachable stays false and Failure keeps the text — a throttled
+	// list is no more a usable model list than a timed-out one — but the distinction is there for an
+	// observer that treats a rate-limited probe as silence rather than as a verdict about the
+	// server (cmd/apogee's Sub-agent routing). Nothing else reads it, and false is the safe default:
+	// an observer that ignores the field behaves exactly as it did before the field existed.
+	Throttled bool
 	// ActiveModel is the model the Upstream resolves to — the monitor's hint whenever one is
 	// configured, trusted verbatim even when the server does not advertise it (provider.Discover's
 	// rule), and the first model advertised only when no hint is configured.
@@ -145,7 +154,12 @@ func (m *Monitor) SetModel(model string) {
 func (m *Monitor) Beat(ctx context.Context) Beat {
 	info, err := m.client.Discover(ctx)
 	if err != nil {
-		return Beat{Failure: err.Error()}
+		// A 429 is singled out on the observation rather than left for every caller to re-derive by
+		// string-matching the failure text: the code is a fact the probe HAS, and reading it back
+		// out of a sentence is the sort of thing that breaks the day the sentence is reworded.
+		var status *provider.StatusError
+		throttled := errors.As(err, &status) && status.Code == http.StatusTooManyRequests
+		return Beat{Failure: err.Error(), Throttled: throttled}
 	}
 
 	beat := Beat{

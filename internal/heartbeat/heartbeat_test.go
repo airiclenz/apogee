@@ -326,3 +326,40 @@ func TestNewMonitorPassesProviderOptionsToDiscovery(t *testing.T) {
 		t.Errorf("EffortSupport = %+v, want the forced openai dialect, supported", got)
 	}
 }
+
+// A 429 on the model list is marked on the observation so an observer can treat it as silence
+// rather than as a verdict; every other non-200 stays a plain unusable beat. Either way the beat
+// is unreachable and keeps its sentence — Throttled says why, it does not excuse the failure.
+func TestBeatMarksA429Throttled(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name          string
+		status        int
+		wantThrottled bool
+	}{
+		{name: "rate limited", status: http.StatusTooManyRequests, wantThrottled: true},
+		{name: "unavailable", status: http.StatusServiceUnavailable, wantThrottled: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			t.Cleanup(srv.Close)
+
+			beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
+
+			if beat.Reachable {
+				t.Errorf("Reachable = true on HTTP %d, want false", tc.status)
+			}
+			if beat.Failure == "" {
+				t.Errorf("Failure is empty on HTTP %d, want the reason", tc.status)
+			}
+			if beat.Throttled != tc.wantThrottled {
+				t.Errorf("Throttled = %v on HTTP %d, want %v", beat.Throttled, tc.status, tc.wantThrottled)
+			}
+		})
+	}
+}

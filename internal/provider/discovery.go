@@ -233,6 +233,27 @@ func EffortDialectFor(name string) EffortDialect {
 	}
 }
 
+// discoveryStatusError is the non-200 answer GET /v1/models gave. It exists so a caller can branch
+// on the HTTP code — errors.As reaches the wrapped *StatusError, which is how a rate-limited list is
+// told apart from a server that is genuinely down — while the rendered text still carries exactly ONE
+// "apogee: " prefix: StatusError.Error() opens with that prefix itself, so wrapping it through
+// fmt.Errorf("apogee: model discovery: %w") would print it twice everywhere the failure text surfaces
+// (the TUI's offline note, the probe report).
+type discoveryStatusError struct {
+	// status is the upstream reply, carrying the code callers branch on and owning the rendering.
+	status *StatusError
+}
+
+// Error names the failing step and then renders the upstream status exactly as every other
+// non-2xx surface does, with the status renderer's own "apogee: " opening dropped:
+// "apogee: model discovery: upstream HTTP 429 Too Many Requests".
+func (e *discoveryStatusError) Error() string {
+	return "apogee: model discovery: " + strings.TrimPrefix(e.status.Error(), "apogee: ")
+}
+
+// Unwrap exposes the *StatusError so errors.As reaches the HTTP code the server answered with.
+func (e *discoveryStatusError) Unwrap() error { return e.status }
+
 // discoverModels probes GET /v1/models and resolves the model list plus the active model.
 func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+modelsPath, nil)
@@ -248,7 +269,7 @@ func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return ModelInfo{}, fmt.Errorf("apogee: model discovery: upstream HTTP %d", resp.StatusCode)
+		return ModelInfo{}, &discoveryStatusError{status: &StatusError{Code: resp.StatusCode}}
 	}
 
 	var decoded modelsResponse

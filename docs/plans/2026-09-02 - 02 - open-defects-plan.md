@@ -117,7 +117,9 @@ go build ./... && go test ./cmd/apogee/ -run 'TestDelegation' -count=1 && go tes
 
 ---
 
-## 4. Probe: an HTTP 429 keeps the last routing verdict
+## 4. Probe: an HTTP 429 keeps the last routing verdict — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the re-run grep for `model discovery: upstream HTTP` / `discovery: upstream` across `*_test.go` found no pinned copy — only the plan document and two archived plans mention the old text, so no pin needed fixing.
 
 **What.** Depends on item 3. `provider.Discover`'s non-200 branch (`internal/provider/discovery.go:250-252`) returns `fmt.Errorf("apogee: model discovery: %w", &StatusError{Code: resp.StatusCode})` so callers branch with `errors.As`. `heartbeat.Beat` (`internal/heartbeat/heartbeat.go:52`) gains `Throttled bool`, set by `Monitor.Beat` (`:145-150`) when `errors.As(err, &se) && se.Code == http.StatusTooManyRequests`; `Reachable` stays false and `Failure` keeps the text. In `delegationWiring.observe` (`delegation.go:404-407`) a `Throttled` beat is not landed at all — no push, no notice, `failures` untouched — with a comment stating the call: a rate-limited list is silence, not a verdict. A cold-start 429 therefore says nothing until a non-429 beat lands. This differs in KIND from item 3's debounce: a 429 means the server ANSWERED, so the beat is not landed at all and the routed target stays latched (the last verdict), whereas a timeout, 5xx or connection error still pushes nil immediately under item 3's rule and only its NOTICE is debounced. The session heartbeat (`internal/tui/heartbeat.go`) is NOT changed (out of scope).
 

@@ -407,8 +407,20 @@ func (d *delegationWiring) observe(ctx context.Context) func() {
 			d.land(generation, server.entry.Name, nil, err)
 			return
 		}
+		observed := server.beat(ctx, apiKey)
+		if observed.Throttled {
+			// A rate-limited model list is SILENCE, not a verdict: the server answered, it just
+			// declined to answer this question now, which says nothing about whether it can take a
+			// delegation. So the beat is not landed at all — no push, no notice, the failure run
+			// untouched — and the last verdict stays latched until a non-429 beat replaces it. This
+			// differs in KIND from the failure debounce below: a timeout, a 5xx or a refused
+			// connection is an observation that the server is not usable, so it still pushes nil at
+			// once and only its NOTICE waits (see delegationFailureThreshold). A cold-start 429
+			// therefore says nothing at all until some other beat lands.
+			return
+		}
 		d.land(generation, server.entry.Name,
-			resolveDelegationTarget(server.entry, apiKey, server.beat(ctx, apiKey), d.userProfiles(),
+			resolveDelegationTarget(server.entry, apiKey, observed, d.userProfiles(),
 				server.catalogue), nil)
 	}()
 	return func() { <-done }

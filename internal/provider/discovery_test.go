@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -882,5 +883,35 @@ func TestEffortDialectFor(t *testing.T) {
 		if got := EffortDialectFor(name); got != want {
 			t.Errorf("EffortDialectFor(%q) = %q, want %q", name, got, want)
 		}
+	}
+}
+
+// A non-200 model list is branchable by HTTP code rather than only by its sentence: the routing
+// heartbeat has to tell a rate-limited server (429 — it answered, it just would not answer this)
+// apart from one that is down. The rendered text must still carry exactly ONE "apogee: " prefix,
+// because it surfaces verbatim in the TUI's offline note and the probe report.
+func TestDiscoverNon200IsAStatusError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	_, err := NewClient(srv.URL, "").Discover(context.Background())
+	if err == nil {
+		t.Fatal("Discover succeeded on HTTP 429, want error")
+	}
+
+	var status *StatusError
+	if !errors.As(err, &status) {
+		t.Fatalf("error %v is not a *StatusError, want errors.As to reach the code", err)
+	}
+	if status.Code != http.StatusTooManyRequests {
+		t.Errorf("Code = %d, want %d", status.Code, http.StatusTooManyRequests)
+	}
+	const want = "apogee: model discovery: upstream HTTP 429 Too Many Requests"
+	if err.Error() != want {
+		t.Errorf("Error() = %q, want %q", err.Error(), want)
 	}
 }

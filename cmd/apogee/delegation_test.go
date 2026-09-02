@@ -765,6 +765,68 @@ func TestDelegationTwoUnusableBeatsUnroute(t *testing.T) {
 	}
 }
 
+// A 429 is not a verdict about the server: it answered, it just declined to list its models. Such a
+// beat is not landed at all — nothing pushed, nothing said, the failure run untouched — so the last
+// verdict stays latched however many of them arrive, and a throttled run cannot substitute for the
+// two real failures the unavailable line owes.
+func TestDelegationThrottledBeatKeepsTheLastVerdict(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
+	up := heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}
+	down := heartbeat.Beat{Failure: "connection refused"}
+	throttled := heartbeat.Beat{
+		Failure:   "apogee: model discovery: upstream HTTP 429 Too Many Requests",
+		Throttled: true,
+	}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, up, spy, notices)
+
+	beat := func(observed heartbeat.Beat) {
+		t.Helper()
+		wiring.server.beat = beatSource(observed)
+		wiring.observe(context.Background())()
+	}
+	beat(up)
+	engaged, latched := len(notices.notes), len(spy.pushes)
+
+	for i := 1; i <= 3; i++ {
+		beat(throttled)
+		if len(notices.notes) != engaged {
+			t.Fatalf("notices after throttled beat %d = %q; want nothing new said", i, notices.notes)
+		}
+		if len(spy.pushes) != latched {
+			t.Fatalf("pushes after throttled beat %d = %+v; want the last verdict left latched", i, spy.pushes)
+		}
+	}
+
+	// The throttled run left the failure counter alone, so the unavailable line still owes two real
+	// failures — the same pair it would owe if no 429 had ever arrived.
+	beat(down)
+	if len(notices.notes) != engaged {
+		t.Fatalf("notices after the FIRST failed beat = %q; want nothing new said", notices.notes)
+	}
+	beat(down)
+	const unavailable = "sub-agents: grunt unavailable — delegations run on the session server"
+	if len(notices.notes) != engaged+1 || notices.notes[engaged] != unavailable {
+		t.Fatalf("notices after the SECOND failed beat = %q; want %q said once", notices.notes, unavailable)
+	}
+	unrouted := len(spy.pushes)
+
+	beat(throttled)
+	if len(notices.notes) != engaged+1 || len(spy.pushes) != unrouted {
+		t.Fatalf("a throttled beat after the unavailable line said %q and pushed %+v; want neither",
+			notices.notes, spy.pushes)
+	}
+
+	beat(up)
+	const engagedLine = "sub-agents: routing to grunt (cheap-7b)"
+	if len(notices.notes) != engaged+2 || notices.notes[engaged+1] != engagedLine {
+		t.Fatalf("notices after the recovery = %q; want %q said once", notices.notes, engagedLine)
+	}
+}
+
 // A flagged server that was never reachable degrades VISIBLY (ADR 0042): the first resolved state is
 // worth a notice whichever way it goes, or a human who configured routing and got none would have
 // nothing at all to read.
