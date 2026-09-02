@@ -225,7 +225,8 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // question it answers is one a human asks precisely while an agent is burning tokens.
 //
 // /inspect opens the raw-protocol pane (inspector.go): the request bodies and response payloads of
-// the recent model calls, as the provider put them on the wire. It carries /usage's two flags for
+// the recent model calls, as the provider put them on the wire — read back as prose by default, with
+// ctrl+r for the bytes themselves. It carries /usage's two flags for
 // /usage's two reasons — noRecall because it opens a surface rather than saying anything to the
 // model, and whileRunning because it reads a ring the Model already holds and calls nothing, which
 // is what makes it answerable exactly while the traffic worth reading is being made. It is armed by
@@ -253,7 +254,7 @@ var commandSpecs = []commandSpec{
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseConfine)},
 	{name: "continue", summary: "ask the model to keep going", opensExchange: true},
 	{name: "effort", summary: "set how hard the model thinks — a picker of this model's levels", whileRunning: true, gatedByEffort: true},
-	{name: "inspect", summary: "show the recent raw request and response traffic", whileRunning: true, noRecall: true},
+	{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
 	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},

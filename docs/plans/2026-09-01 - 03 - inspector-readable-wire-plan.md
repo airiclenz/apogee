@@ -74,7 +74,15 @@ Each passage becomes rows: `· thinking <text>` / `· <text>` / `· tool call �
 
 **Regression guard.** Every existing inspector test passes byte-for-byte: `lines`, `hidden`, `wirePayloadLines` and `prettyWireLine` are untouched, and `inspectorRows` still renders `lines` until item 2 lands. `TestReasoningTailIsRenderedNowhere` passes — nothing here reads `m.reasoning`. A decoder failure never drops a line: the fallback for every unclassifiable line is its pretty form.
 
-## 2. The `ctrl+r` toggle between readable and raw
+## 2. The `ctrl+r` toggle between readable and raw — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item offered "assert the readable line `model red`" for
+`TestWirePayloadReachesThePaneStrippedAndPretty`; that line is not producible — `stripEscapes`
+removes the ESC byte and leaves the CSI remainder, so the summary reads `model [31mred[0m`.
+Asserted the readable SHAPE instead (the pane shows `model ` and NOT the JSON key `"model"`),
+keeping the raw-mode `"model"` assertion the item requires.
+NOTES (2026-09-02): `inspectorHint` kept as the readable-mode hint and `inspectorRawHint` added
+beside it, since the item asks for both hints and the pane must spell one per rendering.
 
 **What:** Recast at the regression check (2026-09-01). `reportPane` (`internal/tui/reportpane.go`) gains `raw bool` (false = readable). `dismissReport` already zeroes the struct, so a reopen starts readable with no new code. `reportKey` claims `"ctrl+r"` ONLY for `inspectReport` while it is open — a kind check beside the `esc` case, the module's existing pattern (`reportContent`, `pane`); no hook type, no function field. `/usage` is key-identical. `inspectorRows` (item 1's struct) renders `rec.readable`/`rec.readableHidden` when `!m.inspector.raw`, else `rec.lines`/`rec.hidden`; the elision marker uses the shown mode's count. `inspectorHint` becomes `↑/↓ scroll · ctrl+r raw · esc close`; `inspectContent` becomes a Model method `m.inspectContent() reportContent` that reads the mode off the Model, so the hint reads `ctrl+r readable` while raw; both callers — `inspector.go`'s `inspectorSpec` and `reportpane.go`'s `reportContent` — route through it. The `/inspect` commandSpec summary (`internal/tui/command.go`, the `/inspect` entry) names the readable default and the toggle in one sentence. Depends on item 1.
 

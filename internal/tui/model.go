@@ -1297,7 +1297,8 @@ var keyClaimOrder = []keyClaimant{
 		claim: paneClaim(Model.usageKey),
 	},
 	{
-		// The /inspect pane claims the same five keys on the same terms (inspector.go): not modal, so
+		// The /inspect pane claims the same five keys, plus a ctrl+r of its own that flips its rendering,
+		// on the same terms (inspector.go): not modal, so
 		// every key it does not act on goes where it always went, and below the modal overlays above
 		// because a pane that owns the keyboard answers its own esc first. It sits beside the report it
 		// is shaped after — the two are never open together in practice and their claims are disjoint

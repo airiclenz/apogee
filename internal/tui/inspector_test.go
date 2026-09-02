@@ -6,8 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 )
+
+// ctrlR is the pane's rendering toggle as the terminal delivers it. internal/tuitest spells no
+// constant for this chord, so the press is built here: tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
+// is what String() reports as "ctrl+r", the string reportKey matches on.
+func ctrlR() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl} }
 
 // ----------------------------------------------------------------------------
 // /inspect — the raw-protocol pane and its ring (inspector.go)
@@ -84,6 +91,7 @@ func TestWireFoldDisturbsNothingElse(t *testing.T) {
 // TestWirePayloadReachesThePaneStrippedAndPretty pins both halves of what the fold does to a
 // payload: the ESC bytes an upstream server can put in it never reach the ring (and so never reach
 // the terminal), and the JSON is expanded once, at fold time, so the pane never parses on a repaint.
+// The pane opens READABLE, so the body itself is what raw mode shows — both are asserted here.
 func TestWirePayloadReachesThePaneStrippedAndPretty(t *testing.T) {
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, "{\"model\":\"\x1b[31mred\x1b[0m\"}", 1, 0))
 
@@ -95,8 +103,16 @@ func TestWirePayloadReachesThePaneStrippedAndPretty(t *testing.T) {
 	if len(rec.lines) < 3 {
 		t.Errorf("payload lines = %q, want the body expanded onto its own lines", rec.lines)
 	}
+	readable := strip(m.renderInspector())
+	if strings.Contains(readable, `"model"`) {
+		t.Errorf("the pane opens on the body rather than on the readable summary:\n%s", readable)
+	}
+	if !strings.Contains(readable, "model ") {
+		t.Errorf("the readable pane does not summarise the request envelope:\n%s", readable)
+	}
+	m.inspector.raw = true
 	if pane := strip(m.renderInspector()); !strings.Contains(pane, `"model"`) {
-		t.Errorf("the pane does not show the request body:\n%s", pane)
+		t.Errorf("the raw pane does not show the request body:\n%s", pane)
 	}
 }
 
@@ -116,7 +132,9 @@ func TestWirePayloadKeepsANonJSONLineAsItArrived(t *testing.T) {
 
 // TestWireRecordCapsItsLinesAndSaysSo pins the per-record cap: a body past maxWireRecordLines keeps
 // its head and reports the count it dropped, in the package's one elision phrase — the cut is
-// stated on the pane rather than made silently.
+// stated on the pane rather than made silently, in EITHER rendering. This body carries none of
+// messages/tools/model, so the readable rendering falls back to the pretty lines whole and lands on
+// the very same marker — which is the point: each mode states its own count.
 func TestWireRecordCapsItsLinesAndSaysSo(t *testing.T) {
 	payload := "{\"a\":[" + strings.Repeat("1,", maxWireRecordLines) + "1]}"
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, payload, 1, 0))
@@ -130,8 +148,14 @@ func TestWireRecordCapsItsLinesAndSaysSo(t *testing.T) {
 	}
 	rows, _ := m.inspectorRows()
 	last := rows[len(rows)-1][0]
+	if want := popupElisionMarker(rec.readableHidden); last != want {
+		t.Errorf("last readable row = %q, want the elision marker %q", last, want)
+	}
+	m.inspector.raw = true
+	rows, _ = m.inspectorRows()
+	last = rows[len(rows)-1][0]
 	if want := popupElisionMarker(rec.hidden); last != want {
-		t.Errorf("last row = %q, want the elision marker %q", last, want)
+		t.Errorf("last raw row = %q, want the elision marker %q", last, want)
 	}
 }
 
@@ -345,7 +369,8 @@ func TestInspectorDisarmedNamesTheKey(t *testing.T) {
 
 // TestInspectVerbOpensThePaneAndEscCloses pins the verb's routing: /inspect opens the pane and
 // launches nothing, the frame budgets it as one of its own (openPanes) and stacks it, and esc — one
-// of its five keys — closes it while leaving the draft in the box untouched, because the pane is a
+// of its five keys (ctrl+r, which flips the rendering, is the sixth) — closes it while leaving the
+// draft in the box untouched, because the pane is a
 // report and not a modal.
 func TestInspectVerbOpensThePaneAndEscCloses(t *testing.T) {
 	m := newTestModel(t)
@@ -420,18 +445,103 @@ func TestInspectOpensOnTheNewestRecord(t *testing.T) {
 	}
 }
 
-// TestInspectorLeavesEveryOtherKeyAlone is the non-modal half of the contract: the pane owns esc and
-// the four scroll keys and NOTHING else, so a printable key types into the box behind it exactly as
-// it would with no pane up.
+// TestInspectorLeavesEveryOtherKeyAlone is the non-modal half of the contract: the pane owns esc,
+// the four scroll keys and its own ctrl+r and NOTHING else, so a printable key types into the box
+// behind it exactly as it would with no pane up — and even ctrl+r is the OPEN pane's alone, so a
+// closed pane leaves the chord to whatever else the keyboard does with it.
 func TestInspectorLeavesEveryOtherKeyAlone(t *testing.T) {
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
 
 	m = step(t, m, keySpace())
 	if !m.inspector.open {
-		t.Error("a printable key closed the pane; it claims only esc and the scroll keys")
+		t.Error("a printable key closed the pane; it claims only esc, the scroll keys and ctrl+r")
 	}
 	if got := m.input.Value(); got != " " {
 		t.Errorf("draft = %q, want the key to have reached the box behind the pane", got)
+	}
+
+	closed := newTestModel(t)
+	if handled, _, _ := closed.inspectorKey(ctrlR()); handled {
+		t.Error("a closed pane claimed ctrl+r; the chord is the open pane's alone")
+	}
+}
+
+// TestCtrlRFlipsTheRenderingAndTheHint pins the toggle end to end, through the keyboard: the pane
+// opens on the readable rendering, ctrl+r paints the pretty-printed protocol instead, and a second
+// press paints the very frame it started on. The HINT flips with it — each spells what the chord
+// would switch TO — because a pane that offered "ctrl+r raw" while already raw would be lying about
+// the one key it owns beyond the report's five.
+func TestCtrlRFlipsTheRenderingAndTheHint(t *testing.T) {
+	m := inspectorModel(t, wireEvent(domain.WireDirectionResponse,
+		`{"choices":[{"delta":{"reasoning_content":"weighing it"}}]}`, 1, 0))
+
+	readable := strip(m.renderInspector())
+	if !strings.Contains(readable, readableThinkingPrefix+"weighing it") {
+		t.Fatalf("the pane does not open on the readable rendering:\n%s", readable)
+	}
+	if !strings.Contains(readable, inspectorHint) {
+		t.Errorf("the readable pane does not spell %q:\n%s", inspectorHint, readable)
+	}
+
+	m = step(t, m, ctrlR())
+	if !m.inspector.raw {
+		t.Fatal("ctrl+r did not put the pane in raw mode")
+	}
+	raw := strip(m.renderInspector())
+	if !strings.Contains(raw, `"reasoning_content"`) {
+		t.Errorf("the raw pane does not show the protocol member:\n%s", raw)
+	}
+	if strings.Contains(raw, readableThinkingPrefix+"weighing it") {
+		t.Errorf("the readable passage survived into raw mode:\n%s", raw)
+	}
+	if !strings.Contains(raw, inspectorRawHint) {
+		t.Errorf("the raw pane does not spell %q:\n%s", inspectorRawHint, raw)
+	}
+
+	m = step(t, m, ctrlR())
+	if m.inspector.raw {
+		t.Fatal("a second ctrl+r did not put the pane back on the readable rendering")
+	}
+	if back := strip(m.renderInspector()); back != readable {
+		t.Errorf("the pane came back as\n%s\nwant the frame it opened on\n%s", back, readable)
+	}
+}
+
+// TestInspectorIgnoresAPlainRWhileOpen is the non-modal doctrine held against the very letter the
+// chord is built on: "r" is printable, so it belongs to the box behind the pane and can never be the
+// toggle. This is what makes the toggle a CHORD rather than a key.
+func TestInspectorIgnoresAPlainRWhileOpen(t *testing.T) {
+	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
+
+	m = step(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if m.inspector.raw {
+		t.Error("a plain r flipped the rendering; only ctrl+r does")
+	}
+	if !m.inspector.open {
+		t.Error("a plain r closed the pane")
+	}
+	if got := m.input.Value(); got != "r" {
+		t.Errorf("draft = %q, want the letter to have reached the box behind the pane", got)
+	}
+}
+
+// TestReopenedInspectorStartsReadable pins the zero value's promise from the pane's side: closing
+// takes the rendering with it, so the next /inspect opens on the readable one however the last one
+// was left. Nothing about the mode is persisted, and there is no code to keep in step — dismissal
+// zeroes the whole reportPane.
+func TestReopenedInspectorStartsReadable(t *testing.T) {
+	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
+
+	m = step(t, m, ctrlR())
+	if !m.inspector.raw {
+		t.Fatal("ctrl+r did not put the pane in raw mode")
+	}
+	if m = step(t, m, keyEsc()); m.inspector.open {
+		t.Fatal("esc did not close the pane")
+	}
+	next, _ := m.runInspectCommand()
+	if reopened := next.(Model); reopened.inspector.raw {
+		t.Error("a reopened pane kept the last open's rendering; the zero value is readable")
 	}
 }
 

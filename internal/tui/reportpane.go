@@ -15,9 +15,11 @@ import (
 //
 // What a report is, stated once:
 //
-//   - It is NOT modal. It says something rather than asking, so the box behind it stays live: esc and
-//     the four scroll keys are its whole keyboard, every other key goes exactly where it would go
-//     with no report up (handleKey), and a printable key still opens a message.
+//   - It is NOT modal. It says something rather than asking, so the box behind it stays live: esc,
+//     the four scroll keys and — on /inspect alone — ctrl+r are its whole keyboard, every other key
+//     goes exactly where it would go with no report up (handleKey), and a printable key still opens
+//     a message. That is also why the rendering toggle is a CHORD and never a plain letter: a
+//     printable key belongs to the box behind the pane, and a report may not take it.
 //   - It has no selection. Nothing in it is chosen (popupSpec.selected is −1), which is what makes
 //     the window open where the reader scrolled it rather than around a cursor.
 //   - It scrolls off the PAINTER. The rows a key or a wheel notch moves are the ones the frame DREW
@@ -26,8 +28,9 @@ import (
 //     shorter list corrects itself the first time it is moved instead of drifting.
 //   - Its scroll is clamped to the last FULL window rather than to the last row, so a report scrolled
 //     to its end shows a full pane of rows.
-//   - Closing it takes the scroll with it: a reportPane's zero value is "closed at the top", so the
-//     next open starts where the first one did.
+//   - Closing it takes the scroll with it, and /inspect's choice of rendering with it too: a
+//     reportPane's zero value is "closed at the top, readable", so the next open starts where the
+//     first one did.
 //
 // The POINTER does the two things the keyboard has no key for (handleReportClick, reportWheel): a
 // click OUTSIDE the box dismisses the report — the gesture esc already is, made with the hand that is
@@ -72,13 +75,15 @@ func (r reportKind) pane() framePane {
 	return paneUsage
 }
 
-// reportPane is a report overlay's whole state: whether it is up, and how far its row list is
-// scrolled. The rows themselves are derived at render time from the folds or the ring, so there is
-// nothing here to keep in step with them. Its zero value is "closed at the top", so it lives inline in
-// the value-copied Model like the picker and the settings pane (ADR 0011).
+// reportPane is a report overlay's whole state: whether it is up, how far its row list is scrolled,
+// and — for /inspect, the one report whose records carry two renderings — which of them it is
+// showing. The rows themselves are derived at render time from the folds or the ring, so there is
+// nothing here to keep in step with them. Its zero value is "closed at the top, readable", so it
+// lives inline in the value-copied Model like the picker and the settings pane (ADR 0011).
 type reportPane struct {
 	open bool
-	top  int // the first row the window shows (popupSpec.rowTop) — what the wheel and the scroll keys move
+	top  int  // the first row the window shows (popupSpec.rowTop) — what the wheel and the scroll keys move
+	raw  bool // /inspect only: show the pretty-printed protocol rather than the readable rendering (ctrl+r)
 }
 
 // reportState points at the named report's state inside THIS Model value — the module's one statement
@@ -113,7 +118,7 @@ type reportContent struct {
 // the panes' own files, and the only place a report's kind decides anything about what it holds.
 func (m Model) reportContent(r reportKind) reportContent {
 	if r == inspectReport {
-		return inspectContent(m.inspectorRows())
+		return m.inspectContent()
 	}
 	return usageContent(m.usageRows())
 }
@@ -191,8 +196,9 @@ func reportScrollStep(key string) (step int, byPage, ok bool) {
 	return 0, false, false
 }
 
-// reportKey is a report's whole key contract: esc closes it, ↑/↓ scroll it a row at a time and
-// pgup/pgdown a drawn window at a time. handled is false for every other key, because a report is NOT
+// reportKey is a report's whole key contract: esc closes it, ↑/↓ scroll it a row at a time,
+// pgup/pgdown a drawn window at a time, and ctrl+r — /inspect's alone — flips that pane between its
+// readable and its raw rendering. handled is false for every other key, because a report is NOT
 // modal (the doctrine above) — the box behind it stays live and a printable key opens a message
 // exactly as it would with no report up (handleKey).
 //
@@ -208,6 +214,15 @@ func (m Model) reportKey(r reportKind, msg tea.KeyPressMsg) (bool, tea.Model, te
 	key := msg.String()
 	if key == "esc" {
 		return true, m.dismissReport(r), nil
+	}
+	// The rendering toggle is /inspect's and not the module's: /usage has ONE rendering, and a key
+	// that flipped nothing there would still swallow a keystroke the live box behind the pane was
+	// owed. It is claimed whether or not the frame seated the pane, exactly as esc is — what it moves
+	// is state the pane carries, not a window the painter has to have drawn.
+	if key == "ctrl+r" && r == inspectReport {
+		state := m.reportState(r)
+		state.raw = !state.raw
+		return true, m, nil
 	}
 	step, byPage, scrolls := reportScrollStep(key)
 	if !scrolls {

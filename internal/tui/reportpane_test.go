@@ -244,3 +244,21 @@ func TestFrameOverlayBlocksAnswerForEveryPane(t *testing.T) {
 		}
 	}
 }
+
+// TestCtrlRIsTheInspectorsKeyAlone pins the module's ONE asymmetry: the shared body claims ctrl+r for
+// /inspect, which has two renderings of every record, and never for /usage, which has one. A key
+// claimed on both would swallow a chord the live box behind the /usage report was owed — the same
+// reason the toggle is not a printable letter (the doctrine in reportpane.go).
+func TestCtrlRIsTheInspectorsKeyAlone(t *testing.T) {
+	if handled, _, _ := usageReportModel(t, 40).reportKey(usageReport, ctrlR()); handled {
+		t.Error("/usage claimed ctrl+r; it has one rendering and the chord belongs to the box behind it")
+	}
+
+	handled, next, _ := inspectorPaneModel(t, 40).reportKey(inspectReport, ctrlR())
+	if !handled {
+		t.Fatal("/inspect did not claim ctrl+r")
+	}
+	if !next.(Model).inspector.raw {
+		t.Error("ctrl+r did not flip /inspect to its raw rendering")
+	}
+}

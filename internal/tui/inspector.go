@@ -34,10 +34,15 @@ import (
 // transcript.debug does — it is a diagnostic view of the RUN, not of the session's memory.
 //
 // The pane is the /usage report's shape because it IS that shape: both are reportPanes
-// (reportpane.go), non-modal and scrollable, esc and the four scroll keys their whole keyboard, rows
-// derived at render time — from the ring here, from the folds there. What is written in this file is
-// the ring and what it says; the entries below are the shared module's functions under this pane's
-// own name.
+// (reportpane.go), non-modal and scrollable, rows derived at render time — from the ring here, from
+// the folds there — and esc, the four scroll keys and this pane's own ctrl+r their whole keyboard.
+// What is written in this file is the ring and what it says; the entries below are the shared
+// module's functions under this pane's own name.
+//
+// ctrl+r is the one key /usage has no use for: this pane's records carry TWO renderings of the same
+// bytes (below), the readable one is what it opens on, and the chord flips to the pretty-printed
+// protocol and back. Which rendering is showing is pane state and nothing else — nothing is
+// persisted, and a closed pane forgets it (reportPane's zero value).
 //
 // Its rows are FLAT AT THE PANE — one stored line per row, elided at the pane's width like every
 // other unwrapped row (popupRowBlocks) — rather than wrapped there: a single JSON line longer than
@@ -74,13 +79,17 @@ type wireRecord struct {
 }
 
 // inspectorPane is the /inspect overlay's state — a reportPane (reportpane.go) under the name of the
-// pane that keeps it: whether the pane is up, and how far its record list is scrolled.
+// pane that keeps it: whether the pane is up, how far its record list is scrolled, and which of the
+// two renderings ctrl+r left it showing.
 type inspectorPane = reportPane
 
-// inspectorTitle names the pane, and inspectorHint spells the keys it owns.
+// inspectorTitle names the pane; inspectorHint and inspectorRawHint spell the keys it owns, one per
+// rendering. Each names what ctrl+r would switch TO rather than what is on the screen: the hint
+// answers "what else can I do here", and the rows below it already say which rendering they are.
 const (
-	inspectorTitle = "raw wire traffic"
-	inspectorHint  = "↑/↓ scroll · esc close"
+	inspectorTitle   = "raw wire traffic"
+	inspectorHint    = "↑/↓ scroll · ctrl+r raw · esc close"
+	inspectorRawHint = "↑/↓ scroll · ctrl+r readable · esc close"
 )
 
 // maxWireRecords is the ring's whole bound: the most recent twenty half-round-trips. A request
@@ -458,11 +467,11 @@ func (m Model) renderInspector() string { return m.renderReport(inspectReport) }
 // inspectorSpec composes the pane's [popupSpec] for THIS frame — its rows, the budget the frame
 // granted and the window the scroll landed on ([Model.reportSpec]).
 func (m Model) inspectorSpec() (popupSpec, bool) {
-	return m.reportSpec(inspectReport, inspectContent(m.inspectorRows()))
+	return m.reportSpec(inspectReport, m.inspectContent())
 }
 
-// inspectorKey is the pane's whole key contract: esc closes it, ↑/↓ scroll a row at a time and
-// pgup/pgdown a drawn window at a time (reportKey).
+// inspectorKey is the pane's whole key contract: esc closes it, ↑/↓ scroll a row at a time,
+// pgup/pgdown a drawn window at a time, and ctrl+r flips the rendering (reportKey).
 func (m Model) inspectorKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	return m.reportKey(inspectReport, msg)
 }
@@ -494,10 +503,20 @@ func (m Model) inspectorWheel(msg tea.MouseWheelMsg) (Model, bool) {
 // keys it spells, how tall it likes to be, and the record rows with the kinds composed beside them.
 // It words no empty state of its own — an empty ring is a ROW here, and which one depends on whether
 // anything is being captured at all (inspectorRows).
-func inspectContent(rows []popupRow, kinds []popupRowKind) reportContent {
+//
+// It is a METHOD because the rendering ctrl+r selected is Model state, and the rows and the hint are
+// two halves of ONE answer about it: composed apart, a pane could spell one rendering's keys over the
+// other's rows. Both callers — this file's inspectorSpec and the shared module's reportContent —
+// route through it for that reason.
+func (m Model) inspectContent() reportContent {
+	hint := inspectorHint
+	if m.inspector.raw {
+		hint = inspectorRawHint
+	}
+	rows, kinds := m.inspectorRows()
 	return reportContent{
 		title:  inspectorTitle,
-		hint:   inspectorHint,
+		hint:   hint,
 		rowCap: maxInspectorRows,
 		rows:   rows,
 		kinds:  kinds,
@@ -509,6 +528,11 @@ func inspectContent(rows []popupRow, kinds []popupRowKind) reportContent {
 // cut one — the elision the package words every hidden-lines statement with, then — where the ring
 // went on without recording the answer — the note that says so (hasUnrecordedReply). An empty ring
 // is ONE row, and which one depends on whether anything is being captured at all.
+//
+// WHICH lines is the pane's mode (ctrl+r): the readable rendering unless the pane is raw. The
+// elision marker is taken off the SAME rendering's dropped count — the two caps are counted
+// separately (maxWireRecordLines), so a marker borrowed from the other one would announce a cut
+// these rows never made.
 //
 // The kinds are composed in the same pass rather than derived from the rows afterwards: a header is
 // a header because of where it was put, and a payload line that happened to look like one would be
@@ -524,14 +548,18 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 	rows := make([]popupRow, 0, len(m.wire)*2)
 	kinds := make([]popupRowKind, 0, len(m.wire)*2)
 	for i, rec := range m.wire {
+		lines, hidden := rec.readable, rec.readableHidden
+		if m.inspector.raw {
+			lines, hidden = rec.lines, rec.hidden
+		}
 		rows = append(rows, popupRow{wireRecordHeader(rec)})
 		kinds = append(kinds, popupRowHeading)
-		for _, line := range rec.lines {
+		for _, line := range lines {
 			rows = append(rows, popupRow{line})
 			kinds = append(kinds, popupRowPlain)
 		}
-		if rec.hidden > 0 {
-			rows = append(rows, popupRow{popupElisionMarker(rec.hidden)})
+		if hidden > 0 {
+			rows = append(rows, popupRow{popupElisionMarker(hidden)})
 			kinds = append(kinds, popupRowPlain)
 		}
 		if hasUnrecordedReply(m.wire, i) {
