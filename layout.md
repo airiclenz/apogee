@@ -102,7 +102,7 @@ are load-bearing rather than decorative and every shipped scheme is tested for t
 
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
 prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the
-`/usage` report, the `/inspect` raw-protocol pane, the `/` and
+`/usage` report, the `/inspect` wire-traffic pane, the `/` and
 `@` dropdown, the staged-interjection band and the skill-suggestion row all sit in the frame between the session area and the bottom chrome,
 and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
@@ -144,7 +144,7 @@ doing.** The **session area** goes first and goes to nothing; then the **skill-s
 which is advice about a message that has not been sent yet; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
 **`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
-**`/inspect` raw-protocol pane**, a window onto a ring that keeps its records whether or not the
+**`/inspect` wire-traffic pane**, a window onto a ring that keeps its records whether or not the
 pane is drawn — reopened on a taller window it says exactly what it would have said; then the
 **`/usage` report**, a question already answered; then the
 **`/settings` pane**; then the **`/sessions` browser and the picker**; and last the **approval or ask
@@ -1699,18 +1699,33 @@ stays live and every other key — a printable one included — goes where it al
 what the frame already holds and calls nothing — which is exactly when the question gets asked, so
 it is the one pane that can be up beside an approval or ask prompt, seated below it, nearest the
 chrome. In the give-way order it sits between the `/settings` pane and the `/inspect` pane: it
-yields to every surface the human is acting **in**, and the two panes below it — the raw-protocol
+yields to every surface the human is acting **in**, and the two panes below it — the wire-traffic
 view, and the dropdown the next keystroke re-derives — yield before it.
 
 ---
 
 ## The `/inspect` popup
 
-**What it shows.** `/inspect` opens a bordered pane in the same transcript-side slot, listing the
-**raw protocol** of the recent model calls: the request body the engine marshalled and the response
-payload it read back, newest last. It is the view for the question the rendered conversation cannot
-answer — the model behaved in a way the transcript does not explain — and the only thing that
-settles that is the bytes.
+**What it shows.** `/inspect` opens a bordered pane in the same transcript-side slot, listing what the
+recent model calls actually put on the **wire**: the request body the engine marshalled and the
+response payload it read back, newest last. It is the view for the question the rendered conversation
+cannot answer — the model behaved in a way the transcript does not explain — and the only thing that
+settles that is what was said on the connection.
+
+**It opens readable, and `ctrl+r` shows the bytes.** Every captured record carries TWO renderings of
+the same payload and the pane picks one per frame. The **readable** one is what it opens on: a request
+becomes the single line that says what was asked of the model — `14 messages · 9 tools · model
+gpt-oss-20b` — and a response becomes the passages its deltas spell, because a stream that arrived as
+three hundred one-token JSON documents is a sentence nobody can read as one. Consecutive deltas of one
+kind are ONE passage, hard-wrapped at column 96, its first row carrying `· thinking ` for the model's
+private reasoning or `· ` for its reply and every row after it indented two spaces; a tool call is its
+own `· tool call <name> <id>` row, named and identified but never argued. `ctrl+r` flips to the **raw**
+rendering — the pretty-printed protocol, arguments and all — and flips back. Nothing a payload did not
+fit is dropped: a request body that summarises to nothing and any response line that is not a delta
+chunk go through in their pretty form in both renderings. Which rendering is showing is the pane's own
+state — per pane, in memory, nothing persisted, and a closed pane forgets it — and the hint under the
+rows names what the chord would switch **to**: `↑/↓ scroll · ctrl+r raw · esc close` on the readable
+side, `↑/↓ scroll · ctrl+r readable · esc close` on the raw one.
 
 **It is armed, and off by default.** The engine captures nothing unless the `ui.inspector` config
 key says so, read once at start-up, so a session that never asks for it pays nothing at all. With
@@ -1719,20 +1734,36 @@ is off, and "armed — the next model call lands here" where it is on. Those are
 the same silence and only one of them is actionable.
 
 **A bounded ring, oldest first.** The pane holds the twenty most recent halves of a round-trip, each
-headed `request · turn 2` — with `· depth 1` on a delegated run's traffic — and its payload
-pretty-printed under it. A record longer than a hundred lines keeps its head and closes with the
-same `… (+N more lines)` every other elided block carries, so the cut is stated rather than made
-silently. Payload rows are **flat**: a line wider than the pane is clipped at the border like any
-other unwrapped row, because a wrapped one long enough to outgrow the whole window would seat
-nothing at all, and a raw-protocol view that goes blank on a big request body is worse than one that
-cuts a long line short.
+headed `request · turn 2` — with `· depth 1` on a delegated run's traffic — and its payload under it.
+A rendering longer than a hundred lines keeps its head and closes with the same `… (+N more lines)`
+every other elided block carries, so the cut is stated rather than made silently; the cap is taken on
+**each** rendering separately, with its own dropped count, because the readable and the raw one are
+different lengths of the same traffic. Payload rows are **flat**: a line wider than the pane is
+clipped at the border like any other unwrapped row, because a wrapped one long enough to outgrow the
+whole window would seat nothing at all, and a wire view that goes blank on a big request body is
+worse than one that cuts a long line short. The readable rendering is the one that reaches the pane
+already broken to width — it carries prose rather than protocol, so it is wrapped once when the
+record is captured rather than at the pane, and its rows are flat like every other row here.
 
 **It opens on the newest record.** The rows are a log's order, so the record worth reading is the
 last one; the pane opens on the last full window and the keys move from there. Its keyboard is the
-`/usage` report's exactly — `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, and nothing else —
-and it is non-modal on the same terms: the box behind it stays live and every other key goes where
-it always went. Its verb is safe while the agent works, which is when the traffic worth reading is
-being made.
+`/usage` report's plus one of its own — `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, `ctrl+r`
+to flip the rendering, and nothing else — and it is non-modal on the same terms: the box behind it
+stays live and every other key goes where it always went, a printable one included, because `ctrl+r`
+is a chord and not a character. Its verb is safe while the agent works, which is when the traffic
+worth reading is being made.
+
+**It shows the run you are reading.** With a **run view** open the pane is that delegation's own wire
+stream and nothing else — the records whose depth and spawning call id are the viewed run's — and the
+box says which: the title reads `raw wire traffic · repo-scout` rather than the bare name. At the top
+level it is the whole ring as it was recorded. There is no key for the scope and no manual filter: a
+fan-out braids several runs into one arrival-ordered ring, a reader who opened a child is asking about
+that child, and closing the view is what widens it back. Where the ring holds nothing of the viewed
+run's stream the pane draws one row naming every cause it covers — `no records for this run — not
+called yet, rotated out of the ring, or an unrouted delegation speaking over its parent's connection;
+close the view for the whole ring` — rather than the armed row, and never by quietly falling back to
+the whole ring. Capture being off keeps its own row even there: that one is actionable, and it is the
+cause.
 
 **The pointer works on it exactly as it does on the report.** A click **outside** the box dismisses
 the pane and still lands where it was aimed, a click **inside** does nothing and is swallowed rather

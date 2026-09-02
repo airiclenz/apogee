@@ -119,7 +119,17 @@ excluded the title and became false.
 
 **Regression guard.** Unscoped title, row order, armed/disarmed rows and `hasUnrecordedReply` pairing stay byte-identical (existing tests unchanged). The run-view esc contract (`runViewOwnsEsc`) is untouched: with /inspect open, esc still closes the pane first, as today. `hasUnrecordedReply` is asked only over the scoped slice.
 
-## 4. Documentation for the readable, scoping /inspect
+## 4. Documentation for the readable, scoping /inspect — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's sweep rule ("calling it raw-protocol as its ONLY description") reached
+three further layout.md sentences outside the named block — the height-budget list (:105), the
+give-way order (:147) and the /usage pane's give-way sentence (:1702) — where "the `/inspect`
+raw-protocol pane / view" now misstates the default rendering; each reads "wire-traffic" instead.
+NOTES (2026-09-02): the code-comment half of the sweep needed no edit — item 2 had already amended
+`inspector.go:44`, `reportpane.go:19` and `model.go:1300`, and `grep -n 'five keys|four scroll
+keys|whole keyboard' internal/tui/*.go` shows every remaining sentence naming `ctrl+r`.
+NOTES (2026-09-02): the new CONTEXT.md **Inspector** term is seated directly after **Run view** in
+"Identity and shape", the Driver-state neighbourhood the item named.
 
 **What:** Update the prose that pins /inspect: `layout.md` /inspect section (the block starting at "It opens on the newest record", :1730-1740) — readable by default, `ctrl+r`, merged-and-wrapped passages, the scoping rule, scoped title and scoped-empty row; the keyboard sentence there ("`esc`, `↑`/`↓` … and nothing else") gains `ctrl+r`; `CONTEXT.md` gains an Inspector term beside the TUI/Driver concepts (it has no Inspector section today) stating the default rendering, `ctrl+r` and the run-view scoping, in the concept map's voice; `docs/manual/commands.md` /inspect row — the toggle and the scoping in one sentence each; `IDEAS.md` line 12 removed (delivered). The report doctrine's printable-key rule in `layout.md:1698` and `reportpane.go`'s header stays as written — `ctrl+r` is not a printable key; the "four scroll keys are its whole keyboard" / "same five keys" sentences in the code comments are item 2's to amend. Depends on item 3.
 
