@@ -25,16 +25,19 @@ import (
 // startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
 // left on options: the endpoint, the key SOURCE — all three spellings of it, since which one the
 // entry named is exactly what the resolver has to be told — the discovery hint, the fan-out pin, the
-// reply cap, the window pin, and the alias —
-// which for a configured entry IS its `servers:` name and for the ephemeral override entry is the
-// endpoint's host. It exists so the bind step below has ONE input shape, the ServerEntry, whether it
-// is binding the startup server or the one a human picked out of the list — and, since the key is
+// reply cap, the window pin, the alias — which for a configured entry IS its `servers:` name and for
+// the ephemeral override entry is the endpoint's host — and the human's own `description:` of that
+// box, which the bind hands the engine as the session Delegation seat's words (ADR 0069), so an
+// entry the user described describes its seat from the first Turn rather than from the first
+// `/server` switch. It exists so the bind step below has ONE input shape, the ServerEntry, whether
+// it is binding the startup server or the one a human picked out of the list — and, since the key is
 // resolved from the entry rather than carried on it, so that every command in the composition root
 // that needs the startup server's key asks for it the same way a switch does.
 func startupEntry(opts config.Options) config.ServerEntry {
 	return config.ServerEntry{
 		Name:            opts.HostAlias,
 		Endpoint:        opts.Endpoint,
+		Description:     opts.StartupDescription,
 		APIKey:          opts.APIKey,
 		APIKeyCmd:       opts.APIKeyCmd,
 		APIKeyEnv:       opts.APIKeyEnv,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1912,5 +1913,60 @@ func TestBindServerCarriesTheEntrysOwnWords(t *testing.T) {
 					handed.ServerDescription, tt.entry.Description)
 			}
 		})
+	}
+}
+
+// The same two words at STARTUP, over the whole path a fresh session actually takes: the entry as
+// the human wrote it, resolution's flattening onto the options, the startup ServerEntry
+// re-assembled out of them (startupEntry) and the bind.
+//
+// The test above binds an entry a `/server` switch already holds. This one holds none: between the
+// file and the bind the entry is only its flattened fields, and a `description:` that is not among
+// them is gone by the time the Config is written. That is a session whose Delegations line names
+// the box it runs on but never says what it is FOR — the half of the choice ADR 0069 decision 5
+// exists to give the model — and only heals itself on the first `/server` switch, which is the one
+// moment the human was not asking for a delegation.
+func TestStartupBindCarriesTheEntrysOwnWords(t *testing.T) {
+	t.Parallel()
+	const description = "the big box upstairs, slow and thorough"
+	opts := config.Options{
+		Workspace: t.TempDir(),
+		ConfigDir: testConfigHome(t, "servers:\n"+
+			"  - name: workstation\n"+
+			"    endpoint: http://127.0.0.1:1111\n"+
+			"    description: "+description+"\n"+
+			"server: workstation\n"),
+	}
+	if err := config.ApplyConfig(&opts, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	engine := newLateEngine(apogee.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	var handed apogee.Config
+	binder := serverBinder{
+		cfg:    validCfg(t),
+		engine: engine,
+		holder: newUpstreamHolder(),
+		caps:   newParallelAgentsCap(engine),
+		keys:   config.NewKeyResolver(""),
+		build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+			handed = cfg
+			return buildAgent(cfg, resumed)
+		},
+	}
+	if err := binder.bind(startupEntry(opts)); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	if handed.ServerName != "workstation" {
+		t.Errorf("Config.ServerName = %q; want the startup entry's own name %q",
+			handed.ServerName, "workstation")
+	}
+	if handed.ServerDescription != description {
+		t.Errorf("Config.ServerDescription = %q; want the startup entry's own %q — the words the "+
+			"orientation block describes the session Delegation seat with, from the first Turn "+
+			"rather than from the first /server switch", handed.ServerDescription, description)
 	}
 }

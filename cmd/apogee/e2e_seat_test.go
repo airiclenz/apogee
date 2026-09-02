@@ -173,6 +173,36 @@ func TestE2ESeatChoiceFixedStatesNoDelegationsLine(t *testing.T) {
 	run.quit(t)
 }
 
+// TestE2ESeatDelegationsLineDescribesBothSeatsOnTheFirstRequest is ADR 0069 decision 5 held to from
+// the very first Turn: a model asked to choose between two boxes is told what BOTH are FOR before
+// it has made a single choice.
+//
+// It reads the FIRST request that states the line rather than the last, and that is the whole case.
+// The far seat's words are pushed at the engine by the composition root; the NEAR seat's ride the
+// Config the Agent is constructed from, out of the entry the startup selection resolved to — and a
+// `/server` switch rebuilds them from a real entry afterwards. A case reading the last request
+// would therefore pass on a session that started with the near seat named but undescribed, which is
+// the one thing this asks about.
+func TestE2ESeatDelegationsLineDescribesBothSeatsOnTheFirstRequest(t *testing.T) {
+	run := launchSeatSession(t, seatChoiceModel)
+
+	submit(run.drv, seatPlainPrompt)
+	run.drv.WaitText(seatPlainReply)
+	run.drv.WaitQuiet(settled)
+
+	// Each seat as the line renders it — model, box, words — spelled out here rather than imported
+	// for [seatFallbackNoteText]'s reason: this is what the feature promises the MODEL will read.
+	line := seatFirstDelegationsLine(t, run.session)
+	near := `run_on "session" = ` + run.session.Model + " on " + seatSessionServer + " — " + seatSessionDescription
+	far := `run_on "sub-agents-server" = ` + run.target.Model + " on " + seatTargetServer + " — " + seatTargetDescription
+	for _, want := range []string{near, far} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the session's first Delegations line does not state %q:\n%s", want, line)
+		}
+	}
+	run.quit(t)
+}
+
 // TestE2ESeatDelegationsLineSurvivesATargetDownBeat is ADR 0023 §6 held to: the Delegations line
 // states per-session constants, so the far server going down underneath the session does not
 // rewrite it.
@@ -330,6 +360,21 @@ func seatDelegationsLineOf(req stubllm.Request) string {
 			return line
 		}
 	}
+	return ""
+}
+
+// seatFirstDelegationsLine is the Delegations bullet off the EARLIEST request that stated one — the
+// session's first Turn, since nothing but a Turn carries the standing block. It fails the test when
+// no request did, so a case reading the line as the session opened can never pass on an absence.
+func seatFirstDelegationsLine(t *testing.T, stub *stubllm.Server) string {
+	t.Helper()
+
+	for _, req := range stub.Requests() {
+		if line := seatDelegationsLineOf(req); line != "" {
+			return line
+		}
+	}
+	t.Fatalf("no request the server answered states a Delegations line")
 	return ""
 }
 

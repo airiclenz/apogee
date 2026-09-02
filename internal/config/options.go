@@ -194,6 +194,19 @@ type Options struct {
 	// so a session that STARTS on a dialled entry speaks that dialect from its first request.
 	StartupEffortDialect string
 
+	// StartupDescription is the SELECTED startup entry's own free-text `description:`, verbatim —
+	// the human's words for what the box this session starts on is FOR. It is flattened for the
+	// reason the five fields above it are: the composition root re-assembles the startup ServerEntry
+	// out of these fields (startupEntry), and the bind hands this one to the engine as the SESSION
+	// Delegation seat's description, which the orientation block's Delegations line states when the
+	// model is offered a seat to choose (ADR 0069). Without it a fresh session would name that seat
+	// but not describe it until the first `/server` switch rebuilt it from a real entry — the model
+	// asked to choose between two boxes on the first Turn is exactly the one that needs the words.
+	// The ephemeral `--endpoint`/`APOGEE_ENDPOINT` override entry describes nothing, which leaves an
+	// override run naming the seat undescribed. Resolved-not-flag-bound; ApplyConfig sets it from
+	// the startup entry.
+	StartupDescription string
+
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that
 	// does not come out of ApplyConfig's write-back but out of its refusal: the root command

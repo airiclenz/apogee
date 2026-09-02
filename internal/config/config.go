@@ -2839,6 +2839,14 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// for the composition root to hand the beat and every unattended run's construction seed. The
 	// ephemeral override entry forces nothing, which leaves an override run on what discovery sees.
 	opts.StartupEffortDialect = startup.EffortDialect
+	// And what that entry IS, in the human's own words — the SELECTED entry's free-text
+	// `description:`, carried verbatim for the composition root to hand the engine at the bind,
+	// where it becomes the session Delegation seat's description in the orientation block's
+	// Delegations line (ADR 0069). Flattened for the dialect's reason and travelling the same way:
+	// it is a fact about the entry this session starts ON, and a model offered a seat to choose must
+	// read it from the FIRST Turn rather than from the first `/server` switch. The ephemeral
+	// override entry describes nothing, which leaves an override run naming that seat undescribed.
+	opts.StartupDescription = startup.Description
 	// A roster name that matches no tool — in either half of the global `tools:` block or of any
 	// `model-profiles:` entry's axis — is a NOTICE, never a refusal, and so is a name written under
 	// both halves of one block: the lists are how a roster is tuned on evidence, and a typo in one
