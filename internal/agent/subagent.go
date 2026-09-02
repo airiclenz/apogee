@@ -174,16 +174,18 @@ func parseDelegationSeat(raw string) (delegationSeat, error) {
 	}
 }
 
-// seatFallbackNote is the ONE line the result of a fallen-back delegation carries (ADR 0069
+// SeatFallbackNote is the ONE line the result of a fallen-back delegation carries (ADR 0069
 // decision 9): the call asked for the Sub-agent server, no usable target was latched, and the work
 // ran on the session server instead. It is for the PARENT MODEL — the human already read the
 // routing-state notice the host emits once per beat — so it says what happened to the decision the
 // model made and nothing about why the server is down, which is not the parent's to act on.
 //
-// A package constant, pinned by test, because it is a contract line: the parent reads it as the
+// An EXPORTED constant, pinned by test, because it is a contract line: the parent reads it as the
 // answer to "did my run_on take effect", and it is appended to the result BODY (delegationResult),
-// never prefixed, so the child's own first line stays the head every reader meets first.
-const seatFallbackNote = "note: ran on the session server — the sub-agents server was unavailable"
+// never prefixed, so the child's own first line stays the head every reader meets first. It is
+// exported — and re-exported as apogee.SeatFallbackNote — so the Driver-side tests that assert the
+// model reads this sentence read it from here rather than re-typing it.
+const SeatFallbackNote = "note: ran on the session server — the sub-agents server was unavailable"
 
 // runSubAgent is the recursion point: it parses the delegated task, constructs a nested Agent
 // bounded by this Agent's privileges (ADR 0005/0013), drives it to its Exchange boundary, and
@@ -425,7 +427,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// ADR 0063 D3's trailer below is the final line on every outcome and stays there, so where both
 	// apply the note sits immediately above it.
 	if a.seatFallback {
-		result.Content += "\n" + seatFallbackNote
+		result.Content += "\n" + SeatFallbackNote
 	}
 
 	// The parent notice, appended once for EVERY outcome that produces a result (ADR 0063 D3) —

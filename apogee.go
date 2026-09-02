@@ -91,6 +91,12 @@ type DelegationTarget = agent.DelegationTarget
 // See internal/agent for the contract.
 type DelegationSeat = agent.DelegationSeat
 
+// SeatFallbackNote is the one line a delegation's result carries when its call asked for the
+// Sub-agent server and no usable target was latched, so the work ran on the session server instead
+// (ADR 0069 decision 9). It is appended to the result BODY, never prefixed. Re-exported so a Driver
+// can assert the sentence its model reads without re-typing it. See internal/agent for the contract.
+const SeatFallbackNote = agent.SeatFallbackNote
+
 // ----------------------------------------------------------------------------
 // Construction & autonomy (internal/domain)
 // ----------------------------------------------------------------------------

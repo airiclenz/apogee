@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
@@ -55,10 +56,11 @@ const (
 )
 
 // seatFallbackNoteText is the line a delegation that asked for the far seat and did not get it
-// carries back to the model (ADR 0069 decision 9). It is internal/agent's own constant restated
-// here because cmd/apogee cannot import it — which is the point: it is what the feature promises
-// the MODEL will read, so a re-wording over there has to fail here.
-const seatFallbackNoteText = "note: ran on the session server — the sub-agents server was unavailable"
+// carries back to the model (ADR 0069 decision 9). It is internal/agent's own constant, reached
+// through the root facade because cmd/apogee cannot import internal/agent — one sentence, one
+// source: the wording itself is pinned literally once, in internal/agent/seat_test.go, so a
+// re-wording over there fails there rather than passing silently here.
+const seatFallbackNoteText = apogee.SeatFallbackNote
 
 // seatDelegationsPrefix opens the orientation bullet this whole file is about. A line that stopped
 // being rendered, or started being spelled another way, takes every assertion below with it.
@@ -190,8 +192,8 @@ func TestE2ESeatDelegationsLineDescribesBothSeatsOnTheFirstRequest(t *testing.T)
 	run.drv.WaitText(seatPlainReply)
 	run.drv.WaitQuiet(settled)
 
-	// Each seat as the line renders it — model, box, words — spelled out here rather than imported
-	// for [seatFallbackNoteText]'s reason: this is what the feature promises the MODEL will read.
+	// Each seat as the line renders it — model, box, words — spelled out here rather than composed
+	// from the production code that paints it: this is what the feature promises the MODEL will read.
 	line := seatFirstDelegationsLine(t, run.session)
 	near := `run_on "session" = ` + run.session.Model + " on " + seatSessionServer + " — " + seatSessionDescription
 	far := `run_on "sub-agents-server" = ` + run.target.Model + " on " + seatTargetServer + " — " + seatTargetDescription

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -132,7 +133,7 @@ func TestGrepBranchRowShowsTheSearchedPath(t *testing.T) {
 func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 	t.Parallel()
 
-	const note = "\nnote: ran on the session server — the sub-agents server was unavailable"
+	const note = "\n" + agent.SeatFallbackNote
 
 	t.Run("a capped run is still capped", func(t *testing.T) {
 		t.Parallel()

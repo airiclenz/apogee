@@ -238,7 +238,12 @@ from `runName`.
 
 ---
 
-## 6. The seat fallback note has one source
+## 6. The seat fallback note has one source — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the sentence's value is unchanged byte for byte; only the identifier's case changed. The doc comment at `internal/agent/subagent.go:186` was re-worded in the same edit ("A package constant" → "An EXPORTED constant") because the export makes the old wording false.
+NOTES (2026-09-02): both downstream sites keep their local identifier and now DEFINE it from the exported constant — `internal/tui/toolregistry_test.go`'s `note` becomes `"\n" + agent.SeatFallbackNote` (keeping its leading `"\n" +` as the item directs) and `cmd/apogee/e2e_seat_test.go`'s `seatFallbackNoteText` becomes `apogee.SeatFallbackNote` with its "cmd cannot import it" comment replaced by one naming the facade. The copied string LITERAL is gone from both; only the local name survives, which keeps the existing assertion sites and the file's `[seatFallbackNoteText]` doc reference intact.
+NOTES (2026-09-02): consequential edit — cmd/apogee/e2e_seat_test.go:193: made necessary by the re-worded constant comment; the announced-line comment cited "[seatFallbackNoteText]'s reason" (that cmd cannot import the engine), which no longer holds, so it now states the reason directly.
+NOTES (2026-09-02): the new pin `TestSeat_FallbackNoteIsTheSentenceItself` was confirmed non-vacuous by construction — it is the only literal in the repo besides the constant itself (`grep -rn 'ran on the session server' --include=*.go` shows exactly those two code lines), so any re-word of `internal/agent/subagent.go:188` fails it.
 
 **What.** `seatFallbackNote` (`internal/agent/subagent.go:186`) is unexported and its sentence is
 re-typed verbatim in `internal/tui/toolregistry_test.go:135` and `cmd/apogee/e2e_seat_test.go:61`, with

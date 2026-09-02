@@ -143,6 +143,21 @@ func TestSeat_SubAgentsServerAskFallsBackToTheSession(t *testing.T) {
 	}
 }
 
+// TestSeat_FallbackNoteIsTheSentenceItself is the ONE literal pin on the constant. Every other
+// site — here, in internal/tui and in cmd/apogee — now READS SeatFallbackNote, so a re-word of
+// internal/agent/subagent.go would leave all of them green against themselves. This assertion is
+// what makes a re-word fail: the sentence is written out, because the sentence is the contract the
+// parent model is promised.
+func TestSeat_FallbackNoteIsTheSentenceItself(t *testing.T) {
+	t.Parallel()
+
+	const want = "note: ran on the session server — the sub-agents server was unavailable"
+
+	if SeatFallbackNote != want {
+		t.Errorf("SeatFallbackNote = %q, want %q — this sentence is what the parent model reads to learn its run_on did not take effect", SeatFallbackNote, want)
+	}
+}
+
 // TestSeat_FallbackNoteIsTheBodysLastLine pins the contract line the parent model reads, on every
 // outcome that produces a result: the note is APPENDED, so the head each outcome opens with — the
 // step-cap marker, the fault prefix, the child's own first line — is untouched and the recognisers
@@ -172,8 +187,8 @@ func TestSeat_FallbackNoteIsTheBodysLastLine(t *testing.T) {
 			if !strings.HasPrefix(got.Content, tc.wantHead) {
 				t.Errorf("result = %q, want it to open with the outcome's own head %q — the note is appended, never prefixed", got.Content, tc.wantHead)
 			}
-			if last := lastLine(got.Content); last != seatFallbackNote {
-				t.Errorf("result's last line = %q, want the routing note %q", last, seatFallbackNote)
+			if last := lastLine(got.Content); last != SeatFallbackNote {
+				t.Errorf("result's last line = %q, want the routing note %q", last, SeatFallbackNote)
 			}
 		})
 	}
@@ -194,8 +209,8 @@ func TestSeat_FallbackNoteSitsUnderTheSteeredTrailer(t *testing.T) {
 		t.Fatalf("result = %q, want the steered trailer as its final line", got.Content)
 	}
 	body := strings.TrimSuffix(got.Content, trailer)
-	if last := lastLine(body); last != seatFallbackNote {
-		t.Errorf("body's last line = %q, want the routing note %q immediately above the trailer", last, seatFallbackNote)
+	if last := lastLine(body); last != SeatFallbackNote {
+		t.Errorf("body's last line = %q, want the routing note %q immediately above the trailer", last, SeatFallbackNote)
 	}
 }
 
@@ -414,7 +429,7 @@ func TestSeat_RunOnIsIgnoredWhereItWasNeverPublished(t *testing.T) {
 	if !strings.Contains(res.Content, "Go TUI agent") {
 		t.Errorf("sub_agent result = %q, want the child's final message", res.Content)
 	}
-	if strings.Contains(res.Content, seatFallbackNote) {
+	if strings.Contains(res.Content, SeatFallbackNote) {
 		t.Errorf("sub_agent result = %q, want no routing note — the seat was never read, so nothing was overruled", res.Content)
 	}
 }
