@@ -1196,7 +1196,7 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 	// The loop resumes draining, and the notice it was never able to take now arrives.
 	select {
 	case msg := <-sender.msgs:
-		if _, ok := msg.(tea.Msg); !ok || msg == nil {
+		if msg == nil {
 			t.Fatalf("scheduler notice = %#v, want a message the Update loop can fold", msg)
 		}
 	case <-time.After(3 * time.Second):

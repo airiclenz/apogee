@@ -220,7 +220,7 @@ func Example_enableMechanismStack() {
 		fmt.Println("construct:", err)
 		return
 	}
-	defer ag.Close()
+	defer func() { _ = ag.Close() }()
 
 	fmt.Println("armed:", cfg.EnableMechanisms)
 	// Output:

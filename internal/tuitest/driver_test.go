@@ -240,7 +240,9 @@ func TestDriverPumpsTerminalAnswers(t *testing.T) {
 	before := log.count()
 	// A primary device-attributes query. The emulator answers it (x/vt handles DA1 itself); the
 	// pump is what turns that answer back into program input.
-	drv.Screen().Write([]byte("\x1b[c"))
+	if _, err := drv.Screen().Write([]byte("\x1b[c")); err != nil {
+		t.Fatalf("Screen().Write(DA1 query) = %v, want nil", err)
+	}
 	drv.WaitFor(func() bool { return log.count() > before },
 		Awaiting("the terminal's DA1 answer to reach the program"))
 }

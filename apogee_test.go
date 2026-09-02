@@ -143,7 +143,7 @@ func TestNew_ModelMayBeBoundLater(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New with an empty Model = %v, want nil", err)
 	}
-	defer agent.Close()
+	defer func() { _ = agent.Close() }()
 
 	if err := agent.Submit(apogee.UserInput{Text: "too early"}); err == nil {
 		t.Error("Submit with no model bound = nil error, want a refusal")

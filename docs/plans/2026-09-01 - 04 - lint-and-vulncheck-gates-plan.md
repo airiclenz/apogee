@@ -279,7 +279,9 @@ go build ./cmd/apogee && go test -race -count=1 -run 'TestHeadless|TestDaemon|Te
 
 **Commit:** `refactor(cmd): lint-clean under golangci-lint standard set`
 
-## 11. Lint clean: root tests, `cmd/apogee` tests, `cmd/stubllm`, `internal/tuitest`
+## 11. Lint clean: root tests, `cmd/apogee` tests, `cmd/stubllm`, `internal/tuitest` — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): all 19 uncapped findings the item lists were the 19 the linter reported at this tree; no site was added or dropped.
 
 Depends on items 2 and 10.
 

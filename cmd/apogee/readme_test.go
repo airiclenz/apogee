@@ -20,7 +20,7 @@ func TestReadmeArchiveInstallDoesNotPinAVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open README.md: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	pinned := regexp.MustCompile(`VERSION=[0-9]`)
 	sc := bufio.NewScanner(f)

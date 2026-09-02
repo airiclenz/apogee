@@ -371,7 +371,7 @@ func TestBenchReadinessContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New (mechanisms-on arm): %v", err)
 	}
-	defer mechArm.Close()
+	defer func() { _ = mechArm.Close() }()
 
 	// --- Arm B: Bypass ---------------------------------------------------------
 	bypassRoots := newRoots(t)
@@ -393,7 +393,7 @@ func TestBenchReadinessContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New (Bypass arm): %v", err)
 	}
-	defer bypassArm.Close()
+	defer func() { _ = bypassArm.Close() }()
 
 	// Drive both arms through the same task to their quiescent boundaries.
 	runToQuiescence(t, mechArm, apogee.UserInput{Text: complexPrompt})
@@ -520,7 +520,7 @@ func resumeFork(t *testing.T, endpoint string, snap apogee.Session, token string
 	if err != nil {
 		t.Fatalf("Resume fork %q: %v", token, err)
 	}
-	defer fork.Close()
+	defer func() { _ = fork.Close() }()
 
 	runToQuiescence(t, fork, apogee.UserInput{Text: "wrap up now. " + closeMarker + " " + token})
 
@@ -583,7 +583,7 @@ func TestBenchReadinessConstructionRefusals(t *testing.T) {
 			t.Parallel()
 			ag, err := hermeticArm(t, tc.enable)
 			if ag != nil {
-				ag.Close()
+				_ = ag.Close()
 			}
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("New(EnableMechanisms=%v) error = %v, want errors.Is(err, %v)", tc.enable, err, tc.wantErr)
@@ -660,7 +660,7 @@ func TestBenchReadinessLeaveOneOutArms(t *testing.T) {
 		if err != nil {
 			t.Fatalf("New(EnableMechanisms=%v): %v", enable, err)
 		}
-		ag.Close()
+		_ = ag.Close()
 	}
 
 	t.Run("full stack", func(t *testing.T) {

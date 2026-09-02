@@ -57,8 +57,8 @@ func TestMain(m *testing.M) {
 	}
 	suiteTempHome = home
 	// HOME is what os.UserHomeDir reads on POSIX, USERPROFILE what it reads on Windows.
-	os.Setenv("HOME", home)
-	os.Setenv("USERPROFILE", home)
+	_ = os.Setenv("HOME", home)
+	_ = os.Setenv("USERPROFILE", home)
 
 	// Built for every ordinary run of the suite — never for the key-command fixture's re-exec of
 	// this binary (keysource_test.go), which happens several times per run and only ever prints a
@@ -68,7 +68,7 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
-	os.RemoveAll(home)
+	_ = os.RemoveAll(home)
 	os.Exit(code)
 }
 

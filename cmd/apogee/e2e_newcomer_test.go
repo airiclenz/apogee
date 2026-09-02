@@ -216,7 +216,7 @@ func driveNewcomer(t *testing.T, ctx context.Context, docker, container, upstrea
 	if err != nil {
 		t.Fatalf("build the judge client: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	t.Logf("newcomer driven by %s", judgeModel)
 
 	runTool := provider.ToolSpec{

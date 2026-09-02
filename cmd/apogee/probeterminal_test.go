@@ -22,12 +22,12 @@ func runProbeTerminal(t *testing.T) (string, error) {
 	if err != nil {
 		t.Fatalf("create a stand-in for stdin: %v", err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.Create(filepath.Join(dir, "stdout"))
 	if err != nil {
 		t.Fatalf("create a stand-in for stdout: %v", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	previous := probeTerminalStreams
 	probeTerminalStreams = func() (*os.File, *os.File) { return in, out }
