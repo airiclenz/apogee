@@ -26,6 +26,13 @@ import (
 // it — and TestFoldEventCoversEveryEventVariant reads internal/domain/events.go to check the
 // answer was actually given, including "deliberately nothing".
 
+// throughputWindowFloor is the shortest generation window the tok/s readout will divide by.
+// Under it the elapsed time is dominated by scheduling jitter rather than by generation, and
+// the quotient stops describing the server at all — 200 completion tokens over a 130 µs window
+// reads as 1.5 million tok/s. A sub-floor window therefore yields NO reading (tokPerSec 0, the
+// suffix hidden) instead of a clamped or invented one.
+const throughputWindowFloor = 250 * time.Millisecond
+
 // foldEvent folds one engine Event into the view: the live token stats, the retained reasoning
 // tail, then the transcript, then the activity phrase. It mutates the local copy and returns it,
 // like every Update fold; repainting the viewport is the caller's (the eventMsg case's).
@@ -133,9 +140,24 @@ func usageReading(e domain.UsageEvent) (usageTotals, bool) {
 // A PruneEvent moves no reading at all, and deliberately: pruning frees window the NEXT request
 // will show, and the gauge reports what the last reply actually reported. Subtracting the freed
 // tokens here would paint a fill no Upstream has confirmed.
+//
+// The generation clock starts on the Turn's first depth-0 OUTPUT event — a reasoning chunk as
+// readily as a visible token — because the completion count it is divided by includes the
+// reasoning tokens. A window shorter than throughputWindowFloor is refused rather than divided:
+// a cached or instant completion timed over a millisecond reads in the millions, which is noise
+// wearing a number's clothes.
 func (m Model) foldStats(e domain.Event) Model {
 	switch e := e.(type) {
 	case domain.TokenEvent:
+		if e.Depth == 0 && m.genStart.IsZero() {
+			m.genStart = time.Now()
+		}
+	case domain.ReasoningEvent:
+		// Reasoning is generated output like any other: the server counts it in
+		// completion_tokens, so the window the throughput divides by has to start here too
+		// when a Turn thinks before it speaks. Timing only the visible tokens divided the
+		// WHOLE completion by the tail of the generation, which is where the absurd readings
+		// came from.
 		if e.Depth == 0 && m.genStart.IsZero() {
 			m.genStart = time.Now()
 		}
@@ -168,8 +190,10 @@ func (m Model) foldStats(e domain.Event) Model {
 			m.ctxUsed = total
 		}
 		if !m.genStart.IsZero() && e.CompletionTokens > 0 {
-			if secs := time.Since(m.genStart).Seconds(); secs > 0 {
-				m.tokPerSec = float64(e.CompletionTokens) / secs
+			if window := time.Since(m.genStart); window >= throughputWindowFloor {
+				m.tokPerSec = float64(e.CompletionTokens) / window.Seconds()
+			} else {
+				m.tokPerSec = 0 // sub-floor: unmeasured, and the suffix hides itself
 			}
 		}
 		m.genStart = time.Time{}

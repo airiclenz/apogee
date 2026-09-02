@@ -297,10 +297,11 @@ func TestUsageEventDrivesGaugeAndThroughput(t *testing.T) {
 		t.Fatalf("context gauge lit before any usage: %q", g)
 	}
 
-	// A token starts the throughput clock; a short gap guarantees a non-zero elapsed before the
-	// terminal usage lands.
+	// A token starts the throughput clock; the clock is then back-dated rather than slept
+	// against, so the window the usage divides by clears throughputWindowFloor by a second
+	// without the test waiting for one (foldStats).
 	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "hi"}})
-	time.Sleep(2 * time.Millisecond)
+	m.genStart = time.Now().Add(-time.Second)
 	m = step(t, m, eventMsg{Event: domain.UsageEvent{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}})
 
 	if m.ctxUsed != 1200 {

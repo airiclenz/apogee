@@ -7,7 +7,9 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -86,6 +88,17 @@ func foldCases() []foldCase {
 			// the program.
 			event:         domain.ReasoningEvent{Text: "hmm"},
 			wantPhrase:    "thinking",
+			wantReasoning: "hmm",
+			// The generation clock starts here as readily as on a token: reasoning is output the
+			// server counts in completion_tokens, so the throughput window has to include it.
+			wantStats: statsFold{genStarted: true},
+		},
+		{
+			name: "ReasoningEvent at Depth 1 retains at its own depth and starts no generation clock",
+			// The mirror of the Depth-1 TokenEvent row: a delegate's thinking is not the
+			// conversation the gauge times, so foldStats leaves the clock alone (foldStats).
+			event:         domain.ReasoningEvent{EventBase: domain.EventBase{Depth: 1}, Text: "hmm"},
+			wantPhrase:    subAgentActivityName + " · thinking",
 			wantReasoning: "hmm",
 		},
 		{
@@ -531,12 +544,71 @@ func TestFoldStatsSkipsAMaintenanceReadingForTheGaugeAndClock(t *testing.T) {
 		t.Error("the generation clock was cleared by a maintenance reading; the Turn is still streaming")
 	}
 
+	// The surviving clock is what the next reading times, but this test folds its events
+	// microseconds apart — a window under throughputWindowFloor, which now reads as unmeasured.
+	// Back-date the clock so the assertion below is about SURVIVAL, not about the floor.
+	m.genStart = time.Now().Add(-time.Second)
+
 	m = m.foldEvent(mainUsage(2000, 300, 2300, 11000, 900, 11900, 3))
 	if m.ctxUsed != 2300 {
 		t.Errorf("ctxUsed = %d, want 2300 — the next Turn moves the gauge normally", m.ctxUsed)
 	}
 	if m.tokPerSec <= 0 {
 		t.Errorf("tokPerSec = %v, want > 0 — the surviving clock timed the completion", m.tokPerSec)
+	}
+}
+
+// TestFoldStatsReasoningStartsTheGenerationClock pins the first half of the tok/s fix: the clock
+// starts on the Turn's first OUTPUT event, and a reasoning chunk is one. The server counts
+// reasoning in completion_tokens, so timing only from the first visible token divided the whole
+// completion by the tail of the generation — a model that thinks for twenty seconds and then
+// speaks for one read as twenty times its real speed. A delegate's reasoning still starts
+// nothing: the gauge times the conversation the human is steering.
+func TestFoldStatsReasoningStartsTheGenerationClock(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	m = m.foldEvent(domain.ReasoningEvent{Text: "hmm"})
+	if m.genStart.IsZero() {
+		t.Error("a depth-0 ReasoningEvent left the generation clock unstarted")
+	}
+
+	child := newTestModel(t)
+	child = child.foldEvent(domain.ReasoningEvent{EventBase: domain.EventBase{Depth: 1}, Text: "hmm"})
+	if !child.genStart.IsZero() {
+		t.Error("a delegate's ReasoningEvent started the top-level generation clock")
+	}
+}
+
+// TestFoldStatsSubFloorWindowReadsUnmeasured pins the second half: a generation window shorter
+// than throughputWindowFloor yields NO reading rather than a quotient. Dividing a real completion
+// count by a window that is really scheduling jitter is where '1514218 tok/s' came from; the
+// suffix hides itself instead. A window comfortably over the floor still reads normally.
+func TestFoldStatsSubFloorWindowReadsUnmeasured(t *testing.T) {
+	t.Parallel()
+
+	usage := domain.UsageEvent{PromptTokens: 1000, CompletionTokens: 100, TotalTokens: 1100}
+
+	m := newTestModel(t)
+	m.genStart = time.Now() // a window of microseconds — below the floor
+	m = m.foldEvent(usage)
+	if m.tokPerSec != 0 {
+		t.Errorf("tokPerSec = %v, want 0 — a sub-floor window is unmeasured, not divided", m.tokPerSec)
+	}
+	if s := m.throughputSuffix(); s != "" {
+		t.Errorf("throughput suffix = %q, want empty — an unmeasured window shows no reading", s)
+	}
+
+	// Ten seconds, not one: a -race run can stall long enough that a one-second window drifts
+	// out of a tight band, while a ten-second one absorbs it.
+	m = newTestModel(t)
+	m.genStart = time.Now().Add(-10 * time.Second)
+	m = m.foldEvent(usage)
+	if m.tokPerSec < 9 || m.tokPerSec > 11 {
+		t.Errorf("tokPerSec = %v, want ~10 (100 completion tokens over ten seconds)", m.tokPerSec)
+	}
+	if s := m.throughputSuffix(); !strings.Contains(s, "tok/s") {
+		t.Errorf("throughput suffix = %q, want a reading for a measured window", s)
 	}
 }
 

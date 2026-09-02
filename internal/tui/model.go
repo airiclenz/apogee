@@ -475,9 +475,12 @@ type Model struct {
 // liveStats is the reading the status line takes off the engine's UsageEvents for the conversation
 // that is live RIGHT NOW (server token accounting, folded in foldStats): ctxUsed is the latest
 // top-level (Depth 0) total-token count, driving the context-usage gauge; genStart marks when the
-// current Turn began streaming content (set on its first token, cleared on a re-stream or once usage
-// lands); tokPerSec is the last completion's throughput, timed against the Update clock. All three
-// are plain values, so the whole group rides the value-copied Model (ADR 0011).
+// current Turn began producing output (set on its first depth-0 token OR reasoning chunk, cleared
+// on a re-stream or once usage lands); tokPerSec is the last completion's throughput — the server's
+// completion tokens, reasoning included, over that whole window, timed against the Update clock.
+// A window shorter than throughputWindowFloor is left unmeasured (tokPerSec 0), so the suffix
+// renders nothing rather than a number scheduling jitter made up. All three are plain values, so
+// the whole group rides the value-copied Model (ADR 0011).
 //
 // Its lifetime is one CONVERSATION, which is what separates it from [Model.usage] beside it: these
 // three describe the exchange history the engine is still carrying, so the boundaries that discard
@@ -3171,9 +3174,12 @@ func confinementWord(info ConfinementInfo, mode domain.Mode, confine bool) strin
 	}
 }
 
-// throughputSuffix is the status line's "· N tok/s" readout while a Turn generates, timed off
-// the last completion's server-reported token count (foldStats). It renders nothing below one
-// token per second (an unmeasured or sub-1 tok/s turn), keeping the black status field clean.
+// throughputSuffix is the status line's "· N tok/s" readout while a Turn generates: the last
+// completion's server-reported token count over the window from that Turn's first output event
+// — reasoning or visible token — as foldStats timed it. It renders nothing below one token per
+// second, which covers both a genuinely sub-1 tok/s turn and an UNMEASURED one: a window under
+// throughputWindowFloor reaches here as a zero, deliberately, and is shown as no reading at all
+// rather than clamped into a plausible-looking number. Keeps the black status field clean.
 func (m Model) throughputSuffix() string {
 	if m.tokPerSec < 1 {
 		return ""
