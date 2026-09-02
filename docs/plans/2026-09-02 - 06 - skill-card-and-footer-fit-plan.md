@@ -217,7 +217,18 @@ Acceptance runs `go build ./... && go test ./internal/tui/` plus the two greps a
 
 ---
 
-## 4. `footerFit` — the footer's priority-ordered fit, as a pure function
+## 4. `footerFit` — the footer's priority-ordered fit, as a pure function — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the plan's ladder ends "only if the marker cannot seat whole between its two
+margins" — that last rung is therefore the marker's OWN floor (`margin + Width(mode) + margin <= w`)
+rather than the fit's blank-column test, because with the left run empty there is nothing for a
+blank column to separate the marker from. Every rung above it still uses the blank-column test.
+NOTES (2026-09-02): the floor case (`hasMode=false`) truncates `info` and `offline` as a PAIR
+rather than truncating one concatenated string, so `offline` keeps a styled run of its own for
+item 5's error-tone fix; the cells spent are identical to today's single truncation.
+NOTES (2026-09-02): `offline` sheds its leading ` ✦ ` separator on the one rung where it is alone
+on the row (the model already dropped), so the run never begins on a dangling glyph; the plan's
+"a dropped one leaves WITH its separator" idiom applied to the segment that carries its own.
 
 **What.** The arithmetic half of `ISSUES.md:30-35`. Today `footerModeSpan`
 (`internal/tui/model.go:3009-3022`) returns `ok=false` the moment the left run and the marker do
