@@ -838,16 +838,23 @@ func TestInspectorScopedEmptyNamesEveryCause(t *testing.T) {
 	// The ring is NOT empty: it holds the parent's record, so what is empty here is the scope.
 	m := scopedInspectorModel(t, wireEvent(domain.WireDirectionRequest, "parent-body", 1, 0))
 
+	// The sentences are written out here rather than compared to the constants they come from: a
+	// typo in either constant is the very regression this test exists to catch, and a comparison
+	// against the constant would carry the typo into the assertion and stay green.
+	const wantScopedEmpty = "no records for this run — not called yet, rotated out of the ring, " +
+		"or an unrouted delegation speaking over its parent's connection; close the view for the whole ring"
+	const wantDisarmed = "capture is off — set ui.inspector: true, then restart"
+
 	rows, _ := m.inspectorRows()
-	if len(rows) != 1 || rows[0][0] != inspectorScopedEmptyRow {
-		t.Errorf("the armed scoped-empty pane = %q, want the one row %q", rows, inspectorScopedEmptyRow)
+	if len(rows) != 1 || rows[0][0] != wantScopedEmpty {
+		t.Errorf("the armed scoped-empty pane = %q, want the one row %q", rows, wantScopedEmpty)
 	}
 
 	m.opts.Inspector = false
 
 	rows, _ = m.inspectorRows()
-	if len(rows) != 1 || rows[0][0] != inspectorDisarmedRow {
-		t.Errorf("the disarmed scoped-empty pane = %q, want the key it is off %q", rows, inspectorDisarmedRow)
+	if len(rows) != 1 || rows[0][0] != wantDisarmed {
+		t.Errorf("the disarmed scoped-empty pane = %q, want the key it is off %q", rows, wantDisarmed)
 	}
 }
 

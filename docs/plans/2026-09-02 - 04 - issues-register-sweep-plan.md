@@ -505,7 +505,10 @@ Config with every field set, `SubAgentSeatChoice` excepted engine-side.
 
 ---
 
-## 11. The inspector's two sentences are pinned literally
+## 11. The inspector's two sentences are pinned literally — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): `inspectorEmptyRow` is left alone — no test in `internal/tui/` renders it, which is the item's stated "otherwise leave it" case.
+NOTES (2026-09-02): both pins were mutation-checked (a typo introduced into `inspectorDisarmedRow` fails the test) and the constant restored.
 
 **What.** Both halves of `TestInspectorScopedEmptyNamesEveryCause`
 (`internal/tui/inspector_test.go:841-851`) compare the rendered row to `inspectorScopedEmptyRow` /
