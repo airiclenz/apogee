@@ -742,3 +742,180 @@ func TestReadableCountsItsOwnHiddenLines(t *testing.T) {
 		t.Errorf("readableHidden = %d, want nothing dropped from a one-row rendering", rec.readableHidden)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The pane's SCOPE — one run's stream while its view is open (scopedWire)
+// ----------------------------------------------------------------------------
+
+// scopedInspectorModel is the scoped pane's setup: a finished delegation the human has opened as a
+// run view, the capture armed, the given halves folded into the ring behind it, and /inspect up.
+// The view is entered through the KEYBOARD (enterOnLastBlock) rather than by writing viewStack, so
+// what the assertions read is the scope a human actually gets.
+func scopedInspectorModel(t *testing.T, events ...domain.Event) Model {
+	t.Helper()
+	m := modelWithRun(t)
+	m.opts.Inspector = true
+	for _, e := range events {
+		m = m.foldEvent(e)
+	}
+	m = enterOnLastBlock(t, m)
+	if got, want := m.viewedRun(), (runRef{depth: 1, spawn: "s1"}); got != want {
+		t.Fatalf("setup: the open view is rooted at %+v, want the delegation's run %+v", got, want)
+	}
+	m.inspector = inspectorPane{open: true}
+	return m
+}
+
+// paneText joins every row the pane composes for this frame into one string, so an assertion can ask
+// what the pane does and does not say without caring which row said it.
+func paneText(t *testing.T, m Model) string {
+	t.Helper()
+	rows, _ := m.inspectorRows()
+	var out []string
+	for _, row := range rows {
+		out = append(out, row[0])
+	}
+	return strings.Join(out, "\n")
+}
+
+// TestInspectorScopesToTheViewedRun pins the ratified scope: a fan-out braids several runs into one
+// arrival-ordered ring, and a reader who opened a delegation is asking about THAT delegation — so
+// with a run view open the pane lists its records alone, under a title carrying its name, and
+// closing the view gives the whole ring back byte-identically titled.
+func TestInspectorScopesToTheViewedRun(t *testing.T) {
+	const (
+		childBody   = "child-body"
+		siblingBody = "sibling-body"
+		parentBody  = "parent-body"
+	)
+	m := scopedInspectorModel(t,
+		wireEventOfCall(domain.WireDirectionRequest, childBody, 1, 1, "s1"),
+		wireEventOfCall(domain.WireDirectionResponse, siblingBody, 1, 1, "s2"),
+		wireEvent(domain.WireDirectionRequest, parentBody, 1, 0),
+	)
+
+	scoped := paneText(t, m)
+	if !strings.Contains(scoped, childBody) {
+		t.Errorf("the scoped pane drops the viewed run's own record:\n%s", scoped)
+	}
+	for _, other := range []string{siblingBody, parentBody} {
+		if strings.Contains(scoped, other) {
+			t.Errorf("the scoped pane shows %q — a record of another run:\n%s", other, scoped)
+		}
+	}
+	if got, want := m.inspectContent().title, inspectorTitle+" · "+m.runLabel("s1"); got != want {
+		t.Errorf("scoped title = %q, want %q — the box has to name what is under it", got, want)
+	}
+
+	m = step(t, m, keyEsc()) // the pane goes first, as it does with no view open
+	m = step(t, m, keyEsc()) // and then the view
+	if m.inRunView() {
+		t.Fatal("two escs left a view open; the second one leaves the run")
+	}
+	next, _ := m.runInspectCommand()
+	m = next.(Model)
+
+	whole := paneText(t, m)
+	for _, body := range []string{childBody, siblingBody, parentBody} {
+		if !strings.Contains(whole, body) {
+			t.Errorf("the unscoped pane drops %q; the closed view gives the whole ring back:\n%s", body, whole)
+		}
+	}
+	if got := strings.Index(whole, childBody); got > strings.Index(whole, siblingBody) {
+		t.Error("the unscoped rows are out of ring order; the ring is a log and arrival is its order")
+	}
+	if got := m.inspectContent().title; got != inspectorTitle {
+		t.Errorf("unscoped title = %q, want the bare %q", got, inspectorTitle)
+	}
+}
+
+// TestInspectorScopedEmptyNamesEveryCause pins the empty SCOPE, which is a different fact from an
+// empty ring: the pane cannot tell a run that has not called yet from one whose records rotated out
+// or from an unrouted delegation filed under its parent, so the one row it shows names all three
+// and the way back to the whole ring. With the capture OFF that slot keeps the disarmed row — the
+// key is the actionable answer to an empty pane, and the scope never displaces it.
+func TestInspectorScopedEmptyNamesEveryCause(t *testing.T) {
+	// The ring is NOT empty: it holds the parent's record, so what is empty here is the scope.
+	m := scopedInspectorModel(t, wireEvent(domain.WireDirectionRequest, "parent-body", 1, 0))
+
+	rows, _ := m.inspectorRows()
+	if len(rows) != 1 || rows[0][0] != inspectorScopedEmptyRow {
+		t.Errorf("the armed scoped-empty pane = %q, want the one row %q", rows, inspectorScopedEmptyRow)
+	}
+
+	m.opts.Inspector = false
+
+	rows, _ = m.inspectorRows()
+	if len(rows) != 1 || rows[0][0] != inspectorDisarmedRow {
+		t.Errorf("the disarmed scoped-empty pane = %q, want the key it is off %q", rows, inspectorDisarmedRow)
+	}
+}
+
+// TestInspectorPairsTheNoteInsideTheScope is the pairing rule read at the scoped pane: the
+// unrecorded-reply note is asked over the very list the rows came from, so a sibling's response
+// landing between a request and its answer neither answers it nor is counted as its successor.
+func TestInspectorPairsTheNoteInsideTheScope(t *testing.T) {
+	t.Run("a sibling between the halves leaves a complete round-trip unnoted", func(t *testing.T) {
+		m := scopedInspectorModel(t,
+			wireEventOfCall(domain.WireDirectionRequest, "child-request", 1, 1, "s1"),
+			wireEventOfCall(domain.WireDirectionResponse, "sibling-response", 1, 1, "s2"),
+			wireEventOfCall(domain.WireDirectionResponse, "child-response", 1, 1, "s1"),
+		)
+
+		if noted := recordsWithNoReplyNote(t, m); len(noted) != 0 {
+			t.Errorf("the note landed under records %v; the child's reply was recorded", noted)
+		}
+	})
+
+	t.Run("the run's own next request still carries the note", func(t *testing.T) {
+		m := scopedInspectorModel(t,
+			wireEventOfCall(domain.WireDirectionRequest, "child-request-1", 1, 1, "s1"),
+			wireEventOfCall(domain.WireDirectionResponse, "sibling-response", 1, 1, "s2"),
+			wireEventOfCall(domain.WireDirectionRequest, "child-request-2", 2, 1, "s1"),
+		)
+
+		if noted := recordsWithNoReplyNote(t, m); !slices.Equal(noted, []int{0}) {
+			t.Errorf("the note landed under records %v, want the first of the SCOPED two", noted)
+		}
+	})
+}
+
+// TestInspectScopedOpensOnTheViewedRunsNewestRecord pins where the verb lands a scoped pane: past
+// the last row of the RUN's list, not of the ring behind it — a scroll set past a longer list than
+// the pane shows would open it below its own rows.
+func TestInspectScopedOpensOnTheViewedRunsNewestRecord(t *testing.T) {
+	var events []domain.Event
+	for i := range maxWireRecords / 2 {
+		events = append(events,
+			wireEventOfCall(domain.WireDirectionRequest, "child "+strconv.Itoa(i), i, 1, "s1"),
+			wireEvent(domain.WireDirectionRequest, "parent "+strconv.Itoa(i), i, 0),
+		)
+	}
+	m := scopedInspectorModel(t, events...)
+	m.inspector = inspectorPane{} // reopen through the verb itself, which is what sets the scroll
+	next, _ := m.runInspectCommand()
+	m = next.(Model)
+
+	scoped, _ := m.inspectorRows()
+	whole := m
+	whole.viewStack = nil
+	wholeRows, _ := whole.inspectorRows()
+	if len(scoped) >= len(wholeRows) {
+		t.Fatalf("precondition: %d scoped rows against %d unscoped — the ring must hold other runs", len(scoped), len(wholeRows))
+	}
+	if m.inspector.top != len(scoped) {
+		t.Errorf("top = %d, want it past the %d SCOPED rows (the ring draws %d)", m.inspector.top, len(scoped), len(wholeRows))
+	}
+
+	spec, seated := m.inspectorSpec()
+	if !seated {
+		t.Fatal("the frame seated no pane for a full run")
+	}
+	if len(spec.rows) <= spec.maxRows {
+		t.Fatalf("precondition: %d rows into a window of %d — the run must overflow the pane", len(spec.rows), spec.maxRows)
+	}
+	if spec.rowTop+spec.maxRows != len(spec.rows) {
+		t.Fatalf("window [%d,%d) of %d rows, want the last full window of the run's own list",
+			spec.rowTop, spec.rowTop+spec.maxRows, len(spec.rows))
+	}
+}

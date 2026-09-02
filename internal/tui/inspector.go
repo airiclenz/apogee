@@ -33,6 +33,12 @@ import (
 // row states the same rule from the other side). The ring survives /clear for the same reason
 // transcript.debug does — it is a diagnostic view of the RUN, not of the session's memory.
 //
+// What the pane shows OF that ring follows the view (runview.go): with a run view open it is the
+// viewed delegation's own wire stream and nothing else, named in the title; at the top level it is
+// the whole ring as it was recorded. A fan-out braids several runs into one arrival-ordered ring
+// (foldWire is the ring's one writer), and a reader who opened a child is asking about that child —
+// so the scope is the view's, there is no key for it, and closing the view is what widens it back.
+//
 // The pane is the /usage report's shape because it IS that shape: both are reportPanes
 // (reportpane.go), non-modal and scrollable, rows derived at render time — from the ring here, from
 // the folds there — and esc, the four scroll keys and this pane's own ctrl+r their whole keyboard.
@@ -121,6 +127,17 @@ const inspectorDisarmedRow = "capture is off — set ui.inspector: true, then re
 // been made yet, which is a wait rather than a thing to fix.
 const inspectorEmptyRow = "armed — the next model call lands here"
 
+// inspectorScopedEmptyRow is that same armed slot narrowed to ONE run (scopedWire): the pane is
+// showing the delegation the human is looking at and the ring holds nothing of its stream. Every
+// cause of that is in the sentence, because the pane cannot tell them apart — the run has not
+// called yet, its records fell off the twenty-record ring, or it is an UNROUTED delegation whose
+// halves carry its parent's identity and are filed under the parent (hasUnrecordedReply's residual,
+// ADR 0045) — and it names the way back to the whole ring, since what is empty here is the SCOPE
+// and not the capture. Capture being off is a different answer and keeps its own row
+// (inspectorDisarmedRow): that one is actionable, and this one displaces nothing.
+const inspectorScopedEmptyRow = "no records for this run — not called yet, rotated out of the ring, " +
+	"or an unrouted delegation speaking over its parent's connection; close the view for the whole ring"
+
 // inspectorNoReplyRow is what stands under a request the ring holds no answer for once a later
 // record of the SAME wire stream has landed (hasUnrecordedReply): the reply was not RECORDED, which
 // is a different fact from the reply not arriving. A non-streaming success body is decoded straight off the connection and never captured
@@ -134,7 +151,8 @@ const inspectorNoReplyRow = "· no response recorded — a non-streaming reply i
 // the same reason and a stronger one: everything it shows is already on the Model, and a request
 // the human wants to READ is one the agent has just sent.
 //
-// It opens at the END of the list. The rows are newest-last (a log's order), so the record worth
+// It opens at the END of the list it is actually going to show — the SCOPED one where a run view is
+// open (inspectorRows). The rows are newest-last (a log's order), so the record worth
 // reading is the last one, and a pane that opened on the oldest of twenty bodies would ask for a
 // hundred page-downs before it said anything. The top is set past the last row and CLAMPED to the
 // last full window when the pane is composed (inspectorSpec) — the window is the frame's answer for
@@ -507,15 +525,22 @@ func (m Model) inspectorWheel(msg tea.MouseWheelMsg) (Model, bool) {
 // It is a METHOD because the rendering ctrl+r selected is Model state, and the rows and the hint are
 // two halves of ONE answer about it: composed apart, a pane could spell one rendering's keys over the
 // other's rows. Both callers — this file's inspectorSpec and the shared module's reportContent —
-// route through it for that reason.
+// route through it for that reason. The TITLE joins them for the same reason once the pane scopes:
+// a box called "raw wire traffic" over one delegation's records would misname what is under it, so
+// the run's name is composed HERE, beside the rows it belongs to, and the unscoped title stays the
+// bare constant it has always been.
 func (m Model) inspectContent() reportContent {
 	hint := inspectorHint
 	if m.inspector.raw {
 		hint = inspectorRawHint
 	}
+	title := inspectorTitle
+	if m.inRunView() {
+		title += " · " + m.runLabel(m.viewedRun().spawn)
+	}
 	rows, kinds := m.inspectorRows()
 	return reportContent{
-		title:  inspectorTitle,
+		title:  title,
 		hint:   hint,
 		rowCap: maxInspectorRows,
 		rows:   rows,
@@ -523,11 +548,41 @@ func (m Model) inspectContent() reportContent {
 	}
 }
 
-// inspectorRows composes the report: for each record in the ring, oldest first, a header row naming
-// the direction and the agent that made the call, then the payload's lines, then — where the cap
-// cut one — the elision the package words every hidden-lines statement with, then — where the ring
-// went on without recording the answer — the note that says so (hasUnrecordedReply). An empty ring
-// is ONE row, and which one depends on whether anything is being captured at all.
+// scopedWire is the record list the pane speaks for in THIS frame: the whole ring at the top level,
+// and only the viewed delegation's records while a run view is open — the record's (depth, callID)
+// against the runRef the view is rooted at (runOf's mapping, ADR 0039), which is one `==` because
+// that pair is the run identity every event carries.
+//
+// It is a slice and not a filter passed around because everything the pane composes has to see the
+// SAME list: the headers, the elision counts and the unanswered-request note are all statements
+// about a list, and a note paired over the whole ring while the rows came from one run's share of it
+// would put a sibling's silence under this run's request.
+//
+// The scoped slice is FRESH (ADR 0011): the Model is copied by value on every Update, so a slice
+// handed back over the ring's own backing array would let a later fold write into rows a frame is
+// still drawing. Unscoped there is nothing to build — the ring itself is the answer, read-only.
+func (m Model) scopedWire() []wireRecord {
+	if !m.inRunView() {
+		return m.wire
+	}
+	viewed := m.viewedRun()
+	scoped := make([]wireRecord, 0, len(m.wire))
+	for _, rec := range m.wire {
+		if (runRef{depth: rec.depth, spawn: rec.callID}) == viewed {
+			scoped = append(scoped, rec)
+		}
+	}
+	return scoped
+}
+
+// inspectorRows composes the report: for each record the pane speaks for (scopedWire), oldest first,
+// a header row naming the direction and the agent that made the call, then the payload's lines,
+// then — where the cap cut one — the elision the package words every hidden-lines statement with,
+// then — where the list went on without recording the answer — the note that says so
+// (hasUnrecordedReply, asked over that same list). An empty list is ONE row, and which one depends
+// on why it is empty: capture off is the one actionable answer and keeps the slot wherever it
+// applies, an empty ring at the top level is a wait, and an empty SCOPE with capture on is a fact
+// about the run being looked at.
 //
 // WHICH lines is the pane's mode (ctrl+r): the readable rendering unless the pane is raw. The
 // elision marker is taken off the SAME rendering's dropped count — the two caps are counted
@@ -538,16 +593,20 @@ func (m Model) inspectContent() reportContent {
 // a header because of where it was put, and a payload line that happened to look like one would be
 // styled as a section label by any rule read back off the text.
 func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
-	if len(m.wire) == 0 {
+	records := m.scopedWire()
+	if len(records) == 0 {
 		row := inspectorEmptyRow
-		if !m.opts.Inspector {
+		switch {
+		case !m.opts.Inspector:
 			row = inspectorDisarmedRow
+		case m.inRunView():
+			row = inspectorScopedEmptyRow
 		}
 		return []popupRow{{row}}, []popupRowKind{popupRowPlain}
 	}
-	rows := make([]popupRow, 0, len(m.wire)*2)
-	kinds := make([]popupRowKind, 0, len(m.wire)*2)
-	for i, rec := range m.wire {
+	rows := make([]popupRow, 0, len(records)*2)
+	kinds := make([]popupRowKind, 0, len(records)*2)
+	for i, rec := range records {
 		lines, hidden := rec.readable, rec.readableHidden
 		if m.inspector.raw {
 			lines, hidden = rec.lines, rec.hidden
@@ -562,7 +621,7 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 			rows = append(rows, popupRow{popupElisionMarker(hidden)})
 			kinds = append(kinds, popupRowPlain)
 		}
-		if hasUnrecordedReply(m.wire, i) {
+		if hasUnrecordedReply(records, i) {
 			rows = append(rows, popupRow{inspectorNoReplyRow})
 			kinds = append(kinds, popupRowPlain)
 		}
@@ -570,10 +629,12 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 	return rows, kinds
 }
 
-// hasUnrecordedReply says whether the record at index i is a request the ring will never show an
-// answer for. The successor rule that settles it applies WITHIN one wire stream — the pair
-// (depth, callID), the run identity every event carries (domain.EventBase) — and never across the
-// whole ring: the ring is filled in arrival order by the one writer (foldWire), so a fan-out
+// hasUnrecordedReply says whether the record at index i is a request the pane's list will never show
+// an answer for. It is asked over the very list the rows were composed from (scopedWire) and never
+// over the ring behind it, so a scoped pane pairs within what it is showing. The successor rule that
+// settles it applies WITHIN one wire stream — the pair (depth, callID), the run identity every event
+// carries (domain.EventBase) — and never across a list that holds more than one: records arrive in
+// arrival order from the one writer (foldWire), so a fan-out
 // interleaves runs and the half that merely follows a request may belong to a sibling and say
 // nothing about it. Inside a stream the halves stay in round-trip order, so the record that
 // follows a request THERE is its own answer or nothing.

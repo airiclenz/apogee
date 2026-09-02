@@ -98,7 +98,12 @@ beside it, since the item asks for both hints and the pane must spell one per re
 
 **Regression guard.** esc, up, down, pgup, pgdown behave identically for BOTH reports; `reportKey` stays non-modal (every printable key still falls through — the `"r"` test pins it). The `reportPane` zero value stays "closed at the top, readable". The scroll-clamp in `reportSpec` is re-evaluated against the shown mode's row count, so flipping modes never paints past the end.
 
-## 3. /inspect scoped to the viewed sub-agent
+## 3. /inspect scoped to the viewed sub-agent — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): `internal/tui/reportpane.go` needed no code change — item 2 had already
+made `inspectContent` a Model method, so the scoped title composes inside it with no signature
+change; the file's edit is its `reportContent` doc, whose "composed for THIS frame" clause
+excluded the title and became false.
 
 **What:** Recast at the regression check (2026-09-01). With a run view open, /inspect shows only that run's records; otherwise the whole ring as today. Scope key: `m.viewedRun()` (`runview.go:36`) equals `runRef{rec.depth, rec.callID}` — build the ref with `runOf`'s field mapping. Filter at row composition: a new `m.scopedWire() []wireRecord` returns `m.wire` unscoped, or the filtered slice (a fresh slice, ADR 0011) when `m.inRunView()`; `inspectorRows` iterates that slice and passes it to `hasUnrecordedReply`, so headers, elision counts and no-reply notes are computed over the scoped list only. Title: `raw wire traffic · <runLabel(spawn)>` when scoped, byte-identical `raw wire traffic` otherwise (composed inside `m.inspectContent()`, item 2's Model method — no signature change lands here). Empty scoped list with capture ON (`m.opts.Inspector`) → ONE row, `inspectorScopedEmptyRow = "no records for this run — not called yet, rotated out of the ring, or an unrouted delegation speaking over its parent's connection; close the view for the whole ring"`; with capture OFF the scoped-empty slot keeps `inspectorDisarmedRow` (capture off is the cause); an empty UNSCOPED ring keeps today's armed/disarmed rows. `runInspectCommand` sets `top` past the SCOPED row count. A viewed run whose records rotated out of the ring shows the scoped-empty row too. `wireRecordHeader` unchanged. Depends on item 2.
 

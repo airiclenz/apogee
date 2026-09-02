@@ -100,8 +100,10 @@ func (m *Model) reportState(r reportKind) *reportPane {
 }
 
 // reportContent is everything ONE report says about itself that this module cannot know: what the box
-// is called, the keys it spells, how many rows it likes to show at once, and — composed for THIS
-// frame — its rows, their kinds, and the prose it shows in place of rows where it has none.
+// is called, the keys it spells, how many rows it likes to show at once, its rows, their kinds, and
+// the prose it shows in place of rows where it has none. ALL of it is composed for THIS frame,
+// title included — /inspect names the run its view scoped it to (inspector.go), so the box and the
+// rows under it speak for the same thing on every paint.
 //
 // rowCap is the pane's own taste and not a limit the frame respects; [Model.popupBudget] cuts it down
 // to what the window can seat. body is "" for a report that never words an empty state.
