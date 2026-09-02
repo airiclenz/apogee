@@ -27,13 +27,6 @@ package tui
 // left a run its collapsed row and its view, since when no caller names one. Its ZERO VALUE is the
 // ┝/┕ of the tree, so every block keeps the marker it always drew without saying so. It reaches the single shape alone: a group's markers are
 // the LIST's — which row closes it is the list's own arithmetic — and a caller cannot hand one in.
-//
-// members is the GROUPED shape's answer to the same question, one flag per view in the block's own
-// order. A group has no state of its own — its header toggles nothing — and each member opens and
-// closes alone (design call 6), so the flag a member is painted by is its own entry's rather than
-// the head's. It is nil for every single block, where expanded above is the whole of the state, and
-// read only through [blockState.memberExpanded] so a short slice is a collapsed member and never a
-// panic on the repaint path.
 type blockState struct {
 	expanded bool
 	elides   bool
@@ -41,7 +34,6 @@ type blockState struct {
 	blink    bool
 	glyph    string
 	marker   string
-	members  []bool
 }
 
 // branchMarkerIn is the marker the single shape's n'th of total rows leads with: the frame the
@@ -53,13 +45,6 @@ func (s blockState) branchMarkerIn(n, total int) string {
 		return s.marker
 	}
 	return branchMarker(n == total-1)
-}
-
-// memberExpanded is the n'th member's own view state — false wherever the caller named none, which
-// is every single block and every hand-built test transcript. It is a method rather than an index
-// because this runs on the repaint path, where the alternative to a bound is a panic mid-frame.
-func (s blockState) memberExpanded(n int) bool {
-	return n >= 0 && n < len(s.members) && s.members[n]
 }
 
 // star is the glyph the block's header leads with (layout.md, "The live star"): ✦ for a block that
@@ -112,10 +97,10 @@ func anyOpenCall(ins []paintInput) bool {
 }
 
 // memberFlags is a grouped block's per-member view state, read off the run's own paint inputs in
-// view order (blockState.members). It is a copy rather than the entries themselves because a painter
-// is handed what it needs to draw and nothing it could write through: the flag is owned by the
-// shared entries backing array and moved only by transcript.setExpanded (ADR 0011) — the very rule
-// [paintInput] now states for every field at once.
+// view order ([toolRunView.members]). It is a copy rather than the entries themselves because a
+// painter is handed what it needs to draw and nothing it could write through: the flag is owned by
+// the shared entries backing array and moved only by transcript.setExpanded (ADR 0011) — the very
+// rule [paintInput] now states for every field at once.
 func memberFlags(ins []paintInput) []bool {
 	flags := make([]bool, len(ins))
 	for i := range ins {

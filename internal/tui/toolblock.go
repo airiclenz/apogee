@@ -95,8 +95,8 @@ type toolRunView struct {
 	members  []bool // each member's own expanded flag, in view order
 }
 
-// memberExpanded is the n'th member's own view state, bounded for the repaint path exactly as
-// [blockState.memberExpanded] is: a short slice is a collapsed member and never a panic mid-frame.
+// memberExpanded is the n'th member's own view state, bounded for the repaint path: a short slice
+// is a collapsed member and never a panic mid-frame.
 func (r toolRunView) memberExpanded(n int) bool {
 	return n >= 0 && n < len(r.members) && r.members[n]
 }
