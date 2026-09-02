@@ -351,7 +351,23 @@ the wide branch and the narrow branch's escape strip would be covered by nothing
 
 ---
 
-## 6. The footer's spec, narration and register line
+## 6. The footer's spec, narration and register line — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): consequential edit — internal/tui/theme.go: made necessary by the DECISION's
+correction of the retired "no shape opens a span in place since ADR 0063" sentence; `glyphRailClose`'s
+comment carried the identical claim and is now false since item 2 gave a grouped skill member an
+inline span for the ┊ to close. Its twin at `internal/tui/doc.go:57-58` (on this item's own file
+list) was corrected with it, both in the wording `render.go:784` already uses.
+NOTES (2026-09-02): the sweep grep now returns exactly one hit, `internal/tui/model.go:3047`, and
+that one is CORRECT rather than stale — `footerModeSpan`'s `ok=false` case is the fit's floor, the
+one place the marker still drops whole. The two sites item 5 left verbatim for this grep to find
+(`model.go:2913`, `:3043`) are rewritten to the priority rule.
+NOTES (2026-09-02): ISSUES.md's "Open defects" section is now empty — both entries this plan closes
+are gone. Per the item, the heading stays; its body is a single `*(none open)*` line so the file's
+stated two-section shape survives an empty register.
+NOTES (2026-09-02): ADR 0060 decision 6 keeps its 2026-08-28 amendment as history and gains a
+2026-09-02 one that explicitly supersedes it: narrowness now DOES drop the effort word whole (it is
+priority 3, the first rung), which is precisely what the older note said it never did.
 
 **What.** `layout.md:1437-1443` states the behaviour this plan replaces, verbatim: *"A window too
 narrow for both ends keeps the older shape: the left info truncates with an ellipsis and the mode

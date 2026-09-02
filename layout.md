@@ -1434,17 +1434,23 @@ the mode, so a click on it says exactly what a click on the glyph says. The clai
 own — the marker answers a click only while the picker could hold the keyboard: a live state with no
 picker already open, no `/sessions` browser and no `/settings` pane owning input, since an overlay
 opened from under a higher modal rung is one the human can neither answer nor close. `⇧⇥` stays the
-every-state route. And where the window drops the marker whole (below), nothing is drawn and a click
-on the footer names nothing.
+every-state route. And in the one case below where the window is too narrow to seat the marker whole
+— narrower than the ordinary narrow window, which now keeps it rather than the segments beside it —
+nothing is drawn and a click on the footer names nothing.
 
 **What it is.** ONE frameless row below the prompt box, which closes its own `╰─╯` frame. The
 footer used to be three rows of chrome — a `├──┤` divider standing in for the edge the box was
 missing, the content between two `│` bars, and a `╰──╯` rule under it — and it now takes the
 **status line's** posture instead, one row below the box rather than one row above it: the two-column
 `bodyIndent` lead, one unbroken black field to the window's full width, and the mode marker ending
-`bodyIndent` short of the edge — the same column the gauge ends in (above). A window too narrow for
-both ends keeps the older shape: the left info truncates with an ellipsis and the mode drops whole,
-because a clipped mode word would name a blast radius the session is not in.
+`bodyIndent` short of the edge — the same column the gauge ends in (above). A narrow window does not
+give up an end: the row is composed TO the width, spending it in the order the row is read for — the
+effort word goes first, then the workdir, then the host. What is left is what the row never gives
+up: the model, the `✦ offline` marker and the mode marker, and those three only give way to each
+other — the model truncates with an `…` before it goes at all, then `offline` goes. The marker drops
+only where it cannot seat whole between its two margins, and only THERE does the row keep the older
+shape, the left info truncated to the window: a clipped mode word would name a blast radius the
+session is not in, so the marker is stated whole or not at all.
 
 **And the hairline under it.** The footer is the last thing the frame *says*, but it is not the last
 row: a `▁` hairline closes the screen beneath it — the `▔` at the top of the bottom chrome

@@ -98,14 +98,24 @@ The footer run reads `host ✦ model ✦ <effort> ✦ ~/repo` — the effort sit
 facts it belongs to, before the local workdir. The word shown is what the **next request will
 actually carry**: session override ▸ profile `thinking.effort:` ▸ the server-reported
 `default_effort` ▸ the word `auto` (a `/props` hit, where the default is unknowable). The word
-sits in the footer's LEFT run with the upstream facts it belongs to, so a window too narrow to hold
-both ends truncates that run with an ellipsis exactly as its neighbouring segments do; only the mode
-marker on the right drops WHOLE, because a clipped mode word would name a blast radius the session
-is not in. *(Amended 2026-08-28 — this decision previously said the segment dropped whole at a
-narrow footer, like the other optional segments. It never did: `footerContent`
-(`internal/tui/model.go`) has always ellipsized the left run and dropped only the marker. Leaving
-with its separator stays what an UNNAMED segment does — decision 5's absence, not narrowness. No
-footer code changed.)*
+sits in the footer's LEFT run with the upstream facts it belongs to, and that is also where a narrow
+window spends first: the row is composed TO the width in priority order — the effort word given up
+first, then the workdir, then the host — while the model, the `✦ offline` marker and the mode marker
+are what the row never gives up, the marker dropping only where it cannot seat whole, because a
+clipped mode word would name a blast radius the session is not in.
+
+*(Amended 2026-08-28 — this decision previously said the segment dropped whole at a narrow footer,
+like the other optional segments. It never did: `footerContent` (`internal/tui/model.go`) has always
+ellipsized the left run and dropped only the marker. Leaving with its separator stays what an
+UNNAMED segment does — decision 5's absence, not narrowness. No footer code changed.)*
+
+*(Amended 2026-09-02, superseding the amendment above — the footer now fits by PRIORITY
+(`internal/tui/footerfit.go`; `layout.md`, "The footer's upstream slot"). The effort word is
+priority 3 and is the FIRST thing a narrow row gives up, whole and with its separator, before the
+workdir (2) and the host (1); the mode marker is priority 0 and survives every rung above the fit's
+floor. So narrowness now does what the 2026-08-28 note said it did not, and for the effort segment
+alone the two exits — nothing named it, or the row could not afford it — look the same on screen.
+What the word SAYS, and that it is present exactly when `/effort` is, are untouched.)*
 
 **7 — `/effort` is a popup picker; the text grammar is removed.** Bare `/effort` opens a
 fixed-choice popup ([ADR 0053](0053-popup-surfaces-embed-one-list-surface.md), the

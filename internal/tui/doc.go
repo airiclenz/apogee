@@ -26,10 +26,15 @@
 // headers, ┝/┕ tool-detail branches, depth indenting, and the [userBlock] ranges the sticky
 // header rides on so the owning prompt sticks to the top while a reply streams). The
 // transcript now groups a tool call with its result by ToolCall ID, the input box is a rounded,
-// auto-growing black field, and the chrome is a braille status line plus a footer bar (host alias
-// ✦ model ✦ workdir, then the mode behind its own symbol ("◐ ask before", [modeMarker]) — the
-// workspace written with the home directory as `~`,
-// [workdirDisplay], resolved once at construction). The live token gauge (reserved at P2.7) is now
+// auto-growing black field, and the chrome is a braille status line plus a footer bar — five plain
+// segments in reading order (host alias ✦ model ✦ effort ✦ workdir, plus an `✦ offline` marker
+// while the upstream is unreachable), then the mode behind its own symbol ("◐ ask before",
+// [modeMarker]) — the workspace written with the home directory as `~`,
+// [workdirDisplay], resolved once at construction. The row is composed TO the window by ONE
+// priority fit ([footerFit], footerfit.go): the effort word is given up first, then the workdir,
+// then the host, while the model, the offline marker and the mode marker are what the row never
+// gives up — the model truncating before it goes, and the marker dropping only where it cannot
+// seat whole. The live token gauge (reserved at P2.7) is now
 // wired: the post-v1 track folds each top-level UsageEvent's total into the status-line
 // context-fill gauge, measured against the discovered context window ([Model.contextGauge] /
 // [Model.statusRight]) — which is why the window is stated THERE and no longer in the footer, since
@@ -54,8 +59,10 @@
 // there it is the single ┊ closing the span. Every other climb-out keeps its spacer, because the
 // spec draws the closer only where another grouped sub-agent follows the expanded one — a group's
 // last member and a lone delegation alike close against nothing and so show none
-// (docs/layout/tool-layout.md, "Grouped Sub-agents"); the rule is [railJoin]'s and stands, though
-// under ADR 0063 no shape opens such a span in place for it to close. Nothing announces a DESCENT,
+// (docs/layout/tool-layout.md, "Grouped Sub-agents"); the rule is [railJoin]'s and stands. No
+// DELEGATION opens such a span in place since ADR 0063, but a grouped SKILL fetch does — it expands
+// INLINE, over a body the rail runs down — so the seam is drawn where the next row of that group
+// follows the open member. Nothing announces a DESCENT,
 // and nothing draws one either: a delegation's span is elided whole in the conversation and painted
 // in its RUN VIEW, where [transcript.paintRoot] rebases every row to the top level and the rail
 // goes with it. The whole frame —

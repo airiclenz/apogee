@@ -2909,8 +2909,11 @@ func (m Model) footerView() string {
 // last the local directory it is pointed at, the one fact of the four that no upstream state can
 // change.
 //
-// A window too narrow to hold both ends keeps today's shape: the left info truncates with an
-// ellipsis and the mode marker drops WHOLE, because a clipped mode word would name a blast radius
+// A narrow window does not give up an end: the row is composed TO the width by [footerFit]
+// (footerfit.go), which spends it in priority order — the effort word first, then the workdir, then
+// the host — and keeps the model, the offline marker and the mode marker. Only at the FLOOR, where
+// the marker cannot seat whole between its two margins, does the left info truncate with an
+// ellipsis and the mode marker drop WHOLE, because a clipped mode word would name a blast radius
 // the session is not in.
 //
 // The line is one of the view's escape-strip SEAMS (doc.go): the model id and the effort default
@@ -3040,9 +3043,10 @@ func footerModeText(marker, word string) string {
 // and col is the screen column its first cell lands on; the marker is right-anchored, with the
 // slot's own trailing bodyIndent margin between its last cell and the window edge.
 //
-// ok is false in the narrow branch where both ends do not fit and the marker drops WHOLE (a clipped
-// mode word would name a blast radius the session is not in). A click on the footer then names
-// nothing, because there is nothing drawn to click.
+// ok is false only at the fit's FLOOR, where the marker cannot seat whole between its two margins
+// and the marker drops WHOLE (a clipped mode word would name a blast radius the session is not in).
+// Every wider window keeps it: the ladder gives up segments off the LEFT run instead. A click on
+// the footer at that floor names nothing, because there is nothing drawn to click.
 //
 // It is the pointer's reading of the row's ONE composition ([Model.footerRow]) — the same layout
 // [Model.footerContent] paints — so the cells [Model.handleFooterModeClick] (mouse.go) addresses

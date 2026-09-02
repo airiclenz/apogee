@@ -25,12 +25,7 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [P] when the horizontal space becomes to little in the bottom most status bar, the current mode is not displayed any longer. These are the lements in the bottom most status bar - each with its priority. Remove lowest priorities first and never remove priority 0:
-  - server-name - priority 1 
-  - model-name - priority 0
-  - thinging effort - priority 3
-  - workspace-folder - priority 2
-  - mode - priority 0
+*(none open)*
 
 
 ## Parked / deferred work
