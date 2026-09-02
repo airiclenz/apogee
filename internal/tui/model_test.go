@@ -6339,3 +6339,55 @@ func TestFooterModeMarkerSpanAgreesWithThePaintedCells(t *testing.T) {
 		})
 	}
 }
+
+// TestCancelCommitsThePartialBeforeTheNote: a stopped reply keeps what had arrived as a real
+// ENTRY, not as the live preview it was mid-stream. A preview belongs to no entry, so the next
+// prompt used to render above it and a resumed session showed the note with nothing before it.
+// Committed, the three land in the order the screen shows: partial, `· cancelled`, next message.
+func TestCancelCommitsThePartialBeforeTheNote(t *testing.T) {
+	t.Run("the streamed partial becomes the entry the note stands behind", func(t *testing.T) {
+		m := runningModel(t)
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "Item 1.\n"}})
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "Item 2."}})
+
+		m = step(t, m, cancelledMsg{})
+		m.transcript.addUser("next", nil)
+
+		want := []entry{
+			{kind: entryAssistant, text: "Item 1.\nItem 2."},
+			{kind: entryNote, text: "cancelled"},
+			{kind: entryUser, text: "next"},
+		}
+		got := m.transcript.entries
+		if len(got) < len(want) {
+			t.Fatalf("transcript holds %d entries; want at least the closing %d: %+v",
+				len(got), len(want), got)
+		}
+		for i, w := range want {
+			e := got[len(got)-len(want)+i]
+			if e.kind != w.kind || e.text != w.text || e.depth != 0 {
+				t.Errorf("closing entry %d = kind %v depth %d text %q; want kind %v depth 0 text %q",
+					i, e.kind, e.depth, e.text, w.kind, w.text)
+			}
+		}
+		if m.transcript.streaming {
+			t.Error("the transcript is still streaming after the cancel; the buffer was not taken")
+		}
+		if got := m.transcript.pending.String(); got != "" {
+			t.Errorf("pending buffer after the cancel = %q; want it drained", got)
+		}
+	})
+
+	t.Run("a whitespace-only buffer commits nothing", func(t *testing.T) {
+		m := runningModel(t)
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "  \n\n"}})
+
+		m = step(t, m, cancelledMsg{})
+
+		last := m.transcript.entries[len(m.transcript.entries)-1]
+		if last.kind != entryNote || last.text != "cancelled" {
+			t.Errorf("last entry = kind %v text %q; want the cancelled note alone, no blank reply",
+				last.kind, last.text)
+		}
+	})
+}

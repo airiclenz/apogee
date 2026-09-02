@@ -1854,15 +1854,18 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	return nil
 }
 
-// foldCancelled folds the worker's return from a cancel: the interrupted Exchange is discarded,
-// the "cancelled" note lands, and a staged queue is held rather than flushed.
+// foldCancelled folds the worker's return from a cancel: the interrupted Exchange is discarded, the
+// streamed partial is committed, the "cancelled" note lands behind it, and a staged queue is held
+// rather than flushed.
 //
 // The worker cancelled at a quiescent boundary and has returned, so the engine is the Update loop's
 // to touch again (C1). Discard the interrupted Exchange so the engine leaves its open-Exchange
 // state: without this the Agent stays inExchange after a cancel and the next /clear or message is
-// rejected with ErrInputPending — the post-Esc wedge. The visible transcript is untouched (the
-// "cancelled" note and any streamed partial stay in scrollback); only the model's memory drops the
-// scrapped Exchange.
+// rejected with ErrInputPending — the post-Esc wedge. Only the model's memory drops the scrapped
+// Exchange: what reached the screen stays in scrollback. Which is why the partial is COMMITTED
+// ([transcript.commitCancelled]) rather than left as the live preview it was — a preview belongs to
+// no entry, so the next user message would render above it; committed, the note stands after it and
+// the next message after both, and the session record keeps that same order.
 //
 // A stop is NOT a completion, so a staged queue is held rather than flushed: Esc stops everything,
 // including what was waiting to go out (ADR 0025). The note says so once, and ⏎ on the empty box is
@@ -1875,6 +1878,7 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 // it is still waiting to go out.
 func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
 	m.eng.AbortExchange()
+	m.transcript.commitCancelled()
 	m.transcript.addNote("cancelled")
 	cmd := m.finishWorker(stateIdle)
 	m.noteHeldQueue()

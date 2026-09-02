@@ -1175,6 +1175,28 @@ func (t *transcript) closeRun(head entry) {
 	t.place(entry{kind: entryAssistant, text: text, depth: run.depth, spawnCallID: run.spawn})
 }
 
+// commitCancelled commits what the TOP-LEVEL reply had streamed when the human stopped it, as a
+// plain assistant entry. It is the depth-0 twin of closeRun: a cancelled Exchange ends without the
+// completion event that would normally commit the buffer, so without this the half-sentence on
+// screen stays a live PREVIEW — and a preview belongs to no entry, so the next user message renders
+// above it instead of after it.
+//
+// The `· cancelled` note the caller adds next is what marks the entry as stopped: it is a host note,
+// so it lands at the tail behind the entry ([transcript.tailBeforeHostNotes]) and the following
+// addUser appends after both — the screen's order, which encodeTranscript then persists so a resume
+// reads the same way.
+//
+// A whitespace-only buffer commits nothing: an Exchange cancelled before the first token leaves the
+// note standing alone, as it always did. Depth ≥ 1 buffers are not this method's to touch — a
+// delegate's own half-sentence is closeRun's, at the moment its report folds into its head.
+func (t *transcript) commitCancelled() {
+	text := trimBlankLines(t.takePending(runRef{}))
+	if text == "" {
+		return
+	}
+	t.place(entry{kind: entryAssistant, text: text})
+}
+
 // addToolCall appends a tool-call entry: the presentation view (friendly label + target)
 // built from the model's requested call, plus the call ID the paired result folds into. The
 // view shows the call verbatim where it cannot summarise it (a malformed argument is rendered

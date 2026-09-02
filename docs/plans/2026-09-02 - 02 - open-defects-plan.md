@@ -57,7 +57,17 @@ go build ./... && go test ./internal/tui/ -run 'FoldStats|Throughput|Stats' -cou
 
 ---
 
-## 2. Cancel: commit the streamed partial before the cancelled note
+## 2. Cancel: commit the streamed partial before the cancelled note — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): the item's whitespace-only case is covered in `model_test.go` as a subtest of
+`TestCancelCommitsThePartialBeforeTheNote`; `transcript_test.go` carries the transcript-level
+sibling `TestCommitCancelledRecoversAParkedTopLevelPartial` (a delegate streaming at depth 1 parks
+the parent's buffer, and the cancel must still commit it) — the case only the transcript level can
+reach, and what puts that file on the Files list.
+NOTES (2026-09-02): consequential edit — cmd/apogee/e2e_stream_test.go: made necessary by the
+commit; the pre-existing comment at the cancel's idle wait said the note "is written ABOVE the text
+that had arrived", which the fix makes false, so it was reworded alongside the `:167-176` comment
+the item names.
 
 **What.** Fixes `ISSUES.md:32` (defect: the next prompt renders above the cancelled partial). In `Model.foldCancelled` (`internal/tui/model.go:1872-1879`), before `addNote("cancelled")`: take the top-level pending buffer — `text := trimBlankLines(m.transcript.takePending(runRef{}))` — and when non-empty `place(entry{kind: entryAssistant, text: text})`, the depth-0 twin of `closeRun` (`transcript.go:1160-1172`). Put the two lines in a `transcript.commitCancelled()` method beside `closeRun` so the buffer's join stays in `transcript.go`. Consequences that need no further code: the note then lands at the tail behind the entry (`internal/tui/doc.go:68-72`), the next `addUser` appends after both, and `encodeTranscript` (`transcriptbridge.go:42-56`) persists the entry with the note after it. Rewrite the `foldCancelled` doc comment (`model.go:1870-1871`) to state the partial is committed, not left as a preview.
 

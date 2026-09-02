@@ -407,6 +407,32 @@ func TestTranscriptBlankMessageCommitsNothing(t *testing.T) {
 	})
 }
 
+// commitCancelled is the depth-0 commit point, and it drains the top-level buffer wherever the
+// buffer is: a delegate streaming at depth 1 has PARKED the parent's half-sentence out of the live
+// buffer, and a cancel landing in that window must still commit it. The delegate's own buffer is
+// not its to touch — that text waits for closeRun, at the moment the run's report folds in.
+func TestCommitCancelledRecoversAParkedTopLevelPartial(t *testing.T) {
+	tr := feed(
+		domain.TokenEvent{Text: "Item 1."},
+		domain.TokenEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child chatter"},
+	)
+
+	tr.commitCancelled()
+
+	if n := len(tr.entries); n != 1 {
+		t.Fatalf("entries = %d, want 1 (the parked top-level partial): %+v", n, tr.entries)
+	}
+	got := tr.entries[0]
+	if got.kind != entryAssistant || got.text != "Item 1." || got.depth != 0 {
+		t.Errorf("committed entry = kind %v depth %d text %q; want a depth-0 assistant %q",
+			got.kind, got.depth, got.text, "Item 1.")
+	}
+	if !tr.streaming || tr.pending.String() != "child chatter" {
+		t.Errorf("the delegate's live buffer = %q (streaming %v); want it untouched",
+			tr.pending.String(), tr.streaming)
+	}
+}
+
 // The streaming preview drops the buffer's trailing blank lines for display only — the buffer
 // keeps them, since a mid-stream "\n\n" may be a paragraph break about to be continued — while a
 // just-opened empty buffer still renders its lone marker so the human sees streaming has begun.

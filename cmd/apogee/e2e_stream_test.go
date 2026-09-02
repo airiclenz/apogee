@@ -141,9 +141,9 @@ func TestE2EStreamCancelKeepsWhatArrived(t *testing.T) {
 	drv.WaitText(streamLine(10))
 	drv.Press(tuitest.Esc)
 	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
-	// Back at idle is the signal, read off the prompt box's own hint. The "cancelled" note is not:
-	// it is written ABOVE the text that had arrived, and by the time the worker unwinds that text
-	// has usually pushed it off the top of the window.
+	// Back at idle is the signal, read off the prompt box's own hint. The "cancelled" note is
+	// written by the very fold that returns to idle — the same boundary — so the hint is the
+	// steadier thing to wait on, and where the note LANDS is what the assertions below check.
 	drv.WaitText("⌃c quit")
 	drv.WaitQuiet(settled)
 
@@ -165,30 +165,72 @@ func TestE2EStreamCancelKeepsWhatArrived(t *testing.T) {
 			highest)
 	}
 
-	// And the next prompt starts a CLEAN entry rather than continuing the cancelled one: the record
-	// holds exactly one answer afterwards, and it is the new one.
+	// And the next prompt starts a CLEAN entry rather than continuing the cancelled one, while what
+	// had arrived is kept as an entry of its OWN: the record holds two answers afterwards, the
+	// partial and then the new reply.
 	//
-	// That count records something worth knowing rather than only what it asserts. What arrived
-	// before the cancel is on the SCREEN, above, but it never becomes a committed entry:
-	// Model.foldCancelled (internal/tui/model.go) writes the "cancelled" note and returns to idle,
-	// leaving the in-flight buffer as a live preview that the next prompt clears. So a resumed
-	// session shows the prompt and the note with nothing between them. Whether the partial ought to
-	// be kept is a product call and not this test's to make; the test states what the build does.
+	// Model.foldCancelled (internal/tui/model.go) commits the in-flight buffer before writing the
+	// "cancelled" note, so the note stands behind the partial and the next prompt behind the note —
+	// on screen and, since the idle save follows, in the session record a resume reads back.
 	submit(drv, "Anything else?")
 	drv.WaitText("Nothing else to add.")
-	drv.WaitFor(func() bool { return len(replyEntries(t, sess)) > 0 },
-		tuitest.Awaiting("the reply after the cancel to reach the session record"))
+	drv.WaitFor(func() bool { return len(replyEntries(t, sess)) > 1 },
+		tuitest.Awaiting("the cancelled partial and the reply after it to reach the session record"))
 
 	replies := replyEntries(t, sess)
-	if len(replies) != 1 {
-		t.Fatalf("the record holds %d answers after one cancelled reply and one clean one; want 1: %q",
+	if len(replies) != 2 {
+		t.Fatalf("the record holds %d answers after one cancelled reply and one clean one; want 2: %q",
 			len(replies), replies)
 	}
-	if got := strings.TrimSpace(replies[0]); got != "Nothing else to add." {
+	if !strings.Contains(replies[0], "Item 1.") {
+		t.Errorf("the first answer is %q; want the partial that had arrived before the cancel",
+			replies[0])
+	}
+	for _, line := range strings.Split(replies[0], "\n") {
+		m := streamRowStart.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		n := 0
+		if _, err := fmt.Sscanf(m[1], "%d", &n); err == nil && n >= streamLines {
+			t.Errorf("the committed partial carries line %d; the reply was supposed to be cut short",
+				n)
+		}
+	}
+	if got := strings.TrimSpace(replies[1]); got != "Nothing else to add." {
 		t.Errorf("the answer after the cancel is %q; want the new reply, standing alone", got)
 	}
-	if strings.Contains(replies[0], "Item 1.") {
+	if strings.Contains(replies[1], "Item 1.") {
 		t.Error("the reply after the cancel continued the cancelled entry rather than starting a new one")
+	}
+
+	// The screen reads in that same order: the kept stream rows, the note below the last of them,
+	// and the next prompt below the note. This row order is the defect the commit fixes — the
+	// prompt used to render ABOVE a partial that belonged to no entry.
+	settledFrame := drv.Frame()
+	lastStreamRow, noteRow, promptRow := -1, -1, -1
+	for y, row := range settledFrame.Rows() {
+		text := rowContent(row)
+		switch {
+		case streamRowPattern.MatchString(text):
+			lastStreamRow = y
+		case noteRow < 0 && strings.Contains(text, "cancelled"):
+			noteRow = y
+		case promptRow < 0 && strings.Contains(text, "Anything else?"):
+			promptRow = y
+		}
+	}
+	if lastStreamRow < 0 || noteRow < 0 || promptRow < 0 {
+		t.Fatalf("the settled frame is missing one of the three rows (stream %d, note %d, prompt %d):\n%s",
+			lastStreamRow, noteRow, promptRow, settledFrame)
+	}
+	if noteRow < lastStreamRow {
+		t.Errorf("the cancelled note is on row %d, above the last kept stream row %d:\n%s",
+			noteRow, lastStreamRow, settledFrame)
+	}
+	if promptRow < noteRow {
+		t.Errorf("the next prompt is on row %d, above the cancelled note on row %d:\n%s",
+			promptRow, noteRow, settledFrame)
 	}
 	// The cancel itself is on the record, so a reader of the session knows the answer above it was
 	// cut short rather than finished.
