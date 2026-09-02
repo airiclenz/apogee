@@ -17,9 +17,10 @@ import (
 // neutral blob, not that every Driver writes the same richness into it.
 //
 // What it folds is exactly what the STREAM says: the submitted prompt, committed assistant text,
-// tool calls with their bounded arguments, tool results, and errors — each at the Depth that
-// emitted it and stamped with the delegating call that spawned that run, so a delegate's work
-// replays nested under its head rather than flattened into the Firing's own.
+// tool calls with their bounded arguments, tool results, errors, and the note a pruning pass
+// leaves behind (domain.PruneEvent) — each at the Depth that emitted it and stamped with the
+// delegating call that spawned that run, so a delegate's work replays nested under its head
+// rather than flattened into the Firing's own.
 //
 // What it does NOT fold is anything a PRESENTER decided. A tool card's label, verb, target, its
 // promoted outcome phrase and the stacked body beneath it are verdicts the TUI's presenter reaches
@@ -87,6 +88,13 @@ func (f *transcriptFold) fold(e domain.Event) {
 		// The TUI words an error entry the same way (transcript.addError): the source that failed,
 		// then what it said. A record written by either Driver reads alike.
 		f.appendText(session.EntryKindError, ev.Source+": "+ev.Err, ev.EventBase)
+	case domain.PruneEvent:
+		// A note, not an error: the engine dropped tool results it had already acted on, which is
+		// housekeeping the reader of the record is owed a line about. Worded exactly as the TUI
+		// words it (transcript.addPrune) and rendered verbatim from the event, so neither Driver
+		// holds a chars-per-token ratio of its own.
+		f.appendText(session.EntryKindNote,
+			fmt.Sprintf("pruned %d tool results (~%d tokens)", ev.Results, ev.Tokens), ev.EventBase)
 	}
 }
 

@@ -16,8 +16,9 @@
 // Config.Skills already carries — so a Firing whose prompt names a skill reaches the same
 // injected body a chat message does, and a Config with no resolver leaves every "/" token
 // prose. A missing or escaping ref — and an unknown skill ID — is skipped WITHOUT notice: the
-// loop reports one as an ErrorEvent, and a Firing has no event sink to carry it (headless and
-// the daemon both leave Config.Events nil).
+// loop reports one as an ErrorEvent, and a Firing has no event sink that would carry it (the
+// daemon leaves Config.Events nil, and headless wires only its own prune-notice sink, which
+// renders domain.PruneEvent and nothing else).
 //
 // # Nothing waits for a human
 //
@@ -45,7 +46,8 @@
 // stream as the run goes (transcript.go), so resuming a Firing from the /sessions browser
 // repaints what it actually did instead of taking ADR 0022's no-scrollback degrade path.
 // The fold is deliberately narrow: the submitted prompt, committed assistant text, tool
-// calls with bounded arguments, tool results and errors, each at the Depth that emitted it.
+// calls with bounded arguments, tool results, errors and the note a pruning pass leaves
+// behind, each at the Depth that emitted it.
 // Nothing a PRESENTER decided is in it — a runner paints nothing, so a card carries the
 // call's raw name and no invented label — and where the stream lacks a fact an entry needs,
 // the entry is omitted rather than synthesized. A blob that could not be encoded degrades

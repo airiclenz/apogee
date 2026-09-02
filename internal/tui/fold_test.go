@@ -218,6 +218,16 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
+			name: "PruneEvent appends the host note and moves nothing else",
+			// The engine dropped stale tool results: one dim note in the scrollback, at the run that
+			// emitted it (transcript.addPrune, placement pinned in transcript_test.go). The gauge is
+			// deliberately untouched — pruning frees window the NEXT request will show, and the fill
+			// on the status line is what the last reply actually reported. No phrase, no reasoning,
+			// no progress save: what it rewrites is the ENGINE's conversation, never the record.
+			event:       domain.PruneEvent{Results: 3, Tokens: 1200},
+			wantEntries: 1,
+		},
+		{
 			name: "UsageEvent at depth 0 moves the gauge and appends no entry",
 			// The top-level reading is the status line's: it lights the gauge and nothing in the
 			// scrollback. A sub-agent's reading (Depth > 0) appends no entry either — it lands ON

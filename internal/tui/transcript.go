@@ -913,7 +913,8 @@ func presentedStatus(v presentedView) string {
 // delegation was just given lands ON that same block, renaming the run every surface reads off it
 // (addSubAgentName); a ChildInterjection commits the message it reports INSIDE the child's run
 // when it landed and a note saying it never did when it did not (addChildInterjection); a
-// MechanismFired is surfaced only in the debug view. It renders only —
+// MechanismFired is surfaced only in the debug view; a Prune says, in one host note, that the
+// engine dropped stale tool results from the conversation it keeps (addPrune). It renders only —
 // no agent logic (C5).
 func (t *transcript) apply(e domain.Event) {
 	switch e := e.(type) {
@@ -941,6 +942,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addMechanism(e)
 	case domain.ErrorEvent:
 		t.addError(e.Source, e.Err, runOf(e.EventBase))
+	case domain.PruneEvent:
+		t.addPrune(e.Results, e.Tokens, runOf(e.EventBase))
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively
 		// versioned, so an unrecognised Event is rendered as nothing rather than a panic.
@@ -1770,6 +1773,23 @@ func (t *transcript) addError(source, msg string, run runRef) {
 	t.place(entry{
 		kind:        entryError,
 		text:        stripEscapes(source + ": " + msg),
+		depth:       run.depth,
+		spawnCallID: run.spawn,
+	})
+}
+
+// addPrune appends the host note for one pruning pass — the engine dropped results tool calls
+// had already returned, freeing about tokens of window (domain.PruneEvent). Both numbers are
+// rendered verbatim: the engine counted them, and a Driver that recomputed either from the
+// other would be holding a chars-per-token ratio of its own.
+//
+// It is placed at the run that emitted it, exactly as addError is and unlike addNote (which
+// takes no run at all), so a delegate's prune lands inside the delegate's own block rather than
+// interrupting the parent's conversation with a child's housekeeping.
+func (t *transcript) addPrune(results, tokens int, run runRef) {
+	t.place(entry{
+		kind:        entryNote,
+		text:        fmt.Sprintf("pruned %d tool results (~%d tokens)", results, tokens),
 		depth:       run.depth,
 		spawnCallID: run.spawn,
 	})

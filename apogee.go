@@ -210,6 +210,7 @@ type (
 	ApprovalEvent       = domain.ApprovalEvent
 	MechanismFiredEvent = domain.MechanismFiredEvent
 	ErrorEvent          = domain.ErrorEvent
+	PruneEvent          = domain.PruneEvent
 	UsageEvent          = domain.UsageEvent
 	AuditEvent          = domain.AuditEvent
 	WireEvent           = domain.WireEvent

@@ -129,6 +129,10 @@ func usageReading(e domain.UsageEvent) (usageTotals, bool) {
 // call, whose prompt is the summarizer's own request — must leave the gauge and the generation
 // clock exactly where the last Turn left them, while the cumulative totals take it like any other
 // call, because those tokens were really spent (domain.UsageEvent).
+//
+// A PruneEvent moves no reading at all, and deliberately: pruning frees window the NEXT request
+// will show, and the gauge reports what the last reply actually reported. Subtracting the freed
+// tokens here would paint a fill no Upstream has confirmed.
 func (m Model) foldStats(e domain.Event) Model {
 	switch e := e.(type) {
 	case domain.TokenEvent:
@@ -199,9 +203,10 @@ func (m Model) foldStats(e domain.Event) Model {
 //
 // SubAgentStarted is deliberately NOT one: the head's own ToolCallEvent already fired the save, and
 // under a fan-out a queued child's start adds nothing the record does not already show. Every other
-// variant answers false — streamed tokens, reasoning, approvals, usage, audit and wire records
-// either move nothing a reader of the record could act on or are already covered by the per-Turn
-// save that follows the Turn they belong to.
+// variant answers false — streamed tokens, reasoning, approvals, usage, audit and wire records, and
+// a pruning notice (which rewrites what the ENGINE keeps, never the record, and whose host note the
+// per-Turn save carries anyway) either move nothing a reader of the record could act on or are
+// already covered by the per-Turn save that follows the Turn they belong to.
 func progressSaveTrigger(e domain.Event) bool {
 	switch e := e.(type) {
 	case domain.ToolCallEvent:

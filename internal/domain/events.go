@@ -256,6 +256,27 @@ type ErrorEvent struct {
 	Err    string
 }
 
+// PruneEvent reports that the engine dropped stale tool results from the conversation it
+// keeps — a structural rewrite of history at a Turn boundary, performed so a long Exchange
+// stops spending its window on output the model has already acted on. Like Compaction it is
+// engine behaviour rather than a Mechanism, so it survives Bypass, and like Compaction it
+// changes what the next request carries: the pruned results are replaced by a one-line stub
+// naming the call, and re-running that call is how a model gets the content back.
+//
+// Results is how many tool results the pass replaced; Tokens is the engine's estimate of what
+// that freed, on the same terms the window budget is measured in. Both are reported as the
+// engine counted them — a Driver renders them verbatim and derives nothing from them, so no
+// surface has to hold a chars-per-token ratio of its own to say what happened.
+//
+// It carries EventBase like every variant, so a prune inside a delegated run reaches the
+// parent's observer at the child's Depth and spawning CallID and is rendered inside that
+// child's run rather than the parent's conversation.
+type PruneEvent struct {
+	EventBase
+	Results int
+	Tokens  int
+}
+
 // UsageEvent reports the token accounting an Upstream reply carried — the prompt
 // (context) tokens, the generated completion tokens, and their total — once a Turn's
 // stream reaches its terminal Done. A server that omits usage emits no UsageEvent, so an

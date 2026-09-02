@@ -100,6 +100,10 @@ func keepLastBytes(s string, limit int) string {
 // the stale one. Neither is depth-scoped: the tail speaks for one agent at a time, so the boundary
 // that ends any agent's Turn ends what this is holding. It mutates the local copy and returns it,
 // like every Update fold.
+//
+// Every other variant leaves the tail alone, a PruneEvent included: pruning rewrites the tool
+// results the ENGINE keeps, and the reasoning held here is the current Turn's own chunks, which
+// no pruning pass has ever touched.
 func (m Model) foldReasoning(e domain.Event) Model {
 	switch e := e.(type) {
 	case domain.ReasoningEvent:

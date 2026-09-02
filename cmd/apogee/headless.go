@@ -93,6 +93,36 @@ func exitCodeFor(err error) int {
 // codes are all provable without a live model. Production never reassigns it.
 var runOnce = run.Once
 
+// pruneNoticeSink is the headless Driver's own EventSink: it prints one stderr line per
+// [domain.PruneEvent] and forwards every Event, its own included, to whatever sink it wraps
+// (nil ⇒ nothing to forward to). A zero-value inner is the normal case — a bare headless run
+// composes no sink of its own — and the wrap still matters, because run.Once installs its tap
+// AROUND this one rather than instead of it (run.Spec).
+//
+// It lives here, in the command, rather than in internal/run's eventTap, because internal/run is
+// also the DAEMON's Firing path (daemonfire.go): a print there would put a line on a daemon's
+// stderr on every Firing, for a human who is not watching. The record keeps the same fact either
+// way — transcriptFold folds a Note entry for it — so this sink is the live view alone.
+//
+// Emit is never called concurrently: the engine serializes emission on its side ([domain.EventSink]).
+type pruneNoticeSink struct {
+	inner domain.EventSink
+	out   io.Writer
+}
+
+// Emit prints the prune notice, then forwards. The two numbers are rendered verbatim, worded as
+// every other Driver words them (internal/tui's transcript.addPrune, internal/run's
+// transcriptFold.fold), so one pruning pass reads the same on a terminal, in a session record and
+// in a scrollback.
+func (s pruneNoticeSink) Emit(e domain.Event) {
+	if pe, ok := e.(domain.PruneEvent); ok {
+		fmt.Fprintf(s.out, "pruned %d tool results (~%d tokens)\n", pe.Results, pe.Tokens)
+	}
+	if s.inner != nil {
+		s.inner.Emit(e)
+	}
+}
+
 // discoverSlots is the seam onto the discovery half of the Parallel agents cap (ADR 0039 decision
 // 2): how many generation slots the bound server reports it was launched with, and 0 when it cannot
 // say. Like runOnce it exists so the composition below is provable without a live server; production
@@ -407,6 +437,13 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// its partial answer and still saves its record.
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// The one Event this Driver renders live. Everything else a headless run reports comes back on
+	// Result, but a prune happens MID-run and leaves no trace on the answer, so a human watching an
+	// unattended run would otherwise see a window quietly shrink with nothing said. The sink WRAPS
+	// whatever the Config already carries (nil here today) rather than replacing it, exactly as
+	// run.Once's own tap wraps this one in turn (run.Spec).
+	cfg.Events = pruneNoticeSink{inner: cfg.Events, out: cmd.ErrOrStderr()}
 
 	res, runErr := runOnce(ctx, run.Spec{Config: cfg, Prompt: prompt, Store: store, RecordID: recordID})
 

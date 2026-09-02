@@ -403,9 +403,9 @@ func (m *Model) noteEngineHeard() {
 // transcript.apply establishes and foldEvent hands over (fold.go), so the ToolResultEvent rule
 // below reads a value rather than an ordering.
 //
-// Events that say nothing about what the worker is doing next — an error notice, usage
-// accounting, an audit record, a fired mechanism, an approval record — leave the activity
-// alone, so the phrase does not flicker off the work actually in flight.
+// Events that say nothing about what the worker is doing next — an error notice, a pruning
+// notice, usage accounting, an audit record, a fired mechanism, an approval record — leave the
+// activity alone, so the phrase does not flicker off the work actually in flight.
 //
 // stopping is STICKY, and run-wide: once Esc has fired the cancel the worker keeps emitting events
 // until it reaches a quiescent boundary, and overwriting the phrase there would tell the human

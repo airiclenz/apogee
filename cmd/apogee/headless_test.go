@@ -34,11 +34,18 @@ type stubRunner struct {
 	spec   run.Spec
 	res    run.Result
 	err    error
+	// emit, when set, is handed the Config's Event sink before the stub returns — the way a test
+	// drives an Event the COMMAND's own sink is supposed to render (the prune notice) without a
+	// model or a real loop. nil emits nothing, which is what every other test here wants.
+	emit func(domain.EventSink)
 }
 
 func (s *stubRunner) once(_ context.Context, spec run.Spec) (run.Result, error) {
 	s.called = true
 	s.spec = spec
+	if s.emit != nil && spec.Config.Events != nil {
+		s.emit(spec.Config.Events)
+	}
 	return s.res, s.err
 }
 
@@ -489,8 +496,15 @@ func TestHeadlessComposesTheRunnerSpec(t *testing.T) {
 		t.Errorf("a bare headless run carries a Schedule identity or a title: %+v", stub.spec)
 	}
 	cfg := stub.spec.Config
-	if cfg.Events != nil || cfg.Approver != nil || cfg.Asker != nil || cfg.Presenter != nil {
+	if cfg.Approver != nil || cfg.Asker != nil || cfg.Presenter != nil {
 		t.Error("the command wired a delegate run.Once pins for itself")
+	}
+	// The Events sink is the ONE delegate the command does wire, and wiring it is not the same as
+	// claiming run.Once's: Spec says the Config's sink is WRAPPED by the runner's tap, not replaced
+	// (internal/run/run.go), so the command's own prune-notice sink sits inside the tap rather than
+	// displacing it. What must hold is that it is the headless one and nothing else.
+	if _, ok := cfg.Events.(pruneNoticeSink); !ok {
+		t.Errorf("Config.Events = %T; want the headless prune-notice sink", cfg.Events)
 	}
 	if cfg.Tools != nil {
 		t.Error("the command wired a tool registry; a headless run takes the engine's own (no MCP)")
@@ -1669,3 +1683,57 @@ func TestHeadlessIsRegisteredOnTheRoot(t *testing.T) {
 		t.Error("the command dumps usage or prints its own error; main owns both")
 	}
 }
+
+// TestHeadlessPrintsThePruneNotice pins the one Event the headless Driver renders live. A prune
+// happens MID-run and leaves no trace on Result, so without this line a human watching an
+// unattended run would see the window quietly shrink with nothing said.
+//
+// It goes to STDERR, where it cannot contaminate the answer a pipeline reads off stdout, and it is
+// worded exactly as every other Driver words it (internal/tui's transcript.addPrune, internal/run's
+// transcriptFold.fold) from the event's own two counts.
+func TestHeadlessPrintsThePruneNotice(t *testing.T) {
+	stub := &stubRunner{emit: func(sink domain.EventSink) {
+		sink.Emit(domain.PruneEvent{Results: 3, Tokens: 1200})
+	}}
+
+	out, errOut, err := headlessRun(t, stub, "explain this repo")
+	if err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	const want = "pruned 3 tool results (~1200 tokens)"
+	if !slices.Contains(strings.Split(errOut, "\n"), want) {
+		t.Errorf("stderr carries no prune notice reading %q:\n%s", want, errOut)
+	}
+	if strings.Contains(out, "pruned") {
+		t.Errorf("the notice reached stdout, where a pipeline reads the answer: %q", out)
+	}
+}
+
+// TestPruneNoticeSinkForwardsEveryEvent pins the wrap half of the sink: it prints for a prune and
+// hands EVERY Event on to the sink it wraps, its own included. run.Once puts its tap around this
+// one (run.Spec), so a sink that swallowed what it rendered would cost the Firing's record the very
+// entry the notice is about.
+func TestPruneNoticeSinkForwardsEveryEvent(t *testing.T) {
+	t.Parallel()
+
+	inner := &recordingSink{}
+	var errOut bytes.Buffer
+	sink := pruneNoticeSink{inner: inner, out: &errOut}
+
+	sink.Emit(domain.PruneEvent{Results: 2, Tokens: 800})
+	sink.Emit(domain.MessageEvent{Text: "done"})
+
+	if len(inner.events) != 2 {
+		t.Errorf("the wrapped sink saw %d events, want both: %+v", len(inner.events), inner.events)
+	}
+	if got, want := errOut.String(), "pruned 2 tool results (~800 tokens)\n"; got != want {
+		t.Errorf("printed %q, want %q — the prune alone, and nothing for the message", got, want)
+	}
+}
+
+// recordingSink keeps every Event handed to it, in order. [domain.EventSink] promises serialized
+// emission, so it needs no lock.
+type recordingSink struct{ events []domain.Event }
+
+func (s *recordingSink) Emit(e domain.Event) { s.events = append(s.events, e) }

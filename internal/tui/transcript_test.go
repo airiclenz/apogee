@@ -3346,3 +3346,51 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 		}
 	})
 }
+
+// TestPruneNoteIsOneHostLineAtItsOwnRun pins what a pruning pass looks like in the scrollback: one
+// dim host note wording the engine's two counts verbatim, placed at the run that emitted it.
+//
+// The wording is asserted literally because three Drivers word it identically (internal/run's
+// transcriptFold.fold, cmd/apogee's pruneNoticeSink) and a reader comparing a terminal against a
+// session record must not find two spellings of one event. The placement matters for the same
+// reason addError's does: a delegate prunes its OWN conversation, so the note belongs inside that
+// delegate's run rather than interrupting the parent's with a child's housekeeping.
+func TestPruneNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the note reads the engine's own counts", func(t *testing.T) {
+		tr := &transcript{}
+
+		tr.apply(domain.PruneEvent{Results: 3, Tokens: 1200})
+
+		if len(tr.entries) != 1 {
+			t.Fatalf("transcript holds %d entries, want the note alone", len(tr.entries))
+		}
+		got := tr.entries[0]
+		const want = "pruned 3 tool results (~1200 tokens)"
+		if got.kind != entryNote || got.text != want {
+			t.Errorf("prune fold = %v/%q, want an entryNote reading %q", got.kind, got.text, want)
+		}
+	})
+
+	t.Run("a child's prune lands inside the delegate's run", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentStarted(tr, "s1", 1)
+
+		tr.apply(domain.PruneEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Results:   2,
+			Tokens:    800,
+		})
+
+		if len(tr.entries) != 2 {
+			t.Fatalf("transcript holds %d entries, want the head and the note", len(tr.entries))
+		}
+		got := tr.entries[1]
+		if got.kind != entryNote || got.depth != 1 || got.spawnCallID != "s1" {
+			t.Errorf("prune entry = %v at depth %d/spawn %q, want an entryNote inside s1's run at depth 1",
+				got.kind, got.depth, got.spawnCallID)
+		}
+	})
+}
