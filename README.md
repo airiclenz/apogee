@@ -156,6 +156,9 @@ a stray key cannot do it — stops a run. The full tour is in
   [Sessions](docs/manual/sessions.md).
 - **`/undo`** — put back the files the agent wrote, one exchange at a time,
   with a preview before anything is touched.
+- **`/thinking`** — read the model's reasoning as plain text, one record per
+  turn and the whole session kept: the main agent's, or the sub-agent's alone
+  while you are reading its run.
 - **Model profiles** — adapt to models that don't speak native tool calls:
   tool menus injected as text, fenced or custom-regex calls parsed back out,
   thinking channels stripped, reasoning effort set per model — while native

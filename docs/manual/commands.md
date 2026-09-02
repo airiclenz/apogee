@@ -15,7 +15,7 @@ which case the menu completes it to `/command ` and waits for you to type them; 
 away, since bare they only open a picker or print a report. The menu stays open while the model is working, too —
 commands that need a quiet engine wear an `— idle only` tag for as long as the engine
 is busy, and say so if you pick one anyway, while `/version`, `/usage`,
-`/inspect`, `/effort`, `/schedule`, `/schedule-stop`, `/sub-agents-server`, `/skills`' listing and
+`/inspect`, `/thinking`, `/effort`, `/schedule`, `/schedule-stop`, `/sub-agents-server`, `/skills`' listing and
 `/confine`'s status report answer immediately. Once the engine is idle that tag is gone from the menu entirely — there
 is nothing left for it to warn about. A token
 lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
@@ -30,6 +30,7 @@ a typo is visible before you send.
 | `/version` | Show the apogee version | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total; a `cached` column joins them when the server reports how much of a prompt it answered from its own cache | ✅ |
 | `/inspect` | The request and response traffic of the recent model calls, **readable** by default — each request summarised as `N messages · N tools · model …`, each response as the passages its stream spells, thinking and reply as wrapped prose and every tool call named; `ctrl+r` flips the pane to the raw pretty-printed protocol and back. With a sub-agent's run view open the pane shows that run's traffic alone and names it in its title — close the view for the whole ring. Armed by `ui.inspector` (off by default) | ✅ |
+| `/thinking` | The model's thinking as plain text — the reasoning it streams beside its answer, one record per completed turn, newest last, with no protocol and no prefixes. Opens on the newest record; with a sub-agent's run view open it shows that run's thinking alone and names it in its title, and at the top level the main agent's alone. Always recorded, nothing to arm, nothing saved with the session | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](configuration.md#auto-modes-blast-radius) | ✅ report only |
 | `/effort` | Set how hard the model thinks this session — opens a picker of the levels this model supports, plus `auto` (back to the profile); the resolved effort reads in the footer, and the command is hidden when the model reports no dial — see [below](configuration.md) | ✅ |
 | `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright | ✅ |

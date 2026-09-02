@@ -68,6 +68,8 @@ resolution, `/effort auto` clears it. It is the human's session intent, not a mo
 only — a routed sub-agent resolves its own model's profile
 ([ADR 0045](0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)). The name is
 `/effort`, not `/thinking` — the latter is reserved for the deferred thinking-display feature.
+*(The reservation was spent 2026-09-02: `/thinking` now opens the plain-text thinking pane —
+CONTEXT.md "Thinking pane", layout.md "The `/thinking` popup". `/effort` is unchanged.)*
 *(Amended 2026-08-25 by [ADR 0060](0060-effort-is-detected-passively-dialected-per-server-and-picked.md) §5–§8: `/effort` is a popup picker of the
 model's own reported levels — the level-word grammar is removed — hidden from the menu when
 the model reports no dial, with the resolved effort shown as a footer segment. The override
@@ -108,4 +110,5 @@ byte-identical on the wire; effort enters only through user config or the overri
 - **A lower default effort for sub-agents** — the child already resolves its own profile;
   a distinct default is extra policy for later.
 - **Visible rendering of thinking tokens** — a separate future plan (owner scope call,
-  2026-08-15); `/thinking` stays reserved for it.
+  2026-08-15); `/thinking` stays reserved for it. *(Landed 2026-09-02 as the `/thinking` pane,
+  under that reserved name.)*

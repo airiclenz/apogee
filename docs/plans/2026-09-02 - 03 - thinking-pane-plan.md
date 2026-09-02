@@ -399,7 +399,24 @@ frame-overlay tests this item updates.
 
 **Commit:** `feat(tui): open /thinking as a report pane scoped to the viewed run`
 
-## 4. Name the pane in the layout spec and the user docs
+## 4. Name the pane in the layout spec and the user docs — ✅ DONE (2026-09-02)
+
+NOTES (2026-09-02): README anchor — the item offered "the `/` command-menu sentence or a Features
+bullet"; the bullet was taken, seated after the `/undo` bullet whose shape it mirrors, since the
+command-menu sentence names key gestures rather than verbs.
+NOTES (2026-09-02): the "usage" sweep the guard prescribes found three further layout.md
+enumerations beyond the give-way sentence — the height-budget pane list (layout.md:105), the
+overflow-bar pane list (:545) and the report-only verbs (:2140) — and the commands.md while-running
+sentence (:17); all four gained `/thinking`.
+NOTES (2026-09-02): consequential edit — layout.md (the `/inspect` popup's click-chain sentence):
+made necessary by the third report joining the slot's draw order, which made "the report is asked
+first where both are up" ambiguous; it now names `/usage` as the first and `/thinking` as the last.
+NOTES (2026-09-02): consequential edit — docs/adr/0050-...-canonical-wire-mapping.md: made
+necessary by the verb landing under the name that ADR reserved. Two dated markers record that the
+reservation is spent (decision §, and the deferred-display rejected-alternative); the decision
+itself and the `/thinking`-as-effort-name rejection are untouched.
+NOTES (2026-09-02): the guard's `grep -rn "reasoning" CONTEXT.md layout.md docs/` walk found no doc
+claiming a retention seam nothing reads — item 1's narration lived only in Go files.
 
 **What.** `layout.md`: a new `## The /thinking popup` section beside `## The /inspect popup`
 (layout.md:1715) — non-modal, transcript-slot, opens on the newest record, plain-text rows wrapped

@@ -102,7 +102,7 @@ are load-bearing rather than decorative and every shipped scheme is tested for t
 
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
 prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the
-`/usage` report, the `/inspect` wire-traffic pane, the `/` and
+`/usage` report, the `/inspect` wire-traffic pane, the `/thinking` pane, the `/` and
 `@` dropdown, the staged-interjection band and the skill-suggestion row all sit in the frame between the session area and the bottom chrome,
 and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
@@ -144,7 +144,9 @@ doing.** The **session area** goes first and goes to nothing; then the **skill-s
 which is advice about a message that has not been sent yet; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
 **`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
-**`/inspect` wire-traffic pane**, a window onto a ring that keeps its records whether or not the
+**`/thinking` pane**, a window onto a board that keeps every turn's reasoning whether or not the
+pane is drawn, and prose a reader comes back to rather than the evidence of a call that has just
+gone wrong; then the **`/inspect` wire-traffic pane**, a window onto a ring that keeps its records whether or not the
 pane is drawn — reopened on a taller window it says exactly what it would have said; then the
 **`/usage` report**, a question already answered; then the
 **`/settings` pane**; then the **`/sessions` browser and the picker**; and last the **approval or ask
@@ -540,7 +542,7 @@ column stay a single column.
 
 **Every overflowing popup carries the same bar.** A bordered pane whose list is longer than the
 window it was granted paints those same two weights down the last column *inside* its border —
-the picker, the session browser, `/settings` and its sub-lists, `/usage`, `/inspect`, the dropdown,
+the picker, the session browser, `/settings` and its sub-lists, `/usage`, `/inspect`, `/thinking`, the dropdown,
 the approval and ask prompts alike, because a windowed list that gives no sign of what it is holding
 back is the same omission wherever it is drawn. The column is reserved **only while the list
 overflows**: a pane whose rows all fit keeps its full inner width, so the bar appearing is itself
@@ -1778,8 +1780,69 @@ cause.
 the pane and still lands where it was aimed, a click **inside** does nothing and is swallowed rather
 than dragging a selection across the transcript drawn under it, and the **wheel** scrolls the record
 list one row per notch, clamped at the first row and the last full window — the two ends the keys
-stop at. The report is asked first where both are up, so a click on this pane dismisses the report
-above it and is then swallowed here.
+stop at. The `/usage` report is asked first where both are up, so a click on this pane dismisses the
+report above it and is then swallowed here; the `/thinking` pane is asked after this one.
+
+---
+
+## The `/thinking` popup
+
+**What it shows.** `/thinking` opens a bordered pane in the same transcript-side slot holding the
+model's **thinking** as plain text — the private reasoning it streams beside its answer, one record
+per completed turn, newest last. It is the view for the question the transcript cannot answer
+because the transcript never carried the thinking at all: what the model was working through while
+it decided. Where the `/inspect` pane shows the wire and wears the protocol on its face, this one
+shows prose and nothing else — no JSON, no `·` prefixes, no tool-call rows, no elision inside a
+record.
+
+**It is always recording, and there is nothing to arm.** No config key gates it: the reasoning is
+already crossing the frame on its way to the activity line, and the pane is a second reader of what
+is already there. Nothing it keeps is sent back to the model, written into the transcript or saved
+with the session — it is a board beside the conversation, and a resumed session opens with it empty.
+
+**One heading, then the text.** Each record is one turn's thinking under one heading row — `turn 4`
+for the main agent, `repo-scout · turn 2` for a delegation, the same name the run view spells — and
+under it the model's own paragraphs, wrapped, every continuation row indented two spaces so a wrap
+reads as a wrap rather than as a line the model broke itself. A turn still in flight renders at the
+**tail**, where its arrival puts it, and carries no in-progress marker: the text growing is the
+marker. With nothing recorded in scope the pane draws one row — `no thinking recorded yet` — rather
+than an empty box.
+
+**The rows are wrapped to the pane's own width, not to a fixed column.** Popup rows are truncated at
+the border and never re-wrapped, and this pane has no second rendering to recover a cut line from, so
+the wrap column is taken from the width the pane is actually drawn at: its inner width less the two
+cells every row's marker leads with and the scroll bar's column, reserved whether or not the bar is
+drawn so the text does not re-flow the moment the list overflows. A resize recomposes the rows and
+the scroll offset lands where the same clamp every report applies puts it. What it holds is bounded
+rather than complete — a record keeps its last 64 KB, the board its 64 most recent turns and the
+oldest is dropped — because it lives in the frame and not on disk.
+
+**It opens on the newest record**, on the last full window, and its keyboard is the `/usage`
+report's exactly: `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, and nothing else. There is no
+`ctrl+r` — one rendering is the point of the pane, and raw bytes are `/inspect`'s job. It is
+non-modal on the same terms as the other two reports: the box behind it stays live and every other
+key, a printable one included, goes where it always went. The hint under the rows reads `↑/↓ scroll
+· esc close`. Its verb is safe while the agent works, which is when the thinking worth reading is
+being made.
+
+**It shows the run you are reading.** With a **run view** open the pane holds that delegation's
+thinking and nothing else, and the title says which: `thinking — repo-scout` rather than the bare
+name. At the top level it is the main agent's own and no child's — a fan-out braids several runs'
+reasoning into one arrival-ordered stream, and a reader who has not opened a child is asking about
+the agent they are talking to. There is no key for the scope and no manual filter: opening a run is
+what narrows it, and closing the view is what widens it back.
+
+**In the give-way order it sits below the `/inspect` pane**, above only the dropdown. It is a window
+onto a board that keeps its records whether or not the pane is drawn — reopened on a taller window it
+says exactly what it would have said — and of the two windows onto retained state, prose a reader
+returns to yields before the evidence of a call that has just gone wrong.
+
+**The pointer works on it exactly as it does on the other two reports.** A click **outside** the box
+dismisses the pane and still lands where it was aimed, a click **inside** does nothing and is
+swallowed rather than dragging a selection across the transcript drawn under it, and the **wheel**
+scrolls the rows one per notch, clamped at the first row and the last full window — the two ends the
+keys stop at. It is asked LAST of the three reports, in the slot's own draw order, so a click aimed
+here dismisses the panes above it first.
 
 ---
 
@@ -2074,7 +2137,8 @@ quiescent engine is not hidden — its row fills the menu's `— idle only` colu
 unselected style, and accepting it anyway prints the note and leaves the draft exactly as it was.
 The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
 cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
-verbs that only report (`/version`, `/skills`, `/usage`, `/inspect`, `/confine` with no arguments)
+verbs that only report (`/version`, `/skills`, `/usage`, `/inspect`, `/thinking`, `/confine` with no
+arguments)
 run there and then, and
 so do `/schedule` and `/schedule-stop`, which touch no engine at all: a schedule fires as a run of
 its own, so creating or stopping one needs no quiet moment in this session.
