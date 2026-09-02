@@ -3636,7 +3636,7 @@ func settingsMechanismRow() SettingRow {
 	return SettingRow{
 		Path: settingKeyMechanisms, Section: "Mechanisms", Kind: SettingStructured, Value: "1 mechanism",
 		EditPointer: "⏎ opens toggle list",
-		Desc:        "Catalogued small-model Mechanisms to enable by canonical ID; every one defaults off.",
+		Desc:        "Catalogued small-model Mechanisms by canonical ID; the two off-ramps default on, every other one defaults off.",
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
@@ -577,7 +578,7 @@ var KeyRegistry = []Key{
 	},
 	{
 		Path: "mechanisms", Kind: KindStructured,
-		Desc:      "Catalogued small-model Mechanisms to enable by canonical ID; every one defaults off.",
+		Desc:      "Catalogued small-model Mechanisms by canonical ID; the two off-ramps default on, every other one defaults off.",
 		Read:      func(o Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
 		Structure: func(o Options) any { return o.Mechanisms },
 	},
@@ -894,10 +895,20 @@ func countSummary(n int, noun string) string {
 // enabledCount counts the Mechanisms actually switched ON. A `mechanisms:` block may carry explicit
 // `false` entries — that is how a user records a decision to leave one off — and those are not
 // enabled Mechanisms, so counting map keys would overstate what the session is running.
-func enabledCount(mechanisms map[string]bool) int {
+//
+// The OFF-RAMP FLOOR is counted too (ADR 0070): the catalogued off-ramps are on unless the block
+// names one `false`, so counting only the `true` keys would understate a session by two whenever the
+// block is absent — and the summary this feeds is read as "what is this run arming". The floor is
+// asked of the catalogue rather than assumed, so a row joining or leaving it moves the count with it.
+func enabledCount(block map[string]bool) int {
 	n := 0
-	for _, on := range mechanisms {
+	for _, on := range block {
 		if on {
+			n++
+		}
+	}
+	for _, id := range mechanisms.OffRampFloor(block) {
+		if !block[string(id)] {
 			n++
 		}
 	}

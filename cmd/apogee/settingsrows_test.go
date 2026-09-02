@@ -408,10 +408,11 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"cursor-shape":           "block", // unset, so the declared default is what is in force
 		"editor":                 "code -w",
 		"bypass":                 "true",
-		"mechanisms":             "2 mechanisms", // the explicit `false` entry is not an enabled one
-		"validated-sets.enable":  "true",
-		"validated-sets.alias":   "1 alias",
-		"model-profiles":         "1 model profile",
+		// The explicit `false` entry is not an enabled one; the two default-on off-ramps are (ADR 0070).
+		"mechanisms":            "4 mechanisms",
+		"validated-sets.enable": "true",
+		"validated-sets.alias":  "1 alias",
+		"model-profiles":        "1 model profile",
 	}
 	for path, wantValue := range want {
 		if got := byPath[path].Value; got != wantValue {

@@ -16,6 +16,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -220,10 +221,14 @@ func (w *rootWiring) options() tui.Options {
 		// and a list that vanished on an unreadable config would look like a build with no Mechanisms.
 		ListMechanisms: func() []tui.MechanismToggle {
 			enabled := mechanismBlock(configPath)
+			// An off-ramp reads as ON unless the block says `false` (ADR 0070): the list must show the
+			// posture the run is actually in, and a floored row whose key is simply absent is armed.
+			floor := mechanisms.OffRampFloor(enabled)
 			known := mechanisms.KnownIDs()
 			toggles := make([]tui.MechanismToggle, 0, len(known))
 			for _, id := range known {
-				toggles = append(toggles, tui.MechanismToggle{ID: string(id), Enabled: enabled[string(id)]})
+				on := enabled[string(id)] || slices.Contains(floor, id)
+				toggles = append(toggles, tui.MechanismToggle{ID: string(id), Enabled: on})
 			}
 			return toggles
 		},

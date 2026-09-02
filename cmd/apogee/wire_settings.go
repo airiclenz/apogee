@@ -1974,7 +1974,9 @@ func settingBool(key, value string) (bool, error) {
 //     (ADR 0016) — the opts copy carries the new id so the fingerprint re-keys on it;
 //   - the enable list, applying the same precedence startup applies: an explicit `mechanisms:` block
 //     is manual control and suppresses any matched set (whole-set-or-nothing, never a merge), which
-//     is why manualIDs is passed in rather than re-derived from the map here;
+//     is why manualIDs is passed in rather than re-derived from the map here — and, when a set DOES
+//     apply, the off-ramp floor folded into it exactly as startup folds it (withOffRampFloor, ADR
+//     0070), so a rebind onto a validated model cannot silently drop a recovery guarantee;
 //   - the context window, applying the pin: pinnedWindow > 0 is the user's `context-window:` key and
 //     outranks whatever the server reports (decision 9), else the observed window is bound as-is;
 //   - the reply ceiling, which is not per-model at all and is re-stated here anyway: outputCap is the
@@ -2019,7 +2021,7 @@ func rebindSpecFor(
 	}
 	enable := manualIDs
 	if len(vset) > 0 {
-		enable = vset
+		enable = withOffRampFloor(vset, next.Mechanisms)
 	}
 
 	bound := window

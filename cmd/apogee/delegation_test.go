@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
 )
@@ -465,16 +467,38 @@ func TestSubAgentCatalogueBuildsTheEntrysOwnMechanisms(t *testing.T) {
 	if first, second := catalogue(), catalogue(); first == nil || first == second {
 		t.Error("the factory must hand each child its own registry")
 	}
+	// A block naming one row still arms the off-ramp floor beside it (ADR 0070): replace-whole
+	// replaces what the parent armed, never the floor every build stands on.
+	wantArmed := append(mechanisms.OffRampFloor(nil), "library")
+	slices.Sort(wantArmed)
+	if armed := postResponseIDs(catalogue()); !slices.Equal(armed, wantArmed) {
+		t.Errorf("a `library: true` block armed post-response %v; want %v (the floor beside it)", armed, wantArmed)
+	}
 
-	// A map that enables nothing is still a map: replace-whole means the child runs with no Mechanism
-	// at all, which is a catalogue rather than an inheritance.
+	// A map that enables nothing is still a map: replace-whole means the child runs on the off-ramp
+	// floor alone (ADR 0070) — a catalogue of its own rather than an inheritance — and only an
+	// explicit `<off-ramp>: false` would take one of those two away as well.
 	off, err := subAgentCatalogue(config.ServerEntry{Name: "grunt", Mechanisms: map[string]bool{"library": false}}, base)
 	if err != nil {
 		t.Fatalf("subAgentCatalogue with an all-false map: %v", err)
 	}
 	if off == nil {
-		t.Error("an all-false map inherited the parent's catalogue; want an empty one of its own")
+		t.Fatal("an all-false map inherited the parent's catalogue; want a floor-only one of its own")
 	}
+	if armed, want := postResponseIDs(off()), mechanisms.OffRampFloor(nil); !slices.Equal(armed, want) {
+		t.Errorf("an all-false map armed %v; want the off-ramp floor %v", armed, want)
+	}
+}
+
+// postResponseIDs is the canonical IDs a child's registry holds at the post-response hook, sorted —
+// where both off-ramps live, so it is the direct read of whether the floor reached the child.
+func postResponseIDs(r *apogee.MechanismRegistry) []apogee.MechanismID {
+	var out []apogee.MechanismID
+	for _, m := range r.Ordered(apogee.HookPostResponse) {
+		out = append(out, m.Descriptor.ID)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // The posture keys are legal on EVERY entry now, which the flag era refused: the config loads, and

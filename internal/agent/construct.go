@@ -263,19 +263,33 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 // every ID and names no Mechanism. An unknown ID (Build wraps domain.ErrUnknownMechanism), an ID
 // listed twice or already pre-built into the registry (the already-registered rejection), and a
 // hook-less Mechanism all propagate as construction failures.
-// An empty list builds nothing (the default-off posture untouched); the ordering, incompatibility,
-// and requirements gates then run over the merged registry unchanged.
+// An empty list builds the OFF-RAMP FLOOR (mechanisms.OffRampFloor, ADR 0070) rather than nothing —
+// but only when the engine made the registry itself (cfg.Mechanisms == nil). That floor already
+// lives in every Driver's YAML→ID-list resolver; repeating it here is what keeps a library embedder
+// or a bench arm that hands New a Config with no EnableMechanisms on the same recovery guarantees
+// the TUI runs, instead of on a quieter agent nobody asked for. A HANDED-IN registry is never
+// floored: it is a caller who assembled the arm itself — both sub-agent spawn paths and Rebind pass
+// one — and flooring it would re-add rows that registry may already hold, failing construction with
+// "already registered". A NON-EMPTY list is built exactly as given, floor included or not: the
+// Drivers union the floor in before they get here, so an explicit `tool_use_enforcer: false` arrives
+// as a one-element list and stays one. Every other Capability keeps defaulting off (D1). The
+// ordering, incompatibility, and requirements gates then run over the merged registry unchanged.
 //
 // The derived Deps come BACK so the caller can hold what the build opened: the Library store is the
 // one collaborator with a lifetime (a writer goroutine and pending observations), and the Agent that
 // derived it is what flushes it at Close. An empty list — and any failure — returns the zero Deps,
 // so a caller never holds a half-built collaborator.
 func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) (mechanisms.Deps, error) {
-	if len(cfg.EnableMechanisms) == 0 {
-		return mechanisms.Deps{}, nil
-	}
-
 	ids := slices.Clone(cfg.EnableMechanisms)
+	if len(ids) == 0 {
+		if cfg.Mechanisms != nil {
+			return mechanisms.Deps{}, nil
+		}
+		ids = mechanisms.OffRampFloor(nil)
+		if len(ids) == 0 {
+			return mechanisms.Deps{}, nil
+		}
+	}
 	slices.Sort(ids)
 
 	deps := deriveDeps(cfg, mechanisms.DepsNeeded(ids))

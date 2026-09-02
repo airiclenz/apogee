@@ -437,3 +437,66 @@ func TestHostToolsThreadsTheSkillLookupOntoTheDefaultRoster(t *testing.T) {
 		t.Error("`tools.disabled: [load_skill]` did not reach the assembly")
 	}
 }
+
+// TestBuildEnabledMechanismsFloorsAFreshRegistry: an EnableMechanisms list the engine was handed
+// EMPTY builds the off-ramp floor rather than nothing (ADR 0070), while a list that names something
+// builds exactly what it names — the Drivers union the floor in before New sees it, so a resolved
+// `{"tool_use_enforcer": false}` arrives here as a one-element list and must stay one element.
+//
+// The claim is read off the registry the construction produced, never off fired events: what the
+// list BUILDS is the whole question, and an off-ramp only triggers on a malformed reply.
+func TestBuildEnabledMechanismsFloorsAFreshRegistry(t *testing.T) {
+	floor := mechanisms.OffRampFloor(nil)
+	if len(floor) < 2 {
+		t.Fatalf("OffRampFloor(nil) = %v; want the two catalogued off-ramps", floor)
+	}
+
+	for _, tt := range []struct {
+		name string
+		ids  []domain.MechanismID
+		want []domain.MechanismID
+	}{
+		{"nil list", nil, floor},
+		{"empty list", []domain.MechanismID{}, floor},
+		{"one-element list", []domain.MechanismID{floor[1]}, []domain.MechanismID{floor[1]}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig(&recordingSink{})
+			cfg.EnableMechanisms = tt.ids
+
+			a, err := newAgent(cfg, echoResponder{reply: "hi"})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if got := armedIDs(a, domain.HookPostResponse); !slices.Equal(got, tt.want) {
+				t.Errorf("armed post-response Mechanisms = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildEnabledMechanismsNeverFloorsAHandedInRegistry is the bite test for the floor's one
+// exception. A sub-agent spawn hands the child its parent's registry and CLEARS EnableMechanisms
+// (subagent.go), because those rows are already built into what it inherited. If the engine floored
+// a handed-in registry too, it would re-add the parent's own off-ramps and MechanismRegistry.Add
+// would refuse them as already registered — failing every delegation from a parent that was itself
+// built with nil lists, which after this change is every default parent there is.
+func TestBuildEnabledMechanismsNeverFloorsAHandedInRegistry(t *testing.T) {
+	parentCfg := baseConfig(&recordingSink{})
+	parent, err := newAgent(parentCfg, echoResponder{reply: "hi"})
+	if err != nil {
+		t.Fatalf("newAgent (parent): %v", err)
+	}
+
+	childCfg := baseConfig(&recordingSink{})
+	childCfg.Mechanisms = parent.registry.ForSubAgent()
+	childCfg.EnableMechanisms = nil
+
+	child, err := newAgent(childCfg, echoResponder{reply: "hi"})
+	if err != nil {
+		t.Fatalf("newAgent (child off an inherited registry): %v — a handed-in registry must never be floored", err)
+	}
+	if got, want := armedIDs(child, domain.HookPostResponse), mechanisms.OffRampFloor(nil); !slices.Equal(got, want) {
+		t.Errorf("child armed %v, want the inherited floor %v exactly once", got, want)
+	}
+}

@@ -217,14 +217,26 @@ func TestIDLessNativeCallIsDroppedWhileItsSiblingDispatches(t *testing.T) {
 // nothing left after the filter the reply reads exactly like one that carried no calls at all —
 // the text parser gets its turn (a no-op on a native profile) and the empty-reply guard faults the
 // Turn. The alternative, dispatching it, is what the drop exists to prevent.
+//
+// The off-ramp floor (ADR 0070) sits between the two now: a Config with no EnableMechanisms arms
+// empty_response_recovery, which retries the empty reply in place up to maxPostResponseRetries
+// times before the loop proceeds with the last one. So the same reply is scripted four times — the
+// first call and its three retries — and the Turn ends on the same fault, with the same wording,
+// after the recovery has had its turns.
 func TestAReplyWhoseOnlyNativeCallLacksAnIDFaults(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "never reached"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{{
+	idLessReply := []provider.Delta{
 		idLessCall("lookup", "{}"),
 		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
-	}}}
+	}
+	attempts := 1 + maxPostResponseRetries
+	scripts := make([][]provider.Delta, 0, attempts)
+	for range attempts {
+		scripts = append(scripts, idLessReply)
+	}
+	responder := &scriptedResponder{scripts: scripts}
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -251,16 +263,19 @@ func TestAReplyWhoseOnlyNativeCallLacksAnIDFaults(t *testing.T) {
 	}
 
 	errs := errorEvents(sink.events)
-	if len(errs) != 2 {
-		t.Fatalf("ErrorEvents = %d (%v), want 2 — the drop, then the Turn's fault", len(errs), errs)
+	if len(errs) != attempts+1 {
+		t.Fatalf("ErrorEvents = %d (%v), want %d — one drop per attempt, then the Turn's fault",
+			len(errs), errs, attempts+1)
 	}
-	if errs[0].Source != "processing" || !strings.Contains(errs[0].Err, "dropped 1 of 1") {
-		t.Errorf("first ErrorEvent = {Source:%q Err:%q}, want the processing drop signal", errs[0].Source, errs[0].Err)
+	for i, e := range errs[:attempts] {
+		if e.Source != "processing" || !strings.Contains(e.Err, "dropped 1 of 1") {
+			t.Errorf("ErrorEvent %d = {Source:%q Err:%q}, want the processing drop signal", i, e.Source, e.Err)
+		}
 	}
 	want := "upstream returned an empty reply (finish: tool_calls)"
-	if errs[1].Source != "loop" || errs[1].Err != want {
-		t.Errorf("second ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:%q}",
-			errs[1].Source, errs[1].Err, "loop", want)
+	if last := errs[attempts]; last.Source != "loop" || last.Err != want {
+		t.Errorf("last ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:%q}",
+			last.Source, last.Err, "loop", want)
 	}
 	// Nothing was committed: the user message alone survives a faulted Turn.
 	if got := a.conv.Len(); got != 1 {

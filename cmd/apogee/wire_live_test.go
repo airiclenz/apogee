@@ -5,13 +5,16 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/validated"
 )
 
 // The `url-safety:` guard an MCP connect is made under (audit 2026-08-25 F-40).
@@ -303,8 +306,58 @@ func TestWireSessionReportsARetiredMechanismOnStderr(t *testing.T) {
 		t.Errorf("the retired-mechanism notice appeared %d times on stderr; want exactly 1 line\n"+
 			"want: %q\nstderr: %q", got, want, stderr)
 	}
-	if len(w.cfg.EnableMechanisms) != 0 {
-		t.Errorf("EnableMechanisms = %v; a retired id is dropped from what the engine arms, which is "+
-			"exactly why the line above has to be printed", w.cfg.EnableMechanisms)
+	if want := mechanisms.OffRampFloor(nil); !slices.Equal(w.cfg.EnableMechanisms, want) {
+		t.Errorf("EnableMechanisms = %v, want the off-ramp floor %v; a retired id is dropped from what "+
+			"the engine arms — leaving only what always arms — which is exactly why the line above has "+
+			"to be printed", w.cfg.EnableMechanisms, want)
 	}
+}
+
+// The floor a validated set is folded onto is a DEDUPLICATED union, and that is not tidiness: the
+// shipped gemma-4 set already names both off-ramps, so an appending union would hand the engine the
+// same ID twice and MechanismRegistry.Add would refuse it as already registered — turning every
+// startup that matches that set into a failure. The proof runs the union's output through the
+// engine's own build, which is the code that would refuse.
+func TestWithOffRampFloorDeduplicatesAShippedSet(t *testing.T) {
+	t.Parallel()
+
+	entries, err := validated.Shipped()
+	if err != nil {
+		t.Fatalf("validated.Shipped: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Skip("no shipped validated set to fold a floor onto")
+	}
+	floor := mechanisms.OffRampFloor(nil)
+
+	for _, e := range entries {
+		t.Run(e.Key, func(t *testing.T) {
+			got := withOffRampFloor(e.Set, nil)
+
+			for _, id := range floor {
+				if n := countID(got, id); n != 1 {
+					t.Errorf("%q appears %d times in the folded set %v; want exactly 1", id, n, got)
+				}
+			}
+			for _, id := range e.Set {
+				if !slices.Contains(got, id) {
+					t.Errorf("the fold dropped %q from the set: %v", id, got)
+				}
+			}
+			if _, err := apogee.BuildMechanisms(validCfg(t), got); err != nil {
+				t.Errorf("BuildMechanisms over the folded set: %v", err)
+			}
+		})
+	}
+}
+
+// countID is how many times id appears in ids — the duplicate check the test above is entirely about.
+func countID(ids []apogee.MechanismID, id apogee.MechanismID) int {
+	n := 0
+	for _, got := range ids {
+		if got == id {
+			n++
+		}
+	}
+	return n
 }

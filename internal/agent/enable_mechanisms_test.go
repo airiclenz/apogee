@@ -9,10 +9,12 @@ package agent
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -138,9 +140,16 @@ func TestEnableMechanisms_MergesWithProvidedExperimentalHook(t *testing.T) {
 	}
 }
 
-// TestEnableMechanisms_NilAndEmptyBuildNothing: neither a nil nor an empty list arms anything — the
-// default-off posture is untouched, so no MechanismFiredEvent is ever emitted.
-func TestEnableMechanisms_NilAndEmptyBuildNothing(t *testing.T) {
+// TestEnableMechanisms_NilAndEmptyBuildTheOffRampFloor: neither a nil nor an empty list arms
+// NOTHING any more — both build the off-ramp floor (ADR 0070), so an embedder that hands New a
+// Config with no `EnableMechanisms` gets the same recovery guarantees a Driver's own resolver
+// computes instead of a quieter agent nobody asked for. Every other Capability stays default-off
+// (D1): the arm is exactly the two off-ramps, nothing beside them.
+//
+// It is read off the registry rather than off fired events: what the list BUILDS is the claim, and
+// an off-ramp that never triggers on a well-behaved reply would make an event-based assertion say
+// nothing at all.
+func TestEnableMechanisms_NilAndEmptyBuildTheOffRampFloor(t *testing.T) {
 	cases := map[string][]domain.MechanismID{
 		"nil":   nil,
 		"empty": {},
@@ -155,13 +164,24 @@ func TestEnableMechanisms_NilAndEmptyBuildNothing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
-			runExchange(t, a, "hello")
 
-			if hasEvent[domain.MechanismFiredEvent](sink.events) {
-				t.Error("a Mechanism fired though EnableMechanisms was nil/empty")
+			want := mechanisms.OffRampFloor(nil)
+			if got := armedIDs(a, domain.HookPostResponse); !slices.Equal(got, want) {
+				t.Errorf("armed post-response Mechanisms = %v, want the off-ramp floor %v", got, want)
 			}
 		})
 	}
+}
+
+// armedIDs is the canonical IDs a built Agent actually holds at one hook point, sorted — the direct
+// read of what a Config's EnableMechanisms list constructed, independent of whether anything fired.
+func armedIDs(a *Agent, at domain.HookPoint) []domain.MechanismID {
+	var out []domain.MechanismID
+	for _, m := range a.registry.Ordered(at) {
+		out = append(out, m.Descriptor.ID)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // TestEnableMechanisms_ResumeArmsIdentically: Resume builds the same IDs the same way New does —

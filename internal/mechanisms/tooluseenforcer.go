@@ -39,6 +39,9 @@ func newToolUseEnforcer(Deps) (any, error) { return toolUseEnforcerMechanism{}, 
 
 // toolUseEnforcerDescriptor identifies tool_use_enforcer as an off-ramp exempt from suppression
 // (catalogue Table A) — it survives Bypass (ADR 0006 / D5) and is never withdrawn by self-regulation.
+// Being an off-ramp is also what puts it on the DEFAULT-ON floor (ADR 0070, mechanisms.OffRampFloor):
+// a `mechanisms:` block that never names it arms it anyway, and only an explicit
+// `tool_use_enforcer: false` turns it off.
 var toolUseEnforcerDescriptor = domain.MechanismDescriptor{
 	ID:          toolUseEnforcerID,
 	Capability:  domain.CapOffRamp,
