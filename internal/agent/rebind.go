@@ -140,7 +140,7 @@ type RebindSpec struct {
 }
 
 // Rebind swaps the Agent's per-model bindings at a quiescent boundary — the wire model, the
-// system-prompt template, the context window the Budget and Compaction measure against, the
+// system-prompt template, the context window the Budget, Compaction and Pruning measure against, the
 // catalogued Mechanism set, and the profile with the tool roster its third axis spells (ADR 0057)
 // — and rebinds the provider client's wire model with them. It is the
 // engine half of the heartbeat's observed model change (ADR 0024). A spec may carry three facts that

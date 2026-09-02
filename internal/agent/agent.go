@@ -49,7 +49,7 @@ import (
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
 // anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetBypass,
-// SetCompactionEnabled, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
+// SetCompactionEnabled, SetPruneToolResults, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
 // behind its own mutex, so the host (the settings surface, Shift+Tab, /confine) may call it
 // while a Step runs and the change lands at that field's next consumption boundary.
 type Agent struct {
@@ -116,11 +116,13 @@ type Agent struct {
 	scratchMu  sync.RWMutex
 	scratchDir string // live session scratch dir; seeded from cfg.ScratchDir, swappable via SetScratchDir
 
-	// bypassMu, compactionMu and contextFilesMu guard the three settings the settings surface may
-	// swap mid-session (SetBypass / SetCompactionEnabled / SetContextFiles). They follow the modeMu
+	// bypassMu, compactionMu, pruneMu and contextFilesMu guard the four settings the settings
+	// surface may swap mid-session (SetBypass / SetCompactionEnabled / SetPruneToolResults /
+	// SetContextFiles). They follow the modeMu
 	// pattern to the letter — one mutex per field, named for the single field it guards, because the
-	// three are independent facts read at three different boundaries and never as one consistent
-	// tuple. Their cfg counterparts (cfg.Bypass, cfg.Context.CompactionEnabled, cfg.ContextFiles)
+	// four are independent facts read at four different boundaries and never as one consistent
+	// tuple. Their cfg counterparts (cfg.Bypass, cfg.Context.CompactionEnabled,
+	// cfg.Context.PruneToolResults, cfg.ContextFiles)
 	// stay the immutable construction seeds, so the whole-struct cfg copy a sub-agent spawn takes
 	// (newChildAgent) keeps reading fields nothing ever writes.
 	bypassMu sync.RWMutex
@@ -128,6 +130,9 @@ type Agent struct {
 
 	compactionMu sync.RWMutex
 	compaction   bool // live auto-Compaction gate; seeded from cfg.Context.CompactionEnabled, swappable via SetCompactionEnabled
+
+	pruneMu sync.RWMutex
+	prune   bool // live tool-result Pruning gate; seeded from cfg.Context.PruneToolResults, swappable via SetPruneToolResults
 
 	contextFilesMu   sync.RWMutex
 	contextFileNames []string // live workspace context-file names; seeded from cfg.ContextFiles, swappable via SetContextFiles
@@ -890,6 +895,29 @@ func (a *Agent) compactionEnabled() bool {
 	a.compactionMu.RLock()
 	defer a.compactionMu.RUnlock()
 	return a.compaction
+}
+
+// SetPruneToolResults switches stale-tool-result Pruning (the `prune-tool-results` key) on or off
+// for the rest of the session, mirroring SetCompactionEnabled. It takes effect at the next Turn
+// boundary — the gate is consulted once per autoPrune — so switching it off stops the next prune
+// and switching it on arms it again with no rebuild. Already-written stubs are not restored:
+// pruning is a committed rewrite of history, so the switch governs future passes only.
+//
+// It is safe to call from another goroutine (the settings surface) while a Step runs, like SetMode.
+// A sub-agent spawned AFTER the switch inherits the new value at spawn.
+func (a *Agent) SetPruneToolResults(enabled bool) {
+	a.pruneMu.Lock()
+	a.prune = enabled
+	a.pruneMu.Unlock()
+}
+
+// pruneEnabled reports the live Pruning gate under the lock, so the Turn-boundary decision is
+// race-free against a concurrent SetPruneToolResults. cfg.Context.PruneToolResults is only the
+// construction seed.
+func (a *Agent) pruneEnabled() bool {
+	a.pruneMu.RLock()
+	defer a.pruneMu.RUnlock()
+	return a.prune
 }
 
 // setName replaces this Agent's display identity. It exists for ONE writer: the out-of-band namer

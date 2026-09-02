@@ -1843,6 +1843,7 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 
 	e.SetBypass(true)
 	e.SetCompactionEnabled(false)
+	e.SetPruneToolResults(false)
 	e.SetContextFiles(true, []string{"AGENTS.md"})
 
 	if e.pendingBypass == nil || !*e.pendingBypass {
@@ -1850,6 +1851,9 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 	}
 	if e.pendingCompaction == nil || *e.pendingCompaction {
 		t.Errorf("pendingCompaction = %v, want false held for the bind", e.pendingCompaction)
+	}
+	if e.pendingPrune == nil || *e.pendingPrune {
+		t.Errorf("pendingPrune = %v, want false held for the bind", e.pendingPrune)
 	}
 	if e.pendingContextFiles == nil || !e.pendingContextFiles.enable {
 		t.Fatalf("pendingContextFiles = %+v, want the pair held for the bind", e.pendingContextFiles)
@@ -1870,8 +1874,8 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 
 	// A holder nothing moved holds nothing: the Agent is then constructed from its Config alone.
 	fresh := newLateEngine(domain.ModeAskBefore, true)
-	if fresh.pendingBypass != nil || fresh.pendingCompaction != nil || fresh.pendingContextFiles != nil ||
-		fresh.pendingProfile != nil {
+	if fresh.pendingBypass != nil || fresh.pendingCompaction != nil || fresh.pendingPrune != nil ||
+		fresh.pendingContextFiles != nil || fresh.pendingProfile != nil {
 		t.Errorf("a fresh holder already carries overrides: %+v", fresh)
 	}
 }

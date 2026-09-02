@@ -65,6 +65,13 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// slot already there, so the whole tree queues on the top-level Agent's.
 	ctx = domain.WithPromptSlot(ctx, a.prompts)
 
+	// Stale-tool-result Pruning (structural): rewrite tool results the model has finished with into
+	// one-line stubs before this Turn's request is built. It runs BEFORE the fold below because it
+	// is the cheap, non-generative half of the reducer pair — a history pruning can relieve never
+	// pays for a summary call — and, unlike the fold, it needs no quiescent Exchange boundary,
+	// because the rewrite is in place and moves no message (prune.go).
+	a.autoPrune(turn)
+
 	// Automatic Compaction (structural, on by default — item 9): fold the conversation before this
 	// Turn's request is built when the history has outgrown its Budget allocation. It runs BEFORE
 	// consuming pending input so a just-submitted user message survives the fold as its own turn

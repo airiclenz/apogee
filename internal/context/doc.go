@@ -1,7 +1,7 @@
 // Package context manages the model's working context: Budget allocation, the
 // context builder, generative Compaction (the default reducer), stale-tool-result
-// Pruning, and tool-result capping. It is three of the four context-reduction seams;
-// the fourth, History truncation, is a separate off-by-default Mechanism (package
+// Pruning, and tool-result capping. It is four of the five context-reduction seams;
+// the fifth, History truncation, is a separate off-by-default Mechanism (package
 // mechanisms).
 //
 // Generative Compaction is implemented (Compact): it summarizes a conversation and

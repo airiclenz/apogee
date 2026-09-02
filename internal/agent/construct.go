@@ -114,6 +114,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		scratchDir:         cfg.ScratchDir,         // and the live, session-following scratch root (SetScratchDir)
 		bypass:             cfg.Bypass,             // and the three the settings surface swaps: Bypass …
 		compaction:         cfg.Context.CompactionEnabled,
+		prune:              cfg.Context.PruneToolResults,
 		contextFileNames:   cfg.ContextFiles,
 		parallelAgents:     cfg.ParallelAgents,                   // and the fan-out width the host resolved per bound server
 		effortDialect:      toProviderDialect(cfg.EffortDialect), // and the wire shape this server reads an effort intent in, so a Driver that never rebinds still speaks it (ADR 0060, ADR 0031)

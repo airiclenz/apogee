@@ -7,7 +7,7 @@ inside that loop to give smaller models the help they need.
 The hard constraint, inherited unchanged from the predecessor projects: **Apogee's
 Mechanisms must never make the underlying model perform worse than the same agent with
 those Mechanisms off.** That floor is **Bypass mode** (Mechanisms off, structure on) —
-**not** a naked model, because Budget and Compaction are structural and load-bearing (a
+**not** a naked model, because Budget, Compaction and Pruning are structural and load-bearing (a
 truly naked model just overflows its context window). The constraint is **proved at bench
 time** as a ground-truth, distributional non-inferiority gate against Bypass (see
 [ADR 0009](docs/adr/0009-the-ab-decision-rule.md)); in production it is only

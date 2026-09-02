@@ -70,6 +70,7 @@ type applySettingSpy struct {
 	modes        []apogee.Mode
 	bypass       []bool
 	compaction   []bool
+	prune        []bool
 	contextFiles []contextFileChoice
 	swaps        []*apogee.ToolRegistry
 	profiles     []apogee.ModelProfile
@@ -84,6 +85,7 @@ type applySettingSpy struct {
 func (s *applySettingSpy) SetMode(m apogee.Mode)        { s.modes = append(s.modes, m) }
 func (s *applySettingSpy) SetBypass(on bool)            { s.bypass = append(s.bypass, on) }
 func (s *applySettingSpy) SetCompactionEnabled(on bool) { s.compaction = append(s.compaction, on) }
+func (s *applySettingSpy) SetPruneToolResults(on bool)  { s.prune = append(s.prune, on) }
 func (s *applySettingSpy) SetContextFiles(on bool, n []string) {
 	s.contextFiles = append(s.contextFiles, contextFileChoice{enable: on, names: n})
 }
@@ -107,7 +109,7 @@ func (s *applySettingSpy) SetProfile(p apogee.ModelProfile) error {
 // drove reports how many engine seams the spy was driven through in total — the assertion a key that
 // should have touched nothing makes.
 func (s *applySettingSpy) drove() int {
-	return len(s.modes) + len(s.bypass) + len(s.compaction) + len(s.contextFiles) +
+	return len(s.modes) + len(s.bypass) + len(s.compaction) + len(s.prune) + len(s.contextFiles) +
 		len(s.swaps) + len(s.profiles)
 }
 

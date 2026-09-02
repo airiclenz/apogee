@@ -38,7 +38,8 @@
 // the auto-compaction trigger and its allocation arithmetic, the emergency fold, the user bridge
 // that fold appends and the marker a summary cut at the output cap carries
 // (prompts/overflow-bridge.txt, prompts/summary-truncated.txt), and the summarizer's own fixed
-// sampling. selfreg.go is per-Session self-regulation: the proxy-signal
+// sampling. prune.go is its cheap, non-generative twin: the Turn-boundary trigger that drives
+// internal/context.Prune over the committed history and reports the reclaim as a PruneEvent. selfreg.go is per-Session self-regulation: the proxy-signal
 // safety net that withdraws a Mechanism hurting the model, deliberately weaker than the
 // bench's A/B gate and reset on Resume.
 //

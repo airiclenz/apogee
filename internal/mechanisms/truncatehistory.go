@@ -63,7 +63,8 @@ func newTruncateHistory(Deps) (any, error) {
 // truncateHistoryDescriptor identifies truncate_history as a strikes-3 proactive-nudge Mechanism
 // (catalogue Table A, footnote 2: a context-shaper is neither off-ramp nor response-repair;
 // proactive-nudge carries the Bypass semantics — disabled under Bypass, D5 — while the structural
-// Budget and Compaction stay on, D6). It is withdrawn by self-regulation after repeated non-help.
+// Budget, Compaction and Pruning stay on, D6). It is withdrawn by self-regulation after repeated
+// non-help.
 var truncateHistoryDescriptor = domain.MechanismDescriptor{
 	ID:          truncateHistoryID,
 	Capability:  domain.CapProactiveNudge,

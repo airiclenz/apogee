@@ -1648,7 +1648,7 @@ func TestApplyConfigRememberModel(t *testing.T) {
 
 // The context-window config block parses into opts.contextWindow (item 3): a file-only key (no
 // flag/env). This proves the config-file surface lands in opts; the downstream opts →
-// ContextConfig.MaxContextTokens threading (which the Budget and Compaction bind against) is
+// ContextConfig.MaxContextTokens threading (which the Budget, Compaction and Pruning bind against) is
 // pinned separately by TestRunRootThreadsContextWindow in wire_boot_test.go.
 func TestApplyConfigContextWindow(t *testing.T) {
 	t.Parallel()

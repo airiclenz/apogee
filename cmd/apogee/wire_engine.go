@@ -75,6 +75,7 @@ type lateEngine struct {
 	// seed its Config carried — which is the difference between "not moved" and "moved to false".
 	pendingBypass       *bool
 	pendingCompaction   *bool
+	pendingPrune        *bool
 	pendingContextFiles *contextFileChoice
 	// pendingProfile is the same idea for the one IDLE-ONLY mutator that has to be remembered: a
 	// dialect swap needs an Agent to build its parsers, but a bind with no memory of the edit would
@@ -160,6 +161,9 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	}
 	if e.pendingCompaction != nil {
 		agent.SetCompactionEnabled(*e.pendingCompaction)
+	}
+	if e.pendingPrune != nil {
+		agent.SetPruneToolResults(*e.pendingPrune)
 	}
 	if c := e.pendingContextFiles; c != nil {
 		agent.SetContextFiles(c.enable, c.names)
@@ -353,6 +357,18 @@ func (e *lateEngine) SetCompactionEnabled(enabled bool) {
 	e.mu.Unlock()
 	if agent != nil {
 		agent.SetCompactionEnabled(enabled)
+	}
+}
+
+// SetPruneToolResults arms or disarms stale-tool-result Pruning (`prune-tool-results`), on the same
+// terms as SetCompactionEnabled above.
+func (e *lateEngine) SetPruneToolResults(enabled bool) {
+	e.mu.Lock()
+	e.pendingPrune = &enabled
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetPruneToolResults(enabled)
 	}
 }
 

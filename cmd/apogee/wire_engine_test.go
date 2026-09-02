@@ -78,3 +78,32 @@ func TestLateEngineRemembersTheDelegationSeatUntilTheBind(t *testing.T) {
 		t.Errorf("pendingSeat after the opt-out = %+v; want nil", engine.pendingSeat)
 	}
 }
+
+// TestLateEngineReplaysThePruneGateAtTheBind pins the newest anytime-safe mutator on the holder's
+// remember-then-install contract: a `prune-tool-results` edit made while the settings pane is open
+// and no server is chosen must reach the Agent the moment one is built, or the session runs the
+// whole way on the seed its Config carried. The holder's memory is asserted here and the bind is
+// driven to prove the replay path is live; what SetPruneToolResults DOES to an Agent is pinned in
+// internal/agent's own prune tests, the same split the delegation seat above follows.
+func TestLateEngineReplaysThePruneGateAtTheBind(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	engine.SetPruneToolResults(false)
+	if engine.pendingPrune == nil || *engine.pendingPrune {
+		t.Fatalf("pendingPrune = %v; want false held for the bind", engine.pendingPrune)
+	}
+
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	// And past the bind the door stays open and stays anytime-safe: the edit goes straight to the
+	// Agent, and the holder keeps the value so a later bind of this session installs it too.
+	engine.SetPruneToolResults(true)
+	if engine.pendingPrune == nil || !*engine.pendingPrune {
+		t.Errorf("pendingPrune after a bound edit = %v; want true", engine.pendingPrune)
+	}
+}

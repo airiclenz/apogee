@@ -364,7 +364,7 @@ type DelegationConfig struct {
 	MaxSteps int
 }
 
-// ContextConfig governs the structural context reducers — Budget and Compaction —
+// ContextConfig governs the structural context reducers — Budget, Compaction and Pruning —
 // which are NOT Mechanisms and stay on under Bypass (CONTEXT: Budget, Compaction).
 type ContextConfig struct {
 	MaxContextTokens int // 0 ⇒ window unknown; the CLI discovers it or the context-window key supplies it (the Budget then allocates nothing and the engine's growth bounds fall back to one conservative assumed ceiling — internal/agent, ADR 0018)
@@ -401,6 +401,16 @@ type ContextConfig struct {
 	MaxOutputTokens int
 
 	CompactionEnabled bool // generative summarisation; default true
+
+	// PruneToolResults arms the cheap, NON-generative reducer: at a Turn boundary the engine
+	// rewrites stale tool results into a one-line stub naming the call that produced them
+	// (internal/context.Prune), so a long Exchange stops spending its window on output the model
+	// has already acted on. Like CompactionEnabled it is STRUCTURAL, not a Mechanism — it stays on
+	// under Bypass and is opted out only by the file-only `prune-tool-results: false` key — and
+	// like it, it is only the construction SEED: the live gate is swapped mid-session through
+	// Agent.SetPruneToolResults. Default true; the thresholds themselves are code constants, never
+	// configuration.
+	PruneToolResults bool
 }
 
 // ----------------------------------------------------------------------------
