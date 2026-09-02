@@ -653,12 +653,12 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 			next: head + span + 1, // the span is elided whole: it is read in the run's own view
 		}
 	}
-	// Adjacent runs of DIFFERENT tools fold under one umbrella (toolSuperGroup, item 5), which
-	// is asked before the same-label run because a same-label run inside one is a row of it rather
-	// than a block of its own. The question is only ever asked at a block head — the walk's index is
-	// one by construction, since every shape either advances by a single entry or steps over a whole
-	// block — and toolSuperGroup is only correct there: asked mid-run it would answer with a
-	// partial first run.
+	// Any run of 2+ groupable calls folds under one umbrella (toolSuperGroup) — a single same-label
+	// run and adjacent runs of DIFFERENT tools alike — which is asked before the same-label run
+	// below because a same-label run is a ROW of the umbrella rather than a block of its own. The
+	// question is only ever asked at a block head — the walk's index is one by construction, since
+	// every shape either advances by a single entry or steps over a whole block — and
+	// toolSuperGroup is only correct there: asked mid-run it would answer with a partial first run.
 	//
 	// The umbrella covers its calls and nothing else (superGroup.calls), so the walk steps
 	// over exactly them. Its per-entry state is in the paint key already: blockKey spans the

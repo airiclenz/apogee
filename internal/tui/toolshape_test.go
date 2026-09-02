@@ -43,10 +43,23 @@ func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"pwd"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "/workspace/repos/apogee"}})
 
+	// Two differing one-line outputs neither sum nor agree, so the type row's aggregate is blank.
 	want := strings.Join([]string{
-		"✦ Terminal (2)",
-		"  ┝ git rev-parse HEAD ⋯ abc1234",
-		"  ┕ pwd ⋯ /workspace/repos/apogee",
+		"✦ Tools (2 calls)",
+		groupMemberLine("  ┕ Terminal (2) ⋯"),
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("collapsed one-line Run group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
+	}
+	want = strings.Join([]string{
+		"✦ Tools (2 calls)",
+		leaderEdgeRow("  ┕ Terminal (2) ⋯", glyphExpanded),
+		"  │ ┝ git rev-parse HEAD ⋯ abc1234",
+		"  │ ┕ pwd ⋯ /workspace/repos/apogee",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("one-line Run group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -537,10 +550,14 @@ func TestRenderGroupBreakers(t *testing.T) {
 		if run := toolCallRun(tr.entries, 0); len(run) != 2 {
 			t.Fatalf("toolCallRun over the two Terminal calls = %d views, want 2 — a body no longer breaks a run", len(run))
 		}
+		if !tr.setTypeExpanded(0, true) {
+			t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
+		}
 		want := strings.Join([]string{
-			"✦ Terminal (2)",
-			"  ┝ go build ⋯ done",
-			groupMemberLine("  ┕ go test ⋯ exit 0"),
+			"✦ Tools (2 calls)",
+			leaderEdgeRow("  ┕ Terminal (2) ⋯", glyphExpanded),
+			"  │ ┝ go build ⋯ done",
+			groupMemberLine("  │ ┕ go test ⋯ exit 0"),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("joined group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)

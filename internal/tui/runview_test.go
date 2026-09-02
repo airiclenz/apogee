@@ -358,6 +358,13 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 		for i := range 60 {
 			readCall(&m.transcript, "r"+strconv.Itoa(i), "a.go", 1, 5, 1)
 		}
+		// The 60 reads are ONE same-type run and fold under the umbrella, so the view paints them as
+		// a single collapsed type row until it is opened — and this case needs the tall paint.
+		// entries[0:12] are the prompts and entries[12] the delegation, so the run's head is 13.
+		const runHead = 13
+		if !m.transcript.setTypeExpanded(runHead, true) {
+			t.Fatalf("setTypeExpanded(%d, true) = false; want the reads' type row open", runHead)
+		}
 		subAgentReport(&m.transcript, "s1", "all clear", 0)
 		for range 12 {
 			m.transcript.addUser("and again", nil)

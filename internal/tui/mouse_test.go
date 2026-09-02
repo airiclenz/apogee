@@ -1650,10 +1650,25 @@ func memberRows(t *testing.T, m Model, member int) []int {
 	return rows
 }
 
-// TestGroupMemberClickTogglesOnlyThatMember is per-member expansion, whole: a group's members each
-// own a state, so a click opens the one under the pointer and leaves its siblings — and the group
-// itself, which has no state at all — exactly as they were. Every row of the open member closes it
-// again, the see-less row it grew included, because the whole member is its own click surface.
+// typeRow is the line the umbrella's type row is painted on, read off the marks the painter made.
+// A member is reached in TWO clicks — the type row first, then the row itself — so a test that aims
+// at a member has to open the row above it exactly as a human does.
+func typeRow(t *testing.T, m Model) int {
+	t.Helper()
+	for i, target := range m.lineTargets {
+		if target.kind == targetType {
+			return i
+		}
+	}
+	t.Fatalf("no rendered row is the umbrella's type row:\n%s", strings.Join(m.lines, "\n"))
+	return -1
+}
+
+// TestGroupMemberClickTogglesOnlyThatMember is per-member expansion, whole: a run's members each
+// own a state, so a click opens the one under the pointer and leaves its siblings exactly as they
+// were. Every row of the open member closes it again, the see-less row it grew included, because
+// the whole member is its own click surface. Reaching a member takes the two clicks any umbrella
+// member takes: the type row, then the member.
 func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 	// entries[0] is the prompt, so the run's three calls are entries 1..3 and the sketch's "middle
 	// one expanded" (docs/layout/tool-layout.md) is entry 2.
@@ -1661,6 +1676,10 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 
 	open := func(t *testing.T, m Model) Model {
 		t.Helper()
+		m = clickCell(t, m, 4, screenRow(t, m, typeRow(t, m)))
+		if !m.transcript.entries[groupHead].typeExpanded {
+			t.Fatal("a click on the type row did not open the run's members")
+		}
 		row := memberRows(t, m, middle)[0]
 		m = clickCell(t, m, 4, screenRow(t, m, row))
 		if !m.transcript.entries[middle].expanded {
@@ -1722,17 +1741,16 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 				t.Errorf("entry %d expanded = %v, want %v (only the clicked member may flip)", i, was, want)
 			}
 		}
-		// The header itself is no click target: a click there keeps its selection meaning.
-		header := memberRows(t, m, groupHead)[0] - 1
-		if m.lineTargets[header].kind != targetNone {
-			t.Fatalf("setup: line %d is marked %v, not the inert group header this case needs",
+		// With a member open the umbrella's header IS a click target — the one that closes the lot —
+		// so the case that used to assert an inert header now asserts the close-all it became.
+		header := typeRow(t, m) - 1
+		if m.lineTargets[header].kind != targetUmbrella {
+			t.Fatalf("setup: line %d is marked %v, not the umbrella header this case needs",
 				header, m.lineTargets[header].kind)
 		}
-		painted := strings.Join(m.lines, "\n")
 		m = clickCell(t, m, 2, screenRow(t, m, header))
-		if got := strings.Join(m.lines, "\n"); got != painted {
-			t.Errorf("a click on the group header repainted the transcript:\n--- got ---\n%s\n--- want ---\n%s",
-				got, painted)
+		if m.transcript.entries[middle].expanded || m.transcript.entries[groupHead].typeExpanded {
+			t.Error("a click on the umbrella header left the run open; it closes all")
 		}
 	})
 }

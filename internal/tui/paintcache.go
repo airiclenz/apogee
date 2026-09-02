@@ -67,7 +67,7 @@ const (
 	shapeEntry         blockShape = iota // renderEntryLines — one entry, one block
 	shapeToolRun                         // renderToolBlock over a folded run of same-label calls
 	shapeSubAgentRun                     // renderSubAgentRun — the call plus the run nested under it
-	shapeToolSuper                       // renderSuperGroup — the umbrella over adjacent runs of different tools
+	shapeToolSuper                       // renderSuperGroup — the umbrella over a run of 2+ groupable calls
 	shapeSubAgentGroup                   // renderSubAgentGroup — the folded list of adjacent delegations
 )
 

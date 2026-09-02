@@ -477,12 +477,17 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 			}
 		}
 
+		replayed := &transcript{entries: got}
+		if !replayed.setTypeExpanded(0, true) {
+			t.Fatal("setTypeExpanded(0, true) = false; want the Ask User run's type row open")
+		}
 		want := strings.Join([]string{
-			"✦ Ask User (2)",
-			"  ┝ Ship it? ⋯",
-			"  ┕ Tag it? ⋯",
+			"✦ Tools (2 calls)",
+			leaderEdgeRow("  ┕ Ask User (2) ⋯", glyphExpanded),
+			"  │ ┝ Ship it? ⋯",
+			"  │ ┕ Tag it? ⋯",
 		}, "\n")
-		if out := renderPlain(&transcript{entries: got}, 80); out != want {
+		if out := renderPlain(replayed, 80); out != want {
 			t.Errorf("replayed pending questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
 		}
 	})
@@ -515,12 +520,17 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 			}
 		}
 
+		replayed := &transcript{entries: got}
+		if !replayed.setTypeExpanded(0, true) {
+			t.Fatal("setTypeExpanded(0, true) = false; want the Ask User run's type row open")
+		}
 		want := strings.Join([]string{
-			"✦ Ask User (2)",
-			"  ┝ Ship it? ⋯ " + errLine,
-			"  ┕ Tag it? ⋯ " + errLine,
+			"✦ Tools (2 calls)",
+			leaderEdgeRow("  ┕ Ask User (2) ⋯ 2 errors", glyphExpanded),
+			"  │ ┝ Ship it? ⋯ " + errLine,
+			"  │ ┕ Tag it? ⋯ " + errLine,
 		}, "\n")
-		if out := renderPlain(&transcript{entries: got}, 80); out != want {
+		if out := renderPlain(replayed, 80); out != want {
 			t.Errorf("replayed failed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
 		}
 
@@ -532,6 +542,9 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 				ID: q.id, Tool: "ask_user", Arguments: []byte(`{"question":"` + q.question + `"}`)}})
 			live.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 				CallID: q.id, Content: "could not ask the user: asker closed", IsError: true}})
+		}
+		if !live.setTypeExpanded(0, true) {
+			t.Fatal("setTypeExpanded(0, true) = false; want the live run's type row open")
 		}
 		if out := renderPlain(live, 80); out != want {
 			t.Errorf("live failed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)

@@ -2458,11 +2458,11 @@ func subAgentCard(name string, depth int) entry {
 	}, "", workspaceRoot{})}
 }
 
-// A super-group forms at two adjacent same-depth runs of DIFFERENT labels, a lone call counting as a
-// run of 1, and ends at the first thing that is not such a run: a non-tool entry, a sub-agent block,
-// a call standing at another depth, a call the presenter left unfoldable. One run alone is the
-// same-label group that already had a header of its own and is no umbrella
-// (docs/layout/tool-layout.md, "Vocabulary"; design call 1).
+// A super-group forms at TWO groupable calls at one depth — one same-label run of 2+, or adjacent
+// runs of different labels, a lone call counting as a run of 1 — and ends at the first thing that is
+// not such a run: a non-tool entry, a sub-agent block, a call standing at another depth, a call the
+// presenter left unfoldable. Only a single groupable call heads no umbrella
+// (docs/layout/tool-layout.md, "Vocabulary"; plan "2026-09-02 - 01", item 3).
 func TestTranscriptSuperGroupFormation(t *testing.T) {
 	t.Parallel()
 
@@ -2491,13 +2491,28 @@ func TestTranscriptSuperGroupFormation(t *testing.T) {
 			calls: 3,
 		},
 		{
-			name:    "one run alone is the same-label group, not an umbrella",
+			name:    "a same-type run of 2 forms an umbrella of one type row",
 			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("Read", "b.go", 0)},
+			at:      0,
+			want:    superGroup{{at: 0, n: 2}},
+			calls:   2,
+		},
+		{
+			name: "a same-type run of 3 is still one type row",
+			entries: []entry{toolCallCard("Terminal", "go build", 0), toolCallCard("Terminal", "go vet", 0),
+				toolCallCard("Terminal", "go test", 0)},
+			at:    0,
+			want:  superGroup{{at: 0, n: 3}},
+			calls: 3,
+		},
+		{
+			name:    "a lone call heads nothing",
+			entries: []entry{toolCallCard("Read", "a.go", 0)},
 			at:      0,
 		},
 		{
-			name:    "a single call heads nothing",
-			entries: []entry{toolCallCard("Read", "a.go", 0)},
+			name:    "a sub-agent run of 2 is no umbrella either",
+			entries: []entry{subAgentCard("surveyor", 0), subAgentCard("auditor", 0)},
 			at:      0,
 		},
 		{
@@ -2555,9 +2570,9 @@ func TestTranscriptSuperGroupFormation(t *testing.T) {
 	}
 }
 
-// Formation is LIVE (design call 2): the umbrella exists the moment the second different-label run
-// starts — while its last call is still open — and grows as calls append, because membership is
-// derived from the entries every time it is asked rather than recorded when a call lands.
+// Formation is LIVE (design call 2): the umbrella exists the moment the SECOND groupable call is
+// placed — same label or not, while it is still open — and grows as calls append, because membership
+// is derived from the entries every time it is asked rather than recorded when a call lands.
 func TestTranscriptSuperGroupFormsLiveAndGrows(t *testing.T) {
 	t.Parallel()
 
@@ -2567,28 +2582,29 @@ func TestTranscriptSuperGroupFormsLiveAndGrows(t *testing.T) {
 	}
 	call("c1", "read_file", `{"path":"a.go"}`)
 	if got := toolSuperGroup(tr.entries, 0); got != nil {
-		t.Fatalf("one call formed %v; a run of 1 is no umbrella on its own", got)
+		t.Fatalf("one call formed %v; a lone call is no umbrella on its own", got)
 	}
 
-	// The second run's first call is still open — no result has folded into it — and the umbrella is
-	// already there, which is what puts the running call on its last row.
-	call("c2", "terminal", `{"command":"go build"}`)
-	want := superGroup{{at: 0, n: 1}, {at: 1, n: 1}}
+	// The second call carries the SAME label and is still open — no result has folded into it — and
+	// the umbrella is already there, which is what puts the running call on its last row.
+	call("c2", "read_file", `{"path":"b.go"}`)
+	want := superGroup{{at: 0, n: 2}}
 	if got := toolSuperGroup(tr.entries, 0); !reflect.DeepEqual(got, want) {
-		t.Fatalf("umbrella at the second run = %v; want %v formed live", got, want)
+		t.Fatalf("umbrella at the second same-label call = %v; want %v formed live", got, want)
 	}
 	if tr.entries[1].done {
 		t.Fatal("the fixture's last call is settled; the live-formation case needs it open")
 	}
 
-	call("c3", "terminal", `{"command":"go vet"}`)
-	call("c4", "read_file", `{"path":"b.go"}`)
+	call("c3", "terminal", `{"command":"go build"}`)
+	call("c4", "terminal", `{"command":"go vet"}`)
+	call("c5", "read_file", `{"path":"c.go"}`)
 	got := toolSuperGroup(tr.entries, 0)
-	if want := (superGroup{{at: 0, n: 1}, {at: 1, n: 2}, {at: 3, n: 1}}); !reflect.DeepEqual(got, want) {
+	if want := (superGroup{{at: 0, n: 2}, {at: 2, n: 2}, {at: 4, n: 1}}); !reflect.DeepEqual(got, want) {
 		t.Errorf("grown umbrella = %v; want %v — a call joins its run, a new label opens one", got, want)
 	}
-	if n := got.calls(); n != 4 {
-		t.Errorf("grown umbrella counts %d calls; want 4", n)
+	if n := got.calls(); n != 5 {
+		t.Errorf("grown umbrella counts %d calls; want 5", n)
 	}
 }
 

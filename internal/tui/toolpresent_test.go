@@ -2288,11 +2288,12 @@ func proseView(text string) toolView {
 	return toolView{Summary: namedSummary(detailLine{Text: text})}
 }
 
-// TestRunAggregate is design call 10 in one table: a type row counts its run's FAILURES first, else
-// sums where the members' stats sum, else says nothing at all and lets the dots run to the ▶. Every
-// shape a registry stat hook produces is represented — the house plural, a producer's fixed spelling,
-// an invariant noun, a diffstat, a phrase with no arithmetic — because a hook that changed the shape
-// it answers in would show up here as a run that stopped adding up.
+// TestRunAggregate is design call 10 in one table, in the rule order plan "2026-09-02 - 01" settled:
+// a type row counts its run's FAILURES first, else sums where the members' stats sum, else shows the
+// one reading the whole run agrees on, else says nothing at all and lets the dots run to the ▶.
+// Every shape a registry stat hook produces is represented — the house plural, a producer's fixed
+// spelling, an invariant noun, a diffstat, a phrase with no arithmetic — because a hook that changed
+// the shape it answers in would show up here as a run that stopped adding up.
 func TestRunAggregate(t *testing.T) {
 	cases := []struct {
 		name string
@@ -2321,10 +2322,19 @@ func TestRunAggregate(t *testing.T) {
 			[]toolView{proseView(deniedSummary), proseView(cancelledSummary), statView(pluralStat(5, "line"))}, "2 errors"},
 		{"different nouns do not sum",
 			[]toolView{statView(pluralStat(3, "hit")), statView(pluralStat(2, "file"))}, ""},
-		{"a stat with no arithmetic is blank",
-			[]toolView{statView(plainStat("exit 0")), statView(plainStat("exit 0"))}, ""},
-		{"a verdict is blank",
+		{"two 2-line reads sum to four",
+			[]toolView{statView(pluralStat(2, "line")), statView(pluralStat(2, "line"))}, "4 lines"},
+		{"a stat with no arithmetic the run agrees on is shown once",
+			[]toolView{statView(plainStat("exit 0")), statView(plainStat("exit 0"))}, "exit 0"},
+		{"a whole run of them is still shown once",
+			[]toolView{statView(plainStat("exit 0")), statView(plainStat("exit 0")),
+				statView(plainStat("exit 0")), statView(plainStat("exit 0"))}, "exit 0"},
+		{"nearly the same phrase is not the same phrase",
+			[]toolView{statView(plainStat("exit 0")), statView(plainStat("exit 0 · 1.2s"))}, ""},
+		{"a verdict the run disagrees on is blank",
 			[]toolView{statView(plainStat("PASS")), statView(plainStat("FAIL"))}, ""},
+		{"failures are counted even where the run agrees on the words",
+			[]toolView{proseView(deniedSummary), proseView(deniedSummary)}, "2 errors"},
 		{"a mixed run is blank",
 			[]toolView{statView(pluralStat(5, "line")), statView(plainStat("exit 0"))}, ""},
 		{"an unfinished member is blank",

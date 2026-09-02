@@ -9,9 +9,10 @@ import (
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
-// A batch of reads folds into one block: a single ✦ Read header carrying the member count,
-// ┝ ┝ ┕ rails, and every member row a leader row — target left, dotted leader, outcome flush
-// against the row's right edge — the shape docs/layout/tool-layout.md sketches.
+// A batch of reads folds under the umbrella like any other run of 2+ groupable calls: the header
+// counts the CALLS, one type row counts the run and aggregates it, and the member rows — target
+// left, dotted leader, outcome flush against the row's right edge — lie one level down under the
+// opened row, the shape docs/layout/tool-layout.md sketches.
 func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "README.md", 1, 154, 0)
@@ -19,13 +20,25 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	readCall(tr, "c3", "ISSUES.md", 1, 8, 0)
 
 	want := strings.Join([]string{
-		"✦ Read (3)",
-		"  ┝ README.md ⋯ 154 lines",
-		"  ┝ TODO.md ⋯ 408 lines",
-		"  ┕ ISSUES.md ⋯ 8 lines",
+		"✦ Tools (3 calls)",
+		groupMemberLine("  ┕ Read (3) ⋯ 570 lines"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
-		t.Errorf("grouped block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Errorf("collapsed same-type run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
+	}
+	want = strings.Join([]string{
+		"✦ Tools (3 calls)",
+		leaderEdgeRow("  ┕ Read (3) ⋯ 570 lines", glyphExpanded),
+		"  │ ┝ README.md ⋯ 154 lines",
+		"  │ ┝ TODO.md ⋯ 408 lines",
+		"  │ ┕ ISSUES.md ⋯ 8 lines",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("opened same-type run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
@@ -37,10 +50,14 @@ func TestRenderGroupsInsideSubAgent(t *testing.T) {
 	readCall(tr, "c1", "a.go", 1, 5, 1)
 	readCall(tr, "c2", "bb.go", 1, 9, 1)
 
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
+	}
 	want := strings.Join([]string{
-		"│ ✦ Read (2)",
-		"│   ┝ a.go ⋯ 5 lines",
-		"│   ┕ bb.go ⋯ 9 lines",
+		"│ ✦ Tools (2 calls)",
+		"│ " + leaderEdgeRow("  ┕ Read (2) ⋯ 14 lines", glyphExpanded),
+		"│   │ ┝ a.go ⋯ 5 lines",
+		"│   │ ┕ bb.go ⋯ 9 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("railed group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -56,10 +73,14 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "multi_find_and_replace", Arguments: []byte(`{"path":"bb.go"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "applied 2 replacements to bb.go"}})
 
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Replace run's type row open")
+	}
 	want := strings.Join([]string{
-		"✦ Replace (2)",
-		"  ┝ a.go ⋯ replaced text in a.go",
-		"  ┕ bb.go ⋯ applied 2 replacements to bb.go",
+		"✦ Tools (2 calls)",
+		leaderEdgeRow("  ┕ Replace (2) ⋯", glyphExpanded),
+		"  │ ┝ a.go ⋯ replaced text in a.go",
+		"  │ ┕ bb.go ⋯ applied 2 replacements to bb.go",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("shared-label group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -194,8 +215,10 @@ func runGroup(depth int, calls ...[2]string) *transcript {
 // TestRenderGroupsBodyCarryingCalls is the grouping scope's new half (design call 3): a call that
 // carries a body groups exactly as a bodiless one does, and pays for it with a member row held to
 // ONE line. Three Terminal calls with output are the sketch's own case
-// (docs/layout/tool-layout.md): one header counting them, one row each, and every ▶ flush against
-// the block's right edge, whatever the commands beneath it are doing.
+// (docs/layout/tool-layout.md): the umbrella counting the calls over one type row that aggregates
+// the run — three "exit 0"s are one reading between them (runAggregate) — and, opened, one member
+// row each with every ▶ flush against the block's right edge, whatever the commands beneath it are
+// doing.
 func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 	tr := &transcript{}
 	for _, c := range []struct{ id, command, output string }{
@@ -209,20 +232,33 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Terminal (3)",
-		groupMemberLine("  ┝ go build ./... ⋯ exit 0"),
-		groupMemberLine("  ┝ go vet ./... ⋯ exit 0"),
-		groupMemberLine("  ┕ go test ./... ⋯ exit 0"),
+		"✦ Tools (3 calls)",
+		groupMemberLine("  ┕ Terminal (3) ⋯ exit 0"),
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("collapsed body-carrying run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
+	}
+	want = strings.Join([]string{
+		"✦ Tools (3 calls)",
+		leaderEdgeRow("  ┕ Terminal (3) ⋯ exit 0", glyphExpanded),
+		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
+		groupMemberLine("  │ ┝ go vet ./... ⋯ exit 0"),
+		groupMemberLine("  │ ┕ go test ./... ⋯ exit 0"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("body-carrying group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
-// The count is the group's own arithmetic and is painted as such: it rides the header in the faint
+// The count is the run's own arithmetic and is painted as such: it rides the TYPE ROW in the faint
 // indicator tone rather than in the label's bold gold, so a reader scanning the gold down the
-// left edge does not read "(3)" as part of the tool's name (design call 6). The header wears no
-// state indicator and takes no click — the members own their state.
+// left edge does not read "(2)" as part of the tool's name (design call 6). The umbrella's header
+// wears no state indicator and takes no click — the type rows own their state, and the header's own
+// count is of CALLS.
 func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
@@ -232,18 +268,22 @@ func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
 	readCall(tr, "c1", "main.go", 1, 154, 0)
 	readCall(tr, "c2", "util.go", 1, 42, 0)
 
-	header := tr.renderLines(th, 80)[0]
-	if want := th.toolIndicator.Render("(2)"); !strings.Contains(header, want) {
-		t.Errorf("header %q does not carry the faint-styled count %q", header, want)
+	rows := tr.renderLines(th, 80)
+	header, typeRow := rows[0], rows[1]
+	// The type row paints the count in one run with the space before it, so the fixture is that run.
+	if want := th.toolIndicator.Render(" (2)"); !strings.Contains(typeRow, want) {
+		t.Errorf("type row %q does not carry the faint-styled count %q", typeRow, want)
 	}
-	if styled := th.toolLabel.Render("Read (2)"); strings.Contains(header, styled) {
-		t.Errorf("header %q paints the count in the label's own style", header)
+	if styled := th.toolLabel.Render("Read (2)"); strings.Contains(typeRow, styled) {
+		t.Errorf("type row %q paints the count in the label's own style", typeRow)
 	}
 	if strings.ContainsAny(strip(header), glyphCollapsed+glyphExpanded) {
-		t.Errorf("group header %q wears a state indicator; the members own their state", strip(header))
+		t.Errorf("umbrella header %q wears a state indicator; the type rows own their state", strip(header))
 	}
-	if got := blockMarks(t, tr, 80); got != nil {
-		t.Errorf("group marks = %+v, want none — a group header is not a click target", got)
+	for _, mark := range blockMarks(t, tr, 80) {
+		if mark.line == 0 {
+			t.Errorf("umbrella header is a click target %+v; want none", mark)
+		}
 	}
 }
 
@@ -270,9 +310,12 @@ func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
 	// The RAW rows, not renderPlain's: the leader's length is the very thing under test here, and
 	// renderPlain collapses it (transcript_test.go).
 	th := newTheme(scheme.Default())
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
+	}
 	rows := tr.renderLines(th, width)
-	if len(rows) != 3 {
-		t.Fatalf("group painted %d rows, want 3 — one header and one row per member:\n%s",
+	if len(rows) != 4 {
+		t.Fatalf("group painted %d rows, want 4 — the umbrella header, its type row and one row per member:\n%s",
 			len(rows), strings.Join(rows, "\n"))
 	}
 	for _, tc := range []struct {
@@ -281,8 +324,8 @@ func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
 		summary string
 		cut     bool
 	}{
-		{"clipped member", strip(rows[1]), "abc1234", true},
-		{"short member", strip(rows[2]), "/repo", false},
+		{"clipped member", strip(rows[2]), "abc1234", true},
+		{"short member", strip(rows[3]), "/repo", false},
 	} {
 		if got := th.measure.Width(tc.row); got != toolRowCells(th, width) {
 			t.Errorf("%s measures %d cells, want the row's whole room of %d: %q",
@@ -313,19 +356,23 @@ func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
 		[2]string{"go build ./...", "ok\nbuilt"},
 		[2]string{"go vet ./...", "clean\nno findings\ndone"},
 		[2]string{"go test ./...", "ok\nPASS"})
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setup: entries[0] does not head the umbrella's Terminal type row")
+	}
 	if !tr.setExpanded(1, true) {
 		t.Fatal("setup: entries[1] is not a toggleable block")
 	}
 
 	want := strings.Join([]string{
-		"✦ Terminal (3)",
-		groupMemberLine("  ┝ go build ./... ⋯ exit 0"),
-		leaderEdgeRow("  ┝ go vet ./... ⋯ exit 0", glyphExpanded),
-		"  │ clean",
-		"  │ no findings",
-		"  │ done",
-		memberEdgeRow(t, "  │ ", promptSeeLess, width),
-		groupMemberLine("  ┕ go test ./... ⋯ exit 0"),
+		"✦ Tools (3 calls)",
+		leaderEdgeRow("  ┕ Terminal (3) ⋯ exit 0", glyphExpanded),
+		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
+		leaderEdgeRow("  │ ┝ go vet ./... ⋯ exit 0", glyphExpanded),
+		"  │ │ clean",
+		"  │ │ no findings",
+		"  │ │ done",
+		memberEdgeRow(t, "  │ │ ", promptSeeLess, width),
+		groupMemberLine("  │ ┕ go test ./... ⋯ exit 0"),
 	}, "\n")
 	got := renderPlain(tr, width)
 	if got != want {
@@ -374,27 +421,42 @@ func TestSeeLessFooterClosesAnOpenBody(t *testing.T) {
 
 // Every row an open member paints belongs to that member and says so: the marks name entry 1 down
 // the whole of it — first row, body and see-less row alike — while the siblings' single rows name
-// entries 0 and 2 and the group header names nothing at all. This is the click surface the mouse
-// then resolves against (mouse.go, toggleBlockAt).
+// entries 0 and 2, the type row above them names the run's head as the row a click folds, and the
+// umbrella's own header — a click surface only while something below it is open — is the row that
+// closes the lot. This is the click surface the mouse then resolves against (mouse.go,
+// toggleBlockAt).
 func TestGroupMemberMarksNameTheirOwnCalls(t *testing.T) {
 	tr := runGroup(0,
 		[2]string{"go build ./...", "ok\nbuilt"},
 		[2]string{"go vet ./...", "clean\nno findings\ndone"},
 		[2]string{"go test ./...", "ok\nPASS"})
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setup: entries[0] does not head the umbrella's Terminal type row")
+	}
 	if !tr.setExpanded(1, true) {
 		t.Fatal("setup: entries[1] is not a toggleable block")
 	}
 
-	// Line 0 is the header and carries no mark, so the marks start on line 1 and run to the end:
-	// one row for the first member, six for the open one, one for the last.
+	// Line 0 is the umbrella's header — a close-all target while a member is open — then the type
+	// row, then one row for the first member, six for the open one, one for the last.
 	marks := blockMarks(t, tr, 80)
-	want := []int{0, 1, 1, 1, 1, 1, 2} // the entry each marked line names, in paint order
+	want := []struct {
+		kind  targetKind
+		entry int
+	}{
+		{targetUmbrella, 0},
+		{targetType, 0},
+		{targetHeader, 0},
+		{targetHeader, 1}, {targetHeader, 1}, {targetHeader, 1}, {targetHeader, 1}, {targetHeader, 1},
+		{targetHeader, 2},
+	}
 	if len(marks) != len(want) {
 		t.Fatalf("group painted %d marked rows, want %d:\n%+v", len(marks), len(want), marks)
 	}
 	for i, mark := range marks {
-		if mark.line != i+1 || mark.kind != targetHeader || mark.entry != want[i] {
-			t.Errorf("mark %d = %+v; want line %d, a toggle naming entry %d", i, mark, i+1, want[i])
+		if mark.line != i || mark.kind != want[i].kind || mark.entry != want[i].entry {
+			t.Errorf("mark %d = %+v; want line %d, a %v naming entry %d",
+				i, mark, i, want[i].kind, want[i].entry)
 		}
 	}
 }
@@ -411,6 +473,9 @@ func TestExpandedMemberGutterIsNotTheSubAgentRail(t *testing.T) {
 	tr := runGroup(1,
 		[2]string{"go build ./...", "ok\nbuilt"},
 		[2]string{"go vet ./...", "clean\nno findings\ndone"})
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setup: entries[0] does not head the umbrella's Terminal type row")
+	}
 	if !tr.setExpanded(0, true) {
 		t.Fatal("setup: entries[0] is not a toggleable block")
 	}
@@ -424,10 +489,13 @@ func TestExpandedMemberGutterIsNotTheSubAgentRail(t *testing.T) {
 	if row == "" {
 		t.Fatalf("no body row under the member gutter in:\n%s", strings.Join(tr.renderLines(th, 80), "\n"))
 	}
-	if !strings.Contains(row, th.toolDetail.Render(memberGutter)) {
+	// Under the umbrella the member's gutter follows its type row's, and the two are painted as one
+	// run, so that run is what the tone is asserted on.
+	gutters := memberGutter + glyphMemberGutter + " "
+	if !strings.Contains(row, th.toolDetail.Render(gutters)) {
 		t.Errorf("row %q does not carry the gutter in the detail tone", row)
 	}
-	if strings.Contains(row, th.subRail.Render(memberGutter)) {
+	if strings.Contains(row, th.subRail.Render(gutters)) {
 		t.Errorf("row %q paints the member gutter in the sub-agent rail's style", row)
 	}
 	if !strings.HasPrefix(row, th.subRail.Render(glyphSubRail+" ")) {
@@ -451,22 +519,28 @@ func TestSplitDiffPaintsUnderAnOpenMembersGutter(t *testing.T) {
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id,
 			Content: "replaced text in main.go", Summary: domain.EditRegions{Regions: paintRegions()}}})
 	}
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setup: entries[0] does not head the umbrella's Replace type row")
+	}
 	if !tr.setExpanded(1, true) {
 		t.Fatal("setup: entries[1] is not a toggleable block")
 	}
 
+	// Under the umbrella the member's own gutter follows its type row's, so the body hangs under
+	// both.
+	gutters := memberGutter + glyphMemberGutter + " "
 	wide := strings.Split(renderPlain(tr, 140), "\n")
 	if !paintsSplit(wide) {
 		t.Errorf("the open member's body at 140 columns is not two panes:\n%s", strings.Join(wide, "\n"))
 	}
 	for _, row := range wide {
-		if strings.Contains(row, "errNarrow") && !strings.HasPrefix(row, memberGutter) {
-			t.Errorf("a pane row hangs outside the member's gutter %q: %q", memberGutter, row)
+		if strings.Contains(row, "errNarrow") && !strings.HasPrefix(row, gutters) {
+			t.Errorf("a pane row hangs outside the member's gutter %q: %q", gutters, row)
 		}
 	}
 	for _, frame := range []string{
-		groupMemberLine("  " + glyphBranch + " main.go ⋯ +1 −1"), // the sibling is still closed
-		memberEdgeRow(t, memberGutter, promptSeeLess, 140),       // and the open one still closes
+		groupMemberLine(memberGutter + glyphBranch + " main.go ⋯ +1 −1"), // the sibling is still closed
+		memberEdgeRow(t, gutters, promptSeeLess, 140),                    // and the open one still closes
 	} {
 		if !strings.Contains(strings.Join(wide, "\n"), frame) {
 			t.Errorf("the split body cost the member its frame row %q:\n%s", frame, strings.Join(wide, "\n"))

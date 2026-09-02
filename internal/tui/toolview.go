@@ -967,7 +967,7 @@ const errorNoun = "error"
 
 // runAggregate is the outcome slot of a whole RUN — what a super-group's type row says about the
 // calls folded behind it (design call 10, docs/layout/tool-layout.md, "Fold states and
-// interaction"). Three answers, in this order:
+// interaction"). Four answers, in this order:
 //
 //   - a run of ONE is its own member's summary, verbatim, whatever kind that is. Summing one call is
 //     that call, so nothing has to be invented: a lone failure keeps its "error: …" sentence instead
@@ -975,9 +975,15 @@ const errorNoun = "error"
 //   - any FAILED member and the row counts them, "N errors", and that count is the row's OWN
 //     verdict: the summary it words goes through namedSummary like any other sentence in the
 //     failure vocabulary, so the type row carries failed and needs nothing read back out of it.
-//   - otherwise the run's natural sum, where the members' typed stats sum at all (sumStats), and
-//     nothing when they do not: an empty slot lets the dots run to the ▶, which is the spec's "else
-//     blank".
+//   - otherwise the run's natural sum, where the members' typed stats sum at all (sumStats).
+//   - otherwise the members' own summary, shown ONCE, where every one of them says the SAME thing
+//     and the stats do not sum (sameSummary): four terminals that all came back "exit 0" have one
+//     reading between them, and repeating it on the type row is the honest aggregate of a run that
+//     agreed — where "exit 0" and "exit 0 · 1.2s" disagree, they have none. The member's own
+//     summary is returned whole rather than reworded, exactly as a run of one is, so a quoted line
+//     stays quoted and no verdict is invented for it (ratified call, plan "2026-09-02 - 01").
+//   - nothing when none of those answer: an empty slot lets the dots run to the ▶, which is the
+//     spec's "else blank".
 //
 // It is pure and lipgloss-free like everything else in this file: it words the slot, and the tone
 // that wording earns is the painter's (summaryStyle).
@@ -994,7 +1000,29 @@ func runAggregate(views []toolView) branchSummary {
 	if sum, ok := sumStats(views); ok {
 		return typedSummary(sum)
 	}
+	if s, ok := sameSummary(views); ok {
+		return s
+	}
 	return branchSummary{}
+}
+
+// sameSummary is the one summary a whole run agrees on, and whether it agrees at all. Agreement is
+// on the TEXT — the slot the reader would have seen on every member — so a phrase with no
+// arithmetic behind it ("exit 0", "PASS", "clean") still has an aggregate when the run is unanimous,
+// which is the one reading the sum could never reach.
+//
+// The first member's summary is returned WHOLE rather than reworded: the marks it carries — quoted,
+// and the verdicts — are already true of the text, and every member carries the same text, so the
+// row says what the run said with nothing invented on top of it. An empty slot is not agreement
+// worth showing, but it needs no test of its own: a run of unfinished members agrees on "" and the
+// blank row that comes back is the blank the last rule would have given it anyway.
+func sameSummary(views []toolView) (branchSummary, bool) {
+	for _, tv := range views[1:] {
+		if tv.Summary.Text != views[0].Summary.Text {
+			return branchSummary{}, false
+		}
+	}
+	return views[0].Summary, true
 }
 
 // failedCalls counts the members of a run whose outcome says the call failed. It reads each

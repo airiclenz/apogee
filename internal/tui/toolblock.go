@@ -160,9 +160,10 @@ const (
 	superCallNoun   = "call"
 )
 
-// renderSuperGroup paints the umbrella: adjacent runs of DIFFERENT tools folded under one
-// "✦ Tools (N calls)" header, one row per run in time order (docs/layout/tool-layout.md, "Grouped
-// tools collapsed (different types / super-group)"). It is the same list the same-label group is,
+// renderSuperGroup paints the umbrella: a run of 2+ groupable calls — one same-type run, or
+// adjacent runs of different tools — folded under one "✦ Tools (N calls)" header, one row per run
+// in time order (docs/layout/tool-layout.md, "Grouped tools collapsed (different types /
+// super-group)"). It is the same list the same-label group is,
 // one level up — the rows stand for runs instead of for calls — and everything about the shape
 // follows from that:
 //

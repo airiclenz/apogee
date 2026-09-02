@@ -31,6 +31,12 @@ func TestBlockCursorEntersAtTheEndItsKeyPointsAwayFrom(t *testing.T) {
 	t.Parallel()
 
 	base := modelWithToolGroup(t)
+	// The run folds under the umbrella, so its member rows are stops only under an OPEN type row —
+	// entries[0] is the prompt, so the run's head is entries[1].
+	if !base.transcript.setTypeExpanded(1, true) {
+		t.Fatal("setTypeExpanded(1, true) = false; want the run's type row open")
+	}
+	base.refreshViewport()
 	stops := cursorStops(base.lineTargets)
 	if len(stops) < 2 {
 		t.Fatalf("setup: the fixture offers %d stops, too few to tell the two ends apart", len(stops))
@@ -162,6 +168,12 @@ func modelWithLongToolGroup(t *testing.T, count int) Model {
 	m.transcript.addUser("check every package", nil)
 	for i := range count {
 		runCall(&m.transcript, fmt.Sprintf("c%d", i+1), fmt.Sprintf("go test ./pkg%d/...", i+1), "ok\nPASS", 0)
+	}
+	// The calls are ONE same-type run folded under the umbrella, so their rows are painted — and
+	// walked — only under an OPEN type row; entries[0] is the prompt, so the run's head is
+	// entries[1].
+	if !m.transcript.setTypeExpanded(1, true) {
+		t.Fatal("setTypeExpanded(1, true) = false; want the run's type row open")
 	}
 	m.refreshViewport()
 	return m

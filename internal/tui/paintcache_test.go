@@ -161,6 +161,11 @@ func TestPaintCacheCoversEveryGroupMemberState(t *testing.T) {
 			Arguments: []byte(`{"command":"` + c[0] + `"}`)}})
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: c[1]}})
 	}
+	// The run folds under the umbrella, so its members are painted only under an OPEN type row
+	// (toolblock.go): opening it is what puts the member states in the paint at all.
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
+	}
 	collapsed := tr.renderView(th, 80, false, breadcrumbHint) // warm
 
 	for member := range 3 {

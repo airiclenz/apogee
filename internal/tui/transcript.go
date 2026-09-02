@@ -1561,9 +1561,11 @@ func sameLabelRun(entries []entry, i int) int {
 }
 
 // toolSuperGroup is the umbrella entries[i] heads, or nil when it heads none: the adjacent
-// same-depth runs of DIFFERENT labels starting there. Two runs are the floor (design call 1) —
-// one run is the same-label group that already had a header of its own, and a run of 1 is a lone
-// call, so a Read followed by a Terminal is an umbrella of two rows.
+// same-depth runs of groupable calls starting there. TWO CALLS are the floor, whatever their
+// labels (plan "2026-09-02 - 01", item 3) — a run of 2+ same-label calls folds under the umbrella
+// exactly as adjacent runs of different labels do, so four terminals are `✦ Tools (4 calls)` over
+// one `┕ Terminal (4)` type row, and a Read followed by a Terminal is that same umbrella over two
+// rows. Only a LONE groupable call heads no umbrella and stays the standalone block it always was.
 //
 // Adjacent runs differ in label BY CONSTRUCTION rather than by a test here: sameLabelRun is maximal,
 // so a call carrying the previous run's label was already absorbed by it and a call that opens a new
@@ -1577,9 +1579,10 @@ func sameLabelRun(entries []entry, i int) int {
 // break it by depth, as does a nested call at any other level.
 //
 // Membership is DERIVED here and stored nowhere, which is what makes formation live (design call 2):
-// the umbrella exists the moment the second run's first call is placed — the running call being its
-// last row, spinner star and all — and grows as further calls append, with no membership recorded
-// anywhere that could fall out of date behind them.
+// the umbrella exists the moment the SECOND groupable call is placed, whether it opens a run of its
+// own or extends the first — the running call being its last row, spinner star and all — and grows
+// as further calls append, with no membership recorded anywhere that could fall out of date behind
+// them.
 func toolSuperGroup(entries []entry, i int) superGroup {
 	n := sameLabelRun(entries, i)
 	if n == 0 {
@@ -1594,7 +1597,7 @@ func toolSuperGroup(entries []entry, i int) superGroup {
 		runs = append(runs, toolRun{at: at, n: m})
 		at += m
 	}
-	if len(runs) < 2 {
+	if runs.calls() < 2 {
 		return nil
 	}
 	return runs

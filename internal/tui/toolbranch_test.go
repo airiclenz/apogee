@@ -15,16 +15,21 @@ import (
 
 // A member whose result has not landed shows its target and a leader running to the row's edge with
 // nothing in the outcome slot; when the result folds in, the whole block repaints with that member's
-// outcome in the slot.
+// outcome in the slot — and its type row, which could not sum a run with an open member, with the
+// run's total.
 func TestRenderGroupWithInFlightMember(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "README.md", 1, 154, 0)
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"TODO.md"}`)}})
 
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
+	}
 	want := strings.Join([]string{
-		"✦ Read (2)",
-		"  ┝ README.md ⋯ 154 lines",
-		"  ┕ TODO.md ⋯",
+		"✦ Tools (2 calls)",
+		leaderEdgeRow("  ┕ Read (2) ⋯", glyphExpanded),
+		"  │ ┝ README.md ⋯ 154 lines",
+		"  │ ┕ TODO.md ⋯",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("in-flight member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -34,9 +39,10 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 		Content: "[File: TODO.md, 408 lines total, showing lines 1-408]\n…",
 		Summary: domain.ReadSpan{Start: 1, End: 408, Total: 408}}})
 	want = strings.Join([]string{
-		"✦ Read (2)",
-		"  ┝ README.md ⋯ 154 lines",
-		"  ┕ TODO.md ⋯ 408 lines",
+		"✦ Tools (2 calls)",
+		leaderEdgeRow("  ┕ Read (2) ⋯ 562 lines", glyphExpanded),
+		"  │ ┝ README.md ⋯ 154 lines",
+		"  │ ┕ TODO.md ⋯ 408 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("re-rendered group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -44,10 +50,12 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 }
 
 // A lone call renders in the shape a group does — a label header, target leading the branch, the
-// outcome at the row's right edge behind a leader — and counts nothing: the "(N)" is a group's
-// arithmetic and a block of one has none to state. A second call joins by adding a line rather
-// than by moving the first one's target: there is no column to re-measure, the leader simply
-// absorbs whatever the two targets differ by.
+// outcome at the row's right edge behind a leader — and counts nothing: the "(N)" is a run's
+// arithmetic and a block of one has none to state. A SECOND call folds the pair under the umbrella
+// (toolSuperGroup): a type row counting the run stands where the standalone header was, and the two
+// member rows lie one level down under it, each joining by adding a line rather than by moving the
+// first one's target — there is no column to re-measure, the leader simply absorbs whatever the two
+// targets differ by.
 func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "main.go", 1, 154, 0)
@@ -62,10 +70,14 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 
 	// …and a second call joins it by adding a line, not by moving the first one's target.
 	readCall(tr, "c2", "a-much-longer-name.go", 1, 9, 0)
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
+	}
 	want = strings.Join([]string{
-		"✦ Read (2)",
-		"  ┝ main.go ⋯ 154 lines",
-		"  ┕ a-much-longer-name.go ⋯ 9 lines",
+		"✦ Tools (2 calls)",
+		leaderEdgeRow("  ┕ Read (2) ⋯ 163 lines", glyphExpanded),
+		"  │ ┝ main.go ⋯ 154 lines",
+		"  │ ┕ a-much-longer-name.go ⋯ 9 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("grown block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -429,24 +441,28 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 		// Both members carry a MULTI-line body: a one-line output rides the branch as the call's
 		// summary instead, which would leave the member with nothing to open.
 		tr := runGroup(0, [2]string{"go build ./...", "ok\nbuilt"}, [2]string{"go vet ./...", "clean\ndone"})
+		if !tr.setTypeExpanded(0, true) {
+			t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
+		}
 		if !tr.setExpanded(1, true) {
 			t.Fatal("setExpanded(1, true) = false; want the second member opened")
 		}
 		rows := tr.renderLines(th, 80)
 
-		// A member row is not one style run — its ▶/▼ and, open, its gutter are chrome painted
-		// beside the text — so the tone is asserted on the text the member is carrying.
-		if want := th.toolDetail.Render("go build ./..."); !strings.Contains(rows[1], want) {
-			t.Errorf("the closed member = %q; want its row in the dim tone %q", rows[1], want)
+		// Row 0 is the umbrella's header and row 1 its type row, so the members start at row 2. A
+		// member row is not one style run — its ▶/▼ and, open, its gutter are chrome painted beside
+		// the text — so the tone is asserted on the text the member is carrying.
+		if want := th.toolDetail.Render("go build ./..."); !strings.Contains(rows[2], want) {
+			t.Errorf("the closed member = %q; want its row in the dim tone %q", rows[2], want)
 		}
-		if want := th.toolDetailBright.Render("go vet ./..."); !strings.Contains(rows[2], want) {
-			t.Errorf("the open member's first row = %q; want its target in the brighter tone %q", rows[2], want)
+		if want := th.toolDetailBright.Render("go vet ./..."); !strings.Contains(rows[3], want) {
+			t.Errorf("the open member's first row = %q; want its target in the brighter tone %q", rows[3], want)
 		}
-		if want := th.toolDetailBright.Render("clean"); !strings.Contains(rows[3], want) {
-			t.Errorf("the open member's body = %q; want it in the brighter tone %q", rows[3], want)
+		if want := th.toolDetailBright.Render("clean"); !strings.Contains(rows[4], want) {
+			t.Errorf("the open member's body = %q; want it in the brighter tone %q", rows[4], want)
 		}
-		if want := th.toolDetail.Render(memberGutter); !strings.Contains(rows[3], want) {
-			t.Errorf("the open member's body = %q; want the gutter beside it still chrome %q", rows[3], want)
+		if want := th.toolDetail.Render(memberGutter + glyphMemberGutter + " "); !strings.Contains(rows[4], want) {
+			t.Errorf("the open member's body = %q; want the gutters beside it still chrome %q", rows[4], want)
 		}
 	})
 }
@@ -780,10 +796,14 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "")
 		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "")
 
+		if !tr.setTypeExpanded(0, true) {
+			t.Fatal("setTypeExpanded(0, true) = false; want the Ask User run's type row open")
+		}
 		want := strings.Join([]string{
-			"✦ Ask User (2)",
-			"  ┝ Ship it? ⋯",
-			"  ┕ Tag it? ⋯",
+			"✦ Tools (2 calls)",
+			leaderEdgeRow("  ┕ Ask User (2) ⋯", glyphExpanded),
+			"  │ ┝ Ship it? ⋯",
+			"  │ ┕ Tag it? ⋯",
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("pending questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)

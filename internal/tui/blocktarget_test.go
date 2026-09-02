@@ -140,15 +140,18 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			want: nil,
 		},
 		{
-			// A group's calls carry no bodies (that is what made them groupable), so the block
-			// hides nothing and its header keeps a click's selection meaning.
-			name:  "a body-less group is no target at all",
+			// A run's calls carry no bodies (that is what made them groupable), so nothing under the
+			// umbrella hides a body — but the TYPE ROW hides the run's member rows, and that is what
+			// a click there folds open. The umbrella's own header stays inert while nothing is open,
+			// so it keeps a click's selection meaning.
+			name:  "a body-less run marks its type row and nothing else",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			want: nil,
+			want: []blockMark{{line: 1, kind: targetType, entry: 0,
+				text: groupMemberLine("  ┕ Read (2) ⋯ 196 lines")}},
 		},
 		{
 			// The targetless shape is capped like every other: an unregistered tool's verbatim
@@ -554,19 +557,25 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 				Arguments: []byte(`{"command":"` + c[0] + `"}`)}})
 			m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: c[1]}})
 		}
+		// The run folds under the umbrella, so its member rows are painted only under an OPEN type
+		// row (toolblock.go).
+		if !m.transcript.setTypeExpanded(0, true) {
+			t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
+		}
 		m.refreshViewport()
 		lockstep(t, m)
 
-		// One header and one row per member: the marks are the three member rows, in order, each
-		// naming its own entry — and the entry the mouse's own lookup lands on is that same one.
+		// One row per member under the opened type row, in order, each naming its own entry — and
+		// the entry the mouse's own lookup lands on is that same one. The umbrella's header and its
+		// type row carry marks of their own kinds and are not member rows.
 		var marked []int
 		for i, target := range m.lineTargets {
-			if target.kind != targetNone {
+			if target.kind == targetHeader {
 				marked = append(marked, i)
 			}
 		}
 		if len(marked) != 3 {
-			t.Fatalf("group marked %d rows, want one per member:\n%s", len(marked), strings.Join(m.lines, "\n"))
+			t.Fatalf("group marked %d member rows, want one per member:\n%s", len(marked), strings.Join(m.lines, "\n"))
 		}
 		for member, line := range marked {
 			resolves(t, m, line)
@@ -657,22 +666,23 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 			settled: "✦ Terminal", flipped: "  Terminal",
 		},
 		{
-			// A group has ONE header for many calls, so its star answers for all of them: a batch
-			// whose first read landed and whose second has not is still working.
-			name: "a group blinks while any of its calls is open",
+			// A same-type run of 2 is an umbrella of one type row, and the umbrella has ONE header for
+			// every call under it, so its star answers for all of them: a batch whose first read
+			// landed and whose second has not is still working.
+			name: "a same-type run blinks while any of its calls is open",
 			build: func(_ *testing.T, tr *transcript) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRead(tr, "c2", "util.go", 0)
 			},
-			settled: "✦ Read (2)", flipped: "  Read (2)",
+			settled: "✦ Tools (2 calls)", flipped: "  Tools (2 calls)",
 		},
 		{
-			name: "a group whose calls have all landed settles",
+			name: "a same-type run whose calls have all landed settles",
 			build: func(_ *testing.T, tr *transcript) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			settled: "✦ Read (2)", flipped: "✦ Read (2)",
+			settled: "✦ Tools (2 calls)", flipped: "✦ Tools (2 calls)",
 		},
 		{
 			// A run is live until its REPORT lands, whatever the span has already finished.
