@@ -804,3 +804,30 @@ B3–B5) are recorded by the report and by that plan's out-of-scope list, not he
 
 The full findings, with the candidates this plan took and the ones it left, are in
 [`docs/reviews/architecture-review-2026-08-30.html`](docs/reviews/architecture-review-2026-08-30.html).
+
+---
+
+### Issues-register sweep — residue (2026-09-02)
+
+**Status:** recorded 2026-09-02 at the close of
+`docs/plans/2026-09-02 - 04 - issues-register-sweep-plan.md`. Each line is a gap left open by
+that plan's own delivered work — the session-retention sweep (items 14–16) and the stdio MCP
+`env-allowlist:` opt-in (items 17–18). None is a regression: every one is a hole in behaviour
+that did not exist before this plan.
+
+- [ ] **`Store.Prune`'s partial-failure contract is untested.** The doc comment
+  (`internal/session/store.go:341-342`) promises that one failed delete does not abort the sweep —
+  the first error comes back alongside the count of what did go — and the loop implements it
+  (`internal/session/store.go:386-393`). No test drives a delete that fails, so the contract that
+  keeps a single unremovable record from stranding the rest of the sweep is unpinned.
+- [ ] **A `--no-save`-only host never applies its retention policy.** `apogee headless --no-save`
+  leaves `store` nil (`cmd/apogee/headless.go:447-450`) and `gcSessions` returns immediately on a
+  nil store (`cmd/apogee/wire.go:501-503`), so a host that only ever runs `--no-save` headless —
+  the case the sweep was placed here to cover (`cmd/apogee/headless.go:452-457`) — sweeps nothing,
+  and `sessions.max-age` / `max-count` never bind. The sweep could run off `roots.sessions`
+  directly rather than off the record-writing store.
+- [ ] **`env-allowlist:` on a non-stdio MCP server is silently ignored.** The key is meaningful to
+  the stdio launch only (`internal/mcp/transport.go:62,172-176`); an `sse` or `streamable-http`
+  entry that sets it (`internal/config/config.go:2276`) gets no validation notice, matching the
+  existing silent treatment of `command:` / `args:` on http transports. A human who narrows the
+  environment of a remote server is told nothing about it having no effect.

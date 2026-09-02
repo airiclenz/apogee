@@ -772,6 +772,88 @@ point is a **minor** bump, not a breaking change.
   unconditional (no config key) and nothing is persisted. Internally the `reasoningTail` retention
   seam is retired for the bounded per-run thinking board the pane reads.
 
+- **A `when.system:` regexp that does not compile is now refused at parse time.** `Match.validate`
+  no longer returns early when `last_message` is unset: it compiles each of `last_message` and
+  `system` that a `when:` block sets, reporting `when.system is not a regexp` in the same shape as
+  its `last_message` sibling. A bad `system:` pattern used to surface later from `newMatcher` with a
+  turn index instead of from the YAML that wrote it; `newMatcher` keeps its own compile as a
+  defensive path, now unreachable through the public API since `Script.Validate` runs on every
+  construction path.
+
+- Fixed: a capped delegate's latched wrap-up reply whose text is whitespace-only no longer commits an assistant message or emits a `MessageEvent` — the latched exit now measures emptiness with `strings.TrimSpace`, the same way the empty-reply guard does, so a blank final message can no longer bury the partial result the child's capped Turns earned. The committed and emitted text stays the raw reply, untrimmed.
+
+- Two delegation test assertions hardened: the unbounded-delegation e2e check now flattens its needles like the frame it searches, so a wrapped closing report cannot make the check pass vacuously; and the live delegate-cap shakeout no longer reads the menu size positionally, so an overflow fold inside one Turn cannot fail a correct run.
+
+- Documented in `layout.md` why the step-cap outcome envelope keeps the collapsed row's slot ahead of the capped child's closing wrap-up report (ADR 0063), which is read one level down in the run view.
+
+- The status line's delegate phrase is now pinned for a run whose name arrived as a `SubAgentNamedEvent` rather than in the `sub_agent` call's arguments: a new subtest of `TestGeneratedDelegationNameReachesEverySurface` asserts the rendered `<name> · <phrase> · <clock>` off `Model.runningPhrase`, not off `transcript.runName`, so the last surface a rename reaches can no longer regress silently.
+
+- The Delegation seat-fallback note now has one source: `internal/agent`'s constant is exported as `agent.SeatFallbackNote` and re-exported as `apogee.SeatFallbackNote`, so the TUI and `cmd/apogee` tests read the sentence instead of re-typing it. The sentence itself is unchanged, byte for byte, and is pinned literally once in `internal/agent/seat_test.go`.
+
+- Fixed: a delegation reply whose every call asked for `run_on: "session"` is now sized by the session server's Parallel agents cap instead of the latched Delegation target's, honouring ADR 0069 decision 7. Mixed replies, all-target replies, unrouted sessions and `sub-agents-choice: fixed` keep today's width exactly.
+
+- **A Firing's `run.Spec` can carry the Delegation target and seat.** Two optional fields —
+  `DelegationTarget *agent.DelegationTarget` and `DelegationSeat *agent.DelegationSeat` —
+  reach `Agent.SetDelegationTarget` / `SetDelegationSeat` on the constructed Agent before the
+  first Turn, so a Driver that is not the TUI can route its delegations to the Sub-agent server
+  (ADR 0045) and name that seat to the model (ADR 0069). Both nil is byte-for-byte the old
+  behaviour: neither setter is called and every child runs on the session's own Upstream. The
+  engine still reads no config (ADR 0031) — the Driver resolves the target, the seam only
+  carries it.
+
+- An unattended run now honours `sub-agents-server:`. `firingConfig` resolves the named `servers:`
+  entry the way a session's second heartbeat does — one beat against it, the same
+  `resolveDelegationTarget` pin-else-observe ladder, the entry's own key source and its own
+  `mechanisms:` catalogue — and hands the resolved Delegation target and seat back for the Driver to
+  latch through `run.Spec`. `apogee headless`, a daemon Schedule's firing and a `/schedule` Firing
+  all delegate there; every failure (no key, an unknown name, a defective `mechanisms:` map, a
+  refused key source, an unreachable or model-less server) leaves the target nil with one notice and
+  the children on the run's own server, exactly as before. A Firing's Config also carries
+  `ServerName` / `ServerDescription`, so the orientation block can name the session seat, and its
+  delegation namer asks the routed child's own box (ADR 0068 decision 2) rather than the
+  orchestrator's. A `/sub-agents-server` retarget is mirrored onto the live settings projection, so a
+  Firing raised afterwards follows the pick rather than the launch-time entry.
+
+- **Headless, daemon and `/schedule` Firings honour `sub-agents-choice: model`.** With a Delegation
+  target latched (the routing an unattended run now resolves for itself), the seat gate is read off
+  the Options every Driver already fills, and `firingConfig` hands the runner a tool registry whose
+  `sub_agent` publishes the `run_on` argument — so an unattended run's model can pick a seat exactly
+  as a session's can, and the orientation block names both. Under `sub-agents-choice: fixed` and with
+  the key absent nothing moves: `Config.Tools` stays nil byte-for-byte and the engine goes on
+  building its own roster off the delegates `run.Once` pins. A Firing still reaches no external MCP
+  server either way (ADR 0034). The two hand-assemblies of `tools.HostTools` — the composition root's
+  MCP-aware one and the engine's own — are now pinned field-by-field in their own packages, so a
+  field added to the struct and missed by either composer fails a test rather than silently dropping
+  a configured URL deny, credential scrub or read-root mount on one of the two paths.
+
+- `TestInspectorScopedEmptyNamesEveryCause` now compares the inspector's scoped-empty and disarmed rows against the sentences written out in the test rather than against the constants they are rendered from, so a typo in either constant fails the test instead of being carried into the assertion.
+
+- `ListMechanisms`, the `/settings` Mechanism toggle list, is now pinned to apply the off-ramp floor: an off-ramp whose key the `mechanisms:` block never names reads ON in the pane (ADR 0070), while an ordinary Mechanism absent from the block still reads OFF.
+
+- Retired the unused `toolCallRun` helper in the TUI renderer; the four tests that used it as a run-extent probe now ask `sameLabelRun` directly.
+
+- `internal/session.Store` can prune: `Prune(Retention{MaxAge, MaxCount}, keep...)` removes records past an age cut and beyond a newest-N budget, never touching a corrupt or foreign file, a file whose name disagrees with the id it declares, or an id the caller asked to keep. Both knobs default to off, and no caller wires it yet.
+
+- Added the `sessions:` config block — `max-age` (a duration) and `max-count` — which bound how much
+  of the session store is kept. Both keys are absent by default, so an untouched config keeps every
+  session exactly as before; both are editable in `/settings` and take effect at the next start.
+
+- The `sessions:` retention policy is now applied: a silent, best-effort sweep runs once at
+  startup in all three Drivers (TUI, `apogee headless`, the daemon) and removes the records the
+  configured `max-age` and `max-count` leave outside. It never removes the session a `--resume` or
+  `--continue` start is opening — the sweep runs after the resume is resolved and is handed that
+  record's id to keep — and a config that names neither knob walks no directory and removes
+  nothing, which is the shipped default.
+
+- **MCP:** a configured stdio server can now narrow what it inherits. The new per-server
+  `env-allowlist:` key is optional and absent by default, leaving today's launch unchanged
+  (apogee's full environment plus `env:`); a named list scopes the child to those keys plus the
+  platform's essentials, with PATH scoped away from the workspace as the git tool's allowlist is,
+  and an explicit `[]` hands it the platform floor alone. `env:` entries are appended last in every
+  case, so a per-server variable still wins.
+
+- Documented the stdio MCP `env-allowlist:` opt-in: the config template's `mcp-servers:` block carries the key, `docs/manual/configuration.md` gains an `mcp-servers:` section covering the whole block and what a stdio server inherits, and the trust note in `internal/mcp/transport.go` (and its restatement in `docs/design/mcp-client.md`) now states the full-environment launch as the default with `env-allowlist:` as the narrowing opt-in, dropping the `ISSUES.md` L4 pointer.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
