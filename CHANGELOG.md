@@ -739,6 +739,39 @@ point is a **minor** bump, not a breaking change.
 
 - `make check` is green again: the `members` field and `memberExpanded` method left dead on `blockState` when the same-type group shape was retired are removed, so golangci-lint's `unused` check reports nothing.
 
+- **The view's reasoning retention is now a per-run thinking board.** `internal/tui/reasoning.go`
+  is renamed `internal/tui/thinking.go` and its single 4 KB `reasoningTail` — retention that
+  nothing read, landed as the seam a reasoning display would be built on — is replaced by
+  `thinkingBoard`: one escape-stripped record per agent per Turn, bounded to the last 64 KB of
+  text each, with the newest 64 completed records kept newest-last beside one in-flight record
+  per run. Both stream boundaries are now run-scoped (a `StreamResetEvent` drops only its own
+  run's record, a `MessageEvent` commits only its own), so a fan-out's interleaved delegates no
+  longer splice into one another; a chunk under a new Turn commits the record before it; and the
+  worker-unwind and new-Exchange boundaries COMMIT every live record instead of discarding it, so
+  a stopped or faulted Turn's thinking survives. `foldReasoning` becomes `foldThinking`, and
+  fold.go's own header count is corrected to the five folds `foldEvent` actually runs. Retention
+  only — no surface reads the board yet.
+
+- The `/thinking` pane's rows: plain wrapped reasoning text with one `turn <n>` heading per record
+  (a delegate's named by its run), composed at the pane's REAL width for the frame rather than at a
+  fixed column, so nothing is truncated away on a narrow terminal. Scoped as the view is — the main
+  agent's thinking at the top level, the viewed delegation's under a run view — with the in-flight
+  record at the tail. `wrapReadable`/`cutReadable` now take the wrap column as a parameter;
+  `/inspect` passes `readableWrapColumn` and its rendering is unchanged.
+
+- `/thinking` opens a non-modal report pane over the session's retained reasoning — the main
+  agent's at the top level, the viewed delegation's alone inside a run view, named in the pane's
+  title. It is the third pane of the shared report module beside `/usage` and `/inspect`: esc and
+  the four scroll keys are its whole keyboard, a click or a wheel notch behave as they do on its
+  two siblings, and the box behind it stays live. The module's three kind resolvers became
+  exhaustive switches so a fourth report cannot silently inherit another pane's state or content.
+
+- `/thinking` — a non-modal report pane holding the model's thinking as plain text, one record per
+  completed turn, newest last: the main agent's at the top level, the viewed sub-agent's alone with a
+  run view open. Rows are wrapped to the pane's own width, there is no raw toggle, capture is
+  unconditional (no config key) and nothing is persisted. Internally the `reasoningTail` retention
+  seam is retired for the bounded per-run thinking board the pane reads.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
