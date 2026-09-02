@@ -446,7 +446,8 @@ type Model struct {
 	userBlocks  []userBlock
 	lineTargets []lineTarget
 	// header is the sticky header the PAINT owns rather than the scrollback: the breadcrumb row of a
-	// transcript rooted at one run (renderedTranscript.header, render.go), and the zero value while
+	// transcript rooted at one run and the blank spacer beneath it
+	// (renderedTranscript.header, render.go), and the zero value while
 	// the whole transcript is on screen. It takes the overlay slot outright when it is there — inside
 	// a run view the breadcrumb is the only header, and the paint registers no user block beside it.
 	header userBlock

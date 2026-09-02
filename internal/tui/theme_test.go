@@ -103,6 +103,11 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		{"toolDetailBright fg", th.toolDetailBright.GetForeground(), s.MutedBright},
 		{"promptToggle fg", th.promptToggle.GetForeground(), s.PromptToggle},
 		{"userBlock fg", th.userBlock.GetForeground(), s.UserText},
+		// The run view's header, sampled on BOTH slots: it keeps the prompt block's white and
+		// stands on the `surface` field the input box and the status line share. A breadcrumb back
+		// on `chrome` is exactly the crossed wire this field exists to keep fixed.
+		{"breadcrumb fg", th.breadcrumb.GetForeground(), s.UserText},
+		{"breadcrumb bg", th.breadcrumb.GetBackground(), s.Surface},
 		// The raw fields the call sites that paint without a style reach for.
 		{"raw surface", th.surface, s.Surface},
 		{"raw chrome", th.chrome, s.Chrome},
@@ -160,6 +165,8 @@ func TestDefaultThemeCarriesTheShippedScheme(t *testing.T) {
 		{"mode auto", th.modeColor(domain.ModeAuto), def.ModeAuto},
 		{"raw surface", th.surface, def.Surface},
 		{"raw chrome", th.chrome, def.Chrome},
+		{"breadcrumb fg", th.breadcrumb.GetForeground(), def.UserText},
+		{"breadcrumb bg", th.breadcrumb.GetBackground(), def.Surface},
 		// The open-detail tone travels as the `muted-bright` role, sampled here because the pair it
 		// forms with `muted` is checked below and a crossed wire would satisfy that check trivially.
 		{"toolDetailBright fg", th.toolDetailBright.GetForeground(), def.MutedBright},

@@ -189,8 +189,9 @@ func breadcrumbTrail(entries []entry, spawn string) string {
 }
 
 // breadcrumbRow paints that trail as the run view's own sticky header: the trail in the transcript's
-// body column, the key that leaves the view held bodyIndent off the right edge, on the one
-// full-width field the frame already spends on a header (the user block's).
+// body column, the key that leaves the view held bodyIndent off the right edge, on the black
+// `surface` field the input box and the status line already stand on (th.breadcrumb) — the header
+// is a band of the frame, not the prompt block whose gray it once borrowed.
 //
 // hint is that key's wording for THIS frame rather than a constant, for the reason the status line's
 // right slot gates the same wording ([Model.statusRight]): while a child's ask or approval pane
@@ -205,14 +206,14 @@ func breadcrumbTrail(entries []entry, spawn string) string {
 func breadcrumbRow(th theme, trail string, width int, hint string) string {
 	body := bodyIndent + trail
 	if hint == "" {
-		return th.userBlock.Render(squareLine(th.measure, body, width))
+		return th.breadcrumb.Render(squareLine(th.measure, body, width))
 	}
 	hint += bodyIndent
 	gap := width - th.measure.Width(body) - th.measure.Width(hint)
 	if gap < 1 {
-		return th.userBlock.Render(squareLine(th.measure, body, width))
+		return th.breadcrumb.Render(squareLine(th.measure, body, width))
 	}
-	return th.userBlock.Render(squareLine(th.measure, body+strings.Repeat(" ", gap)+hint, width))
+	return th.breadcrumb.Render(squareLine(th.measure, body+strings.Repeat(" ", gap)+hint, width))
 }
 
 // insideCollapsedRunAtDepth is insideCollapsedRun's answer for a run with no spawning call id: each

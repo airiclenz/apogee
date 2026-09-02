@@ -130,6 +130,7 @@ type theme struct {
 	measure widthAuthority
 
 	userBlock     lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
+	breadcrumb    lipgloss.Style // the run view's sticky header (breadcrumbRow): prompt-white on the `surface` field the input box and the status line already share, so the header reads as one of the frame's black bands rather than as a prompt block it is not
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader    lipgloss.Style // the ✦ Label target header
 	toolLabel     lipgloss.Style // the tool label inside that header (bold, in the scheme's `tool-header` role — a tone of the header's own, no longer borrowed from the `code` role inline code and fenced blocks carry)
@@ -326,6 +327,11 @@ func newTheme(s scheme.Scheme) theme {
 		// Any future live rebuild owes the same carry-over.
 		measure:   newWidthAuthority(),
 		userBlock: lipgloss.NewStyle().Foreground(userText).Background(chrome),
+		// The run view's header is NOT a prompt block, so it stops borrowing the prompt block's
+		// gray: it is the same black field the input box and the status line stand on, which is
+		// what makes the view read as one frame with a band top and bottom (layout.md, "The
+		// breadcrumb is the header").
+		breadcrumb: lipgloss.NewStyle().Foreground(userText).Background(surface),
 		// The collapse marker keeps the block's background and changes everything else: a light
 		// gray-blue, bolded, against the dark-gray field the prompt text is white on. It is the one
 		// run inside the block that is apogee talking rather than the human, and the hue says so by

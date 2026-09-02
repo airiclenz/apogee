@@ -44,10 +44,11 @@ type renderedTranscript struct {
 	// exact accounting the paint used (ADR 0030's rule, one authority per measurement).
 	targets []lineTarget
 	// header is the sticky header the PAINT itself owns, as the lines it occupies at the top of the
-	// slice: the breadcrumb row of a paint rooted at one run (transcript.setRoot), and the zero
-	// value — count 0 — for the ordinary whole-transcript paint, whose sticky headers are the user
-	// blocks beside it. The overlay is one mechanism either way (Model.stickyHeaderSpan): a header
-	// is a content line frozen at row 0, and this only says WHICH line without asking the offset.
+	// slice: the breadcrumb row of a paint rooted at one run, plus the blank spacer beneath it
+	// (transcript.setRoot), and the zero value — count 0 — for the ordinary whole-transcript paint,
+	// whose sticky headers are the user blocks beside it. The overlay is one mechanism either way
+	// (Model.stickyHeaderSpan): a header is content lines frozen at the top of the viewport, and
+	// this only says WHICH lines without asking the offset.
 	header userBlock
 }
 
@@ -182,7 +183,11 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	// Sub-agents"). Only the block being placed knows which, so the answer rides the block
 	// [transcript.resolveBlock] resolved; the streaming preview, which resumes no list, answers no.
 	appendJoined := func(isUser, closes bool, depth, head int, block blockPaint) {
-		if len(lines) > 0 {
+		// The separator is what stands BETWEEN two blocks, so the header's own rows do not earn one:
+		// a rooted paint has already laid its blank spacer down, and a railed spacer on top of it
+		// would open the view with two blank rows. Outside a view header.count is 0 and this is the
+		// `len(lines) > 0` it has always been.
+		if len(lines) > header.count {
 			lines = append(lines, railJoin(th, prevBlockDepth, depth, closes))
 			targets = append(targets, lineTarget{}) // a separator belongs to neither block
 		}
@@ -234,7 +239,14 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		head := t.entries[root.first-1]
 		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref.spawn), width, backHint))
 		targets = append(targets, lineTarget{kind: targetBreadcrumb})
-		header = userBlock{start: 0, count: 1}
+		// The header is TWO rows: the trail, and a blank one beneath it holding the view's content
+		// off the band exactly as the frame's own gap row holds the transcript off the bottom block.
+		// The spacer is unpainted and carries no target — it is a row of nothing, and a click on it
+		// belongs to no block — but it is part of the header, so it freezes with the trail rather
+		// than scrolling away and letting the first block ride against it.
+		lines = append(lines, "")
+		targets = append(targets, lineTarget{})
+		header = userBlock{start: 0, count: 2}
 		if strings.TrimSpace(head.tool.task) != "" {
 			prompt := paintInput{
 				kind:       entryUser,

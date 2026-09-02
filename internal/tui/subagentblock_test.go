@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -1155,6 +1158,75 @@ func TestBreadcrumbRowSpendsItsWidthInOrder(t *testing.T) {
 	if got := th.measure.Width(narrow); got != 24 {
 		t.Errorf("the narrow row is %d columns wide, want 24", got)
 	}
+}
+
+// The header stands on the `surface` field the input box and the status line stand on — a black
+// band at the top of the frame to match the one at its bottom — and not on the prompt block's gray,
+// which is the field it used to borrow for want of one of its own. The row is painted edge to edge
+// at every width: a bare cell would show the terminal's own background through the band, and a cell
+// on `chrome` would be the borrowed field leaking back.
+func TestBreadcrumbRowIsPaintedEdgeToEdgeOnTheSurfaceField(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	const trail = "← main › repo-scout"
+
+	// The two fields, read off the styles that DEFINE them rather than off a literal: the status
+	// line's black and the prompt block's gray. A scheme retune moves both and this test still
+	// asks the question it means to ask.
+	surfaceField := backgroundToken(t, th.statusBar.Render("x"))
+	chromeField := backgroundToken(t, th.userBlock.Render("x"))
+	if surfaceField == chromeField {
+		t.Fatalf("the surface and chrome fields both render as %q; the test cannot tell them apart", surfaceField)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		width int
+		hint  string
+	}{
+		{"wide, with the hint", 60, breadcrumbHint},
+		{"wide, hint silent", 60, ""},
+		{"narrow, the hint dropped", 24, breadcrumbHint},
+		{"narrow, hint silent", 24, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			row := breadcrumbRow(th, trail, tc.width, tc.hint)
+
+			if got := ansi.StringWidth(row); got != tc.width {
+				t.Errorf("the row is %d columns wide, want %d: %q", got, tc.width, strip(row))
+			}
+			if col, ok := firstCellWithoutBackground(row); !ok {
+				t.Errorf("the row has a bare (no-background) cell at column %d: %q", col, strip(row))
+			}
+			for _, bg := range backgroundSGR.FindAllString(row, -1) {
+				if bg != surfaceField {
+					t.Errorf("the row carries the background %q, want the surface field %q: %q",
+						bg, surfaceField, strip(row))
+				}
+			}
+		})
+	}
+}
+
+// backgroundSGR matches ONE background parameter run inside a rendered line — "48;5;n" or
+// "48;2;r;g;b". It answers which field a row stands on, where firstCellWithoutBackground
+// (popup_test.go) answers only whether it stands on one at all.
+var backgroundSGR = regexp.MustCompile(`48;(?:5;\d+|2;\d+;\d+;\d+)`)
+
+// backgroundToken reports the background a probe render carries, for use as the expected field of
+// the rows under test. It fails the test outright when the probe carries none, because a bare probe
+// would otherwise make every comparison against it pass.
+func backgroundToken(t *testing.T, probe string) string {
+	t.Helper()
+
+	found := backgroundSGR.FindAllString(probe, -1)
+	if len(found) == 0 {
+		t.Fatalf("the probe %q carries no background at all", probe)
+	}
+	return found[0]
 }
 
 // ----------------------------------------------------------------------------

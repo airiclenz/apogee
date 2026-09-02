@@ -1091,7 +1091,14 @@ its task's first line, else the generic word) — with `esc back` held `bodyInde
 edge, in the same column the status line's right slot ends in, so the two rows on screen
 advertising a key end together. It is the **one sticky header a view has**: a rooted paint collects
 no `❯` block to stick, so the breadcrumb holds the top row for as long as the view is open, and it
-is squared out to the full width so the terminal's own background never shows through beside it.
+is squared out to the full width so the terminal's own background never shows through beside it. It
+is painted on the **`surface`** role — the same black field the prompt box's interior and the status
+line stand on — and not on the prompt block's gray: the header is a band of apogee's own frame
+rather than something the human said, so the view reads as one pane with a band at the top and a
+band at the bottom. The header is **two rows**: the trail, and a blank one beneath it, unpainted,
+holding the view's first block off the band exactly as the frame's gap row holds the transcript off
+the bottom block. The spacer freezes with the trail rather than scrolling away, and it is a click
+target for nothing.
 Where the width cannot pay for both, the hint gives way whole rather than truncating — a key hint
 nobody can read advertises nothing, and the trail is what the header is for. It gives way for a
 second reason too: while a child's ask or approval pane stands inside the view, `esc` answers the
