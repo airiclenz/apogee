@@ -831,3 +831,20 @@ that did not exist before this plan.
   entry that sets it (`internal/config/config.go:2276`) gets no validation notice, matching the
   existing silent treatment of `command:` / `args:` on http transports. A human who narrows the
   environment of a remote server is told nothing about it having no effect.
+
+---
+
+### Reasoning-field spelling — residue (2026-09-02)
+
+**Status:** recorded 2026-09-02 at the close of
+`docs/plans/2026-09-02 - 05 - reasoning-field-spelling-plan.md`. The gap below is left open by
+that plan's own delivered work — the report panes' follow (item 4). It is not a regression: the
+kind-switch it names did not exist before this plan.
+
+- [ ] **`TestReportKindsResolveDistinctly` does not walk `reportKind.follows`.** The walk over the
+  declared kinds (`internal/tui/reportpane_test.go:44-70`) resolves each kind through
+  `reportKind.pane`, `Model.reportState` and `Model.reportContent`, but not through the module's
+  fourth kind-switch, `reportKind.follows` (`internal/tui/reportpane.go:132-141`). Its panicking
+  default is therefore reached by no test, and a fourth report added later inherits the walk's guard
+  for three of the four resolvers only — the follow answer it forgot to state would panic at first
+  paint rather than fail the build's own guard test.

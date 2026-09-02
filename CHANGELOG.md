@@ -854,6 +854,37 @@ point is a **minor** bump, not a breaking change.
 
 - Documented the stdio MCP `env-allowlist:` opt-in: the config template's `mcp-servers:` block carries the key, `docs/manual/configuration.md` gains an `mcp-servers:` section covering the whole block and what a stdio server inherits, and the trust note in `internal/mcp/transport.go` (and its restatement in `docs/design/mcp-client.md`) now states the full-environment launch as the default with `env-allowlist:` as the narrowing opt-in, dropping the `ISSUES.md` L4 pointer.
 
+- **The thinking channel is decoded under both of its wire spellings.** Ollama and OpenRouter
+  spell the model's reasoning `reasoning`, not `reasoning_content`, so against either server the
+  channel streamed into a field apogee never read: `/thinking` showed `no thinking recorded yet`
+  and nothing was preserved as reasoning in history. The provider now reads both spellings as one
+  channel, per chunk and per reply, with `reasoning_content` winning wherever it is non-empty —
+  so llama.cpp, vLLM and LM Studio are byte-for-byte unchanged and one binary serves a mixed
+  roster without being told which server is which. The alias is decoded as raw JSON, so a server
+  that spells `reasoning` as `null` or as an object costs the chunk neither its content nor its
+  place in the stream.
+
+- `/inspect`'s readable view now classifies the `reasoning` wire spelling as thinking, the same
+  channel it already read under `reasoning_content`. The mirrored streamed delta became a named
+  `sseDelta` carrying the provider's own precedence helper — `reasoning_content` wins wherever it is
+  non-empty, `reasoning` is read only otherwise, decided per chunk — so an Ollama or OpenRouter
+  reply's reasoning renders as a thinking passage instead of vanishing entirely, and a chunk whose
+  `reasoning` is a non-string (OpenRouter's terminal `null`, an object) keeps its content instead of
+  falling through to the raw line (closes **The thinking channel's second wire spelling is never
+  decoded** for the inspector).
+
+- `internal/stubllm` scripts and records both wire spellings of the thinking channel: a turn's new
+  `reasoning_field` key writes it as `reasoning_content` (the default) or as the bare `reasoning`
+  Ollama and OpenRouter send, and the recorder captures a stream in the spelling it arrived in. A
+  new `cmd/apogee` end-to-end test drives `/thinking` over both, so the pane's whole journey —
+  wire, provider, board, pane — is proven for either server.
+
+- `/thinking` and `/inspect` now FOLLOW the tail of their row lists the way the transcript does:
+  reasoning and wire records arriving while the pane is open are shown rather than landing below a
+  frozen window. Scrolling up off the end (key or wheel) detaches the pane and holds its window;
+  scrolling back onto the last full window re-arms it. `/usage` is unchanged — it keeps its
+  clamp-only scroll.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
