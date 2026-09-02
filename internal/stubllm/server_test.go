@@ -806,3 +806,87 @@ func waitUntil(t *testing.T, done func() bool) {
 	}
 	t.Fatal("condition never held within two seconds")
 }
+
+// TestServerAwaitHoldsTheReplyUntilReleased pins the whole of the `await:` gate: the request is
+// matched and logged the moment it arrives, its ANSWER waits for [Server.Release], a Release that
+// ran before the request did is already open when it gets there, and a gate nobody opens refuses
+// the request rather than hanging.
+//
+// The subtests are deliberately NOT parallel with each other: the refusal case moves awaitLimit,
+// which the other two read.
+func TestServerAwaitHoldsTheReplyUntilReleased(t *testing.T) {
+	t.Parallel()
+
+	body := `{"model":"stub-model","messages":[{"role":"user","content":"hi"}]}`
+
+	t.Run("held until released", func(t *testing.T) {
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Await: "go", Text: "done"}}})
+		request := newRequest(t, t.Context(), server, body)
+
+		answered := make(chan string, 1)
+		failed := make(chan error, 1)
+		go func() {
+			resp, err := http.DefaultClient.Do(request)
+			if err != nil {
+				failed <- err
+				return
+			}
+			defer resp.Body.Close()
+			raw, err := readAll(resp)
+			if err != nil {
+				failed <- err
+				return
+			}
+			answered <- raw
+		}()
+
+		// The request reaches the log while its answer is still waiting — the gate holds the
+		// reply, not the request, which is what lets a test assert on what was ASKED mid-hold.
+		waitUntil(t, func() bool { return len(server.Requests()) == 1 })
+		select {
+		case raw := <-answered:
+			t.Fatalf("the reply arrived before the gate opened: %s", raw)
+		case err := <-failed:
+			t.Fatalf("post: %v", err)
+		case <-time.After(50 * time.Millisecond):
+		}
+
+		server.Release("go")
+		select {
+		case raw := <-answered:
+			if !strings.Contains(raw, "done") {
+				t.Errorf("reply = %s, want the scripted text once the gate opened", raw)
+			}
+		case err := <-failed:
+			t.Fatalf("post: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the reply never came after Release")
+		}
+	})
+
+	t.Run("released before the request arrives", func(t *testing.T) {
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Await: "go", Text: "done"}}})
+		server.Release("go")
+		server.Release("go")
+
+		if got := post(t, server, body); !strings.Contains(got.body, "done") {
+			t.Errorf("reply = %s, want an already-open gate to answer at once", got.body)
+		}
+	})
+
+	t.Run("nothing releases it", func(t *testing.T) {
+		previous := awaitLimit
+		awaitLimit = 20 * time.Millisecond
+		t.Cleanup(func() { awaitLimit = previous })
+
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Await: "nobody opens this", Text: "done"}}})
+
+		got := post(t, server, body)
+		if got.status != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500 for a gate nothing releases", got.status)
+		}
+		if !strings.Contains(got.body, "nobody opens this") {
+			t.Errorf("body = %q, want it to name the gate that was never released", got.body)
+		}
+	})
+}

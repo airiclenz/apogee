@@ -99,6 +99,21 @@ completion shape at all. `usage.cached` reaches the wire as `prompt_tokens_detai
 present zero means "nothing was cached", and both shapes have to be scriptable.
 `finish_reason` defaults to `stop`, or to `tool_calls` when the turn emits any.
 
+`await: <label>` withholds a turn's reply until the test calls `server.Release("<label>")`. It is
+how a fixture states an ORDER when apogee has **two requests in flight at once** — a delegation's
+child and the out-of-band call that names it, say — where a test that asserts what the first
+answer changed is otherwise a coin toss. The gate is opened by the test rather than by another
+turn on purpose: what such a test waits for is apogee having ACTED on the earlier answer (a frame
+that has painted it, an Event that has been folded), and a server can only see when it wrote the
+bytes, not when the client was done with them. So the release point is an assertion the test can
+already make — `drv.WaitText(…)`, or an Event observed on the run's own sink — and the ordering
+stops being a matter of who wins.
+
+It holds the ANSWER, never the request: every request is matched and logged as it arrives, and
+only the reply waits. `Release` is idempotent and may be called before the held request arrives.
+A gate nobody opens fails the held request with a 500 naming the label after ten seconds, rather
+than hanging the suite.
+
 ### Matching
 
 A request takes **the first unconsumed turn whose `when:` matches it**, and failing that **the

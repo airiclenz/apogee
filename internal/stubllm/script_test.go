@@ -29,6 +29,7 @@ func TestScriptRoundTripsThroughYAML(t *testing.T) {
 			{
 				When:         &Match{LastMessage: "^weather", ToolResult: "list_dir", System: "^You are apogee"},
 				Repeat:       true,
+				Await:        "the forecast is in",
 				Text:         "sunny",
 				TokenDelay:   2 * time.Millisecond,
 				ChunkRunes:   3,

@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
@@ -49,6 +50,12 @@ const (
 	// because it is a prompt asset, and a re-wording that dropped the delegation half of it would
 	// leave this file's fixture matching nothing.
 	namingInstruction = "You name delegated sub-tasks"
+
+	// The gate testdata/stubllm/naming.yaml holds the CHILD's answer on. Every case that expects
+	// a name opens it at the moment it has seen that name land, so the child cannot finish — and
+	// the engine cannot drop the reply as late (ADR 0068 decision 3) — before the thing under
+	// test has happened.
+	namingChildGate = "named"
 )
 
 // TestE2ENamingPaintsAGeneratedName is the TUI half: a delegation the model left unnamed is
@@ -62,11 +69,16 @@ func TestE2ENamingPaintsAGeneratedName(t *testing.T) {
 	submit(drv, namingPrompt)
 	drv.WaitText("Sub-Agent")
 
-	// The name arriving is the assertion. It cannot be waited for by waiting for the delegation to
-	// END — the naming call runs concurrently with the child (ADR 0068 decision 3), so a fast child
-	// can finish first and the name lands on a block that is already closed, which is exactly the
-	// case that must still paint.
+	// The name arriving is the assertion, and it is waited for while the child is still running:
+	// the fixture holds the child's answer on the `named` gate, so the delegation cannot finish
+	// and take the reply down with it as late (ADR 0068 decision 3) before the frame has had the
+	// name. Waiting for the delegation to END instead would be the coin toss this case was flaky
+	// on — a fast child finishes first, and whether the name lands is then a matter of which
+	// goroutine ran.
 	drv.WaitText(namingGenerated)
+
+	// Seen. Let the child finish, and let the parent wrap up on its result.
+	stub.Release(namingChildGate)
 	drv.WaitText(namingWrapUp)
 	drv.WaitQuiet(settled)
 
@@ -120,7 +132,7 @@ func TestE2ENamingReachesAHeadlessSubAgentLine(t *testing.T) {
 // made at all — not one that is made and discarded. The delegation still runs and still paints, on
 // the task's first line it has always worn.
 func TestE2ENamingIsSilentWithAutoTitleOff(t *testing.T) {
-	stub := stubllm.New(t, loadScript(t, "naming"))
+	stub := stubllm.New(t, withoutTheChildGate(loadScript(t, "naming")))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIConfigured(t, drv, stub, "auto-title: false\n")
 
@@ -146,6 +158,21 @@ func TestE2ENamingIsSilentWithAutoTitleOff(t *testing.T) {
 	}
 }
 
+// withoutTheChildGate is the naming script with the hold on the child's answer dropped. The two
+// cases that expect a name open that gate when they have seen the name; the case that switches
+// naming OFF is waiting for a name that is never asked for, so for it the gate is not an ordering
+// but a deadlock. Dropping it here rather than copying the fixture keeps the three cases on the
+// one script they are three readings of.
+func withoutTheChildGate(s stubllm.Script) stubllm.Script {
+	turns := make([]stubllm.Turn, len(s.Turns))
+	copy(turns, s.Turns)
+	for i := range turns {
+		turns[i].Await = ""
+	}
+	s.Turns = turns
+	return s
+}
+
 // headlessAgainst runs one real `apogee headless` against stub in a home of its own and returns
 // what reached stderr. extraConfig is written above the `servers:` block, which is how a case
 // reaches a file-only key.
@@ -156,7 +183,16 @@ func headlessAgainst(t *testing.T, stub *stubllm.Server, extraConfig string) str
 	t.Helper()
 
 	prev := runOnce
-	runOnce = run.Once
+	// The real runner, with ONE observer added: the Spec's own Events sink is wrapped so the case
+	// can open the child's gate at the moment the generated name has been folded into the run —
+	// which is the record the sub-agent line is printed from. run.Once wraps this sink in its own
+	// eventTap and forwards to it AFTER folding, so by the time the release fires the reading the
+	// line will be built from already carries the name. Nothing else about the composition moves:
+	// the namer is still the firing Config's own, which is the injection this case exists to prove.
+	runOnce = func(ctx context.Context, spec run.Spec) (run.Result, error) {
+		spec.Config.Events = releasingOnName(spec.Config.Events, stub)
+		return run.Once(ctx, spec)
+	}
 	t.Cleanup(func() { runOnce = prev })
 	// The environment must not move the home or the mode out from under the run.
 	assertNoAmbientApogeeConfig(t)
@@ -182,6 +218,25 @@ func headlessAgainst(t *testing.T, stub *stubllm.Server, extraConfig string) str
 	}
 	return errBuf.String()
 }
+
+// releasingOnName forwards every Event to inner and opens the child's gate on the one that says
+// the delegation has been named. It is an observer and not a rewrite: the run's own sink still
+// sees the identical stream, in the identical order.
+func releasingOnName(inner domain.EventSink, stub *stubllm.Server) domain.EventSink {
+	return sinkFunc(func(e domain.Event) {
+		if inner != nil {
+			inner.Emit(e)
+		}
+		if named, ok := e.(domain.SubAgentNamedEvent); ok && named.Name != "" {
+			stub.Release(namingChildGate)
+		}
+	})
+}
+
+// sinkFunc is a domain.EventSink written as one function.
+type sinkFunc func(domain.Event)
+
+func (f sinkFunc) Emit(e domain.Event) { f(e) }
 
 // namingRequests picks the DELEGATION naming calls out of a stub's request log by the one thing
 // that identifies them — the system instruction they carry. It is what makes "no naming request was

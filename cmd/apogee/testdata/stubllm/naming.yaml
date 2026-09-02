@@ -42,11 +42,23 @@ turns:
       tool_calls:
         - name: sub_agent
           arguments: '{"task":"Audit every configuration key in this workspace"}'
-    # The child. It states its usage because the headless sub-agent line is printed only for a run
-    # that reported a fill against a window (headlessSubAgentLines).
+    # The child. Its answer is held on the `named` gate until the test has SEEN the generated name
+    # land, which is what makes this fixture a test rather than a coin toss: the two requests are
+    # in flight at once, and a name that comes back after the child has finished is DROPPED by
+    # contract (ADR 0068 decision 3). It is the same hold the engine's own unit tests keep the
+    # child open with (internal/agent/naming_test.go's `gate`), moved to the wire because that is
+    # the only handle an e2e has on a composition it does not build. Holding it until the naming
+    # REPLY was written would not do: that is the server's clock, and what has to have happened is
+    # apogee READING the reply and applying it — so the two cases that expect a name open the gate
+    # on the frame that painted it and on the Event the run folded. The `auto-title: false` case
+    # asks for no name at all and drops the gate (withoutTheChildGate).
+    #
+    # It states its usage because the headless sub-agent line is printed only for a run that
+    # reported a fill against a window (headlessSubAgentLines).
     - when:
         last_message: configuration key in this workspace
       repeat: true
+      await: named
       text: a.txt holds no configuration keys.
       usage:
         prompt: 11800

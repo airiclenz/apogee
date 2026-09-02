@@ -65,6 +65,21 @@ type Turn struct {
 	// Repeat keeps the Turn available forever: it is never consumed, so it answers every
 	// request that reaches it. Useful for a "whatever else is asked" fallback.
 	Repeat bool `yaml:"repeat,omitempty"`
+	// Await withholds this Turn's reply until the test calls [Server.Release] with this
+	// label. It is how a fixture states an ORDER when apogee has two requests in flight at
+	// once and the test is about what the first answer changed: a delegation's child and the
+	// out-of-band call that names it, say, where a name that comes back after the child has
+	// finished is dropped by contract (ADR 0068).
+	//
+	// The gate is deliberately opened by the TEST rather than by another turn, because what
+	// such a test waits for is apogee having ACTED on the earlier answer — the name painted,
+	// the event folded — and a server can only see when it wrote the bytes, not when the
+	// client was done with them. It holds the reply, never the request: every request is
+	// matched and logged as it arrives, and only the answer waits.
+	//
+	// A gate nobody opens fails the held request with a 500 naming the label after
+	// [awaitLimit], rather than hanging the suite until the test binary's own timeout.
+	Await string `yaml:"await,omitempty"`
 	// Captures lift text out of the request this Turn answers, so the reply can echo a path
 	// apogee itself announced rather than one the fixture guessed. Every `{{name}}` in Text and
 	// in the ToolCalls' Arguments is replaced by the matching capture's value.

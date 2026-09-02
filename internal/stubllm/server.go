@@ -19,6 +19,13 @@ import (
 // growing the test process until the machine notices.
 const maxRequestBytes = 8 << 20
 
+// awaitLimit bounds how long a request held by a Turn's `await:` waits for [Server.Release]. A
+// gate nobody opens is a mistake in the test, and the useful failure is a 500 naming the label —
+// not a suite that hangs until the test binary's own timeout and reports nothing about what was
+// waiting for what. It is a var only so this package's own test can pin that refusal without
+// taking ten seconds over it; nothing outside the package moves it.
+var awaitLimit = 10 * time.Second
+
 // completionID is the id every reply carries. It is a constant because nothing reads it — the
 // field exists so the payload is shaped like a real one.
 const completionID = "chatcmpl-stubllm"
@@ -65,6 +72,11 @@ type Server struct {
 	count    int
 	matcher  *matcher
 	requests []Request
+	// gates holds one channel per `await:` label, closed by [Server.Release]. Labels are
+	// created on first use from either side, so a Release that runs before the request it
+	// frees — the ordinary case, since the test is watching apogee and not the wire — opens a
+	// gate that is already there when the request arrives.
+	gates map[string]chan struct{}
 
 	closeOnce sync.Once
 	closer    func()
@@ -145,11 +157,41 @@ func newServer(s Script, opts ...Option) (*Server, error) {
 		return nil, err
 	}
 
-	server := &Server{Model: s.Model, set: settings{requestLog: true}, matcher: m}
+	server := &Server{Model: s.Model, set: settings{requestLog: true}, matcher: m, gates: map[string]chan struct{}{}}
 	for _, opt := range opts {
 		opt(&server.set)
 	}
 	return server, nil
+}
+
+// Release opens the gate label names, so every Turn whose `await:` names it answers from now on.
+// It is idempotent and may be called before the held request has even arrived: a test that
+// watches apogee — a frame that has painted, an Event that has been folded — is watching the
+// thing that has to happen FIRST, and the request it frees is by definition still waiting.
+func (s *Server) Release(label string) {
+	if label == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	gate := s.gate(label)
+	select {
+	case <-gate:
+	default:
+		close(gate)
+	}
+}
+
+// gate is the channel this label's waiters block on, made on first mention from either side. The
+// caller holds the lock.
+func (s *Server) gate(label string) chan struct{} {
+	if existing, ok := s.gates[label]; ok {
+		return existing
+	}
+	made := make(chan struct{})
+	s.gates[label] = made
+	return made
 }
 
 // handler is the routing surface: the two endpoints the provider client uses, behind the
@@ -200,10 +242,45 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// The gate sits between matching and replying: the request is already logged and its turn
+	// already taken, so a test reading the log sees the request arrive at the moment it arrived,
+	// and only the ANSWER is held back.
+	held, err := s.awaitRelease(r.Context(), turn.Await)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !held {
+		return
+	}
 	if !sleep(r.Context(), s.set.latency) {
 		return
 	}
 	s.reply(w, r, turn, request.Stream)
+}
+
+// awaitRelease holds a request until [Server.Release] opens label's gate. It answers true when the
+// wait is over and the reply may be written, false when the client gave up first — in which case
+// nothing is written at all, the way a cancelled `hang` turn writes nothing — and an error when
+// nobody opened the gate inside [awaitLimit].
+func (s *Server) awaitRelease(ctx context.Context, label string) (bool, error) {
+	if label == "" {
+		return true, nil
+	}
+	s.mu.Lock()
+	gate := s.gate(label)
+	s.mu.Unlock()
+
+	timer := time.NewTimer(awaitLimit)
+	defer timer.Stop()
+	select {
+	case <-gate:
+		return true, nil
+	case <-ctx.Done():
+		return false, nil
+	case <-timer.C:
+		return false, fmt.Errorf("stubllm: a turn waited for the gate %q, which nothing released", label)
+	}
 }
 
 // take logs a request and hands back the Turn that answers it, expanded against the request's
