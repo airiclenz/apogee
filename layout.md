@@ -942,7 +942,10 @@ body — unless the engine wrapped that report in an **outcome envelope**, which
 instead: `· stopped at its step cap` where the step cap stopped the run mid-task, and
 `· steered by 2 messages` appended to whichever verdict stands where the human addressed the child
 while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its
-cause. The collapsed row is the only place in the parent's conversation any of that can be read,
+cause. A capped run still closes with a wrap-up report; the envelope takes the slot ahead of that
+report's first line deliberately (ADR 0063), so the row says why the run stopped rather than what
+it managed to say last, and the capped child's closing report is read one level down, inside the
+run view. The collapsed row is the only place in the parent's conversation any of that can be read,
 the run's own conversation being a level down. The count is **transitive** — every call in the span counts, whatever its
 depth — so one number says how much work happened in there, at every nesting level by the same
 rule. The middle cell is the other half of that summary: **how full the delegate's own context

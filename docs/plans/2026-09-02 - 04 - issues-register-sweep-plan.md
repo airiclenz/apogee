@@ -190,7 +190,7 @@ with "the last entry is 0 AND some earlier entry is non-zero", keeping the same 
 
 ---
 
-## 4. `layout.md` says why the cap envelope keeps the collapsed slot
+## 4. `layout.md` says why the cap envelope keeps the collapsed slot — ✅ DONE (2026-09-02)
 
 **What.** `layout.md:942` words the collapsed slot `· stopped at its step cap`, which is exactly what
 the TUI emits (`delegationCappedVerdict`, `internal/tui/toolregistry.go:727`, reached through
