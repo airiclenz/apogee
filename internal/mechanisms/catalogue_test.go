@@ -100,20 +100,25 @@ func TestBuildFromConstructorErrorPropagates(t *testing.T) {
 // that mutates a built Mechanism's IncompatibleWith/Requires or Before/After cannot reach back
 // through the aliased slice header into the static catalogue row. Without the clone the two builds
 // below would see each other's writes.
+//
+// It is registered through registerIn over a table of its own, so the row it asserts on carries both
+// Requires and IncompatibleWith non-empty whatever the shipped catalogue holds. That is why the
+// clone contract lives HERE rather than at the root: apogee.CataloguedMechanisms() is
+// Descriptors() over the production catalogue, which returns no synthetic row, so the root's old
+// assertion could only ever be as strong as whichever catalogued row happened to declare an edge.
 func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 	t.Parallel()
 	const id domain.MechanismID = "fake"
-	table := map[domain.MechanismID]row{
-		id: {
-			descriptor: domain.MechanismDescriptor{
-				ID:               id,
-				IncompatibleWith: []domain.MechanismID{"rival"},
-				Requires:         []domain.MechanismID{"prereq"},
-			},
-			ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{"later"}, After: []domain.MechanismID{"earlier"}},
-			construct: func(Deps) (any, error) { return fakeMechanism{id: id}, nil },
+	table := map[domain.MechanismID]row{}
+	registerIn(table, row{
+		descriptor: domain.MechanismDescriptor{
+			ID:               id,
+			IncompatibleWith: []domain.MechanismID{"rival"},
+			Requires:         []domain.MechanismID{"prereq"},
 		},
-	}
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{"later"}, After: []domain.MechanismID{"earlier"}},
+		construct: func(Deps) (any, error) { return fakeMechanism{id: id}, nil },
+	})
 
 	built, err := buildFrom(table, id, Deps{})
 	if err != nil {
@@ -159,9 +164,10 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 // KnownIDs reports it, while a deferred / un-ported ID is still an unknown-ID error. The tool-call
 // validator, the identical-repeat detector, the redundant-re-read interceptor, the per-result
 // trimmer and the two Wave-1 recoveries (item 6) are NOT here: they were promoted to Floor guards
-// (ADR 0071) and are on the retired roll. Neither are Wave 4's decompose request shaper and its
-// stall_nudge/list_nudge/tool_use_directive completion nudges: they were retired outright on the
-// same verdict. A `mechanisms:` key naming any of them is tolerated, never built.
+// (ADR 0071) and are on the retired roll. Neither are Wave 4's decompose request shaper, its
+// stall_nudge/list_nudge/tool_use_directive completion nudges, nor apogee's own enumeration-steer
+// and sub-agent fan-out row: they were retired outright on the same verdict. A `mechanisms:` key
+// naming any of them is tolerated, never built.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
@@ -206,10 +212,11 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	t.Parallel()
 	deps := Deps{Library: library.NewStore(t.TempDir())}
 	// Every pre-request Mechanism, including the unordered request-prep injectors (filehint/read_loop),
-	// so the pin reflects the production registry. The three completion nudges and decompose retired
-	// in v0.20.0 (ADR 0071), so library is the only row left declaring the Before-toolfilter edge.
+	// so the pin reflects the production registry. The Wave-4 rows retired in v0.20.0 (ADR 0071), so
+	// library is the only row left declaring the Before-toolfilter edge and nothing declares the
+	// After-toolfilter one.
 	ids := []domain.MechanismID{
-		"toolfilter", "guided_decomposition", "library",
+		"toolfilter", "library",
 		"filehint", "read_loop",
 	}
 	reg := domain.NewMechanismRegistry()
@@ -229,11 +236,6 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	if len(ordered) != len(ids) {
 		t.Fatalf("Ordered(pre-request) returned %d Mechanisms, want %d", len(ordered), len(ids))
 	}
-	pos := make(map[domain.MechanismID]int, len(ordered))
-	for i, m := range ordered {
-		pos[m.Descriptor.ID] = i
-	}
-
 	// library injects before toolfilter narrows the menu — assert it DECLARES its Before-toolfilter
 	// edge, not merely that it sorts ahead of toolfilter. Under the D4 stable-ID tiebreak "library"
 	// already sorts before "toolfilter" even with the edge dropped, so an emergent-position check
@@ -243,17 +245,6 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 		if !slices.Contains(built[before].Ordering.Before, "toolfilter") {
 			t.Errorf("%s does not declare Before toolfilter (Ordering = %+v)", before, built[before].Ordering)
 		}
-	}
-	// guided_decomposition declares After toolfilter (its sub_agent-presence gate must read the final,
-	// post-toolfilter menu) — assert the DECLARED edge, not merely that it sorts after toolfilter, and
-	// that it lands after the narrowing.
-	if !slices.Contains(built["guided_decomposition"].Ordering.After, "toolfilter") {
-		t.Errorf("guided_decomposition does not declare After toolfilter (Ordering = %+v)",
-			built["guided_decomposition"].Ordering)
-	}
-	if pos["toolfilter"] >= pos["guided_decomposition"] {
-		t.Errorf("want toolfilter@%d < guided_decomposition@%d",
-			pos["toolfilter"], pos["guided_decomposition"])
 	}
 }
 

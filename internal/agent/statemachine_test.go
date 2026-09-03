@@ -765,7 +765,7 @@ func (h deferOnceHook) PostResponse(_ context.Context, _ *domain.Response) (doma
 // Exchange. So neither the snapshot taken after the Exchange nor the resumed next-Exchange request
 // carries the correction. This reverses the pre-F6 cross-Exchange delivery (a stale directive leaking
 // past an Exchange was the reviewed High defect); within-Exchange defer delivery across a
-// snapshot/resume is still proven by TestGuidedDecomposition_SnapshotMidFanOutRoundTripsDirective.
+// snapshot/resume is still proven by TestDeferredAction_CancelDuringDelegationRestoresSingleDirective.
 func TestStep_DeferredCorrectionExpiresAtExchangeEnd(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)

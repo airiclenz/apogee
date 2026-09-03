@@ -61,6 +61,10 @@ type retiredRow struct {
 //   - decompose (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. The task-decomposition
 //     steer collapsed complex prompts in history and hinted a single next step into the system
 //     prompt: it rewrites what the human asked for, so it steers rather than shapes.
+//   - guided_decomposition (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. The
+//     enumeration steer and its batched sub_agent fan-out (ADR 0014) told the model how to plan
+//     its own work and then dispatched delegations it never asked for: the most steering row the
+//     catalogue carried, and no per-model A/B ever earned it a place (ADR 0009's gate).
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
@@ -73,6 +77,7 @@ var retired = []retiredRow{
 	{ID: "list_nudge", Release: "v0.20.0"},
 	{ID: "tool_use_directive", Release: "v0.20.0"},
 	{ID: "decompose", Release: "v0.20.0"},
+	{ID: "guided_decomposition", Release: "v0.20.0"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

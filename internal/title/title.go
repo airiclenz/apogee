@@ -736,7 +736,7 @@ func FirstLine(s string) string {
 // DelegateLabel says WHICH delegation a display is reporting on: the short name the sub_agent call
 // gave it, falling back to the delegated task's first line when it gave none — which is every
 // delegation written before the name argument existed, and every one a Mechanism synthesises
-// (guided decomposition names nothing). Both spellings go through FirstLine, so a name is folded to
+// (a synthesized call names nothing). Both spellings go through FirstLine, so a name is folded to
 // one line exactly as a task is.
 //
 // The fallback is decided on the form the caller handed in, not on the raw argument: a "name" of

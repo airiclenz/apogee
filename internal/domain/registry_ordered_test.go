@@ -255,22 +255,22 @@ func TestValidateIncompatibilities(t *testing.T) {
 func TestValidateRequirements(t *testing.T) {
 	t.Run("required peer absent ⇒ error naming both IDs", func(t *testing.T) {
 		r := registerAll(t,
-			regd("guided_decomposition", requires("tool_result_cap")),
+			regd("requiring_row", requires("required_row")),
 		)
 		err := r.ValidateRequirements()
 		if !errors.Is(err, ErrMissingRequirement) {
 			t.Fatalf("ValidateRequirements = %v, want ErrMissingRequirement", err)
 		}
 		msg := err.Error()
-		if !strings.Contains(msg, "guided_decomposition") || !strings.Contains(msg, "tool_result_cap") {
+		if !strings.Contains(msg, "requiring_row") || !strings.Contains(msg, "required_row") {
 			t.Errorf("error %q does not name both the requiring and required IDs", msg)
 		}
 	})
 
 	t.Run("required peer present ⇒ ok", func(t *testing.T) {
 		r := registerAll(t,
-			regd("guided_decomposition", requires("tool_result_cap")),
-			regd("tool_result_cap"),
+			regd("requiring_row", requires("required_row")),
+			regd("required_row"),
 		)
 		if err := r.ValidateRequirements(); err != nil {
 			t.Errorf("ValidateRequirements = %v, want nil (the required peer is registered)", err)

@@ -17,7 +17,7 @@
 //
 // # The Mechanism files, one line each
 //
-// Ten files carrying ten catalogue rows — one row per file. Each holds its Mechanism's init()
+// Nine files carrying nine catalogue rows — one row per file. Each holds its Mechanism's init()
 // registration, descriptor, constructor, hook implementation, and the logic only that Mechanism
 // uses. prompts.go is described with them and registers nothing: it holds the prompt-asset embed
 // library.go loads through.
@@ -26,9 +26,7 @@
 // gated sub-process and the repaired content is spliced back into the call.
 // errorenrich.go is error_enrichment, which classifies a tool error and appends category-shaped
 // suggestions when the same category repeats. filehint.go scores a freshly listed directory
-// against the user's prompt and hints at the files worth reading. guideddecomposition.go is apogee's own
-// guided_decomposition (ADR 0014): the enumeration steer plus the batched sub-agent fan-out
-// follow-through, Depth-0 and once-per-Exchange gated. library.go is the Library Mechanism — the
+// against the user's prompt and hints at the files worth reading. library.go is the Library Mechanism — the
 // only row that declares a needs (the Library store the engine derives). readloop.go detects a
 // path read over and over without progress and hints at it; readrepeat.go catches the redundant
 // re-read in the response about to be sent. syntax.go is the write-content syntax-check Mechanism

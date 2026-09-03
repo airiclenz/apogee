@@ -206,14 +206,32 @@ type discardSink struct{}
 func (discardSink) Emit(apogee.Event) {}
 
 // Example_enableMechanismStack arms catalogued Mechanisms by ID through Config.EnableMechanisms.
-// The pair must be compatible: guided_decomposition is IncompatibleWith decompose (ADR 0014), so
-// arming those two together fails New with ErrIncompatibleMechanisms.
+// The arm must be internally compatible — a pair the catalogue declares IncompatibleWith fails New
+// with ErrIncompatibleMechanisms — so it is planned from CataloguedMechanisms() itself, keeping each
+// row only when it stacks with everything already chosen. Naming no ID keeps the example honest as
+// the catalogue changes.
 func Example_enableMechanismStack() {
+	catalogue := apogee.CataloguedMechanisms()
+	byID := make(map[apogee.MechanismID]apogee.MechanismDescriptor, len(catalogue))
+	for _, d := range catalogue {
+		byID[d.ID] = d
+	}
+
+	var arm []apogee.MechanismID
+	for _, d := range catalogue {
+		if slices.ContainsFunc(arm, func(sel apogee.MechanismID) bool {
+			return slices.Contains(d.IncompatibleWith, sel) || slices.Contains(byID[sel].IncompatibleWith, d.ID)
+		}) {
+			continue // a row that refuses to stack with one already chosen
+		}
+		arm = append(arm, d.ID)
+	}
+
 	cfg := apogee.Config{
 		Endpoint:         "http://localhost:11434",
 		Model:            "local-model",
 		Events:           discardSink{},
-		EnableMechanisms: []apogee.MechanismID{"guided_decomposition", "toolfilter"},
+		EnableMechanisms: arm,
 	}
 	ag, err := apogee.New(cfg)
 	if err != nil {
@@ -222,29 +240,38 @@ func Example_enableMechanismStack() {
 	}
 	defer func() { _ = ag.Close() }()
 
-	fmt.Println("armed:", cfg.EnableMechanisms)
+	fmt.Println("construct: ok")
 	// Output:
-	// armed: [guided_decomposition toolfilter]
+	// construct: ok
 }
 
-// Example_cataloguedMechanisms plans an arm around one Mechanism from CataloguedMechanisms() — the
-// bench's idiom: keep the Mechanism the arm is about, then drop every row declared incompatible with
-// it, so no refused pair reaches New (which would refuse with ErrIncompatibleMechanisms). Arming
-// truncate_history therefore drops guided_decomposition, which is IncompatibleWith it.
+// Example_cataloguedMechanisms plans an arm AROUND one Mechanism the way the bench does: keep the
+// Mechanism the arm is about, then drop every row declared incompatible with it, so no refused pair
+// reaches New. The subject is taken from CataloguedMechanisms() rather than named, so the idiom —
+// not any one row — is what the example shows.
 func Example_cataloguedMechanisms() {
-	const armAbout = apogee.MechanismID("truncate_history")
+	catalogue := apogee.CataloguedMechanisms()
+	if len(catalogue) == 0 {
+		fmt.Println("no incompatible row survived the filter: true")
+		return
+	}
+	armAbout := catalogue[0].ID
 
 	var arm []apogee.MechanismID
-	for _, d := range apogee.CataloguedMechanisms() {
+	for _, d := range catalogue {
 		if d.ID != armAbout && slices.Contains(d.IncompatibleWith, armAbout) {
 			continue // a row that refuses to stack with the one this arm is about
 		}
 		arm = append(arm, d.ID)
 	}
 
-	fmt.Println("arm about:", armAbout)
-	fmt.Println("guided_decomposition still armed:", slices.Contains(arm, "guided_decomposition"))
+	clean := true
+	for _, d := range catalogue {
+		if d.ID != armAbout && slices.Contains(d.IncompatibleWith, armAbout) && slices.Contains(arm, d.ID) {
+			clean = false
+		}
+	}
+	fmt.Println("no incompatible row survived the filter:", clean)
 	// Output:
-	// arm about: truncate_history
-	// guided_decomposition still armed: false
+	// no incompatible row survived the filter: true
 }

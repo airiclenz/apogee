@@ -110,7 +110,9 @@ func TestRetiredReleaseAndSuccessorAnswerPerID(t *testing.T) {
 func TestRetiredOutrightRowsCarryTheirReleaseAndNoSuccessor(t *testing.T) {
 	t.Parallel()
 
-	for _, id := range []domain.MechanismID{"decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
+	for _, id := range []domain.MechanismID{
+		"decompose", "stall_nudge", "list_nudge", "tool_use_directive", "guided_decomposition",
+	} {
 		t.Run(string(id), func(t *testing.T) {
 			t.Parallel()
 

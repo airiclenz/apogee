@@ -272,7 +272,7 @@ func (a *Agent) shouldAutoCompact() bool {
 // actually costs, so a history the fold cannot render whole is precisely the history worth folding.
 // The substitution is the ENGINE's, deliberately: the Budget the hooks and Mechanisms see keeps its
 // honest zero allocation, so nothing outside this file starts steering on a guessed window
-// (guided_decomposition's stated posture) or shows a fill against a window nobody reported.
+// (the catalogue's stated posture: never fire on a guess) or shows a fill against a window nobody reported.
 func (a *Agent) historyExceedsAllocation() bool {
 	b := a.budget()
 	if b.History <= 0 {

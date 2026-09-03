@@ -661,7 +661,62 @@ remaining tests pass.
 
 **Commit:** `refactor(mechanisms): retire stall_nudge, list_nudge, tool_use_directive and decompose`
 
-## 13. Retire `guided_decomposition`
+## 13. Retire `guided_decomposition` — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the F6 Deferred-Action Exchange-scope proofs are recast in
+`internal/agent/deferred_exchange_scope_test.go` over a synthetic `deferringMech` post-response hook
+registered on a plain `MechanismRegistry` (opens a serialized sub_agent fan-out on a cued Exchange,
+defers a "Remaining subtasks (N left)" directive). The three tests keep their assertions and are
+renamed `TestDeferredAction_*`; their `gd*` fixtures become `defer*`, since the old names encoded the
+retired row.
+
+NOTES (2026-09-03): the two still-called `gd*` helpers from the deleted
+`internal/agent/guided_decomposition_test.go` were rehomed unrenamed — `gdWindow` and
+`gdMessageEventDepth` into `enable_mechanisms_subagent_test.go` (its only remaining caller), and
+`blockAtResponder` into `deferred_exchange_scope_test.go` (also used by `interject_test.go:189`, a
+caller the item's enumeration did not list).
+
+NOTES (2026-09-03): the catalogue pair the incompatibility gate is proved on in
+`internal/agent/rebind_test.go` and `enable_mechanisms_test.go` moves to `read_loop` /
+`read_repeat` — the only IncompatibleWith edge left in the shipped catalogue. `benchreadiness_test.go`
+drops its incompatible-pair case per the item's text (item 19 owns that file's shape).
+
+NOTES (2026-09-03): `apogee_test.go`'s `TestCataloguedMechanisms_ReturnsClonedDescriptors` is deleted
+rather than rewritten: `CataloguedMechanisms()` is `mechanisms.Descriptors()` over the production
+catalogue and never returns a synthetic row. The clone contract now stands solely on
+`internal/mechanisms`'s `TestBuildFromClonesDescriptorAndOrderingSlices`, whose synthetic row is
+registered through `registerIn` and whose doc comment records that it is the contract's home. No
+duplicate `Descriptors()`-level assertion was added, since that would need a production-code split of
+`Descriptors` to take an explicit table.
+
+NOTES (2026-09-03): the acceptance grep does not read literally zero — three sites survive by design,
+all of them the retirement record itself: the roll entry and its doc bullet in
+`internal/mechanisms/retired.go`, and the ID in `retired_test.go`'s outright-retired roll coverage.
+That matches item 12's landed precedent for `decompose`/`stall_nudge`/`list_nudge`/`tool_use_directive`.
+Every other site — code, comment, fixture and prose — is gone.
+
+NOTES (2026-09-03): consequential edit — internal/domain/registry_ordered_test.go: made necessary by
+the grep rule; `TestValidateRequirements`'s two synthetic fixture IDs (`guided_decomposition` /
+`tool_result_cap`) become `requiring_row` / `required_row`.
+
+NOTES (2026-09-03): consequential edit — internal/domain/hooks_test.go: made necessary by the grep
+rule; the Exchange-opening comment no longer names the retired row's F1/F3 invariant.
+
+NOTES (2026-09-03): consequential edit — internal/agent/fanout_test.go: made necessary by the grep
+rule; two comments naming the retired row's batch now name a delegation-synthesizing Mechanism.
+
+NOTES (2026-09-03): consequential edit — internal/agent/hooksynthesis_test.go: made necessary by the
+grep rule; the header names a fan-out Mechanism rather than the retired row.
+
+NOTES (2026-09-03): consequential edit — internal/agent/statemachine_test.go: made necessary by
+deleting `internal/agent/guided_decomposition_test.go`; the cross-reference now names the surviving
+`TestDeferredAction_CancelDuringDelegationRestoresSingleDirective`.
+
+NOTES (2026-09-03): consequential edit — internal/config/defaults/config.yaml: made necessary by the
+grep rule; the `parallel-agents` prose no longer names guided decomposition.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/retired_test.go: made necessary by the
+new roll entry; the outright-retired roll case list gains the ID.
 
 **What.** Depends on 12. Delete `guideddecomposition.go` (+`_test.go`), `internal/agent/guided_decomposition_test.go`,
 `cmd/apogee/guided_decomposition_test.go`; roll entry. `Requires`/`IncompatibleWith` and

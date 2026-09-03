@@ -110,8 +110,7 @@ func TestRequestInjectContext(t *testing.T) {
 // injected message is UNMARKED, so anchoring on the plain last user message would slot it
 // between the remark and the ask, making the injection itself the newest non-interjected
 // user message: the derived Exchange would collapse to the interjection alone and every
-// Mechanism scoped to the Exchange (guided decomposition's F1/F3 shared-context invariant
-// first among them) would lose the ask it shares context with.
+// Mechanism scoped to the Exchange would lose the ask it shares context with.
 func TestRequestInjectContextPreservesExchangeOpening(t *testing.T) {
 	msgs := []Message{
 		{Role: RoleSystem, Content: "base"},

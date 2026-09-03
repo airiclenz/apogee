@@ -153,7 +153,7 @@
 #   parallel-agents
 #              how many sub-agents this server may run at once. When one model reply asks for
 #              several delegations, apogee runs up to this many of them side by side instead of
-#              one after another, and guided decomposition dispatches batches of the same size.
+#              one after another, and a Mechanism that synthesises delegations batches by the same size.
 #              Optional, and it is a PIN — set it and nothing overrides it:
 #
 #                (absent)  ask the server: apogee uses the slot count it advertises. A server

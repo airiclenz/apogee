@@ -2,15 +2,14 @@ package agent
 
 // Sub-agent spawn under the PRODUCTION Config.EnableMechanisms arm (ADR 0015 Realisation; plan
 // item 9). The existing coverage splits the two concerns: enable_mechanisms_test.go arms via
-// EnableMechanisms but never delegates, and guided_decomposition_test.go delegates but arms via a
-// pre-built Config.Mechanisms (wave1Registry). Neither exercises the seam the ADR names — a spawned
-// sub-agent inherits the parent's ALREADY-BUILT registry (subagent.go: childCfg.Mechanisms =
+// EnableMechanisms but never delegates, and the delegation suites arm via a pre-built
+// Config.Mechanisms (wave1Registry, or a synthetic row). Neither exercises the seam the ADR names —
+// a spawned sub-agent inherits the parent's ALREADY-BUILT registry (subagent.go: childCfg.Mechanisms =
 // a.registry.ForSubAgent(), which hands the child that catalogue in a container of its own) and
 // CLEARS EnableMechanisms so the child does not rebuild those IDs into the inherited registry and
-// trip the already-registered rejection. These tests arm guided_decomposition +
-// syntax by ID with Config.Mechanisms left nil (the engine BUILDS the stack), drive one
-// real delegation, and prove the child ran the inherited stack — through New and through Resume, the
-// one construction path the ADR names.
+// trip the already-registered rejection. These tests arm syntax by ID with Config.Mechanisms left
+// nil (the engine BUILDS the stack), drive one real delegation, and prove the child ran the
+// inherited stack — through New and through Resume, the one construction path the ADR names.
 
 import (
 	"context"
@@ -21,12 +20,18 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// gdEnableStack is the production arm under test: two catalogued rows left for the engine to BUILD
-// (Config.Mechanisms nil), one of which — syntax — is a response-repair row a CHILD can trip. A
-// spawned sub-agent must inherit this built registry, not rebuild it. (The stack used to name the
-// tool-result cap as guided_decomposition's Required peer; that is the `tool-result-cap` Floor guard
-// now, on for every agent at every Depth and so no proof that a registry was inherited.)
-var gdEnableStack = []domain.MechanismID{"guided_decomposition", "syntax"}
+// gdEnableStack is the production arm under test: a catalogued row left for the engine to BUILD
+// (Config.Mechanisms nil) — syntax, a response-repair row a CHILD can trip. A spawned sub-agent must
+// inherit this built registry, not rebuild it. (The stack used to carry the fan-out row too, with
+// the tool-result cap as its Required peer; the cap is the `tool-result-cap` Floor guard now — on
+// for every agent at every Depth, and so no proof that a registry was inherited — and the row itself
+// retired in v0.20.0, ADR 0071.)
+var gdEnableStack = []domain.MechanismID{"syntax"}
+
+// gdWindow is the discovered context window these delegation tests run under: at 4 chars/token
+// (uncalibrated) it allocates ~400 tokens to FileContext and ~960 to History, so a modest ask leaves
+// the budget honest without any allocation being close to full.
+const gdWindow = 2000
 
 // enableMechanismsSubAgentConfig arms the stack by ID (Config.Mechanisms left nil so the engine
 // builds it), wires the sub_agent recursion point plus a write_file tool the child can call, and
@@ -40,9 +45,8 @@ func enableMechanismsSubAgentConfig(sink domain.EventSink) domain.Config {
 }
 
 // enableMechanismsSubAgentScripts is the run-ordered script the shared responder replays across the
-// parent AND its one child: the parent delegates unprompted (a modest opening ask, so signal A never
-// fires; the committed delegation then keeps the once-per-Exchange gate quiet), and the child writes
-// a Go file whose payload is unbalanced — which the inherited syntax row retries in place, firing at
+// parent AND its one child: the parent delegates unprompted on a modest opening ask, and the child
+// writes a Go file whose payload is unbalanced — which the inherited syntax row retries in place, firing at
 // Depth 1 — before the child and then the parent each answer. The call itself is well formed, so the
 // tool-call repair Floor guard ahead of every hook stands down and leaves the seam to the Mechanism.
 func enableMechanismsSubAgentScripts() [][]provider.Delta {
@@ -120,9 +124,8 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 
 	// The spawn succeeded: the sub_agent tool result the parent saw is the child's report, not a
 	// construction error. Reverting subagent.go's `childCfg.EnableMechanisms = nil` breaks exactly
-	// this — the child would rebuild guided_decomposition/syntax into the registry it
-	// inherited and fail with the already-registered rejection, surfacing "could not construct
-	// sub-agent" here.
+	// this — the child would rebuild syntax into the registry it inherited and fail with the
+	// already-registered rejection, surfacing "could not construct sub-agent" here.
 	subRes, ok := lastSubAgentResult(sink.events)
 	if !ok {
 		t.Fatal("no sub_agent tool result — the parent never delegated")
@@ -149,6 +152,16 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 		t.Errorf("no syntax fire at Depth 1; the child did not run the inherited EnableMechanisms stack. fires=%+v",
 			mechanismFires(sink.events))
 	}
+}
+
+// gdMessageEventDepth returns the Depth of the first MessageEvent whose Text equals text, or -1.
+func gdMessageEventDepth(events []domain.Event, text string) int {
+	for _, e := range events {
+		if me, ok := e.(domain.MessageEvent); ok && me.Text == text {
+			return me.Depth
+		}
+	}
+	return -1
 }
 
 // hasFireAtDepth reports whether a MechanismFiredEvent for id was emitted at the given nesting Depth.

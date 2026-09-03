@@ -78,7 +78,7 @@ type DelegationTarget struct {
 	// reply CEILING is not, being a token count off the retired server's window.
 	ResponseReserveFraction float64
 	// ParallelAgents is the RECEIVING server's fan-out width — the cap that bounds a routed
-	// depth-0 fan-out and the guided-decomposition batch alike (ADR 0039's one width everywhere,
+	// depth-0 fan-out and a Mechanism's synthesized batch alike (ADR 0039's one width everywhere,
 	// sourced from the server actually holding the slots). Anything < 2 means serial.
 	ParallelAgents int
 	// Profile is the model profile resolved for Model (ADR 0044): how the grunt model speaks the

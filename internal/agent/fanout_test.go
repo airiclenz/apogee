@@ -646,7 +646,7 @@ func TestFanOutWidth_UnparseableSeatIsNotASplit(t *testing.T) {
 // A routed delegation spends the SUB-AGENT server's slots, so that server's cap is the one that
 // bounds the group. These tests pin the choice (which cap governs), the behaviour it buys (a
 // session server pinned to serial still fans out three-wide onto a three-slot grunt box), the
-// second reader that follows for free (the hook view guided decomposition batches by), and the
+// second reader that follows for free (the hook view a delegation-synthesizing Mechanism batches by), and the
 // once-per-reply snapshot that keeps a group at one width while the target moves under it.
 
 // TestDelegationCapPicksTheGoverningServer is the resolution rule alone: routed ⇒ the target's
@@ -813,8 +813,8 @@ func TestFanOut_LatchClearedMidGroupKeepsTheGroupWidth(t *testing.T) {
 }
 
 // TestRoutedWidthReachesTheHookView pins the second reader (ADR 0039's one width everywhere): the
-// width stamped onto the hook-facing view is the ROUTED one, so guided decomposition's
-// min(cap, remaining) batch follows the Sub-agent server's cap with no rule of its own — and falls
+// width stamped onto the hook-facing view is the ROUTED one, so a delegation-synthesizing
+// Mechanism's min(cap, remaining) batch follows the Sub-agent server's cap with no rule of its own — and falls
 // back to the session server's the moment the target is gone.
 func TestRoutedWidthReachesTheHookView(t *testing.T) {
 	t.Parallel()

@@ -209,7 +209,7 @@ func (a *Agent) askedSeat(call domain.ToolCall) delegationSeat {
 // slots its own children need. It is one rule with two readers — the pool below sizes itself by
 // it through fanOutWidthFor, and buildRequest stamps it onto the hook-facing view
 // (LoopView.ParallelAgents) so a Mechanism synthesizing delegations batches by the same width the
-// engine will honour. That second reader is why guided decomposition's batch needs nothing of its
+// engine will honour. That second reader is why such a batch needs nothing of its
 // own to follow a routed cap (ADR 0045 §5): its min(cap, remaining) reads the view, the view
 // carries this number, and this number already knows which server the children will run on.
 //

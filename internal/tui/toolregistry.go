@@ -1147,7 +1147,7 @@ func subAgentName(args map[string]any) string {
 
 // subAgentTarget leads a delegation's header with the name the model gave it, falling back to the
 // delegated task's first line when it gave none — which is every delegation written before the
-// argument existed, and every one a Mechanism synthesises (guided decomposition names nothing).
+// argument existed, and every one a Mechanism synthesises (a synthesized call names nothing).
 // The two spellings get the same treatment, so a name is clipped and escape-stripped exactly as a
 // task line is (firstLineArg, finishDisplay).
 //

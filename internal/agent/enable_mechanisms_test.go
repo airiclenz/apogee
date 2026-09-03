@@ -300,8 +300,8 @@ func TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent(t *testing.T) {
 
 // TestBuildMechanisms_RefusesWhatConstructionRefuses: the errors are the construction errors, raised
 // where the host can still name the config that asked for them — an unknown ID wrapping
-// ErrUnknownMechanism, and a pair the incompatibility gate refuses (guided_decomposition
-// IncompatibleWith truncate_history), exactly as New refuses the same two lists. BuildMechanisms builds
+// ErrUnknownMechanism, and a pair the incompatibility gate refuses (read_loop
+// IncompatibleWith read_repeat), exactly as New refuses the same two lists. BuildMechanisms builds
 // into a FRESH registry and never reads cfg.Mechanisms, so the refusal it is checked on has to be
 // one a catalogue pair can still trip.
 func TestBuildMechanisms_RefusesWhatConstructionRefuses(t *testing.T) {
@@ -312,7 +312,7 @@ func TestBuildMechanisms_RefusesWhatConstructionRefuses(t *testing.T) {
 		t.Errorf("BuildMechanisms with an unknown ID = %v, want ErrUnknownMechanism", err)
 	}
 
-	_, err = BuildMechanisms(cfg, []domain.MechanismID{"guided_decomposition", "truncate_history"})
+	_, err = BuildMechanisms(cfg, []domain.MechanismID{"read_loop", "read_repeat"})
 	if !errors.Is(err, domain.ErrIncompatibleMechanisms) {
 		t.Errorf("BuildMechanisms with an incompatible pair = %v, want ErrIncompatibleMechanisms", err)
 	}

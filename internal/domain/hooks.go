@@ -314,16 +314,16 @@ type LoopView interface {
 	Turn() int
 	// Depth reports the sub-agent nesting level the hook is firing at: 0 for a top-level
 	// Agent, parent+1 for a sub-agent (ADR 0013). It is the seam a gate keyed on "only at
-	// the top level" needs — guided decomposition steers only the primary call, never a
-	// nested delegation it itself set up (ADR 0014 §5). A view built without a depth (a test
+	// the top level" needs — a Mechanism that opens a fan-out shapes only the primary call,
+	// never a nested delegation it itself set up. A view built without a depth (a test
 	// fake, the degraded no-view Response) reports 0, the top-level default.
 	Depth() int
 	// ParallelAgents reports how many sub_agent delegations the agent this hook is firing
 	// inside may run AT ONCE — the bound server's Parallel agents cap (ADR 0039 decision 2,
 	// pin-else-discover-else-1) at Depth 0, and 1 at any deeper level, where a child's own
 	// delegations stay serial inline (decision 3). It is the width a Mechanism that
-	// synthesizes delegations batches by: guided decomposition dispatches min(cap,
-	// remaining) per Turn (ADR 0014 amendment 2026-08-07). A view built without one (a test
+	// synthesizes delegations batches by, dispatching min(cap, remaining) per Turn (ADR 0039
+	// decision 2). A view built without one (a test
 	// fake, the degraded no-view Response) reports 0, which reads the same as 1 — strictly
 	// serial, the ratified floor.
 	ParallelAgents() int
@@ -719,8 +719,8 @@ func (r *Response) SetToolCallArguments(index int, args json.RawMessage) {
 
 // AppendToolCall appends a synthesized tool call to the response and bumps the revision —
 // the intercept seam a post-response Mechanism uses to add a delegation the model did not
-// itself emit (guided decomposition synthesizing the first sub_agent call from the model's
-// enumeration, ADR 0014 §2). The appended call is indistinguishable from a model-emitted one
+// itself emit (a fan-out Mechanism synthesizing the first sub_agent call from a plan the
+// model wrote out as text). The appended call is indistinguishable from a model-emitted one
 // downstream: the loop reads it back through ToolCalls(), records it on the committed
 // assistant message, and dispatches it through the full per-call Resolution — the ADR 0013
 // recursion point for a sub_agent call. The caller owns the call's ID (the loop's

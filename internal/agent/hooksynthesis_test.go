@@ -1,6 +1,6 @@
 package agent
 
-// Item-2 acceptance (ADR 0014): the two hook-visible seams guided decomposition needs but
+// Item-2 acceptance (ADR 0014): the two hook-visible seams a fan-out Mechanism needs but
 // hooks could not reach — LoopView.Depth() and Response.AppendToolCall. These drive the seams
 // through the REAL loop with a scripted upstream (no mechanism internals mocked): a stub
 // post-response hook synthesizes a sub_agent delegation the model never emitted, and the loop
