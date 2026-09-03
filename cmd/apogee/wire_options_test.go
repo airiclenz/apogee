@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -98,12 +99,18 @@ func TestWriteMechanismReportsWhichHalfFailed(t *testing.T) {
 	})
 }
 
-// The read half of the same seam: what the `/settings` Mechanism list SAYS about the rows a
-// `mechanisms:` block names and the rows it leaves out. The list has to show the posture the run is
-// actually in, and no catalogued row is on by default any more (ADR 0071 — the recovery guarantees
-// are Floor guards with their own keys), so the list is exactly what the block says: the named row
-// ON, every other row listed and OFF.
-func TestListMechanismsReadsTheBlock(t *testing.T) {
+// The read half of the same seam: what the `/settings` Mechanism list OFFERS. It offers the
+// CATALOGUE — one switch per catalogued id, each answered from the FILE's manual block — and never
+// the block's own keys, so a `mechanisms:` line naming something this build does not catalogue adds
+// no row. With the shipped catalogue empty since v0.20.0 (ADR 0071) that makes the list empty
+// whatever the block says, which is the case a user upgrading into this wave is actually in: their
+// saved block names rows that retired, the resolver tolerates them, and the pane must not offer the
+// old spellings as switches that would promise a flip doing nothing.
+//
+// It is EMPTY and not nil: a list that vanished would look like an unwired seam to the pane, which
+// answers the two differently (internal/tui: an unwired catalogue opens nothing, an empty one opens
+// and says so).
+func TestListMechanismsOffersTheCatalogueNotTheBlock(t *testing.T) {
 	t.Parallel()
 
 	w := urlGuardWiring(t, config.Options{})
@@ -111,35 +118,35 @@ func TestListMechanismsReadsTheBlock(t *testing.T) {
 		t.Fatalf("wireSession: %v", err)
 	}
 	// The list re-reads the FILE rather than the resolution this run started on, so the block is
-	// written here — and it names one ordinary Mechanism and nothing else.
-	const named = "autofix"
+	// written here — and it names a RETIRED id, which is the one thing a saved config plausibly
+	// carries now that nothing is catalogued.
+	const retired = "autofix"
+	if !mechanisms.IsRetired(retired) {
+		t.Fatalf("%s is not on the retired roll; this case needs an id a saved config would still carry", retired)
+	}
 	path := filepath.Join(w.roots.config, "config.yaml")
-	if err := os.WriteFile(path, []byte("mechanisms:\n  "+named+": true\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("mechanisms:\n  "+retired+": true\n"), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
-	// The OFF half's id is taken from the catalogue rather than hard-coded, so the case keeps
-	// asserting over a real row as the roster shrinks.
-	var ordinary string
-	for _, d := range mechanisms.Descriptors() {
-		if string(d.ID) != named {
-			ordinary = string(d.ID)
-			break
-		}
-	}
-	if ordinary == "" {
-		t.Fatalf("the catalogue offers no ordinary Mechanism beside %s; the OFF half cannot be asserted", named)
+
+	toggles := w.options().ListMechanisms()
+	if toggles == nil {
+		t.Fatal("ListMechanisms() = nil; an empty catalogue is an empty LIST, and the pane tells the two apart")
 	}
 
-	enabled := map[string]bool{}
-	for _, toggle := range w.options().ListMechanisms() {
-		enabled[toggle.ID] = toggle.Enabled
+	listed := make([]string, 0, len(toggles))
+	for _, toggle := range toggles {
+		listed = append(listed, toggle.ID)
 	}
-
-	if !enabled[named] {
-		t.Errorf("%s reads OFF; the block names it true and the list is answered from the file", named)
+	want := make([]string, 0, len(mechanisms.KnownIDs()))
+	for _, id := range mechanisms.KnownIDs() {
+		want = append(want, string(id))
 	}
-	if on, listed := enabled[ordinary]; !listed || on {
-		t.Errorf("%s = (enabled %v, listed %v), want a listed row reading OFF: a row the block leaves "+
-			"out is off, nothing being armed by default", ordinary, on, listed)
+	if !slices.Equal(listed, want) {
+		t.Errorf("ListMechanisms() offered %v, want the catalogue %v — the list is the catalogue, "+
+			"not the block", listed, want)
+	}
+	if slices.Contains(listed, retired) {
+		t.Errorf("the list offered the retired id %q as a switch; flipping it would arm nothing", retired)
 	}
 }

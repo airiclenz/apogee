@@ -557,8 +557,10 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		// is a shape a row list holds perfectly well. Matched on its path for settingsVocabulary's
 		// reason one row over — what makes it special is where its vocabulary comes from (the Mechanism
 		// catalogue, [Options.ListMechanisms]) and not a kind of its own. An unwired seam offers
-		// nothing, so ⏎ opens nothing, exactly as an enum with no vocabulary does below.
-		if len(m.settingsMechanisms(rows)) == 0 {
+		// nothing, so ⏎ opens nothing, exactly as an enum with no vocabulary does below — but a WIRED
+		// seam over an empty catalogue opens and says so (settingsMechanismsListed), because a ⏎ that
+		// did nothing at all would read as a broken key rather than as a build with no rows.
+		if !m.settingsMechanismsListed(rows) {
 			return m, nil
 		}
 		m.settings.kind, m.settings.sub = settingsMechanismList, listCursor{}
@@ -1043,14 +1045,10 @@ func (m Model) settingsMechanismTarget(rows []SettingRow) (SettingRow, []Mechani
 		return SettingRow{}, nil, false
 	}
 	row, ok := m.settingsSelectedRow(rows)
-	if !ok {
+	if !ok || !m.settingsMechanismsListed(rows) {
 		return SettingRow{}, nil, false
 	}
-	toggles := m.settingsMechanisms(rows)
-	if len(toggles) == 0 {
-		return SettingRow{}, nil, false
-	}
-	return row, toggles, true
+	return row, m.settingsMechanisms(rows), true
 }
 
 // settingsPickable reports whether a row is edited in the value SUB-LIST: the two kinds that answer a
@@ -1112,6 +1110,22 @@ func (m Model) settingsMechanisms(rows []SettingRow) []MechanismToggle {
 		return nil
 	}
 	return m.opts.ListMechanisms()
+}
+
+// settingsMechanismsListed reports whether the `mechanisms` row has a list to OPEN — which is not
+// the same question as whether that list has any rows, and the two were one bail until the shipped
+// catalogue emptied in v0.20.0 (ADR 0071). A wired seam over an empty catalogue still opens and
+// paints one line saying so (settingsMechanismsEmptyRow): a ⏎ answered with nothing at all reads as
+// a broken key, and the human would have no way to tell a build with no catalogued rows from a row
+// whose seam was never wired. Only a genuinely unwired [Options.ListMechanisms], or a selection that
+// is not that row, has nothing to open — which is the case the key router's own ok=false fallback is
+// left for.
+func (m Model) settingsMechanismsListed(rows []SettingRow) bool {
+	if m.opts.ListMechanisms == nil {
+		return false
+	}
+	row, ok := m.settingsSelectedRow(rows)
+	return ok && row.Path == settingKeyMechanisms
 }
 
 // settingsCurrentValue is the value a sub-list opens on and marks "(current)": what the pane believes
@@ -1816,9 +1830,17 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 // choices a human takes in at once, not a scrolled offering), the window left to the row plan, and the
 // highlight the sub-list's shared cursor clamps.
 //
-// What each content brings is its ROWS and its LEGEND — a vocabulary with one "(current)" cell against
-// a catalogue of switches that each carry their own — so those are the only two parameters.
-func (m Model) renderSettingsSubList(row SettingRow, values []popupRow, hint string) string {
+// What each content brings is its ROWS, its LEGEND and its CHOICE COUNT — a vocabulary with one
+// "(current)" cell against a catalogue of switches that each carry their own — so those are the only
+// three parameters.
+//
+// choices is what the shared cursor is clamped against, and it is the count of things a ⏎ could TAKE
+// rather than the count of rows painted. The two are the same number for every list of choices, and
+// they part company for the one content that can paint PROSE: an empty Mechanism catalogue is one
+// row saying so, which is not a row to highlight (listContent.selected's own convention, and
+// [listCursor.highlight] answers −1 for it by itself). Passing the choice count keeps that fact
+// where the pane knows it rather than making this painter guess from the rows it was handed.
+func (m Model) renderSettingsSubList(row SettingRow, values []popupRow, hint string, choices int) string {
 	return m.renderList(listContent{
 		pane:     paneSettings,
 		title:    settingsTitle,
@@ -1827,7 +1849,7 @@ func (m Model) renderSettingsSubList(row SettingRow, values []popupRow, hint str
 		rowCap:   len(values), // the whole content is the taste; popupBudget answers with the frame's
 		rows:     values,
 		menuRows: true,
-		selected: m.settings.sub.highlight(len(values)),
+		selected: m.settings.sub.highlight(choices),
 	})
 }
 
@@ -1861,7 +1883,7 @@ func (m Model) renderSettingsEnum(row SettingRow) string {
 		}
 		values = append(values, popupRow{stripEscapes(value), cell})
 	}
-	return m.renderSettingsSubList(row, values, settingsEnumHint)
+	return m.renderSettingsSubList(row, values, settingsEnumHint, len(values))
 }
 
 // settingsEnumValueCell is what the sub-list's right-hand column says about ONE value BEFORE the
@@ -1923,6 +1945,13 @@ const (
 	settingsMechanismOff = "off"
 )
 
+// settingsMechanismsEmptyRow is the whole of the list when the build catalogues nothing — the
+// /sessions browser's empty-workspace note in this pane's voice (a row of PROSE, so the highlight
+// stays off it). The shipped catalogue emptied in v0.20.0 (ADR 0071): six rows became Floor guards
+// with keys of their own on this very pane and fourteen retired outright, so the honest answer names
+// where the behaviour went rather than leaving a bordered box with nothing in it.
+const settingsMechanismsEmptyRow = "no catalogued Mechanisms in this build — the Floor guards are the Session keys"
+
 // renderSettingsMechanisms paints the `mechanisms` row's own list — the pane's fourth renderer, and
 // the second content the shared sub-list draws (renderSettingsSubList: a MENU in the same pane, the
 // same frame around it, the body naming the key because the list where the human read that name is
@@ -1930,15 +1959,23 @@ const (
 // SWITCHES, so every one carries its own state cell rather than one of them carrying "(current)", and
 // the legend says what flips them (settingsMechanismHint).
 //
-// It is also the one list of this pane that reliably overflows — the catalogue is twenty-one
-// Mechanisms and counting — which is why the shared painter leaves the window to the row plan exactly
-// as the key list does (popupBudget answers with the frame's grant) and the bar the overflow earns
-// comes from the same place every other popup's does (popupSpec.scrollbar).
+// It is also the one list of this pane that can OVERFLOW without limit — a lab catalogue is however
+// many rows a bench Driver registered — which is why the shared painter leaves the window to the row
+// plan exactly as the key list does (popupBudget answers with the frame's grant) and the bar the
+// overflow earns comes from the same place every other popup's does (popupSpec.scrollbar). The
+// SHIPPED catalogue is empty since v0.20.0 (ADR 0071), and that end of the range is a row of prose
+// rather than an empty box (settingsMechanismsEmptyRow).
 //
 // Nothing here says what a Mechanism DOES: the id is what the config file names it by and what the
 // documentation indexes it under, and a sentence per row would make a manual of a switch panel
 // (ADR 0035's one-deliberate-edit surface is not a place to learn what to edit).
 func (m Model) renderSettingsMechanisms(row SettingRow, toggles []MechanismToggle) string {
+	if len(toggles) == 0 {
+		// Prose is not a choice, so the shared cursor's highlight is already off it
+		// ([listCursor.highlight] answers −1 for an empty list) and there is nothing for the legend's
+		// flip keys to act on — but esc is still the way out, so the legend stays as it is.
+		return m.renderSettingsSubList(row, singleCellRows([]string{settingsMechanismsEmptyRow}), settingsMechanismHint, 0)
+	}
 	values := make([]popupRow, 0, len(toggles))
 	for _, toggle := range toggles {
 		state := settingsMechanismOff
@@ -1947,7 +1984,7 @@ func (m Model) renderSettingsMechanisms(row SettingRow, toggles []MechanismToggl
 		}
 		values = append(values, popupRow{stripEscapes(toggle.ID), state})
 	}
-	return m.renderSettingsSubList(row, values, settingsMechanismHint)
+	return m.renderSettingsSubList(row, values, settingsMechanismHint, len(toggles))
 }
 
 // settingsEnumPrompt is the sub-list's one-line question: the key, then what it is for. Two facts on

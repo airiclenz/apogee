@@ -157,20 +157,50 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 	}
 }
 
-// The production catalogue carries the ported Mechanisms and only those. As of v0.20.0 that is
-// NOTHING: `library`, the last row standing, retired outright on ADR 0071's ratified verdict, and
-// every ID the catalogue ever carried is on the retired roll — six of them PROMOTED to Floor
-// guards, fourteen retired outright. A `mechanisms:` key naming any of them is tolerated, never
-// built; an ID on neither list is still a loud unknown-ID error.
-func TestProductionCatalogueHasPortedWaves(t *testing.T) {
+// The SHIPPED catalogue is EMPTY, and that is the end state rather than a stage on the way to one:
+// on ADR 0071's ratified verdict every row this build ever carried left in v0.20.0 — six PROMOTED to
+// Floor guards, plain engine behaviour with config keys of their own, and fourteen retired outright
+// — so the whole of the former roster is on the retired roll and none of it is buildable. That makes
+// this the invariant every empty-catalogue restatement elsewhere rests on: a `mechanisms:` key
+// naming a former row is tolerated and arms nothing, an ID on neither list is still a loud unknown-ID
+// error, and a row that reappears here is a LAB row a Driver registered rather than a shipped one.
+//
+// KnownIDs() answers empty but NON-NIL, which is the shape every caller composing a list off it
+// depends on (the `/settings` sub-list, the config surface's valid-keys tail): a nil would be the
+// same length and a different thing to a caller that ranges, appends and reports what it built.
+func TestProductionCatalogueIsEmpty(t *testing.T) {
 	t.Parallel()
-	for _, id := range KnownIDs() {
+
+	known := KnownIDs()
+	if known == nil {
+		t.Error("KnownIDs() = nil; an empty catalogue is an empty SLICE, not the absence of one")
+	}
+	if len(known) != 0 {
+		t.Errorf("KnownIDs() = %v; the shipped catalogue emptied in v0.20.0 (ADR 0071)", known)
+	}
+	if rows := Descriptors(); len(rows) != 0 {
+		t.Errorf("Descriptors() = %+v; an empty catalogue harvests no descriptor", rows)
+	}
+
+	// Nothing that left is buildable, and nothing buildable is on the roll: the two lists partition
+	// every ID this build recognises, so a row can never be tolerated AND armed.
+	roll := RetiredIDs()
+	if len(roll) == 0 {
+		t.Fatal("the retired roll is empty; every ID the catalogue ever carried has to stay on it so a saved config still starts")
+	}
+	for _, id := range roll {
+		if _, err := Build(id, Deps{}); err == nil {
+			t.Errorf("Build(%q) succeeded; a retired ID is tolerated by the resolver, never built", id)
+		}
+	}
+	for _, id := range known {
 		if IsRetired(id) {
 			t.Errorf("%q is both catalogued and retired; the two lists must not overlap", id)
 		}
 	}
-	// correct_tool_result is DEFERRED (owner-ratified) — never a catalogue row — so it is still an
-	// unknown-ID error, proving a deferred / un-ported ID does not silently build.
+
+	// correct_tool_result is DEFERRED (owner-ratified) — never a catalogue row and never on the roll —
+	// so it is still an unknown-ID error, proving a deferred / un-ported ID does not silently build.
 	if _, err := Build("correct_tool_result", Deps{}); err == nil {
 		t.Error("Build of a deferred/un-ported ID: want an unknown-ID error, got nil")
 	}

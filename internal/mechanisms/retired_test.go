@@ -143,8 +143,8 @@ func TestRetiredOutrightRowsCarryTheirReleaseAndNoSuccessor(t *testing.T) {
 	}
 }
 
-// The rows this wave PROMOTED are on the real roll, each with its release and the Floor-guard key
-// that governs the behaviour now — so a saved `mechanisms:` block naming one still starts, and the
+// All SIX rows this wave PROMOTED are on the real roll, each with its release and the Floor-guard
+// key that governs the behaviour now — so a saved `mechanisms:` block naming one still starts, and the
 // notice it earns names the key rather than telling the user the behaviour is gone. This pins the
 // roll itself; the wording is pinned over a synthetic row below.
 func TestPromotedRowsCarryTheirFloorGuardKey(t *testing.T) {
@@ -157,6 +157,9 @@ func TestPromotedRowsCarryTheirFloorGuardKey(t *testing.T) {
 		{"validate", "tool-call-repair"},
 		{"tool_loop_interceptor", "tool-loop-breaker"},
 		{"cached_content_intercept", "read-cache"},
+		{"tool_use_enforcer", "tool-use-enforcer"},
+		{"empty_response_recovery", "empty-response-recovery"},
+		{"tool_result_cap", "tool-result-cap"},
 	} {
 		t.Run(string(tc.id), func(t *testing.T) {
 			t.Parallel()

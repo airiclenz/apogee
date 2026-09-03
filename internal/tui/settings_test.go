@@ -3780,6 +3780,58 @@ func TestSettingsMechanismSeamsDegradeWhenUnwired(t *testing.T) {
 	}
 }
 
+// A WIRED seam over an EMPTY catalogue is not the unwired degrade above, and the pane must not answer
+// the two alike: the shipped catalogue emptied in v0.20.0 (ADR 0071), so ⏎ opens the list and paints
+// one line naming where the behaviour went. A ⏎ that did nothing would read as a broken key, and the
+// human would have no way to tell a build with no catalogued rows from a seam nobody wired.
+//
+// The line is PROSE, so nothing is highlighted and the flip keys have nothing to act on — while esc
+// still closes, which is the one thing the legend has to keep being true about.
+func TestSettingsMechanismListOpensOnAnEmptyCatalogue(t *testing.T) {
+	rows := []SettingRow{settingsMechanismRow()}
+	log := newMechanismLog() // wired, and offering nothing: the shipped catalogue
+	edit := &externalEditLog{argv: []string{"vi", "/tmp/config.yaml"}}
+	opts := testOpts
+	opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return rows }}
+	opts.ListMechanisms, opts.WriteMechanism = log.list, log.write
+	opts.ExternalEditSpec = edit.spec
+	// Wide enough that the sentence is read rather than truncated: the pin is the wording, and a
+	// narrow pane would only be asserting the popup module's ellipsis.
+	m := modelWithOverlayRoomAt(t, 120, 20, opts)
+	m.settings = settingsPane{open: true}
+	m.layout()
+
+	opened, cmd := stepCmd(t, m, keyEnter())
+
+	if opened.settings.kind != settingsMechanismList {
+		t.Fatalf("pane = %+v, want the Mechanism list open over an empty catalogue", opened.settings)
+	}
+	if cmd != nil || len(edit.asked) != 0 {
+		t.Errorf("⏎ launched an editor (cmd=%v, asked=%v); this row opens its own list", cmd != nil, edit.asked)
+	}
+
+	pane := strip(opened.renderSettings())
+	if !strings.Contains(pane, settingsMechanismsEmptyRow) {
+		t.Errorf("the empty list does not say why it is empty:\n%s", pane)
+	}
+	// The one row is PROSE: no switch cell beside it, and nothing for the flip keys to take.
+	line := mechanismStateLine(t, pane, settingsMechanismsEmptyRow)
+	if strings.Contains(line, " "+settingsMechanismOn) || strings.Contains(line, " "+settingsMechanismOff) {
+		t.Errorf("the empty list painted a switch state on its prose row: %q", line)
+	}
+
+	flipped := step(t, opened, keyEnter())
+	if len(log.writes) != 0 {
+		t.Errorf("⏎ over an empty catalogue wrote %+v", log.writes)
+	}
+	if flipped.settings.kind != settingsMechanismList {
+		t.Errorf("pane = %+v, want the list still open: a key it cannot act on is swallowed", flipped.settings)
+	}
+	if closed := step(t, flipped, keyEsc()); closed.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v after esc, want the key list", closed.settings)
+	}
+}
+
 // A refusal from the writer — the seam's !saved arm, where the SPLICE itself was refused — lands the
 // same way, and the block is left exactly as it was: the row carries what the seam said and nothing
 // else, the list stays up so the human can try again, and the state it paints is still the one the
@@ -3834,10 +3886,11 @@ func TestSettingsMechanismListSaysWhenOnlyTheApplyFailed(t *testing.T) {
 	}
 }
 
-// The catalogue is twenty-one Mechanisms and counting, so this list is the one that reliably
-// overflows: the window follows the highlight down the list — the last id is off-screen at the top and
-// on it at the bottom — and the overflow earns the popup module's scrollbar (item 1) without this
-// renderer asking for anything the others do not.
+// A lab catalogue is however many rows a bench Driver registered, so this list is the one that can
+// overflow without limit: the window follows the highlight down the list — the last id is off-screen
+// at the top and on it at the bottom — and the overflow earns the popup module's scrollbar (item 1)
+// without this renderer asking for anything the others do not. Twenty-one rows is what the SHIPPED
+// catalogue held before v0.20.0 emptied it (ADR 0071), kept here as the size the pane was sized for.
 func TestSettingsMechanismListWindowsTheWholeCatalogue(t *testing.T) {
 	ids := make([]string, 0, 21)
 	for i := range 21 {

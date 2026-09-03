@@ -71,6 +71,12 @@ func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
 	if !strings.Contains(msg, `"not_a_real_mechanism"`) {
 		t.Errorf("newAgent err = %q; want it to name the mechanism that failed", msg)
 	}
+	// And the tail names the valid keys — "(none)" over the empty shipped catalogue rather than a
+	// dangling "known: " that would read as a truncated message. That is the whole of what a host can
+	// tell the user about which ids ARE arm-able in this build.
+	if !strings.Contains(msg, "(none)") {
+		t.Errorf("newAgent err = %q; want the known-ids tail to render %q for the empty catalogue", msg, "(none)")
+	}
 }
 
 // TestEnableMechanisms_MergesWithProvidedExperimentalHook: a Config.Mechanisms carrying an

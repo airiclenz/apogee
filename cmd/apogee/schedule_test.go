@@ -110,35 +110,32 @@ const firingStepPrompt = "Build a full parser pipeline.\n" +
 // halves of that binding are the holder's: the wire the Firing dials AND the endpoint its spec
 // resolution keys on.
 //
-// It reads the Config the Firing composed through the package's runner seam while still letting the
-// real run reach the upstream, which is why it does not call t.Parallel: it replaces a package-level
-// var, exactly as the width test below does.
+// The run really reaches the stubbed upstream, which is the dialling half. The resolution's own half
+// is re-read one layer down, at firingConfig — the composer this seam calls, whose notices it drops
+// (a Firing's narration is the record it leaves behind), and the only place the two endpoints can
+// still be told apart now that no catalogued row can be armed. It does not call t.Parallel: sibling
+// tests here replace the package-level runner seam.
 func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	url, menus := firingUpstream(t, "the build is green")
 
-	// The Mechanism roster the Firing composed, captured on the way to the real runner: which IDs a
-	// Firing arms is the endpoint-keyed resolution's own observable, and the only one left now that
-	// no catalogued row marks a fresh request's system prompt.
-	var armed []apogee.MechanismID
-	prevRunner := runOnce
-	runOnce = func(ctx context.Context, spec run.Spec) (run.Result, error) {
-		armed = spec.Config.EnableMechanisms
-		return prevRunner(ctx, spec)
-	}
-	t.Cleanup(func() { runOnce = prevRunner })
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	store := session.NewStore(roots.sessions)
 
-	// The endpoint-keyed half of the resolution, fixtured so the wire can report which endpoint it
-	// was keyed on: the identity ladder's behavioral rung is (probe dir, endpoint, model label), so
-	// the record `apogee probe model` left for the server this session MOVED to is found only when
-	// the bound endpoint reaches the resolver. Found, the identity is medium-confidence and the
-	// matching Validated set APPLIES; missed, the bare label resolves at low confidence and the set
-	// is merely offered (validatedsets.go). The set holds syntax alone, so exactly one Mechanism
-	// can reach the composed Config.
+	// The endpoint-keyed half of the resolution, fixtured so a resolution keyed on the WRONG endpoint
+	// is a visibly different run: the identity ladder's behavioral rung is (probe dir, endpoint, model
+	// label), so the record `apogee probe model` left for the server this session MOVED to is found
+	// only when the bound endpoint reaches the resolver. Found, the identity is medium-confidence and
+	// the entry is weighed as one that APPLIES; missed, the bare label resolves at low confidence and
+	// the entry is merely OFFERED — a different rung, and a different line (validatedsets.go).
+	//
+	// The set below names a row no build of this apogee carries, and that is the point rather than an
+	// accident: since the shipped catalogue emptied (v0.20.0, ADR 0071) NO set can validate, so what a
+	// set names can no longer reach the composed roster and the roster stopped being this resolution's
+	// observable. Its rung still speaks — the applying rung, and only it, says out loud that it weighed
+	// the entry and could not use it — which is what the assertion at the end of this test reads.
 	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
 		Endpoint:   url,
 		ModelLabel: "bound-model",
@@ -150,7 +147,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	writeUserValidatedEntry(t, roots.validated, "bound-model", `{
 		"version": 1,
 		"key": "bound-model",
-		"set": ["syntax"],
+		"set": ["a-row-no-build-carries"],
 		"evidence": {"campaign": "schedule-test"}
 	}`)
 
@@ -217,14 +214,36 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		}
 	}
 
-	// The spec resolution's own endpoint, read off the Config the Firing composed: syntax is
-	// default-off and reached this run only through the Validated set the probe record promoted, so
-	// its standing in the composed roster is the proof that the resolver was handed the BOUND
-	// endpoint. Keyed on the launch snapshot's `http://launch.invalid` the record is missed, the set
-	// is offered rather than applied, and the roster is empty.
-	if len(armed) != 1 || armed[0] != "syntax" {
-		t.Errorf("the firing armed %v, want the Validated set's [syntax]: the set was not applied, "+
-			"so the spec resolution keyed on the LAUNCH endpoint rather than the bound one", armed)
+	// The endpoint the per-model resolution was KEYED on, read at the composer the seam above calls:
+	// `fire` drops firingConfig's notices, so the same composition is asked again here from the
+	// wiring's own sources, for the one line only the medium-confidence rung emits. Keyed on the
+	// launch snapshot's `http://launch.invalid` the probe record is missed, the identity is name-only,
+	// and the very same entry earns the low-confidence OFFER line instead — so the pair below is the
+	// two endpoints told apart, not a value read back from the field that was written from it.
+	opts, entry, manualIDs := w.live.firingSources(w.binding())
+	_, _, notices, err := firingConfig(context.Background(), firingInputs{
+		opts:      opts,
+		entry:     entry,
+		roots:     roots,
+		manualIDs: manualIDs,
+		mode:      domain.ModePlan,
+		width:     func(context.Context, string, string, string) int { return 1 },
+		dialect:   (&stubDialect{}).discover,
+		recordID:  "sch-1-abcd-resolution",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+	const weighed = `skipping validated-set entry "bound-model"`
+	const offered = "the model identity is name-only"
+	if !slices.ContainsFunc(notices, func(n string) bool { return strings.Contains(n, weighed) }) {
+		t.Errorf("the firing's notices are %q, want one carrying %q: the entry never reached the "+
+			"medium-confidence rung, so the resolution keyed on the LAUNCH snapshot rather than on "+
+			"the holder", notices, weighed)
+	}
+	if slices.ContainsFunc(notices, func(n string) bool { return strings.Contains(n, offered) }) {
+		t.Errorf("the firing's notices are %q: the entry was merely OFFERED, which is the name-only "+
+			"identity a resolution keyed on the LAUNCH snapshot resolves", notices)
 	}
 }
 
