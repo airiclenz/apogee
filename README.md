@@ -157,8 +157,9 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 
 ### The agent loop
 
-- **28 built-in tools**: read, write and edit files, grep and find, git, terminal,
-  Python, test runners, web fetch and web search, and delegation to sub-agents.
+- **29 built-in tools**: read, write and edit files, grep and find, git, terminal,
+  Python, test runners, web fetch and web search, a task list the model keeps for itself,
+  and delegation to sub-agents.
 - **Parallel sub-agents**, each with a context window of its own. Open one as its own
   full screen to watch it work, and type to it while it runs.
 - **Skills** — short markdown playbooks you invoke with `/name`. apogee ships a few

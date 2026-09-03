@@ -328,7 +328,30 @@ count; an error result yields no counted stat; the oversize note names the task 
 
 ---
 
-## 8. The tool reaches every doc that enumerates the roster
+## 8. The tool reaches every doc that enumerates the roster — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): rule (b) — the item cites `README.md`'s "29-tool" and its Acceptance greps for
+"30-tool"; README actually spells the roster size as "**28 built-in tools**" (the `[0-9]\+-tool`
+grep matches nothing in README). Applied the rule as written — the size goes up by one, 28 → 29 —
+so the verifiable check is `grep -n "29 built-in tools" README.md`, not `grep -n "30-tool"`. The
+count is consistent with the build: 25 default-on non-task_list tools + load_skill + ask_user +
+present_document = 28 before this plan, the default-off Console four excluded.
+
+NOTES (2026-09-03): README's enumeration of what the built-ins do gained "a task list the model
+keeps for itself" alongside the count bump — the item's title is that the tool reaches every doc
+that enumerates the roster, and that sentence is README's enumeration.
+
+NOTES (2026-09-03): rule (a) — beyond the three CONTEXT.md order sentences the item's grep names,
+the **Delegate report block** entry's "sits between the orientation and the **Context files**
+blocks" is a fourth live order sentence that this item's change makes imprecise; folded in per the
+"enumeration is a FLOOR" clause. The manual's orientation/delegate prose gained a new order
+paragraph naming the task list rather than an edit to the two existing sentences, which stay true
+as written (orientation is still right after the prompt, the delegate block still right after the
+orientation, both still ahead of the context files).
+
+NOTES (2026-09-03): the ADR/CHANGELOG order sentences the broader grep turns up (ADR 0023, 0026,
+0067, `CHANGELOG.md`) are dated records, not live prose, and item 6 owns the ADRs;
+`internal/agent/loop.go`'s order comment was already updated by item 5.
 
 **What.** Item 3 has already put the name `task_list` in the manual's menu-order roster list
 (enforced by `internal/tools/manual_drift_test.go`); this item writes a short section in

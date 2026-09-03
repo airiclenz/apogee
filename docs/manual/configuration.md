@@ -1152,6 +1152,12 @@ and, like the orientation block, it is not part of `system-prompt-text`, cannot 
 edited out of it, and follows the same rule of riding along only when a system message
 goes out at all.
 
+Once the model has written itself a **task list** ([below](#the-task-list)), that list is
+re-rendered as a third block of apogee's own — after the orientation and delegate blocks,
+still ahead of any workspace context files — so the checklist is in front of the model on
+every request, however long the run gets. A model that never calls the tool sends nothing
+extra, and here too the block is engine-written, not part of your prompt.
+
 ```yaml
 # ~/.apogee/config.yaml
 # Your own prompt, replacing apogee's built-in one whole:
@@ -1378,3 +1384,36 @@ neither one can start anything.
 the BSDs. On Windows the four tools are still on the menu — so a config that enables them is not a
 startup notice about tools that do not exist — but `console_open` answers `console is not supported
 on Windows yet` rather than pretending. ConPTY support is a later change.
+
+## The task list
+
+A long run forgets what it set out to do. apogee's own reducers are part of why: **compaction**
+summarises older turns and drops the messages behind them, so the eight-step plan a model wrote in
+its third reply comes back as a sentence. The **task list** is the answer — a checklist the *model*
+keeps for itself, which apogee holds for the session and re-renders into that first system message
+on every request, where nothing the reducers do can reach it.
+
+`task_list` is the tool, and it is the only thing that can write the list. apogee never adds a row,
+you have no command that edits one, and nothing infers a checklist from what you asked for: a model
+that never calls the tool runs exactly the agent it ran before. One call carries the **whole** list
+and replaces what was there — the model sends the complete set of tasks with each one marked done
+or not — so ticking a task off is resending the list with that task done, and clearing it is
+sending an empty one. There are no task ids to get wrong. The current list is what you see in the
+transcript's `Task List` card, rendered `[✔]` for a finished row and `[ ]` for an open one.
+
+**The list survives the things that lose a plan.** It is written into the session record, so
+`--resume` brings it back with everything else, and it lives outside the conversation, so a
+compaction that rewrites the history leaves it untouched. It is also a **read-only** call as far as
+permissions go — writing down what you intend to do touches no file, starts no process and reaches
+no network — so it never prompts you, and it is offered in Plan mode, which is exactly where a
+model is deciding what it will do.
+
+The tool ships **on** for every model and has no setting of its own; it is turned off like any
+other tool, with `tools.disabled: [task_list]` globally or on one model's `model-profiles:` roster.
+The one cost worth knowing about: because the block changes whenever the list changes, a
+`task_list` call invalidates your server's prefix cache from that point in the prompt onward. That
+is a re-encode the model chose to spend, and a run that never touches the list never pays it.
+
+**A sub-agent keeps its own list.** A delegation starts with an empty one, cannot see the parent's
+and cannot write to it, and its list disappears when the delegation ends. What comes back from a
+delegation is its final reply, exactly as before.

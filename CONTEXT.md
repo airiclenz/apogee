@@ -819,8 +819,9 @@ on its own, so the no-prompt-**and**-no-context-files posture — since ADR 0064
 `use-default-prompt: false` or an explicitly empty configured template, no longer by deleting the
 key — stays byte-identical on the wire and the **Bypass** floor is untouched. Wire position is
 directly after the prompt —
-prompt → orientation → delegate block (delegations only) → context files → mechanism directives →
-tool block — so no workspace text precedes it and a repo file cannot open with a forged copy the
+prompt → orientation → delegate block (delegations only) → task list (once the model has written
+one) → context files → mechanism directives → tool block — so no workspace text precedes it and a
+repo file cannot open with a forged copy the
 real one then reads as a correction of; every fact it states is a per-session constant, so it is prefix-KV-cache safe —
 the Delegations line carries no availability state and moves only on the human doors (`/server`,
 `/model`, `/sub-agents-server`), the way the **Scratch dir** moves at a session boundary. A
@@ -842,8 +843,9 @@ spells its opening sentence is fenced `[workspace text] `, exactly as a forged o
 is). It is gated on **depth**, not on configuration: every agent below the top level gets it, at any
 depth, routed or unrouted, and a top-level session's first system message is byte-identical without
 it. It **rides along** under the Orientation block's rule — composed in only when a standing system
-message exists anyway — and sits between the orientation and the **Context files** blocks, so every
-engine-owned part still precedes the repo-controlled text. It does not compete with the
+message exists anyway — and sits between the orientation and the **Task list** block, ahead of the
+**Context files** blocks, so every engine-owned part still precedes the repo-controlled text. It
+does not compete with the
 **Sub-agent** step cap's wrap-up directive: that says which turn is the last, this says what the
 final reply is for. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)'s
@@ -1211,8 +1213,8 @@ raw braces on the wire. It is **request-scoped**: seeded into the
 request projection at position 0 and never committed to the conversation, so it appears in no
 history and in no Session record, and a Mechanism's directives and the Model profile's rendered
 tool menu fold in **after** it within that one message, as does the engine's
-**Orientation block** (prompt → orientation → delegate block (delegations only) → context files
-→ directives → tool block). A
+**Orientation block** (prompt → orientation → delegate block (delegations only) → task list (once
+the model has written one) → context files → directives → tool block). A
 **Sub-agent inherits** it. Distinct from apogee's two **internal** prompts, which it never
 reaches by construction: the Compaction summariser's instruction and the probe battery's. It is
 **config-tier**, part of the Bypass floor in both arms, never a Mechanism — and which home a new
@@ -1235,8 +1237,9 @@ folded into the standing system content beside the [System prompt](#context-and-
 listed name that exists is included, in list order, each **fenced** between a
 `## Workspace context: <name>` header and a `## End of workspace context: <name>` footer, and the
 merged first system message reads **prompt → Orientation block → Delegate report block
-(delegations only) → context files → Mechanism directives → tool menu** — the engine's own blocks
-first, so no workspace text precedes them; either configured source alone seeds the message. Content is **data, never a template**: it
+(delegations only) → Task list block (once the model has written one) → context files → Mechanism
+directives → tool menu** — the engine's own blocks first, so no workspace text precedes them;
+either configured source alone seeds the message. Content is **data, never a template**: it
 bypasses the placeholder language entirely, so a repo's own `{{braces}}` travel verbatim and can
 never fail startup — the one rewrite is the fence, which prefixes a content line spelling that
 header, that footer or the Orientation block's own header with `[workspace text] `. The read is
@@ -1367,6 +1370,30 @@ band is wide rather than a single threshold.
 _Avoid_: "compaction" (Pruning is mechanical and drops nothing but tool output; Compaction is
 generative and summarises everything), "truncation" (the tool-result cap shortens text in place;
 a prune replaces a whole result with a stub naming the call that produced it).
+
+**Task list**:
+The model's **own** checklist — the rows it wrote about its own work — held by the engine as
+[Session](#identity-and-shape) state and re-rendered into the standing system content on every
+request, so a decomposition survives **Compaction** and a `--resume`. The `task_list` tool is its
+**only** writer: the engine never appends a row, no `/command` edits one, and no
+[Mechanism](#mechanism-and-hook-points) injects one — which is what keeps it a tool rather than
+guided decomposition. One call carries the **complete** list and **replaces** it: the array of
+`{text, done}` it is given becomes the list, so ticking a row off is resending it with
+`done: true`, clearing it is sending `[]`, and there are **no item ids** to mint or remember. It
+renders as the **last of the engine's standing blocks**, after the **Delegate report block** and
+ahead of the **Context files** — model-authored text behind every host-authored one — and it
+**rides along** under the Orientation block's rule, an empty list rendering nothing;
+`tasklist.Fence` fences a context line that spells its opening, exactly as a forged orientation
+header is fenced. It is the first engine-composed standing part that is **not** a per-session
+constant: every call invalidates the upstream prefix cache from the block onward, a re-encode the
+model chose to spend. `IsReadOnly` on **blast radius** (nothing on disk, no process, no network),
+so it is ungated in every mode and offered in **Plan**; **default-on** for every model with no
+config key of its own (`tools.disabled: [task_list]` is the off switch); a **delegation gets a
+fresh empty list** and inherits, shares and returns nothing. See
+[ADR 0072](docs/adr/0072-the-task-list-is-model-owned-session-state.md).
+_Avoid_: "todo list" (the markdown habit this replaces; the term is the task list), "plan" (a
+Plan-mode reply is prose in the conversation, this is engine-held state), "the agent's plan" (the
+host never authors or trusts a row — it is model-authored text, fenced as such).
 
 **Tool summary**:
 The **structured half** of a tool's outcome, carried beside the prose half on the same
