@@ -239,6 +239,10 @@ func TestSubAgent_InheritsPlanModeCannotWrite(t *testing.T) {
 	writer := fakeTool{name: "write_thing", readOnly: false, ran: &wrote, result: "wrote"}
 	cfg := subAgentConfig(sink, domain.ModePlan, writer)
 
+	// Plan withdraws the writer from the child's MENU, so the tool-call repair Floor guard would
+	// answer the call as "not in the tool set" before dispatch saw it. This test is about the
+	// Plan-mode refusal at dispatch, so the guard is off for it (its own proofs: floorguards_test.go).
+	cfg.Floor.DisableToolCallRepair = true
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		subAgentCallScript("c1", "write a file"),
 		toolCallScript("c2", "write_thing", `{}`), // the child attempts a write
@@ -277,6 +281,9 @@ func TestSubAgent_SubsetCannotCallOmittedTool(t *testing.T) {
 	cfg := subAgentConfig(sink, domain.ModeAllowEdits) // writer NOT registered on the parent
 	_ = writer                                         // documents intent: the tool exists but is not in the parent set
 
+	// The omitted tool is absent from the child's MENU too, so the tool-call repair Floor guard
+	// would answer it before the unknown-tool result this test is about; the guard is off here.
+	cfg.Floor.DisableToolCallRepair = true
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		subAgentCallScript("c1", "use the writer"),
 		toolCallScript("c2", "write_thing", `{}`), // child calls a tool not in its subset
@@ -363,7 +370,10 @@ func TestSubAgent_BreakerIsolatedFromParent(t *testing.T) {
 	}}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, failing)
 
-	// The child calls "flaky" repeatedly (same args) until its breaker trips, then finishes.
+	// The child calls "flaky" repeatedly (same args) until its breaker trips, then finishes. The
+	// tool-loop breaker Floor guard answers that identical repeat first, so it is off for this
+	// test — the subject is the child's own circuit-breaker and its isolation from the parent's.
+	cfg.Floor.DisableToolLoopBreaker = true
 	childScripts := [][]provider.Delta{}
 	for i := 0; i < 4; i++ {
 		childScripts = append(childScripts, toolCallScript("k", "flaky", `{}`))
@@ -947,8 +957,10 @@ func narratedToolCallScript(id, name, args, text string) []provider.Delta {
 func cappedChildTurns(n int) [][]provider.Delta {
 	out := make([][]provider.Delta, 0, n)
 	for i := 0; i < n; i++ {
+		// The arguments carry the Turn index so consecutive child Turns are not an identical
+		// repeat, which the tool-loop breaker Floor guard would answer instead of spending a step.
 		out = append(out, narratedToolCallScript(
-			fmt.Sprintf("t%d", i), "read_thing", `{}`, fmt.Sprintf("reading file %d", i)))
+			fmt.Sprintf("t%d", i), "read_thing", fmt.Sprintf(`{"n":%d}`, i), fmt.Sprintf("reading file %d", i)))
 	}
 	return out
 }
@@ -1159,11 +1171,12 @@ func TestSubAgent_StepCapMarksAWordlessDelegate(t *testing.T) {
 
 	scripts := [][]provider.Delta{
 		subAgentCallScript("c1", "trawl the repo"),
-		toolCallScript("t0", "read_thing", `{}`), // no visible text on either child Turn
-		toolCallScript("t1", "read_thing", `{}`),
+		toolCallScript("t0", "read_thing", `{"n":0}`), // no visible text on either child Turn
+		toolCallScript("t1", "read_thing", `{"n":1}`), // (arguments differ per Turn so the tool-loop
+		//                                                breaker guard reads no identical repeat)
 		// …and none on the wrap-up either: a child that answers its closing request with nothing
 		// but another tool call commits no assistant message, so there is still nothing to show.
-		toolCallScript("t2", "read_thing", `{}`),
+		toolCallScript("t2", "read_thing", `{"n":2}`),
 		contentScript("parent done"),
 	}
 	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})

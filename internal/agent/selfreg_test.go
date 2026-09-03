@@ -374,7 +374,9 @@ func harmfulConfig(sink domain.EventSink) domain.Config {
 func harmfulScripts(turns int) [][]provider.Delta {
 	scripts := make([][]provider.Delta, 0, turns+1)
 	for i := 0; i < turns; i++ {
-		scripts = append(scripts, toolCallScript(fmt.Sprintf("boom%d", i), "boom", `{}`))
+		// The arguments carry the Turn index: an identical repeat would draw the tool-loop breaker
+		// Floor guard's retry instead of reaching the failing tool these Turns are about.
+		scripts = append(scripts, toolCallScript(fmt.Sprintf("boom%d", i), "boom", fmt.Sprintf(`{"n":%d}`, i)))
 	}
 	return append(scripts, contentScript("I give up"))
 }
@@ -574,7 +576,7 @@ func TestToolErrorsTripBudgetAndWithdrawAtDispatch(t *testing.T) {
 	// Each Exchange: one erroring tool Turn (harmful) + one text Turn (neutral — freezes).
 	var scripts [][]provider.Delta
 	for i := 0; i < turnBudgetLimit; i++ {
-		scripts = append(scripts, toolCallScript(fmt.Sprintf("p%d", i), "poke", `{}`), contentScript("still trying"))
+		scripts = append(scripts, toolCallScript(fmt.Sprintf("p%d", i), "poke", fmt.Sprintf(`{"n":%d}`, i)), contentScript("still trying"))
 	}
 	scripts = append(scripts, contentScript("idle"))
 	responder := &scriptedResponder{scripts: scripts}

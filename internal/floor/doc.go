@@ -31,5 +31,10 @@
 // model-facing correction a repair guard hands back with its retry. prompts.go embeds the guards'
 // fixed prose from prompts/*.txt and loads one asset by name.
 //
+// The guards. repair.go is the tool-call repair guard — an unknown tool, malformed arguments or a
+// missing required parameter answered with the correction the Turn re-streams with. loopbreak.go is
+// the tool-loop breaker — a response repeating the previous Turn's exact calls answered with the
+// directive that names the repeat and steers at the remaining work.
+//
 // And doc.go this map.
 package floor

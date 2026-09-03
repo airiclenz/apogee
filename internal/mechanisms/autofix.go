@@ -17,11 +17,12 @@ import (
 func init() {
 	register(row{
 		descriptor: autofixDescriptor,
-		// Ordering runs autofix after validate and before syntax (catalogue Table A): the sim repairs
-		// before it corrects (response_analysis.go:72-88 @pin — detect → tryAutoFix →
-		// correct-the-remainder), so syntax's retry covers only what a formatter could not fix.
+		// Ordering runs autofix before syntax (catalogue Table A): the sim repairs before it
+		// corrects (response_analysis.go:72-88 @pin — detect → tryAutoFix → correct-the-remainder),
+		// so syntax's retry covers only what a formatter could not fix. The "after validate" edge
+		// went with the row: tool-call repair is a Floor guard now (ADR 0071) and runs ahead of the
+		// whole hook cascade, so no ordering constraint can express — or needs to express — it.
 		ordering: domain.OrderingConstraints{
-			After:  []domain.MechanismID{validateID},
 			Before: []domain.MechanismID{syntaxID},
 		},
 		construct: newAutofix,

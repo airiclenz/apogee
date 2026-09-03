@@ -40,13 +40,12 @@
 // path read over and over without progress and hints at it; readrepeat.go catches the redundant
 // re-read in the response about to be sent. syntax.go is the write-content syntax-check Mechanism
 // (the checker itself is the internal/syntaxcheck package). toolfilter.go narrows the tool menu before the
-// request goes out. toolloop.go is tool_loop_interceptor, the identical-repeat-turn detector, and
-// the file that declares this package's prompt-asset embed and its mustPrompt loader (the prompts/
-// directory, below) — cot.go, decompose.go, emptyresponse.go and library.go load their own assets
-// through it. toolresultcap.go caps oversized tool results mid-Exchange — the one reducer that shapes a
+// request goes out. prompts.go declares this package's prompt-asset embed and its mustPrompt
+// loader (the prompts/ directory, below) — cot.go, decompose.go, emptyresponse.go and library.go
+// load their own assets through it. toolresultcap.go caps oversized tool results mid-Exchange — the one reducer that shapes a
 // request rather than the history. tooluseenforcer.go is the narration off-ramp: an action request
 // answered in prose is corrected into a tool call. truncatehistory.go is the drop-the-middle
-// history rewrite. validate.go checks a response's tool calls against the menu and the schema.
+// history rewrite.
 //
 // # The shared plumbing, one line each
 //
@@ -78,10 +77,9 @@
 //
 // prompts/ is not Go: it holds this package's prompt text as plain .txt files — the wording as
 // editable prose rather than string literals buried in code (ISSUES.md: hard-coded prompt
-// literals) — which toolloop.go compiles into the binary with go:embed, so nothing is read from
-// disk at runtime and nothing is user-overridable. It carries the fixed sentence fragments of
-// tool_loop_interceptor's loop-breaking directive, the cot and decompose directives, the two
-// library behavioural notes and that Mechanism's injection-block header, and the
+// literals) — which prompts.go compiles into the binary with go:embed, so nothing is read from
+// disk at runtime and nothing is user-overridable. It carries the cot and decompose directives, the
+// two library behavioural notes and that Mechanism's injection-block header, and the
 // empty_response_recovery nudge. Only the fixed text lives there: the branching, the %s
 // substitution, the sentence-joining spaces and the trailing newlines stay in Go, as do the
 // @pin/rationale comments (an asset carries no comments — a comment line in a .txt would be sent

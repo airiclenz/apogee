@@ -21,10 +21,11 @@ import (
 func init() {
 	register(row{
 		descriptor: syntaxDescriptor,
-		// Ordering runs syntax after validate and after autofix (catalogue Table A): repair precedes
-		// correction, so the correction covers only the post-repair remainder.
+		// Ordering runs syntax after autofix (catalogue Table A): repair precedes correction, so the
+		// correction covers only the post-repair remainder. The "after validate" edge went with that
+		// row — tool-call repair is a Floor guard now (ADR 0071), running ahead of every hook.
 		ordering: domain.OrderingConstraints{
-			After: []domain.MechanismID{validateID, autofixID},
+			After: []domain.MechanismID{autofixID},
 		},
 		construct: newSyntax,
 	})

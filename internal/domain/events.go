@@ -247,6 +247,23 @@ type MechanismFiredEvent struct {
 	Action    string // e.g. the PostResponseDecision taken, or "suppressed"
 }
 
+// FloorGuardEvent reports that a Floor guard fired — the engine changing what the model sees after
+// its own failure, or shaping the request without steering it (ADR 0071). It is the guards'
+// counterpart to MechanismFiredEvent and deliberately a SEPARATE variant: a guard is not a
+// catalogued Mechanism, carries no MechanismID, and is never attributed to one in a bench run.
+//
+// Guard is the guard's configuration key — the same spelling a user writes in config.yaml
+// (`tool-call-repair`, `tool-loop-breaker`, …), so an observer never has to map an internal name
+// back to the switch that turns the behaviour off. Action names what the guard did ("retry",
+// "intercept", "cap"), and Detail is optional supporting text a renderer may show verbatim or
+// ignore.
+type FloorGuardEvent struct {
+	EventBase
+	Guard  string // the guard's config key, e.g. "tool-call-repair"
+	Action string // what the guard did, e.g. "retry"
+	Detail string // optional supporting text; may be empty
+}
+
 // ErrorEvent reports a localised, recovered fault — a tool or Mechanism panic
 // caught at the extension boundary, or a tool execution error (ADR 0007). It does
 // not imply the loop stopped.

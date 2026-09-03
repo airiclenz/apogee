@@ -49,7 +49,7 @@ import (
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
 // anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetBypass,
-// SetCompactionEnabled, SetPruneToolResults, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
+// SetCompactionEnabled, SetPruneToolResults, SetFloor, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
 // behind its own mutex, so the host (the settings surface, Shift+Tab, /confine) may call it
 // while a Step runs and the change lands at that field's next consumption boundary.
 type Agent struct {
@@ -116,13 +116,13 @@ type Agent struct {
 	scratchMu  sync.RWMutex
 	scratchDir string // live session scratch dir; seeded from cfg.ScratchDir, swappable via SetScratchDir
 
-	// bypassMu, compactionMu, pruneMu and contextFilesMu guard the four settings the settings
-	// surface may swap mid-session (SetBypass / SetCompactionEnabled / SetPruneToolResults /
-	// SetContextFiles). They follow the modeMu
+	// bypassMu, compactionMu, pruneMu, floorMu and contextFilesMu guard the five settings the
+	// settings surface may swap mid-session (SetBypass / SetCompactionEnabled /
+	// SetPruneToolResults / SetFloor / SetContextFiles). They follow the modeMu
 	// pattern to the letter — one mutex per field, named for the single field it guards, because the
-	// four are independent facts read at four different boundaries and never as one consistent
+	// five are independent facts read at five different boundaries and never as one consistent
 	// tuple. Their cfg counterparts (cfg.Bypass, cfg.Context.CompactionEnabled,
-	// cfg.Context.PruneToolResults, cfg.ContextFiles)
+	// cfg.Context.PruneToolResults, cfg.Floor, cfg.ContextFiles)
 	// stay the immutable construction seeds, so the whole-struct cfg copy a sub-agent spawn takes
 	// (newChildAgent) keeps reading fields nothing ever writes.
 	bypassMu sync.RWMutex
@@ -133,6 +133,9 @@ type Agent struct {
 
 	pruneMu sync.RWMutex
 	prune   bool // live tool-result Pruning gate; seeded from cfg.Context.PruneToolResults, swappable via SetPruneToolResults
+
+	floorMu sync.RWMutex
+	floor   domain.FloorConfig // live Floor-guard opt-outs (ADR 0071); seeded from cfg.Floor, swappable via SetFloor
 
 	contextFilesMu   sync.RWMutex
 	contextFileNames []string // live workspace context-file names; seeded from cfg.ContextFiles, swappable via SetContextFiles

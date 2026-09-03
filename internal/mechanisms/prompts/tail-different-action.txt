@@ -1,1 +1,0 @@
-You MUST take a DIFFERENT action now. Use write_file to make modifications, or read a file you haven't read yet.

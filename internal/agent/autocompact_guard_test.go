@@ -448,10 +448,12 @@ func TestAutoCompactFailedFoldStandsDownForTheRestOfTheExchange(t *testing.T) {
 	up := &scriptedCompactResponder{
 		summaryReply: "", // an empty summary is a fault: context.Compact rejects it (errEmptySummary)
 		scripts: [][]provider.Delta{
-			toolCallScript("c1", "probe", "{}"), // Turn 0 (opening): the oversized result puts the history over budget
-			toolCallScript("c2", "peek", "{}"),  // Turn 1: over budget at its top → the fold RUNS and faults
-			toolCallScript("c3", "peek", "{}"),  // Turn 2: still over budget → the latch must stand the trigger down
-			toolCallScript("c4", "peek", "{}"),  // Turn 3: ditto — a second silent boundary
+			toolCallScript("c1", "probe", "{}"),     // Turn 0 (opening): the oversized result puts the history over budget
+			toolCallScript("c2", "peek", "{}"),      // Turn 1: over budget at its top → the fold RUNS and faults
+			toolCallScript("c3", "peek", `{"n":3}`), // Turn 2: still over budget → the latch must stand the trigger down
+			toolCallScript("c4", "peek", `{"n":4}`), // Turn 3: ditto — a second silent boundary
+			//                                          (the arguments differ per Turn so the tool-loop
+			//                                          breaker guard does not read them as a repeat)
 		},
 	}
 	cfg := autoCompactConfig(sink)

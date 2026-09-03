@@ -196,7 +196,31 @@ after `Delegation` (`:354-357`); `:407-415` is inside `ContextConfig` (`:371-416
 
 **Commit:** `feat(floor): shared guard substrate and the zero-value-on FloorConfig`
 
-## 4. Post-response guards: tool-call repair and tool-loop breaker
+## 4. Post-response guards: tool-call repair and tool-loop breaker — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): consequential edit — internal/agent/agent.go: made necessary by the live gate, whose `floorMu`/`floor` fields can only be declared in the Agent struct; the three comments enumerating the four settings-swappable live fields become five. The methods (`SetFloor`, `floorConfig`) are in floorguards.go as the item says.
+
+NOTES (2026-09-03): consequential edit — internal/floor/doc.go: made necessary by the two new files, which docmap_test.go requires the package map to name.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/doc.go: made necessary by deleting validate.go/toolloop.go and adding prompts.go, which docmap_test.go enumerates.
+
+NOTES (2026-09-03): consequential edit — internal/tui/fold_test.go: made necessary by `domain.FloorGuardEvent`; `TestFoldEventCoversEveryEventVariant` parses events.go and fails on a variant with no row, so the row is added saying the fold does explicitly nothing with it (item 9 owns the debug-view render).
+
+NOTES (2026-09-03): consequential edit — internal/domain/hooks.go, internal/mechanisms/historyhints.go: made necessary by the retirement; both comments named `tool_loop_interceptor` as a live row.
+
+NOTES (2026-09-03): the item's regression guard (a) named only `toolNames` as a surviving caller, but `library.go:200` calls `validateToolCalls` (and through it `validateCall`/`validateArguments`/`toolKnown`/`requiredParams`) to observe the same issues it records as corrections — so those five moved into `robustness.go` beside `toolNames` rather than being deleted, and `internal/floor/repair.go` carries its own copy. The two halves diverge only when `library` retires at item 17.
+
+NOTES (2026-09-03): the eight loop-directive prompt assets were deleted with `toolloop.go` (item 3 copied them into `internal/floor/prompts/`); `toolloop_test.go`'s package-wide asset roster test `TestEmbeddedDirectivePromptsLoad` moved into `prompts_test.go` beside the embed rather than dying with the row.
+
+NOTES (2026-09-03): the symbol rule "`grep -rn 'validateID\|toolLoopInterceptorID' internal/ --include=*.go` reads zero" is met for the CATALOGUE-row consts; the grep still hits `internal/session/store.go`'s unrelated `validateID` filename-stem validator and `internal/config/configwrite_mechanism_test.go`'s local `validateID = "validate"` YAML-key const (a splice fixture that never touches the catalogue), neither of which names a Mechanism.
+
+NOTES (2026-09-03): the item's "tests that name them" list is a floor, not a ceiling. Beyond it: `internal/agent/{rebind,guardrails,statemachine,setconfine,selfreg,autocompact_guard,console,restoresession,subagent}_test.go`, `cmd/apogee/{validatedsets,wire_live}_test.go` and the `guard`/`egress` stubllm scripts all had to be re-armed. Most are the SAME two interactions the guards now always-on introduce (see the follow-up): a test that scripted an identical repeat to exercise something else now varies its arguments, and one whose subject IS the identical repeat (the circuit-breaker, the allow-for-session cache) sets the guard's own `Floor.Disable…` opt-out with a comment saying why. `driveToolCall` (guardrails_test.go) disables the repair guard for the whole disposition family: several of those drives push a deliberately bare `{}` or a tool a mode withdrew from the menu.
+
+NOTES (2026-09-03): `internal/agent/wave1delivery_test.go`'s `TestWave1_ValidateRetryCarriesCorrectionThenDispatchesFixed` moved into `floorguards_test.go` as the guard's own Bypass proof rather than being edited in place; `TestWave1_ValidateFailShortCircuitsCascade` became `TestWave1_RepairGuardShortCircuitsTheCascade` (the guard now short-circuits the whole hook cascade, not just its tail), and `retryview_test.go`'s two committedLen proofs were recast over the guards.
+
+NOTES (2026-09-03): `internal/mechanisms/retired_test.go`'s live-row exemplar is `liveExemplarID` ("live_exemplar"), registered through `registerIn` into a test-private table, with `exemplarKnown()` as the known-ID list those `ResolveEnabled` cases validate against — the permanent shape the guard asked for. A new `TestPromotedRowsCarryTheirFloorGuardKey` pins the REAL roll: both IDs, `v0.20.0`, and their successor keys, plus the notice each earns.
+
+NOTES (2026-09-03): `internal/validated/shipped_test.go` needed no edit — item 2's `DropRetired` relaxation absorbs the two new roll entries. `cmd/apogee/validatedsets_test.go`'s gemma fixtures now derive their expected size from the shed set instead of the literal 15 (item 18 recasts them over a synthetic user-dir entry), and `wire_live_test.go`'s shipped-set fold sheds the retired members before `BuildMechanisms`.
 
 **What.** Depends on 2, 3. Move `validate.go:51-159` into `internal/floor/repair.go` as
 `ToolCallRepair(resp *domain.Response) (correction string, ok bool)` and `toolloop.go:64-251` (minus the

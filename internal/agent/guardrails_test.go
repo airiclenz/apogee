@@ -74,6 +74,12 @@ func (eligibleConfiner) Confine(_ context.Context, _ domain.ConfinementBox, _ *e
 // returns the recorded events plus the agent for post-assertions.
 func driveToolCall(t *testing.T, cfg domain.Config, sink *recordingSink, callID, tool, args string) *Agent {
 	t.Helper()
+	// The tool-call repair Floor guard is off for these drives. Several of them push a call the
+	// guard would answer BEFORE dispatch ever saw it — a deliberately bare {} on a tool whose schema
+	// declares required parameters, or a tool a mode has withdrawn from the menu — and every one of
+	// them is about what the DISPOSITION does with a call that reaches the tool path, not about the
+	// floor. The guard has its own proofs in floorguards_test.go.
+	cfg.Floor.DisableToolCallRepair = true
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		toolCallScript(callID, tool, args),
 		contentScript("done"),
@@ -222,6 +228,11 @@ func TestGuardrails_CircuitBreakerTrips(t *testing.T) {
 
 	// Build scripts: N+1 identical tool-call Turns, then a final reply.
 	const calls = security.DefaultCircuitBreakerThreshold + 1
+	// The circuit-breaker keys on IDENTICAL repeated calls, which is also what the tool-loop
+	// breaker Floor guard answers — and the guard runs first, at the post-response seam, so it would
+	// re-stream every Turn before the breaker ever counted one. This test is about the breaker, so
+	// the guard is off for it; the guard's own repeat proof lives in floorguards_test.go.
+	cfg.Floor.DisableToolLoopBreaker = true
 	scripts := make([][]provider.Delta, 0, calls+1)
 	for i := 0; i < calls; i++ {
 		scripts = append(scripts, toolCallScript("c", "flaky", `{"x":"same"}`))

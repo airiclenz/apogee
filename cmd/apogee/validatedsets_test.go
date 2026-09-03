@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/validated"
 )
 
@@ -70,16 +72,20 @@ func TestResolveValidatedSet_IdentityAliasApplies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
-	if len(set) != 15 {
-		t.Fatalf("want the gemma 15 applied, got %d: %v", len(set), set)
+	if want := len(shippedGemmaSet(t)); len(set) != want {
+		t.Fatalf("want the gemma set's %d live members applied, got %d: %v", want, len(set), set)
 	}
 	for i := 1; i < len(set); i++ {
 		if set[i-1] >= set[i] {
 			t.Fatalf("applied set not in sorted canonical order: %v", set)
 		}
 	}
-	if len(notices) != 1 || !strings.Contains(notices[0], "applied via alias") ||
-		!strings.Contains(notices[0], "15 mechanisms on") || !strings.Contains(notices[0], validated.SourceShipped) {
+	// One shed line per retired member of the shipped record, then the applied notice last — the
+	// count it names is the LIVE half of the set, which is what actually armed.
+	count := fmt.Sprintf("%d mechanisms on", len(shippedGemmaSet(t)))
+	applied := notices[len(notices)-1]
+	if !strings.Contains(applied, "applied via alias") ||
+		!strings.Contains(applied, count) || !strings.Contains(applied, validated.SourceShipped) {
 		t.Fatalf("applied notice wrong: %v", notices)
 	}
 }
@@ -88,7 +94,7 @@ func TestResolveValidatedSet_ManualControlSuppresses(t *testing.T) {
 	t.Parallel()
 	opts := baseOpts(gemmaKey)
 	opts.ValidatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
-	opts.Mechanisms = map[string]bool{"validate": true} // any non-empty block = manual control
+	opts.Mechanisms = map[string]bool{"syntax": true} // any non-empty block = manual control
 
 	set, notices, err := resolveValidatedSet(opts, t.TempDir(), t.TempDir())
 	if err != nil {
@@ -119,7 +125,7 @@ func TestResolveValidatedSet_UserEntryWinsAndSorts(t *testing.T) {
 	dir := t.TempDir()
 	// A user-local entry for the SAME key as the shipped gemma one: user wins, and its
 	// (deliberately unsorted) set comes back in sorted canonical order.
-	entry := `{"version":1,"key":"gemma-4-e4b-it-qat","set":["validate","autofix"],"evidence":{"campaign":"user-run-1"}}`
+	entry := `{"version":1,"key":"gemma-4-e4b-it-qat","set":["syntax","autofix"],"evidence":{"campaign":"user-run-1"}}`
 	if err := os.WriteFile(filepath.Join(dir, "gemma.json"), []byte(entry), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +136,7 @@ func TestResolveValidatedSet_UserEntryWinsAndSorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
-	want := []apogee.MechanismID{"autofix", "validate"}
+	want := []apogee.MechanismID{"autofix", "syntax"}
 	if len(set) != 2 || set[0] != want[0] || set[1] != want[1] {
 		t.Fatalf("want the user entry's set sorted %v, got %v", want, set)
 	}
@@ -233,8 +239,10 @@ func TestResolveValidatedSetDropsARetiredIDWithANotice(t *testing.T) {
 	}
 }
 
-// shippedGemmaSet is the live shipped gemma enable set — real curation data, so a test built on it
-// stays in step with the catalogue instead of pinning a copy that can rot.
+// shippedGemmaSet is the LIVE half of the shipped gemma enable set — real curation data with the
+// retired members already shed, so a test built on it stays in step with the catalogue instead of
+// pinning a copy that can rot. The shed is the same one resolveValidatedSet performs, so what this
+// returns is exactly what a record naming the whole set arms.
 func shippedGemmaSet(t *testing.T) []domain.MechanismID {
 	t.Helper()
 	entries, err := validated.Shipped()
@@ -243,7 +251,8 @@ func shippedGemmaSet(t *testing.T) []domain.MechanismID {
 	}
 	for _, e := range entries {
 		if e.Key == gemmaKey {
-			return e.Set
+			live, _ := validated.DropRetired(e, mechanisms.RetiredIDs())
+			return live.Set
 		}
 	}
 	t.Fatalf("no shipped entry for %q", gemmaKey)

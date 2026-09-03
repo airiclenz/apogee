@@ -69,7 +69,9 @@ func openConsoleScripts(n int) [][]provider.Delta {
 	scripts := make([][]provider.Delta, 0, 2*n)
 	for i := range n {
 		scripts = append(scripts,
-			toolCallScript(fmt.Sprintf("c%d", i), "open_console", `{}`),
+			// The arguments carry the iteration so two consecutive Exchanges are not an identical
+			// repeat, which the tool-loop breaker Floor guard would answer instead of opening a shell.
+			toolCallScript(fmt.Sprintf("c%d", i), "open_console", fmt.Sprintf(`{"n":%d}`, i)),
 			contentScript("opened"))
 	}
 	return scripts

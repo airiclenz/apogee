@@ -212,35 +212,6 @@ func TestEmptyResponseRecoveryTreatsRecentEditAsProgress(t *testing.T) {
 	}
 }
 
-// extractConversationContext (toolloop.go:170's write branch) counts an apogee edit tool into
-// filesWritten, so the loop-breaking directive credits an edit_existing_file / single_find_and_replace
-// as work already done ("You have already written: …") and steers toward the remaining work rather
-// than restarting from write_file. Holds only because isFileMutatingTool counts apogee's own edit
-// tools; the identical read-repeat of b.go is what trips the interceptor.
-func TestToolLoopDirectiveCreditsEditToolWrite(t *testing.T) {
-	t.Parallel()
-	for _, tool := range []string{"edit_existing_file", "single_find_and_replace"} {
-		t.Run(tool, func(t *testing.T) {
-			t.Parallel()
-			history := []domain.Message{
-				userMsg("update a.go"),
-				assistantCall(mutatingCall("e1", tool, "a.go")),
-				toolResult("e1", "wrote a.go"),
-				assistantCall(readCall("r1", "b.go")),
-				toolResult("r1", "package b"),
-			}
-			resp := offrampResponse(history, nil, "", readCall("r2", "b.go")) // repeats the previous turn's exact call
-			d := postResponse(t, toolLoopInterceptorID, resp)
-			if d.Action != domain.ActionRetry {
-				t.Fatalf("Action = %q, want ActionRetry on the identical repeat", d.Action)
-			}
-			if !strings.Contains(d.Inject, "already written: a.go") {
-				t.Errorf("directive = %q, want it to credit the %s write of a.go", d.Inject, tool)
-			}
-		})
-	}
-}
-
 // writtenPaths (historyhints.go:106) counts an apogee edit tool as a successful write, so
 // deriveWriteTarget excludes an edit_existing_file / single_find_and_replace-written path from the
 // read-loop hint's "create X" suggestion — the suggestion always points at REMAINING work. Holds only

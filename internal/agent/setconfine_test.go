@@ -59,9 +59,10 @@ func TestAgentSetConfineToWorkspaceObservedByNextToolCall(t *testing.T) {
 	cfg := autoConfig(sink, eligibleConfiner{}, true, write)
 	cfg.Approver = approver
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "w", `{}`),
+		toolCallScript("c1", "w", `{"n":1}`),
 		contentScript("done"),
-		toolCallScript("c2", "w", `{}`),
+		toolCallScript("c2", "w", `{"n":2}`), // different arguments: not the identical repeat the
+		//                                       tool-loop breaker guard answers
 		contentScript("done"),
 	}}
 	a, err := newAgent(cfg, responder)

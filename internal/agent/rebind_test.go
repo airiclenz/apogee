@@ -168,15 +168,15 @@ func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 
 	if err := a.Rebind(RebindSpec{
 		Model:            "second-model",
-		EnableMechanisms: []domain.MechanismID{"validate"},
+		EnableMechanisms: []domain.MechanismID{"syntax"},
 	}); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
 	if a.registry == seeded {
 		t.Error("Rebind kept the seeded registry; the new model's set was never built")
 	}
-	if !hasRegistered(a.registry, "validate") {
-		t.Errorf("rebuilt registry = %v, want it to hold the newly enabled validate", registeredIDs(a.registry))
+	if !hasRegistered(a.registry, "syntax") {
+		t.Errorf("rebuilt registry = %v, want it to hold the newly enabled syntax", registeredIDs(a.registry))
 	}
 	if hasRegistered(a.registry, "empty_response_recovery") {
 		t.Errorf("rebuilt registry = %v, want the previous model's set gone", registeredIDs(a.registry))

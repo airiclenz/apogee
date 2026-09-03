@@ -38,8 +38,15 @@ type retiredRow struct {
 //   - grammar (retired 2026-08-29) — the json_schema `response_format` shaper. Its only gate was a
 //     backend-capability field on Deps that nothing ever populated, over a provider wire that
 //     carries no response_format field, so it no-op'd on every backend from the port onwards.
+//   - tool_loop_interceptor (retired v0.20.0) — PROMOTED. The identical-repeat-turn detector became
+//     the `tool-loop-breaker` Floor guard: it changes only what the model sees after its own
+//     failure, so it needs no per-model proof and runs for every model (ADR 0071).
+//   - validate (retired v0.20.0) — PROMOTED. The tool-call validator became the `tool-call-repair`
+//     Floor guard, on the same reasoning.
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
+	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
+	{ID: "validate", Release: "v0.20.0", Successor: "tool-call-repair"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

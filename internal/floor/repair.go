@@ -1,7 +1,6 @@
-package mechanisms
+package floor
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,58 +8,27 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// validate registers the tool-call validation Mechanism's catalogue row (Phase-4 item 5). It is
-// default-off (D1) — the config surface builds it only when the `mechanisms:` block enables it.
-func init() {
-	register(row{
-		descriptor: validateDescriptor,
-		// Ordering runs validate before syntax and autofix (catalogue Table A): validation is the
-		// coarsest check, so a malformed call is corrected before the finer content passes look at it.
-		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{syntaxID, autofixID}},
-		construct: newValidate,
-	})
-}
-
-// validateMechanism is the post-response tool-call validator (catalogue Table A `validate`;
-// ported from apogee-sim internal/validate + internal/proxy/response_validator.go @pin). It
-// checks each requested tool call against the tool menu the model was shown (LoopView.Tools())
-// and its own arguments: an unknown tool name, empty/malformed JSON arguments, or a missing
-// required parameter each yield a correction the loop re-streams in the same Turn (ActionRetry
-// — the retry-in-place delivery of the amended C5, R1; see robustness.go). The retry
-// short-circuits the rest of the response-repair cascade, so a malformed call is corrected
-// before the finer content passes ever see it.
+// ToolCallRepair is the tool-call repair guard (the `tool-call-repair` key, ADR 0071): it checks
+// each requested tool call against the tool menu the model was shown (LoopView.Tools()) and against
+// its own arguments — an unknown tool name, empty or malformed JSON arguments, or a missing required
+// parameter — and hands back the correction the engine re-streams the Turn with. ok is false for a
+// response with no tool calls, or one whose calls are all well formed: the no-op case, where the
+// response stands exactly as the model wrote it.
 //
-// It carries no per-Mechanism state: the descriptor's strikes-3 policy routes its
-// self-regulation through the loop's per-Session tracker (item 3), the same as every catalogued
-// Mechanism, so the sim's ad-hoc syntax-fail counter is not re-implemented here.
-type validateMechanism struct{}
-
-// newValidate builds the validate Mechanism. It needs no injected Deps (D3): validation reads
-// only the response and the tool menu already on its LoopView.
-func newValidate(Deps) (any, error) { return validateMechanism{}, nil }
-
-// validateDescriptor identifies validate as a strikes-3 response-repair Mechanism (catalogue
-// Table A) — disabled under Bypass (ADR 0006) and withdrawn by self-regulation after repeated
-// non-help.
-var validateDescriptor = domain.MechanismDescriptor{
-	ID:          validateID,
-	Capability:  domain.CapResponseRepair,
-	Suppression: domain.SuppressStrikesThree,
-}
-
-// PostResponse validates the response's tool calls and, on any error, retries in place with a
-// correction — the loop re-streams the corrected request in the same Turn (R1). A response with
-// no tool calls, or with only valid calls, is a no-op.
-func (validateMechanism) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
+// The decision logic is apogee-sim's response validator @pin, unchanged by the promotion: the guard
+// changes only what the model sees after its OWN failure, which is why it needs no per-model proof
+// and stays on under Bypass. It reads nothing but resp — no clock, no filesystem, no state between
+// calls — so the same response always yields the same answer.
+func ToolCallRepair(resp *domain.Response) (correction string, ok bool) {
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
-		return domain.PostResponseDecision{}, nil
+		return "", false
 	}
 	issues := validateToolCalls(calls, resp.View().Tools())
 	if !hasIssues(issues) {
-		return domain.PostResponseDecision{}, nil
+		return "", false
 	}
-	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: buildCorrectionMessage(issues)}, nil
+	return buildCorrectionMessage(issues), true
 }
 
 // validateToolCalls collects the validation problems across every requested call (apogee-sim's

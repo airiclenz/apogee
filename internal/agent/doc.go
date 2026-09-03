@@ -32,7 +32,10 @@
 // Turn/Exchange state between quiescent boundaries (ADR 0007) and the exits that mutate the
 // conversation and the self-regulator together. hookrun.go fires the hooks at each point —
 // catalogued Mechanisms first in the registry's total order, then the bench's experimental
-// hooks — each under one recover boundary and attributed by MechanismID. wire.go is the
+// hooks — each under one recover boundary and attributed by MechanismID. floorguards.go is the
+// engine half of the Floor guards (ADR 0071): the live per-guard opt-outs the settings surface
+// swaps, the seams that run internal/floor's decisions ahead of the hooks at each hook point, and
+// the FloorGuardEvent a firing books. wire.go is the
 // translation onto the provider seam: the domain request drained into a domain-free
 // provider.Request (ADR 0010). compact.go is conversation compaction — the explicit Compact,
 // the auto-compaction trigger and its allocation arithmetic, the emergency fold, the user bridge

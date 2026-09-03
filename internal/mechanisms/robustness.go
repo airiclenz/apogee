@@ -8,15 +8,18 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The Wave-1 response-robustness Mechanisms (Phase-4 item 5): validate, syntax, and autofix,
-// ported from the pinned apogee-sim source (docs/design/mechanism-catalogue.md Table A). All
-// three are post-response Mechanisms with Capability response-repair and SuppressionPolicy
-// strikes-3, dispatched in the deterministic order validate → autofix → syntax (repair precedes
-// correction — sim internal/proxy/response_analysis.go:72-88 @pin; see autofix.go).
+// The Wave-1 response-robustness Mechanisms (Phase-4 item 5): syntax and autofix, ported from the
+// pinned apogee-sim source (docs/design/mechanism-catalogue.md Table A). Both are post-response
+// Mechanisms with Capability response-repair and SuppressionPolicy strikes-3, dispatched in the
+// deterministic order autofix → syntax (repair precedes correction — sim
+// internal/proxy/response_analysis.go:72-88 @pin; see autofix.go). The third member, the tool-call
+// validator, was promoted out of the catalogue to the `tool-call-repair` Floor guard (ADR 0071):
+// its decision logic now lives in internal/floor/repair.go and runs ahead of these two, on every
+// model, without a catalogue row.
 //
 // Correction delivery is by ActionRetry — retry-in-place per the amended C5 (R1, owner-ratified
 // 2026-07-04; docs/plans/phase-4-review-fixes-plan.md). The loop, unlike the sim's proxy, owns
-// the stream and can reset it (StreamResetEvent), so validate/syntax return ActionRetry{Inject:
+// the stream and can reset it (StreamResetEvent), so syntax returns ActionRetry{Inject:
 // correction} and the loop re-streams the corrected request in the SAME Turn: the superseded
 // assistant message (text + tool calls) and then the correction as a role-safe user message are
 // appended to the in-flight request — request-scoped, never committed to history — exactly the
@@ -28,12 +31,11 @@ import (
 // dispatches a Response's tool calls only after post-response review, so a formatter write-back
 // via Response.SetToolCallArguments reaches the tool that runs.
 const (
-	validateID domain.MechanismID = "validate"
-	syntaxID   domain.MechanismID = "syntax"
-	autofixID  domain.MechanismID = "autofix"
+	syntaxID  domain.MechanismID = "syntax"
+	autofixID domain.MechanismID = "autofix"
 )
 
-// robustnessIssue is one problem validate or syntax found in a tool call — the correctable unit
+// robustnessIssue is one problem syntax found in a tool call — the correctable unit
 // buildCorrectionMessage renders into the model-facing retry correction. context carries
 // the optional supporting lists the sim's message includes (available_tools, required_params).
 type robustnessIssue struct {
@@ -94,7 +96,7 @@ func isWriteTool(name string) bool { return writeToolNames[name] }
 // verified against internal/tools, and pinned to its registered menu there), reusing
 // wave4WriteTools (decompose.go) as the single source of that superset. The history-family
 // Mechanisms — read_repeat, read_loop, cached_content_intercept, error_enrichment,
-// tool_loop_interceptor, the off-ramps, and deriveWriteTarget — use it so their write-since /
+// the off-ramps, and deriveWriteTarget — use it so their write-since /
 // read-then-write / progress detection sees apogee's real edit menu, not just the sim spellings.
 func isFileMutatingTool(name string) bool { return wave4WriteTools[name] }
 
@@ -127,4 +129,105 @@ func replaceContentArg(args json.RawMessage, content string) (json.RawMessage, e
 	}
 	m["content"] = content
 	return json.Marshal(m)
+}
+
+// toolNames lists the tool-menu names, for the "Available tools: …" line the tool_use_enforcer
+// correction carries. It lived beside the tool-call validator until that behaviour was promoted to
+// the tool-call-repair Floor guard (ADR 0071), and moved here with its one surviving caller.
+func toolNames(tools []domain.ToolDef) []string {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	return names
+}
+
+// The tool-call validation helpers. They were the tool-call validator Mechanism's own until that
+// behaviour was promoted to the `tool-call-repair` Floor guard (ADR 0071, internal/floor/repair.go);
+// they stay here because the library Mechanism observes the SAME issues to record its corrections,
+// and a second reading of a call's problems would be a second answer to one question.
+
+// validateToolCalls collects the validation problems across every requested call (apogee-sim's
+// validate.ValidateToolCalls, adapted to already-parsed domain.ToolCalls — the wire-level id/type
+// checks the sim did are unnecessary once the loop has parsed the call).
+func validateToolCalls(calls []domain.ToolCall, tools []domain.ToolDef) []robustnessIssue {
+	var issues []robustnessIssue
+	for _, call := range calls {
+		issues = append(issues, validateCall(call, tools)...)
+	}
+	return issues
+}
+
+// validateCall checks one call: a present function name, membership in the tool menu, and valid
+// arguments. A missing name short-circuits the rest (there is nothing left to check).
+func validateCall(call domain.ToolCall, tools []domain.ToolDef) []robustnessIssue {
+	if call.Tool == "" {
+		return []robustnessIssue{{message: "tool call missing function name"}}
+	}
+
+	var issues []robustnessIssue
+	if len(tools) > 0 && !toolKnown(call.Tool, tools) {
+		issues = append(issues, robustnessIssue{
+			message: fmt.Sprintf("function %q not in the tool set provided to the model", call.Tool),
+			context: map[string]string{"available_tools": strings.Join(toolNames(tools), ", ")},
+		})
+	}
+	return append(issues, validateArguments(call, tools)...)
+}
+
+// validateArguments checks a call's arguments are a JSON object and carry every required
+// parameter the tool's schema declares. Empty or non-object arguments are the malformed-call case.
+func validateArguments(call domain.ToolCall, tools []domain.ToolDef) []robustnessIssue {
+	raw := strings.TrimSpace(string(call.Arguments))
+	if raw == "" {
+		return []robustnessIssue{{message: "tool call has empty arguments (expected JSON object)"}}
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return []robustnessIssue{{message: fmt.Sprintf("arguments are not valid JSON: %s", err.Error())}}
+	}
+
+	required := requiredParams(call.Tool, tools)
+	var issues []robustnessIssue
+	for _, req := range required {
+		if _, ok := parsed[req]; !ok {
+			issues = append(issues, robustnessIssue{
+				message: fmt.Sprintf("missing required parameter %q for function %q", req, call.Tool),
+				context: map[string]string{"required_params": strings.Join(required, ", ")},
+			})
+		}
+	}
+	return issues
+}
+
+// toolKnown reports whether name is in the tool menu the model was shown.
+func toolKnown(name string, tools []domain.ToolDef) bool {
+	for _, t := range tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// requiredParams reads the "required" list from a tool's JSON-schema arguments (ToolDef.Schema),
+// mirroring apogee-sim's ExtractToolDefsFromPipeline. A tool absent from the menu, or a schema
+// without a required array, yields no required parameters (nothing to enforce).
+func requiredParams(name string, tools []domain.ToolDef) []string {
+	for _, t := range tools {
+		if t.Name != name {
+			continue
+		}
+		if len(t.Schema) == 0 {
+			return nil
+		}
+		var s struct {
+			Required []string `json:"required"`
+		}
+		if json.Unmarshal(t.Schema, &s) == nil {
+			return s.Required
+		}
+		return nil
+	}
+	return nil
 }

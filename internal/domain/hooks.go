@@ -383,8 +383,8 @@ type Request struct {
 	// committedLen bounds the history View() exposes to the post-response scanners: it is
 	// frozen at the first retry-in-place append (AppendSupersededAssistant), so the
 	// request-scoped superseded attempt + correction never masquerade as committed history
-	// to read_repeat / tool_loop_interceptor (item 10, sim parity — the sim's retry builders
-	// left the detector's request unmutated). -1 means no retry appendage has been recorded,
+	// to read_repeat or to the tool-loop breaker Floor guard (item 10, sim parity — the sim's
+	// retry builders left the detector's request unmutated). -1 means no retry appendage has been recorded,
 	// so View() exposes the whole request. State() (the model-facing projection) is never
 	// bounded — the appendage still reaches the Upstream.
 	//

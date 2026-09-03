@@ -81,6 +81,18 @@ turns:
       tool_calls:
         - name: docs__echo
           arguments: '{"text":"still here"}'
+    # Once the reconnect is refused the docs server is dropped, so `docs__echo` is no longer in the
+    # menu the model is shown — and the tool-call repair Floor guard (on by default since v0.20.0,
+    # ADR 0071) answers a call to a tool that is not in the menu by re-streaming the Turn with a
+    # correction rather than letting it reach the tool path. This model insists on the call; the
+    # guard's per-Turn retry bound then lets it through, and the dropped server's tool is refused as
+    # unknown, which is what this scenario is about.
+    - when:
+        last_message: ^Your previous tool call had errors
+      repeat: true
+      tool_calls:
+        - name: docs__echo
+          arguments: '{"text":"still here"}'
     # ------------------------------------------------------------------------
     # The two turns about the upstream itself.
     # ------------------------------------------------------------------------

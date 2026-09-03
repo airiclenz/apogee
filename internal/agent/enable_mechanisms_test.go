@@ -77,7 +77,7 @@ func TestEnableMechanisms_HalfStackFailsRequirement(t *testing.T) {
 // caller who pre-built the same Mechanism).
 func TestEnableMechanisms_DuplicateIDRejected(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"validate", "validate"}
+	cfg.EnableMechanisms = []domain.MechanismID{"syntax", "syntax"}
 
 	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if err == nil || !strings.Contains(err.Error(), "already registered") {
@@ -89,11 +89,11 @@ func TestEnableMechanisms_DuplicateIDRejected(t *testing.T) {
 // host, and cmd/apogee/main.go prints a returned error verbatim — so it has to read as ONE
 // "apogee: "-prefixed line. registry.Add's rejections already arrive prefixed (house
 // convention for a returned error), so the enable-path context is appended rather than wrapping them
-// in a second prefix ("apogee: enable mechanism "validate": apogee: mechanism ID "validate" is
+// in a second prefix ("apogee: enable mechanism "syntax": apogee: mechanism ID "syntax" is
 // already registered").
 func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"validate", "validate"}
+	cfg.EnableMechanisms = []domain.MechanismID{"syntax", "syntax"}
 
 	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if err == nil {
@@ -107,7 +107,7 @@ func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
 	if got := strings.Count(msg, "apogee: "); got != 1 {
 		t.Errorf("newAgent err = %q; want exactly one %q prefix, got %d", msg, "apogee: ", got)
 	}
-	if !strings.Contains(msg, `"validate"`) {
+	if !strings.Contains(msg, `"syntax"`) {
 		t.Errorf("newAgent err = %q; want it to name the mechanism that failed", msg)
 	}
 }
@@ -252,7 +252,7 @@ func TestEnableMechanisms_LibraryBuildsFromLibraryDir(t *testing.T) {
 func TestEnableMechanisms_NonLibraryArmIgnoresLibraryDir(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.LibraryDir = "/no/such/dir/should/never/be/read"
-	cfg.EnableMechanisms = []domain.MechanismID{"validate"}
+	cfg.EnableMechanisms = []domain.MechanismID{"syntax"}
 
 	if _, err := newAgent(cfg, echoResponder{reply: "unused"}); err != nil {
 		t.Errorf("newAgent with a non-library arm: %v, want a clean build (LibraryDir untouched)", err)

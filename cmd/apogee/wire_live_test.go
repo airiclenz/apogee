@@ -332,6 +332,11 @@ func TestWithOffRampFloorDeduplicatesAShippedSet(t *testing.T) {
 
 	for _, e := range entries {
 		t.Run(e.Key, func(t *testing.T) {
+			// The retired members are shed first, exactly as resolveValidatedSet sheds them: a
+			// shipped record is a historical curation, and BuildMechanisms only ever sees the
+			// live half of one.
+			live, _ := validated.DropRetired(e, mechanisms.RetiredIDs())
+			e := live
 			got := withOffRampFloor(e.Set, nil)
 
 			for _, id := range floor {

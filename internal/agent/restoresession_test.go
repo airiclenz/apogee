@@ -343,7 +343,7 @@ func TestRestoreSession_RefusalLeavesConsolesAndTallyStanding(t *testing.T) {
 	a, opener := consoleUsageAgent(t, sink,
 		usageToolCallScript("c0", "open_console", `{}`, spent),
 		usageScript("opened", spent),
-		usageToolCallScript("c1", "open_console", `{}`, spent),
+		usageToolCallScript("c1", "open_console", `{"n":1}`, spent), // not an identical repeat of c0
 		usageScript("carried on", spent),
 	)
 

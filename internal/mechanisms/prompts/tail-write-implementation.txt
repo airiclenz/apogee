@@ -1,1 +1,0 @@
-You have enough context — now use write_file to create the implementation.

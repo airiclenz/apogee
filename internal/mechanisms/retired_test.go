@@ -10,6 +10,34 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
+// liveExemplarID names a Mechanism that exists only for these tests: a LIVE catalogue row, in a
+// test-private table, standing in for "some row this build still ships". The tests below need one
+// to prove the roll and the catalogue are different questions — a live row answers false to
+// IsRetired, resolves as enabled, and is listed by an unknown-key error — and naming a real
+// shipped row would make the proof expire the moment that row retires. The shipped catalogue is
+// on its way to empty (ADR 0071), so the stand-in is permanent rather than a stopgap.
+const liveExemplarID domain.MechanismID = "live_exemplar"
+
+// exemplarCatalogue is that stand-in's table, registered through the same seam the production rows
+// use so the row is shaped exactly as a real one. It is never the production catalogue: registering
+// into that would ship a Mechanism nobody asked for.
+var exemplarCatalogue = func() map[domain.MechanismID]row {
+	table := map[domain.MechanismID]row{}
+	registerIn(table, row{
+		descriptor: domain.MechanismDescriptor{
+			ID:          liveExemplarID,
+			Capability:  domain.CapResponseRepair,
+			Suppression: domain.SuppressStrikesThree,
+		},
+		construct: func(Deps) (any, error) { return struct{}{}, nil },
+	})
+	return table
+}()
+
+// exemplarKnown is the known-ID list ResolveEnabled validates against in these tests — the
+// stand-in row alone, which is all a key-validation proof needs.
+func exemplarKnown() []domain.MechanismID { return knownIDs(exemplarCatalogue) }
+
 // A retired ID is never also a catalogue row: the two lists partition the IDs this build recognises,
 // so a caller that drops the retired ones and refuses the rest cannot silently drop a live Mechanism.
 func TestRetiredIDsAreNotInTheCatalogue(t *testing.T) {
@@ -31,7 +59,7 @@ func TestIsRetiredNamesTheRolledIDsOnly(t *testing.T) {
 	if !IsRetired("grammar") {
 		t.Errorf("IsRetired(%q) = false, want true — grammar was retired 2026-08-29", "grammar")
 	}
-	for _, id := range []domain.MechanismID{"validate", "not_a_mechanism", ""} {
+	for _, id := range []domain.MechanismID{liveExemplarID, "not_a_mechanism", ""} {
 		if IsRetired(id) {
 			t.Errorf("IsRetired(%q) = true, want false", id)
 		}
@@ -66,13 +94,54 @@ func TestRetiredReleaseAndSuccessorAnswerPerID(t *testing.T) {
 	if got := Successor("grammar"); got != "" {
 		t.Errorf("Successor(%q) = %q, want \"\" — grammar retired outright", "grammar", got)
 	}
-	for _, id := range []domain.MechanismID{"validate", "not_a_mechanism", ""} {
+	for _, id := range []domain.MechanismID{liveExemplarID, "not_a_mechanism", ""} {
 		if got := RetiredRelease(id); got != "" {
 			t.Errorf("RetiredRelease(%q) = %q, want \"\" — it is not on the roll", id, got)
 		}
 		if got := Successor(id); got != "" {
 			t.Errorf("Successor(%q) = %q, want \"\" — it is not on the roll", id, got)
 		}
+	}
+}
+
+// The rows this wave PROMOTED are on the real roll, each with its release and the Floor-guard key
+// that governs the behaviour now — so a saved `mechanisms:` block naming one still starts, and the
+// notice it earns names the key rather than telling the user the behaviour is gone. This pins the
+// roll itself; the wording is pinned over a synthetic row below.
+func TestPromotedRowsCarryTheirFloorGuardKey(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		id  domain.MechanismID
+		key string
+	}{
+		{"validate", "tool-call-repair"},
+		{"tool_loop_interceptor", "tool-loop-breaker"},
+	} {
+		t.Run(string(tc.id), func(t *testing.T) {
+			t.Parallel()
+
+			if !IsRetired(tc.id) {
+				t.Fatalf("IsRetired(%q) = false; a promoted row must stay on the roll so a saved config still starts", tc.id)
+			}
+			if got := RetiredRelease(tc.id); got != "v0.20.0" {
+				t.Errorf("RetiredRelease(%q) = %q, want %q", tc.id, got, "v0.20.0")
+			}
+			if got := Successor(tc.id); got != tc.key {
+				t.Errorf("Successor(%q) = %q, want the floor-guard key %q", tc.id, got, tc.key)
+			}
+
+			ids, notices, err := ResolveEnabled(map[string]bool{string(tc.id): true}, exemplarKnown())
+			if err != nil {
+				t.Fatalf("ResolveEnabled(%q): a promoted id must be tolerated, got %v", tc.id, err)
+			}
+			if slices.Contains(ids, tc.id) {
+				t.Errorf("ResolveEnabled armed the promoted id %q: %v", tc.id, ids)
+			}
+			if len(notices) != 1 || !strings.Contains(notices[0], tc.key) {
+				t.Errorf("notices = %q, want one line naming the floor-guard key %q", notices, tc.key)
+			}
+		})
 	}
 }
 
@@ -170,7 +239,7 @@ func TestOffRampFloorIsTheCapOffRampRows(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatal("no CapOffRamp row in the catalogue; the floor would be vacuous")
 	}
-	for _, block := range []map[string]bool{nil, {}, {"validate": true}, {string(want[0]): true}} {
+	for _, block := range []map[string]bool{nil, {}, {string(liveExemplarID): true}, {string(want[0]): true}} {
 		if got := OffRampFloor(block); !slices.Equal(got, want) {
 			t.Errorf("OffRampFloor(%+v) = %v, want %v", block, got, want)
 		}
@@ -256,26 +325,26 @@ func TestResolveEnabledUnknownIDErrors(t *testing.T) {
 func TestResolveEnabledUnknownDisabledKeyErrors(t *testing.T) {
 	t.Parallel()
 
-	_, _, err := ResolveEnabled(map[string]bool{"typo": false}, KnownIDs())
+	_, _, err := ResolveEnabled(map[string]bool{"typo": false}, exemplarKnown())
 	if err == nil {
 		t.Fatal(`{"typo": false}: want a startup error, got nil`)
 	}
 	if !strings.Contains(err.Error(), `"typo"`) {
 		t.Errorf("error = %q, want it to name the unknown key", err)
 	}
-	if !strings.Contains(err.Error(), "validate") {
-		t.Errorf("error = %q, want it to list the known catalogue (e.g. %q)", err, "validate")
+	if !strings.Contains(err.Error(), string(liveExemplarID)) {
+		t.Errorf("error = %q, want it to list the known catalogue (e.g. %q)", err, liveExemplarID)
 	}
 
 	// The same key spelled correctly and disabled is fine: validated by name, never enabled. What
 	// comes back is the off-ramp floor alone — switching a non-off-ramp row off adds nothing and
 	// takes nothing away (ADR 0070).
-	ids, _, err := ResolveEnabled(map[string]bool{"validate": false}, KnownIDs())
+	ids, _, err := ResolveEnabled(map[string]bool{string(liveExemplarID): false}, exemplarKnown())
 	if err != nil {
-		t.Fatalf(`{"validate": false}: %v`, err)
+		t.Fatalf(`{%q: false}: %v`, liveExemplarID, err)
 	}
 	if want := OffRampFloor(nil); !slices.Equal(ids, want) {
-		t.Errorf(`{"validate": false} = %v; want the off-ramp floor %v (a disabled Mechanism is never enabled)`, ids, want)
+		t.Errorf(`{%q: false} = %v; want the off-ramp floor %v (a disabled Mechanism is never enabled)`, liveExemplarID, ids, want)
 	}
 }
 
@@ -307,14 +376,14 @@ func TestResolveEnabledRetiredIDIsDropped(t *testing.T) {
 	}{
 		{"retired and asked for", map[string]bool{"grammar": true}, OffRampFloor(nil)},
 		{"retired and switched off", map[string]bool{"grammar": false}, OffRampFloor(nil)},
-		{"retired beside a live row", map[string]bool{"grammar": true, "validate": true}, floorPlus("validate")},
+		{"retired beside a live row", map[string]bool{"grammar": true, string(liveExemplarID): true}, floorPlus(liveExemplarID)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var ids []domain.MechanismID
 			var err error
 
 			printed := captureStderr(t, func() {
-				ids, _, err = ResolveEnabled(tt.enabled, KnownIDs())
+				ids, _, err = ResolveEnabled(tt.enabled, exemplarKnown())
 			})
 
 			if err != nil {
@@ -341,7 +410,7 @@ func TestResolveEnabledRetiredIDIsDropped(t *testing.T) {
 func TestResolveEnabledNoticesNameEachRetiredID(t *testing.T) {
 	t.Parallel()
 
-	_, got, err := ResolveEnabled(map[string]bool{"grammar": true, "validate": true}, KnownIDs())
+	_, got, err := ResolveEnabled(map[string]bool{"grammar": true, string(liveExemplarID): true}, exemplarKnown())
 	if err != nil {
 		t.Fatalf("ResolveEnabled: %v", err)
 	}
@@ -353,8 +422,8 @@ func TestResolveEnabledNoticesNameEachRetiredID(t *testing.T) {
 		t.Errorf("ResolveEnabled notices = %q, want %q", got, want)
 	}
 
-	for _, quiet := range []map[string]bool{nil, {}, {"grammar": false}, {"validate": true}} {
-		_, lines, err := ResolveEnabled(quiet, KnownIDs())
+	for _, quiet := range []map[string]bool{nil, {}, {"grammar": false}, {string(liveExemplarID): true}} {
+		_, lines, err := ResolveEnabled(quiet, exemplarKnown())
 		if err != nil {
 			t.Fatalf("ResolveEnabled(%v): %v", quiet, err)
 		}

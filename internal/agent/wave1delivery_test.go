@@ -124,80 +124,20 @@ func dispatchedCalls(events []domain.Event) []domain.ToolCall {
 	return out
 }
 
-// TestWave1_ValidateRetryCarriesCorrectionThenDispatchesFixed: a bad tool call (missing required
-// parameter) makes validate retry in place — the retried request carries the superseded assistant
-// call and the correction — and the scripted second (fixed) response is the one dispatched.
-func TestWave1_ValidateRetryCarriesCorrectionThenDispatchesFixed(t *testing.T) {
-	sink := &recordingSink{}
-	ran := 0
-	lookup := schemaTool{
-		fakeTool: fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "42"},
-		schema:   `{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}`,
-	}
-	cfg := configWithTools(sink, lookup)
-	cfg.Mechanisms = wave1Registry(t, "validate")
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "lookup", `{}`),        // missing required "q" — validate retries
-		toolCallScript("c2", "lookup", `{"q":"x"}`), // the corrected call — dispatches
-		contentScript("done"),
-	}}
-
-	a, err := newAgent(cfg, responder)
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
-	}
-	runExchange(t, a, "look it up")
-
-	if len(responder.got) != 3 {
-		t.Fatalf("provider was called %d times, want 3 (draft, retry, final)", len(responder.got))
-	}
-	second := responder.got[1].Messages
-	ai := wireMessageIndex(second, "assistant", "")
-	if ai < 0 {
-		t.Fatalf("retried request carries no superseded assistant message: %+v", second)
-	}
-	if tc := second[ai].ToolCalls; len(tc) != 1 || tc[0].ID != "c1" {
-		t.Errorf("superseded assistant tool calls = %+v, want the draft's c1 call", tc)
-	}
-	ci := wireUserIndexContaining(second, "Your previous tool call had errors")
-	if ci != ai+1 {
-		t.Errorf("correction at index %d, want %d (immediately after the superseded assistant)", ci, ai+1)
-	}
-	if wireUserIndexContaining(second, `missing required parameter "q"`) < 0 {
-		t.Errorf("retried request correction does not name the missing parameter: %+v", second)
-	}
-
-	// The fixed call — not the superseded one — is what dispatched.
-	calls := dispatchedCalls(sink.events)
-	if len(calls) != 1 || calls[0].ID != "c2" || string(calls[0].Arguments) != `{"q":"x"}` {
-		t.Errorf("dispatched calls = %+v, want only the corrected c2 call", calls)
-	}
-	if ran != 1 {
-		t.Errorf("tool ran %d times, want 1", ran)
-	}
-	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "done" {
-		t.Errorf("final MessageEvent = %+v (ok=%v), want %q", me, ok, "done")
-	}
-	// Request-scoped: the corrective exchange never committed to history.
-	// user, assistant (c2 call), tool result, assistant final = 4 messages.
-	if got := a.conv.Len(); got != 4 {
-		t.Errorf("committed history has %d messages, want 4", got)
-	}
-}
-
-// TestWave1_ValidateFailShortCircuitsCascade: with the full validate → syntax → autofix cascade
-// registered, a response that fails validate (and whose broken-Go content would also trip syntax)
-// retries immediately — the failing pass fires validate only, never reaching syntax or autofix.
-func TestWave1_ValidateFailShortCircuitsCascade(t *testing.T) {
+// TestWave1_RepairGuardShortCircuitsTheCascade: with syntax and autofix registered, a response the
+// tool-call repair guard rejects (and whose broken-Go content would also trip syntax) retries
+// immediately — the guard runs AHEAD of the whole hook cascade (ADR 0071), so the failing pass
+// fires no catalogued Mechanism at all.
+func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 	sink := &recordingSink{}
 	writeTool := schemaTool{
 		fakeTool: fakeTool{name: "write_file", result: "ok"},
 		schema:   `{"type":"object","required":["path","content","mode"]}`,
 	}
 	cfg := configWithTools(sink, writeTool)
-	cfg.Mechanisms = wave1Registry(t, "autofix", "validate", "syntax") // shuffled; Ordered sorts
+	cfg.Mechanisms = wave1Registry(t, "autofix", "syntax") // shuffled; Ordered sorts
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		// Missing required "mode" (validate fails) AND broken Go content (syntax would fail).
+		// Missing required "mode" (the repair guard rejects) AND broken Go content (syntax would fail).
 		toolCallScript("c1", "write_file", `{"path":"main.go","content":"package main\nfunc main() {"}`),
 		contentScript("stopping here"),
 	}}
@@ -208,23 +148,13 @@ func TestWave1_ValidateFailShortCircuitsCascade(t *testing.T) {
 	}
 	runExchange(t, a, "write the file")
 
-	failing := firesBeforeStreamReset(sink.events)
-	if len(failing) == 0 {
-		t.Fatal("no MechanismFiredEvent in the failing pass (did the retry happen at all?)")
+	if !hasGuardFire(sink.events, guardToolCallRepair, guardActionRetry) {
+		t.Fatal("the repair guard did not retry (did the retry happen at all?)")
 	}
-	sawValidateRetry := false
-	for _, fe := range failing {
-		switch fe.Mechanism {
-		case "validate":
-			if fe.Action == string(domain.ActionRetry) {
-				sawValidateRetry = true
-			}
-		case "syntax", "autofix":
-			t.Errorf("%q fired in the failing pass (action %q); the validate retry must short-circuit the cascade", fe.Mechanism, fe.Action)
+	for _, fe := range firesBeforeStreamReset(sink.events) {
+		if fe.Mechanism == "syntax" || fe.Mechanism == "autofix" {
+			t.Errorf("%q fired in the failing pass (action %q); the guard retry must short-circuit the cascade", fe.Mechanism, fe.Action)
 		}
-	}
-	if !sawValidateRetry {
-		t.Errorf("validate did not fire with %q in the failing pass: %+v", domain.ActionRetry, failing)
 	}
 }
 
@@ -349,14 +279,14 @@ func TestWave1_AlwaysEmptyTerminatesAtCap(t *testing.T) {
 
 // TestWave1_OffRampsFireUnderBypassAndTrippedBudget: both off-ramps — registry-built, dispatched
 // through the real gates — still fire with Config.Bypass on AND the global Turn Budget tripped,
-// while a co-registered non-off-ramp (validate) is withdrawn at dispatch. This is the dispatch-
+// while a co-registered non-off-ramp (syntax) is withdrawn at dispatch. This is the dispatch-
 // level guarantee, not the descriptor-only one.
 func TestWave1_OffRampsFireUnderBypassAndTrippedBudget(t *testing.T) {
 	t.Run("empty_response_recovery", func(t *testing.T) {
 		sink := &recordingSink{}
 		cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
 		cfg.Bypass = true
-		cfg.Mechanisms = wave1Registry(t, "empty_response_recovery", "validate")
+		cfg.Mechanisms = wave1Registry(t, "empty_response_recovery", "syntax")
 		responder := &captureAllResponder{scripts: [][]provider.Delta{
 			emptyScript(),
 			contentScript("recovered"),
@@ -379,8 +309,8 @@ func TestWave1_OffRampsFireUnderBypassAndTrippedBudget(t *testing.T) {
 		if !hasFire(sink.events, "empty_response_recovery", string(domain.ActionRetry)) {
 			t.Error("no MechanismFiredEvent for empty_response_recovery with the retry action")
 		}
-		if n := fireCountFor(sink.events, "validate"); n != 0 {
-			t.Errorf("validate fired %d times; a non-off-ramp must be withdrawn under Bypass + a tripped Turn Budget", n)
+		if n := fireCountFor(sink.events, "syntax"); n != 0 {
+			t.Errorf("syntax fired %d times; a non-off-ramp must be withdrawn under Bypass + a tripped Turn Budget", n)
 		}
 	})
 
@@ -391,7 +321,7 @@ func TestWave1_OffRampsFireUnderBypassAndTrippedBudget(t *testing.T) {
 			fakeTool{name: "write_file", result: "ok"},
 		)
 		cfg.Bypass = true
-		cfg.Mechanisms = wave1Registry(t, "tool_use_enforcer", "validate")
+		cfg.Mechanisms = wave1Registry(t, "tool_use_enforcer", "syntax")
 		responder := &captureAllResponder{scripts: [][]provider.Delta{
 			contentScript("I'll implement feature X."),
 			contentScript("Here is my plan."),
@@ -423,8 +353,8 @@ func TestWave1_OffRampsFireUnderBypassAndTrippedBudget(t *testing.T) {
 		if !hasFire(sink.events, "tool_use_enforcer", string(domain.ActionRetry)) {
 			t.Error("no MechanismFiredEvent for tool_use_enforcer with the retry action")
 		}
-		if n := fireCountFor(sink.events, "validate"); n != 0 {
-			t.Errorf("validate fired %d times; a non-off-ramp must be withdrawn under Bypass + a tripped Turn Budget", n)
+		if n := fireCountFor(sink.events, "syntax"); n != 0 {
+			t.Errorf("syntax fired %d times; a non-off-ramp must be withdrawn under Bypass + a tripped Turn Budget", n)
 		}
 	})
 }

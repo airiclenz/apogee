@@ -281,6 +281,11 @@ func TestDispatch_ApprovalAllowForSession(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	approver := &fakeApprover{decision: domain.ApprovalAllowForSession}
 	cfg.Approver = approver
+	// The allow-for-session cache keys on the call as the model wrote it, so the second call must
+	// be the SAME call — which is also what the tool-loop breaker Floor guard answers. The guard is
+	// off for this test: it is about the approval cache, and the guard has its own repeat proof in
+	// floorguards_test.go.
+	cfg.Floor.DisableToolLoopBreaker = true
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		toolCallScript("c1", "write_it", "{}"),
 		toolCallScript("c2", "write_it", "{}"),

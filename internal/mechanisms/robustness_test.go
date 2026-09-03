@@ -20,6 +20,17 @@ func (fakeView) Depth() int                              { return 0 }
 func (fakeView) ParallelAgents() int                     { return 0 }
 func (fakeView) Fired(domain.MechanismID) int            { return 0 }
 
+// toolMenu is a small tool menu: read_file (no required params) and write_file (path + content
+// required) — the surface the tool-call validation helpers and the off-ramps read through
+// LoopView.Tools().
+func toolMenu() []domain.ToolDef {
+	writeSchema := json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`)
+	return []domain.ToolDef{
+		{Name: "read_file"},
+		{Name: "write_file", Schema: writeSchema},
+	}
+}
+
 // responseWith builds a post-response working value carrying calls, produced against the tool menu
 // — the shape a post-response Mechanism inspects.
 func responseWith(tools []domain.ToolDef, calls ...domain.ToolCall) *domain.Response {
@@ -57,11 +68,12 @@ func postResponse(t *testing.T, id domain.MechanismID, resp *domain.Response) do
 	return decision
 }
 
-// The three Wave-1 Mechanisms share the ratified descriptor shape: response-repair (off under
-// Bypass) and strikes-3 (self-regulated), each a post-response hook (catalogue Table A).
+// The two surviving Wave-1 Mechanisms share the ratified descriptor shape: response-repair (off
+// under Bypass) and strikes-3 (self-regulated), each a post-response hook (catalogue Table A). The
+// third, the tool-call validator, is a Floor guard now (ADR 0071) and carries no descriptor at all.
 func TestWave1Descriptors(t *testing.T) {
 	t.Parallel()
-	for _, id := range []domain.MechanismID{validateID, syntaxID, autofixID} {
+	for _, id := range []domain.MechanismID{syntaxID, autofixID} {
 		m := mustBuild(t, id)
 		d := m.Descriptor
 		if d.ID != id {
@@ -79,14 +91,14 @@ func TestWave1Descriptors(t *testing.T) {
 	}
 }
 
-// Registered together, the three resolve to the deterministic cascade validate → autofix → syntax
-// (catalogue Table A ordering — repair precedes correction), independent of registration order,
-// and co-register cleanly (no ordering cycle, no incompatibility).
+// Registered together, the two resolve to the deterministic cascade autofix → syntax (catalogue
+// Table A ordering — repair precedes correction), independent of registration order, and
+// co-register cleanly (no ordering cycle, no incompatibility).
 func TestWave1DeterministicOrder(t *testing.T) {
 	t.Parallel()
 	registry := domain.NewMechanismRegistry()
 	// Register out of cascade order to prove the topo-sort — not insertion order — sets dispatch.
-	for _, id := range []domain.MechanismID{syntaxID, autofixID, validateID} {
+	for _, id := range []domain.MechanismID{syntaxID, autofixID} {
 		if err := registry.Add(mustBuild(t, id)); err != nil {
 			t.Fatalf("Add(%q): %v", id, err)
 		}
@@ -103,7 +115,7 @@ func TestWave1DeterministicOrder(t *testing.T) {
 	for i, m := range ordered {
 		got[i] = m.Descriptor.ID
 	}
-	want := []domain.MechanismID{validateID, autofixID, syntaxID}
+	want := []domain.MechanismID{autofixID, syntaxID}
 	if len(got) != len(want) {
 		t.Fatalf("Ordered = %v, want %v", got, want)
 	}

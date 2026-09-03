@@ -525,6 +525,9 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	childCfg.Bypass = a.bypassEnabled()                        // and the parent's LIVE Bypass, auto-Compaction and
 	childCfg.Context.CompactionEnabled = a.compactionEnabled() // Pruning gates, which the settings surface may have
 	childCfg.Context.PruneToolResults = a.pruneEnabled()       // swapped since construction
+	childCfg.Floor = a.floorConfig()                           // and the parent's LIVE Floor-guard
+	//                                                            opt-outs, so a child runs the same
+	//                                                            floor the parent is running (ADR 0071)
 	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the
 	// parent's context-file CONTENT verbatim below, because a sub-agent is not a session boundary.
 	childCfg.Tools = a.defaultSubAgentTools()

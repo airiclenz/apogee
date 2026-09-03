@@ -36,6 +36,18 @@ turns:
       tool_calls:
         - name: terminal
           arguments: '{"command":"ls -d /tmp"}'
+    # T-13 asks for the SAME command over and over, which from the second Exchange on is an
+    # identical repeat of the previous tool-call turn — so the tool-loop breaker Floor guard (on by
+    # default since v0.20.0, ADR 0071) re-streams the Turn with its directive before the call is
+    # dispatched. This model ignores the directive and asks for the same command again, which is
+    # what a model that genuinely means the call does; the guard's per-Turn retry bound then lets
+    # the call through and the pane T-13 is about is raised exactly as before.
+    - when:
+        last_message: ^STOP\. You are in a loop
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"ls -d /tmp"}'
     # A READ under the control plane. WritesOnly does not exempt it — the terminal declares no
     # read-source key — so the rule fires and the pane carries the hint.
     - when:

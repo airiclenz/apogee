@@ -153,14 +153,16 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 }
 
 // The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
-// validate/syntax/autofix (item 5) and the empty_response_recovery/tool_use_enforcer off-ramps
+// syntax/autofix (item 5) and the empty_response_recovery/tool_use_enforcer off-ramps
 // (item 6), Wave 2 added the truncate_history history-rewrite (item 7), item 9 added the
 // tool_result_cap pre-request capping Mechanism, Wave 3 added the toolfilter/filehint
-// request shapers (item 10) and the error_enrichment/read_loop/read_repeat/tool_loop_interceptor/
+// request shapers (item 10) and the error_enrichment/read_loop/read_repeat/
 // cached_content_intercept history-aware family (item 11), Wave 4 added the decompose request
 // shaper plus the stall_nudge/list_nudge/tool_use_directive completion nudges (item 12), and item 14
 // added the library observe/inject Mechanism, so each is buildable and KnownIDs reports it, while a
-// deferred / un-ported ID is still an unknown-ID error. Later waves add rows the same way.
+// deferred / un-ported ID is still an unknown-ID error. The tool-call validator and the
+// identical-repeat detector are NOT here: they were promoted to Floor guards (ADR 0071) and are on
+// the retired roll, so a `mechanisms:` key naming one is tolerated, never built.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
@@ -168,7 +170,7 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 		known[id] = true
 	}
 	// Every ported Mechanism that builds with no injected Deps.
-	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "error_enrichment", "read_loop", "read_repeat", "tool_loop_interceptor", "cached_content_intercept", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
+	for _, want := range []domain.MechanismID{"syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "error_enrichment", "read_loop", "read_repeat", "cached_content_intercept", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
 		}
@@ -337,8 +339,8 @@ func TestBuildUnknownIDWrapsSentinel(t *testing.T) {
 	if !errors.Is(err, domain.ErrUnknownMechanism) {
 		t.Fatalf("Build(bogus) err = %v; want it to wrap domain.ErrUnknownMechanism", err)
 	}
-	// validate is always catalogued, so the error still names the known IDs.
-	if got := err.Error(); !strings.Contains(got, "validate") {
+	// syntax is catalogued, so the error still names the known IDs.
+	if got := err.Error(); !strings.Contains(got, "syntax") {
 		t.Errorf("error %q; want it to name the known IDs", got)
 	}
 }
@@ -407,11 +409,11 @@ func TestDepsNeeded(t *testing.T) {
 	}{
 		"no mechanisms enabled": {ids: nil, want: DepNeeds{}},
 		"a row declaring no needs": {
-			ids:  []domain.MechanismID{"validate"},
+			ids:  []domain.MechanismID{"syntax"},
 			want: DepNeeds{},
 		},
 		"library declares the store": {
-			ids:  []domain.MechanismID{"validate", "library"},
+			ids:  []domain.MechanismID{"syntax", "library"},
 			want: DepNeeds{Library: true},
 		},
 		"an uncatalogued ID is skipped": {

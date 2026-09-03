@@ -225,6 +225,13 @@ func foldCases() []foldCase {
 			event: domain.MechanismFiredEvent{Mechanism: "m", Hook: "h", Action: "a"},
 		},
 		{
+			name: "FloorGuardEvent is inert in the transcript",
+			// Nothing, and deliberately: a Floor guard firing is engine behaviour correcting the
+			// model's own failure, not user news the way a prune pass is (ADR 0071). It belongs in
+			// the hidden debug view beside a Mechanism firing and nowhere else.
+			event: domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
+		},
+		{
 			name:        "ErrorEvent appends a recovered-fault notice and leaves the phrase alone",
 			event:       domain.ErrorEvent{Source: "loop", Err: "recovered"},
 			wantEntries: 1,

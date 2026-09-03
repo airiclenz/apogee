@@ -17,13 +17,13 @@ import (
 func init() {
 	register(row{
 		descriptor: readRepeatDescriptor,
-		// Ordering runs read_repeat BEFORE tool_loop_interceptor and validate in the post-response cascade
-		// (apogee-sim response_analysis.go:54-94 @pin: the sim checks repeat-reads first, then the
-		// tool-loop, then validate, so the earliest match wins and short-circuits the rest — read_repeat is
-		// the HIGHEST priority). This contradicts catalogue Table A's "After validate" cell for read_repeat
-		// (a Table-A defect surfaced 2026-07-04; see the plan item-11 NOTES); the sim source is the
-		// behaviour ground truth (D7 as amended), so apogee follows the source's priority order.
-		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{toolLoopInterceptorID, validateID}},
+		// read_repeat declares no ordering edge any more. It used to sit BEFORE tool_loop_interceptor
+		// and validate in the post-response cascade (apogee-sim response_analysis.go:54-94 @pin: the
+		// sim checks repeat-reads first, then the tool-loop, then validation, so the earliest match
+		// wins and short-circuits the rest). Both of those rows were promoted to Floor guards (ADR
+		// 0071), which run AHEAD of the whole hook cascade, so the sim's priority order no longer
+		// holds for this row and no edge can restore it: the guards see the response first.
+		ordering:  domain.OrderingConstraints{},
 		construct: newReadRepeat,
 	})
 }

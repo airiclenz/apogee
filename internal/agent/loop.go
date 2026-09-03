@@ -444,6 +444,17 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 		}
 
 		resp := a.assembleResponse(turn, req.View(), reply, nativeCalls)
+
+		// The Floor guards run FIRST at this seam (ADR 0071): they are engine behaviour every
+		// model runs with, so a looping or malformed response is repaired before a catalogued
+		// Mechanism looks at it. A guard retry and a hook retry share one budget — the same Turn
+		// re-streams either way, and separating them would let the two spend it twice.
+		if retry, inject := a.runPostResponseGuards(turn, resp); retry && attempt < maxPostResponseRetries {
+			attempt++
+			a.applyRetry(turn, req, resp, inject)
+			continue
+		}
+
 		retry, inject, hookErr := a.runPostResponseHooks(ctx, turn, resp)
 		if hookErr != nil {
 			// A post-response hook panicked (recovered into an ErrorEvent): the model did
@@ -455,24 +466,32 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 			// the transient-fault re-stream above loops back through that header too, and a blip
 			// must not spend a hook's retry budget: separate remedies, separate budgets.
 			attempt++
-			// The Turn re-streams: tell observers the tokens emitted this attempt are
-			// superseded, so a streaming UI discards them before the retry streams afresh.
-			a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
-			if inject != "" {
-				// Carry the corrective exchange onto the retried request (R1): the
-				// superseded assistant message, then the correction as a role-safe user
-				// message. An Inject-less retry stays a bare re-stream of the request.
-				// AppendSupersededAssistant freezes the request's committed length, so the
-				// next attempt's post-response scanners (req.View() below) see committed
-				// history + the response under review, NOT this superseded appendage — the
-				// sim ran its retry-cycle detectors against the unmutated request (item 10).
-				req.AppendSupersededAssistant(resp.Text(), resp.ToolCalls())
-				req.InjectContext(inject)
-			}
+			a.applyRetry(turn, req, resp, inject)
 			continue
 		}
 		return a.reviewedOutcome(turn, resp)
 	}
+}
+
+// applyRetry prepares the Turn's next attempt for a retry the caller has already counted, and is
+// the ONE place a re-stream is set up: a Floor guard's retry and a post-response hook's ActionRetry
+// take it identically, because the two differ only in who asked.
+//
+// It tells observers the tokens emitted this attempt are superseded, so a streaming UI discards them
+// before the retry streams afresh, and then — when there is a correction to carry — appends the
+// corrective exchange onto the retried request (R1): the superseded assistant message, then the
+// correction as a role-safe user message. An inject-less retry stays a bare re-stream of the
+// request. AppendSupersededAssistant freezes the request's committed length, so the next attempt's
+// post-response scanners (req.View()) see committed history + the response under review, NOT this
+// superseded appendage — the sim ran its retry-cycle detectors against the unmutated request
+// (item 10).
+func (a *Agent) applyRetry(turn int, req *domain.Request, resp *domain.Response, inject string) {
+	a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
+	if inject == "" {
+		return
+	}
+	req.AppendSupersededAssistant(resp.Text(), resp.ToolCalls())
+	req.InjectContext(inject)
 }
 
 // emptyReplyErrFmt is the fault text an empty reviewed reply surfaces. It names the finish reason

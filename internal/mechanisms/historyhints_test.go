@@ -27,7 +27,6 @@ func TestHistoryFamilyDescriptorsNonExempt(t *testing.T) {
 		{errorEnrichmentID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostToolResultHook); return ok }},
 		{readLoopID, domain.CapProactiveNudge, func(h any) bool { _, ok := h.(domain.PreRequestHook); return ok }},
 		{readRepeatID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostResponseHook); return ok }},
-		{toolLoopInterceptorID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostResponseHook); return ok }},
 		{cachedContentInterceptID, domain.CapProactiveNudge, func(h any) bool { _, ok := h.(domain.PreToolExecHook); return ok }},
 	}
 	for _, c := range cases {
@@ -72,12 +71,12 @@ func TestReReadFamilyPairwiseIncompatible(t *testing.T) {
 	}
 }
 
-// error_enrichment and tool_loop_interceptor declare no incompatibility, so they co-register with a
-// re-read-family member cleanly (they are not part of the exclusive symptom).
+// error_enrichment declares no incompatibility, so it co-registers with a re-read-family member
+// cleanly (it is not part of the exclusive symptom).
 func TestHistoryFamilyCompatibleMembersCoRegister(t *testing.T) {
 	t.Parallel()
 	reg := domain.NewMechanismRegistry()
-	for _, id := range []domain.MechanismID{errorEnrichmentID, toolLoopInterceptorID, readLoopID} {
+	for _, id := range []domain.MechanismID{errorEnrichmentID, readLoopID} {
 		if err := reg.Add(mustBuild(t, id)); err != nil {
 			t.Fatalf("Add(%q): %v", id, err)
 		}
@@ -90,15 +89,15 @@ func TestHistoryFamilyCompatibleMembersCoRegister(t *testing.T) {
 	}
 }
 
-// read_repeat and tool_loop_interceptor slot into the post-response cascade BEFORE validate, so the
-// resolved dispatch order is read_repeat → tool_loop_interceptor → validate → autofix → syntax — the
-// sim's response-side priority (response_analysis.go @pin: repeat-reads, then the tool loop, then
-// validation, earliest match short-circuits). This is the concrete check that apogee follows the sim
-// source over catalogue Table A's contradictory "read_repeat: After validate" cell (item-11 NOTES).
+// The post-response cascade resolves to autofix → syntax (repair precedes correction), with
+// read_repeat unconstrained beside them: the two rows that used to head this cascade — the
+// tool-loop detector and the tool-call validator — were promoted to Floor guards (ADR 0071) and run
+// AHEAD of every hook, so no ordering edge expresses their priority any more and read_repeat's own
+// Before edges went with them.
 func TestPostResponseCascadeOrder(t *testing.T) {
 	t.Parallel()
 	reg := domain.NewMechanismRegistry()
-	for _, id := range []domain.MechanismID{readRepeatID, toolLoopInterceptorID, validateID, autofixID, syntaxID} {
+	for _, id := range []domain.MechanismID{readRepeatID, autofixID, syntaxID} {
 		if err := reg.Add(mustBuild(t, id)); err != nil {
 			t.Fatalf("Add(%q): %v", id, err)
 		}
@@ -106,7 +105,7 @@ func TestPostResponseCascadeOrder(t *testing.T) {
 	if err := reg.ValidateOrdering(); err != nil {
 		t.Fatalf("ValidateOrdering: %v", err)
 	}
-	want := []domain.MechanismID{readRepeatID, toolLoopInterceptorID, validateID, autofixID, syntaxID}
+	want := []domain.MechanismID{autofixID, readRepeatID, syntaxID}
 	got := reg.Ordered(domain.HookPostResponse)
 	if len(got) != len(want) {
 		t.Fatalf("Ordered(post-response) has %d mechanisms, want %d", len(got), len(want))
