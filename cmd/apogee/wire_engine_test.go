@@ -107,3 +107,30 @@ func TestLateEngineReplaysThePruneGateAtTheBind(t *testing.T) {
 		t.Errorf("pendingPrune after a bound edit = %v; want true", engine.pendingPrune)
 	}
 }
+
+// The Floor gates ride the same remember-then-install contract, with one difference worth pinning:
+// the seam takes the WHOLE FloorConfig rather than a gate at a time, so what the holder remembers is
+// where all six stand — and a second edit made before the bind must not lose the first one's.
+func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	engine.SetFloor(apogee.FloorConfig{DisableReadCache: true})
+	engine.SetFloor(apogee.FloorConfig{DisableReadCache: true, DisableToolResultCap: true})
+	want := apogee.FloorConfig{DisableReadCache: true, DisableToolResultCap: true}
+	if engine.pendingFloor == nil || *engine.pendingFloor != want {
+		t.Fatalf("pendingFloor = %+v; want %+v held for the bind", engine.pendingFloor, want)
+	}
+
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	// Past the bind the door stays open and stays anytime-safe, exactly as the prune gate's does.
+	engine.SetFloor(apogee.FloorConfig{})
+	if engine.pendingFloor == nil || *engine.pendingFloor != (apogee.FloorConfig{}) {
+		t.Errorf("pendingFloor after a bound edit = %+v; want the whole floor back on", engine.pendingFloor)
+	}
+}

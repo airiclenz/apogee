@@ -297,6 +297,12 @@ func (w *rootWiring) resolveConfig() error {
 		// cap existed). It rides here for the reply cap's reason — this Config is what a scheduled
 		// Firing copies, so a delegate is bounded the same whether a human is watching or not.
 		Delegation: apogee.DelegationConfig{MaxSteps: w.opts.DelegateMaxSteps},
+		// And which Floor guards this session runs WITHOUT (ADR 0071). The six keys are positive in
+		// the file and negative at the engine, and floorFromOptions is the one place that turns one
+		// spelling into the other. It rides here for the reply cap's reason as well: this Config is
+		// what a scheduled Firing copies, so a guard the human took away is taken away for the runs
+		// nobody watches too.
+		Floor: floorFromOptions(w.opts),
 	}
 	return nil
 }

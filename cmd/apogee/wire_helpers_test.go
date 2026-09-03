@@ -69,10 +69,13 @@ func captureStderr(t *testing.T, f func()) string {
 // drove and with what, so the mapping from registry path to engine call is asserted without an Agent
 // — the narrow-interface reason applySettingFor takes one at all.
 type applySettingSpy struct {
-	modes        []apogee.Mode
-	bypass       []bool
-	compaction   []bool
-	prune        []bool
+	modes      []apogee.Mode
+	bypass     []bool
+	compaction []bool
+	prune      []bool
+	// floors records the WHOLE FloorConfig each Floor-guard apply pushed, which is the only way the
+	// "one key moved, the other five stood still" claim can be asserted: the seam takes all six.
+	floors       []apogee.FloorConfig
 	contextFiles []contextFileChoice
 	swaps        []*apogee.ToolRegistry
 	profiles     []apogee.ModelProfile
@@ -88,6 +91,10 @@ func (s *applySettingSpy) SetMode(m apogee.Mode)        { s.modes = append(s.mod
 func (s *applySettingSpy) SetBypass(on bool)            { s.bypass = append(s.bypass, on) }
 func (s *applySettingSpy) SetCompactionEnabled(on bool) { s.compaction = append(s.compaction, on) }
 func (s *applySettingSpy) SetPruneToolResults(on bool)  { s.prune = append(s.prune, on) }
+func (s *applySettingSpy) SetFloor(gates apogee.FloorConfig) {
+	s.floors = append(s.floors, gates)
+}
+
 func (s *applySettingSpy) SetContextFiles(on bool, n []string) {
 	s.contextFiles = append(s.contextFiles, contextFileChoice{enable: on, names: n})
 }
@@ -111,8 +118,8 @@ func (s *applySettingSpy) SetProfile(p apogee.ModelProfile) error {
 // drove reports how many engine seams the spy was driven through in total — the assertion a key that
 // should have touched nothing makes.
 func (s *applySettingSpy) drove() int {
-	return len(s.modes) + len(s.bypass) + len(s.compaction) + len(s.prune) + len(s.contextFiles) +
-		len(s.swaps) + len(s.profiles)
+	return len(s.modes) + len(s.bypass) + len(s.compaction) + len(s.prune) + len(s.floors) +
+		len(s.contextFiles) + len(s.swaps) + len(s.profiles)
 }
 
 // rebindProbe stands in for the composition root's own rebind closure ([tui.ServerHost.Rebind]): it

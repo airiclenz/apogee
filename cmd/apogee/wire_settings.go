@@ -211,6 +211,18 @@ type liveSettings struct {
 	autoCompact      bool
 	pruneToolResults bool
 
+	// And the six Floor-guard keys beside them (ADR 0071), mirrored for the same reason and held
+	// POSITIVE — the spelling the file and the pane use — because domain.FloorConfig's negation is
+	// the engine's own contract and belongs at the seam alone (floorFromOptions below). The engine
+	// holds the live gates and nothing re-resolves them here, so an unattended run raised from this
+	// session runs the floor the human last chose rather than the one the process started with.
+	toolUseEnforcer       bool
+	emptyResponseRecovery bool
+	toolCallRepair        bool
+	toolLoopBreaker       bool
+	toolResultCap         bool
+	readCache             bool
+
 	// delegateMaxSteps mirrors `delegate-max-steps:`, which is the WRITE alone for THIS session —
 	// the bound is read off the file into the Config the engine was constructed with, and there is
 	// no setter behind it. It is mirrored for the one reader that can still act on it: a Firing
@@ -263,9 +275,9 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		contextFileNames:   opts.ContextFiles,
 		modelProfiles:      opts.ModelProfiles,
 		rememberModel:      opts.RememberModel,
-		// And the seven keys this holder only MIRRORS — the tool set's four, the engine's two toggles
-		// and the inspector — seeded from the same snapshot for the reason the rest are: a session
-		// nobody edits must hand back exactly the configuration it launched with.
+		// And the keys this holder only MIRRORS — the tool set's four, the engine's two toggles, the
+		// six Floor-guard gates and the inspector — seeded from the same snapshot for the reason the
+		// rest are: a session nobody edits must hand back exactly the configuration it launched with.
 		searchEndpoint:   opts.WebSearchEndpoint,
 		disabledTools:    opts.ToolsDisabled,
 		allowHosts:       opts.URLAllowHosts,
@@ -274,6 +286,13 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		autoCompact:      opts.AutoCompact,
 		pruneToolResults: opts.PruneToolResults,
 		inspector:        opts.UI.Inspector,
+
+		toolUseEnforcer:       opts.ToolUseEnforcer,
+		emptyResponseRecovery: opts.EmptyResponseRecovery,
+		toolCallRepair:        opts.ToolCallRepair,
+		toolLoopBreaker:       opts.ToolLoopBreaker,
+		toolResultCap:         opts.ToolResultCap,
+		readCache:             opts.ReadCache,
 
 		delegateMaxSteps: opts.DelegateMaxSteps,
 	}
@@ -715,6 +734,48 @@ func (s *liveSettings) setPruneToolResults(on bool) {
 	s.pruneToolResults = on
 }
 
+// setFloorGuard flips ONE Floor-guard key on the holder and hands back the WHOLE FloorConfig the
+// engine must be re-seeded with. The read and the write are one locked act on purpose: the engine
+// seam takes all six values at once (SetFloor), so an apply that read the other five outside the
+// lock could re-arm a guard a concurrent apply had just taken away.
+//
+// An unknown key is a programming error the six table rows cannot make, so it changes nothing and
+// the projection is handed back as it stands.
+func (s *liveSettings) setFloorGuard(key string, on bool) apogee.FloorConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch key {
+	case "tool-use-enforcer":
+		s.toolUseEnforcer = on
+	case "empty-response-recovery":
+		s.emptyResponseRecovery = on
+	case "tool-call-repair":
+		s.toolCallRepair = on
+	case "tool-loop-breaker":
+		s.toolLoopBreaker = on
+	case "tool-result-cap":
+		s.toolResultCap = on
+	case "read-cache":
+		s.readCache = on
+	}
+	return floorFromOptions(s.optionsLocked())
+}
+
+// floorFromOptions is the ONE negation seam between the six positive config keys and the engine's
+// Disable… gates (ADR 0071: the zero FloorConfig is the full floor). Both composition roots and
+// every `/settings` apply go through it, so "off in the file" and "off in the pane" cannot come to
+// mean two different things.
+func floorFromOptions(o config.Options) apogee.FloorConfig {
+	return apogee.FloorConfig{
+		DisableToolUseEnforcer:       !o.ToolUseEnforcer,
+		DisableEmptyResponseRecovery: !o.EmptyResponseRecovery,
+		DisableToolCallRepair:        !o.ToolCallRepair,
+		DisableToolLoopBreaker:       !o.ToolLoopBreaker,
+		DisableToolResultCap:         !o.ToolResultCap,
+		DisableReadCache:             !o.ReadCache,
+	}
+}
+
 // setDelegateMaxSteps mirrors `delegate-max-steps:`. Like setInspector below there is no engine
 // seam this shadows — the bound is a field of the Config an Agent was constructed with — so the
 // store is the whole of what the value can reach in this process, and what it reaches is the next
@@ -774,6 +835,12 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.Bypass = s.bypass
 	next.AutoCompact = s.autoCompact
 	next.PruneToolResults = s.pruneToolResults
+	next.ToolUseEnforcer = s.toolUseEnforcer
+	next.EmptyResponseRecovery = s.emptyResponseRecovery
+	next.ToolCallRepair = s.toolCallRepair
+	next.ToolLoopBreaker = s.toolLoopBreaker
+	next.ToolResultCap = s.toolResultCap
+	next.ReadCache = s.readCache
 	next.UI.Inspector = s.inspector
 	next.DelegateMaxSteps = s.delegateMaxSteps
 
@@ -1245,6 +1312,41 @@ var settingsTable = []settingsEntry{
 			return "", nil
 		},
 	},
+	// The six Floor-guard gates (ADR 0071). They share one apply and one engine seam: SetFloor takes
+	// the WHOLE FloorConfig, so a row that knows only its own key has to read the other five back off
+	// the holder — which is why these are the one bool family that needs the holder as well as the
+	// engine. Nothing else about them is special: each is an ordinary editable bool, on by default,
+	// in force the moment its apply returns.
+	{
+		key:     "tool-use-enforcer",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyFloorGuard,
+	},
+	{
+		key:     "empty-response-recovery",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyFloorGuard,
+	},
+	{
+		key:     "tool-call-repair",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyFloorGuard,
+	},
+	{
+		key:     "tool-loop-breaker",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyFloorGuard,
+	},
+	{
+		key:     "tool-result-cap",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyFloorGuard,
+	},
+	{
+		key:     "read-cache",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyFloorGuard,
+	},
 	{
 		key: "delegate-max-steps",
 		// No member of the applier is needed: the bound reaches no engine seam and rides no
@@ -1697,13 +1799,28 @@ func applyInspector(a settingsApplier, key, value string) (string, error) {
 	return "", nil
 }
 
+// applyFloorGuard is the shared apply behind all six Floor-guard keys. It writes the one key onto
+// the holder and pushes the projection that read hands back at the single engine seam, so the five
+// keys this row does not name keep the values they had — the whole reason the write and the read are
+// one locked act inside setFloorGuard.
+func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
+	on, err := settingBool(key, value)
+	if err != nil {
+		return "", err
+	}
+	a.engine.SetFloor(a.live.setFloorGuard(key, on))
+	return "", nil
+}
+
 // reachesTheEngine reports whether the anytime-safe mutator class is composed: the keys that are
 // PUSHED at the engine and are in force the moment their apply returns.
 func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
 
 // reachesTheEngineAndTheHolder reports whether the engine and the startup snapshot's mutable half
 // are BOTH composed — the pair the two `context-files.` rows need, since either row installs the
-// switch and the names together and only the holder remembers the half the row did not carry.
+// switch and the names together and only the holder remembers the half the row did not carry, and
+// the pair the six Floor-guard rows need for the same shape of reason: SetFloor takes all six gates
+// and only the holder remembers the five the row did not carry.
 func reachesTheEngineAndTheHolder(a settingsApplier) bool { return a.engine != nil && a.live != nil }
 
 // reachesTheHolder reports whether the live holder is composed. It is the whole of what two keys

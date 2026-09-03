@@ -745,6 +745,40 @@ func TestBootConfigCarriesThePruneToolResultsToggle(t *testing.T) {
 	}
 }
 
+// The six Floor-guard keys reach the engine the same way, negated once on the trip (ADR 0071): they
+// are positive in the file and Disable… at the engine, so a key left at its `true` default has to
+// arrive as a FALSE gate. The case that proves the negation is not a blanket one is a single key
+// switched off while the other five stand.
+func TestBootConfigCarriesTheFloorGuardKeys(t *testing.T) {
+	t.Parallel()
+	opts := config.Options{
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
+		ConfigDir: t.TempDir(),
+		// What a config with `tool-result-cap: false` and nothing else said resolves to.
+		ToolUseEnforcer:       true,
+		EmptyResponseRecovery: true,
+		ToolCallRepair:        true,
+		ToolLoopBreaker:       true,
+		ToolResultCap:         false,
+		ReadCache:             true,
+	}
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+	t.Cleanup(w.close)
+	if err := w.resolveConfig(); err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	want := apogee.FloorConfig{DisableToolResultCap: true}
+	if w.cfg.Floor != want {
+		t.Errorf("Config.Floor = %+v; want %+v — one key off, the other five guards standing",
+			w.cfg.Floor, want)
+	}
+}
+
 // The global rungs ride Config rather than the assembly alone so every Driver prunes and lifts the
 // same roster from the same value (ADR 0057) — one row per Config assembly in the composition root:
 // the session's boot phase, `apogee headless`, and a daemon Firing, each fed the same two lists and

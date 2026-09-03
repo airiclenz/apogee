@@ -76,6 +76,7 @@ type lateEngine struct {
 	pendingBypass       *bool
 	pendingCompaction   *bool
 	pendingPrune        *bool
+	pendingFloor        *apogee.FloorConfig
 	pendingContextFiles *contextFileChoice
 	// pendingProfile is the same idea for the one IDLE-ONLY mutator that has to be remembered: a
 	// dialect swap needs an Agent to build its parsers, but a bind with no memory of the edit would
@@ -164,6 +165,9 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	}
 	if e.pendingPrune != nil {
 		agent.SetPruneToolResults(*e.pendingPrune)
+	}
+	if e.pendingFloor != nil {
+		agent.SetFloor(*e.pendingFloor)
 	}
 	if c := e.pendingContextFiles; c != nil {
 		agent.SetContextFiles(c.enable, c.names)
@@ -369,6 +373,20 @@ func (e *lateEngine) SetPruneToolResults(enabled bool) {
 	e.mu.Unlock()
 	if agent != nil {
 		agent.SetPruneToolResults(enabled)
+	}
+}
+
+// SetFloor replaces the Floor-guard gates (ADR 0071), on the same terms as SetPruneToolResults
+// above. The WHOLE FloorConfig is remembered rather than a gate at a time because that is what the
+// seam takes: a bind replays one value that says where all six stand, so a session that flipped two
+// guards while the picker was up starts with both of them where the human left them.
+func (e *lateEngine) SetFloor(gates apogee.FloorConfig) {
+	e.mu.Lock()
+	e.pendingFloor = &gates
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetFloor(gates)
 	}
 }
 

@@ -44,13 +44,21 @@ func fabricatedSettings() config.Options {
 		UseDefaultPrompt:   false,
 		AutoCompact:        true,
 		PruneToolResults:   true,
-		DelegateMaxSteps:   40,
-		AutoTitle:          false,
-		RememberModel:      true,
-		ContextWindow:      32768,
-		WorkingWindow:      16384,
-		ResponseReserve:    0.35,
-		Present:            config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
+		// The six Floor guards as a resolved session actually carries them: on, bar the one this
+		// fixture opts out of, so the pane is asserted to report the VALUE rather than the default.
+		ToolUseEnforcer:       true,
+		EmptyResponseRecovery: true,
+		ToolCallRepair:        true,
+		ToolLoopBreaker:       true,
+		ToolResultCap:         true,
+		ReadCache:             false,
+		DelegateMaxSteps:      40,
+		AutoTitle:             false,
+		RememberModel:         true,
+		ContextWindow:         32768,
+		WorkingWindow:         16384,
+		ResponseReserve:       0.35,
+		Present:               config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
 		UI: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false},
 		Bypass:              true,
@@ -364,47 +372,53 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 
 	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
 	want := map[string]string{
-		"servers":                "3 servers",
-		"server":                 "rented-box",
-		"sub-agents-server":      "auto (session server)",
-		"sub-agents-choice":      "fixed", // unset in the fixture, so the declared default is in force
-		"mode":                   "auto",
-		"system-prompt-text":     "2 lines",
-		"system-prompt-file":     "", // unset, and an editable string row's blank is what the field seeds from
-		"system-prompt-models":   "1 model",
-		"system-prompt-layers":   noneSettingValue, // unset: the additive channel is opt-in (ADR 0067)
-		"use-default-prompt":     "false",          // the fabricated session runs on a prompt of its own
-		"context-files.enable":   "true",
-		"context-files.names":    "[AGENTS.md, CLAUDE.md]",
-		"confine-to-workspace":   "false",
-		"unconfined-hosts":       "1 host",
-		"web-search-endpoint":    "off",
-		"mcp-servers":            noneSettingValue,
-		"tools.disabled":         "[view_diff]",
-		"tools.enabled":          "[]", // unset: nothing is added back, which is the whole default menu
-		"url-safety.allow-hosts": "[docs.example.com]",
-		"url-safety.deny-hosts":  "[]", // unset: a list row's empty spelling, and every host is still floored
-		"use-project-skills":     "false",
-		"use-shipped-skills":     "false",
-		"auto-compact":           "true",
-		"prune-tool-results":     "true",
-		"delegate-max-steps":     "40",
-		"auto-title":             "false",
-		"remember-model":         "true",
-		"context-window":         "32768",
-		"working-window":         "16384",
-		"response-reserve":       "0.35", // the shortest spelling that reads back as the same share
-		"present.auto-open":      "true",
-		"present.command":        "zed {path}",
-		"present.port":           "8080",
-		"present.host":           "",
-		"ui.spinner":             "glitter",
-		"ui.spinner-color":       "true",
-		"ui.show-scrollbar":      "false",
-		"ui.color-scheme":        "dark",
-		"ui.stall-after":         "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
-		"ui.inspector":           "true",  // armed for THIS run, which is the only thing a startup-only key can report
-		"ui.skill-suggestions":   "false", // turned off in the fixture: a bool row reports the value, never the default
+		"servers":                 "3 servers",
+		"server":                  "rented-box",
+		"sub-agents-server":       "auto (session server)",
+		"sub-agents-choice":       "fixed", // unset in the fixture, so the declared default is in force
+		"mode":                    "auto",
+		"system-prompt-text":      "2 lines",
+		"system-prompt-file":      "", // unset, and an editable string row's blank is what the field seeds from
+		"system-prompt-models":    "1 model",
+		"system-prompt-layers":    noneSettingValue, // unset: the additive channel is opt-in (ADR 0067)
+		"use-default-prompt":      "false",          // the fabricated session runs on a prompt of its own
+		"context-files.enable":    "true",
+		"context-files.names":     "[AGENTS.md, CLAUDE.md]",
+		"confine-to-workspace":    "false",
+		"unconfined-hosts":        "1 host",
+		"web-search-endpoint":     "off",
+		"mcp-servers":             noneSettingValue,
+		"tools.disabled":          "[view_diff]",
+		"tools.enabled":           "[]", // unset: nothing is added back, which is the whole default menu
+		"url-safety.allow-hosts":  "[docs.example.com]",
+		"url-safety.deny-hosts":   "[]", // unset: a list row's empty spelling, and every host is still floored
+		"use-project-skills":      "false",
+		"use-shipped-skills":      "false",
+		"auto-compact":            "true",
+		"prune-tool-results":      "true",
+		"tool-use-enforcer":       "true",
+		"empty-response-recovery": "true",
+		"tool-call-repair":        "true",
+		"tool-loop-breaker":       "true",
+		"tool-result-cap":         "true",
+		"read-cache":              "false", // opted out in the fixture: a guard row reports the value, never the floor
+		"delegate-max-steps":      "40",
+		"auto-title":              "false",
+		"remember-model":          "true",
+		"context-window":          "32768",
+		"working-window":          "16384",
+		"response-reserve":        "0.35", // the shortest spelling that reads back as the same share
+		"present.auto-open":       "true",
+		"present.command":         "zed {path}",
+		"present.port":            "8080",
+		"present.host":            "",
+		"ui.spinner":              "glitter",
+		"ui.spinner-color":        "true",
+		"ui.show-scrollbar":       "false",
+		"ui.color-scheme":         "dark",
+		"ui.stall-after":          "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
+		"ui.inspector":            "true",  // armed for THIS run, which is the only thing a startup-only key can report
+		"ui.skill-suggestions":    "false", // turned off in the fixture: a bool row reports the value, never the default
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
 		"sessions.max-age":   "0s",

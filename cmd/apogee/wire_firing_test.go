@@ -228,6 +228,51 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	}
 }
 
+// A Firing runs the FLOOR the session it was raised from runs (ADR 0071). The six keys are positive
+// in the session's Options and Disable… at the engine, and floorFromOptions is the one seam that
+// negates them — so a run nobody watches must arrive with exactly the guard the human took away and
+// the five they did not.
+func TestFiringConfigCarriesTheFloorGuardKeys(t *testing.T) {
+	t.Parallel()
+
+	roots := firingRoots(t)
+	opts := config.Options{
+		// Bypass keeps the Validated-set surface off, so this composition resolves with no probe
+		// record to match against — and says the second half of the claim besides: Bypass takes the
+		// lab rows away and leaves every Floor guard exactly where the six keys put it.
+		Bypass: true,
+		Servers: []config.ServerEntry{
+			{Name: "box", Endpoint: "http://box.example/v1"},
+		},
+		// What a session running `tool-result-cap: false` and nothing else projects.
+		ToolUseEnforcer:       true,
+		EmptyResponseRecovery: true,
+		ToolCallRepair:        true,
+		ToolLoopBreaker:       true,
+		ToolResultCap:         false,
+		ReadCache:             true,
+	}
+	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+		opts:     opts,
+		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+		roots:    roots,
+		confiner: fenceableHost,
+		mode:     domain.ModeAuto,
+		skills:   provider,
+		recordID: "2026-09-03T09-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+	want := apogee.FloorConfig{DisableToolResultCap: true}
+	if cfg.Floor != want {
+		t.Errorf("Config.Floor = %+v; want %+v — the one guard the session gave up, and no other",
+			cfg.Floor, want)
+	}
+}
+
 // A workspace skill anchor that is a symlink OUT of the workspace is discovered as a source and
 // mounted nowhere (audit 2026-08-25 F-13; residual 2026-08-28). The provider answers two lists on
 // purpose and they are not interchangeable: SourceDirs is the DISPLAY view — where skills come

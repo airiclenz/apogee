@@ -119,6 +119,11 @@ type ContextConfig = domain.ContextConfig
 // DelegationConfig bounds what a sub-agent run may spend (Config.Delegation).
 type DelegationConfig = domain.DelegationConfig
 
+// FloorConfig switches individual Floor guards off (Config.Floor, ADR 0071). Every field is a
+// Disable… bool, so the zero value keeps the whole floor on and an embedder that never names this
+// type still gets it.
+type FloorConfig = domain.FloorConfig
+
 // ContextFilesReport is what a session's workspace context files (Config.ContextFiles)
 // contributed and what the standing system content costs against its Budget share — the
 // read-only view Agent.ContextFilesReport returns for the host's session notice.

@@ -299,6 +299,7 @@ type settingsEngine interface {
 	SetBypass(bool)
 	SetCompactionEnabled(bool)
 	SetPruneToolResults(bool)
+	SetFloor(apogee.FloorConfig)
 	SetContextFiles(enable bool, names []string)
 	SwapTools(*apogee.ToolRegistry) error
 	SetProfile(apogee.ModelProfile) error

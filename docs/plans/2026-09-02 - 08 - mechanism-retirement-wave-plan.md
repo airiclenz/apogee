@@ -561,7 +561,23 @@ covers all six.
 
 **Commit:** `feat(config): six floor-guard keys, on by default`
 
-## 11. The keys reach the engine and `/settings` live-apply
+## 11. The keys reach the engine and `/settings` live-apply — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the regression guard's two options were resolved in favour of `reachesTheEngineAndTheHolder` (the item's What names ONE `SetFloor(domain.FloorConfig)` seam, which six single-bool setters would have contradicted). The read-modify-write is one locked act inside `liveSettings.setFloorGuard`, which flips its own key and hands back the whole projection, so two concurrent applies cannot re-arm each other's guard.
+
+NOTES (2026-09-03): the negation between the six POSITIVE config keys and the engine's `Disable…` gates has exactly one home, `floorFromOptions(config.Options) apogee.FloorConfig` in `wire_settings.go` — called by `wire_boot.go`, `wire_firing.go` and `setFloorGuard` alike, so "off in the file" and "off in the pane" cannot come to mean two different things. `setFloorGuard` reaches it through `optionsLocked()`, the projection the holder already answers with, rather than a second hand-written mapping.
+
+NOTES (2026-09-03): the item's Files list is a floor. `cmd/apogee/wire_boot_test.go`, `wire_firing_test.go`, `root_test.go` and `wire_engine_test.go` joined it, because three of the item's own four delivered seams had no home in the listed test files: the boot fold (`TestBootConfigCarriesTheFloorGuardKeys`), the Firing fold the item's Tests line asks for (`TestFiringConfigCarriesTheFloorGuardKeys`), the pinned `--bypass` help (`TestRootCommandBypassHelpNamesWhatStaysOn`) and the `pendingFloor` bind replay (`TestLateEngineReplaysTheFloorGatesAtTheBind`, on the prune gate's precedent). Only the last falls outside the item's `-run 'Settings|Firing|Boot|Root|Help'` acceptance filter; the whole `./cmd/apogee/` package is green.
+
+NOTES (2026-09-03): `settingsrows_test.go`'s `fabricatedSettings()` gained the six keys with `read-cache: false`, so the golden map pins a guard row reporting the VALUE rather than the default — the `ui.skill-suggestions` precedent in the same table.
+
+NOTES (2026-09-03): `applySettingSpy.drove()` now counts `SetFloor` calls too; a Floor-guard apply that reached the spy without being counted would have made "a key that should have touched nothing" pass over a seam it did touch.
+
+NOTES (2026-09-03): no `/settings` table edit was needed — the six land between `prune-tool-results` and `delegate-max-steps`, inside the run `settingSections` opens at `auto-compact`, so position alone puts them in the Session section as the item says.
+
+NOTES (2026-09-03): `internal/config/registry.go:605`'s `bypass` Desc and `internal/config/defaults/config.yaml:867` still read "Run with Mechanisms off; the structural context reducers stay on" — still TRUE (they do not claim the Floor guards go), just less complete than the flag help this item restated. Left alone as `internal/config` prose outside this item's scope; not a defect, and no test pins either against the flag's wording.
+
+NOTES (2026-09-03): `ISSUES.md`, `README.md` and `docs/manual/{commands,configuration,probe}.md` are dirty in the working tree from a CONCURRENT documentation pass, not from this item — deliberately absent from FILES and left untouched, as items 8 and 9 recorded before it.
 
 **What.** Depends on 6, 10. Fold `Options` → `Config.Floor` in both composition roots
 (`cmd/apogee/wire_boot.go:273-294`, `wire_firing.go:304-306`); live holder fields, seed, setters and

@@ -296,6 +296,70 @@ func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
 	}
 }
 
+// The six Floor-guard keys are ONE engine seam and six rows, so every apply has to carry the five
+// gates its own row does not name — the same shape of problem the context-files pair has, and the
+// reason both families need the holder as well as the engine. The failure this pins is the one a
+// row that composed a fresh FloorConfig from its own key alone would ship: a second flip that
+// silently puts the first guard back.
+//
+// It also pins the NEGATION. The keys are positive in the file and the pane (`read-cache: false`
+// means the guard is gone) and negative at the engine (`DisableReadCache: true`), and one seam
+// turns one into the other.
+func TestApplySettingFloorGuardKeysCarryTheOtherFiveGates(t *testing.T) {
+	t.Parallel()
+	spy := &applySettingSpy{}
+	// A session running the whole floor, which is what every start resolves to: the six keys default
+	// to true and nothing in this fixture opts out.
+	live := newLiveSettings(config.Options{
+		ToolUseEnforcer:       true,
+		EmptyResponseRecovery: true,
+		ToolCallRepair:        true,
+		ToolLoopBreaker:       true,
+		ToolResultCap:         true,
+		ReadCache:             true,
+	}, nil)
+	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+
+	if _, err := apply("read-cache", "false"); err != nil {
+		t.Fatalf("apply read-cache=false: %v", err)
+	}
+	want := apogee.FloorConfig{DisableReadCache: true}
+	if len(spy.floors) != 1 || spy.floors[0] != want {
+		t.Fatalf("SetFloor = %+v, want one call carrying %+v — the other five guards stand",
+			spy.floors, want)
+	}
+
+	// A second row moves, and the first row's opt-out is still gone: the gates are read back off the
+	// holder rather than composed from the key in hand.
+	if _, err := apply("tool-loop-breaker", "false"); err != nil {
+		t.Fatalf("apply tool-loop-breaker=false: %v", err)
+	}
+	want = apogee.FloorConfig{DisableReadCache: true, DisableToolLoopBreaker: true}
+	if len(spy.floors) != 2 || spy.floors[1] != want {
+		t.Fatalf("SetFloor = %+v, want the second call to carry %+v", spy.floors, want)
+	}
+
+	// And back on again, which is the same claim in the other direction.
+	if _, err := apply("read-cache", "true"); err != nil {
+		t.Fatalf("apply read-cache=true: %v", err)
+	}
+	want = apogee.FloorConfig{DisableToolLoopBreaker: true}
+	if len(spy.floors) != 3 || spy.floors[2] != want {
+		t.Fatalf("SetFloor = %+v, want the third call to carry %+v", spy.floors, want)
+	}
+
+	// The projection a Firing composes from says the same thing in the file's positive spelling, so
+	// an unattended run raised from this session runs the floor the human left it on.
+	got := live.options()
+	if got.ReadCache != true || got.ToolLoopBreaker != false || got.ToolResultCap != true {
+		t.Errorf("options() floor keys = read-cache:%v tool-loop-breaker:%v tool-result-cap:%v; "+
+			"want true/false/true", got.ReadCache, got.ToolLoopBreaker, got.ToolResultCap)
+	}
+	if floor := floorFromOptions(got); floor != want {
+		t.Errorf("floorFromOptions(options()) = %+v, want the %+v the engine holds", floor, want)
+	}
+}
+
 // What the dispatcher will not apply, it REFUSES by name — the write has already landed, so a silent
 // success would leave the file and the session disagreeing with nothing said about it. A key this
 // build cannot apply and a value its seam cannot take are the same kind of answer.

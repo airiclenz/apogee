@@ -309,6 +309,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		// A Firing runs while nobody watches, which is exactly the case a runaway delegation
 		// must not be able to become.
 		Delegation: apogee.DelegationConfig{MaxSteps: in.opts.DelegateMaxSteps},
+		// The six Floor-guard gates the session resolved, negated at the one seam that negates them
+		// (floorFromOptions). A Firing is composed out of the session's LIVE options, so a guard
+		// switched off in `/settings` is off for the run this session raises as well.
+		Floor: floorFromOptions(in.opts),
 	}
 
 	// Where this run's delegations go, resolved off the same `sub-agents-server:` key a session

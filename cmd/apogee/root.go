@@ -115,7 +115,7 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 	flags.StringVar(&opts.Workspace, "workspace", "",
 		"workspace root the file tools are scoped to (default: current directory)")
 	flags.BoolVar(&opts.Bypass, "bypass", false,
-		"run with Mechanisms off; structural context reducers stay on (ADR 0006)")
+		"run with the lab Mechanisms off; Floor guards and structural reducers stay on (ADR 0071)")
 	flags.StringVar(&opts.Resume, "resume", "", "resume a saved session (id from /sessions, or a file path)")
 	flags.BoolVar(&opts.ContinueSession, "continue", false,
 		"resume this workspace's most recent saved session (mutually exclusive with --resume)")
