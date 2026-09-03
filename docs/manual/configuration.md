@@ -1120,7 +1120,19 @@ right after your prompt, ahead of any workspace context files, naming the worksp
 this session's scratch directory and any read-only library roots the model may read
 from. Ahead of them is deliberate: nothing a repository ships can then precede the
 host's own facts. That block is not part of `system-prompt-text`, cannot be edited out
-of it, and is not sent when you have configured neither a prompt nor context files.
+of it, and is not sent in the one posture where no system message goes out at all —
+`use-default-prompt: false` (or an explicitly empty prompt of your own) together with
+no context files.
+
+A sub-agent additionally carries a short **delegate report block**, right after the
+orientation block and still ahead of any workspace context files. It tells the child
+that the agent which delegated the work sees nothing of the child's own conversation
+and receives only its final reply, and asks it to report what it found, changed and
+left unfinished by citing `path:line` rather than pasting file contents. This
+delegate block goes to delegated agents only — your own session never carries it —
+and, like the orientation block, it is not part of `system-prompt-text`, cannot be
+edited out of it, and follows the same rule of riding along only when a system message
+goes out at all.
 
 ```yaml
 # ~/.apogee/config.yaml

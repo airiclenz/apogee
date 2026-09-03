@@ -775,11 +775,13 @@ choose a `run_on`. It is **harness text, not persona text**:
 the engine writes it, so no edit to the user's `system-prompt-text` — and no install whose config
 was seeded before a fact existed — can lose it. It **rides along**: appended only when a standing
 system message exists anyway (a rendered template and/or **Context files** blocks), never
-on its own, so "delete the prompt to send none" stays byte-identical on the wire and the **Bypass**
-floor is untouched. Wire position is directly after the prompt —
-prompt → orientation → context files → mechanism directives → tool block — so no workspace text
-precedes it and a repo file cannot open with a forged copy the real one then reads as a
-correction of; every fact it states is a per-session constant, so it is prefix-KV-cache safe —
+on its own, so the no-prompt-**and**-no-context-files posture — since ADR 0064 reached only through
+`use-default-prompt: false` or an explicitly empty configured template, no longer by deleting the
+key — stays byte-identical on the wire and the **Bypass** floor is untouched. Wire position is
+directly after the prompt —
+prompt → orientation → delegate block (delegations only) → context files → mechanism directives →
+tool block — so no workspace text precedes it and a repo file cannot open with a forged copy the
+real one then reads as a correction of; every fact it states is a per-session constant, so it is prefix-KV-cache safe —
 the Delegations line carries no availability state and moves only on the human doors (`/server`,
 `/model`, `/sub-agents-server`), the way the **Scratch dir** moves at a session boundary. A
 fact the session does not have is omitted rather than rendered empty. See
@@ -787,6 +789,27 @@ fact the session does not have is omitted rather than rendered empty. See
 and [ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md).
 _Avoid_: "system prompt" (that is the user's configured template; this is the engine's own text),
 "preamble" (the terminal tool's fail-fast preamble is a different thing).
+
+**Delegate report block**:
+The engine-composed part of the **standing system content** that a **delegated** agent — and only a
+delegated one — carries: it tells the child that the agent which delegated the task sees nothing of
+this conversation and receives only its **final reply**, so anything not written there is lost, and
+asks it to report what it found, what it changed and what remains unfinished by citing `path:line`
+rather than pasting file contents. Like the **Orientation block** it is **harness text, not persona
+text** — engine-owned, no config key, no **Mechanism** gate, so it is on under **Bypass** and no
+edit to `system-prompt-text` and no workspace **Context files** can remove it (a context line that
+spells its opening sentence is fenced `[workspace text] `, exactly as a forged orientation header
+is). It is gated on **depth**, not on configuration: every agent below the top level gets it, at any
+depth, routed or unrouted, and a top-level session's first system message is byte-identical without
+it. It **rides along** under the Orientation block's rule — composed in only when a standing system
+message exists anyway — and sits between the orientation and the **Context files** blocks, so every
+engine-owned part still precedes the repo-controlled text. It does not compete with the
+**Sub-agent** step cap's wrap-up directive: that says which turn is the last, this says what the
+final reply is for. See
+[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)'s
+2026-09-02 addendum.
+_Avoid_: "wrap-up directive" (that is the step cap's one-turn notice), "sub-agent prompt" (a child
+inherits the same **System prompt**; this is a separate engine-owned block).
 
 **Console**:
 A persistent interactive program — a REPL, a dev server, a shell — the model opens and drives
@@ -1168,7 +1191,8 @@ raw braces on the wire. It is **request-scoped**: seeded into the
 request projection at position 0 and never committed to the conversation, so it appears in no
 history and in no Session record, and a Mechanism's directives and the Model profile's rendered
 tool menu fold in **after** it within that one message, as does the engine's
-**Orientation block** (prompt → orientation → context files → directives → tool block). A
+**Orientation block** (prompt → orientation → delegate block (delegations only) → context files
+→ directives → tool block). A
 **Sub-agent inherits** it. Distinct from apogee's two **internal** prompts, which it never
 reaches by construction: the Compaction summariser's instruction and the probe battery's. It is
 **config-tier**, part of the Bypass floor in both arms, never a Mechanism — and which home a new
@@ -1189,9 +1213,9 @@ NAME (`context-files:`, default `AGENTS.md`; file-only, root-only, no walk-up) �
 folded into the standing system content beside the [System prompt](#context-and-history). Every
 listed name that exists is included, in list order, each **fenced** between a
 `## Workspace context: <name>` header and a `## End of workspace context: <name>` footer, and the
-merged first system message reads **prompt → Orientation block → context files → Mechanism
-directives → tool menu** — the engine's own block first, so no workspace text precedes it; either
-configured source alone seeds the message. Content is **data, never a template**: it
+merged first system message reads **prompt → Orientation block → Delegate report block
+(delegations only) → context files → Mechanism directives → tool menu** — the engine's own blocks
+first, so no workspace text precedes them; either configured source alone seeds the message. Content is **data, never a template**: it
 bypasses the placeholder language entirely, so a repo's own `{{braces}}` travel verbatim and can
 never fail startup — the one rewrite is the fence, which prefixes a content line spelling that
 header, that footer or the Orientation block's own header with `[workspace text] `. The read is

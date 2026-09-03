@@ -231,7 +231,23 @@ and if that identifier does not exist yet, item 1 exports it rather than the fix
 
 commit: `test(e2e): pin the delegate report block on a child's request`
 
-## 3. Record the block
+## 3. Record the block — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): guard (b)'s stale-conditioning fix landed at both live sites named by the grep —
+`CONTEXT.md:778`'s "delete the prompt to send none" and `docs/manual/configuration.md:1123`'s
+"neither a prompt nor context files" — each rewritten to name the posture ADR 0064 actually leaves
+(`use-default-prompt: false` or an explicitly empty template, plus no context files). The three
+remaining `grep -rn "send none\|neither a prompt\|nothing configured"` hits
+(`docs/manual/configuration.md:1061`, `:1074`, `:1113`) DESCRIBE ADR 0064's default-prompt rule and
+are correct, so they stay, as the item instructs.
+NOTES (2026-09-03): the manual names the block "**delegate report block**" (CONTEXT.md's term) and
+then refers to "This delegate block", so the acceptance grep `grep -n "delegate block"` hits all
+three files; the wrap in `CONTEXT.md`'s Orientation-block order sentence keeps the literal locator
+phrase `→ context files` on one line, so the guard's own `grep -rin "→ context files" CONTEXT.md
+docs/manual/` still finds every live order sentence for a future run.
+NOTES (2026-09-03): the ADR addendum is appended at the end of the file, after the 2026-08-31
+amendment, in date order and in the shape of the two before it; it STATES the new order and leaves
+`docs/adr/0023-…:304-313` and `docs/adr/0026-…:228` as written, per the item.
 
 **What.** Depends on item 1. Three documents, one owning item.
 - `docs/adr/0023-…md`: a third addendum, dated 2026-09-02, in the shape of the two before it — the
