@@ -115,7 +115,13 @@ superseding the SuppressStrikesThree posture the two repair rows had (`selfreg.g
 
 **Commit:** `docs(adr): ADR 0071 — floor guards are engine behaviour, the nudge catalogue retires`
 
-## 2. The retired roll carries a release and a successor per ID
+## 2. The retired roll carries a release and a successor per ID — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/doc.go: made necessary by the new promoted-row notice, whose file-map half-line said ResolveEnabled hands back notices only for rows "the block still turns on".
+
+NOTES (2026-09-03): the retired-and-false notice is worded exactly as the plan spells it, including the literal quotes around `"<id>: false"`; `retired_test.go` gains a `withRoll` fixture (sequential, package-global swap, captureStderr precedent) so the wording is pinned over a synthetic promoted row rather than over whichever IDs are rolled today.
+
+NOTES (2026-09-03): `cmd/apogee/validatedsets_test.go` gains one assertion pinning grammar's own `v0.18.7` in the shed notice — the per-ID lookup's only user-visible proof at this item.
 
 **What.** `internal/mechanisms/retired.go`: replace `retiredIDs []MechanismID` + `const RetiredRelease`
 (`:25`, `:43`) with `var retired = []retiredRow{{ID: "grammar", Release: "v0.18.7"}}` where

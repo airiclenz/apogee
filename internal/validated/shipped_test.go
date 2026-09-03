@@ -1,6 +1,7 @@
 package validated
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -12,6 +13,12 @@ import (
 // change that invalidates one (a removed ID, a changed Requires/IncompatibleWith
 // relation) must fail HERE, at build time — never surface as a runtime skip-warning on
 // a user's machine.
+//
+// RETIRED members are shed first, exactly as the runtime path does
+// (cmd/apogee/validatedsets.go): a removal recorded on the roll is a curation change the
+// entry survives, so failing on it here would fail the very case ADR 0016's 2026-08-29
+// amendment exists to permit. A removal with NO roll entry still trips this pin —
+// TestShipped_RemovalWithoutARollEntryStillTrips is the other half of that claim.
 func TestShipped_PinnedAgainstCatalogue(t *testing.T) {
 	entries, err := Shipped()
 	if err != nil {
@@ -31,9 +38,48 @@ func TestShipped_PinnedAgainstCatalogue(t *testing.T) {
 		if e.Source != SourceShipped {
 			t.Fatalf("entry %q: Source not stamped shipped: %q", e.Key, e.Source)
 		}
-		if err := Validate(e, descriptors); err != nil {
+		live, _ := DropRetired(e, mechanisms.RetiredIDs())
+		if err := Validate(live, descriptors); err != nil {
 			t.Fatalf("shipped entry %q no longer validates against the catalogue: %v", e.Key, err)
 		}
+	}
+}
+
+// TestShipped_RemovalWithoutARollEntryStillTrips is the other half of the drift guard.
+// TestShipped_PinnedAgainstCatalogue sheds retired members before validating, so a removal
+// the roll records passes; a removal the roll does NOT record must still fail, or the
+// relaxation would hide exactly the drift the pin exists to catch. A catalogue missing one
+// live member of a shipped entry — which is what deleting a row without rolling it leaves
+// behind — is simulated by thinning the descriptor list.
+func TestShipped_RemovalWithoutARollEntryStillTrips(t *testing.T) {
+	entries, err := Shipped()
+	if err != nil {
+		t.Fatalf("Shipped: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("shipped bundle is empty — the gemma entry should exist")
+	}
+
+	live, _ := DropRetired(entries[0], mechanisms.RetiredIDs())
+	if len(live.Set) == 0 {
+		t.Fatalf("shipped entry %q has no live members to remove", live.Key)
+	}
+	gone := live.Set[0]
+
+	var thinned []domain.MechanismDescriptor
+	for _, d := range mechanisms.Descriptors() {
+		if d.ID != gone {
+			thinned = append(thinned, d)
+		}
+	}
+
+	err = Validate(live, thinned)
+	if err == nil {
+		t.Fatalf("entry %q validated against a catalogue missing %q; an un-rolled removal must trip the pin",
+			live.Key, gone)
+	}
+	if !strings.Contains(err.Error(), string(gone)) {
+		t.Errorf("Validate error = %v, want it to name the removed mechanism %q", err, gone)
 	}
 }
 

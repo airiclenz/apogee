@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -20,13 +21,14 @@ import (
 
 // retiredMechanismNotice is the exact line a `mechanisms:` key naming a retired Mechanism earns,
 // for the three Drivers that print it: the TUI's startup (wire_live.go), a headless run and a
-// daemon's log. The release comes from [mechanisms.RetiredRelease] rather than being spelled here,
-// so the roll moving to a later version is a one-line change in the library and not a hunt through
-// three test files; the wording is spelled out, because these tests exist to pin the line a human
-// actually reads.
+// daemon's log. The release is looked up per ID through [mechanisms.RetiredRelease] rather than
+// being spelled here, so a row joining the roll in a later release is a one-line change in the
+// library and not a hunt through three test files; the wording is spelled out, because these tests
+// exist to pin the line a human actually reads. It words the OUTRIGHT retirement — a promoted row
+// earns the floor-guard line instead, which these Drivers print through the same seam.
 func retiredMechanismNotice(id string) string {
 	return fmt.Sprintf("apogee: mechanism %q was retired in %s and is ignored; remove it from mechanisms:",
-		id, mechanisms.RetiredRelease)
+		id, mechanisms.RetiredRelease(domain.MechanismID(id)))
 }
 
 // captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to

@@ -54,6 +54,94 @@ func TestRetiredIDsIsACopy(t *testing.T) {
 	}
 }
 
+// RetiredRelease and Successor answer PER ID: grammar retired outright in v0.18.7 and has no
+// successor, while an ID that is not on the roll at all answers "" to both rather than handing back
+// whichever release happened to be last.
+func TestRetiredReleaseAndSuccessorAnswerPerID(t *testing.T) {
+	t.Parallel()
+
+	if got := RetiredRelease("grammar"); got != "v0.18.7" {
+		t.Errorf("RetiredRelease(%q) = %q, want %q", "grammar", got, "v0.18.7")
+	}
+	if got := Successor("grammar"); got != "" {
+		t.Errorf("Successor(%q) = %q, want \"\" — grammar retired outright", "grammar", got)
+	}
+	for _, id := range []domain.MechanismID{"validate", "not_a_mechanism", ""} {
+		if got := RetiredRelease(id); got != "" {
+			t.Errorf("RetiredRelease(%q) = %q, want \"\" — it is not on the roll", id, got)
+		}
+		if got := Successor(id); got != "" {
+			t.Errorf("Successor(%q) = %q, want \"\" — it is not on the roll", id, got)
+		}
+	}
+}
+
+// withRoll swaps the package roll for the duration of one test and puts it back afterwards, so a
+// wording assertion is about the wording rather than about whichever IDs happen to be rolled today.
+// The caller must NOT be a parallel test: the roll is a package global, so this is only race-free
+// during the sequential test phase (the captureStderr precedent below).
+func withRoll(t *testing.T, rows ...retiredRow) {
+	t.Helper()
+	orig := retired
+	retired = rows
+	t.Cleanup(func() { retired = orig })
+}
+
+// A PROMOTED row — one retired because its behaviour became a Floor guard — earns a notice naming
+// the top-level key that governs the behaviour now, in BOTH directions. Asking for it says the
+// guard is already on; switching it OFF says the old spelling no longer does that and names the key
+// that does, which is the one case where the silence a plain retirement earns would mislead: the
+// user would be left believing a guard is off when it is on. A row retired outright keeps the plain
+// wording and its own release, and stays silent when set false.
+func TestResolveEnabledNoticesNameAPromotedRowsFloorGuardKey(t *testing.T) {
+	withRoll(t,
+		retiredRow{ID: "grammar", Release: "v0.18.7"},
+		retiredRow{ID: "validate", Release: "v0.20.0", Successor: "tool-call-repair"},
+	)
+
+	for _, tt := range []struct {
+		name    string
+		enabled map[string]bool
+		want    []string
+	}{
+		{
+			"promoted and asked for",
+			map[string]bool{"validate": true},
+			[]string{`apogee: mechanism "validate" is the "tool-call-repair" floor guard since v0.20.0 and is on by default; remove it from mechanisms:`},
+		},
+		{
+			"promoted and switched off",
+			map[string]bool{"validate": false},
+			[]string{`apogee: mechanism "validate" is the "tool-call-repair" floor guard since v0.20.0; "validate: false" under mechanisms: no longer turns it off — set tool-call-repair: false at the top level`},
+		},
+		{
+			"retired outright keeps the plain wording and its own release",
+			map[string]bool{"grammar": true},
+			[]string{`apogee: mechanism "grammar" was retired in v0.18.7 and is ignored; remove it from mechanisms:`},
+		},
+		{
+			"retired outright and switched off stays silent",
+			map[string]bool{"grammar": false},
+			nil,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, got, err := ResolveEnabled(tt.enabled, KnownIDs())
+			if err != nil {
+				t.Fatalf("ResolveEnabled(%v): %v", tt.enabled, err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("ResolveEnabled(%v) notices = %q, want %q", tt.enabled, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("notice[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 // fakeKnown is a stand-in catalogue for the pure key-validation tests: ResolveEnabled only checks a
 // `mechanisms:` key against the known set and selects the enabled ones (the engine builds, so no
 // constructor is needed here — the unknown-ID cases below drive the REAL catalogue via KnownIDs).
@@ -259,7 +347,7 @@ func TestResolveEnabledNoticesNameEachRetiredID(t *testing.T) {
 	}
 
 	want := []string{
-		`apogee: mechanism "grammar" was retired in ` + RetiredRelease + ` and is ignored; remove it from mechanisms:`,
+		`apogee: mechanism "grammar" was retired in ` + RetiredRelease("grammar") + ` and is ignored; remove it from mechanisms:`,
 	}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Errorf("ResolveEnabled notices = %q, want %q", got, want)

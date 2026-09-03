@@ -223,6 +223,11 @@ func TestResolveValidatedSetDropsARetiredIDWithANotice(t *testing.T) {
 		!strings.Contains(notices[0], gemmaKey) {
 		t.Errorf("shed notice = %q, want it to name the entry, the id and the retirement", notices[0])
 	}
+	// The release is the shed id's OWN, looked up on the roll — not one release string shared by
+	// every removal, which would misname the changelog entry a user goes looking for.
+	if !strings.Contains(notices[0], "v0.18.7") {
+		t.Errorf("shed notice = %q, want grammar's own retirement release v0.18.7", notices[0])
+	}
 	if !strings.Contains(notices[1], "pre-retirement-run") {
 		t.Errorf("applied notice = %q, want the record's campaign", notices[1])
 	}
