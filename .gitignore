@@ -30,3 +30,9 @@ live-config.yaml
 # overrides it stays in the developer's tree and never reaches a clone.
 /go.work
 /go.work.sum
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/

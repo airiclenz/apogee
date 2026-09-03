@@ -1,0 +1,8 @@
+#!/bin/sh
+# commit-msg hook — strip Claude/Anthropic attribution from commit messages.
+#
+# Owner directive (2026-06-26): commit messages must NEVER contain a
+# "Co-authored-by: Claude" trailer (or any Claude/Anthropic attribution).
+# A previous history rewrite was required to remove these. This hook removes
+# them automatically from every commit, regardless of what produced the message.
+perl -i -ne 'print unless /^\s*Co-authored-by:.*(Claude|Anthropic)/i || /Generated with \[?Claude Code/i' "$1"
