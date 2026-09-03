@@ -10,6 +10,87 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`internal/tasklist` — the model-owned checklist.** A new pure-policy package holds the task
+  list the `task_list` tool will write: an `Item` (`text`, `done`), a mutex-guarded `List` whose
+  zero value is empty, a whole-list `Replace` that trims each text, drops the empty ones and
+  refuses — leaving the held list untouched — a call carrying more than 40 tasks or a task longer
+  than 200 characters, a `Render` that writes the standing block (`Task list — …(N open, M done):`
+  and one `[✔]`/`[ ]` row per task, `""` for an empty list), and the `WithList`/`FromContext`
+  carrier a tool call reaches the engine's list through. It imports the standard library and
+  nothing else, performs no I/O and emits no events; nothing constructs a list yet.
+
+- **`task_list` — the model's own checklist as a tool.** A new default-ON built-in lets the model
+  hold the complete list of what a run is doing: one call carries the WHOLE list (no item ids to
+  carry across a compaction), replacing whatever was held, and returns the list rendered exactly as
+  the model will meet it again. It reaches the engine's list through the call context
+  (`internal/tasklist`) rather than holding one itself, so a mid-session roster swap cannot orphan a
+  checklist. It takes the read-only floor — writing down what you mean to do touches nothing the
+  host owns — so it is ungated in every mode and offered in Plan, and `tools.disabled: [task_list]`
+  turns it off for a roster that would rather not have it.
+
+- The **task list** is now engine state rather than a tool's: the `Agent` holds one
+  `tasklist.List`, built beside the undo journal and the console registry, and dispatch installs
+  it on EVERY call context (`tasklist.WithList`) so the `task_list` tool reaches it without
+  holding it — the ADR 0008 reason the consoles ride there too, since `SwapTools` rebuilds tool
+  instances mid-session. Unlike those two it is **session state** (ADR 0022 §8): it round-trips
+  through the session snapshot under the `tasks` key, so a `--resume` or a compaction still knows
+  what is left. The key is `omitempty` and therefore additive in both directions, so
+  `SessionVersion` stays 1; an over-cap snapshot is refused as a decode error rather than
+  silently truncated, and a snapshot carrying no tasks clears the list. `/clear` empties it, and
+  a delegated child is handed its OWN fresh empty list — nothing of the parent's checklist is
+  inherited.
+
+- The model's **task list now rides on the standing system message**, as the last engine-owned
+  block: after the prompt, the orientation block and — on a delegation — the delegate report
+  block, and ahead of the workspace context files' blocks, so nothing a repo ships can read as a
+  correction of the checklist the model wrote. A list nobody has written renders nothing, and the
+  block rides along under the orientation block's rule — it is composed in only when a configured
+  source already seeded the message, so a session with no prompt and no context files still sends
+  zero system messages. Its header opening (`apogee.TaskListFence`) joins the forgery fence, so a
+  workspace file spelling `Task list — …` is prefixed `[workspace text]` rather than passing as
+  the engine's own. It is the first engine-owned block whose content changes within a session:
+  every `task_list` call invalidates the server's prefix KV cache from that block onward, which is
+  the accepted cost of a checklist that survives a compaction.
+- ADR 0072 records that **the task list is model-owned session state**: written only through
+  `task_list` and never by a human or the engine, replaced whole on every call so no id has to
+  survive a compaction, held on `agentState` so it survives `--resume` (the stated counter-example
+  to ADR 0022 §8, which drops a Console because a running process cannot be serialized), rendered
+  as a standing block last of the engine's parts and ahead of the workspace context files,
+  classified `ReadOnly` because `IsReadOnly` measures blast radius (`ask_user`, `console_close`),
+  shipped default-on with no config key of its own (`tools.disabled:` turns it off), and given
+  fresh and empty to every delegation. It amends ADR 0023's 2026-08-25 "live inputs, per-session
+  constants" bullet to admit the first engine-composed standing block whose content changes within
+  a session — the prefix KV cache is re-encoded from that block on every `task_list` call, an
+  accepted cost because the volatility is under the model's own control. ADR 0057 decision 3 (the
+  build-level default-off state) is untouched.
+
+- ADR 0023 gains a **2026-09-03 addendum**: the standing system content is composed of five parts,
+  in the order prompt → orientation → delegate report → task list → context files, and the
+  volatility exception above is stated there for the reader who arrives at the order first.
+
+- The **"task/todo persistence" denial** in `docs/design/tool-surface-findings.md` is reversed in
+  place. Its dated record stands as written, with the owner's 2026-09-02 reversal beside it: the
+  denial was right that a Mechanism injecting a decomposition the model did not ask for is guided
+  decomposition, and wrong that a plain tool the model owns is the same thing.
+
+- A `task_list` call now renders as its own tool card — labelled `Task List`, verbed
+  "updating the task list", with the rendered checklist beneath the branch and the number of
+  still-open tasks in the outcome slot. The standing-content oversize warning now names the task
+  list among the things to trim.
+
+- The manual gains a **The task list** section (`docs/manual/configuration.md`): what `task_list`
+  is, that one call replaces the whole list, that the current list rides in the standing system
+  content, that it ships on for every model with `tools.disabled: [task_list]` as the off switch,
+  and that a delegation keeps a list of its own. `CONTEXT.md` gains the **Task list** term, and
+  every live prose sentence stating the standing-content order now names the task list block
+  between the delegate report block and the workspace context files. README's built-in tool count
+  goes from 28 to 29.
+
+- The task list is pinned end to end: a new `cmd/apogee/e2e_tasklist_test.go` drives a real
+  session that calls `task_list`, asserts the upstream's own request log carries the rendered
+  block on the request following the call, then resumes the session with `--continue` and
+  asserts the same row is still there.
+
 - ADR 0071 records that the six structural Mechanisms become **Floor guards** — plain engine
   behaviour, on by default, each behind one file-only config key — and that the shipped nudge
   catalogue and gemma Validated entry retire. It supersedes ADR 0009 for structural behaviour and
