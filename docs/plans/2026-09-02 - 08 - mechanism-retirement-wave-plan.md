@@ -973,7 +973,27 @@ tests untouched and green; `SaveProbeRecord` still writes with the rehomed `dirP
 
 **Commit:** `refactor: retire the library Mechanism and the store only it used`
 
-## 18. The gemma Validated set retires; an all-retired entry no longer "applies"
+## 18. The gemma Validated set retires; an all-retired entry no longer "applies" — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): `RetiredEntryKeys` ships as an accessor pair — `RetiredEntryKeys() []string` and `RetiredEntryRelease(key) string` over an unexported `{Key, Release}` roll — rather than the plan's exported `RetiredEntryKeys = []string{…}` var: the notice has to name the release, and an exported mutable slice is package state any caller could rewrite. Mirrors `internal/mechanisms`' own roll.
+
+NOTES (2026-09-03): PLAN-VS-TREE — `setApplied` is UNREACHABLE in this build, so the item's Tests wording ("applies the rest", "still applies unchanged") could not be asserted as written. With the catalogue empty since item 17, any non-retired ID in an entry is unknown to `Validate` and the entry is skipped whole, while an all-retired entry now takes the new `setRetired` rung — the two exits between them cover every entry. Every recast fixture therefore asserts the rung the ladder actually reaches (offered vs. carried-past-the-gate-and-skipped), which is what each test was really about: the confidence gate, the alias override, the bound-endpoint keying, the no-re-keying guard. No production behaviour was changed to suit a test.
+
+NOTES (2026-09-03): tests renamed where the recast made the old name untrue — `TestResolveValidatedSet_IdentityAliasApplies` → `…_IdentityAliasReplacesTheConfidenceGate`; `TestResolveValidatedSetAppliesOnAStoredProbeRecord` → `…PromotesTheIdentityOnAStoredProbeRecord`; `TestProbeModelPromotesAnOfferedValidatedSet` → `TestProbeModelDoesNotRekeyAnOfferedValidatedSet`; `TestProbeModelKeepsAnAliasedSetApplying` → `TestProbeModelClaimsNoPromotionForAnAliasedSet`; `TestAShippedValidatedSetBuildsAsTheEnableList` → `TestAValidatedSetBuildsAsTheEnableList` (also drops the silent `t.Skip` on an empty roster for a synthetic wholly-retired record); `TestShipped_GemmaEntryVerbatim` → `TestShipped_RosterIsEmptyAndTheGemmaEntryIsRolled`.
+
+NOTES (2026-09-03): `TestResolveValidatedSet_UserEntryWinsAndSorts` REMOVED — the shipped/user key collision it proved cannot exist with an empty roster. `Merge`'s user-wins rule stays covered by `internal/validated/load_test.go:69`. Two tests take its place: `_AllRetiredEntryNoLongerApplies` and `_UserEntryUnderARetiredKeyStillResolves` (the owner's 2026-09-03 lookup-before-roll ratification).
+
+NOTES (2026-09-03): `TestResolveValidatedSetDropsARetiredIDWithANotice` keeps its name and its claim, recast onto `startupSetDecision` plus the pure `retiredSetMemberNotice` — the shed is proven on the ladder, the wording (including grammar's own `v0.18.7`) at the renderer, because the applying rung it used to ride is gone.
+
+NOTES (2026-09-03): consequential edit — cmd/apogee/probemodel_test.go: made necessary by emptying the shipped roster (`TestAutoApplyKeysNamesEverySessionOffSwitch` seeded its rows from the shipped gemma entry; it now writes a synthetic user-dir entry).
+
+NOTES (2026-09-03): consequential edit — cmd/apogee/wire_live_test.go: made necessary by emptying the shipped roster (its shipped-set build pin had nothing left to walk).
+
+NOTES (2026-09-03): consequential edit — internal/validated/doc.go: made necessary by emptying the shipped roster (the package doc described a bundle that shipped an entry).
+
+NOTES (2026-09-03): `internal/validated/validate_test.go` needed no change (`TestDropRetiredCanEmptyASet` already pins the shed-to-empty case); it stays off the FILES list despite the plan naming it.
+
+NOTES (2026-09-03): two `cmd/apogee` tests stay red and are NOT this item's — both are the run's already-tracked item-16 follow-ups: `TestScheduleFiringRunsAgainstTheCurrentBinding` (`schedule_test.go:153,:225` — a user-dir Validated entry `["syntax"]` arms nothing) and `TestListMechanismsReadsTheBlock` (`wire_options_test.go:115` — the OFF half needs a second catalogued row).
 
 **What.** Recast at the regression check (2026-09-02). Depends on 17. `internal/validated/shipped.json` → `[]` with a trailing note in
 `docs/design/archived/mechanism-catalogue.md` (item 20). `shipped_test.go:16-79` → asserts the roster is

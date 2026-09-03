@@ -455,20 +455,25 @@ func TestProbeModelReportsAChangedModelBehindTheLabel(t *testing.T) {
 	}
 }
 
-// THE PROMOTION, end to end, in the direction ADR 0021 §4 promises: a model whose Validated set
-// is merely OFFERED before the probe has that same set AUTO-APPLIED after it. This is the
-// regression guard for the defect a behavioral RE-LABELLING would introduce — a probe that
-// re-keys the model silently DEMOTES it instead, because the offered entry, the user's alias and
-// the Library's observations are all filed under the label the probe just walked away from.
-func TestProbeModelPromotesAnOfferedValidatedSet(t *testing.T) {
+// The regression guard for the defect a behavioral RE-LABELLING would introduce: a probe that
+// re-keys the model silently DEMOTES it, because the matched entry, the user's alias and the
+// Library's observations are all filed under the label the probe just walked away from. So the
+// surface must still find the SAME entry under the SAME key afterwards, one rung further up the
+// confidence ladder — merely OFFERED before the probe, past that gate after it (ADR 0021 §4).
+//
+// The rung above that gate is where the shipped catalogue used to answer; it is empty since
+// v0.20.0 (ADR 0071), so what the entry meets there now is the catalogue check, and the skip line
+// naming this entry is the proof the label survived the probe.
+func TestProbeModelDoesNotRekeyAnOfferedValidatedSet(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := upstreamHome(t, srv.URL, gemmaKey)
+	configHome := upstreamHome(t, srv.URL, labKey)
 	roots, err := resolveRoots(configHome, t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve roots: %v", err)
 	}
-	opts := baseOpts(gemmaKey)
+	writeUserValidatedEntry(t, roots.validated, labKey, labEntryJSON(labKey))
+	opts := baseOpts(labKey)
 	opts.Endpoint = srv.URL
 
 	before, offerNotices, err := resolveValidatedSet(opts, roots.validated, roots.probe)
@@ -478,63 +483,67 @@ func TestProbeModelPromotesAnOfferedValidatedSet(t *testing.T) {
 	if before != nil {
 		t.Fatalf("before the probe the set is offered, not applied; got %v", before)
 	}
-	if !noticeContains(offerNotices, "a Validated set exists for "+strconv.Quote(gemmaKey)) {
+	if !noticeContains(offerNotices, "a Validated set exists for "+strconv.Quote(labKey)) {
 		t.Fatalf("before the probe the surface must OFFER the set; notices=%v", offerNotices)
 	}
 
-	report := runProbeModel(t, configHome)
-	if !strings.Contains(report, "Validated set "+gemmaKey+" now AUTO-APPLIES") {
-		t.Errorf("the report must name the promotion it just performed:\n%s", report)
-	}
+	runProbeModel(t, configHome)
 
-	after, applyNotices, err := resolveValidatedSet(opts, roots.validated, roots.probe)
+	after, afterNotices, err := resolveValidatedSet(opts, roots.validated, roots.probe)
 	if err != nil {
 		t.Fatalf("resolveValidatedSet after the probe: %v", err)
 	}
-	if len(after) == 0 {
-		t.Fatalf("probing DEMOTED the model: the offered set no longer matches (notices=%v)", applyNotices)
+	if after != nil {
+		t.Fatalf("the empty catalogue cannot assemble the entry, so nothing may arm; got %v", after)
 	}
-	if !noticeContains(applyNotices, "Validated set for "+gemmaKey+" applied") {
-		t.Errorf("the applying notice must name the entry; notices=%v", applyNotices)
+	if !noticeContains(afterNotices, "skipping validated-set entry "+strconv.Quote(labKey)) {
+		t.Fatalf("probing DEMOTED the model: the entry no longer matches its own label (notices=%v)", afterNotices)
+	}
+	if noticeContains(afterNotices, "To apply it") {
+		t.Errorf("the offer notice must be gone once a record exists: %v", afterNotices)
 	}
 }
 
-// A user who already pasted the ADR 0016 §3 identity alias must not LOSE their applying set by
-// running the probe: the alias keys on the same label the probe promotes, so the set keeps
-// applying — and the report says the record promoted nothing rather than claiming a promotion
-// that did not happen.
-func TestProbeModelKeepsAnAliasedSetApplying(t *testing.T) {
+// A user who already pasted the ADR 0016 §3 identity alias gets nothing NEW from the probe: the
+// alias carried the entry past the confidence gate already, so the record promotes nothing and the
+// report must not claim it did. The surface's answer has to be identical either side of the run —
+// which is also how a probe that quietly re-keyed the model would show up here.
+func TestProbeModelClaimsNoPromotionForAnAliasedSet(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
 	configHome := t.TempDir()
-	writeProbeConfig(t, configHome, config.ServerEntry{Name: "probe-target", Endpoint: srv.URL, Model: gemmaKey},
-		"validated-sets:\n  alias:\n    "+gemmaKey+": "+gemmaKey+"\n")
+	writeProbeConfig(t, configHome, config.ServerEntry{Name: "probe-target", Endpoint: srv.URL, Model: labKey},
+		"validated-sets:\n  alias:\n    "+labKey+": "+labKey+"\n")
 
 	roots, err := resolveRoots(configHome, t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve roots: %v", err)
 	}
-	opts := baseOpts(gemmaKey)
+	writeUserValidatedEntry(t, roots.validated, labKey, labEntryJSON(labKey))
+	opts := baseOpts(labKey)
 	opts.Endpoint = srv.URL
-	opts.ValidatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
+	opts.ValidatedSetsAlias = map[string]string{labKey: labKey}
 
-	before, _, err := resolveValidatedSet(opts, roots.validated, roots.probe)
-	if err != nil || len(before) == 0 {
-		t.Fatalf("the alias must already apply the set: set=%v err=%v", before, err)
+	before, beforeNotices, err := resolveValidatedSet(opts, roots.validated, roots.probe)
+	if err != nil {
+		t.Fatalf("resolveValidatedSet before the probe: %v", err)
+	}
+	if before != nil || !noticeContains(beforeNotices, "skipping validated-set entry "+strconv.Quote(labKey)) {
+		t.Fatalf("the alias must already carry the entry past the offer gate: set=%v notices=%v", before, beforeNotices)
 	}
 
 	report := runProbeModel(t, configHome)
-	if !strings.Contains(report, "was already applying through your validated-sets alias") {
+	if strings.Contains(report, "AUTO-APPLIES") {
 		t.Errorf("the report claimed a promotion that did not happen:\n%s", report)
 	}
 
-	after, _, err := resolveValidatedSet(opts, roots.validated, roots.probe)
+	after, afterNotices, err := resolveValidatedSet(opts, roots.validated, roots.probe)
 	if err != nil {
 		t.Fatalf("resolveValidatedSet after the probe: %v", err)
 	}
-	if len(after) != len(before) {
-		t.Errorf("probing changed the aliased set from %d mechanisms to %d; it must change nothing",
-			len(before), len(after))
+	if len(after) != len(before) || !noticeContains(afterNotices, "skipping validated-set entry "+strconv.Quote(labKey)) {
+		t.Errorf("probing changed the aliased answer from (%v, %v) to (%v, %v); it must change nothing",
+			before, beforeNotices, after, afterNotices)
 	}
 }
 
@@ -588,9 +597,12 @@ func TestProbeModelDoesNotClaimAnEntryStartupWillSkip(t *testing.T) {
 }
 
 // The startup half of the same promise: with a probe record stored for this endpoint + label, the
-// identity resolves at medium confidence and the shipped set that is merely OFFERED without one
-// APPLIES — the rung `probe model` sells, proven at the startup path that has to deliver it.
-func TestResolveValidatedSetAppliesOnAStoredProbeRecord(t *testing.T) {
+// identity resolves at MEDIUM confidence, so an entry that is merely OFFERED without one is
+// carried past the gate — the rung `probe model` sells, proven at the startup path that has to
+// deliver it. Past the gate the entry meets the catalogue, empty since v0.20.0 (ADR 0071), and is
+// skipped against it; what this pins is that the record moved the identity, not what the empty
+// catalogue then does with it.
+func TestResolveValidatedSetPromotesTheIdentityOnAStoredProbeRecord(t *testing.T) {
 	t.Parallel()
 	const endpoint = "http://127.0.0.1:65535"
 	configHome := t.TempDir()
@@ -598,12 +610,13 @@ func TestResolveValidatedSetAppliesOnAStoredProbeRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve roots: %v", err)
 	}
-	opts := baseOpts(gemmaKey)
+	writeUserValidatedEntry(t, roots.validated, labKey, labEntryJSON(labKey))
+	opts := baseOpts(labKey)
 	opts.Endpoint = endpoint
 
 	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
 		Endpoint:   endpoint,
-		ModelLabel: gemmaKey,
+		ModelLabel: labKey,
 		ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
 		Behavior:   "probe:1:tools+json+chain",
 	}); err != nil {
@@ -614,11 +627,11 @@ func TestResolveValidatedSetAppliesOnAStoredProbeRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
-	if len(set) == 0 {
-		t.Fatalf("the stored record must promote the offered set to applied; notices=%v", notices)
+	if set != nil {
+		t.Fatalf("the empty catalogue cannot assemble the entry, so nothing may arm; got %v", set)
 	}
-	if !noticeContains(notices, "Validated set for "+gemmaKey+" applied") {
-		t.Errorf("want the applying notice, got %v", notices)
+	if !noticeContains(notices, "skipping validated-set entry "+strconv.Quote(labKey)) {
+		t.Errorf("the stored record must carry the entry past the offer gate; notices=%v", notices)
 	}
 	if noticeContains(notices, "To apply it") {
 		t.Errorf("the offer notice must be gone once a record exists: %v", notices)
@@ -680,8 +693,9 @@ func TestProbeModelSuppressesTheClaimForAWeightsFileModel(t *testing.T) {
 }
 
 // Every session-level off-switch startup honours must be named by the probe's claim rather than
-// silently ignored. Each row seeds a record that would otherwise auto-apply the shipped gemma
-// set, so deleting the branch under test makes the row see a claimed apply and fail.
+// silently ignored. Each row seeds a synthetic user-local entry and a record that carries it past
+// the confidence gate, so deleting the branch under test makes the row see the ladder's own answer
+// about that entry instead of the off-switch line.
 func TestAutoApplyKeysNamesEverySessionOffSwitch(t *testing.T) {
 	t.Parallel()
 	const endpoint = "http://127.0.0.1:65535"
@@ -713,18 +727,20 @@ func TestAutoApplyKeysNamesEverySessionOffSwitch(t *testing.T) {
 			probeDir := t.TempDir()
 			if _, err := library.SaveProbeRecord(probeDir, library.ProbeRecord{
 				Endpoint:   endpoint,
-				ModelLabel: gemmaKey,
+				ModelLabel: labKey,
 				ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
 				Behavior:   "probe:1:tools+json+chain",
 			}); err != nil {
 				t.Fatalf("save probe record: %v", err)
 			}
-			opts := baseOpts(gemmaKey)
+			opts := baseOpts(labKey)
 			opts.Endpoint = endpoint
 			tc.mutate(&opts)
+			validatedDir := t.TempDir()
+			writeLabEntry(t, validatedDir, labKey, labSet)
 
-			keys, promoted, suppressed := autoApplyKeys(probe.Model{Endpoint: endpoint, Model: gemmaKey},
-				opts, t.TempDir(), probeDir)
+			keys, promoted, suppressed := autoApplyKeys(probe.Model{Endpoint: endpoint, Model: labKey},
+				opts, validatedDir, probeDir)
 			if keys != nil || promoted {
 				t.Errorf("keys=%v promoted=%v; an off-switch must claim nothing", keys, promoted)
 			}

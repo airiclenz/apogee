@@ -901,11 +901,15 @@ ui:
 # measured. Your explicit mechanisms: block above always wins (a validated set applies whole
 # or not at all), and --bypass suppresses everything. Config-file only (no flag or env).
 #
+# NO ENTRY SHIPS WITH THIS BUILD. The one that did named fifteen catalogued Mechanisms and every
+# one of them retired in v0.20.0 (ADR 0071), so it had nothing left to enable; a set you measured
+# yourself, under ~/.apogee/validated/, applies exactly as it always did.
+#
 # validated-sets:
 #   enable: true                # the off-switch; default true
 #   alias:                      # explicit carry-over: runtime model label -> entry key
-#     # gemma-4-e4b-it-qat: gemma-4-e4b-it-qat     # identity = "my model is what it says"
-#     # my-gemma-quant: gemma-4-e4b-it-qat         # transfer to a sibling quant (your call)
+#     # my-model-as-the-server-names-it: my-entry-key   # identity = "my model is what it says"
+#     # my-quant-of-that-model: my-entry-key            # transfer to a sibling quant (your call)
 
 # =============================================================================
 # Model profiles: how apogee equips and speaks to a model — the shape its tool calls arrive in, the

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -165,6 +166,11 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		wantPrompt   string
 		wantWindow   int
 		wantEnable   func(t *testing.T, got []apogee.MechanismID)
+		// seedEntryKey writes one synthetic user-local Validated-set entry under this key before
+		// the rebind runs. The shipped roster is empty since v0.20.0 (ADR 0071), so a case that
+		// needs an entry to match brings its own — which is the only kind a user has now.
+		seedEntryKey string
+		wantNotices  func(t *testing.T, got []string)
 	}{
 		{
 			name:       "the per-model prompt entry is selected for the model being bound",
@@ -183,18 +189,28 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 			wantWindow: 32768,
 		},
 		{
-			name: "a validated set matching the new model applies when no manual list was configured",
+			// The Validated-set surface is re-consulted for the model being bound, not carried
+			// over from the old one: the notice names the entry keyed to THIS model. What the
+			// entry then meets is the catalogue, empty since v0.20.0 (ADR 0071), so nothing arms.
+			name: "the validated-set surface is re-resolved for the new model",
 			opts: config.Options{
 				ValidatedSetsEnable: true,
-				ValidatedSetsAlias:  map[string]string{gemmaKey: gemmaKey}, // the §3 human decision
+				ValidatedSetsAlias:  map[string]string{labKey: labKey}, // the §3 human decision
 			},
-			model:      gemmaKey,
-			window:     8192,
-			wantWindow: 8192,
+			seedEntryKey: labKey,
+			model:        labKey,
+			window:       8192,
+			wantWindow:   8192,
 			wantEnable: func(t *testing.T, got []apogee.MechanismID) {
 				t.Helper()
-				if len(got) < 2 {
-					t.Errorf("EnableMechanisms = %v; want the matched validated set, not the empty floor", got)
+				if len(got) != 0 {
+					t.Errorf("EnableMechanisms = %v; the empty catalogue can assemble no set", got)
+				}
+			},
+			wantNotices: func(t *testing.T, got []string) {
+				t.Helper()
+				if !noticeContains(got, "skipping validated-set entry "+strconv.Quote(labKey)) {
+					t.Errorf("notices = %v; want the surface to have matched the NEW model's entry", got)
 				}
 			},
 		},
@@ -202,13 +218,14 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 			name: "an explicit mechanisms: block is manual control and suppresses the matched set",
 			opts: config.Options{
 				ValidatedSetsEnable: true,
-				ValidatedSetsAlias:  map[string]string{gemmaKey: gemmaKey},
-				Mechanisms:          map[string]bool{"validate": true},
+				ValidatedSetsAlias:  map[string]string{labKey: labKey},
+				Mechanisms:          map[string]bool{"lab_row": true},
 			},
-			manualIDs:  manual,
-			model:      gemmaKey,
-			window:     8192,
-			wantWindow: 8192,
+			manualIDs:    manual,
+			seedEntryKey: labKey,
+			model:        labKey,
+			window:       8192,
+			wantWindow:   8192,
 			wantEnable: func(t *testing.T, got []apogee.MechanismID) {
 				t.Helper()
 				if !slices.Equal(got, manual) {
@@ -254,8 +271,11 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
+			if tt.seedEntryKey != "" {
+				writeLabEntry(t, roots.validated, tt.seedEntryKey, labSet)
+			}
 
-			spec, _, err := rebindSpecFor(tt.opts, roots, tt.manualIDs, tt.model, tt.window,
+			spec, notices, err := rebindSpecFor(tt.opts, roots, tt.manualIDs, tt.model, tt.window,
 				tt.pinnedWindow, tt.outputCap)
 			if err != nil {
 				t.Fatalf("rebindSpecFor: %v", err)
@@ -281,6 +301,9 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 			}
 			if tt.wantEnable != nil {
 				tt.wantEnable(t, spec.EnableMechanisms)
+			}
+			if tt.wantNotices != nil {
+				tt.wantNotices(t, notices)
 			}
 		})
 	}
@@ -310,7 +333,8 @@ func TestRebindInputsOverlayTheBoundUpstream(t *testing.T) {
 // ladder's middle rung is keyed on (probe dir, endpoint, model id), so a rebind that still carried
 // the launch endpoint would miss the record `apogee probe model` left for the server the session is
 // on now — resolving at low confidence, where a matching Validated set is merely OFFERED. With the
-// bound endpoint the same record promotes the identity to medium and the set APPLIES.
+// bound endpoint the same record promotes the identity to medium and the entry is carried past
+// that gate, to the catalogue check the notice below reports.
 func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
 	t.Parallel()
 	const boundEndpoint = "http://127.0.0.1:65535"
@@ -318,9 +342,10 @@ func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
+	writeLabEntry(t, roots.validated, labKey, labSet)
 	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
 		Endpoint:   boundEndpoint,
-		ModelLabel: gemmaKey,
+		ModelLabel: labKey,
 		ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
 		Behavior:   "probe:1:tools+json+chain",
 	}); err != nil {
@@ -345,15 +370,15 @@ func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
 
-	if _, err := rebind(gemmaKey, 8192, provider.EffortDialectNone); err != nil {
+	if _, err := rebind(labKey, 8192, provider.EffortDialectNone); err != nil {
 		t.Fatalf("rebind: %v", err)
 	}
-	if len(spec.EnableMechanisms) == 0 {
-		t.Fatalf("EnableMechanisms is empty: the set was not applied, so the resolution missed the "+
-			"record keyed to the bound endpoint; notices=%v", notices)
+	if len(spec.EnableMechanisms) != 0 {
+		t.Fatalf("EnableMechanisms = %v; the empty catalogue can assemble no set", spec.EnableMechanisms)
 	}
-	if !noticeContains(notices, "Validated set for "+gemmaKey+" applied") {
-		t.Errorf("want the applying notice, got %v", notices)
+	if !noticeContains(notices, "skipping validated-set entry "+strconv.Quote(labKey)) {
+		t.Errorf("the entry was not carried past the offer gate, so the resolution missed the record "+
+			"keyed to the bound endpoint; notices=%v", notices)
 	}
 	if noticeContains(notices, "To apply it") {
 		t.Errorf("the low-confidence OFFER means the launch endpoint was keyed on, not the bound one: %v", notices)

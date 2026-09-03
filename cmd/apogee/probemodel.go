@@ -306,6 +306,11 @@ func autoApplyKeys(m probe.Model, opts config.Options, validatedDir, probeDir st
 		// two surfaces read as one answer about one entry.
 		return nil, false, fmt.Sprintf("the next session start skips validated-set entry %q: %v; it is not applied",
 			with.match.Entry.Key, with.skipErr)
+	case setRetired:
+		// The entry is gone — its key retired, or every Mechanism it named did. Startup says so in
+		// its own voice once per session; a probe report that repeated it would be reporting on
+		// the user's config rather than on what this probe changed, so it stays silent.
+		return nil, false, ""
 	case setApplied:
 		// The one claimable outcome — fall through to the counterfactual below.
 	default:

@@ -78,3 +78,61 @@ func TestMatch_DanglingAliasIsLoud(t *testing.T) {
 		t.Fatalf("error should list known keys, got %q", err.Error())
 	}
 }
+
+// The retired shipped entry key: a config naming it in an alias, or a model whose label IS it,
+// meets the one honest line instead of a refusal. The roll is read only where the lookup missed,
+// so the user's OWN entry under the same key wins over it — the case the regression check of
+// 2026-09-03 put to the owner, ratified: a curation change of ours never costs a live entry its
+// start (ADR 0016's 2026-08-29 amendment).
+func TestMatch_RetiredEntryKey(t *testing.T) {
+	t.Parallel()
+
+	retired := RetiredEntryKeys()
+	if len(retired) == 0 {
+		t.Skip("no retired shipped entry key to exercise")
+	}
+	key := retired[0]
+
+	t.Run("a direct label naming a retired entry says so", func(t *testing.T) {
+		got, err := Match(key, domain.ConfidenceHigh, nil, map[string]Entry{})
+		if err != nil {
+			t.Fatalf("Match: %v", err)
+		}
+		if got.Kind != KindRetired || got.Entry.Key != key {
+			t.Fatalf("got kind %v key %q, want KindRetired naming %q", got.Kind, got.Entry.Key, key)
+		}
+	})
+
+	t.Run("an alias onto a retired entry is not a dangling alias", func(t *testing.T) {
+		got, err := Match("my-quant", domain.ConfidenceLow, map[string]string{"my-quant": key}, map[string]Entry{})
+		var dangling *DanglingAliasError
+		if errors.As(err, &dangling) {
+			t.Fatalf("a retired entry key must not refuse the start: %v", err)
+		}
+		if err != nil {
+			t.Fatalf("Match: %v", err)
+		}
+		if got.Kind != KindRetired || got.Entry.Key != key || !got.ViaAlias || got.AliasFrom != "my-quant" {
+			t.Fatalf("got %+v, want KindRetired via the alias from my-quant onto %q", got, key)
+		}
+	})
+
+	t.Run("a live entry under the retired key still applies", func(t *testing.T) {
+		entries := map[string]Entry{key: {Key: key, Set: ids("a"), Source: SourceUser}}
+		got, err := Match("my-quant", domain.ConfidenceLow, map[string]string{"my-quant": key}, entries)
+		if err != nil {
+			t.Fatalf("Match: %v", err)
+		}
+		if got.Kind != KindApplied || got.Entry.Source != SourceUser {
+			t.Fatalf("got %+v, want the user-local entry applied, not the retired-key line", got)
+		}
+	})
+
+	t.Run("an unrolled unknown alias target is still loud", func(t *testing.T) {
+		_, err := Match("my-quant", domain.ConfidenceLow, map[string]string{"my-quant": "nope"}, map[string]Entry{})
+		var dangling *DanglingAliasError
+		if !errors.As(err, &dangling) {
+			t.Fatalf("want DanglingAliasError for a target on no roll, got %v", err)
+		}
+	})
+}

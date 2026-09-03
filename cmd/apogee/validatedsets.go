@@ -40,6 +40,11 @@ const (
 	setSkipped
 	// setApplied — the entry applies this session.
 	setApplied
+	// setRetired — the entry is gone rather than defective: either its KEY names a shipped entry
+	// this build retired, or every Mechanism its set named retired, leaving nothing to arm. Both
+	// earn ONE line naming the entry — a config apogee itself offered must never become a
+	// refusal, and must never become a silent no-op either.
+	setRetired
 )
 
 // setDecision is the whole startup answer, carrying whatever a renderer needs to say it in
@@ -128,6 +133,20 @@ func startupSetDecision(opts config.Options, userDir, probeDir string) setDecisi
 	match.Entry, out.droppedRetired = validated.DropRetired(match.Entry, mechanisms.RetiredIDs())
 	out.match = match
 
+	// The entry key itself retired: nothing carries it any more, so there is no set to weigh.
+	if match.Kind == validated.KindRetired {
+		out.kind = setRetired
+		return out
+	}
+	// The shed emptied the set. An empty set passes Validate vacuously, so without this rung an
+	// entry whose every member retired would reach setApplied and arm nothing behind a banner
+	// claiming a validated stack — and would say it one line per shed member. One line, and the
+	// entry does not apply.
+	if (match.Kind == validated.KindApplied || match.Kind == validated.KindOffered) && len(match.Entry.Set) == 0 {
+		out.kind = setRetired
+		return out
+	}
+
 	switch match.Kind {
 	case validated.KindApplied, validated.KindOffered:
 		if len(opts.Mechanisms) > 0 {
@@ -183,6 +202,8 @@ func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []a
 		notices = append(notices, offerNotice(d.match.Entry, d.fp.Label))
 	case setSkipped:
 		notices = append(notices, fmt.Sprintf("apogee: skipping validated-set entry %q: %v", d.match.Entry.Key, d.skipErr))
+	case setRetired:
+		notices = append(notices, retiredSetNotice(d.match))
 	case setApplied:
 		set = append([]apogee.MechanismID(nil), d.match.Entry.Set...)
 		sort.Slice(set, func(i, j int) bool { return set[i] < set[j] })
@@ -195,6 +216,28 @@ func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []a
 		// need no banner.
 	}
 	return set, notices, nil
+}
+
+// retiredSetNotice is the ONE line a wholly-retired entry earns — the setRetired rung's whole
+// voice. It has two readings of the same fact, told apart by what actually went away:
+//
+//   - the entry KEY retired (validated.KindRetired): apogee shipped a roster row, offered the user
+//     the alias line that applies it, then removed the row. The config naming it is the user's
+//     copy of our own suggestion, so it draws a line pointing at the alias to delete — never a
+//     dangling-alias refusal (AGENTS.md: a value apogee accepted yesterday and rejects today is a
+//     regression).
+//   - every MEMBER of the set retired: the entry is the user's own, still perfectly readable, but
+//     the stack it recorded is gone from the catalogue. One line, not one per shed member: a
+//     fifteen-member record would otherwise bury the only fact that matters — nothing applies.
+//
+// Pure, so both wordings are table-testable.
+func retiredSetNotice(d validated.Decision) string {
+	if d.Kind == validated.KindRetired {
+		return fmt.Sprintf("apogee: validated-set entry %q was retired in %s and no longer applies; remove the alias",
+			d.Entry.Key, validated.RetiredEntryRelease(d.Entry.Key))
+	}
+	return fmt.Sprintf("apogee: validated-set entry %q names only retired mechanisms and no longer applies; remove it",
+		d.Entry.Key)
 }
 
 // retiredSetMemberNotice is the line an applying set earns for each RETIRED member it shed. It names

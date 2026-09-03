@@ -24,6 +24,12 @@ const (
 	// (ADR 0016 §5), so the set is offered via the per-session notice naming the
 	// one-line alias that applies it — the explicit human decision §3 requires.
 	KindOffered
+
+	// KindRetired — no entry carries the label (or the alias target), and the key names a
+	// SHIPPED entry this build retired. It is KindNone's informed sibling: the same "nothing
+	// applies", said out loud, because the user's config names a key apogee itself offered.
+	// Entry carries the key alone, so a renderer can name it.
+	KindRetired
 )
 
 // Decision is the outcome of matching the resolved fingerprint against the merged
@@ -64,6 +70,12 @@ func (e *DanglingAliasError) Error() string {
 // transfer — either way a human decided, so the confidence gate is replaced, not
 // weakened. A direct label match auto-applies only at ≥ medium confidence and is
 // offered at low. A zero label matches nothing.
+//
+// The roll of RETIRED shipped entry keys is consulted only where a lookup MISSED, never before
+// one: a user-local entry filed under a key apogee once shipped is the user's own measured
+// evidence and still applies, exactly as it did the release before the removal. Only when nothing
+// carries the key does the roll answer — turning what would otherwise be a dangling-alias refusal
+// (or a silent no-match) into the one honest line saying the shipped entry is gone.
 func Match(label string, confidence domain.FingerprintConfidence, alias map[string]string, entries map[string]Entry) (Decision, error) {
 	if label == "" {
 		return Decision{Kind: KindNone}, nil
@@ -72,6 +84,9 @@ func Match(label string, confidence domain.FingerprintConfidence, alias map[stri
 	if target, ok := alias[label]; ok {
 		e, ok := entries[target]
 		if !ok {
+			if RetiredEntryRelease(target) != "" {
+				return Decision{Kind: KindRetired, Entry: Entry{Key: target}, ViaAlias: true, AliasFrom: label}, nil
+			}
 			return Decision{}, &DanglingAliasError{Label: label, Target: target, Known: sortedKeys(entries)}
 		}
 		return Decision{Kind: KindApplied, Entry: e, ViaAlias: true, AliasFrom: label}, nil
@@ -79,6 +94,9 @@ func Match(label string, confidence domain.FingerprintConfidence, alias map[stri
 
 	e, ok := entries[label]
 	if !ok {
+		if RetiredEntryRelease(label) != "" {
+			return Decision{Kind: KindRetired, Entry: Entry{Key: label}}, nil
+		}
 		return Decision{Kind: KindNone}, nil
 	}
 	if confidence >= domain.ConfidenceMedium {

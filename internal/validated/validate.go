@@ -14,6 +14,11 @@ import (
 // construction — dropping it leaves the measured stack, and therefore the entry's evidence,
 // untouched. An UNKNOWN (non-retired) ID still disqualifies the entry whole, as ADR 0016 rules.
 //
+// An entry whose set is retired WHOLE sheds to an empty one. That is honest data, not an apply:
+// the caller must read the empty set as "this entry no longer applies" rather than handing it to
+// Validate, which an empty set passes vacuously. cmd/apogee's startup ladder makes that reading
+// (its setRetired rung); no caller may treat an emptied entry as a validated stack.
+//
 // Retired IDs are a parameter for the same reason descriptors are: this package never imports the
 // Mechanism catalogue. The caller passes mechanisms.RetiredIDs(). The entry is copied, so the
 // source entry (a shipped bundle member, a decoded user file) is never edited in place.
