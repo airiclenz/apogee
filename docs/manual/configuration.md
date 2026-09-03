@@ -68,7 +68,7 @@ without steering it, so none needs a per-model bench run and none is withdrawn b
 floor is what Bypass is measured *against*, not something Bypass takes away. All six are **file-only**
 (no flag, no environment variable) and all six are live on the [settings
 screen](commands.md#the-settings-screen--settings), as Session rows: an edit applies to the session
-you are in. Only an explicit `<key>: false` takes one away, and the Go API's `domain.FloorConfig`
+you are in. Only an explicit `<key>: false` takes one away, and the Go API's `apogee.FloorConfig`
 spells them as `Disable…` fields, so an embedder handing `New` a bare `Config` gets the whole floor.
 [ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) records
 why they are behaviour rather than catalogued rows.
