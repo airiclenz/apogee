@@ -183,7 +183,18 @@ suite goes red.
 
 commit: `feat(agent): tell a delegate what its final reply is for`
 
-## 2. The block on the wire, end to end
+## 2. The block on the wire, end to end — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the system-text helper is REUSED, not added: `seatSystemText`
+(`cmd/apogee/e2e_seat_test.go:348`) already joins a request's system messages in wire order and
+`cmd/apogee` is one test package, so the new case calls it rather than duplicating the loop. The
+new helper this case does add is `requestCarriesTask` — `childRequests`' own discrimination asked of
+ONE request, because the assertion needs the requests themselves and not a count of them;
+`childRequests`/`childToolMenus` are left untouched (regression guard: add, do not reshape).
+NOTES (2026-09-03): the fixture's catch-all turn is what a child whose request lost the block would
+be answered by, so the `when.system:` discriminator is itself an assertion; the header comment says
+so rather than claiming (wrongly) that such a run would never report back — the parent's wrap-up
+turn is keyed on the `sub_agent` tool result and would still fire.
 
 **What.** Depends on item 1. Pin the block as an ANNOUNCED surface: a scripted run where the model
 delegates, and the child's own request is asserted to carry the block's exact text. Add

@@ -1,0 +1,43 @@
+# The upstream TestE2EDelegationChildCarriesTheReportBlock talks to: one delegation, and a child
+# that is picked out of the request log by its SYSTEM text rather than by its task.
+#
+# That is the whole design. At the moment the parent asks for a delegation and the child answers it,
+# the two conversations are told apart by one thing on the wire — the child's standing system
+# message carries the engine-owned delegate report block and the parent's does not. Keying the
+# child's turn on `when.system:` is what makes the fixture itself an assertion: a run where the
+# block never reached a child leaves its request to the catch-all turn at the bottom, and the
+# delegate answers with a line no delegate in this script would ever say.
+#
+# The regexp deliberately names a stretch of the block with no regexp metacharacters in it — the
+# block's own `(path:line)` illustration carries parentheses, which would group rather than match.
+model: report-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Delegate report block
+    # The CHILD, picked by the block in its system text. It sits above the parent's turns so that a
+    # request carrying the block can never be answered as a parent's.
+    - when:
+        system: another agent delegated this task to you
+      repeat: true
+      text: I read a.txt at a.txt:1 and changed nothing; the workspace holds that one file.
+    # The parent's wrap-up, once the delegation has reported. Reaching it at all is the proof that
+    # the child's answer came back through the sub_agent result.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The delegate reported back.
+    # The delegation itself.
+    - when:
+        last_message: ^Delegate the report survey
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey the workspace and report what you found","name":"survey"}'
+    # Anything neither the parent nor the child claims — including a child whose request arrived
+    # without the block, which is the failure this fixture is built to expose.
+    - repeat: true
+      text: Nothing else to add.

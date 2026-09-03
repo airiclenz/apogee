@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/judge"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -381,6 +382,97 @@ func TestJudgeDelegationStepCap(t *testing.T) {
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The delegate report block on the wire
+// ----------------------------------------------------------------------------
+
+// The prompts delegate-report.yaml answers and the wording the run is waited on. The BLOCK itself
+// is never spelled here: cmd/apogee is package main and cannot import internal/agent, so the
+// assertion reads the engine's own constant through the root facade — seatFallbackNoteText
+// (e2e_seat_test.go) is the idiom, and a copy retyped into a fixture would go on passing after the
+// engine's text had changed.
+const (
+	reportPrompt = "Delegate the report survey to a sub-agent."
+	// reportChildTask is the delegate's own instruction, and it is how a child's requests are told
+	// from the parent's: every message of the child's conversation carries it, and the parent holds
+	// it inside a tool CALL rather than in message content.
+	reportChildTask = "Survey the workspace and report what you found"
+	reportWrapUp    = "The delegate reported back."
+	// reportStandingPrompt pins this run's own system prompt so the announced surface under
+	// assertion is the delegate block and not the embedded default's wording: since ADR 0064 a
+	// config naming no prompt resolves the default template, which is free to be reworded.
+	// announcedStandingPrompt (e2e_announced_test.go) is the same move.
+	reportStandingPrompt = "system-prompt-text: |\n  You are apogee, a terminal coding agent.\n"
+)
+
+// TestE2EDelegationChildCarriesTheReportBlock pins the delegate report block as an ANNOUNCED
+// surface: in a real run, through the real composition, the request a DELEGATED agent is asked on
+// carries the engine's block verbatim and the parent's request does not.
+//
+// The block is what tells a child that its final reply is the only thing its parent receives, so it
+// is worth nothing unless it is actually on the child's wire. Every other test of it lives inside
+// internal/agent, where standingSystem can be called directly; this one asks the question the way a
+// user meets it — one conversation, one delegation, and the request log the upstream kept.
+func TestE2EDelegationChildCarriesTheReportBlock(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "delegate-report"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, reportStandingPrompt)
+
+	// The delegation runs and its result reaches the parent. The wrap-up turn is keyed on the
+	// sub_agent tool result, so a frame carrying it is a delegation that came back — the third of
+	// this case's three claims, and the one that keeps the two below from passing over a run that
+	// never delegated at all.
+	submit(drv, reportPrompt)
+	drv.WaitText(reportWrapUp)
+	drv.WaitQuiet(settled)
+
+	// Every request the run made, split by whose conversation it belongs to. The child's carry the
+	// block exactly once — a second copy would mean it is being composed per Turn instead of
+	// standing — and nothing else carries it at all.
+	var children, parents int
+	for _, req := range stub.Requests() {
+		system := seatSystemText(req)
+		blocks := strings.Count(system, apogee.DelegateReportBlock)
+		if requestCarriesTask(req, reportChildTask) {
+			children++
+			if blocks != 1 {
+				t.Errorf("the child's request %d carries the delegate report block %d times; want "+
+					"exactly one:\n%s", req.N, blocks, system)
+			}
+			continue
+		}
+		parents++
+		if blocks != 0 {
+			t.Errorf("request %d belongs to no delegate and still carries the delegate report "+
+				"block:\n%s", req.N, system)
+		}
+	}
+	if children == 0 {
+		t.Fatalf("no request carried the delegate's task %q; the delegation never reached the "+
+			"upstream", reportChildTask)
+	}
+	if parents == 0 {
+		t.Fatalf("every request carried the delegate's task; there is no parent side left for the " +
+			"block to be absent from")
+	}
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// requestCarriesTask reports whether req belongs to the conversation a delegate was handed the task
+// in. It is [childRequests]' discrimination asked of ONE request, for a case that needs the requests
+// themselves rather than a count of them.
+func requestCarriesTask(req stubllm.Request, task string) bool {
+	for _, msg := range req.Messages {
+		if strings.Contains(msg.Content, task) {
+			return true
+		}
+	}
+	return false
 }
 
 // ----------------------------------------------------------------------------
