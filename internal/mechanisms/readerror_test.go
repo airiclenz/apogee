@@ -8,6 +8,13 @@ import (
 	"github.com/airiclenz/apogee/internal/domain/domaintest"
 )
 
+// scanView wraps a message slice as the read-only ConversationView the history-scanning helpers
+// walk. It moved here with the read-error sniffer when the shared conversation-walk file retired
+// with its last caller (v0.20.0, ADR 0071).
+func scanView(msgs []domain.Message) domain.ConversationView {
+	return domaintest.FakeLoopView{Messages: msgs}.Conversation()
+}
+
 // A source file a coding agent reads is full of error-handling strings, and a successful
 // read_file's result content IS that file — so the read-error question can only be answered by
 // the committed marker, never by the text. This table pins the three-way contract:

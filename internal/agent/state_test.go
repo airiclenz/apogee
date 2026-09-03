@@ -153,7 +153,7 @@ func TestSnapshot_PreservesReasoningContent(t *testing.T) {
 
 // TestSnapshot_RoundTripsExchangeBoundaryForAbort pins the ADR 0017 §2 fallback: the snapshot
 // keeps writing exchangeStart — the cached rollback boundary is load-bearing, because a
-// mid-Exchange truncate_history fold can drop the open Exchange's opening user message, so the
+// mid-Exchange history rewrite (a lab `HistoryRewriter`) can drop the open Exchange's opening user message, so the
 // boundary cannot be re-derived on resume — and a resumed Agent's AbortExchange rolls back to
 // exactly the boundary the snapshotting Agent cached, then accepts a fresh Submit.
 func TestSnapshot_RoundTripsExchangeBoundaryForAbort(t *testing.T) {

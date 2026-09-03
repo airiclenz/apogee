@@ -64,14 +64,13 @@ var allHooks = []apogee.HookPoint{
 	apogee.HookHistoryRewrite,
 }
 
-// enabledMechanisms is the multi-wave set the mechanisms-on arm enables via Config: one
-// history-rewrite shaper that stays inspect-only on a short conversation (truncate_history —
-// wave 2) and the learning Mechanism whose observe half writes into the injected LibraryDir
-// (library — item 14). No CATALOGUED row acts every pre-request any more — the wave-3 toolfilter
-// shaper that used to, and the wave-4 decompose shaper that sat beside it, both retired in v0.20.0
+// enabledMechanisms is the set the mechanisms-on arm enables via Config: the learning Mechanism
+// whose observe half writes into the injected LibraryDir (library — item 14). No CATALOGUED row
+// acts every pre-request any more — the wave-3 toolfilter shaper that used to, the wave-4 decompose
+// shaper that sat beside it, and the wave-2 truncate_history history rewrite all retired in v0.20.0
 // (ADR 0071) — so the registered experimental hook is the one pre-request actor the fired stream
-// carries.
-var enabledMechanisms = []apogee.MechanismID{"truncate_history", "library"}
+// carries, and the history-rewrite hook point is exercised by that experimental hook alone.
+var enabledMechanisms = []apogee.MechanismID{"library"}
 
 // ----------------------------------------------------------------------------
 // The scripted OpenAI-compatible streaming model (one responder, both arms)
@@ -420,10 +419,10 @@ func TestBenchReadinessContract(t *testing.T) {
 	}
 
 	// === Assertion 2: R4 — an inspect-only invocation books no fired event ===
-	// truncate_history (short history) and library (observe is silent, inject is confidence-gated)
-	// are dispatched every relevant pass but never intervene, so they never appear in the stream.
+	// library (observe is silent, inject is confidence-gated) is dispatched every relevant pass but
+	// never intervenes, so it never appears in the stream.
 	for _, fe := range mechFires {
-		if fe.Mechanism == "truncate_history" || fe.Mechanism == "library" {
+		if fe.Mechanism == "library" {
 			t.Errorf("inspect-only Mechanism %q booked a fire (R4: only acted fires are booked)", fe.Mechanism)
 		}
 	}

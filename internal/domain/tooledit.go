@@ -122,8 +122,8 @@ func (e *ToolResultEdit) Summary() ToolSummary { return e.result.Summary }
 // never needs it.
 func (e *ToolResultEdit) Revision() int { return e.revision }
 
-// SetContent replaces the prose the model will read — the rewrite error_enrichment makes
-// when it appends its hint to a repeated failure.
+// SetContent replaces the prose the model will read — the rewrite a post-tool-result hook makes
+// when it appends its own guidance to a failure.
 func (e *ToolResultEdit) SetContent(content string) {
 	e.result.Content = content
 	e.revision++

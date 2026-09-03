@@ -52,8 +52,9 @@ type PreToolExecHook interface {
 	PreToolExec(ctx context.Context, call *ToolCallEdit, view LoopView) error
 }
 
-// PostToolResultHook acts on a tool result before the model next sees it — the home
-// of error_enrichment (correct_tool_result is deferred, owner-ratified 2026-07-04: a
+// PostToolResultHook acts on a tool result before the model next sees it — the seam
+// error_enrichment held until it retired in v0.20.0 (ADR 0071), and where
+// correct_tool_result stays deferred (owner-ratified 2026-07-04: a
 // bench-side experimental hook until a production trigger is found), new to the loop
 // (the proxy could not host it). It rewrites the result through a ToolResultEdit
 // (tooledit.go), and receives the originating call (the tool name and arguments live
@@ -63,9 +64,11 @@ type PostToolResultHook interface {
 	PostToolResult(ctx context.Context, call ToolCall, result *ToolResultEdit, view LoopView) error
 }
 
-// HistoryRewriter edits conversation state — the home of truncate_history. A
-// capability that may attach at more than one point (CONTEXT: Hook point). The
-// Conversation is itself the history, so this hook reads and mutates it directly.
+// HistoryRewriter edits conversation state — the seam a drop-the-middle or
+// re-summarising lab hook attaches at (the shipped catalogue has carried no such
+// row since v0.20.0, ADR 0071). A capability that may attach at more than one
+// point (CONTEXT: Hook point). The Conversation is itself the history, so this
+// hook reads and mutates it directly.
 type HistoryRewriter interface {
 	RewriteHistory(ctx context.Context, conv *Conversation) error
 }

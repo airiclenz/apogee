@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -255,19 +254,54 @@ func TestAutoCompactSkippedFoldDoesNotSaturate(t *testing.T) {
 	}
 }
 
+// dropMiddleRewriter is a synthetic lab HistoryRewriter: it keeps the protected prefix and the last
+// keepLastTurns assistant-anchored exchanges, drops everything between them, and inserts note at the
+// cut. It stands in for whatever drop-the-middle rewrite a Driver or bench registers at the
+// history-rewrite hook — the shipped catalogue carries none since v0.20.0 (ADR 0071) — and it is
+// only the SHAPE the repair under test reacts to, not a Mechanism whose own behaviour is asserted
+// here.
+type dropMiddleRewriter struct {
+	keepLastTurns int
+	note          string
+}
+
+func (r dropMiddleRewriter) RewriteHistory(_ context.Context, conv *domain.Conversation) error {
+	prefixEnd := conv.PrefixEnd()
+	boundaries := conv.AssistantBoundaries() // ascending assistant indices
+	kept, tailStart := 0, conv.Len()
+	for i := len(boundaries) - 1; i >= 0 && boundaries[i] >= prefixEnd; i-- {
+		tailStart = boundaries[i]
+		if kept++; kept == r.keepLastTurns {
+			break
+		}
+	}
+	if kept < r.keepLastTurns || tailStart <= prefixEnd {
+		return nil
+	}
+	conv.DropRange(prefixEnd, tailStart)
+	conv.Insert(prefixEnd, domain.Message{Role: domain.RoleUser, Content: r.note})
+	return nil
+}
+
 // TestExchangeStartRepairedAfterMidExchangeTruncation drives the exchangeStart repair (S2c): a
-// mid-Exchange truncate_history fold drops the middle of the conversation — including this Exchange's
+// mid-Exchange history rewrite drops the middle of the conversation — including this Exchange's
 // initiating user message — so the stale exchangeStart would leave AbortExchange dropping the wrong
 // range (orphaning this Exchange's tool results). With the repair, exchangeStart re-anchors just past
 // the gap note and AbortExchange rolls the conversation back to exactly prefix + gap note.
 func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 	sink := &recordingSink{}
 	reg := domain.NewMechanismRegistry()
-	m, err := mechanisms.Build(domain.MechanismID("truncate_history"), mechanisms.Deps{})
-	if err != nil {
-		t.Fatalf("Build(truncate_history): %v", err)
-	}
-	mustAddMech(t, reg, m)
+	mustAddMech(t, reg, domain.RegisteredMechanism{
+		Descriptor: domain.MechanismDescriptor{
+			ID:          "lab_history_rewrite",
+			Capability:  domain.CapProactiveNudge,
+			Suppression: domain.SuppressStrikesThree,
+		},
+		Hook: dropMiddleRewriter{
+			keepLastTurns: 4,
+			note:          "[Earlier conversation history was omitted to keep the context window within budget.]",
+		},
+	})
 
 	toolReg := domain.NewToolRegistry()
 	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: "ok"}); err != nil {
@@ -286,7 +320,7 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 
 	// A mid-Exchange continuation boundary: index 0 is the protected prefix; indices 1–5 are prior
 	// history; index 6 opens THIS Exchange (exchangeStart = 6), followed by four tool Turns. Seven
-	// assistant boundaries mean truncate_history (keepLastTurns = 4) will cut back to the 4th-from-last
+	// assistant boundaries mean the rewriter (keepLastTurns = 4) will cut back to the 4th-from-last
 	// boundary — dropping the prior history AND this Exchange's initiating user message.
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "OVERARCHING GOAL"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "prior 1"})
@@ -309,9 +343,9 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 	if res.Status != domain.StatusTurnComplete {
 		t.Fatalf("Turn status = %q, want %q (a tool Turn keeps the Exchange open)", res.Status, domain.StatusTurnComplete)
 	}
-	// truncate_history fired mid-Exchange (it dropped the middle and inserted the gap note).
+	// The rewriter fired mid-Exchange (it dropped the middle and inserted the gap note).
 	if !hasEvent[domain.MechanismFiredEvent](sink.events) {
-		t.Fatal("truncate_history did not fire; the repair path is untested")
+		t.Fatal("the history rewriter did not fire; the repair path is untested")
 	}
 
 	a.AbortExchange()

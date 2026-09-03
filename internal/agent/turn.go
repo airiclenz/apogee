@@ -222,7 +222,7 @@ func (l *turnLifecycle) openExchange() {
 }
 
 // reanchorAfterShrink repairs the cached Exchange boundary (S2) after a mid-Exchange history
-// rewrite (truncate_history) dropped `dropped` messages, shifting the current Exchange's messages
+// rewrite (a lab `HistoryRewriter`) dropped `dropped` messages, shifting the current Exchange's messages
 // down: it shifts exchangeStart down by the delta, clamped to [conv.PrefixEnd()+1, conv.Len()], so
 // AbortExchange still rolls back to this Exchange's boundary rather than over-dropping into the
 // protected prefix or leaving orphaned tool results. The floor is just past the protected prefix +
@@ -245,7 +245,7 @@ func (l *turnLifecycle) reanchorAfterShrink(dropped int) {
 // summary rather than into the protected prefix. That repair is required, not optional: the boundary
 // is a CACHED value (ADR 0017 §2's recorded fallback) precisely because a rewrite like the fold can
 // drop the Exchange's opening user message, leaving nothing to re-derive it from. It mirrors
-// reanchorAfterShrink, the S2 repair step() performs after a mid-Exchange truncate_history shrink.
+// reanchorAfterShrink, the S2 repair step() performs after a mid-Exchange history-rewrite shrink.
 // No-op outside an Exchange.
 func (l *turnLifecycle) anchorAtBridge() {
 	if l.inExchange {

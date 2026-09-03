@@ -710,8 +710,9 @@ func (a *Agent) AbortExchange() {
 // target AbortExchange drops from and the boundary the snapshot round-trips. It is the ONE
 // reader seam over the cached a.turns.exchangeStart (ADR 0017 §2's recorded fallback): the boundary
 // canNOT be re-derived as "the index of the last user message" (domain.CurrentExchange),
-// because a mid-Exchange truncate_history fold drops the open Exchange's opening user message
-// whenever the Exchange already holds keepLastTurns or more assistant messages — the inserted
+// because a mid-Exchange drop-the-middle rewrite (a lab `HistoryRewriter`) drops the open
+// Exchange's opening user message whenever the Exchange already holds enough assistant
+// messages for the rewrite to cut back past it — the inserted
 // user-role gap note then anchors the derivation, and an abort would wrongly drop the note
 // (pinned by TestExchangeStartRepairedAfterMidExchangeTruncation). So the cache stays —
 // written at step()'s Exchange opening, re-anchored by the S2 repair after a history rewrite

@@ -5,12 +5,13 @@ package agent
 // cycle. The sim's retry builders copied the request and mutated only the throwaway copy sent
 // upstream, so its detectors always ran against the unmutated committed request; apogee mutates
 // the request in place, so without the committedLen View() bound a never-executed superseded
-// read / a superseded tool-call turn would masquerade as committed history to read_repeat and to
-// the tool-loop breaker. These drive the real Floor guards, and a real registry-built Mechanism
-// beside them, through scripted responders.
+// read / a superseded tool-call turn would masquerade as committed history to a history-scanning
+// post-response hook and to the tool-loop breaker. These drive the real Floor guards, and a lab
+// hook beside them, through scripted responders.
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,11 +31,50 @@ func wireUserCountContaining(msgs []provider.Message, substr string) int {
 	return n
 }
 
+// repeatReadProbe is a synthetic post-response hook with exactly the sensitivity the retired
+// read_repeat row had: when EVERY tool call in the response re-reads a file the conversation it can
+// see already read, it retries in place with a "you already read these" correction. It stands in for
+// any history-scanning lab hook a Driver or bench registers at this seam — the shipped catalogue
+// carries none since v0.20.0 (ADR 0071) — and it is the committedLen-bounded View() that is under
+// test here, not the hook's own wording.
+type repeatReadProbe struct{}
+
+func (repeatReadProbe) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
+	calls := resp.ToolCalls()
+	if len(calls) == 0 {
+		return domain.PostResponseDecision{}, nil
+	}
+	alreadyRead := make(map[string]bool)
+	resp.View().Conversation().Range(func(_ int, m domain.Message) bool {
+		for _, tc := range m.ToolCalls {
+			if tc.Tool == "read_file" {
+				alreadyRead[readPathOf(tc)] = true
+			}
+		}
+		return true
+	})
+	for _, tc := range calls {
+		if tc.Tool != "read_file" || !alreadyRead[readPathOf(tc)] {
+			return domain.PostResponseDecision{}, nil
+		}
+	}
+	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: "You already read these files."}, nil
+}
+
+// readPathOf reads a read_file call's path argument, or "" when it carries none.
+func readPathOf(tc domain.ToolCall) string {
+	var args struct {
+		Path string `json:"path"`
+	}
+	_ = json.Unmarshal(tc.Arguments, &args)
+	return args.Path
+}
+
 // TestRetryView_ReadRepeatIgnoresSupersededRead: a tool-call-repair retry cycle whose superseded
-// attempt read a.go must NOT make read_repeat treat a.go as already-read on the retry — the
-// superseded read never executed and lives only in the request-scoped appendage. With the fix
-// read_repeat stays inert, the repair guard passes the corrected call, and the read dispatches;
-// without it read_repeat would hijack the retry (the read never dispatches).
+// attempt read a.go must NOT make a history-scanning post-response hook treat a.go as already-read
+// on the retry — the superseded read never executed and lives only in the request-scoped appendage.
+// With the fix the probe stays inert, the repair guard passes the corrected call, and the read
+// dispatches; without it the probe would hijack the retry (the read never dispatches).
 func TestRetryView_ReadRepeatIgnoresSupersededRead(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
@@ -43,10 +83,18 @@ func TestRetryView_ReadRepeatIgnoresSupersededRead(t *testing.T) {
 		schema:   `{"type":"object","properties":{"path":{"type":"string"},"max_lines":{"type":"integer"}},"required":["path","max_lines"]}`,
 	}
 	cfg := configWithTools(sink, readFile)
-	cfg.Mechanisms = wave1Registry(t, "read_repeat")
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	mustAddMech(t, cfg.Mechanisms, domain.RegisteredMechanism{
+		Descriptor: domain.MechanismDescriptor{
+			ID:          "lab_repeat_read",
+			Capability:  domain.CapResponseRepair,
+			Suppression: domain.SuppressStrikesThree,
+		},
+		Hook: repeatReadProbe{},
+	})
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		toolCallScript("c1", "read_file", `{"path":"a.go"}`),                 // missing max_lines — the repair guard retries; reads a.go
-		toolCallScript("c2", "read_file", `{"path":"a.go","max_lines":100}`), // corrected — must dispatch, not re-fire read_repeat
+		toolCallScript("c2", "read_file", `{"path":"a.go","max_lines":100}`), // corrected — must dispatch, not re-fire the probe
 		contentScript("done"), // next turn's final
 	}}
 
@@ -59,15 +107,15 @@ func TestRetryView_ReadRepeatIgnoresSupersededRead(t *testing.T) {
 	if len(responder.got) != 3 {
 		t.Fatalf("provider was called %d times, want 3 (draft, repair retry, next-turn final)", len(responder.got))
 	}
-	// The superseded read must not be counted: read_repeat never fires this Exchange.
-	if n := fireCountFor(sink.events, "read_repeat"); n != 0 {
-		t.Errorf("read_repeat fired %d times; the superseded a.go read must not read as committed history", n)
+	// The superseded read must not be counted: the probe never fires this Exchange.
+	if n := fireCountFor(sink.events, "lab_repeat_read"); n != 0 {
+		t.Errorf("the probe fired %d times; the superseded a.go read must not read as committed history", n)
 	}
 	// The repair guard DID drive the retry cycle whose appendage carried the superseded read.
 	if !hasGuardFire(sink.events, guardToolCallRepair, guardActionRetry) {
 		t.Error("the repair guard did not retry — the test never exercised the retry-appendage path")
 	}
-	// The corrected read is the call that actually dispatched (read_repeat did not hijack it).
+	// The corrected read is the call that actually dispatched (the probe did not hijack it).
 	calls := dispatchedCalls(sink.events)
 	if len(calls) != 1 || calls[0].ID != "c2" || string(calls[0].Arguments) != `{"path":"a.go","max_lines":100}` {
 		t.Errorf("dispatched calls = %+v, want only the corrected c2 read of a.go", calls)

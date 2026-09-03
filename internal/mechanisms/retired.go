@@ -75,6 +75,17 @@ type retiredRow struct {
 //     down to ten entries decides for the model what it is allowed to reach for, and a wrongly
 //     trimmed menu removes the tool the task needed; `tools.disabled` is the answer to a menu a
 //     model cannot handle.
+//   - truncate_history (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. The
+//     drop-the-middle history rewrite was the cheap A/B alternative to generative Compaction and
+//     never earned its place against it (ADR 0009's gate); dropping the middle of a conversation
+//     silently is a context decision the structural Compaction path makes better and announces.
+//   - error_enrichment (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. Appending
+//     category-shaped suggestions to a repeated tool error tells the model what to try next
+//     instead of handing it what the tool said, which is steering rather than shaping.
+//   - read_repeat (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. It was the twin of the
+//     promoted redundant-re-read interceptor — the two were mutually exclusive on one symptom and
+//     only the interceptor carried evidence — so the read-cache Floor guard covers the symptom for
+//     every model and the hinting half goes.
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
@@ -91,6 +102,9 @@ var retired = []retiredRow{
 	{ID: "filehint", Release: "v0.20.0"},
 	{ID: "read_loop", Release: "v0.20.0"},
 	{ID: "toolfilter", Release: "v0.20.0"},
+	{ID: "truncate_history", Release: "v0.20.0"},
+	{ID: "error_enrichment", Release: "v0.20.0"},
+	{ID: "read_repeat", Release: "v0.20.0"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

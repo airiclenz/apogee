@@ -73,7 +73,7 @@ func buildCorrectionMessage(issues []robustnessIssue) string {
 // deliberately NOT extended with apogee's own edit tools: their payloads are old/new-string fragments
 // or patches, not files, so syntax/autofix must never act on them (S1, 2026-07-04). Semantic (b) —
 // "this call mutated a file / was a write action" — is isFileMutatingTool below, the apogee-complete
-// superset the history family uses.
+// superset every history-scanning caller uses.
 var writeToolNames = map[string]bool{
 	"write_file":      true,
 	"writeFile":       true,
@@ -94,10 +94,10 @@ func isWriteTool(name string) bool { return writeToolNames[name] }
 // superset: apogee-sim's writeToolNames UNION apogee's own write tools (edit_existing_file,
 // single_find_and_replace, multi_find_and_replace, copy_file, move_file, delete_file; names
 // verified against internal/tools, and pinned to its registered menu there), reusing
-// wave4WriteTools (historyhints.go) as the single source of that superset. The history-family
-// Mechanisms — read_repeat, error_enrichment and library's narration check — use it so their
-// write-since / read-then-write / progress detection sees apogee's real edit menu, not just the
-// sim spellings.
+// wave4WriteTools (historyhints.go) as the single source of that superset. library's narration
+// check uses it — as the whole retired history-aware family once did, and as the internal/floor
+// guards' own copy of the set still does — so write-since / read-then-write / progress detection
+// sees apogee's real edit menu, not just the sim spellings.
 func isFileMutatingTool(name string) bool { return wave4WriteTools[name] }
 
 // writePathContent extracts the file path and content a write tool call carries, matching the

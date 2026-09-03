@@ -2,35 +2,28 @@ package mechanisms
 
 import (
 	"encoding/json"
-	"path"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The Wave-3 history-aware hint family (Phase-4 item 11): error_enrichment (post-tool-result) and
-// read_repeat (post-response) — the family's other members left it, the identical-repeat detector
-// and the redundant-re-read interceptor promoted to the tool-loop-breaker and read-cache Floor
-// guards (ADR 0071), read_loop retired outright in v0.20.0 on the same verdict — the cross-turn
-// aggregators ported from the pinned apogee-sim source per the catalogue
-// (docs/design/mechanism-catalogue.md Table A/B). Every one
-// decides by scanning the conversation across Turns, so it reads the loop's history through the
-// LoopView / ConversationView the hook is handed rather than its single mutable value. All ship
-// default-off (D1) and self-regulate through the loop's per-Session tracker (strikes-3, item 3);
-// none is exempt, so all are disabled under Bypass (D5).
+// The Wave-3 history-aware hint family is GONE: the identical-repeat detector and the
+// redundant-re-read interceptor were promoted to the tool-loop-breaker and read-cache Floor guards
+// (ADR 0071), and read_loop, error_enrichment and read_repeat retired outright in v0.20.0 on the
+// same ratified verdict. What survives is this file: the tool-name and path/error-content helpers
+// the family shared, still read by the rows that outlived it (library.go's narration and read/list
+// spellings, robustness.go's write detection).
 //
-// This file carries the helpers the family shares. The read/write tool-name sets and the
-// path/error-content sniffers are ported from apogee-sim (internal/toolsets/toolsets.go,
-// internal/proxy/{read_loop_detector,error_enrichment}.go @pin). The read-tool set
-// (readToolNames / isReadTool / toolCallPath) lives here, having outlived the two recovery rows
-// that first carried it — both are Floor guards now (ADR 0071), and internal/floor keeps its own
-// copy. Write detection has TWO semantics (robustness.go): the history family asks "did this
-// call mutate a file / was it a write action" and so uses isFileMutatingTool — the apogee-complete
-// superset that also carries apogee's own edit tools; only the content-repair Mechanisms (syntax,
-// autofix) use the narrower sim-only isWriteTool.
+// The sets and sniffers are ported from apogee-sim (internal/toolsets/toolsets.go,
+// internal/proxy/{read_loop_detector,error_enrichment}.go @pin); internal/floor keeps its own copy
+// of the ones its guards need, so the two trees stay independent. Write detection has TWO semantics
+// (robustness.go): the history-scanning callers ask "did this call mutate a file / was it a write
+// action" and so use isFileMutatingTool — the apogee-complete superset that also carries apogee's
+// own edit tools; only the content-repair Mechanisms (syntax, autofix) use the narrower sim-only
+// isWriteTool.
 
-// wave4WriteTools is the write-tool set the history family inspects for "has the model written a
-// file yet" — apogee-sim toolsets.WriteTools @pin extended with apogee's own write-tool spellings
+// wave4WriteTools is the write-tool set every "has the model written a file yet" caller inspects —
+// apogee-sim toolsets.WriteTools @pin extended with apogee's own write-tool spellings
 // (edit_existing_file / single_&_multi_find_and_replace, joined 2026-08-10 by the file-operation
 // trio copy_file / move_file / delete_file), so the scans fire on apogee's real menu (apogee's
 // read_file / list_dir / grep already appear in the sim's read/list/search sets, so only the write
@@ -86,16 +79,6 @@ func toolSet(groups ...[]string) map[string]bool {
 	return set
 }
 
-// readToolNames are the tools whose calls count as a file read across the history family. It
-// composes from the read spelling family (readSpellings, above) — apogee-sim's ReadTools
-// @pin plus the retired open_file spelling, a separate read tool until it merged into read_file on
-// 2026-08-11, kept because models may still emit the name — so the library read set that shares the
-// family stays identical by construction rather than by a hand-maintained copy.
-var readToolNames = toolSet(readSpellings)
-
-// isReadTool reports whether name is one of the file-reading tools progress detection counts.
-func isReadTool(name string) bool { return readToolNames[name] }
-
 // toolCallPath extracts the file path a tool call targets, matching apogee-sim's
 // toolsets.ExtractPath @pin (path / file_path / filePath / filename) plus destination — the second
 // half of the source/destination pair copy_file and move_file carry (internal/tools/file_ops.go).
@@ -119,25 +102,12 @@ func toolCallPath(args json.RawMessage) string {
 	return ""
 }
 
-// normalizePath canonicalises a file path for cross-Turn comparison (apogee-sim normalizePath
-// @pin): a leading "./" is dropped and the path is lexically cleaned, so "./a/b" and "a/b" compare
-// equal when the model refers to the same file two different ways. Callers extract a non-empty path
-// before calling, so the path.Clean("")==="." corner never arises in practice.
-func normalizePath(p string) string {
-	return path.Clean(strings.TrimPrefix(p, "./"))
-}
-
 // readErrorSignals are the substrings a FAILED read-family tool result leads with (apogee-sim
 // isToolResultError, read_loop_detector.go @pin). They are the legacy fallback only: a committed
 // tool-result Message now carries the authoritative flag as domain.Message.ToolOutcome (stamped by
 // appendToolResult), and resultIsReadError consults the text solely for a record snapshotted before
 // that marker existed.
 var readErrorSignals = []string{"not found", "no such file", "does not exist", "error:"}
-
-// generalErrorSignals are the substrings error_enrichment treats as a failed tool result in history
-// (apogee-sim findToolResultError, error_enrichment.go @pin) — a broader set than readErrorSignals
-// because a build/runtime failure need not spell "not found".
-var generalErrorSignals = []string{"error", "failed", "traceback", "exception", "panic"}
 
 // contentMatchesAny reports whether the lower-cased content contains any of the signals.
 func contentMatchesAny(content string, signals []string) bool {
@@ -187,19 +157,4 @@ func firstLineMatchesAny(content string, signals []string) bool {
 		return contentMatchesAny(line, signals)
 	}
 	return false
-}
-
-// firstUserContent returns the first non-empty user message's content (apogee-sim firstUserContent,
-// next_step.go @pin) — the task statement a hint quotes back so its correction names what the model
-// was asked to do.
-func firstUserContent(conv domain.ConversationView) string {
-	var out string
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role == domain.RoleUser && strings.TrimSpace(m.Content) != "" {
-			out = m.Content
-			return false
-		}
-		return true
-	})
-	return out
 }

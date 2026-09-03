@@ -807,7 +807,19 @@ from `library_test.go` and dies with the row at item 17.
 
 **Commit:** `refactor(mechanisms): retire filehint, read_loop and toolfilter`
 
-## 15. Retire `truncate_history`, `error_enrichment` and `read_repeat`
+## 15. Retire `truncate_history`, `error_enrichment` and `read_repeat` — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): `historyscan.go` and `historyscan_test.go` were deleted WHOLE, not just `recentSuccessfulReadPaths`. The file's other shape, `writtenPathsSince`, lost its last non-test caller (`deriveWriteTarget`) in item 14 — `make lint`'s `unused` does not see a test-only caller, which is why item 14's own prune list missed it — so nothing live remained and the item's "if nothing else remains, the file" condition held in substance.
+
+NOTES (2026-09-03): prune list extended per the symbol rule and `make lint`'s `unused` — `readToolNames`, `isReadTool` and `normalizePath` (historyhints.go) lost their last callers with the three rows and went too; `toolCallPath` stays (its `TestToolCallPath` pin survives). `scanView` (historyscan_test.go) was still called by `readerror_test.go` and moved there.
+
+NOTES (2026-09-03): `internal/agent/retryview_test.go` joined Files: `TestRetryView_ReadRepeatIgnoresSupersededRead` built `read_repeat` through `wave1Registry` and would not have compiled. Recast over a synthetic `repeatReadProbe` post-response hook with the retired row's exact trigger, registered under the lab id `lab_repeat_read` — the committedLen bound is what the test pins, not the row.
+
+NOTES (2026-09-03): `benchreadiness_test.go` joined Files: `enabledMechanisms` armed `truncate_history` and `New` refused the unknown id. The arm is now `library` alone; the history-rewrite hook point stays exercised by the experimental five-point probe.
+
+NOTES (2026-09-03): `internal/mechanisms/retired_test.go` joined Files so `TestRetiredOutrightRowsCarryTheirReleaseAndNoSuccessor` covers the three new rows (the item's "retired notices for the three IDs").
+
+NOTES (2026-09-03): consequential edits — internal/mechanisms/{robustness.go,doc.go}, internal/domain/{hooks.go,mechanism.go,registry.go,tooledit.go}, internal/config/configwrite_mechanism.go: made necessary by the retirement; each named `truncate_history`, `error_enrichment` or `read_repeat` as a live row, example or family member. The `truncate_history` prose rule reads zero over non-test `internal/` files plus `state_test.go:156`; `internal/tui/transcript_test.go` and `internal/config/config_test.go` stay verbatim as the regression guard directs, and `retired.go`/`catalogue_test.go` name the ids as the roll, not as an example.
 
 **What.** Depends on 14. Delete `truncatehistory.go`, `errorenrich.go`, `readrepeat.go` (+tests),
 `historyscan.go`'s `recentSuccessfulReadPaths` and, if nothing else remains, the file; `generalErrorSignals`;

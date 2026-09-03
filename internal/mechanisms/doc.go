@@ -17,37 +17,31 @@
 //
 // # The Mechanism files, one line each
 //
-// Six files carrying six catalogue rows — one row per file. Each holds its Mechanism's init()
+// Three files carrying three catalogue rows — one row per file. Each holds its Mechanism's init()
 // registration, descriptor, constructor, hook implementation, and the logic only that Mechanism
 // uses. prompts.go is described with them and registers nothing: it holds the prompt-asset embed
 // library.go loads through.
 //
 // autofix.go is formatter repair: a written file is handed to the language's real formatter in a
-// gated sub-process and the repaired content is spliced back into the call.
-// errorenrich.go is error_enrichment, which classifies a tool error and appends category-shaped
-// suggestions when the same category repeats. library.go is the Library Mechanism — the
-// only row that declares a needs (the Library store the engine derives). readrepeat.go catches the
-// redundant re-read in the response about to be sent. syntax.go is the write-content syntax-check
-// Mechanism (the checker itself is the internal/syntaxcheck package). prompts.go declares this
-// package's prompt-asset embed and its mustPrompt loader (the prompts/ directory, below) —
-// library.go loads its own assets through it. truncatehistory.go is the drop-the-middle history
-// rewrite.
+// gated sub-process and the repaired content is spliced back into the call. library.go is the
+// Library Mechanism — the only row that declares a needs (the Library store the engine derives).
+// syntax.go is the write-content syntax-check Mechanism (the checker itself is the
+// internal/syntaxcheck package). prompts.go declares this package's prompt-asset embed and its
+// mustPrompt loader (the prompts/ directory, below) — library.go loads its own assets through it.
 //
 // # The shared plumbing, one line each
 //
-// Seven files that register nothing. They hold the registry itself, the roll of retired IDs, and the
+// Six files that register nothing. They hold the registry itself, the roll of retired IDs, and the
 // helpers more than one Mechanism needs, so a shape lives once instead of once per Mechanism (D5).
 //
 // catalogue.go is the registry: the row, the package-private register() every Mechanism file
 // calls from init(), the injected Deps and the DepNeeds derivation, and the Build / KnownIDs /
-// Descriptors surface the engine resolves a stack through. historyhints.go carries what the Wave-3
-// history-aware family shares — the F8 spelling families every set composes from (readSpellings,
-// listSpellings, wave4WriteTools) with their toolSet union, the read tool-name set, and the path
-// and error-content sniffers (note the two write semantics: isFileMutatingTool for "did this
-// mutate a file", the narrower isWriteTool for content repair).
-// historyscan.go owns one copy of each shared conversation-walk shape (recent successful reads,
-// write-path collection); membership and thresholds stay at the call
-// site. intent.go is the lexical action/analysis/question classifier — a shared helper with no
+// Descriptors surface the engine resolves a stack through. historyhints.go carries what the
+// retired Wave-3 history-aware family left behind — the F8 spelling families every set composes
+// from (readSpellings, listSpellings, wave4WriteTools) with their toolSet union, and the path and
+// error-content sniffers (note the two write semantics: isFileMutatingTool for "did this mutate a
+// file", the narrower isWriteTool for content repair).
+// intent.go is the lexical action/analysis/question classifier — a shared helper with no
 // catalogue row of its own (catalogue C6). retired.go is the roll of IDs this build no longer
 // catalogues, so a saved config or Validated set naming one is tolerated rather than refused — and
 // the home of ResolveEnabled, the resolver a Driver runs a `mechanisms:` block through: it

@@ -158,16 +158,16 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 }
 
 // The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
-// syntax/autofix (item 5), Wave 2 added the truncate_history history-rewrite (item 7), Wave 3 added
-// the error_enrichment/read_repeat history-aware family (item 11), and item 14 added the library
-// observe/inject Mechanism, so each is buildable and KnownIDs reports it, while a deferred /
-// un-ported ID is still an unknown-ID error. The tool-call validator, the identical-repeat
-// detector, the redundant-re-read interceptor, the per-result trimmer and the two Wave-1 recoveries
-// (item 6) are NOT here: they were promoted to Floor guards (ADR 0071) and are on the retired roll.
-// Neither are Wave 4's decompose request shaper, its stall_nudge/list_nudge/tool_use_directive
-// completion nudges, apogee's own enumeration-steer and sub-agent fan-out row, nor Wave 3's
-// toolfilter/filehint request shapers and the family's read_loop member: they were retired outright
-// on the same verdict. A `mechanisms:` key naming any of them is tolerated, never built.
+// syntax/autofix (item 5) and item 14 added the library observe/inject Mechanism, so each is
+// buildable and KnownIDs reports it, while a deferred / un-ported ID is still an unknown-ID error.
+// The tool-call validator, the identical-repeat detector, the redundant-re-read interceptor, the
+// per-result trimmer and the two Wave-1 recoveries (item 6) are NOT here: they were promoted to
+// Floor guards (ADR 0071) and are on the retired roll. Neither are Wave 4's decompose request
+// shaper, its stall_nudge/list_nudge/tool_use_directive completion nudges, apogee's own
+// enumeration-steer and sub-agent fan-out row, Wave 3's toolfilter/filehint request shapers and the
+// history-aware family entire (read_loop, error_enrichment, read_repeat), nor Wave 2's
+// truncate_history history rewrite: they were retired outright on the same verdict. A
+// `mechanisms:` key naming any of them is tolerated, never built.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
@@ -175,7 +175,7 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 		known[id] = true
 	}
 	// Every ported Mechanism that builds with no injected Deps.
-	for _, want := range []domain.MechanismID{"syntax", "autofix", "truncate_history", "error_enrichment", "read_repeat"} {
+	for _, want := range []domain.MechanismID{"syntax", "autofix"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
 		}

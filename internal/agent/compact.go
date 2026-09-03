@@ -363,7 +363,7 @@ var summaryTruncatedMarker = mustPrompt("summary-truncated.txt")
 // the retried request. When the fold ran mid-Exchange, the cached Exchange boundary is re-anchored
 // to the bridge's index (a.turns.anchorAtBridge — turn.go) so AbortExchange still rolls back to a
 // clean boundary rather than into the protected prefix; that owner method carries the full
-// rationale and mirrors the S2 repair step() performs after a mid-Exchange truncate_history shrink.
+// rationale and mirrors the S2 repair step() performs after a mid-Exchange history-rewrite shrink.
 //
 // Neither estimate-driven latch is read or written here. compactSat guards that trigger against
 // re-folding a history it already proved it cannot shrink, and compactFailed stands it down for an
