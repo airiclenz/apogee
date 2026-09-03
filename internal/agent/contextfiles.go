@@ -20,6 +20,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
 // contextFile is one resolved workspace context file held in the session cache. Exactly one of
@@ -175,7 +176,8 @@ func (a *Agent) hasContextBlocks() bool {
 
 // forgesStandingStructure reports whether one content line spells a line the standing system
 // message uses as its OWN furniture: a context-file header or footer, the orientation block's
-// header, or the delegate report block's opening sentence. Leading whitespace is trimmed before
+// header, the delegate report block's opening sentence, or the task list block's header opening.
+// Leading whitespace is trimmed before
 // the test — an indented forgery reads as furniture to a model just as well as a flush one — but
 // the line itself is never trimmed, only prefixed.
 //
@@ -187,7 +189,8 @@ func forgesStandingStructure(line string) bool {
 	return strings.HasPrefix(trimmed, contextFileHeader) ||
 		strings.HasPrefix(trimmed, contextFileFooter) ||
 		strings.HasPrefix(trimmed, orientationHeader()) ||
-		strings.HasPrefix(trimmed, delegateReportFence)
+		strings.HasPrefix(trimmed, delegateReportFence) ||
+		strings.HasPrefix(trimmed, tasklist.Fence)
 }
 
 // fenceContent prefixes every line of a context file that spells the standing message's own

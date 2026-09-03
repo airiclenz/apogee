@@ -204,7 +204,7 @@ marshals a non-zero `Tasks` and asserts the `tasks` key.
 
 ---
 
-## 5. The standing block
+## 5. The standing block — ✅ DONE (2026-09-03)
 
 **What.** New `internal/agent/tasklistblock.go`: `func (a *Agent) taskListBlock() string` returning
 `a.tasks.Render()` (`""` when empty). Its doc comment records why it rides along, why it precedes

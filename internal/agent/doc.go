@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-six files: the handle and its lifecycle, the loop proper, the tool path, and the
+// Twenty-seven files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
@@ -77,6 +77,8 @@
 // ahead of those files' fenced blocks (prompts/orientation.txt). delegatereport.go is the
 // engine-owned block a DELEGATED agent additionally carries between the two — what its final
 // reply is for — and the forgery fence that keeps a repo file from spelling it.
+// tasklistblock.go is the last engine-owned block on that message: the model's own checklist
+// (internal/tasklist), the one part of the standing content that changes within a session.
 //
 // And doc.go this map.
 package agent

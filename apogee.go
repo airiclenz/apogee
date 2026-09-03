@@ -105,6 +105,14 @@ const SeatFallbackNote = agent.SeatFallbackNote
 // it. See internal/agent for the contract.
 const DelegateReportBlock = agent.DelegateReportBlock
 
+// TaskListFence is the literal opening of the task list block's header line — the engine-owned
+// standing block that renders the model's own checklist, written only through the task_list tool
+// (ADR 0072). It is what a Driver's own tests find that block on the wire by, and what the engine
+// fences a workspace context file against so no repo file can forge a checklist of its own.
+// Re-exported so those tests need not retype a string that would then drift. See internal/agent
+// for the contract.
+const TaskListFence = agent.TaskListFence
+
 // ----------------------------------------------------------------------------
 // Construction & autonomy (internal/domain)
 // ----------------------------------------------------------------------------

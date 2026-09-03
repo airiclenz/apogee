@@ -272,13 +272,14 @@ func TestOrientation_FollowsAScratchDirMove(t *testing.T) {
 
 // withOrientation returns the standing system content a seam test expects: the rendered prompt
 // THAT test configures, then the engine's own orientation block, then — when the agent under test
-// is a delegate — the delegate report block, then the context-file blocks the test configures.
-// That is the wire order standingSystem composes, with either configured part passed as "" when
-// the test does not have one. Both engine-owned blocks are pinned by tests of their own (here and
-// in delegatereport_test.go); taken from the agent under test here, so a seam test keeps asserting
+// is a delegate — the delegate report block, then the agent's task list when it holds one, then
+// the context-file blocks the test configures. That is the wire order standingSystem composes,
+// with either configured part passed as "" when the test does not have one. Every engine-owned
+// block is pinned by tests of its own (here, in delegatereport_test.go and in
+// tasklistblock_test.go); taken from the agent under test here, so a seam test keeps asserting
 // the exact bytes of the parts it owns without restating text it does not.
 func withOrientation(a *Agent, rendered, blocks string) string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 5)
 	if rendered != "" {
 		parts = append(parts, rendered)
 	}
@@ -286,6 +287,9 @@ func withOrientation(a *Agent, rendered, blocks string) string {
 		parts = append(parts, block)
 	}
 	if block := a.delegateReportBlock(); block != "" {
+		parts = append(parts, block)
+	}
+	if block := a.taskListBlock(); block != "" {
 		parts = append(parts, block)
 	}
 	if blocks != "" {
