@@ -360,37 +360,9 @@ func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.Mecha
 // three paths that reach this function on ONE LibraryDir — New, every Rebind, and the routed
 // sub-agent catalogue BuildMechanisms builds — share a single store instead of each rewriting the
 // whole file from its own memory. Open Loads on its constructing call alone, which is what keeps the
-// degrade notice below a once-per-process line without any coordination here. LookPath is left nil
-// (the exec.LookPath default): it is not derived from Config, so it has no DepNeeds flag.
+// degrade notice below a once-per-process line without any coordination here.
 func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	var deps mechanisms.Deps
-	// The exec fence a Mechanism resolving an executable measures against. It is derived for
-	// every run, not behind a needs flag: it costs nothing to carry, and a Mechanism that
-	// spawns must refuse a model-writable program even on a host that can establish no
-	// confinement box at all (internal/security.RefuseExecFromWritablePath).
-	// NetworkAllow is cleared deliberately: it names hosts a confined subprocess may REACH,
-	// which says nothing about the paths a program may be resolved FROM. Building the full box
-	// and clearing the one field keeps that divergence one visible line rather than a silently
-	// short literal.
-	// The box is the CONSTRUCTION-TIME one deliberately, not a snapshot that went stale: its
-	// only reader, autofix, resolves every formatter from PATH exactly once in newAutofix
-	// (internal/mechanisms/autofix.go) — before the model has written a byte — and never
-	// re-resolves, so the fence is measured at the same instant the paths it guards are. The
-	// one box field that moves afterwards is the session scratch dir (Agent.SetScratchDir),
-	// and a moved-to scratch dir is a freshly created ~/.apogee/scratch/<id>/ that cannot
-	// contain an already-resolved formatter path: a live box would measure the same paths
-	// against a fence that cannot include them. That is why the tools' per-call
-	// Agent.confinementBox() (internal/agent/dispatch.go) follows the live scratch dir while
-	// this one does not — the tools resolve and spawn PER CALL, against a tree the model has
-	// been writing to in between; autofix resolves ONCE, ahead of all of it.
-	deps.WritableBox = cfg.ConfinementBox()
-	deps.WritableBox.NetworkAllow = nil
-	// The operator-declared credential names a spawning Mechanism drops from its child's
-	// environment (autofix's formatter, through tools.RunHookSubprocess). Same source and same
-	// unconditional derivation as the tools' own copy (hostTools below): the two subprocess
-	// families must scrub the same variables, and a run's enabled rows do not change which key
-	// the operator exported.
-	deps.SecretEnvVars = cfg.SecretEnvVars
 	if needs.Library {
 		store, err := library.Open(cfg.LibraryDir)
 		if err != nil {

@@ -60,7 +60,7 @@ const keyCommandTimeout = 60 * time.Second
 // keyCommandWaitGrace bounds the wait AFTER the timeout fired. The deadline kills the process, but a
 // wrapper-shaped command — a shell script re-execing the real tool — can leave a grandchild holding
 // the stdout pipe it inherited, and cmd.Run() would then block on the output copy forever
-// (autofix.go's runExternalFormatter carries the same guard for the same reason).
+// (internal/keystore's tool runner carries the same guard for the same reason).
 const keyCommandWaitGrace = 2 * time.Second
 
 // maxKeyCommandOutput and maxKeyCommandStderr bound what one command may make apogee hold in

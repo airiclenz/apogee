@@ -17,17 +17,15 @@
 //
 // # The Mechanism files, one line each
 //
-// Three files carrying three catalogue rows — one row per file. Each holds its Mechanism's init()
-// registration, descriptor, constructor, hook implementation, and the logic only that Mechanism
-// uses. prompts.go is described with them and registers nothing: it holds the prompt-asset embed
-// library.go loads through.
+// One file carrying the one surviving catalogue row. It holds its Mechanism's init() registration,
+// descriptor, constructor, hook implementation, and the logic only that Mechanism uses. prompts.go
+// is described with it and registers nothing: it holds the prompt-asset embed library.go loads
+// through.
 //
-// autofix.go is formatter repair: a written file is handed to the language's real formatter in a
-// gated sub-process and the repaired content is spliced back into the call. library.go is the
-// Library Mechanism — the only row that declares a needs (the Library store the engine derives).
-// syntax.go is the write-content syntax-check Mechanism (the checker itself is the
-// internal/syntaxcheck package). prompts.go declares this package's prompt-asset embed and its
-// mustPrompt loader (the prompts/ directory, below) — library.go loads its own assets through it.
+// library.go is the Library Mechanism — the only row left, and the only one that ever declared a
+// needs (the Library store the engine derives). prompts.go declares this package's prompt-asset
+// embed and its mustPrompt loader (the prompts/ directory, below) — library.go loads its own assets
+// through it.
 //
 // # The shared plumbing, one line each
 //
@@ -39,8 +37,8 @@
 // Descriptors surface the engine resolves a stack through. historyhints.go carries what the
 // retired Wave-3 history-aware family left behind — the F8 spelling families every set composes
 // from (readSpellings, listSpellings, wave4WriteTools) with their toolSet union, and the path and
-// error-content sniffers (note the two write semantics: isFileMutatingTool for "did this mutate a
-// file", the narrower isWriteTool for content repair).
+// error-content sniffers (isFileMutatingTool, "did this call mutate a file", is the one write
+// semantic left; the narrower content-repair one went with syntax and autofix).
 // intent.go is the lexical action/analysis/question classifier — a shared helper with no
 // catalogue row of its own (catalogue C6). retired.go is the roll of IDs this build no longer
 // catalogues, so a saved config or Validated set naming one is tolerated rather than refused — and
@@ -48,9 +46,8 @@
 // validates every key against the catalogue, drops the retired ones, and hands back the notices
 // they earn — one for a removed row the block still turns on, and one for a PROMOTED row the block
 // tries to switch off with a key that no longer does that.
-// robustness.go carries the Wave-1 robustness helpers: the robustnessIssue type, the correction
-// message built from a set of issues, the write-tool sets, and the write payload accessors that
-// read and rewrite a call's path/content.
+// robustness.go carries what the Wave-1 robustness rows left behind: the robustnessIssue type and
+// the tool-call validation helpers library observes through.
 //
 // # The prompt assets
 //

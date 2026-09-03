@@ -849,7 +849,25 @@ plus `internal/agent/state_test.go:156`; `internal/tui/transcript_test.go:1067,:
 
 **Commit:** `refactor(mechanisms): retire truncate_history, error_enrichment and read_repeat`
 
-## 16. Retire `syntax` and `autofix`
+## 16. Retire `syntax` and `autofix` — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): `buildCorrectionMessage` (robustness.go) joined the prune list per the symbol rule and `make lint`'s `unused` — `syntax.go` was its last caller; `internal/floor/correction.go` builds the guards' own. `hasIssues`, `toolNames` and the validation helpers stay (library calls them).
+
+NOTES (2026-09-03): `robustness_test.go`'s `TestWave1Descriptors`, `TestWave1DeterministicOrder` and `TestWriteDetectionSemanticsSplitOnApogeeWriteTools` went with their subjects, as did `historyhints_test.go`'s `TestPostResponseCascadeOrder` (its only two rows were syntax and autofix) and `writedetection_test.go`'s two S1 edit-tool pins. The surviving semantic (b) is still pinned in-package by `TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin` and in `internal/floor/toolnames_test.go`; the shared helpers those tests used (`fakeView`, `responseWith`, `writeCall`, `mustBuild`, `postResponse`) lost their last callers and went too, leaving `toolMenu` (library_test.go's).
+
+NOTES (2026-09-03): `catalogue_test.go` — `TestDepsNeeded` lost its "a row declaring no needs" case: with `library` the only catalogued row left, no catalogued ID declares zero needs. `TestProductionCatalogueHasPortedWaves` and `TestBuildUnknownIDWrapsSentinel` now read `library` where they read `syntax`. Item 19 owns the fuller empty-catalogue restatement.
+
+NOTES (2026-09-03): the item's fix-up list was a floor — the symbol rule pulled in five further `internal/agent` test files that armed `syntax`/`autofix` as catalogued IDs and would have failed at build or run. `wave1delivery_test.go` and `floorguards_test.go` are recast over a synthetic strikes-3 response-repair row (`labRepairHook`, `wave1Registry` now builds it), which is what those tests pin — the loop's treatment of such a row, never the retired rows' decision logic. `enable_mechanisms_test.go`, `enable_mechanisms_subagent_test.go`, `rebind_test.go` and `construct_test.go` need a REAL catalogued ID (they drive the production build path), so they arm `library` — the only row left — through a new `armLibrary`/`bindLibrary` fixture that seeds a weights file and a qualifying store so the row actually injects and books a fire. Every fire assertion was mutation-checked: dropping the `EnableMechanisms` line fails all five.
+
+NOTES (2026-09-03): `TestEnableMechanisms_NonLibraryArmIgnoresLibraryDir` now uses the EMPTY arm — with `library` the only catalogued row, that is the only "arm that does not name library" left. Its claim (LibraryDir is derived from DepNeeds, not from the key's presence) is unchanged.
+
+NOTES (2026-09-03): `internal/mechanisms/retired_test.go` joined Files so `TestRetiredOutrightRowsCarryTheirReleaseAndNoSuccessor` covers the two new rows — the item's "retired notices" test.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/{robustness.go,historyhints.go,doc.go}: made necessary by deleting `isWriteTool`/`writeToolNames`; the "two write-detection semantics" prose is now one semantic everywhere it appeared.
+
+NOTES (2026-09-03): consequential edit — internal/agent/hookrun.go: made necessary by deleting autofix; the post-response subprocess-permit comment named it as the spawning row (the permit itself stays for lab hooks, per the item).
+
+NOTES (2026-09-03): consequential edit — internal/keystore/run.go, internal/config/keyresolve.go, internal/security/doc.go, internal/tools/doc.go, internal/tools/exec_common.go: made necessary by deleting `autofix.go`; each named that file, its formatter probe or its stdout split as a live exec/spawn site. `docs/design/confinement-execution-contract.md:514` names it too but inside a DATED 2026-08-30 amendment block — a record of what changed then, left verbatim.
 
 **What.** Depends on 15. Delete `syntax.go`, `autofix.go` (+tests), `syntaxID`/`autofixID`
 (`robustness.go:32-33`) and the write-payload helpers only they used (`writeToolNames`/`isWriteTool`,

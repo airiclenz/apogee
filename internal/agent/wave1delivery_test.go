@@ -1,12 +1,12 @@
 package agent
 
-// Loop-level delivery tests for the Wave-1 Mechanisms riding the retry-in-place seam (R1,
-// phase-4-review-fixes item 2). The Mechanisms are built through the production catalogue
-// (mechanisms.Build — the same seam the config surface drives) and registered on a real
-// MechanismRegistry, so this test proves the registry-built dispatch path end-to-end through a
-// scripted responder: a response the tool-call repair guard rejects short-circuits the
-// syntax/autofix cascade. The delivery cases whose subjects became Floor guards live in
-// floorguards_test.go beside the guards themselves (ADR 0071).
+// Loop-level delivery tests for the retry-in-place seam (R1, phase-4-review-fixes item 2), and the
+// shared fixtures the delivery suites drive it through. The Wave-1 Mechanisms that used to ride the
+// seam are gone — the tool-call validator became the tool-call-repair Floor guard and syntax and
+// autofix retired outright in v0.20.0 (ADR 0071) — so the cascade below is registered over
+// synthetic response-repair rows carrying the retired rows' shape: a response the repair guard
+// rejects must short-circuit it. The delivery cases whose subjects became Floor guards live in
+// floorguards_test.go beside the guards themselves.
 
 import (
 	"context"
@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -23,17 +22,39 @@ import (
 // duplicated verbatim here so the loop-level test proves the exact wording rides the wire.
 const wave1Nudge = "Your response was empty. Review the original task — there are likely remaining steps or files you haven't addressed yet. Use a tool call to continue with the next unfinished part. Do not summarize or stop until every part of the task is complete."
 
-// wave1Registry builds a MechanismRegistry carrying the production-catalogue Mechanisms named by
-// ids, so the tests exercise registry-built dispatch, not descriptor-only fakes.
+// labRepairHook is a synthetic response-repair Mechanism carrying the shape the retired
+// content-repair rows had: strikes-3 self-regulation, off under Bypass, and an ActionRetry whenever
+// the response carries a tool call — which is exactly when syntax and autofix acted. It stands in
+// for them wherever a test needs a catalogued row that the dispatch path can withdraw or
+// short-circuit; what those tests pin is the loop's treatment of such a row, never the retired
+// row's own decision logic.
+type labRepairHook struct{ id domain.MechanismID }
+
+func (h labRepairHook) row() domain.RegisteredMechanism {
+	return domain.RegisteredMechanism{
+		Descriptor: domain.MechanismDescriptor{
+			ID:          h.id,
+			Capability:  domain.CapResponseRepair,
+			Suppression: domain.SuppressStrikesThree,
+		},
+		Hook: h,
+	}
+}
+
+func (h labRepairHook) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
+	if len(resp.ToolCalls()) == 0 {
+		return domain.PostResponseDecision{}, nil
+	}
+	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: "lab repair: produce a valid tool call"}, nil
+}
+
+// wave1Registry builds a MechanismRegistry carrying one synthetic response-repair row per id, so
+// the tests exercise registry-backed dispatch rather than descriptor-only fakes.
 func wave1Registry(t *testing.T, ids ...domain.MechanismID) *domain.MechanismRegistry {
 	t.Helper()
 	reg := domain.NewMechanismRegistry()
 	for _, id := range ids {
-		m, err := mechanisms.Build(id, mechanisms.Deps{})
-		if err != nil {
-			t.Fatalf("Build(%q): %v", id, err)
-		}
-		mustAddMech(t, reg, m)
+		mustAddMech(t, reg, labRepairHook{id: id}.row())
 	}
 	return reg
 }
@@ -122,10 +143,10 @@ func dispatchedCalls(events []domain.Event) []domain.ToolCall {
 	return out
 }
 
-// TestWave1_RepairGuardShortCircuitsTheCascade: with syntax and autofix registered, a response the
-// tool-call repair guard rejects (and whose broken-Go content would also trip syntax) retries
-// immediately — the guard runs AHEAD of the whole hook cascade (ADR 0071), so the failing pass
-// fires no catalogued Mechanism at all.
+// TestWave1_RepairGuardShortCircuitsTheCascade: with two response-repair rows registered, a response
+// the tool-call repair guard rejects (and which would also trip both rows) retries immediately — the
+// guard runs AHEAD of the whole hook cascade (ADR 0071), so the failing pass fires no catalogued
+// Mechanism at all.
 func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 	sink := &recordingSink{}
 	writeTool := schemaTool{
@@ -133,9 +154,10 @@ func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 		schema:   `{"type":"object","required":["path","content","mode"]}`,
 	}
 	cfg := configWithTools(sink, writeTool)
-	cfg.Mechanisms = wave1Registry(t, "autofix", "syntax") // shuffled; Ordered sorts
+	cfg.Mechanisms = wave1Registry(t, "lab_content_repair", "lab_formatter_repair")
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		// Missing required "mode" (the repair guard rejects) AND broken Go content (syntax would fail).
+		// Missing the required "mode" argument, which the repair guard rejects; the call itself is
+		// what would also trip both registered rows.
 		toolCallScript("c1", "write_file", `{"path":"main.go","content":"package main\nfunc main() {"}`),
 		contentScript("stopping here"),
 	}}
@@ -150,7 +172,7 @@ func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 		t.Fatal("the repair guard did not retry (did the retry happen at all?)")
 	}
 	for _, fe := range firesBeforeStreamReset(sink.events) {
-		if fe.Mechanism == "syntax" || fe.Mechanism == "autofix" {
+		if fe.Mechanism == "lab_content_repair" || fe.Mechanism == "lab_formatter_repair" {
 			t.Errorf("%q fired in the failing pass (action %q); the guard retry must short-circuit the cascade", fe.Mechanism, fe.Action)
 		}
 	}

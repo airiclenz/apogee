@@ -86,6 +86,14 @@ type retiredRow struct {
 //     promoted redundant-re-read interceptor — the two were mutually exclusive on one symptom and
 //     only the interceptor carried evidence — so the read-cache Floor guard covers the symptom for
 //     every model and the hinting half goes.
+//   - syntax (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. Re-streaming the Turn because
+//     a written file failed a syntax check corrects the model's work for it on a signal the tool
+//     result would have carried anyway, and no per-model A/B ever earned it a place (ADR 0009's
+//     gate). The structural syntax trailer (internal/syntaxcheck, plan 2026-09-02 - 00) is the
+//     shaping answer to the same symptom and stays.
+//   - autofix (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. Handing a written payload to
+//     an external formatter in a gated sub-process rewrote the model's file behind its back —
+//     a mutation of the work, not of what the model sees — and paid a per-write subprocess for it.
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
@@ -105,6 +113,8 @@ var retired = []retiredRow{
 	{ID: "truncate_history", Release: "v0.20.0"},
 	{ID: "error_enrichment", Release: "v0.20.0"},
 	{ID: "read_repeat", Release: "v0.20.0"},
+	{ID: "syntax", Release: "v0.20.0"},
+	{ID: "autofix", Release: "v0.20.0"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

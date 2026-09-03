@@ -3,37 +3,7 @@ package mechanisms
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/airiclenz/apogee/internal/domain"
 )
-
-// The post-response cascade resolves to autofix → syntax (repair precedes correction). The rows
-// that used to head this cascade — the tool-loop detector and the tool-call validator — were
-// promoted to Floor guards (ADR 0071) and run AHEAD of every hook, so no ordering edge expresses
-// their priority any more, and the history-aware rows that once sat unconstrained beside these two
-// retired outright in v0.20.0 on the same verdict.
-func TestPostResponseCascadeOrder(t *testing.T) {
-	t.Parallel()
-	reg := domain.NewMechanismRegistry()
-	for _, id := range []domain.MechanismID{autofixID, syntaxID} {
-		if err := reg.Add(mustBuild(t, id)); err != nil {
-			t.Fatalf("Add(%q): %v", id, err)
-		}
-	}
-	if err := reg.ValidateOrdering(); err != nil {
-		t.Fatalf("ValidateOrdering: %v", err)
-	}
-	want := []domain.MechanismID{autofixID, syntaxID}
-	got := reg.Ordered(domain.HookPostResponse)
-	if len(got) != len(want) {
-		t.Fatalf("Ordered(post-response) has %d mechanisms, want %d", len(got), len(want))
-	}
-	for i, m := range got {
-		if m.Descriptor.ID != want[i] {
-			t.Errorf("cascade[%d] = %q, want %q (full order: %v)", i, m.Descriptor.ID, want[i], want)
-		}
-	}
-}
 
 // toolCallPath reads the file a call targets from the four sim-inherited spellings plus
 // destination, the key copy_file and move_file carry instead. The precedence is pinned here:

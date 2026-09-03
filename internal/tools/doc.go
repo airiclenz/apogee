@@ -229,7 +229,7 @@
 // The subprocess plumbing. exec_common.go is the single runSubprocess every execution tool
 // above calls — the ceilings, the default timeout, the capped output buffer, and the
 // exit-code result shape — plus RunHookSubprocess, the one exported door onto that funnel, so
-// a HOOK that must spawn (internal/mechanisms' autofix formatter) gets the same exec fence on its
+// a HOOK that must spawn (a lab hook registered through internal/mechanisms) gets the same exec fence on its
 // argv[0], scrub, teardown, cap and clamp instead of an exec.Command of its own. The §2.4
 // teardown contract itself is no longer this package's to own: planTreeKill, the ProcessTeardown
 // seam, the POSIX process group and the Windows Job Object all live in internal/platform

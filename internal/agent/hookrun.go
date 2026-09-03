@@ -214,8 +214,9 @@ func (a *Agent) runPreRequestHooks(ctx context.Context, turn int, req *domain.Re
 // A catalogued invocation is booked when it acted (R4): a non-zero Action, or an in-place
 // mutation of resp the Revision bracket catches.
 func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain.Response) (retry bool, inject string, err error) {
-	// Post-response is the ONE hook point whose Mechanisms may spawn a subprocess (autofix's
-	// external formatters). The domain.SubprocessPermit is installed ONCE here, ahead of the
+	// Post-response is the ONE hook point whose Mechanisms may spawn a subprocess (no shipped row
+	// does since autofix retired; the door stays open for lab hooks — ADR 0071). The
+	// domain.SubprocessPermit is installed ONCE here, ahead of the
 	// cascade, so every post-response hook — catalogued and experimental alike — sees the same
 	// authorisation the ladder granted; outside Auto no permit is installed at all, which is the
 	// refusal default (confinement-execution-contract §10).

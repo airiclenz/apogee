@@ -44,7 +44,7 @@ const probeTimeout = 5 * time.Second
 
 // waitGrace bounds the wait AFTER a timeout fired. Killing the process ends the process, but a
 // wrapper-shaped tool can leave a grandchild holding the stderr pipe it inherited, and cmd.Run would
-// then block on the copy forever (keyresolve.go and autofix.go carry the same guard).
+// then block on the copy forever (keyresolve.go carries the same guard).
 const waitGrace = 2 * time.Second
 
 // maxToolStderr bounds what a store tool may make apogee hold in memory. Stderr is kept only to

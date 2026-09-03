@@ -2,42 +2,11 @@ package mechanisms
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
 )
-
-// Regression pin for S1's non-extension: syntax must ignore apogee's edit tools even when the call
-// carries a content field with broken code — edit payloads are fragments/patches the sim never
-// syntax-checked, so semantic (a) (isWriteTool) deliberately excludes them.
-func TestSyntaxIgnoresEditToolCall(t *testing.T) {
-	t.Parallel()
-	call := domain.ToolCall{
-		ID:        "e1",
-		Tool:      "edit_existing_file",
-		Arguments: json.RawMessage(`{"path":"broken.go","content":"package main\nfunc main() {"}`),
-	}
-	if d := postResponse(t, syntaxID, responseWith(nil, call)); d.Action != "" || d.Inject != "" {
-		t.Errorf("decision = %+v, want the no-op zero decision: syntax must ignore edit-tool calls", d)
-	}
-}
-
-// Regression pin for S1's non-extension: autofix must likewise ignore apogee's edit tools, never
-// rewriting their fragment payloads.
-func TestAutofixIgnoresEditToolCall(t *testing.T) {
-	t.Parallel()
-	call := domain.ToolCall{
-		ID:        "e1",
-		Tool:      "edit_existing_file",
-		Arguments: json.RawMessage(`{"path":"messy.go","content":"x = (1\n"}`),
-	}
-	hook := buildAutofix(t, notFound)
-	if d := fireAutofix(t, hook, responseWith(nil, call)); d.Action != "" {
-		t.Errorf("Action = %q, want the no-op zero decision: autofix must ignore edit-tool calls", d.Action)
-	}
-}
 
 // NOTE — wroteRecently (the tool-use enforcer's stand-down, internal/floor/conversation.go and
 // library.go's copy of the same scan) carries NO edit-tool test because the site cannot carry
@@ -46,7 +15,7 @@ func TestAutofixIgnoresEditToolCall(t *testing.T) {
 // calls. The only history in which wroteRecently's edit branch could matter is one that contains an
 // edit call, but that same edit makes hasEverUsedTools true, which forces the check to stand down
 // regardless of whether wroteRecently counts the edit. So mutating the isFileMutatingTool branch
-// there (e.g. to isWriteTool, dropping the edit tools) cannot flip any enforcement decision — a test
+// there (e.g. narrowing it to the sim-only write spellings) cannot flip any enforcement decision — a test
 // claiming to pin it would pass under that mutation and be vacuous. See the plan's item-7 dated
 // NOTES for the full rationale. The empty-reply guard's own progress branch is pinned in
 // internal/floor (emptyreply_test.go). The read_loop hint's writtenPaths site, which DID

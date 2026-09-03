@@ -157,31 +157,22 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 	}
 }
 
-// The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
-// syntax/autofix (item 5) and item 14 added the library observe/inject Mechanism, so each is
-// buildable and KnownIDs reports it, while a deferred / un-ported ID is still an unknown-ID error.
-// The tool-call validator, the identical-repeat detector, the redundant-re-read interceptor, the
-// per-result trimmer and the two Wave-1 recoveries (item 6) are NOT here: they were promoted to
-// Floor guards (ADR 0071) and are on the retired roll. Neither are Wave 4's decompose request
-// shaper, its stall_nudge/list_nudge/tool_use_directive completion nudges, apogee's own
-// enumeration-steer and sub-agent fan-out row, Wave 3's toolfilter/filehint request shapers and the
-// history-aware family entire (read_loop, error_enrichment, read_repeat), nor Wave 2's
-// truncate_history history rewrite: they were retired outright on the same verdict. A
-// `mechanisms:` key naming any of them is tolerated, never built.
+// The production catalogue carries the ported Mechanisms and only those: item 14's library
+// observe/inject Mechanism is the last one standing, so it is buildable and KnownIDs reports it,
+// while a deferred / un-ported ID is still an unknown-ID error. The tool-call validator, the
+// identical-repeat detector, the redundant-re-read interceptor, the per-result trimmer and the two
+// Wave-1 recoveries (item 6) are NOT here: they were promoted to Floor guards (ADR 0071) and are on
+// the retired roll. Neither are Wave 4's decompose request shaper, its
+// stall_nudge/list_nudge/tool_use_directive completion nudges, apogee's own enumeration-steer and
+// sub-agent fan-out row, Wave 3's toolfilter/filehint request shapers and the history-aware family
+// entire (read_loop, error_enrichment, read_repeat), Wave 2's truncate_history history rewrite, nor
+// Wave 1's own syntax and autofix content-repair rows: they were retired outright on the same
+// verdict. A `mechanisms:` key naming any of them is tolerated, never built.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
 	for _, id := range KnownIDs() {
 		known[id] = true
-	}
-	// Every ported Mechanism that builds with no injected Deps.
-	for _, want := range []domain.MechanismID{"syntax", "autofix"} {
-		if !known[want] {
-			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
-		}
-		if _, err := Build(want, Deps{}); err != nil {
-			t.Errorf("Build(%q): %v", want, err)
-		}
 	}
 	// library (item 14) is ported and known, but it needs the Library store injected (D3): Build with
 	// no store is a loud construction error, Build WITH a store succeeds.
@@ -269,8 +260,8 @@ func TestBuildUnknownIDWrapsSentinel(t *testing.T) {
 	if !errors.Is(err, domain.ErrUnknownMechanism) {
 		t.Fatalf("Build(bogus) err = %v; want it to wrap domain.ErrUnknownMechanism", err)
 	}
-	// syntax is catalogued, so the error still names the known IDs.
-	if got := err.Error(); !strings.Contains(got, "syntax") {
+	// library is catalogued, so the error still names the known IDs.
+	if got := err.Error(); !strings.Contains(got, "library") {
 		t.Errorf("error %q; want it to name the known IDs", got)
 	}
 }
@@ -327,10 +318,11 @@ func TestRegisterRejectsDuplicateAndEmptyID(t *testing.T) {
 }
 
 // DepsNeeded answers the engine's "what must I derive for this arm?" from the rows themselves, so
-// the build path carries no Mechanism ID literal: an arm of rows that declare nothing needs nothing
-// derived, and one containing `library` — the single row declaring needs — asks for the store (and
-// the Fingerprint it keys on). An ID absent from the catalogue contributes nothing rather than
-// failing here: Build is the one place an unknown ID is reported, loudly, a moment later.
+// the build path carries no Mechanism ID literal: an empty arm needs nothing derived, and one
+// containing `library` — the single row declaring needs, and since the content-repair rows retired
+// the only row left at all — asks for the store (and the Fingerprint it keys on). An ID absent from
+// the catalogue contributes nothing rather than failing here: Build is the one place an unknown ID
+// is reported, loudly, a moment later.
 func TestDepsNeeded(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
@@ -338,12 +330,8 @@ func TestDepsNeeded(t *testing.T) {
 		want DepNeeds
 	}{
 		"no mechanisms enabled": {ids: nil, want: DepNeeds{}},
-		"a row declaring no needs": {
-			ids:  []domain.MechanismID{"syntax"},
-			want: DepNeeds{},
-		},
 		"library declares the store": {
-			ids:  []domain.MechanismID{"syntax", "library"},
+			ids:  []domain.MechanismID{"library"},
 			want: DepNeeds{Library: true},
 		},
 		"an uncatalogued ID is skipped": {
@@ -366,7 +354,7 @@ func TestDepsNeeded(t *testing.T) {
 // siblings in a depth-0 fan-out run at once, so a hook instance reached from two children at once
 // must either carry no per-run state or hand each child its own. A VALUE hook is exempt by
 // construction — its methods take value receivers, so a fire cannot mutate anything a sibling can
-// observe, and what a value hook does hold (autofix's resolved formatter table) is read-only after
+// observe, and what a value hook does hold is read-only after
 // construction, the same standing the dangerous-action floor has when
 // Guards.ForSubAgent shares IT by pointer. Holding the hook by pointer is exactly the shape
 // per-instance state requires, so that is where the declaration is demanded: a new stateful

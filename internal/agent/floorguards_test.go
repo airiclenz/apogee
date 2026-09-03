@@ -425,13 +425,15 @@ func TestFloorGuard_AlwaysEmptyTerminatesAtCap(t *testing.T) {
 
 // ADR 0071 decision 1 at the dispatch level: neither recovery guard carries strikes-3 suppression
 // nor a Turn-Budget throttle, so both still fire with Bypass ON and the global Turn Budget TRIPPED —
-// the posture in which a co-registered catalogued Mechanism (syntax) is withdrawn at dispatch.
+// the posture in which a co-registered catalogued Mechanism (here a synthetic strikes-3
+// response-repair row, the shape the retired content-repair Mechanisms had) is withdrawn at
+// dispatch.
 func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 	t.Run("empty-response-recovery", func(t *testing.T) {
 		sink := &recordingSink{}
 		cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
 		cfg.Bypass = true
-		cfg.Mechanisms = wave1Registry(t, "syntax")
+		cfg.Mechanisms = wave1Registry(t, "lab_content_repair")
 		responder := &captureAllResponder{scripts: [][]provider.Delta{
 			emptyScript(),
 			contentScript("recovered"),
@@ -454,8 +456,8 @@ func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 		if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
 			t.Error("no FloorGuardEvent for the empty-response recovery with the retry action")
 		}
-		if n := fireCountFor(sink.events, "syntax"); n != 0 {
-			t.Errorf("syntax fired %d times; a catalogued row must be withdrawn under Bypass + a tripped Turn Budget", n)
+		if n := fireCountFor(sink.events, "lab_content_repair"); n != 0 {
+			t.Errorf("the catalogued row fired %d times; it must be withdrawn under Bypass + a tripped Turn Budget", n)
 		}
 	})
 
@@ -466,7 +468,7 @@ func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 			fakeTool{name: "write_file", result: "ok"},
 		)
 		cfg.Bypass = true
-		cfg.Mechanisms = wave1Registry(t, "syntax")
+		cfg.Mechanisms = wave1Registry(t, "lab_content_repair")
 		responder := &captureAllResponder{scripts: [][]provider.Delta{
 			contentScript("I'll implement feature X."),
 			contentScript("Here is my plan."),
@@ -498,8 +500,8 @@ func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 		if !hasGuardFire(sink.events, guardToolUseEnforcer, guardActionRetry) {
 			t.Error("no FloorGuardEvent for the tool-use enforcer with the retry action")
 		}
-		if n := fireCountFor(sink.events, "syntax"); n != 0 {
-			t.Errorf("syntax fired %d times; a catalogued row must be withdrawn under Bypass + a tripped Turn Budget", n)
+		if n := fireCountFor(sink.events, "lab_content_repair"); n != 0 {
+			t.Errorf("the catalogued row fired %d times; it must be withdrawn under Bypass + a tripped Turn Budget", n)
 		}
 	})
 }

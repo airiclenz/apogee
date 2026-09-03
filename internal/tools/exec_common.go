@@ -54,10 +54,10 @@ type subprocessSpec struct {
 	env []string
 	// splitStdout asks for the child's standard output to be captured ON ITS OWN
 	// (subprocessResult.stdout) instead of interleaved with stderr. A caller that CONSUMES the
-	// output as a payload sets it — the autofix formatter reads the reformatted file off
-	// stdout, and a diagnostic spliced into the middle of that would be written to the user's
-	// file as if it were code. The execution tools leave it false: they SHOW the model what a
-	// command printed, and the interleaved order is the truthful one there.
+	// output as a payload sets it — a caller splicing a child's stdout into a file it will
+	// write needs it clean, since a diagnostic in the middle of that would land in the file as
+	// if it were code. The execution tools leave it false: they SHOW the model what a command
+	// printed, and the interleaved order is the truthful one there.
 	splitStdout bool
 	// cmdline, when non-empty, is the verbatim process command line to launch argv with
 	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
@@ -448,7 +448,7 @@ const maxSubprocessErrorExcerptBytes = 256
 // through security.ResolveProgram with that root and the box a Confinement handle on ctx carries
 // (nil when there is none), and the absolute path it answers with replaces argv[0]. The funnel
 // therefore fences its OWN argv[0] rather than trusting the caller to have done it: a caller's
-// earlier resolution (autofix probes its formatter once at construction) is belt, this is braces,
+// earlier resolution (a hook that probes its program once at construction) is belt, this is braces,
 // and a caller that never fenced at all cannot spawn an unfenced program through this door. A
 // refusal — the program resolves inside a path the model can write, or PATH answered with a
 // relative entry — is returned as the funnel's error and nothing is spawned. An empty

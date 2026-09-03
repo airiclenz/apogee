@@ -16,11 +16,11 @@ import (
 //
 // The sets and sniffers are ported from apogee-sim (internal/toolsets/toolsets.go,
 // internal/proxy/{read_loop_detector,error_enrichment}.go @pin); internal/floor keeps its own copy
-// of the ones its guards need, so the two trees stay independent. Write detection has TWO semantics
-// (robustness.go): the history-scanning callers ask "did this call mutate a file / was it a write
-// action" and so use isFileMutatingTool — the apogee-complete superset that also carries apogee's
-// own edit tools; only the content-repair Mechanisms (syntax, autofix) use the narrower sim-only
-// isWriteTool.
+// of the ones its guards need, so the two trees stay independent. Write detection has ONE semantic
+// left (robustness.go): the history-scanning callers ask "did this call mutate a file / was it a
+// write action" and so use isFileMutatingTool — the apogee-complete superset that also carries
+// apogee's own edit tools. The narrower sim-only set — "this call carries a full file payload" —
+// retired with the content-repair Mechanisms that were its only readers (v0.20.0).
 
 // wave4WriteTools is the write-tool set every "has the model written a file yet" caller inspects —
 // apogee-sim toolsets.WriteTools @pin extended with apogee's own write-tool spellings

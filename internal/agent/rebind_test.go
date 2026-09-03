@@ -111,7 +111,7 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.SystemPrompt = "the standing prompt"
 	cfg.Context.MaxContextTokens = 8192
-	cfg.EnableMechanisms = []domain.MechanismID{"autofix"}
+	cfg.EnableMechanisms = []domain.MechanismID{"library"}
 	responder := blockingResponder{started: make(chan struct{})}
 
 	a, err := newAgent(cfg, responder)
@@ -158,7 +158,8 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 // the validate-then-commit guarantee.
 func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"autofix"}
+	cfg.LibraryDir = t.TempDir()
+	cfg.EnableMechanisms = nil
 
 	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if err != nil {
@@ -166,20 +167,19 @@ func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 	}
 	seeded := a.registry
 
+	// `library` is the only catalogued row left since the content-repair rows retired (ADR 0071), so
+	// the two sets that must differ across the rebind are the empty one and the one naming it.
 	if err := a.Rebind(RebindSpec{
 		Model:            "second-model",
-		EnableMechanisms: []domain.MechanismID{"syntax"},
+		EnableMechanisms: []domain.MechanismID{"library"},
 	}); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
 	if a.registry == seeded {
 		t.Error("Rebind kept the seeded registry; the new model's set was never built")
 	}
-	if !hasRegistered(a.registry, "syntax") {
-		t.Errorf("rebuilt registry = %v, want it to hold the newly enabled syntax", registeredIDs(a.registry))
-	}
-	if hasRegistered(a.registry, "autofix") {
-		t.Errorf("rebuilt registry = %v, want the previous model's set gone", registeredIDs(a.registry))
+	if !hasRegistered(a.registry, "library") {
+		t.Errorf("rebuilt registry = %v, want it to hold the newly enabled library", registeredIDs(a.registry))
 	}
 
 	// A set the stacking gates refuse must fail BEFORE anything is committed. (Rebind builds into a

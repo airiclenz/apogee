@@ -31,45 +31,6 @@ type Deps struct {
 	// so the inject and observe halves share one identity rather than re-resolving per call). The zero
 	// fingerprint (an unidentified model) leaves the Library inert. Only the library Mechanism reads it.
 	Fingerprint domain.ModelFingerprint
-
-	// LookPath resolves an executable name against the host PATH (exec.LookPath's contract). A
-	// Mechanism that shells out probes its external commands ONCE at construction through this
-	// seam and caches the resolved paths (D3 — autofix's formatter table), so fires never probe
-	// and a test injects formatter availability without touching the real PATH. nil falls back
-	// to exec.LookPath.
-	LookPath func(string) (string, error)
-
-	// WritableBox is the fence a Mechanism that resolves an executable refuses to resolve one
-	// INSIDE: the workspace root plus any configured extra writable paths. Autofix's formatter
-	// probe is its only reader today (D3 — resolved once at construction, like the paths it
-	// guards), because bytes a confined call was allowed to write must never become the argv[0]
-	// of a later spawn. deriveDeps (internal/agent/construct.go) populates it from Config
-	// UNCONDITIONALLY rather than behind a DepNeeds flag: the refusal has to hold on a host with
-	// no confinement backend too, so it cannot be derived from a fire-time permit's box, and a
-	// zero value simply names no fence (a Deps built by a test that has no workspace).
-	//
-	// It is the box as it stood at CONSTRUCTION, and that is the correct instant rather than a
-	// stale one: autofix probes PATH exactly once, in newAutofix, before the model has written
-	// a byte, and caches the resolved paths for the run's lifetime. The only box field that
-	// moves later is the session scratch dir (the engine's Agent.SetScratchDir), and a
-	// moved-to scratch dir is a freshly created ~/.apogee/scratch/<id>/ which cannot contain a
-	// path that was already resolved before it existed — so a live box would measure the very
-	// same formatter paths against a fence that cannot include them. The tools' per-call box
-	// (Agent.confinementBox) does follow the live scratch dir, because a tool resolves and
-	// spawns PER CALL against a tree the model has been writing to; a Mechanism that caches
-	// its resolutions at construction needs no such freshness.
-	WritableBox domain.ConfinementBox
-
-	// SecretEnvVars names the operator-declared credential variables a Mechanism that SPAWNS must
-	// drop from the child's environment beside apogee's own — the `api-key-env:` names (ADR 0047)
-	// the execution tools receive as tools.HostTools.SecretEnvVars. Autofix's formatter is its only
-	// reader today: it hands them to tools.RunHookSubprocess, so a hook's child scrubs exactly what
-	// terminal/python_exec/run_tests scrub instead of inheriting a key the operator exported into
-	// the shell apogee was started from. deriveDeps (internal/agent/construct.go) populates it from
-	// Config.SecretEnvVars UNCONDITIONALLY, like WritableBox and for the same reason: the scrub has
-	// to hold whichever rows a run enabled, so it cannot hang off a DepNeeds flag. Nil names none,
-	// leaving apogee's own fixed half — the scrub before this field existed.
-	SecretEnvVars []string
 }
 
 // DepNeeds is which construction-injected collaborators a set of enabled rows requires, so the
@@ -82,8 +43,8 @@ type Deps struct {
 // it keys on): they are resolved together, and only the library Mechanism reads either, so one flag
 // covers the pair.
 //
-// The struct grows with Deps: a future Deps field that must be DERIVED — as opposed to one that
-// defaults itself, like LookPath — adds a flag here, and the row that needs it declares it.
+// The struct grows with Deps: a future Deps field that must be DERIVED — as opposed to one a
+// Mechanism defaults for itself — adds a flag here, and the row that needs it declares it.
 type DepNeeds struct {
 	Library bool
 }

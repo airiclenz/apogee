@@ -3,13 +3,14 @@ package agent
 // Sub-agent spawn under the PRODUCTION Config.EnableMechanisms arm (ADR 0015 Realisation; plan
 // item 9). The existing coverage splits the two concerns: enable_mechanisms_test.go arms via
 // EnableMechanisms but never delegates, and the delegation suites arm via a pre-built
-// Config.Mechanisms (wave1Registry, or a synthetic row). Neither exercises the seam the ADR names —
+// Config.Mechanisms (a synthetic row). Neither exercises the seam the ADR names —
 // a spawned sub-agent inherits the parent's ALREADY-BUILT registry (subagent.go: childCfg.Mechanisms =
 // a.registry.ForSubAgent(), which hands the child that catalogue in a container of its own) and
 // CLEARS EnableMechanisms so the child does not rebuild those IDs into the inherited registry and
-// trip the already-registered rejection. These tests arm syntax by ID with Config.Mechanisms left
-// nil (the engine BUILDS the stack), drive one real delegation, and prove the child ran the
-// inherited stack — through New and through Resume, the one construction path the ADR names.
+// trip the already-registered rejection. These tests arm the catalogued row by ID with
+// Config.Mechanisms left nil (the engine BUILDS the stack), drive one real delegation, and prove the
+// child ran the inherited stack — through New and through Resume, the one construction path the ADR
+// names.
 
 import (
 	"context"
@@ -20,13 +21,13 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// gdEnableStack is the production arm under test: a catalogued row left for the engine to BUILD
-// (Config.Mechanisms nil) — syntax, a response-repair row a CHILD can trip. A spawned sub-agent must
-// inherit this built registry, not rebuild it. (The stack used to carry the fan-out row too, with
-// the tool-result cap as its Required peer; the cap is the `tool-result-cap` Floor guard now — on
-// for every agent at every Depth, and so no proof that a registry was inherited — and the row itself
-// retired in v0.20.0, ADR 0071.)
-var gdEnableStack = []domain.MechanismID{"syntax"}
+// The production arm under test is a catalogued row left for the engine to BUILD (Config.Mechanisms
+// nil) — `library`, armed through armLibrary so it injects, and since the content-repair rows
+// retired in v0.20.0 the only catalogued row a CHILD can still trip (ADR 0071). A spawned sub-agent
+// must inherit this built registry, not rebuild it. (The stack used to carry the fan-out row too,
+// with the tool-result cap as its Required peer; the cap is the `tool-result-cap` Floor guard now —
+// on for every agent at every Depth, and so no proof that a registry was inherited — and the row
+// itself retired on the same verdict.)
 
 // gdWindow is the discovered context window these delegation tests run under: at 4 chars/token
 // (uncalibrated) it allocates ~400 tokens to FileContext and ~960 to History, so a modest ask leaves
@@ -36,25 +37,25 @@ const gdWindow = 2000
 // enableMechanismsSubAgentConfig arms the stack by ID (Config.Mechanisms left nil so the engine
 // builds it), wires the sub_agent recursion point plus a write_file tool the child can call, and
 // sets the discovered window the delegation is budgeted against.
-func enableMechanismsSubAgentConfig(sink domain.EventSink) domain.Config {
+func enableMechanismsSubAgentConfig(t *testing.T, sink domain.EventSink) domain.Config {
+	t.Helper()
 	cfg := subAgentConfig(sink, domain.ModeAskBefore,
 		fakeTool{name: "write_file", result: "ok"})
-	cfg.EnableMechanisms = gdEnableStack
+	armLibrary(t, &cfg)
 	cfg.Context.MaxContextTokens = gdWindow
 	return cfg
 }
 
 // enableMechanismsSubAgentScripts is the run-ordered script the shared responder replays across the
 // parent AND its one child: the parent delegates unprompted on a modest opening ask, and the child
-// writes a Go file whose payload is unbalanced — which the inherited syntax row retries in place, firing at
-// Depth 1 — before the child and then the parent each answer. The call itself is well formed, so the
-// tool-call repair Floor guard ahead of every hook stands down and leaves the seam to the Mechanism.
+// writes a Go file before the child and then the parent each answer. Every request the child makes
+// runs the inherited stack, so the library row injects — and books a fire — at Depth 1.
 func enableMechanismsSubAgentScripts() [][]provider.Delta {
 	return [][]provider.Delta{
-		subAgentCallScript("s1", "investigate the auth module and report the entry points"),               // parent T0: unprompted delegation
-		toolCallScript("w0", "write_file", `{"path":"auth.go","content":"package auth\nfunc Login() {"}`), // child T0: unbalanced write → syntax retries
-		contentScript("child: entry points catalogued"),                                                   // child T0 (re-streamed): final report
-		contentScript("parent: synthesized the delegated investigation"),                                  // parent T1: final answer
+		subAgentCallScript("s1", "investigate the auth module and report the entry points"), // parent T0: unprompted delegation
+		toolCallScript("w0", "write_file", `{"path":"auth.go","content":"package auth\n"}`), // child T0: a write
+		contentScript("child: entry points catalogued"),                                     // child T1: final report
+		contentScript("parent: synthesized the delegated investigation"),                    // parent T1: final answer
 	}
 }
 
@@ -66,7 +67,7 @@ func TestEnableMechanisms_SubAgentSpawnInheritsBuiltRegistry(t *testing.T) {
 	sink := &recordingSink{}
 	responder := &captureAllResponder{scripts: enableMechanismsSubAgentScripts()}
 
-	a, err := newAgent(enableMechanismsSubAgentConfig(sink), responder)
+	a, err := newAgent(enableMechanismsSubAgentConfig(t, sink), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestEnableMechanisms_SubAgentSpawnInheritsBuiltRegistry(t *testing.T) {
 // resumed parent rebuilds the same stack and a spawned child inherits it identically. A fresh armed
 // Agent seeds a snapshot; Resume rebuilds the registry from Config and drives the same delegation.
 func TestEnableMechanisms_SubAgentSpawnInheritsBuiltRegistryOnResume(t *testing.T) {
-	seed, err := newAgent(enableMechanismsSubAgentConfig(&recordingSink{}), echoResponder{reply: "seed"})
+	seed, err := newAgent(enableMechanismsSubAgentConfig(t, &recordingSink{}), echoResponder{reply: "seed"})
 	if err != nil {
 		t.Fatalf("newAgent (seed): %v", err)
 	}
@@ -97,7 +98,7 @@ func TestEnableMechanisms_SubAgentSpawnInheritsBuiltRegistryOnResume(t *testing.
 
 	sink := &recordingSink{}
 	responder := &captureAllResponder{scripts: enableMechanismsSubAgentScripts()}
-	b, err := resumeAgent(enableMechanismsSubAgentConfig(sink), snap, responder)
+	b, err := resumeAgent(enableMechanismsSubAgentConfig(t, sink), snap, responder)
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
@@ -124,7 +125,7 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 
 	// The spawn succeeded: the sub_agent tool result the parent saw is the child's report, not a
 	// construction error. Reverting subagent.go's `childCfg.EnableMechanisms = nil` breaks exactly
-	// this — the child would rebuild syntax into the registry it inherited and fail with the
+	// this — the child would rebuild the row into the registry it inherited and fail with the
 	// already-registered rejection, surfacing "could not construct sub-agent" here.
 	subRes, ok := lastSubAgentResult(sink.events)
 	if !ok {
@@ -145,11 +146,11 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 		t.Errorf("parent answer event Depth = %d, want 0", d)
 	}
 
-	// The child ran the INHERITED stack: syntax retried the child's unbalanced write in place,
-	// booking a fire at Depth 1. A child on an empty registry (the EnableMechanisms clear
+	// The child ran the INHERITED stack: the library row injected its notes into the child's own
+	// request, booking a fire at Depth 1. A child on an empty registry (the EnableMechanisms clear
 	// mis-applied to Mechanisms, or the inheritance dropped) books no such fire.
-	if !hasFireAtDepth(sink.events, "syntax", 1) {
-		t.Errorf("no syntax fire at Depth 1; the child did not run the inherited EnableMechanisms stack. fires=%+v",
+	if !hasFireAtDepth(sink.events, "library", 1) {
+		t.Errorf("no library fire at Depth 1; the child did not run the inherited EnableMechanisms stack. fires=%+v",
 			mechanismFires(sink.events))
 	}
 }

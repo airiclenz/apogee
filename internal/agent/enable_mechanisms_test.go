@@ -9,25 +9,54 @@ package agent
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/library"
 )
 
-// brokenThenFixed scripts a write_file call whose Go payload is unbalanced — which the syntax
-// Mechanism retries in place — followed by a recovered content reply, the shape that makes a
-// catalogued Mechanism fire through the loop so a test can prove one was armed by
-// Config.EnableMechanisms alone. The call itself is well formed (a known tool, valid arguments), so
-// the tool-call repair Floor guard that runs ahead of every hook stands down and leaves the seam to
-// the Mechanism.
-func brokenThenFixed(recovered string) [][]provider.Delta {
-	return [][]provider.Delta{
-		toolCallScript("c1", "write_file", `{"path":"main.go","content":"package main\nfunc main() {"}`),
-		contentScript(recovered),
+// armLibrary points cfg at the `library` row so that it actually INJECTS, which is what makes an
+// armed catalogued Mechanism observable as a fire through the loop. Since the content-repair rows
+// retired in v0.20.0 (ADR 0071) it is the only catalogued row left, and it injects only above the
+// confidence gate with qualifying notes on file: a real weights file as the model id lifts the
+// fingerprint to High, and a seeded store under LibraryDir carries the note. It returns the model id
+// it bound and the store it seeded, so a Resume can rebuild an equivalent Config through
+// bindLibrary.
+func armLibrary(t *testing.T, cfg *domain.Config) (modelPath, storeDir string) {
+	t.Helper()
+
+	modelPath = filepath.Join(t.TempDir(), "model.gguf")
+	if err := os.WriteFile(modelPath, []byte("weights"), 0o600); err != nil {
+		t.Fatalf("write the weights file: %v", err)
 	}
+	fingerprint := library.ResolveFingerprint(modelPath)
+
+	storeDir = t.TempDir()
+	seed := library.NewStore(storeDir)
+	// Two observations make the entry qualifying, the shape the store's own tests seed.
+	for range 2 {
+		seed.Record(fingerprint, library.CategoryBehavioral,
+			[]string{"behavioral", "text_instead_of_tool"}, "Always prefer tool calls.")
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close the seed store: %v", err)
+	}
+
+	bindLibrary(cfg, modelPath, storeDir)
+	return modelPath, storeDir
+}
+
+// bindLibrary points a Config at a weights file and a seeded store armLibrary already created — the
+// second half of the fixture, so a Resume gets an Config equivalent to the original rather than a
+// freshly seeded one.
+func bindLibrary(cfg *domain.Config, modelPath, storeDir string) {
+	cfg.Model = modelPath
+	cfg.LibraryDir = storeDir
+	cfg.EnableMechanisms = []domain.MechanismID{"library"}
 }
 
 // TestEnableMechanisms_ArmsNamedMechanism: a valid ID list with a nil Config.Mechanisms builds the
@@ -35,20 +64,16 @@ func brokenThenFixed(recovered string) [][]provider.Delta {
 func TestEnableMechanisms_ArmsNamedMechanism(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
-	cfg.EnableMechanisms = []domain.MechanismID{"syntax"}
-	responder := &captureAllResponder{scripts: brokenThenFixed("recovered")}
+	armLibrary(t, &cfg)
 
-	a, err := newAgent(cfg, responder)
+	a, err := newAgent(cfg, echoResponder{reply: "done"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	runExchange(t, a, "write the parser")
+	runExchange(t, a, "update the config file")
 
-	if !hasFire(sink.events, "syntax", string(domain.ActionRetry)) {
-		t.Error("syntax did not fire; Config.EnableMechanisms never armed it through construction")
-	}
-	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "recovered" {
-		t.Errorf("final MessageEvent = %+v (ok=%v), want %q (the Mechanism drove the retry)", me, ok, "recovered")
+	if !hasFire(sink.events, "library", firedAction) {
+		t.Error("library did not fire; Config.EnableMechanisms never armed it through construction")
 	}
 }
 
@@ -87,7 +112,7 @@ func TestEnableMechanisms_HalfStackFailsRequirement(t *testing.T) {
 // caller who pre-built the same Mechanism).
 func TestEnableMechanisms_DuplicateIDRejected(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"syntax", "syntax"}
+	cfg.EnableMechanisms = []domain.MechanismID{"library", "library"}
 
 	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if err == nil || !strings.Contains(err.Error(), "already registered") {
@@ -99,11 +124,11 @@ func TestEnableMechanisms_DuplicateIDRejected(t *testing.T) {
 // host, and cmd/apogee/main.go prints a returned error verbatim — so it has to read as ONE
 // "apogee: "-prefixed line. registry.Add's rejections already arrive prefixed (house
 // convention for a returned error), so the enable-path context is appended rather than wrapping them
-// in a second prefix ("apogee: enable mechanism "syntax": apogee: mechanism ID "syntax" is
+// in a second prefix ("apogee: enable mechanism "library": apogee: mechanism ID "library" is
 // already registered").
 func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"syntax", "syntax"}
+	cfg.EnableMechanisms = []domain.MechanismID{"library", "library"}
 
 	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if err == nil {
@@ -117,7 +142,7 @@ func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
 	if got := strings.Count(msg, "apogee: "); got != 1 {
 		t.Errorf("newAgent err = %q; want exactly one %q prefix, got %d", msg, "apogee: ", got)
 	}
-	if !strings.Contains(msg, `"syntax"`) {
+	if !strings.Contains(msg, `"library"`) {
 		t.Errorf("newAgent err = %q; want it to name the mechanism that failed", msg)
 	}
 }
@@ -133,20 +158,19 @@ func TestEnableMechanisms_MergesWithProvidedExperimentalHook(t *testing.T) {
 	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firingHook{fired: &fired}); err != nil {
 		t.Fatalf("AddExperimental: %v", err)
 	}
-	cfg.EnableMechanisms = []domain.MechanismID{"syntax"}
-	responder := &captureAllResponder{scripts: brokenThenFixed("recovered")}
+	armLibrary(t, &cfg)
 
-	a, err := newAgent(cfg, responder)
+	a, err := newAgent(cfg, echoResponder{reply: "done"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	runExchange(t, a, "write the parser")
+	runExchange(t, a, "update the config file")
 
 	if !fired {
 		t.Error("the pre-existing experimental hook did not fire; the merge replaced the provided registry")
 	}
-	if fireCountFor(sink.events, "syntax") == 0 {
-		t.Error("the catalogued syntax Mechanism did not fire; EnableMechanisms was not merged in")
+	if fireCountFor(sink.events, "library") == 0 {
+		t.Error("the catalogued library Mechanism did not fire; EnableMechanisms was not merged in")
 	}
 }
 
@@ -197,15 +221,15 @@ func armedIDs(a *Agent, at domain.HookPoint) []domain.MechanismID {
 func TestEnableMechanisms_ResumeArmsIdentically(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
-	cfg.EnableMechanisms = []domain.MechanismID{"syntax"}
+	modelPath, storeDir := armLibrary(t, &cfg)
 
-	a, err := newAgent(cfg, &captureAllResponder{scripts: brokenThenFixed("recovered")})
+	a, err := newAgent(cfg, echoResponder{reply: "done"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	runExchange(t, a, "write the parser")
-	if !hasFire(sink.events, "syntax", string(domain.ActionRetry)) {
-		t.Fatal("syntax did not fire on the original Agent (test precondition)")
+	runExchange(t, a, "update the config file")
+	if !hasFire(sink.events, "library", firedAction) {
+		t.Fatal("library did not fire on the original Agent (test precondition)")
 	}
 	snap, err := a.Snapshot()
 	if err != nil {
@@ -213,18 +237,18 @@ func TestEnableMechanisms_ResumeArmsIdentically(t *testing.T) {
 	}
 
 	// Resume into a fresh Agent with an equivalent Config (fresh sink + registry) and drive another
-	// Mechanism-triggering Exchange: the resumed Agent must arm syntax identically.
+	// Mechanism-triggering Exchange: the resumed Agent must arm library identically.
 	sink2 := &recordingSink{}
 	cfg2 := configWithTools(sink2, fakeTool{name: "write_file", result: "ok"})
-	cfg2.EnableMechanisms = []domain.MechanismID{"syntax"}
-	b, err := resumeAgent(cfg2, snap, &captureAllResponder{scripts: brokenThenFixed("recovered again")})
+	bindLibrary(&cfg2, modelPath, storeDir)
+	b, err := resumeAgent(cfg2, snap, echoResponder{reply: "done again"})
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	runExchange(t, b, "keep going")
+	runExchange(t, b, "update the other config file")
 
-	if !hasFire(sink2.events, "syntax", string(domain.ActionRetry)) {
-		t.Error("Resume did not arm syntax; mechanisms must be rebuilt from Config, not session state")
+	if !hasFire(sink2.events, "library", firedAction) {
+		t.Error("Resume did not arm library; mechanisms must be rebuilt from Config, not session state")
 	}
 }
 
@@ -254,13 +278,15 @@ func TestEnableMechanisms_LibraryBuildsFromLibraryDir(t *testing.T) {
 	})
 }
 
-// TestEnableMechanisms_NonLibraryArmIgnoresLibraryDir: a list with no `library` never wires a store,
-// so LibraryDir is irrelevant — construction succeeds even when it points at a path that does not
-// exist (nothing under it is ever read).
+// TestEnableMechanisms_NonLibraryArmIgnoresLibraryDir: an arm that does not name `library` never
+// wires a store, so LibraryDir is irrelevant — construction succeeds even when it points at a path
+// that does not exist (nothing under it is ever read). `library` is the only catalogued row left
+// since the content-repair rows retired (ADR 0071), so the arm that does not name it is the empty
+// one; the claim is unchanged — the derivation is driven by DepNeeds, not by the key's presence.
 func TestEnableMechanisms_NonLibraryArmIgnoresLibraryDir(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.LibraryDir = "/no/such/dir/should/never/be/read"
-	cfg.EnableMechanisms = []domain.MechanismID{"syntax"}
+	cfg.EnableMechanisms = nil
 
 	if _, err := newAgent(cfg, echoResponder{reply: "unused"}); err != nil {
 		t.Errorf("newAgent with a non-library arm: %v, want a clean build (LibraryDir untouched)", err)
