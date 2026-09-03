@@ -21,27 +21,33 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// The production arm under test is a catalogued row left for the engine to BUILD (Config.Mechanisms
-// nil) — `library`, armed through armLibrary so it injects, and since the content-repair rows
-// retired in v0.20.0 the only catalogued row a CHILD can still trip (ADR 0071). A spawned sub-agent
-// must inherit this built registry, not rebuild it. (The stack used to carry the fan-out row too,
-// with the tool-result cap as its Required peer; the cap is the `tool-result-cap` Floor guard now —
-// on for every agent at every Depth, and so no proof that a registry was inherited — and the row
-// itself retired on the same verdict.)
+// The arm under test is ONE catalogued-shaped row that acts on every request, so a fire booked at
+// Depth 1 proves the child ran the parent's registry. It is a synthetic row rather than a shipped
+// one because the shipped catalogue has been EMPTY since v0.20.0 (ADR 0071): `library` was the last
+// row a child could trip, and it retired with the store it read. A spawned sub-agent must inherit
+// the parent's built registry, not rebuild one of its own. (The stack used to carry the fan-out row
+// too, with the tool-result cap as its Required peer; the cap is the `tool-result-cap` Floor guard
+// now — on for every agent at every Depth, and so no proof that a registry was inherited — and the
+// row itself retired on the same verdict.)
+
+// inheritedMechID names the synthetic row the parent arms and the child must inherit.
+const inheritedMechID domain.MechanismID = "inherited_probe"
 
 // gdWindow is the discovered context window these delegation tests run under: at 4 chars/token
 // (uncalibrated) it allocates ~400 tokens to FileContext and ~960 to History, so a modest ask leaves
 // the budget honest without any allocation being close to full.
 const gdWindow = 2000
 
-// enableMechanismsSubAgentConfig arms the stack by ID (Config.Mechanisms left nil so the engine
-// builds it), wires the sub_agent recursion point plus a write_file tool the child can call, and
-// sets the discovered window the delegation is budgeted against.
+// enableMechanismsSubAgentConfig arms the stack, wires the sub_agent recursion point plus a
+// write_file tool the child can call, and sets the discovered window the delegation is budgeted
+// against.
 func enableMechanismsSubAgentConfig(t *testing.T, sink domain.EventSink) domain.Config {
 	t.Helper()
 	cfg := subAgentConfig(sink, domain.ModeAskBefore,
 		fakeTool{name: "write_file", result: "ok"})
-	armLibrary(t, &cfg)
+	fired := 0
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	mustAddMech(t, cfg.Mechanisms, recordingMech{id: inheritedMechID, cap: domain.CapProactiveNudge, fired: &fired}.row())
 	cfg.Context.MaxContextTokens = gdWindow
 	return cfg
 }
@@ -49,7 +55,7 @@ func enableMechanismsSubAgentConfig(t *testing.T, sink domain.EventSink) domain.
 // enableMechanismsSubAgentScripts is the run-ordered script the shared responder replays across the
 // parent AND its one child: the parent delegates unprompted on a modest opening ask, and the child
 // writes a Go file before the child and then the parent each answer. Every request the child makes
-// runs the inherited stack, so the library row injects — and books a fire — at Depth 1.
+// runs the inherited stack, so the armed row acts — and books a fire — at Depth 1.
 func enableMechanismsSubAgentScripts() [][]provider.Delta {
 	return [][]provider.Delta{
 		subAgentCallScript("s1", "investigate the auth module and report the entry points"), // parent T0: unprompted delegation
@@ -146,12 +152,12 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 		t.Errorf("parent answer event Depth = %d, want 0", d)
 	}
 
-	// The child ran the INHERITED stack: the library row injected its notes into the child's own
-	// request, booking a fire at Depth 1. A child on an empty registry (the EnableMechanisms clear
-	// mis-applied to Mechanisms, or the inheritance dropped) books no such fire.
-	if !hasFireAtDepth(sink.events, "library", 1) {
-		t.Errorf("no library fire at Depth 1; the child did not run the inherited EnableMechanisms stack. fires=%+v",
-			mechanismFires(sink.events))
+	// The child ran the INHERITED stack: the armed row acted on the child's own request, booking a
+	// fire at Depth 1. A child on an empty registry (the EnableMechanisms clear mis-applied to
+	// Mechanisms, or the inheritance dropped) books no such fire.
+	if !hasFireAtDepth(sink.events, inheritedMechID, 1) {
+		t.Errorf("no %s fire at Depth 1; the child did not run the inherited stack. fires=%+v",
+			inheritedMechID, mechanismFires(sink.events))
 	}
 }
 

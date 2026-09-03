@@ -353,7 +353,6 @@ const seatChoiceNote = "applies to the next request"
 // stateRoots are the resolved, absolute directories injected into Config.
 type stateRoots struct {
 	config    string
-	library   string
 	sessions  string
 	validated string
 	probe     string
@@ -383,7 +382,7 @@ func resolveColorScheme(name, schemesDir string) (scheme.Scheme, []string) {
 }
 
 // resolveRoots computes the state roots the library refuses to assume (ADR 0001): the
-// apogee home (configDir override, else ~/.apogee) holds config/library/sessions, and the
+// apogee home (configDir override, else ~/.apogee) holds config/sessions, and the
 // workspace (workspace override, else the current directory) scopes the file tools. It
 // computes paths only — directory creation is deferred to the writer that needs them (P2.5).
 func resolveRoots(configDir, workspace string) (stateRoots, error) {
@@ -407,7 +406,6 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 
 	return stateRoots{
 		config:    absHome,
-		library:   filepath.Join(absHome, "library"),
 		sessions:  filepath.Join(absHome, "sessions"),
 		validated: filepath.Join(absHome, "validated"),
 		// The behavioral-probe records `apogee probe model` writes and the fingerprint

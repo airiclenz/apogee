@@ -94,6 +94,12 @@ type retiredRow struct {
 //   - autofix (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. Handing a written payload to
 //     an external formatter in a gated sub-process rewrote the model's file behind its back —
 //     a mutation of the work, not of what the model sees — and paid a per-write subprocess for it.
+//   - library (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. The cross-session
+//     observation store injected a block of remembered per-model behavioural notes into the system
+//     prompt, which tells the model what to do before it has done anything wrong — steering, not
+//     shaping — and no per-model A/B ever earned it a place (ADR 0009's gate). The store it owned
+//     went with it (internal/library keeps only the fingerprint resolver and the probe record);
+//     an existing ~/.apogee/library is left on disk, simply never read again.
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
@@ -115,6 +121,7 @@ var retired = []retiredRow{
 	{ID: "read_repeat", Release: "v0.20.0"},
 	{ID: "syntax", Release: "v0.20.0"},
 	{ID: "autofix", Release: "v0.20.0"},
+	{ID: "library", Release: "v0.20.0"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

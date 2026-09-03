@@ -896,7 +896,47 @@ the history rows, and whatever of it survives is finished here.
 
 **Commit:** `refactor(mechanisms): retire syntax and autofix`
 
-## 17. Retire `library` and the store it owned
+## 17. Retire `library` and the store it owned — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): `internal/mechanisms/{robustness.go,robustness_test.go,readerror_test.go}` joined Files by the plan-wide symbol rule — `library.go` was the last consumer of every identifier in them, and `internal/floor` already holds verbatim copies (`repair.go`, `correction.go`, `toolnames.go`, `readerror.go`, `conversation.go`).
+
+NOTES (2026-09-03): `historyhints.go` does NOT survive (item 19's "if any survives" reads as deletion here): after `library.go` and `robustness.go` go, nothing in the package reads `wave4WriteTools`, `readSpellings`, `listSpellings`, `toolSet`, `toolCallPath` or the read-error sniffers; `internal/floor` keeps its own copy of each.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/doc.go: made necessary by the file deletions (docmap gate); rewritten as the lab-registry map (catalogue.go / retired.go / doc.go). Item 19 may restate it further.
+
+NOTES (2026-09-03): consequential edit — apogee_test.go: made necessary by the catalogue emptying; `TestCataloguedMechanisms` asserted a non-empty catalogue, recast to assert the query is reachable (non-nil) and well-formed.
+
+NOTES (2026-09-03): consequential edit — cmd/apogee/naming_test.go, cmd/apogee/wire_firing_test.go: made necessary by the catalogue emptying; `mechanisms.KnownIDs()[0]` / `[:1]` PANICKED the `cmd/apogee` test binary. Applied item 19's own prescription (nil manual sets) at `naming_test.go:429,:504` and `wire_firing_test.go:85`; `wire_firing_test.go:618` now takes `RetiredIDs()[0]` so the "a present map travels to the child" case still has a legal key. Item 19 still owns the wider restatement.
+
+NOTES (2026-09-03): consequential edit — internal/agent/{rebind_test.go,construct_test.go,enable_mechanisms_subagent_test.go}, internal/agent/wave1delivery_test.go, benchreadiness_test.go: made necessary by the catalogue emptying (`"library"` symbol grep). Tests that armed a catalogued row by ID were recast — the sub-agent inheritance pin now arms a synthetic `recordingMech` ("inherited_probe") through `Config.Mechanisms`; `TestRebindRebuildsMechanismsForNewModel` proves the rebuild by registry INSTANCE plus the unknown-ID refusal. Unused helpers (`orderedIndex`, `registeredIDs`, `hasRegistered`, `hasFire`, `pollForFile`) deleted for `make lint`.
+
+NOTES (2026-09-03): coverage lost with the last catalogued row, and NOT replaced — `TestEnableMechanisms_ArmsNamedMechanism` and `TestEnableMechanisms_DuplicateIDRejected` are deleted (nothing catalogued left to arm or to double); the duplicate rejection stays pinned in `internal/domain/mechanism_test.go`. `TestEnableMechanisms_MergeRejectionCarriesOnePrefix`, `..._MergesWithProvidedExperimentalHook`, `..._ResumeArmsIdentically` and `TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent` are recast onto the halves that survive an empty catalogue.
+
+NOTES (2026-09-03): deviation — `benchreadiness_test.go`'s `TestBenchReadinessLeaveOneOutArms` `t.Fatal` on an empty `compatibleBaseStack()` was relaxed to `t.Skip` with an ADR 0071 comment. Item 19 owns dropping the test outright; without this the ROOT package (in item 17's own Acceptance) is red. `enabledMechanisms` is now empty per the item's regression guard (c), and the Bypass/mechanisms-on Library store assertions went with `Config.LibraryDir`.
+
+NOTES (2026-09-03): `internal/mechanisms/catalogue.go`'s `register()` now carries `//nolint:unused` (repo precedent: `internal/platform/host.go:46`) — it is the lab surface's door and nothing calls it in a build with an empty catalogue. `make lint` is 0 issues.
+
+NOTES (2026-09-03): `Deps` survives as an EMPTY struct rather than being deleted — the item removes its two fields, `DepNeeds`, `row.needs` and `DepsNeeded`, and `Build(id, Deps)` / `constructor func(Deps)` keep their shape for the lab surface. `buildEnabledMechanisms` now returns only `error`; `deriveDeps`, `Agent.library` and `closeLibrary` are gone.
+
+NOTES (2026-09-03): `dirPerm`/`filePerm` rehomed from `internal/library/store.go` into `proberecord.go` beside `SaveProbeRecord`, their only remaining consumer; `go build ./internal/library/` is green.
+
+NOTES (2026-09-03): **EXTERNAL COMMIT DURING THE ITEM.** A tool ("beads") ran `git commit` mid-run and created `ab19e053 "bd init: initialize beads issue tracking"`, which swept this item's 22 STAGED file deletions into it alongside its own `.beads/`, `.agents/`, `.codex/`, `.gitignore` and `AGENTS.md` additions. The commit is local only (`origin/main` is at `146a4457`). I did NOT rewrite it — that is the owner's call. The working tree is correct; the bookkeeping is not. Recovery, if wanted: `git reset --soft HEAD~1`, `git restore --staged` the 22 paths, re-commit the beads-only change, then let the verifier commit this item normally.
+
+NOTES (2026-09-03): checkpoint — implementation, `make lint` (0 issues), `go build ./...`, `go build ./internal/library/`, `go vet ./...` and `go test ./internal/mechanisms/ ./internal/library/ ./internal/agent/ .` are all DONE and green / the second half of the Acceptance (`go test ./cmd/apogee/ -run 'Delegation|Boot|Firing|Probe|Validated'`) has five failures left to triage against the `eaa340de` baseline (see REMAINING).
+
+NOTES (2026-09-03): consequential edit — cmd/apogee/wire_live.go, internal/domain/confinement.go, docs/design/confinement-execution-contract.md: made necessary by the removal of `deriveDeps` and of `Deps`' two fields; three comment/doc routes still described the Library store under `LibraryDir` and the `mechanisms.Deps.SecretEnvVars` fill as live. No behaviour change.
+
+NOTES (2026-09-03): git recovery (owner call) — `ab19e053` was split: `git reset --soft eaa340de` + `git reset`, then bd init's own paths re-staged from that commit and committed as `9f156eba` with its ORIGINAL message and author (`git commit --no-verify -C ab19e053`). The new commit carries exactly `.agents/`, `.beads/`, `.codex/`, `.gitignore` and bd init's `AGENTS.md` block — no item-17 file. `.gitignore` is beyond the paths the DECISION enumerated but is bd init's own change ("added by bd init"), so it went with it rather than stranding in item 17's commit. Item 17's 22 deletions are unstaged `D` again and the index is empty. Nothing was pushed (`origin/main` = `146a4457`); `ab19e053` remains reachable via reflog.
+
+NOTES (2026-09-03): NOTE for the verifier — `core.hooksPath` now points at `.beads/hooks`, so the repo's own `.git/hooks/commit-msg` attribution stripper no longer runs (beads copied it into `.beads/hooks/commit-msg`, so the behaviour survives). The beads `pre-commit` hook runs `bd hooks run pre-commit`, which is the most likely cause of the original sweep — commit this item with `--no-verify`, or check `git diff --cached` after the hook runs.
+
+NOTES (2026-09-03): triage of the second Acceptance half against the `eaa340de` baseline is COMPLETE. Pre-existing red at baseline, unchanged by this item: `TestScheduleFiringRunsAgainstTheCurrentBinding`, `TestResolveValidatedSet_UserEntryWinsAndSorts`, `TestResolveValidatedSetDropsARetiredIDWithANotice` (panics on BOTH sides — `[3:1]` at baseline, `[3:0]` now — and the panic aborts the package binary, so the comparison was re-run with that one test excluded) and `TestListMechanismsReadsTheBlock`.
+
+NOTES (2026-09-03): NEW red with this item, and handed to ITEM 18 per the owner's ratified call (item 18's own guard already names all five): `TestResolveValidatedSetAppliesOnAStoredProbeRecord`, `TestProbeModelKeepsAnAliasedSetApplying`, `TestProbeModelPromotesAnOfferedValidatedSet`, `TestRebindResolutionKeysOnTheBoundEndpoint` (all `cmd/apogee`) and `TestShipped_RemovalWithoutARollEntryStillTrips` (`internal/validated`, green at baseline). Cause is one and the same: with `library` retired the shipped validated set for `gemma-4-e4b-it-qat` resolves to ZERO surviving mechanisms, so every fixture that asserts an applied non-empty set now sees `[]`. `internal/validated/shipped_test.go` is deliberately NOT fixed here.
+
+NOTES (2026-09-03): fix-retry — `"library"` added to `TestRetiredOutrightRowsCarryTheirReleaseAndNoSuccessor`'s ID table (`internal/mechanisms/retired_test.go:113-117`) so the roll entry this item adds is pinned like the other twelve outright retirements; `internal/mechanisms/retired_test.go` joins FILES. `go test ./internal/mechanisms/` green.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/catalogue.go: made necessary by this item's `//nolint:unused` on `register`; the explanatory sentence was split across the wrong lines and read as two fragments, so it now sits whole above the directive and the directive line carries its own complete reason. Comment only.
 
 **What.** Depends on 4, 16. Delete `internal/mechanisms/library.go` (+test), the three `library-*.txt`
 assets, `intent.go` (+test; its last caller), `prompts_test.go` (no cases left) and, once no row

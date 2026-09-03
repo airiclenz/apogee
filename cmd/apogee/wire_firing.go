@@ -37,7 +37,7 @@ type firingInputs struct {
 	// [config.NewKeyResolver]. A Driver that raises many Firings passes its own so a keychain is
 	// not asked once per run.
 	keys *config.KeyResolver
-	// roots are the resolved state roots this run lives in — config/library/sessions/scratch plus
+	// roots are the resolved state roots this run lives in — config/sessions/scratch plus
 	// the workspace the file tools are fenced to. Resolving them stays the Driver's, because the
 	// workspace is exactly the root a Driver decides (the daemon's is the schedule entry's).
 	roots stateRoots
@@ -227,7 +227,6 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		Mode:              in.mode,
 		Bypass:            in.opts.Bypass,
 		ConfigDir:         in.roots.config,
-		LibraryDir:        in.roots.library,
 		WorkspaceDir:      in.roots.workspace,
 		// This run's own scratch dir, named after the record it will be saved under (wire.go): the
 		// model is offered writable scratch INSIDE the box rather than putting its working files

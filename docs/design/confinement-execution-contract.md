@@ -1100,7 +1100,9 @@ All three of the tool side's execution contracts hold for a hook's child:
 - The credential scrub is `subprocessEnv`'s **whole** scrub, as a tool's is (amended 2026-08-22).
   Its fixed half — apogee's own `APOGEE_API_KEY` — needs nothing from the caller; the
   operator-configured `api-key-env` names (ADR 0047) reach a hook the way they reach a tool, along
-  their own route: `Config.SecretEnvVars` → `mechanisms.Deps.SecretEnvVars` (filled by the engine's
-  `deriveDeps`, unconditionally, beside `HostTools.SecretEnvVars`) → the spawning Mechanism → the
-  door's `secretEnv` argument. A hook's child therefore drops exactly the variables `terminal`,
+  their own route: `Config.SecretEnvVars` → `HostTools.SecretEnvVars` → the door's `secretEnv`
+  argument. Until v0.20.0 a Mechanism-spawned hook took a parallel route through
+  `mechanisms.Deps.SecretEnvVars`, filled by the engine's `deriveDeps`; the catalogue is empty since
+  ADR 0071 and `Deps` carries no fields, so a future lab Mechanism that spawns a subprocess re-adds
+  it. A hook's child therefore drops exactly the variables `terminal`,
   `python_exec` and `run_tests` drop; a Mechanism that names none leaves the fixed half alone.

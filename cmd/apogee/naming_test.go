@@ -11,7 +11,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/title"
 )
@@ -426,7 +425,7 @@ func TestFiringConfigCarriesTheDelegationNamer(t *testing.T) {
 				entry:     entry,
 				apiKey:    "sk-firing",
 				roots:     firingRoots(t),
-				manualIDs: []apogee.MechanismID{mechanisms.KnownIDs()[0]},
+				manualIDs: nil, // the shipped catalogue is empty (v0.20.0, ADR 0071): no key to spell out
 				confiner:  fenceableHost,
 				mode:      domain.ModePlan,
 				width:     func(context.Context, string, string, string) int { return 0 },
@@ -501,7 +500,7 @@ func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 		entry:     entry,
 		apiKey:    "sk-firing",
 		roots:     firingRoots(t),
-		manualIDs: []apogee.MechanismID{mechanisms.KnownIDs()[0]},
+		manualIDs: nil, // the shipped catalogue is empty (v0.20.0, ADR 0071): no key to spell out
 		confiner:  fenceableHost,
 		mode:      domain.ModePlan,
 		width:     func(context.Context, string, string, string) int { return 0 },

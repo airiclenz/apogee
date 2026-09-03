@@ -1,1 +1,0 @@
-This model tends to summarize code from filenames alone without reading file contents. When asked to review or analyze code, always read files with read_file before drawing conclusions.

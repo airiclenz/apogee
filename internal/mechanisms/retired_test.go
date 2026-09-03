@@ -113,7 +113,7 @@ func TestRetiredOutrightRowsCarryTheirReleaseAndNoSuccessor(t *testing.T) {
 	for _, id := range []domain.MechanismID{
 		"decompose", "stall_nudge", "list_nudge", "tool_use_directive", "guided_decomposition",
 		"filehint", "read_loop", "toolfilter", "truncate_history", "error_enrichment", "read_repeat",
-		"syntax", "autofix",
+		"syntax", "autofix", "library",
 	} {
 		t.Run(string(id), func(t *testing.T) {
 			t.Parallel()

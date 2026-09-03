@@ -29,7 +29,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/session"
@@ -43,9 +42,8 @@ const (
 	// plain reply instead of asking for a tool — how a fork continuation ends in one Turn.
 	closeMarker = "PLEASE_CLOSE"
 
-	// complexPrompt is analysis-AND-action intent with six numbered steps: an analysis verb so the
-	// library observer records the shallow-exploration note (list-without-read on an analysis
-	// request), and an action verb so the ask reads as real work.
+	// complexPrompt is analysis-AND-action intent with six numbered steps: an analysis verb and an
+	// action verb, so the ask reads as real work to every seam that classifies intent.
 	complexPrompt = "please analyze and then refactor the payment service by working through these steps.\n" +
 		"1. read the config parser module.\n" +
 		"2. update the request validation logic.\n" +
@@ -64,13 +62,11 @@ var allHooks = []apogee.HookPoint{
 	apogee.HookHistoryRewrite,
 }
 
-// enabledMechanisms is the set the mechanisms-on arm enables via Config: the learning Mechanism
-// whose observe half writes into the injected LibraryDir (library — item 14). No CATALOGUED row
-// acts every pre-request any more — the wave-3 toolfilter shaper that used to, the wave-4 decompose
-// shaper that sat beside it, and the wave-2 truncate_history history rewrite all retired in v0.20.0
-// (ADR 0071) — so the registered experimental hook is the one pre-request actor the fired stream
-// carries, and the history-rewrite hook point is exercised by that experimental hook alone.
-var enabledMechanisms = []apogee.MechanismID{"library"}
+// enabledMechanisms is the set the mechanisms-on arm enables via Config. It is EMPTY: the shipped
+// catalogue emptied in v0.20.0 (ADR 0071) — `library`, the last row, retired with the store it
+// read — so the registered experimental hook is the only actor the fired stream carries, at every
+// one of the five hook points.
+var enabledMechanisms []apogee.MechanismID
 
 // ----------------------------------------------------------------------------
 // The scripted OpenAI-compatible streaming model (one responder, both arms)
@@ -233,9 +229,8 @@ func (p *fivePointProbe) PostToolResult(context.Context, apogee.ToolCall, *apoge
 // armProbe returns a fresh MechanismRegistry carrying only the five-point experimental probe (via the
 // public AddExperimental) plus the probe itself. The catalogued Mechanisms are NOT built here — each
 // arm enables them by ID through Config.EnableMechanisms, and the engine builds them INTO this same
-// registry (its library store rooted at the arm's injected LibraryDir), so a catalogued+experimental
-// combined arm co-fires from one registry. Each arm gets a fresh registry so its probe counters and
-// library store never bleed into the other's.
+// registry, so a catalogued+experimental combined arm co-fires from one registry. Each arm gets a
+// fresh registry so its probe counters never bleed into the other's.
 func armProbe(t *testing.T) (*apogee.MechanismRegistry, *fivePointProbe) {
 	t.Helper()
 	reg := apogee.NewMechanismRegistry()
@@ -264,12 +259,12 @@ func paddedRegistry(t *testing.T, workspace string) *apogee.ToolRegistry {
 	return reg
 }
 
-// stateRoots is a triple of injected temp directories for one Agent.
-type stateRoots struct{ workspace, library, sessions string }
+// stateRoots is a pair of injected temp directories for one Agent.
+type stateRoots struct{ workspace, sessions string }
 
 func newRoots(t *testing.T) stateRoots {
 	t.Helper()
-	return stateRoots{workspace: t.TempDir(), library: t.TempDir(), sessions: t.TempDir()}
+	return stateRoots{workspace: t.TempDir(), sessions: t.TempDir()}
 }
 
 // runToQuiescence submits input and Steps the Agent to the quiescent boundary that ends the
@@ -330,15 +325,6 @@ func messageText(events []apogee.Event) string {
 	return b.String()
 }
 
-func orderedIndex(reg *apogee.MechanismRegistry, at apogee.HookPoint, want apogee.MechanismID) int {
-	for i, m := range reg.Ordered(at) {
-		if m.Descriptor.ID == want {
-			return i
-		}
-	}
-	return -1
-}
-
 // ----------------------------------------------------------------------------
 // The proof
 // ----------------------------------------------------------------------------
@@ -365,7 +351,6 @@ func TestBenchReadinessContract(t *testing.T) {
 		EnableMechanisms: enabledMechanisms,
 		Tools:            paddedRegistry(t, mechRoots.workspace),
 		WorkspaceDir:     mechRoots.workspace,
-		LibraryDir:       mechRoots.library,
 	})
 	if err != nil {
 		t.Fatalf("New (mechanisms-on arm): %v", err)
@@ -387,7 +372,6 @@ func TestBenchReadinessContract(t *testing.T) {
 		EnableMechanisms: enabledMechanisms,
 		Tools:            paddedRegistry(t, bypassRoots.workspace),
 		WorkspaceDir:     bypassRoots.workspace,
-		LibraryDir:       bypassRoots.library,
 	})
 	if err != nil {
 		t.Fatalf("New (Bypass arm): %v", err)
@@ -412,18 +396,13 @@ func TestBenchReadinessContract(t *testing.T) {
 			t.Errorf("pre-request fired[%d] = %q, want %q (deterministic order: shapers in Ordered() order, then the experimental hook)", i, id, "experimental")
 		}
 	}
-	// The registry still dispatches the enabled catalogued row at this hook point, ahead of the
-	// experimental one, even though it books no fire.
-	if li := orderedIndex(mechReg, apogee.HookPreRequest, "library"); li < 0 {
-		t.Error("Ordered(pre-request) does not carry library; the enabled set was not dispatched")
-	}
-
-	// === Assertion 2: R4 — an inspect-only invocation books no fired event ===
-	// library (observe is silent, inject is confidence-gated) is dispatched every relevant pass but
-	// never intervenes, so it never appears in the stream.
+	// === Assertion 2: R4 — only ACTED invocations book a fired event ===
+	// The shipped catalogue is empty (v0.20.0, ADR 0071), so every fire in the stream must be the
+	// experimental probe's: a catalogued name appearing here would mean a row booked a fire this
+	// build no longer carries.
 	for _, fe := range mechFires {
-		if fe.Mechanism == "library" {
-			t.Errorf("inspect-only Mechanism %q booked a fire (R4: only acted fires are booked)", fe.Mechanism)
+		if fe.Mechanism != "experimental" {
+			t.Errorf("mechanisms-on arm booked a catalogued fire %q at %q; the shipped catalogue is empty", fe.Mechanism, fe.Hook)
 		}
 	}
 
@@ -444,17 +423,6 @@ func TestBenchReadinessContract(t *testing.T) {
 	}
 
 	// === Assertion 5: agent-driven writes stay inside the injected roots ===
-	// The library observe half wrote its store under the mechanisms-on arm's LibraryDir; under
-	// Bypass the Library is fully inert, so its LibraryDir stays empty. The store publishes off the
-	// caller's path (it debounces its observations into one write), so the file is polled for
-	// rather than assumed: this file must not import internal/library, so its Flush is out of reach.
-	if err := pollForFile(filepath.Join(mechRoots.library, "library.json")); err != nil {
-		t.Errorf("mechanisms-on arm did not persist its Library into the injected root: %v", err)
-	}
-	if entries, err := os.ReadDir(bypassRoots.library); err != nil || len(entries) != 0 {
-		t.Errorf("Bypass arm's LibraryDir = %d entries (err %v), want 0 (Library inert under Bypass)", len(entries), err)
-	}
-
 	// Snapshot both arms, and prove a host-persisted session lands under the arm's own sessions root.
 	snapMech, err := mechArm.Snapshot()
 	if err != nil {
@@ -495,11 +463,6 @@ func TestBenchReadinessContract(t *testing.T) {
 		t.Errorf("fork of the Bypass arm did not continue independently: %q", forkBypass)
 	}
 
-	// The forks ran in their own roots and never touched the arms': the mechanisms-on arm's
-	// Library still holds exactly its one store file, unperturbed by any fork.
-	if entries, err := os.ReadDir(mechRoots.library); err != nil || len(entries) != 1 {
-		t.Errorf("mechanisms-on LibraryDir = %d entries (err %v) after forks, want exactly 1 (no fork bled in)", len(entries), err)
-	}
 }
 
 // resumeFork resumes a fork from snap into fresh isolated roots (no Mechanisms), continues it
@@ -516,7 +479,6 @@ func resumeFork(t *testing.T, endpoint string, snap apogee.Session, token string
 		Events:       sink,
 		Tools:        tools.NewDefaultRegistry(roots.workspace),
 		WorkspaceDir: roots.workspace,
-		LibraryDir:   roots.library,
 	}, snap)
 	if err != nil {
 		t.Fatalf("Resume fork %q: %v", token, err)
@@ -525,10 +487,6 @@ func resumeFork(t *testing.T, endpoint string, snap apogee.Session, token string
 
 	runToQuiescence(t, fork, apogee.UserInput{Text: "wrap up now. " + closeMarker + " " + token})
 
-	// The fork used only its own roots — its Library never wrote (no library Mechanism wired).
-	if entries, err := os.ReadDir(roots.library); err != nil || len(entries) != 0 {
-		t.Errorf("fork %q LibraryDir = %d entries (err %v), want 0", token, len(entries), err)
-	}
 	return messageText(sink.events)
 }
 
@@ -550,7 +508,6 @@ func hermeticArm(t *testing.T, enable []apogee.MechanismID) (*apogee.Agent, erro
 		Events:           &recSink{},
 		EnableMechanisms: enable,
 		WorkspaceDir:     t.TempDir(),
-		LibraryDir:       t.TempDir(),
 	})
 }
 
@@ -649,7 +606,11 @@ func TestBenchReadinessLeaveOneOutArms(t *testing.T) {
 	t.Parallel()
 	base := compatibleBaseStack()
 	if len(base) == 0 {
-		t.Fatal("compatibleBaseStack() is empty; the public catalogue query returned nothing")
+		// The shipped catalogue emptied in v0.20.0 (ADR 0071): every row was promoted to a Floor
+		// guard or retired outright, so there is no full-stack arm left to subtract from and no
+		// leave-one-out arm to plan. The idiom itself is unchanged for an experimental catalogue a
+		// bench Driver registers.
+		t.Skip("the shipped catalogue is empty; no leave-one-out arms to plan (ADR 0071)")
 	}
 
 	construct := func(t *testing.T, enable []apogee.MechanismID) {
@@ -691,21 +652,4 @@ func descriptorFor(id apogee.MechanismID) apogee.MechanismDescriptor {
 		}
 	}
 	return apogee.MechanismDescriptor{}
-}
-
-// pollForFile waits for path to appear, up to a bounded deadline. The Library store writes
-// asynchronously, so "the arm persisted its store" is a claim that settles shortly after the
-// observation, not at the instant it was recorded.
-func pollForFile(path string) error {
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		_, err := os.Stat(path)
-		if err == nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return err
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }

@@ -215,18 +215,19 @@ func mustAdd(t *testing.T, registry *apogee.MechanismRegistry, m orderingMech) {
 	}
 }
 
-// TestCataloguedMechanisms asserts the public catalogue query is non-empty and sorted by ID —
+// TestCataloguedMechanisms asserts the public catalogue query is REACHABLE and sorted by ID —
 // through the public surface only (no internal import), so it also guards that the descriptor
-// metadata is reachable without building any Mechanism (ADR 0015 §3). The relations it used to read
-// off a named row are gone from the catalogue: the Requires peer became the `tool-result-cap` Floor
-// guard, and the row declaring the IncompatibleWith edge retired in v0.20.0 (ADR 0071). The
-// descriptor CONTRACT — that the returned slices are clones of the catalogue's own — is pinned in
-// internal/mechanisms over a synthetic row, where a row with both edges non-empty can be registered
-// whatever the shipped catalogue holds.
+// metadata is readable without building any Mechanism (ADR 0015 §3). The relations it used to read
+// off a named row are gone from the catalogue, and so is every row: the six Mechanisms every model
+// benefited from became Floor guards and the other fourteen retired outright in v0.20.0 (ADR 0071),
+// so the SHIPPED answer is an empty — but non-nil and well-formed — slice. The descriptor CONTRACT
+// — that the returned slices are clones of the catalogue's own — is pinned in internal/mechanisms
+// over a synthetic row, where a row with both edges non-empty can be registered whatever the
+// shipped catalogue holds.
 func TestCataloguedMechanisms(t *testing.T) {
 	got := apogee.CataloguedMechanisms()
-	if len(got) == 0 {
-		t.Fatal("CataloguedMechanisms() = empty, want the built-in catalogue")
+	if got == nil {
+		t.Fatal("CataloguedMechanisms() = nil, want an empty non-nil slice for the empty catalogue")
 	}
 
 	for i := 1; i < len(got); i++ {

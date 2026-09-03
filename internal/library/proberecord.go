@@ -44,6 +44,14 @@ const (
 	// probeRecordNameBytes is how much of the key digest names a record file. Eight bytes is
 	// ample for the handful of (endpoint, model) pairs one user probes.
 	probeRecordNameBytes = 8
+
+	// dirPerm and filePerm scope this package's on-disk state to the owner: a measured
+	// behavioural claim about the user's own endpoint is a private record, so neither the
+	// directory nor the file is group/world readable (the same posture as internal/session).
+	// They lived beside the Library store's writer until the `library` Mechanism retired
+	// (v0.20.0) and moved here with SaveProbeRecord, their one remaining consumer.
+	dirPerm  os.FileMode = 0o700
+	filePerm os.FileMode = 0o600
 )
 
 // ProbeRecord is one dated behavioral-identity claim: `apogee probe model` measured the model

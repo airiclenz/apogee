@@ -923,7 +923,7 @@ func resolveDelegationTarget(
 // inheriting the parent's catalogue as it always has (ADR 0045 §2).
 //
 // A PRESENT map is the child's entire catalogue, so a map whose every key is false is not the same
-// as no map: it replaces whatever the parent arms with NOTHING — a `{"library": false}` entry builds
+// as no map: it replaces whatever the parent arms with NOTHING — a `{"some_row": false}` entry builds
 // an empty catalogue, no row being on by default. That is the replace-whole rule doing exactly what
 // it says, and it is why the emptiness test below is on the map rather than on the ids it validates
 // to: an empty map means "inherit the parent's catalogue", while a map of nothing but falses means

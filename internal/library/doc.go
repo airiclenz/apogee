@@ -1,27 +1,28 @@
-// Package library is Apogee's cross-session, per-model learning substrate (CONTEXT
-// "Library"). It holds two things: a confidence-tagged ModelFingerprint resolver — the
-// identity the store keys observations on — and a file-backed Store of those observations
-// with Bayesian confidence counts.
+// Package library is Apogee's per-model identity substrate (CONTEXT "Library"). It holds two
+// things: a confidence-tagged ModelFingerprint resolver — the identity a Validated set is keyed
+// on — and the on-disk behavioral-probe record `apogee probe model` writes and that resolver
+// reads back.
 //
-// This package is the substrate only. The loop-facing halves — an observer that records
-// completed-Turn outcomes and a pre-request Mechanism that injects qualifying observations —
-// are catalogued Mechanisms built on top of the Store (phase-4 item 14); this package never
-// imports internal/agent or internal/mechanisms.
+// The confidence-tagged observation Store this package once carried went with the `library`
+// Mechanism it existed for: both retired in v0.20.0 on ADR 0071's ratified verdict, and with them
+// Config.LibraryDir and the ~/.apogee/library directory the engine used to inject. A user's
+// existing library.json on disk is simply never read again — nothing deletes it.
 //
-// The Store is rooted at an injected directory (Config.LibraryDir) and NEVER reaches for an
-// ambient ~/.apogee itself (ADR 0001): the composition root supplies the production default,
-// and the bench points it at an ephemeral dir so a sim run never touches the production
-// Library (decision 11). The Store is process-local: it guards its in-memory map with a
-// mutex for intra-process safety but makes no cross-process locking claims in v1 — two
-// apogee processes sharing one LibraryDir may last-writer-win. WITHIN one process there is
-// exactly one Store per directory, because every whole-file snapshot is written from one
-// memory: Open hands each builder that names a directory the same instance, and NewStore is
-// the door to a private store that shares nothing (a test fixture, a bench Driver's seed).
+// This package is the substrate only: it never imports internal/agent, internal/mechanisms or
+// internal/probe. The last of those is the direction that matters — probe WRITES records, this
+// package READS them, so ProbeBatteryVersion is mirrored here rather than imported (see
+// proberecord.go).
 //
-// The write model is asynchronous: recording an observation only marks the store dirty, and a
-// single writer goroutine debounces those marks into one whole-file snapshot, so no caller — and
-// under ADR 0039 fan-out, no sub-agent's post-response hook — ever waits on the filesystem. An
-// observation therefore reaches disk within the debounce window or at Close; a process that exits
-// within 200ms of its last observation without closing the store loses that observation, which is
-// the accepted cost of a best-effort learning substrate.
+// Probe records are rooted at an injected directory (the apogee home a Driver passes in) and this
+// package NEVER reaches for an ambient ~/.apogee itself (ADR 0001): the composition root supplies
+// the production default, and a test points it at an ephemeral dir. Each record is its own file,
+// so ADR 0021 §4's printed undo — "delete this file" — is a real off-switch.
+//
+// # The files, one line each
+//
+// fingerprint.go resolves a configured model id into a domain.ModelFingerprint with the
+// confidence its evidence earns — a probe record, the advertised label, or nothing.
+// proberecord.go is the record itself: its schema version, the digest that names its file, and
+// the Save/Load pair, with the owner-only directory and file permissions the writer uses.
+// And doc.go this map.
 package library

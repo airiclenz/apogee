@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/library"
 )
 
 // fakeMechanism is a minimal Mechanism HOOK for exercising the catalogue table independently of
@@ -22,12 +21,13 @@ type fakeMechanism struct {
 
 func (f fakeMechanism) PreRequest(context.Context, *domain.Request) error { return nil }
 
-// A fake row in an explicit table builds and receives the injected Deps — the seam every real
-// wave row will use.
+// A fake row in an explicit table builds and receives the injected Deps — the seam an
+// experimental Mechanism uses. Deps is EMPTY since `library` retired with the store it read
+// (v0.20.0, ADR 0071), so what this pins today is that the constructor is handed whatever the
+// caller passed: a Deps field added for a lab row reaches the row that declared it.
 func TestBuildFromKnownIDInjectsDeps(t *testing.T) {
 	t.Parallel()
 	const id domain.MechanismID = "fake"
-	marker := library.NewStore(t.TempDir())
 	table := map[domain.MechanismID]row{
 		id: {
 			descriptor: domain.MechanismDescriptor{ID: id},
@@ -35,7 +35,7 @@ func TestBuildFromKnownIDInjectsDeps(t *testing.T) {
 		},
 	}
 
-	m, err := buildFrom(table, id, Deps{Library: marker})
+	m, err := buildFrom(table, id, Deps{})
 	if err != nil {
 		t.Fatalf("buildFrom(%q): %v", id, err)
 	}
@@ -49,8 +49,8 @@ func TestBuildFromKnownIDInjectsDeps(t *testing.T) {
 	if fake.id != id {
 		t.Errorf("built ID = %q; want %q", fake.id, id)
 	}
-	if fake.deps.Library != marker {
-		t.Error("Deps were not injected into the constructor")
+	if fake.deps != (Deps{}) {
+		t.Error("the constructor was handed Deps other than the ones passed")
 	}
 }
 
@@ -157,33 +157,17 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 	}
 }
 
-// The production catalogue carries the ported Mechanisms and only those: item 14's library
-// observe/inject Mechanism is the last one standing, so it is buildable and KnownIDs reports it,
-// while a deferred / un-ported ID is still an unknown-ID error. The tool-call validator, the
-// identical-repeat detector, the redundant-re-read interceptor, the per-result trimmer and the two
-// Wave-1 recoveries (item 6) are NOT here: they were promoted to Floor guards (ADR 0071) and are on
-// the retired roll. Neither are Wave 4's decompose request shaper, its
-// stall_nudge/list_nudge/tool_use_directive completion nudges, apogee's own enumeration-steer and
-// sub-agent fan-out row, Wave 3's toolfilter/filehint request shapers and the history-aware family
-// entire (read_loop, error_enrichment, read_repeat), Wave 2's truncate_history history rewrite, nor
-// Wave 1's own syntax and autofix content-repair rows: they were retired outright on the same
-// verdict. A `mechanisms:` key naming any of them is tolerated, never built.
+// The production catalogue carries the ported Mechanisms and only those. As of v0.20.0 that is
+// NOTHING: `library`, the last row standing, retired outright on ADR 0071's ratified verdict, and
+// every ID the catalogue ever carried is on the retired roll — six of them PROMOTED to Floor
+// guards, fourteen retired outright. A `mechanisms:` key naming any of them is tolerated, never
+// built; an ID on neither list is still a loud unknown-ID error.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
-	known := make(map[domain.MechanismID]bool)
 	for _, id := range KnownIDs() {
-		known[id] = true
-	}
-	// library (item 14) is ported and known, but it needs the Library store injected (D3): Build with
-	// no store is a loud construction error, Build WITH a store succeeds.
-	if !known["library"] {
-		t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", "library", KnownIDs())
-	}
-	if _, err := Build("library", Deps{}); err == nil {
-		t.Error(`Build("library", Deps{}): want a construction error for the missing Library store, got nil`)
-	}
-	if _, err := Build("library", Deps{Library: library.NewStore(t.TempDir())}); err != nil {
-		t.Errorf(`Build("library", store): %v`, err)
+		if IsRetired(id) {
+			t.Errorf("%q is both catalogued and retired; the two lists must not overlap", id)
+		}
 	}
 	// correct_tool_result is DEFERRED (owner-ratified) — never a catalogue row — so it is still an
 	// unknown-ID error, proving a deferred / un-ported ID does not silently build.
@@ -234,14 +218,9 @@ func TestDescriptorsMatchCatalogue(t *testing.T) {
 			t.Errorf("descriptor row for catalogue key %q has ID %q", id, row.ID)
 		}
 		// What Build hands the registry carries the same descriptor Descriptors() harvested, so the
-		// pre-build metadata query and the post-build registry agree. library needs its store
-		// injected (D3, catalogue_test fake-Deps pattern); every other Mechanism builds with benign
-		// zero Deps.
-		deps := Deps{}
-		if id == libraryID {
-			deps = Deps{Library: library.NewStore(t.TempDir())}
-		}
-		m, err := Build(id, deps)
+		// pre-build metadata query and the post-build registry agree. Every Mechanism builds with
+		// zero Deps since `library` — the one row that ever declared a need — retired (v0.20.0).
+		m, err := Build(id, Deps{})
 		if err != nil {
 			t.Errorf("Build(%q): %v", id, err)
 			continue
@@ -260,8 +239,9 @@ func TestBuildUnknownIDWrapsSentinel(t *testing.T) {
 	if !errors.Is(err, domain.ErrUnknownMechanism) {
 		t.Fatalf("Build(bogus) err = %v; want it to wrap domain.ErrUnknownMechanism", err)
 	}
-	// library is catalogued, so the error still names the known IDs.
-	if got := err.Error(); !strings.Contains(got, "library") {
+	// The shipped catalogue is empty (v0.20.0), so the known-IDs tail renders "(none)" rather than
+	// dangling — the message still tells the user what the valid keys are.
+	if got := err.Error(); !strings.Contains(got, "(none)") {
 		t.Errorf("error %q; want it to name the known IDs", got)
 	}
 }
@@ -317,38 +297,6 @@ func TestRegisterRejectsDuplicateAndEmptyID(t *testing.T) {
 	}
 }
 
-// DepsNeeded answers the engine's "what must I derive for this arm?" from the rows themselves, so
-// the build path carries no Mechanism ID literal: an empty arm needs nothing derived, and one
-// containing `library` — the single row declaring needs, and since the content-repair rows retired
-// the only row left at all — asks for the store (and the Fingerprint it keys on). An ID absent from
-// the catalogue contributes nothing rather than failing here: Build is the one place an unknown ID
-// is reported, loudly, a moment later.
-func TestDepsNeeded(t *testing.T) {
-	t.Parallel()
-	cases := map[string]struct {
-		ids  []domain.MechanismID
-		want DepNeeds
-	}{
-		"no mechanisms enabled": {ids: nil, want: DepNeeds{}},
-		"library declares the store": {
-			ids:  []domain.MechanismID{"library"},
-			want: DepNeeds{Library: true},
-		},
-		"an uncatalogued ID is skipped": {
-			ids:  []domain.MechanismID{"not_a_real_mechanism"},
-			want: DepNeeds{},
-		},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			if got := DepsNeeded(tc.ids); got != tc.want {
-				t.Errorf("DepsNeeded(%v) = %+v; want %+v", tc.ids, got, tc.want)
-			}
-		})
-	}
-}
-
 // Every catalogued Mechanism held by POINTER declares how it scopes to a delegated sub-agent
 // (domain.SubAgentScoped). This is the catalogue's half of the fan-out safety rule (ADR 0039):
 // siblings in a depth-0 fan-out run at once, so a hook instance reached from two children at once
@@ -363,12 +311,7 @@ func TestDepsNeeded(t *testing.T) {
 func TestCatalogueHooksDeclareTheirSubAgentScope(t *testing.T) {
 	t.Parallel()
 	for _, id := range KnownIDs() {
-		// library needs its store injected (D3); every other Mechanism builds with zero Deps.
-		deps := Deps{}
-		if id == libraryID {
-			deps = Deps{Library: library.NewStore(t.TempDir())}
-		}
-		m, err := Build(id, deps)
+		m, err := Build(id, Deps{})
 		if err != nil {
 			t.Errorf("Build(%q): %v", id, err)
 			continue

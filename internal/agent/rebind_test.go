@@ -18,37 +18,6 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// registeredIDs lists every catalogued Mechanism in reg across all five hook points, so a test
-// can assert WHICH set a rebuilt registry holds without reaching into its unexported storage.
-func registeredIDs(reg *domain.MechanismRegistry) []domain.MechanismID {
-	seen := map[domain.MechanismID]bool{}
-	var ids []domain.MechanismID
-	for _, at := range []domain.HookPoint{
-		domain.HookPreRequest,
-		domain.HookPostResponse,
-		domain.HookPreToolExec,
-		domain.HookPostToolResult,
-		domain.HookHistoryRewrite,
-	} {
-		for _, m := range reg.Ordered(at) {
-			if !seen[m.Descriptor.ID] {
-				seen[m.Descriptor.ID] = true
-				ids = append(ids, m.Descriptor.ID)
-			}
-		}
-	}
-	return ids
-}
-
-func hasRegistered(reg *domain.MechanismRegistry, id domain.MechanismID) bool {
-	for _, got := range registeredIDs(reg) {
-		if got == id {
-			return true
-		}
-	}
-	return false
-}
-
 // submitAndRun is runExchange without the *testing.T, so a test can drive an Exchange from
 // another goroutine (t.Fatalf is legal only on the test goroutine).
 func submitAndRun(a *Agent, text string) error {
@@ -111,7 +80,6 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.SystemPrompt = "the standing prompt"
 	cfg.Context.MaxContextTokens = 8192
-	cfg.EnableMechanisms = []domain.MechanismID{"library"}
 	responder := blockingResponder{started: make(chan struct{})}
 
 	a, err := newAgent(cfg, responder)
@@ -153,12 +121,15 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 	}
 }
 
-// TestRebindRebuildsMechanismsForNewModel: a new EnableMechanisms set replaces the registry, and
-// a set that fails a gate (a half Requires stack) leaves the OLD registry and cfg fully intact —
-// the validate-then-commit guarantee.
+// TestRebindRebuildsMechanismsForNewModel: a Rebind rebuilds the registry for the new model, and a
+// set that fails a gate leaves the OLD registry and cfg fully intact — the validate-then-commit
+// guarantee.
+//
+// The shipped catalogue has been empty since v0.20.0 (ADR 0071), so there is no ID left to arm and
+// read back: what proves the rebuild is that the registry INSTANCE is replaced, and what proves the
+// refusal is an unknown ID — the one rejection a fresh build over an empty catalogue can still trip.
 func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.LibraryDir = t.TempDir()
 	cfg.EnableMechanisms = nil
 
 	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
@@ -167,25 +138,17 @@ func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 	}
 	seeded := a.registry
 
-	// `library` is the only catalogued row left since the content-repair rows retired (ADR 0071), so
-	// the two sets that must differ across the rebind are the empty one and the one naming it.
-	if err := a.Rebind(RebindSpec{
-		Model:            "second-model",
-		EnableMechanisms: []domain.MechanismID{"library"},
-	}); err != nil {
+	if err := a.Rebind(RebindSpec{Model: "second-model"}); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
 	if a.registry == seeded {
 		t.Error("Rebind kept the seeded registry; the new model's set was never built")
 	}
-	if !hasRegistered(a.registry, "library") {
-		t.Errorf("rebuilt registry = %v, want it to hold the newly enabled library", registeredIDs(a.registry))
-	}
 
-	// A set the stacking gates refuse must fail BEFORE anything is committed. (Rebind builds into a
-	// FRESH registry, so the refusal has to be one the shipped catalogue can still trip: an unknown
-	// ID. Neither the incompatibility gate nor the requirements gate has a catalogued declarer left
-	// — their rows became Floor guards or retired outright in v0.20.0, ADR 0071 — and both gates are
+	// A set the build refuses must fail BEFORE anything is committed. (Rebind builds into a FRESH
+	// registry, so the refusal has to be one the shipped catalogue can still trip: an unknown ID.
+	// Neither the incompatibility gate nor the requirements gate has a catalogued declarer left —
+	// their rows became Floor guards or retired outright in v0.20.0, ADR 0071 — and both gates are
 	// pinned over synthetic rows in internal/domain.)
 	rebuilt := a.registry
 	err = a.Rebind(RebindSpec{

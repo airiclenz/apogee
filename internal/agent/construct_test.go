@@ -412,10 +412,12 @@ func TestHostToolsThreadsTheSkillLookupOntoTheDefaultRoster(t *testing.T) {
 }
 
 // TestBuildEnabledMechanismsEmptyListBuildsNothing: an EnableMechanisms list the engine was handed
-// EMPTY builds NOTHING, while a list that names something builds exactly what it names. No
-// catalogued row is on by default — the two recoveries that once were are Floor guards now
-// (ADR 0071), engine behaviour switched by Config.Floor whatever this list says — so an embedder
-// handing New a Config with no EnableMechanisms gets an unarmed registry and its guards regardless.
+// EMPTY builds NOTHING. No catalogued row is on by default — the recoveries that once were are
+// Floor guards now (ADR 0071), engine behaviour switched by Config.Floor whatever this list says —
+// so an embedder handing New a Config with no EnableMechanisms gets an unarmed registry and its
+// guards regardless. The "builds exactly what it names" half went with the last catalogued row: the
+// shipped catalogue is empty since v0.20.0, so a named ID is an unknown-ID refusal (pinned in
+// enable_mechanisms_test.go), never an arm.
 //
 // The claim is read off the registry the construction produced, never off fired events: what the
 // list BUILDS is the whole question, and a Mechanism only triggers on a reply that provokes it.
@@ -427,11 +429,9 @@ func TestBuildEnabledMechanismsEmptyListBuildsNothing(t *testing.T) {
 	}{
 		{"nil list", nil, nil},
 		{"empty list", []domain.MechanismID{}, nil},
-		{"one-element list", []domain.MechanismID{"library"}, []domain.MechanismID{"library"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := baseConfig(&recordingSink{})
-			cfg.LibraryDir = t.TempDir()
 			cfg.EnableMechanisms = tt.ids
 
 			a, err := newAgent(cfg, echoResponder{reply: "hi"})

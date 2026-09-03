@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -12,7 +11,6 @@ import (
 	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
@@ -282,15 +280,6 @@ type Agent struct {
 	// Consoles that delegation opened (Close) and nothing else.
 	consoles *console.Registry
 
-	// library is the Library store the build derived for this session's catalogue, or nil when no
-	// armed row asked for one (mechanisms.DepNeeds.Library). It is the per-process, per-directory
-	// instance library.Open shares, so the session's own registry, its every Rebind and a routed
-	// sub-agent's catalogue all hold this same pointer rather than three writers on one file. What
-	// the Agent owns is not the store but the FLUSH: Close is the only place that knows the run has
-	// ended, so it is where the observations recorded since the last debounce reach disk. A child at
-	// depth ≥ 1 never flushes it — the parent's Close does (closeLibrary).
-	library *library.Store
-
 	// tree is the tracked-file mutation floor around subprocess tool calls
 	// (treesnapshot.go): git-status snapshots taken before and after each subprocess
 	// run so the result names the workspace files the command changed. A structural
@@ -492,24 +481,7 @@ func Resume(cfg domain.Config, snap domain.Session) (*Agent, error) {
 // up a shutdown.
 func (a *Agent) Close() error {
 	a.closeConsoles()
-	return errors.Join(a.closeLibrary(), a.closeOwnedUpstream(a.upstream))
-}
-
-// closeLibrary flushes the Library store this Agent's build opened, so the observations recorded
-// since the writer's last debounce window reach disk before the process ends. Nothing else in the
-// engine touches the store's lifetime: recording is asynchronous by design (internal/library), and
-// Close is the one call that knows the run is over.
-//
-// Ownership is the depth, not the pointer: a child at depth ≥ 1 holds the SAME shared instance its
-// parent does, and its Close comes at the end of one delegation rather than at the end of the
-// session. Under the store's flush-and-park Close an early flush would be harmless, but "the
-// top-level Agent flushes; a delegate does not" is the rule that is simple to state and to test.
-// A nil store — no armed row needed one — is the honest "nothing to flush" engine, not an error.
-func (a *Agent) closeLibrary() error {
-	if a.depth > 0 || a.library == nil {
-		return nil
-	}
-	return a.library.Close()
+	return a.closeOwnedUpstream(a.upstream)
 }
 
 // closeConsoles ends the Consoles this Agent's run is responsible for. Ownership is the Console's

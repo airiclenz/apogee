@@ -111,16 +111,6 @@ func firesBeforeStreamReset(events []domain.Event) []domain.MechanismFiredEvent 
 	return out
 }
 
-// hasFire reports whether a MechanismFiredEvent for id with action was emitted.
-func hasFire(events []domain.Event, id domain.MechanismID, action string) bool {
-	for _, fe := range mechanismFires(events) {
-		if fe.Mechanism == id && fe.Action == action {
-			return true
-		}
-	}
-	return false
-}
-
 // fireCountFor counts the MechanismFiredEvents attributed to id.
 func fireCountFor(events []domain.Event, id domain.MechanismID) int {
 	n := 0

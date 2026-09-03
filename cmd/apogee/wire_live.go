@@ -152,8 +152,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// Resolve the catalogued Mechanisms enabled in config.yaml to the sorted ID list the engine arms
 	// (ADR 0015 §1: wire.go collapses to a YAML→ID-list producer). Startup validates EVERY
 	// `mechanisms:` key here — enabled AND disabled — and hands only the enabled IDs to
-	// Config.EnableMechanisms; apogee.New/Resume then build them, derive their Deps (the Library store
-	// under LibraryDir, the resolved model fingerprint), merge them into
+	// Config.EnableMechanisms; apogee.New/Resume then build them, merge them into
 	// Config.Mechanisms, and run the ordering / incompatibility / requirements gates. The disabled-key
 	// validation must stay here because the engine only ever sees the enabled IDs, so a typo'd DISABLED
 	// key — never constructed — must still fail loudly at this startup boundary. No catalogued row is

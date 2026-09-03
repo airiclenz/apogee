@@ -27,7 +27,6 @@ func firingRoots(t *testing.T) stateRoots {
 	home := t.TempDir()
 	return stateRoots{
 		config:    home,
-		library:   filepath.Join(home, "library"),
 		sessions:  filepath.Join(home, "sessions"),
 		validated: filepath.Join(home, "validated-sets"),
 		probe:     filepath.Join(home, "probe"),
@@ -82,7 +81,9 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	dialects := &stubDialect{dialect: "openai"}
 	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
 	probed := false
-	manual := mechanisms.KnownIDs()[:1]
+	// The shipped catalogue is empty since v0.20.0 (ADR 0071), so the manual `mechanisms:` list a
+	// host can validate and hand over is the empty one.
+	var manual []apogee.MechanismID
 
 	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts:      opts,
@@ -129,8 +130,8 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 
 	// The roots half, plus the scratch dir the record id names — a run whose model has no writable
 	// scratch inside the box writes its working files wherever else it can reach.
-	if cfg.ConfigDir != roots.config || cfg.LibraryDir != roots.library || cfg.WorkspaceDir != roots.workspace {
-		t.Errorf("the state roots did not reach the Config: %q / %q / %q", cfg.ConfigDir, cfg.LibraryDir, cfg.WorkspaceDir)
+	if cfg.ConfigDir != roots.config || cfg.WorkspaceDir != roots.workspace {
+		t.Errorf("the state roots did not reach the Config: %q / %q", cfg.ConfigDir, cfg.WorkspaceDir)
 	}
 	wantScratch := filepath.Join(roots.scratch, "2026-08-24T09-00-00-firing")
 	if cfg.ScratchDir != wantScratch {
@@ -614,7 +615,11 @@ func (s *stubBeat) discover(context.Context, string, string, string) heartbeat.B
 // a Firing runs while nobody is watching, so refusing to start over a grunt box that is merely down
 // would turn a scheduled run into a silent gap in the record (ADR 0042's visible degrade).
 func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
-	known := string(mechanisms.KnownIDs()[0])
+	// A key the entry's `mechanisms:` map may legally carry. The shipped catalogue is empty since
+	// v0.20.0 (ADR 0071), so the legal keys left are the RETIRED ones: they validate, resolve to an
+	// empty arm, and are what proves that a PRESENT map still travels to the child as a catalogue of
+	// its own rather than leaving it inheriting the parent's.
+	known := string(mechanisms.RetiredIDs()[0])
 	grunt := config.ServerEntry{
 		Name:        "grunt",
 		Endpoint:    "http://grunt.example/v1",

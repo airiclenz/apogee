@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"sync"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/prompt"
@@ -44,8 +42,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	// Arm the catalogued Mechanisms named on Config.EnableMechanisms, merging them into registry
 	// BEFORE the ordering/incompatibility/requirements gates run over the whole graph (ADR 0015 §1–2).
 	// A build/merge failure (unknown ID, duplicate, hook-less) is a construction failure.
-	deps, err := buildEnabledMechanisms(cfg, registry)
-	if err != nil {
+	if err := buildEnabledMechanisms(cfg, registry); err != nil {
 		return nil, err
 	}
 	if err := registry.ValidateOrdering(); err != nil {
@@ -129,7 +126,6 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		consoles:           console.New(),                        // the engine's live Consoles, empty and per-process (ADR 0059)
 		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
 		now:                time.Now,                             // the request-render clock for the system prompt's {{datetime}}
-		library:            deps.Library,                         // the shared Library store this build opened, nil unless an armed row needed one — Close flushes it
 	}
 	// Fill the context-file cache for this session's first boundary: construction. Every later
 	// refill goes through the same seam at a session boundary (contextfiles.go).
@@ -259,9 +255,9 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 // one arm (ADR 0015 §2, locked decision 2). This is the single build path from Config to the live
 // registry: cmd/apogee/wire.go now only turns config.yaml into the Config.EnableMechanisms ID list
 // and leaves construction to here (ADR 0015 §1). IDs are built in sorted canonical order so a
-// build/register error is deterministic, and Deps are derived once by deriveDeps from what the
-// enabled ROWS declare they need (mechanisms.DepsNeeded) — so the build loop below is uniform for
-// every ID and names no Mechanism. An unknown ID (Build wraps domain.ErrUnknownMechanism), an ID
+// build/register error is deterministic, and every ID is built with the same zero mechanisms.Deps
+// — so the build loop below is uniform for every ID and names no Mechanism. An unknown ID (Build
+// wraps domain.ErrUnknownMechanism), an ID
 // listed twice or already pre-built into the registry (the already-registered rejection), and a
 // hook-less Mechanism all propagate as construction failures.
 // An EMPTY list builds nothing: no catalogued row is on by default, and an embedder handing New a
@@ -271,33 +267,31 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 // Every Capability defaults off (D1). The ordering, incompatibility, and requirements gates then run
 // over the merged registry unchanged.
 //
-// The derived Deps come BACK so the caller can hold what the build opened: the Library store is the
-// one collaborator with a lifetime (a writer goroutine and pending observations), and the Agent that
-// derived it is what flushes it at Close. An empty list — and any failure — returns the zero Deps,
-// so a caller never holds a half-built collaborator.
-func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) (mechanisms.Deps, error) {
+// It hands back nothing but an error. The one collaborator the engine ever derived — the Library
+// store, with a writer goroutine and a lifetime the Agent had to flush — went with the `library`
+// row in v0.20.0 (ADR 0071), so mechanisms.Deps is empty and a build opens nothing a caller must
+// hold.
+func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) error {
 	ids := slices.Clone(cfg.EnableMechanisms)
 	if len(ids) == 0 {
-		return mechanisms.Deps{}, nil
+		return nil
 	}
 	slices.Sort(ids)
 
-	deps := deriveDeps(cfg, mechanisms.DepsNeeded(ids))
-
 	for _, id := range ids {
-		m, err := mechanisms.Build(id, deps)
+		m, err := mechanisms.Build(id, mechanisms.Deps{})
 		if err != nil {
-			return mechanisms.Deps{}, err
+			return err
 		}
 		if err := registry.Add(m); err != nil {
 			// Add's rejections already carry the "apogee: " prefix the house convention puts on a
 			// returned error, so the enable-path context is appended rather than prefixed — wrapping
 			// would print the prefix twice (cmd/apogee/main.go prints a returned error verbatim). Same
 			// shape as the ErrUnknownMechanism wrap in internal/mechanisms: the prefixed error leads.
-			return mechanisms.Deps{}, fmt.Errorf("%w — while enabling mechanism %q", err, id)
+			return fmt.Errorf("%w — while enabling mechanism %q", err, id)
 		}
 	}
-	return deps, nil
+	return nil
 }
 
 // BuildMechanisms builds the catalogued Mechanisms named by ids into a registry of their own and
@@ -307,16 +301,13 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 // The Delegation target is why one does (ADR 0045): a routed sub-agent's catalogue is resolved by
 // the host from the Sub-agent server's own `mechanisms:` posture, and Config.Mechanisms takes a
 // BUILT registry rather than an ID list, so the host has to build one. Going through here rather
-// than around it is what keeps ADR 0015 §2's split intact — the engine derives Deps (the Library
-// store and the identity ladder behind it), the catalogue declares which rows need them — and what
-// keeps ADR 0031's benchable-all-the-way-up door open: a bench Driver latching a target of its own
-// can compose the posture without a config file or an Agent in sight.
+// than around it is what keeps ADR 0015 §2's split intact — the engine owns construction, the
+// catalogue owns the rows — and what keeps ADR 0031's benchable-all-the-way-up door open: a bench
+// Driver latching a target of its own can compose the posture without a config file or an Agent in
+// sight.
 //
-// cfg supplies what the build reads and nothing else: LibraryDir and ConfigDir for the store and the
-// probe records behind it, Model and Endpoint for the identity the Library keys observations on — so
-// a caller building the SUB-AGENT server's catalogue passes that server's model and endpoint, not
-// the session's. It is taken by value and its EnableMechanisms is overwritten, so nothing the caller
-// holds is touched.
+// cfg supplies what the build reads and nothing else. It is taken by value and its EnableMechanisms
+// is overwritten, so nothing the caller holds is touched.
 //
 // The registry comes back FRESH and owned by the caller. A per-child copy is
 // MechanismRegistry.ForSubAgent, the same live-state isolation an inherited catalogue crosses the
@@ -329,11 +320,7 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.MechanismRegistry, error) {
 	cfg.EnableMechanisms = ids
 	registry := domain.NewMechanismRegistry()
-	// The derived Deps are discarded here and nowhere else: this door hands back a REGISTRY, and the
-	// Library store behind it is the per-process instance library.Open shares — the session Agent
-	// built on the same LibraryDir holds it and flushes it at Close, so a routed child's catalogue
-	// needs no lifetime of its own.
-	if _, err := buildEnabledMechanisms(cfg, registry); err != nil {
+	if err := buildEnabledMechanisms(cfg, registry); err != nil {
 		return nil, err
 	}
 	if err := registry.ValidateOrdering(); err != nil {
@@ -346,48 +333,6 @@ func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.Mecha
 		return nil, err
 	}
 	return registry, nil
-}
-
-// deriveDeps turns Config into the collaborators the enabled catalogue rows asked for, deriving each
-// one only when needs says some row actually reads it. This is the ADR 0015 §2 split in code: the
-// ENGINE derives Deps from Config — the store construction, the degrade notice and the identity
-// ladder all live here, outside internal/mechanisms — while the CATALOGUE declares which rows need
-// what (mechanisms.DepNeeds). A second Deps-bearing Mechanism therefore adds a flag and a row field,
-// never a branch in this package naming a Mechanism ID.
-//
-// A Library store is rooted at Config.LibraryDir and opened only for a needs.Library arm (never an
-// ambient ~/.apogee — ADR 0001). It comes from library.Open rather than library.NewStore, so the
-// three paths that reach this function on ONE LibraryDir — New, every Rebind, and the routed
-// sub-agent catalogue BuildMechanisms builds — share a single store instead of each rewriting the
-// whole file from its own memory. Open Loads on its constructing call alone, which is what keeps the
-// degrade notice below a once-per-process line without any coordination here.
-func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
-	var deps mechanisms.Deps
-	if needs.Library {
-		store, err := library.Open(cfg.LibraryDir)
-		if err != nil {
-			// A broken/absent Library never blocks startup: Load leaves the store empty-and-usable on
-			// any soft error, so the run degrades to that empty store and proceeds (like the store's
-			// own persist path, the degrade is surfaced to stderr). Load's errors already carry the
-			// "apogee: " prefix the house convention puts on a returned error, so the consequence is
-			// appended rather than prefixed — wrapping would print it twice. Open returns the error on
-			// the CONSTRUCTING call only, so a Rebind or a routed catalogue re-deriving the same
-			// directory does not print the notice a second time.
-			fmt.Fprintf(os.Stderr, "%v — library store degraded to empty\n", err)
-		}
-		deps.Library = store
-		// The full identity ladder (ADR 0021 §3), keyed IDENTICALLY to the Validated-set
-		// match at wire time so the Library's observations and an auto-applied set cannot end
-		// up filed under two different identities for one model. The probe records live under
-		// the injected ConfigDir — an empty one simply removes the behavioral rung rather
-		// than reaching for an ambient ~/.apogee (ADR 0001).
-		deps.Fingerprint = library.ResolveFingerprintFrom(library.Sources{
-			ModelID:  cfg.Model,
-			Endpoint: cfg.Endpoint,
-			ProbeDir: library.ProbeDir(cfg.ConfigDir),
-		})
-	}
-	return deps
 }
 
 // resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;

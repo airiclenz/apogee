@@ -910,9 +910,6 @@ func TestResolveRootsOverride(t *testing.T) {
 	if roots.config != home {
 		t.Errorf("config = %q; want %q", roots.config, home)
 	}
-	if want := filepath.Join(home, "library"); roots.library != want {
-		t.Errorf("library = %q; want %q", roots.library, want)
-	}
 	if want := filepath.Join(home, "sessions"); roots.sessions != want {
 		t.Errorf("sessions = %q; want %q", roots.sessions, want)
 	}

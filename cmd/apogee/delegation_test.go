@@ -439,7 +439,6 @@ func TestSubAgentCatalogueBuildsTheEntrysOwnMechanisms(t *testing.T) {
 	t.Parallel()
 
 	base := validCfg(t)
-	base.LibraryDir = t.TempDir()
 
 	absent, err := subAgentCatalogue(config.ServerEntry{Name: "grunt"}, base)
 	if err != nil {
@@ -449,8 +448,10 @@ func TestSubAgentCatalogueBuildsTheEntrysOwnMechanisms(t *testing.T) {
 		t.Error("an entry with no `mechanisms:` map built a catalogue; want nil so the child inherits")
 	}
 
-	// `library` is the one catalogued Mechanism that needs collaborators derived for it, so building
-	// it here is what proves the build goes through the engine's own derivation rather than around it.
+	// A PRESENT map builds a catalogue of the child's own, one fresh registry per child. Every key
+	// the map can legally carry is a RETIRED id now — the shipped catalogue emptied in v0.20.0
+	// (ADR 0071) — so the resolver drops them all and the child runs on nothing but its Floor
+	// guards; what this pins is that the map produced a catalogue at all, and a private one.
 	entry := config.ServerEntry{
 		Name:       "grunt",
 		Endpoint:   "http://127.0.0.1:2222",
@@ -458,7 +459,7 @@ func TestSubAgentCatalogueBuildsTheEntrysOwnMechanisms(t *testing.T) {
 	}
 	catalogue, err := subAgentCatalogue(entry, base)
 	if err != nil {
-		t.Fatalf("subAgentCatalogue with a library arm: %v", err)
+		t.Fatalf("subAgentCatalogue with a retired-id arm: %v", err)
 	}
 	if catalogue == nil {
 		t.Fatal("a present map built no catalogue")
@@ -466,11 +467,8 @@ func TestSubAgentCatalogueBuildsTheEntrysOwnMechanisms(t *testing.T) {
 	if first, second := catalogue(), catalogue(); first == nil || first == second {
 		t.Error("the factory must hand each child its own registry")
 	}
-	// A block naming one row arms exactly that row: replace-whole replaces what the parent armed,
-	// and nothing is on by default to stand beside it (ADR 0071 — the guards are Config.Floor's).
-	wantArmed := []apogee.MechanismID{"library"}
-	if armed := postResponseIDs(catalogue()); !slices.Equal(armed, wantArmed) {
-		t.Errorf("a `library: true` block armed post-response %v; want %v", armed, wantArmed)
+	if armed := postResponseIDs(catalogue()); len(armed) != 0 {
+		t.Errorf("a block naming only retired ids armed post-response %v; want nothing armed", armed)
 	}
 
 	// A map that enables nothing is still a map: replace-whole means the child runs on NOTHING — a
@@ -507,7 +505,6 @@ func TestNewDelegationWiringTakesThePostureOfTheNamedEntry(t *testing.T) {
 	t.Parallel()
 
 	base := validCfg(t)
-	base.LibraryDir = t.TempDir()
 	off, on := false, true
 	entries := []config.ServerEntry{
 		{
@@ -1122,7 +1119,6 @@ func TestDelegationRelistRefusesADefectiveMechanismsMap(t *testing.T) {
 	t.Parallel()
 
 	base := validCfg(t)
-	base.LibraryDir = t.TempDir()
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
 	spy := &delegationSpy{}
 	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)

@@ -161,10 +161,11 @@ type Config struct {
 	// alike.
 	SkillLookup SkillLookup
 
-	// Injected state roots — no implicit ~/.apogee (ADR 0001). The bench points
-	// these at ephemeral dirs so sim runs never touch the production Library.
-	LibraryDir string
-	ConfigDir  string
+	// ConfigDir is the injected apogee home — no implicit ~/.apogee (ADR 0001). The bench points
+	// it at an ephemeral dir so a sim run never touches the user's own state. The probe records
+	// the identity ladder reads live under it. Its sibling LibraryDir went with the `library`
+	// Mechanism and the observation store only that row read (v0.20.0, ADR 0071).
+	ConfigDir string
 
 	// WorkspaceDir is the sandbox root the built-in file tools are scoped to when
 	// Config.Tools is nil. Empty ⇒ no default tools are wired (the host must inject
