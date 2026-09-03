@@ -9,10 +9,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
 // TestSnapshot_RestoresTurnIndex closes the documented P0.6 gap: a snapshot taken mid-
@@ -226,6 +228,7 @@ func TestAgentState_EncodesStableKeyNames(t *testing.T) {
 		InExchange:    true,
 		ExchangeStart: 2,
 		PendingInput:  &domain.UserInput{Text: "queued"},
+		Tasks:         []tasklist.Item{{Text: "the model's own checklist"}},
 	})
 	if err != nil {
 		t.Fatalf("marshal agentState: %v", err)
@@ -234,7 +237,7 @@ func TestAgentState_EncodesStableKeyNames(t *testing.T) {
 	if err := json.Unmarshal(raw, &keyed); err != nil {
 		t.Fatalf("unmarshal encoded state to keys: %v", err)
 	}
-	for _, key := range []string{"conversation", "turnIndex", "inExchange", "exchangeStart", "pendingInput"} {
+	for _, key := range []string{"conversation", "turnIndex", "inExchange", "exchangeStart", "pendingInput", "tasks"} {
 		if _, ok := keyed[key]; !ok {
 			t.Errorf("encoded session state missing key %q (the schema is version-gated and must stay byte-compatible)", key)
 		}
@@ -248,4 +251,120 @@ func TestResume_RejectsFutureVersion(t *testing.T) {
 	if _, err := resumeAgent(baseConfig(&recordingSink{}), future, echoResponder{}); !errors.Is(err, domain.ErrSessionVersion) {
 		t.Errorf("resume of a future-version snapshot err = %v, want ErrSessionVersion", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The task list is session state (ADR 0072)
+// ---------------------------------------------------------------------------
+
+// newSnapshotAgent builds a plain top-level Agent for the snapshot tests below — no scripted
+// Turns, because what they assert is what a snapshot carries rather than how it was produced.
+func newSnapshotAgent(t *testing.T) *Agent {
+	t.Helper()
+
+	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	return a
+}
+
+// TestSnapshot_RoundTripsTheTaskList is the reason the list is session state at all: a resumed
+// session still knows what is left. The done flags ride with it, so a resumed model sees which
+// rows it had already ticked off rather than a list of everything it ever planned.
+func TestSnapshot_RoundTripsTheTaskList(t *testing.T) {
+	a := newSnapshotAgent(t)
+	want := []tasklist.Item{
+		{Text: "read the plan", Done: true},
+		{Text: "write the code"},
+		{Text: "run the tests"},
+	}
+	if err := a.tasks.Replace(want); err != nil {
+		t.Fatalf("seed the list: %v", err)
+	}
+
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+
+	got := b.tasks.Items()
+	if len(got) != len(want) {
+		t.Fatalf("the resumed task list = %v, want %v", got, want)
+	}
+	for i, item := range want {
+		if got[i] != item {
+			t.Fatalf("the resumed task list = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestSnapshot_OmitsTheTaskListKeyWhenEmpty pins the omitempty half of the additive-both-ways
+// claim that lets domain.SessionVersion stay 1: an engine whose model never wrote a list writes a
+// payload byte-identical to the one this schema had before the field existed.
+func TestSnapshot_OmitsTheTaskListKeyWhenEmpty(t *testing.T) {
+	snap, err := newSnapshotAgent(t).Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	var keyed map[string]json.RawMessage
+	if err := json.Unmarshal(snap.State, &keyed); err != nil {
+		t.Fatalf("unmarshal the snapshot payload to keys: %v", err)
+	}
+	if raw, ok := keyed["tasks"]; ok {
+		t.Errorf("a snapshot of an empty list carries a %q key (%s), want it omitted", "tasks", raw)
+	}
+}
+
+// TestRestore_WithoutATaskListEmptiesTheHeldOne is the other direction of the same additivity, and
+// the regression guard RestoreSession needs: a snapshot from before the field existed — or one
+// taken with an empty list — restores an EMPTY list rather than leaving the outgoing session's
+// checklist standing under a conversation that knows nothing about it. restoreState's
+// unconditional Replace is that clear; there is no reset beside the console close.
+func TestRestore_WithoutATaskListEmptiesTheHeldOne(t *testing.T) {
+	a := newSnapshotAgent(t)
+	if err := a.tasks.Replace([]tasklist.Item{{Text: "the outgoing session's work"}}); err != nil {
+		t.Fatalf("seed the list: %v", err)
+	}
+
+	if err := a.RestoreSession(domain.Session{
+		Version: domain.SessionVersion,
+		State:   json.RawMessage(`{"conversation":{"messages":[]},"turnIndex":0}`),
+	}); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+
+	if items := a.tasks.Items(); len(items) != 0 {
+		t.Errorf("the task list after restoring a snapshot with no tasks = %v, want empty", items)
+	}
+}
+
+// TestRestore_RejectsAnOverCapTaskList pins that the caps are enforced at the restore seam too: a
+// hand-edited or corrupt snapshot carrying more tasks than the list allows is a decode ERROR, not
+// a list silently truncated behind the model's back — and the refusal leaves the live list exactly
+// as it was, which is what keeps restoreSnapshot's no-partial-swap promise.
+func TestRestore_RejectsAnOverCapTaskList(t *testing.T) {
+	a := newSnapshotAgent(t)
+	if err := a.tasks.Replace([]tasklist.Item{{Text: "the list that must survive the refusal"}}); err != nil {
+		t.Fatalf("seed the list: %v", err)
+	}
+
+	oversized := make([]tasklist.Item, tasklist.MaxItems+1)
+	for i := range oversized {
+		oversized[i] = tasklist.Item{Text: fmt.Sprintf("task %d", i)}
+	}
+	state, err := json.Marshal(agentState{Conversation: domain.NewConversation(nil), Tasks: oversized})
+	if err != nil {
+		t.Fatalf("marshal the oversized payload: %v", err)
+	}
+
+	if err := a.RestoreSession(domain.Session{Version: domain.SessionVersion, State: state}); err == nil {
+		t.Fatal("RestoreSession of an over-cap task list = nil, want a decode error")
+	}
+	assertTaskTexts(t, a.tasks, "the list that must survive the refusal")
 }

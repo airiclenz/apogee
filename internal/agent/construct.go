@@ -16,6 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
 )
@@ -124,6 +125,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		prompts:            domain.NewPromptSlot(),               // the one prompt surface this Agent tree queues on
 		journal:            undo.New(),                           // the per-Exchange undo record, empty and per-process (ADR 0051)
 		consoles:           console.New(),                        // the engine's live Consoles, empty and per-process (ADR 0059)
+		tasks:              tasklist.New(),                       // the model's checklist, empty and ENGINE-held: the tool may not hold it, because SwapTools rebuilds tool instances mid-session (ADR 0072, ADR 0008)
 		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
 		now:                time.Now,                             // the request-render clock for the system prompt's {{datetime}}
 	}

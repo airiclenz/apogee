@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -279,6 +280,22 @@ type Agent struct {
 	// Owner field rather than by which Agent holds the registry: a delegation's end closes the
 	// Consoles that delegation opened (Close) and nothing else.
 	consoles *console.Registry
+
+	// tasks is the model's own checklist — the complete list of what this run is doing, written
+	// only through the task_list tool and re-rendered into the standing content on every request
+	// (ADR 0072). Unlike the journal and the registry above it IS session state (ADR 0022 §8):
+	// a list of sentences the model wrote costs nothing to carry across a process, and carrying
+	// it is the whole point — a resumed session that lost the checklist would have to rebuild it
+	// from a history it no longer has. So it round-trips through agentState (state.go).
+	// The ENGINE holds it and dispatch installs it on every call context (tasklist.WithList)
+	// rather than a tool holding it, for the same ADR 0008 reason the consoles ride there:
+	// SwapTools rebuilds tool instances when the roster changes mid-session, and a list held by
+	// a tool that was rebuilt away would be a checklist nobody can update. newAgent always
+	// supplies it. A delegated child gets its OWN fresh empty list rather than the parent's
+	// (newChildAgentOn) — the one place the three diverge: a delegation is its own run with its
+	// own decomposition, and a child ticking rows off the parent's checklist would rewrite a
+	// list the parent is still working from.
+	tasks *tasklist.List
 
 	// tree is the tracked-file mutation floor around subprocess tool calls
 	// (treesnapshot.go): git-status snapshots taken before and after each subprocess
@@ -1067,11 +1084,17 @@ func (a *Agent) Snapshot() (domain.Session, error) {
 // live process the model steers by id, and the ids live in the history this call drops — leaving
 // four shells running that nothing in the new session can name is exactly the forgotten-process
 // leak the cap exists to prevent.
+//
+// The task list is emptied here for the same reason (ADR 0072): it is the checklist for the work
+// the conversation just forgotten was doing, so carrying it into the new session would leave the
+// model reading a plan for a job it can no longer see. The list is the model's to write, and a
+// new session starts with a blank one.
 func (a *Agent) ClearContext() error {
 	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
 	a.consoles.CloseAll()
+	_ = a.tasks.Replace(nil) // clearing cannot break a cap, so the validated error is not one
 	a.reloadContextFiles()
 	a.conv = *domain.NewConversation(nil)
 	return nil

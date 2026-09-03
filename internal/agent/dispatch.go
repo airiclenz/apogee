@@ -13,6 +13,7 @@ import (
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
 )
@@ -1087,6 +1088,14 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// the dispatch already carries the spawn call id (WithSpawnCallID, above), which is what a
 	// console tool stamps on the Consoles it opens — so a delegation's end can close its own.
 	ctx = console.WithRegistry(ctx, a.consoles)
+
+	// And the task list on EVERY call as well (ADR 0072), third for the same structural reason:
+	// the list is the ENGINE's session state, so a task_list tool instance that held it would
+	// lose the checklist the moment SwapTools rebuilt the roster. Installing it unconditionally
+	// is also what keeps the tool stateless (ADR 0008) — it reads the list out of the call it
+	// was given and writes back through it, and an execution that carries none (a tool driven
+	// outside an engine) finds nil and says so rather than writing into a list nothing renders.
+	ctx = tasklist.WithList(ctx, a.tasks)
 
 	// The floor's own context, taken BEFORE the Confinement handle goes on: apogee's
 	// bookkeeping git is not the model's command and must never run inside the call's box. A

@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
 )
@@ -456,8 +457,9 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 // the SAME EventSink, the parent session's context-file content
 // verbatim (copied, never re-read — a sub-agent is not a session boundary), and Depth =
 // parent+1 so its events nest. The
-// nested Agent is NOT given the parent's pending input or conversation — it starts fresh with only
-// the delegated task (the ADR-0008 statelessness boundary). The allow-for-session approval memory is
+// nested Agent is NOT given the parent's pending input, conversation, or task list — it starts
+// fresh with only the delegated task (the ADR-0008 statelessness boundary), and its checklist is
+// its own empty one (ADR 0072). The allow-for-session approval memory is
 // deliberately NOT on that withheld list: it is scoped to the SESSION rather than to an Agent, and
 // it reaches the child through the very Approver threaded above — the shared queueing seam holds it
 // (approvalCache in approvalcache.go), so a gate the human already cleared anywhere in the tree does
@@ -762,6 +764,15 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// child's Close reaps exactly the Consoles this delegation opened and leaves the parent's
 	// untouched.
 	child.consoles = a.consoles
+	// The task list, alone among the three, is NOT shared: the child gets its OWN fresh empty one
+	// (ADR 0072, ratified call). A delegation is its own run with its own decomposition, and a
+	// child ticking rows off — or replacing — the parent's checklist would rewrite a list the
+	// parent is still working from, with no id or ownership in the whole-list-replace shape to
+	// tell the two runs' rows apart. THIS LINE is the guarantee, not the absence of a tasks field
+	// from Config: newAgent already built the child one, so a future spawn path that forgets this
+	// assignment still gets a private list, and the assignment is here to say the privacy is
+	// intended rather than incidental.
+	child.tasks = tasklist.New()
 	return child, nil
 }
 

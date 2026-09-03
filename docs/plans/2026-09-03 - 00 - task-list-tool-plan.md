@@ -162,7 +162,10 @@ cancelled ctx IS a Go error; over-cap input is an error result; `TestTaskList_Sp
 
 ---
 
-## 4. The engine holds the list, and a child gets its own
+## 4. The engine holds the list, and a child gets its own — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): consequential edit — internal/agent/subagent.go: made necessary by the child's own-list assignment — `newChildAgent`'s doc enumerated what a child is NOT given (pending input, conversation) and would have been incomplete without the task list.
+NOTES (2026-09-03): `restoreState` calls `a.tasks.Replace` FIRST, before the conversation swap, rather than at the end — `Replace` leaves the held list untouched when it refuses, so validating first is what keeps `restoreSnapshot`'s documented no-partial-swap promise on an over-cap payload.
 
 **What.** `Agent` gains `tasks *tasklist.List`, constructed non-nil in `construct.go` beside
 `undo.New()`/`console.New()`, with the ADR 0008 rationale beside it (`agent.go`'s `consoles` comment

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
 // The engine's conversation storage is domain.Conversation: it is already library-complete
@@ -30,6 +31,14 @@ import (
 //     so it keeps round-tripping.
 //   - pendingInput : input Submitted but not yet consumed by a Step, so a Submit→Snapshot→
 //     Resume sequence does not silently drop the queued message.
+//   - tasks        : the model's task list (ADR 0072) — the checklist it wrote through the
+//     task_list tool, so a resumed session still knows what is left. It is omitempty, which
+//     is what makes the field additive in BOTH directions and leaves domain.SessionVersion at
+//     1 (the session.Meta ScheduleID precedent): a snapshot written before the list existed
+//     simply lacks the key and restores an empty list, and an older binary reading a newer
+//     snapshot preserves nothing it does not understand only in the payload it rewrites — a
+//     concern the list is deliberately cheap enough to accept, being sentences the model can
+//     restate.
 //
 // The per-message Interjected marker rides the conversation's own marshal as an omitempty
 // sibling, so it needs NO SessionVersion bump in either direction: a snapshot written before
@@ -56,12 +65,19 @@ import (
 // resumed Session therefore has no Consoles, and an id the model remembers from the snapshot's
 // own run addresses nothing — which the tools report as an unknown id, the whole truth about a
 // Console whose process is gone.
+//
+// The task list (Agent.tasks, ADR 0072) is the counter-example that makes that rule readable: it
+// IS in the payload above, because what it holds is not a live resource of this process but the
+// sentences the model wrote about its own work — nothing that can go stale against a filesystem,
+// nothing that has to be running to mean anything, and precisely what a resumed session has the
+// least other way of getting back.
 type agentState struct {
 	Conversation  *domain.Conversation `json:"conversation"`
 	TurnIndex     int                  `json:"turnIndex"`
 	InExchange    bool                 `json:"inExchange,omitempty"`
 	ExchangeStart int                  `json:"exchangeStart,omitempty"`
 	PendingInput  *domain.UserInput    `json:"pendingInput,omitempty"`
+	Tasks         []tasklist.Item      `json:"tasks,omitempty"`
 }
 
 // encodeState serializes the Agent's quiescent-boundary state into a Session.State payload.
@@ -74,6 +90,7 @@ func (a *Agent) encodeState() (json.RawMessage, error) {
 		InExchange:    a.turns.inExchange,
 		ExchangeStart: a.exchangeBoundary(),
 		PendingInput:  a.pendingInput,
+		Tasks:         a.tasks.Items(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("apogee: encode session state: %w", err)
@@ -114,6 +131,16 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 	var st agentState
 	if err := json.Unmarshal(state, &st); err != nil {
 		return fmt.Errorf("apogee: decode session state: %w", err)
+	}
+	// The task list is restored FIRST and through its own validator, so a snapshot carrying more
+	// tasks — or a longer one — than the caps allow is a DECODE ERROR rather than a list silently
+	// truncated behind the model's back. Replace leaves the held list untouched when it refuses,
+	// so a failure here keeps restoreSnapshot's no-partial-swap promise: nothing else has moved
+	// yet. It is also unconditional, which is what CLEARS the list on a restore from a snapshot
+	// that carries no tasks (a nil slice empties it) — the reason RestoreSession needs no reset
+	// of its own beside the console close it does perform.
+	if err := a.tasks.Replace(st.Tasks); err != nil {
+		return fmt.Errorf("apogee: decode session state: task list: %w", err)
 	}
 	exchangeStart := st.ExchangeStart
 	if st.Conversation != nil {
