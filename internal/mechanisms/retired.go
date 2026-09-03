@@ -65,6 +65,16 @@ type retiredRow struct {
 //     enumeration steer and its batched sub_agent fan-out (ADR 0014) told the model how to plan
 //     its own work and then dispatched delegations it never asked for: the most steering row the
 //     catalogue carried, and no per-model A/B ever earned it a place (ADR 0009's gate).
+//   - filehint (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. Scoring a freshly listed
+//     directory against the prompt and telling the model which files to read first picks the model's
+//     next move for it, and no per-model A/B ever earned it a place (ADR 0009's gate).
+//   - read_loop (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. The re-read detector's
+//     hints went past shaping into instruction — "the workspace is empty, create X" — deriving a
+//     write target from the prompt and steering the model at it.
+//   - toolfilter (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. Scoring the tool menu
+//     down to ten entries decides for the model what it is allowed to reach for, and a wrongly
+//     trimmed menu removes the tool the task needed; `tools.disabled` is the answer to a menu a
+//     model cannot handle.
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
@@ -78,6 +88,9 @@ var retired = []retiredRow{
 	{ID: "tool_use_directive", Release: "v0.20.0"},
 	{ID: "decompose", Release: "v0.20.0"},
 	{ID: "guided_decomposition", Release: "v0.20.0"},
+	{ID: "filehint", Release: "v0.20.0"},
+	{ID: "read_loop", Release: "v0.20.0"},
+	{ID: "toolfilter", Release: "v0.20.0"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

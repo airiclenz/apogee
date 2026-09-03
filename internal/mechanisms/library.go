@@ -34,11 +34,12 @@ var errLibraryStoreRequired = errors.New("apogee: library mechanism requires a L
 func init() {
 	register(row{
 		descriptor: libraryDescriptor,
-		// Ordering declares library Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
-		// review-fixes item 11 / option A): the inject side shapes the system prompt before toolfilter
-		// narrows the tool menu, matching the sim's cot → library → filter Transform order. The observe
-		// (post-response) side is a pure reader and carries no ordering edge.
-		ordering: domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}},
+		// No ordering edge any more. Library declared Before toolfilter (§Ordering seed, ratified into
+		// Table A 2026-07-04, review-fixes item 11 / option A) so its inject side shaped the system
+		// prompt before toolfilter narrowed the tool menu; toolfilter retired in v0.20.0 (ADR 0071),
+		// and no surviving row reads or rewrites what the inject side writes. The observe
+		// (post-response) side was always a pure reader and carried no edge either.
+		ordering: domain.OrderingConstraints{},
 		// The one row that needs derived Deps: the observation store AND the model Fingerprint it
 		// keys on (one flag, since they are resolved together and only this Mechanism reads either).
 		// Declaring it here is what keeps the engine's build loop free of a `library` special case.

@@ -755,7 +755,29 @@ before; the recast Exchange-scope proofs pass over the synthetic deferring hook;
 
 **Commit:** `refactor(mechanisms): retire guided_decomposition`
 
-## 14. Retire `filehint`, `read_loop` and `toolfilter`
+## 14. Retire `filehint`, `read_loop` and `toolfilter` — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the item's `writedetection_test.go:126,:248` line numbers predate items 12-13; the two `read_loop` cases were folded by name (`TestReadLoopEditToolDecrementsSuccessfulReadCount`, `TestReadLoopHintExcludesEditWrittenTarget`).
+
+NOTES (2026-09-03): prune list extended per the symbol rule and `make lint`'s `unused` — `hasWrittenFiles` (historyhints.go) lost its last caller with filehint.go and went too.
+
+NOTES (2026-09-03): `oneTool` (toolfilter_test.go) had a surviving caller in library_test.go and was moved there, per the item's move-the-still-called-identifier rule.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/library.go: made necessary by deleting `toolFilterID`; library's `Before: [toolfilter]` ordering edge dropped (with library_test.go's assertion on it).
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/catalogue_test.go: made necessary by retiring the three rows; `TestPreRequestOrderingSeeds` deleted — the Before-toolfilter edge it pinned is the only edge it asserted and no pre-request row declares one now.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/historyhints_test.go: made necessary by retiring read_loop; `TestReReadFamilyPairwiseIncompatible` deleted (its only pair named read_loop) and the co-registration test re-pointed at read_repeat.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/retired_test.go: made necessary by the three new roll rows; they join the retired-outright table, which is the item's "retired notices for the three IDs" test.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/{robustness.go,intent.go,readrepeat.go,doc.go,historyhints.go,historyscan.go}: made necessary by the deletions; comments and the doc map naming the three rows or the pruned helpers reworded.
+
+NOTES (2026-09-03): consequential edit — benchreadiness_test.go: made necessary by retiring toolfilter, its mechanisms-on arm's acting pre-request shaper; the arm is now `{truncate_history, library}` and assertion 1 expects the experimental hook alone. Item 19 owns the fuller restatement of this file.
+
+NOTES (2026-09-03): consequential edit — internal/agent/{enable_mechanisms_test.go,rebind_test.go}: made necessary by deleting the last catalogued `IncompatibleWith` edge (read_loop's); both refusal checks now use the unknown-ID gate, the only one the shipped catalogue can still trip. The incompatibility gate itself stays pinned over synthetic rows in internal/domain.
+
+NOTES (2026-09-03): consequential edit — cmd/apogee/schedule_test.go: made necessary by retiring toolfilter, the ID its user-dir Validated-set fixture armed; fixture and assertion moved to `syntax`, another default-off catalogued row.
 
 **What.** Depends on 12. Delete `filehint.go`, `readloop.go`, `toolfilter.go` (+tests),
 `readlistfamilies_test.go` bar `TestLibraryObserveShallowExplorationOnCamelCaseList` (item 17 deletes that one with the `library` row), the `read_loop` cases in

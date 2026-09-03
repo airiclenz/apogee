@@ -182,17 +182,18 @@ func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 		t.Errorf("rebuilt registry = %v, want the previous model's set gone", registeredIDs(a.registry))
 	}
 
-	// read_loop is IncompatibleWith read_repeat: enabling both must fail the stacking gates
-	// BEFORE anything is committed. (Rebind builds into a FRESH registry, so the refusal has to be
-	// one a catalogue pair can trip — the requirements gate has no catalogued declarer left, its one
-	// Required peer having become a Floor guard.)
+	// A set the stacking gates refuse must fail BEFORE anything is committed. (Rebind builds into a
+	// FRESH registry, so the refusal has to be one the shipped catalogue can still trip: an unknown
+	// ID. Neither the incompatibility gate nor the requirements gate has a catalogued declarer left
+	// — their rows became Floor guards or retired outright in v0.20.0, ADR 0071 — and both gates are
+	// pinned over synthetic rows in internal/domain.)
 	rebuilt := a.registry
 	err = a.Rebind(RebindSpec{
 		Model:            "third-model",
-		EnableMechanisms: []domain.MechanismID{"read_loop", "read_repeat"},
+		EnableMechanisms: []domain.MechanismID{"no_such_mechanism"},
 	})
-	if !errors.Is(err, domain.ErrIncompatibleMechanisms) {
-		t.Fatalf("Rebind with an incompatible pair err = %v, want it to wrap ErrIncompatibleMechanisms", err)
+	if !errors.Is(err, domain.ErrUnknownMechanism) {
+		t.Fatalf("Rebind with a refused set err = %v, want it to wrap ErrUnknownMechanism", err)
 	}
 	if a.registry != rebuilt {
 		t.Error("a failed Rebind swapped the registry")

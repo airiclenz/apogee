@@ -137,7 +137,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	// the record `apogee probe model` left for the server this session MOVED to is found only when
 	// the bound endpoint reaches the resolver. Found, the identity is medium-confidence and the
 	// matching Validated set APPLIES; missed, the bare label resolves at low confidence and the set
-	// is merely offered (validatedsets.go). The set holds toolfilter alone, so exactly one Mechanism
+	// is merely offered (validatedsets.go). The set holds syntax alone, so exactly one Mechanism
 	// can reach the composed Config.
 	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
 		Endpoint:   url,
@@ -150,7 +150,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	writeUserValidatedEntry(t, roots.validated, "bound-model", `{
 		"version": 1,
 		"key": "bound-model",
-		"set": ["toolfilter"],
+		"set": ["syntax"],
 		"evidence": {"campaign": "schedule-test"}
 	}`)
 
@@ -217,13 +217,13 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		}
 	}
 
-	// The spec resolution's own endpoint, read off the Config the Firing composed: toolfilter is
+	// The spec resolution's own endpoint, read off the Config the Firing composed: syntax is
 	// default-off and reached this run only through the Validated set the probe record promoted, so
 	// its standing in the composed roster is the proof that the resolver was handed the BOUND
 	// endpoint. Keyed on the launch snapshot's `http://launch.invalid` the record is missed, the set
 	// is offered rather than applied, and the roster is empty.
-	if len(armed) != 1 || armed[0] != "toolfilter" {
-		t.Errorf("the firing armed %v, want the Validated set's [toolfilter]: the set was not applied, "+
+	if len(armed) != 1 || armed[0] != "syntax" {
+		t.Errorf("the firing armed %v, want the Validated set's [syntax]: the set was not applied, "+
 			"so the spec resolution keyed on the LAUNCH endpoint rather than the bound one", armed)
 	}
 }

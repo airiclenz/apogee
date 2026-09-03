@@ -3,7 +3,6 @@ package mechanisms
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -103,23 +102,6 @@ func TestErrorEnrichmentEnrichesRepeatedEditError(t *testing.T) {
 	}
 }
 
-// The successful-read-loop count is DECREMENTED by an interleaved edit_existing_file: three reads of
-// a.go with an edit between them is not a re-read loop (the model acted). This pins that read_loop's
-// write-decrement counts an apogee edit tool.
-func TestReadLoopEditToolDecrementsSuccessfulReadCount(t *testing.T) {
-	t.Parallel()
-	msgs := []domain.Message{
-		userMsg("work on a.go"),
-		assistantCall(readCall("r1", "a.go")), toolResult("r1", "package a"),
-		assistantCall(readCall("r2", "a.go")), toolResult("r2", "package a"),
-		assistantCall(editCall("e1", "a.go")), toolResult("e1", "edited a.go"),
-		assistantCall(readCall("r3", "a.go")), toolResult("r3", "package a"),
-	}
-	if fired, _ := fireReadLoop(t, msgs); fired {
-		t.Error("an interleaved edit decrements the successful-read count; 3 reads with an edit between them is not a loop")
-	}
-}
-
 // Regression pin for S1's non-extension: syntax must ignore apogee's edit tools even when the call
 // carries a content field with broken code — edit payloads are fragments/patches the sim never
 // syntax-checked, so semantic (a) (isWriteTool) deliberately excludes them.
@@ -160,51 +142,14 @@ func TestAutofixIgnoresEditToolCall(t *testing.T) {
 // there (e.g. to isWriteTool, dropping the edit tools) cannot flip any enforcement decision — a test
 // claiming to pin it would pass under that mutation and be vacuous. See the plan's item-7 dated
 // NOTES for the full rationale. The empty-reply guard's own progress branch is pinned in
-// internal/floor (emptyreply_test.go); the writtenPaths site below DOES discriminate the edit tools
-// and is pinned genuinely.
-
-// writtenPaths (historyhints.go:106) counts an apogee edit tool as a successful write, so
-// deriveWriteTarget excludes an edit_existing_file / single_find_and_replace-written path from the
-// read-loop hint's "create X" suggestion — the suggestion always points at REMAINING work. Holds only
-// because isFileMutatingTool counts apogee's own edit tools.
-func TestReadLoopHintExcludesEditWrittenTarget(t *testing.T) {
-	t.Parallel()
-	// spec.go re-read three times without acting → the successful-read-loop hint fires and derives the
-	// prompt's backtick-named target.go as the next write target.
-	base := []domain.Message{
-		userMsg("implement `target.go`"),
-		assistantCall(readCall("r1", "spec.go")), toolResult("r1", "package spec"),
-		assistantCall(readCall("r2", "spec.go")), toolResult("r2", "package spec"),
-		assistantCall(readCall("r3", "spec.go")), toolResult("r3", "package spec"),
-	}
-	// Control: with target.go unwritten, the hint names it as the derived write target.
-	if fired, hint := fireReadLoop(t, base); !fired || !strings.Contains(hint, "target.go") {
-		t.Fatalf("control: fired=%v hint=%q, want the hint to derive target.go as the write target", fired, hint)
-	}
-
-	for _, tool := range []string{"edit_existing_file", "single_find_and_replace"} {
-		t.Run(tool, func(t *testing.T) {
-			t.Parallel()
-			edited := append(base[:len(base):len(base)],
-				assistantCall(mutatingCall("e1", tool, "target.go")), toolResult("e1", "wrote target.go"),
-			)
-			fired, hint := fireReadLoop(t, edited)
-			if !fired {
-				t.Fatalf("the read loop on spec.go still fires alongside an unrelated %s", tool)
-			}
-			if strings.Contains(hint, "target.go") {
-				t.Errorf("hint = %q, want target.go excluded: writtenPaths counts the %s, so it is not remaining work", hint, tool)
-			}
-		})
-	}
-}
+// internal/floor (emptyreply_test.go). The read_loop hint's writtenPaths site, which DID
+// discriminate the edit tools and was pinned genuinely here, retired with its row in v0.20.0.
 
 // workspaceWritingBuiltins names the registered built-ins whose EXECUTION mutates a named workspace
 // file — internal/tools' workspaceScopedWriter set, mirrored here because that marker is unexported.
 // Every one of them must appear in wave4WriteTools, or the whole history family (read_repeat,
-// read_loop, error_enrichment, greenfield detection) treats
-// a real write as a non-write, which is exactly how copy_file, move_file and delete_file went
-// unnoticed from 2026-08-10 until this pin.
+// error_enrichment) treats a real write as a non-write, which is exactly how copy_file, move_file
+// and delete_file went unnoticed from 2026-08-10 until this pin.
 var workspaceWritingBuiltins = map[string]bool{
 	"write_file":              true,
 	"edit_existing_file":      true,

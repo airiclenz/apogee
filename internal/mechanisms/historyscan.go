@@ -5,54 +5,16 @@ import (
 )
 
 // The shared history-scan shapes (architecture deepening item 7, D5): each history-inspecting
-// Mechanism used to hand-roll the same conversation walks — readloop's read-attempt counting,
-// readrepeat's recent-successful-reads, the write-path collection deriveWriteTarget filters
-// against — differing subtly in role, window, and success handling. This file owns ONE copy of
-// each shared shape, beside the F8 spelling families it composes with (readSpellings /
-// listSpellings, historyhints.go; wave4WriteTools as the write side's single source): the SCAN is
-// shared, while per-Mechanism MEMBERSHIP (which tool-name set counts) and THRESHOLDS (how many
-// hits matter) stay at the call site — passed as set parameters, applied to the returned counts.
-// A composite walk no shared shape expresses without contortion stays local to its Mechanism with
-// a comment naming the difference (isGreenfieldContext, readloop.go; fileHintDetectOpportunity,
-// filehint.go).
-
-// readAttemptCounts scans the whole conversation and counts the model's read attempts per path,
-// successes and failures separately (the readloop shape: apogee-sim detectReadLoopPaths +
-// detectSuccessfulReadLoopPaths @pin, folded into one pass). A read call in readSet with a
-// non-empty path counts as a failure when its paired result reads as a read error, else as a
-// success — a call without a committed result is not yet a failure (resultIsReadError's
-// conservative contract). A write call in writeSet with a non-empty path decrements that path's
-// success count (never below zero), so a read-then-write does not read as an unacted re-read.
-// The two maps deliberately key differently, preserving each caller's behaviour: failures key by
-// the LITERAL path spelling (the read-loop hint echoes the model's own spelling back at it),
-// successes by the normalized path (so a "./a.go" read cancels against an "a.go" write). Callers
-// apply their own thresholds to the returned counts (D5).
-func readAttemptCounts(conv domain.ConversationView, readSet, writeSet map[string]bool) (successes, failures map[string]int) {
-	successes = make(map[string]int)
-	failures = make(map[string]int)
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role != domain.RoleAssistant || len(m.ToolCalls) == 0 {
-			return true
-		}
-		for _, tc := range m.ToolCalls {
-			p := toolCallPath(tc.Arguments)
-			if p == "" {
-				continue
-			}
-			np := normalizePath(p)
-			switch {
-			case readSet[tc.Tool] && resultIsReadError(conv, tc.ID):
-				failures[p]++
-			case readSet[tc.Tool]:
-				successes[np]++
-			case writeSet[tc.Tool] && successes[np] > 0:
-				successes[np]--
-			}
-		}
-		return true
-	})
-	return successes, failures
-}
+// Mechanism used to hand-roll the same conversation walks — readrepeat's recent-successful-reads,
+// the write-path collection the next-step derivations filtered against — differing subtly in role,
+// window, and success handling. This file owns ONE copy of each shared shape, beside the F8
+// spelling families it composes with (readSpellings / listSpellings, historyhints.go;
+// wave4WriteTools as the write side's single source): the SCAN is shared, while per-Mechanism
+// MEMBERSHIP (which tool-name set counts) and THRESHOLDS (how many hits matter) stay at the call
+// site — passed as set parameters, applied to the returned counts. A composite walk no shared
+// shape expresses without contortion stays local to its Mechanism with a comment naming the
+// difference. The read-attempt counting shape retired with read_loop, the only row that read it
+// (v0.20.0, ADR 0071).
 
 // recentSuccessfulReadPaths returns the set of normalized paths read successfully in the most
 // recent Turn that issued a read, excluding any path written this Session (the readrepeat shape:

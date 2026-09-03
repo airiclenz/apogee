@@ -14,6 +14,11 @@ import (
 	"github.com/airiclenz/apogee/internal/library"
 )
 
+// oneTool is a minimal non-empty tool menu, for a hook that skips entirely when no tools are
+// present. It moved here from decompose_test.go when that row retired, then from toolfilter_test.go
+// when that one did; library_test.go is its last caller.
+var oneTool = []domain.ToolDef{{Name: "write_file"}}
+
 // libFP builds a fingerprint with an explicit confidence tier — the identity the store keys on and
 // the inject gate reads.
 func libFP(label string, c domain.FingerprintConfidence) domain.ModelFingerprint {
@@ -68,8 +73,8 @@ func TestLibraryDescriptorAndHooks(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	if o := m.Ordering; len(o.After) != 0 || len(o.Before) != 1 || o.Before[0] != toolFilterID {
-		t.Errorf("Ordering = %+v, want Before [toolfilter] (§Ordering seed, ratified into Table A 2026-07-04)", o)
+	if o := m.Ordering; len(o.After) != 0 || len(o.Before) != 0 {
+		t.Errorf("Ordering = %+v, want no edge: the Before-toolfilter edge went with toolfilter in v0.20.0", o)
 	}
 	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 		t.Error("library does not implement PreRequestHook (the inject half)")

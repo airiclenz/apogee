@@ -158,16 +158,16 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 }
 
 // The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
-// syntax/autofix (item 5), Wave 2 added the truncate_history history-rewrite (item 7), Wave 3 added the toolfilter/filehint
-// request shapers (item 10) and the error_enrichment/read_loop/read_repeat history-aware family
-// (item 11), and item 14 added the library observe/inject Mechanism, so each is buildable and
-// KnownIDs reports it, while a deferred / un-ported ID is still an unknown-ID error. The tool-call
-// validator, the identical-repeat detector, the redundant-re-read interceptor, the per-result
-// trimmer and the two Wave-1 recoveries (item 6) are NOT here: they were promoted to Floor guards
-// (ADR 0071) and are on the retired roll. Neither are Wave 4's decompose request shaper, its
-// stall_nudge/list_nudge/tool_use_directive completion nudges, nor apogee's own enumeration-steer
-// and sub-agent fan-out row: they were retired outright on the same verdict. A `mechanisms:` key
-// naming any of them is tolerated, never built.
+// syntax/autofix (item 5), Wave 2 added the truncate_history history-rewrite (item 7), Wave 3 added
+// the error_enrichment/read_repeat history-aware family (item 11), and item 14 added the library
+// observe/inject Mechanism, so each is buildable and KnownIDs reports it, while a deferred /
+// un-ported ID is still an unknown-ID error. The tool-call validator, the identical-repeat
+// detector, the redundant-re-read interceptor, the per-result trimmer and the two Wave-1 recoveries
+// (item 6) are NOT here: they were promoted to Floor guards (ADR 0071) and are on the retired roll.
+// Neither are Wave 4's decompose request shaper, its stall_nudge/list_nudge/tool_use_directive
+// completion nudges, apogee's own enumeration-steer and sub-agent fan-out row, nor Wave 3's
+// toolfilter/filehint request shapers and the family's read_loop member: they were retired outright
+// on the same verdict. A `mechanisms:` key naming any of them is tolerated, never built.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
@@ -175,7 +175,7 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 		known[id] = true
 	}
 	// Every ported Mechanism that builds with no injected Deps.
-	for _, want := range []domain.MechanismID{"syntax", "autofix", "truncate_history", "toolfilter", "filehint", "error_enrichment", "read_loop", "read_repeat"} {
+	for _, want := range []domain.MechanismID{"syntax", "autofix", "truncate_history", "error_enrichment", "read_repeat"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
 		}
@@ -198,53 +198,6 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	// unknown-ID error, proving a deferred / un-ported ID does not silently build.
 	if _, err := Build("correct_tool_result", Deps{}); err == nil {
 		t.Error("Build of a deferred/un-ported ID: want an unknown-ID error, got nil")
-	}
-}
-
-// TestPreRequestOrderingSeeds pins the pre-request dispatch order the §Ordering seeds declare
-// (review-fixes item 11 / option A, ratified into Table A 2026-07-04): library injects before
-// toolfilter narrows the menu. It builds the REAL Mechanisms and
-// topo-sorts them through the registry, so a future rename or a dropped Before/After edge fails
-// loudly here — the finding this item closes was that the seeds lived only in catalogue prose, not
-// in the code. The seed's trailing shaper, tool_result_cap, is a Floor guard now (ADR 0071) and runs
-// outside the ordered dispatch entirely, so nothing anchors the chain's tail any more.
-func TestPreRequestOrderingSeeds(t *testing.T) {
-	t.Parallel()
-	deps := Deps{Library: library.NewStore(t.TempDir())}
-	// Every pre-request Mechanism, including the unordered request-prep injectors (filehint/read_loop),
-	// so the pin reflects the production registry. The Wave-4 rows retired in v0.20.0 (ADR 0071), so
-	// library is the only row left declaring the Before-toolfilter edge and nothing declares the
-	// After-toolfilter one.
-	ids := []domain.MechanismID{
-		"toolfilter", "library",
-		"filehint", "read_loop",
-	}
-	reg := domain.NewMechanismRegistry()
-	built := make(map[domain.MechanismID]domain.RegisteredMechanism, len(ids))
-	for _, id := range ids {
-		m, err := Build(id, deps)
-		if err != nil {
-			t.Fatalf("Build(%q): %v", id, err)
-		}
-		built[id] = m
-		if err := reg.Add(m); err != nil {
-			t.Fatalf("Add(%q): %v", id, err)
-		}
-	}
-
-	ordered := reg.Ordered(domain.HookPreRequest)
-	if len(ordered) != len(ids) {
-		t.Fatalf("Ordered(pre-request) returned %d Mechanisms, want %d", len(ordered), len(ids))
-	}
-	// library injects before toolfilter narrows the menu — assert it DECLARES its Before-toolfilter
-	// edge, not merely that it sorts ahead of toolfilter. Under the D4 stable-ID tiebreak "library"
-	// already sorts before "toolfilter" even with the edge dropped, so an emergent-position check
-	// passes vacuously and would not catch an accidentally-deleted edge; inspecting the declared
-	// Ordering guards the edge independently.
-	for _, before := range []domain.MechanismID{"library"} {
-		if !slices.Contains(built[before].Ordering.Before, "toolfilter") {
-			t.Errorf("%s does not declare Before toolfilter (Ordering = %+v)", before, built[before].Ordering)
-		}
 	}
 }
 

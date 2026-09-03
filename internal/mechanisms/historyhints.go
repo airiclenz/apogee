@@ -3,17 +3,17 @@ package mechanisms
 import (
 	"encoding/json"
 	"path"
-	"regexp"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The Wave-3 history-aware hint family (Phase-4 item 11): error_enrichment (post-tool-result),
-// read_loop (pre-request) and read_repeat (post-response) — the family's other two members, the
-// identical-repeat detector and the redundant-re-read interceptor, left the catalogue when they were
-// promoted to the tool-loop-breaker and read-cache Floor guards (ADR 0071) — the cross-turn aggregators ported from the pinned
-// apogee-sim source per the catalogue (docs/design/mechanism-catalogue.md Table A/B). Every one
+// The Wave-3 history-aware hint family (Phase-4 item 11): error_enrichment (post-tool-result) and
+// read_repeat (post-response) — the family's other members left it, the identical-repeat detector
+// and the redundant-re-read interceptor promoted to the tool-loop-breaker and read-cache Floor
+// guards (ADR 0071), read_loop retired outright in v0.20.0 on the same verdict — the cross-turn
+// aggregators ported from the pinned apogee-sim source per the catalogue
+// (docs/design/mechanism-catalogue.md Table A/B). Every one
 // decides by scanning the conversation across Turns, so it reads the loop's history through the
 // LoopView / ConversationView the hook is handed rather than its single mutable value. All ship
 // default-off (D1) and self-regulate through the loop's per-Session tracker (strikes-3, item 3);
@@ -21,7 +21,7 @@ import (
 //
 // This file carries the helpers the family shares. The read/write tool-name sets and the
 // path/error-content sniffers are ported from apogee-sim (internal/toolsets/toolsets.go,
-// internal/proxy/{read_loop_detector,error_enrichment,next_step}.go @pin). The read-tool set
+// internal/proxy/{read_loop_detector,error_enrichment}.go @pin). The read-tool set
 // (readToolNames / isReadTool / toolCallPath) lives here, having outlived the two recovery rows
 // that first carried it — both are Floor guards now (ADR 0071), and internal/floor keeps its own
 // copy. Write detection has TWO semantics (robustness.go): the history family asks "did this
@@ -86,41 +86,11 @@ func toolSet(groups ...[]string) map[string]bool {
 	return set
 }
 
-// hasWrittenFiles reports whether any assistant message issued a write-tool call — the "model has
-// already started writing" signal filehint gates on (apogee-sim toolsets.HasWrittenFiles @pin, over
-// wave4WriteTools so apogee's own write tools count; filehint's private copy of the scan and its
-// duplicate write set folded here, item 7).
-func hasWrittenFiles(conv domain.ConversationView) bool {
-	found := false
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role != domain.RoleAssistant {
-			return true
-		}
-		for _, tc := range m.ToolCalls {
-			if wave4WriteTools[tc.Tool] {
-				found = true
-				return false
-			}
-		}
-		return true
-	})
-	return found
-}
-
-// listToolNames are the directory-listing calls greenfield detection inspects for an empty workspace.
-// It composes from the list spelling family (listSpellings, above) — apogee-sim's ListTools
-// @pin plus apogee's own list_directory — the complete five-spelling family the other list sets now
-// consolidate onto.
-var listToolNames = toolSet(listSpellings)
-
-// isListTool reports whether name is one of the directory-listing tools greenfield detection reads.
-func isListTool(name string) bool { return listToolNames[name] }
-
 // readToolNames are the tools whose calls count as a file read across the history family. It
 // composes from the read spelling family (readSpellings, above) — apogee-sim's ReadTools
 // @pin plus the retired open_file spelling, a separate read tool until it merged into read_file on
-// 2026-08-11, kept because models may still emit the name — so the filehint/library read sets
-// that share the family stay identical by construction rather than by hand-maintained copies.
+// 2026-08-11, kept because models may still emit the name — so the library read set that shares the
+// family stays identical by construction rather than by a hand-maintained copy.
 var readToolNames = toolSet(readSpellings)
 
 // isReadTool reports whether name is one of the file-reading tools progress detection counts.
@@ -220,7 +190,8 @@ func firstLineMatchesAny(content string, signals []string) bool {
 }
 
 // firstUserContent returns the first non-empty user message's content (apogee-sim firstUserContent,
-// next_step.go @pin) — the prompt deriveWriteTarget and the read-loop hints mine for a target file.
+// next_step.go @pin) — the task statement a hint quotes back so its correction names what the model
+// was asked to do.
 func firstUserContent(conv domain.ConversationView) string {
 	var out string
 	conv.Range(func(_ int, m domain.Message) bool {
@@ -231,86 +202,4 @@ func firstUserContent(conv domain.ConversationView) string {
 		return true
 	})
 	return out
-}
-
-// writtenPaths collects the normalized paths the model has successfully issued a write-tool call for
-// (apogee-sim writtenPaths, next_step.go @pin) — deriveWriteTarget excludes these so its suggestion
-// always points at remaining work. A thin delegate to the shared written-paths shape
-// (writtenPathsSince, historyscan.go) over the whole conversation and the write superset.
-func writtenPaths(conv domain.ConversationView) map[string]bool {
-	return writtenPathsSince(conv, wave4WriteTools, 0)
-}
-
-// fileExtRe matches a filename token with a recognised source/doc extension (apogee-sim
-// fileExtPattern, next_step.go @pin).
-var fileExtRe = regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9_\-./]*\.(?:js|jsx|ts|tsx|py|go|rs|rb|java|kt|swift|c|cc|cpp|cxx|h|hpp|cs|php|sh|bash|zsh|html|css|scss|md|json|ya?ml|toml)\b`)
-
-// backtickRe captures a filename-like token wrapped in single backticks (apogee-sim backtickPattern,
-// next_step.go @pin) — a strong intent signal in a prompt.
-var backtickRe = regexp.MustCompile("`([^`\\s]+)`")
-
-// deriveWriteTarget inspects the first user message and returns a single concrete filename the model
-// is likely expected to write next (apogee-sim deriveWriteTarget, next_step.go @pin), or "" when
-// none can be derived with confidence. A backtick-wrapped filename that survives the written-set
-// filter wins; failing that, the first extension-bearing token. Files already written are excluded
-// so the suggestion points at remaining work.
-func deriveWriteTarget(conv domain.ConversationView) string {
-	prompt := firstUserContent(conv)
-	if prompt == "" {
-		return ""
-	}
-	written := writtenPaths(conv)
-
-	for _, m := range backtickRe.FindAllStringSubmatch(prompt, -1) {
-		cand := strings.TrimSpace(m[1])
-		if !fileExtRe.MatchString(cand) {
-			continue
-		}
-		if written[normalizePath(cand)] {
-			continue
-		}
-		return cand
-	}
-	for _, cand := range fileExtRe.FindAllString(prompt, -1) {
-		cand = strings.TrimSpace(cand)
-		if written[normalizePath(cand)] {
-			continue
-		}
-		return cand
-	}
-	return ""
-}
-
-// requestContains reports whether any message in the request already carries text — the
-// idempotency guard the InjectContext-based hints (read_loop, filehint) use so a deterministic
-// hint is never injected twice into the same request. The hint text is its own marker: a
-// re-computed hint for unchanged state is byte-identical (filehint anchors on its stable
-// fileHintMarker lead), so a substring match recognises it without polluting the model-facing
-// wording with a synthetic tag.
-func requestContains(conv domain.ConversationView, text string) bool {
-	if text == "" {
-		return false
-	}
-	found := false
-	conv.Range(func(_ int, m domain.Message) bool {
-		if strings.Contains(m.Content, text) {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
-}
-
-// pathInList reports whether candidate normalises to any path already in paths (apogee-sim
-// pathInList @pin) — used to avoid a "create X — also create X" hint when the derived next step is
-// one of the warned-about paths.
-func pathInList(candidate string, paths []string) bool {
-	target := normalizePath(candidate)
-	for _, p := range paths {
-		if normalizePath(p) == target {
-			return true
-		}
-	}
-	return false
 }

@@ -40,9 +40,11 @@ type readRepeatMechanism struct{}
 func newReadRepeat(Deps) (any, error) { return readRepeatMechanism{}, nil }
 
 // readRepeatDescriptor identifies read_repeat as a strikes-3 response-repair Mechanism (catalogue
-// Table A), incompatible with read_loop (the re-read family is pairwise-exclusive, C2 — the family's
-// third member, the redundant-re-read interceptor, is the read-cache Floor guard now, ADR 0071) —
-// disabled under Bypass (D5), withdrawn after repeated non-help.
+// Table A). It declares no incompatibility any more: the re-read family was pairwise-exclusive on
+// one wasted-read symptom (C2), but its two siblings are gone — the redundant-re-read interceptor
+// is the read-cache Floor guard now and read_loop retired outright (ADR 0071, v0.20.0) — so
+// read_repeat is the only row left that could claim the symptom. Disabled under Bypass (D5),
+// withdrawn after repeated non-help.
 var readRepeatDescriptor = domain.MechanismDescriptor{
 	ID:          readRepeatID,
 	Capability:  domain.CapResponseRepair,

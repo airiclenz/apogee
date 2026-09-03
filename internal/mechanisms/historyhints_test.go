@@ -2,7 +2,6 @@ package mechanisms
 
 import (
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -27,7 +26,6 @@ func TestHistoryFamilyDescriptorsNonExempt(t *testing.T) {
 		hook func(any) bool
 	}{
 		{errorEnrichmentID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostToolResultHook); return ok }},
-		{readLoopID, domain.CapProactiveNudge, func(h any) bool { _, ok := h.(domain.PreRequestHook); return ok }},
 		{readRepeatID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostResponseHook); return ok }},
 	}
 	for _, c := range cases {
@@ -48,35 +46,15 @@ func TestHistoryFamilyDescriptorsNonExempt(t *testing.T) {
 	}
 }
 
-// The re-read family (read_loop, read_repeat) is pairwise-exclusive on the same wasted-read symptom
-// (catalogue Table A / C2); its third member is the read-cache Floor guard now (ADR 0071), which
-// carries no descriptor and so no edge. In apogee IncompatibleWith is a startup gate, so the two
-// co-registered fail ValidateIncompatibilities — at most one is enabled at a time.
-func TestReReadFamilyPairwiseIncompatible(t *testing.T) {
-	t.Parallel()
-	pairs := [][2]domain.MechanismID{
-		{readLoopID, readRepeatID},
-	}
-	for _, p := range pairs {
-		reg := domain.NewMechanismRegistry()
-		if err := reg.Add(mustBuild(t, p[0])); err != nil {
-			t.Fatalf("Add(%q): %v", p[0], err)
-		}
-		if err := reg.Add(mustBuild(t, p[1])); err != nil {
-			t.Fatalf("Add(%q): %v", p[1], err)
-		}
-		if err := reg.ValidateIncompatibilities(); !errors.Is(err, domain.ErrIncompatibleMechanisms) {
-			t.Errorf("ValidateIncompatibilities(%q,%q) = %v, want ErrIncompatibleMechanisms", p[0], p[1], err)
-		}
-	}
-}
-
-// error_enrichment declares no incompatibility, so it co-registers with a re-read-family member
-// cleanly (it is not part of the exclusive symptom).
+// error_enrichment declares no incompatibility, so it co-registers with the re-read family's one
+// surviving member cleanly (it is not part of the exclusive symptom). The family's pairwise
+// exclusion has no pair left to pin: read_loop retired in v0.20.0 (ADR 0071) and the third member,
+// the redundant-re-read interceptor, is the read-cache Floor guard now, which carries no descriptor
+// and so no edge.
 func TestHistoryFamilyCompatibleMembersCoRegister(t *testing.T) {
 	t.Parallel()
 	reg := domain.NewMechanismRegistry()
-	for _, id := range []domain.MechanismID{errorEnrichmentID, readLoopID} {
+	for _, id := range []domain.MechanismID{errorEnrichmentID, readRepeatID} {
 		if err := reg.Add(mustBuild(t, id)); err != nil {
 			t.Fatalf("Add(%q): %v", id, err)
 		}

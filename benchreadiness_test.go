@@ -43,9 +43,9 @@ const (
 	// plain reply instead of asking for a tool — how a fork continuation ends in one Turn.
 	closeMarker = "PLEASE_CLOSE"
 
-	// complexPrompt is analysis-AND-action intent with six numbered steps: an analysis verb so
-	// toolfilter keeps the read tools and the library observer records the shallow-exploration note
-	// (list-without-read on an analysis request), and an action verb so the ask reads as real work.
+	// complexPrompt is analysis-AND-action intent with six numbered steps: an analysis verb so the
+	// library observer records the shallow-exploration note (list-without-read on an analysis
+	// request), and an action verb so the ask reads as real work.
 	complexPrompt = "please analyze and then refactor the payment service by working through these steps.\n" +
 		"1. read the config parser module.\n" +
 		"2. update the request validation logic.\n" +
@@ -65,13 +65,13 @@ var allHooks = []apogee.HookPoint{
 }
 
 // enabledMechanisms is the multi-wave set the mechanisms-on arm enables via Config: one
-// request shaper that ACTS every pre-request (toolfilter — wave 3), one history-rewrite shaper
-// that stays inspect-only on a short conversation (truncate_history — wave 2), and the learning
-// Mechanism whose observe half writes into the injected LibraryDir (library — item 14). library
-// declares "Before toolfilter", so their fired order is the registry's deterministic dispatch
-// order. The wave-4 decompose shaper that used to sit beside toolfilter here retired in v0.20.0
-// (ADR 0071).
-var enabledMechanisms = []apogee.MechanismID{"toolfilter", "truncate_history", "library"}
+// history-rewrite shaper that stays inspect-only on a short conversation (truncate_history —
+// wave 2) and the learning Mechanism whose observe half writes into the injected LibraryDir
+// (library — item 14). No CATALOGUED row acts every pre-request any more — the wave-3 toolfilter
+// shaper that used to, and the wave-4 decompose shaper that sat beside it, both retired in v0.20.0
+// (ADR 0071) — so the registered experimental hook is the one pre-request actor the fired stream
+// carries.
+var enabledMechanisms = []apogee.MechanismID{"truncate_history", "library"}
 
 // ----------------------------------------------------------------------------
 // The scripted OpenAI-compatible streaming model (one responder, both arms)
@@ -184,8 +184,8 @@ func (allowAll) Approve(context.Context, apogee.ApprovalRequest) (apogee.Approva
 	return apogee.ApprovalAllow, nil
 }
 
-// stubTool is an inert read-only tool that pads the menu past toolfilter's 30-tool activation
-// threshold. It declares ReadOnly so it survives every mode's menu, and it is never called.
+// stubTool is an inert read-only tool that pads the menu to a realistic size for the arms. It
+// declares ReadOnly so it survives every mode's menu, and it is never called.
 type stubTool struct{ name string }
 
 func (s stubTool) Name() string          { return s.name }
@@ -249,8 +249,8 @@ func armProbe(t *testing.T) (*apogee.MechanismRegistry, *fivePointProbe) {
 	return reg, probe
 }
 
-// paddedRegistry returns a real list_dir plus enough inert stubs to trip toolfilter's 30-tool
-// activation threshold, so the request shapers have a menu large enough to narrow.
+// paddedRegistry returns a real list_dir plus enough inert stubs to give the arms a menu of
+// realistic size rather than a two-tool toy.
 func paddedRegistry(t *testing.T, workspace string) *apogee.ToolRegistry {
 	t.Helper()
 	reg := apogee.NewToolRegistry()
@@ -400,22 +400,23 @@ func TestBenchReadinessContract(t *testing.T) {
 	runToQuiescence(t, bypassArm, apogee.UserInput{Text: complexPrompt})
 
 	// === Assertion 1: deterministic mechanism order visible in the fired stream ===
-	// The enabled shapers actually ACT (they book fires); an inspect-only Mechanism does not.
+	// A hook that ACTS books a fire; an inspect-only Mechanism does not. With the catalogued
+	// pre-request shapers retired (ADR 0071), the experimental hook is the only actor left, so the
+	// stream is its repeats — one per pre-request pass, and nothing else interleaved.
 	mechFires := firedEvents(mechSink.events)
 	preIDs := firedIDsAt(mechFires, apogee.HookPreRequest)
-	if len(preIDs) == 0 || len(preIDs)%2 != 0 {
-		t.Fatalf("pre-request fired stream = %v, want repeating [toolfilter experimental] pairs", preIDs)
+	if len(preIDs) == 0 {
+		t.Fatalf("pre-request fired stream = %v, want at least one [experimental] entry", preIDs)
 	}
-	want := []string{"toolfilter", "experimental"}
 	for i, id := range preIDs {
-		if id != want[i%2] {
-			t.Errorf("pre-request fired[%d] = %q, want %q (deterministic order: shapers in Ordered() order, then the experimental hook)", i, id, want[i%2])
+		if id != "experimental" {
+			t.Errorf("pre-request fired[%d] = %q, want %q (deterministic order: shapers in Ordered() order, then the experimental hook)", i, id, "experimental")
 		}
 	}
-	// The registry's deterministic dispatch order, read off the enabled set's own declared edge:
-	// library declares Before toolfilter, so it is dispatched first even though it books no fire.
-	if li, ti := orderedIndex(mechReg, apogee.HookPreRequest, "library"), orderedIndex(mechReg, apogee.HookPreRequest, "toolfilter"); li < 0 || ti < 0 || li >= ti {
-		t.Errorf("Ordered(pre-request) has library@%d, toolfilter@%d; want library strictly before toolfilter", li, ti)
+	// The registry still dispatches the enabled catalogued row at this hook point, ahead of the
+	// experimental one, even though it books no fire.
+	if li := orderedIndex(mechReg, apogee.HookPreRequest, "library"); li < 0 {
+		t.Error("Ordered(pre-request) does not carry library; the enabled set was not dispatched")
 	}
 
 	// === Assertion 2: R4 — an inspect-only invocation books no fired event ===

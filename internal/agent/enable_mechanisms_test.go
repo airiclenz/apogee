@@ -298,22 +298,18 @@ func TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent(t *testing.T) {
 	}
 }
 
-// TestBuildMechanisms_RefusesWhatConstructionRefuses: the errors are the construction errors, raised
-// where the host can still name the config that asked for them — an unknown ID wrapping
-// ErrUnknownMechanism, and a pair the incompatibility gate refuses (read_loop
-// IncompatibleWith read_repeat), exactly as New refuses the same two lists. BuildMechanisms builds
-// into a FRESH registry and never reads cfg.Mechanisms, so the refusal it is checked on has to be
-// one a catalogue pair can still trip.
+// TestBuildMechanisms_RefusesWhatConstructionRefuses: the error is the construction error, raised
+// where the host can still name the config that asked for it — an unknown ID wrapping
+// ErrUnknownMechanism, exactly as New refuses the same list. BuildMechanisms builds into a FRESH
+// registry and never reads cfg.Mechanisms, so the refusal it is checked on has to be one the
+// shipped catalogue can still trip: the incompatibility gate no longer qualifies, its last two
+// declarers having been promoted to Floor guards and retired outright in v0.20.0 (ADR 0071). The
+// gate itself is pinned over synthetic rows in internal/domain.
 func TestBuildMechanisms_RefusesWhatConstructionRefuses(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 
 	_, err := BuildMechanisms(cfg, []domain.MechanismID{"no_such_mechanism"})
 	if !errors.Is(err, domain.ErrUnknownMechanism) {
 		t.Errorf("BuildMechanisms with an unknown ID = %v, want ErrUnknownMechanism", err)
-	}
-
-	_, err = BuildMechanisms(cfg, []domain.MechanismID{"read_loop", "read_repeat"})
-	if !errors.Is(err, domain.ErrIncompatibleMechanisms) {
-		t.Errorf("BuildMechanisms with an incompatible pair = %v, want ErrIncompatibleMechanisms", err)
 	}
 }
