@@ -213,7 +213,7 @@ file and another on screen explains itself. Two rows answer from the **running s
 instead of that resolution — `mode:` and `confine-to-workspace:` show what apogee is running
 right now, so a `shift+tab` or a `/confine off` shows up the next time you open the pane, and
 the `mode:` list opens on the rung you are actually on. The conversation gives way
-entirely while the pane is up, because thirty-odd keys are a screen to read rather
+entirely while the pane is up, because fifty-odd keys are a screen to read rather
 than a choice to scan: `↑/↓` move the `❯`, a fixed two-line `Description:` header above the
 list says what the key under the cursor is for, and `esc` closes the pane and hands the
 transcript back. Section labels stand in white above the rows they open, the row being typed
@@ -284,7 +284,15 @@ catalogued mechanism with `on`/`off` beside each; `⏎` or `space` flips the hig
 and applying it on that keypress, and the list **stays open** so a posture is set in one visit. `esc`
 goes back. Switching one off writes `<id>: false` rather than deleting the line, and — as ever — a
 non-empty `mechanisms:` block means manual control, so the Validated set measured for the bound model
-is no longer applied on top. The two **off-ramps** (`empty_response_recovery`, `tool_use_enforcer`)
-read as `on` even when the block never names them: they ship enabled and only an explicit
-`<id>: false` turns one off ([ADR 0070](../adr/0070-off-ramp-mechanisms-ship-on-by-default.md)).
+is no longer applied on top. In a **shipped build that list is empty**, and says so in a row of
+prose — `no catalogued Mechanisms in this build — the Floor guards are the Session keys` — rather
+than as a blank box: the catalogue retired in v0.20.0
+([ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)), and
+rows come back the moment a bench Driver registers experimental ones of its own.
+
+The six **[Floor guards](configuration.md)** that row points at are not in that list, because they
+are not switches you arm — they are on already. Each is an ordinary `on`/`off` row in the pane's
+**Session** section, edited in place like any other boolean and applied to the running session:
+`tool-call-repair`, `tool-loop-breaker`, `empty-response-recovery`, `tool-use-enforcer`,
+`read-cache` and `tool-result-cap`.
 

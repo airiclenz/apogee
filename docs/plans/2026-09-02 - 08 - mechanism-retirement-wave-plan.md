@@ -1173,7 +1173,23 @@ them as the FINGERPRINT's own best-available ladder, which the derived call keep
 
 **Commit:** `docs(context): Floor guards enter the language; the nudge Mechanisms retire from it`
 
-## 22. README, AGENTS.md and the manual
+## 22. README, AGENTS.md and the manual — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): this item's commit legitimately carries pre-existing uncommitted owner edits to `README.md` (a ~320-line front-page rewrite that had already replaced the "Small-model mechanisms" feature bullet and the "every mechanism is A/B-tested" claim with the floor-guards bullet this item specifies), `docs/manual/commands.md` (thirty-odd → fifty-odd keys), `docs/manual/configuration.md` (`/resume` → `--resume`, the `sub-agents-server` row's editor affordance) and `docs/manual/probe.md` (probe model's `--endpoint`/`--model`/`--config`). They were left in the tree for this item to absorb; nothing of theirs was reverted.
+
+NOTES (2026-09-03): README's `:29-36` work was already done by those owner edits, so only two accuracy tightenings were made there — the read cache "cut short" rather than "skipped" (it caps to a header slice), and the tool-result cap trimmed "on its way back to the model rather than in the conversation itself" (it fires in the request projection).
+
+NOTES (2026-09-03): the plan's `configuration.md` "Floor guards **section**" was written as a prose passage in place of `:52-89` rather than a new `##` heading, because that whole region (precedence, the watched config, mechanisms, the tools block) sits unheaded under `# Configuration`; adding one H2 would have swept the following built-in-tools paragraph under it. The Bypass paragraph therefore says "all six Floor guards" without an anchor.
+
+NOTES (2026-09-03): the `syntax`-trailer sentence survives per the regression guard, moved to the end of the new passage and stripped of its `syntax`-mechanism clause ("neither a guard nor a Mechanism").
+
+NOTES (2026-09-03): consequential edit — AGENTS.md: made necessary by the invariant rewrite — the `CONTEXT.md` concept-map line now lists Floor guards alongside Mechanisms and Bypass.
+
+NOTES (2026-09-03): consequential edit — docs/manual/configuration.md: made necessary by the Floor guards passage — the file's opening file-only key list said "the small-model mechanisms among them" and now says "the six Floor-guard switches among them".
+
+NOTES (2026-09-03): item 20's deliberately-left pointer at `configuration.md:88` is gone; `grep -rln "design/mechanism-catalogue.md" AGENTS.md CONTEXT.md docs/ --include=*.md --exclude-dir=archived --exclude-dir=plans --exclude-dir=skill-runs` and the same grep over `internal/ cmd/` both read zero. The surviving hits are `ISSUES.md:131` (item 23's file) and `CHANGELOG.md` (the historical trail).
+
+NOTES (2026-09-03): the item's rule grep `off-ramp\|counts \*\*21\*\*\|Library observ\|learning \*Library\*` over `README.md AGENTS.md docs/manual/` reads zero. `configuration.md`'s "`config.yaml`, the library and your saved sessions" is left alone — that is the `~/.apogee/library` directory, which the wave keeps.
 
 **What.** Depends on 1. `AGENTS.md:3` → "Its hard invariant: nothing apogee puts in front of a model
 may make that model perform worse than the bare loop — the **Floor guards** and structural reducers

@@ -1,10 +1,10 @@
 # apogee — agent guide
 
-"apogee" (spelled lower-case) is a terminal coding agent (Go, Bubble Tea TUI) built for smaller, locally hosted LLMs — while working even better with bigger ones — running a full agentic tool-use loop. Its hard invariant: the gated **Mechanisms** that give smaller models the help they need must never make any model perform worse than the same agent with Mechanisms off (**Bypass mode** is that floor). This file is the agent-facing counterpart to `README.md`: it maps where knowledge lives and states the conventions you cannot derive from the code.
+"apogee" (spelled lower-case) is a terminal coding agent (Go, Bubble Tea TUI) built for smaller, locally hosted LLMs — while working even better with bigger ones — running a full agentic tool-use loop. Its hard invariant: nothing apogee puts in front of a model may make that model perform worse than the bare loop — the **Floor guards** and structural reducers that ship on for every model are held to it, and any model-facing behaviour above them (the **Mechanism** lab surface; **Bypass mode** is its off-switch) ships off until bench evidence turns it on. This file is the agent-facing counterpart to `README.md`: it maps where knowledge lives and states the conventions you cannot derive from the code.
 
 ## Where knowledge lives
 
-- `CONTEXT.md` — the domain language and concept map (Mechanisms, Bypass, Steps,   Turns, …). Terms used in code and docs are defined here; read the relevant   section before design work. Large — read sections, don't load it wholesale.
+- `CONTEXT.md` — the domain language and concept map (Floor guards, Mechanisms, Bypass, Steps,   Turns, …). Terms used in code and docs are defined here; read the relevant   section before design work. Large — read sections, don't load it wholesale.
 - `docs/manual/` — the user-facing reference manual (commands, sessions, configuration, probe, headless, daemon, building). `README.md` is the plain-language front door; detail lives here, not there.
 - `docs/adr/` — architectural decision records. Settled questions live here; check for an ADR before re-opening one.
 - `docs/design/` — design contracts (confinement execution contract, MCP client) plus the `tool-surface-findings.md` record; the mechanism catalogue is archived under `docs/design/archived/` and carries the retirement wave's per-row verdicts (ADR 0071).

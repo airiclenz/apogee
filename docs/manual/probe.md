@@ -36,12 +36,14 @@ output, and a multi-step tool chain — then prints what it observed, an ordinal
 capability tier, and the `model-profiles:` entry the findings suggest — keyed by the
 model it probed, and paste-ready as YAML
 (your `config.yaml` is never edited). It also records a **behavioral fingerprint**: the
-model keeps its advertised name — probing never renames it, so Validated-set entries,
-aliases and Library observations keyed on that name keep matching — but its identity
+model keeps its advertised name — probing never renames it, so Validated-set entries and
+aliases keyed on that name keep matching — but its identity
 rises from *low* to *medium* confidence, which is what promotes a matching Validated
 set from offered to auto-applied on later runs. `--no-save` runs the whole battery and
 records nothing; the record's path is printed either way, so deleting that file undoes
-it.
+it. It takes `--endpoint`, `--model` and `--config` as well, so you can point the battery
+at a server and a model this host has never been configured for — with no `--model` the
+server is asked which one it is serving.
 
 `apogee probe terminal` is the third subject, and it is free like the host report. It
 **measures** the terminal instead of trusting it: it writes real escape sequences to your

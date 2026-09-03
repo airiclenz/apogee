@@ -40,7 +40,8 @@ and `present_document` are not registered, and no MCP server is contacted.
 
 Only the model's answer goes to **stdout**; resolution notices — including one line per
 `mechanisms:` key naming a Mechanism this release retired, which is ignored rather than
-refused — and the one-line summary go to **stderr**, so a pipeline reads the text and
+refused and, where the row became a Floor guard, names the top-level key that governs it
+now — and the one-line summary go to **stderr**, so a pipeline reads the text and
 nothing else. A run that delegated
 adds one stderr line per sub-agent run just ahead of that summary —
 `sub-agent: 12k/32k · <the name it was given, else the task>`, in the order the runs

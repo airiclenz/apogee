@@ -9,8 +9,8 @@ apogee already recommends. Three keys carry all four layers —
 `server:` (`--server`, `APOGEE_SERVER`), `mode:` and `bypass:`. Every other key
 is **file-only** (no flag or env): the `servers:` list, the system prompt, the
 model profile, [MCP servers](#external-mcp-servers--mcp-servers), [the web-search
-endpoint](#where-web_search-looks--web-search-endpoint) and the small-model
-mechanisms among them. Two raw overrides are not config keys at all — `--endpoint`
+endpoint](#where-web_search-looks--web-search-endpoint) and the six Floor-guard
+switches among them. Two raw overrides are not config keys at all — `--endpoint`
 / `APOGEE_ENDPOINT` runs one session against a server the file does not list,
 while `APOGEE_API_KEY` and `--model` / `APOGEE_MODEL` carry that server's token
 and model hint or overlay those two fields of the listed entry a session starts
@@ -49,44 +49,60 @@ says so in the transcript, in one line naming the keys that landed. The watcher 
 file's timestamp and size on a one-second ticker — no daemon, no filesystem-notification
 dependency (ADR 0041).
 
-Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
-until its A/B bench run proves it a win — bar the two **off-ramps**, which ship
-**on** (below) — so enabling one is a deliberate config choice:
+Six **Floor guards** are the help every model gets whatever it is. They are engine behaviour rather
+than settings you switch on: each ships **on**, and each is turned off by exactly one top-level
+boolean named after it.
 
 ```yaml
 # ~/.apogee/config.yaml
-mechanisms:
-  validate: true   # tool-call validation + auto-retry
-  syntax: true     # write-content syntax check + auto-retry
-  autofix: true    # formatter pass on tool-call payloads
+tool-call-repair: true         # correct an unknown or malformed tool call and retry it
+tool-loop-breaker: true        # break an identical repeated tool call with a directive naming the repeat
+empty-response-recovery: true  # retry an empty reply with a completion-check nudge
+tool-use-enforcer: true        # retry a turn that narrated where the model was asked to act
+read-cache: true               # cap a re-read of a file unchanged since apogee last read it
+tool-result-cap: true          # trim an older oversized tool result in the outgoing request
 ```
 
-The `syntax` mechanism is only the RETRY half: every write tool already appends its own
-in-process syntax verdict to the success result it hands the model, always on and not
-configurable, and enabling `syntax` adds the automatic correction Turn on top of it.
+Each of them changes only what the model sees **after its own mistake**, or shapes the request
+without steering it, so none needs a per-model bench run and none is withdrawn by `--bypass` — the
+floor is what Bypass is measured *against*, not something Bypass takes away. All six are **file-only**
+(no flag, no environment variable) and all six are live on the [settings
+screen](commands.md#the-settings-screen--settings), as Session rows: an edit applies to the session
+you are in. Only an explicit `<key>: false` takes one away, and the Go API's `domain.FloorConfig`
+spells them as `Disable…` fields, so an embedder handing `New` a bare `Config` gets the whole floor.
+[ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) records
+why they are behaviour rather than catalogued rows.
 
-The two **off-ramps** — `empty_response_recovery` and `tool_use_enforcer` — are the one
-exception to that default: they ship **enabled**, so a `mechanisms:` block that never names
-one arms it anyway and so does a config file with no block at all. They are recovery
-guarantees rather than small-model tuning — each fires only after a Turn has already
-failed, and both survive `--bypass` — so the bench gate the other mechanisms wait on does
-not apply to them. To turn one off, name it explicitly false:
+The `mechanisms:` block is the lab surface above that floor, and in a shipped build its catalogue is
+**empty**: every row it once carried either became one of the six guards above or retired outright,
+with the per-row verdicts in the [archived catalogue](../design/archived/mechanism-catalogue.md).
+The block stays because a bench Driver registers experimental rows of its own through the Go API,
+and naming an ID under `mechanisms:` is how one is enabled — from the Go API, `Config.EnableMechanisms`
+with `apogee.CataloguedMechanisms()` to enumerate what this build knows. An **unknown** ID is still a
+startup error listing those IDs, and `--bypass` still wins over the block (an enabled row does not
+fire under Bypass).
+
+A **retired** ID is not an error. It earns one startup notice and is ignored, and where the row was
+promoted to a guard the notice names the key that governs the behaviour now, so this:
 
 ```yaml
 mechanisms:
-  tool_use_enforcer: false   # the narration off-ramp, off for this install
+  tool_use_enforcer: false
 ```
 
-See [ADR 0070](../adr/0070-off-ramp-mechanisms-ship-on-by-default.md).
+is answered at startup with
 
-An unknown ID is a startup error that lists the IDs this build knows; `--bypass`
-still wins (an enabled non-off-ramp mechanism does not fire under bypass). The same
-catalogued mechanisms are enabled by ID from the Go API through
-`Config.EnableMechanisms` (with `apogee.CataloguedMechanisms()` to enumerate them), so
-a library embedder arms the identical stack without the config file. The
-catalogue currently counts **21** mechanisms — see
-[`docs/design/mechanism-catalogue.md`](../design/mechanism-catalogue.md) for
-what each one does.
+```
+apogee: mechanism "tool_use_enforcer" is the "tool-use-enforcer" floor guard since v0.20.0;
+"tool_use_enforcer: false" under mechanisms: no longer turns it off — set tool-use-enforcer: false
+at the top level
+```
+
+rather than being mapped to the new key behind your back — a line that no longer switches anything
+is worth being told about.
+
+Separately from all of this, every write tool appends its own in-process syntax verdict to the
+success result it hands the model: always on, not configurable, and neither a guard nor a Mechanism.
 
 The **built-in tools** are all on by default — all but the default-off **Console family**
 (`console_open`, `console_send`, `console_read`, `console_close`;
@@ -166,18 +182,19 @@ sessions. `APOGEE_WORKSPACE` (`--workspace`, then the variable, then the current
 workspace root — the fence every file tool is scoped to, so it decides what the model may read and
 write at all, not merely which directory a session opens in.
 
-`APOGEE_BYPASS` earns a paragraph of its own, because it gives something up. It turns apogee's
-**Mechanisms off for the whole session**: every catalogued mechanism bar the exempt off-ramps is
-skipped wherever it would have fired, and the Validated set your bound model would otherwise be
-given is not applied either —
-so a small model runs with none of the help apogee exists to give it. That is the point of it.
-Bypass is the honest "Mechanisms-off" floor every mechanism is measured against on the bench
+`APOGEE_BYPASS` earns a paragraph of its own, because of what it is for. It turns apogee's
+**Mechanisms off for the whole session**: every catalogued row is skipped wherever it would have
+fired, and the Validated set your bound model would otherwise be given is not applied either. On a
+stock install that changes nothing you can see, because a shipped build's catalogue is empty — the
+switch is the bench's control arm, and it earns its keep the moment a Driver registers experimental
+rows of its own.
+Bypass is the honest "Mechanisms-off" floor every Mechanism is measured against on the bench
 ([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code path
-you can run yourself. What stays on is the agent's structure — context compaction, the Budget, the
-empty-response off-ramp, the rest of the loop — so the floor is a working agent rather than a naked
-model. The same switch is the `bypass` row in `/settings`, and it is live: flip it mid-session and
-the next hook evaluation already sees it. [**Bypass mode**](../../CONTEXT.md) in `CONTEXT.md` is the
-full definition.
+you can run yourself. What it never touches is the agent's structure and its floor — context
+compaction, the Budget, all six Floor guards, the rest of the
+loop — so the floor is a working agent rather than a naked model. The same switch is
+the `bypass` row in `/settings`, and it is live: flip it mid-session and the next hook evaluation
+already sees it. [**Bypass mode**](../../CONTEXT.md) in `CONTEXT.md` is the full definition.
 
 ## What the network tools may reach — `url-safety:`
 
@@ -636,7 +653,7 @@ rather than repeating a "not found in `$PATH`" you cannot act on.
 ## Keeping the session store bounded — `sessions:`
 
 Every session apogee runs is saved under `~/.apogee/sessions/`, and nothing has ever removed one —
-which is what makes `--continue` and `/resume` work months later, and also what makes the folder
+which is what makes `--continue` and `--resume` work months later, and also what makes the folder
 grow for as long as you use apogee. The `sessions:` block is the sweep. Both of its keys are **off
 unless you name them**, so a config that leaves the block out keeps every session it always kept.
 
@@ -654,7 +671,7 @@ may set either or both; with both set, a session survives only if it clears both
 
 The sweep runs **once at startup**, silently: it reports nothing, and a file it cannot read is left
 exactly where it is rather than being removed on a guess. It never removes the session being
-resumed — a `--continue` or a `/resume` pick is resolved first, so the session you are opening is
+resumed — a `--continue` or a `--resume` pick is resolved first, so the session you are opening is
 kept whatever the rules say about it. An edit through `/settings` therefore takes effect at the next
 start rather than in the session you are in. Config-file only (no flag or environment variable);
 what a session record holds and how one is resumed is on the [sessions page](sessions.md).
@@ -731,12 +748,13 @@ delegation spawned after the pick runs there; sub-agents already working stay on
 the server they started on. The pick is written back into the file as
 `sub-agents-server: <name>`, the way `/server` records its own choice, so your
 next session delegates to the same place without being asked. Unlike the file's key, a name the picker
-does not know is refused and nothing moves. It is also the only way the key
-changes from inside apogee: the `sub-agents-server` row on the
-[settings screen](commands.md#the-settings-screen--settings) is read-only — it
-reads `auto (session server)` while the key is unset — because `⏎` on a server
-row switches the *session's* upstream, which is the one thing this key does not
-do.
+does not know is refused and nothing moves. It is the verb for changing the key
+from inside apogee: the `sub-agents-server` row on the
+[settings screen](commands.md#the-settings-screen--settings) has no picker of its
+own — it reads `auto (session server)` while the key is unset, and `⏎` on it opens
+your editor the way every other block-valued row does — because a picker on that
+row would read as the *session's* own upstream switch, which is the one thing this
+key does not do.
 
 **And the last row is the way back out.** Under your entries the picker offers
 one more row — `auto`, whose second cell reads
