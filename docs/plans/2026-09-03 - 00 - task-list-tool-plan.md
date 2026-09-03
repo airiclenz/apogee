@@ -40,7 +40,10 @@ an implementer could have gone two ways; brevity caps applied.
 
 ---
 
-## 1. Verify plan `2026-09-02 - 07` is archived
+## 1. Verify plan `2026-09-02 - 07` is archived — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): gate PASSED at HEAD `94c36e88`. All acceptance checks green — archived plan file present; `git status --short -- internal/agent/ docs/adr/ CONTEXT.md docs/manual/configuration.md` printed nothing; `git ls-files internal/agent/delegatereport.go` printed the path (its `_test.go` is committed too); `grep -c delegateReportFence internal/agent/contextfiles.go` = 1; `grep -c 2026-09-02 docs/adr/0023-*.md` = 1; `grep -in "delegate report" CONTEXT.md` matched lines 833 and 1237 (the latter stating the composition order `prompt → Orientation block → Delegate report block …`); `grep -in "delegate report" docs/manual/configuration.md` matched line 1145.
+NOTES (2026-09-03): no CHANGELOG entry — the item changes nothing user-visible.
 
 **What.** This plan composes a fifth part into `standingSystem()`, adds a fourth entry to
 `forgesStandingStructure`, extends `withOrientation`, and states a five-part order in prose. Plan
@@ -72,7 +75,10 @@ nothing; `git ls-files internal/agent/delegatereport.go` prints the path;
 
 ---
 
-## 2. `internal/tasklist` — the list, its render, and its ctx carrier
+## 2. `internal/tasklist` — the list, its render, and its ctx carrier — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): `Replace` counts an over-long text in runes (`utf8.RuneCountInString`), so `MaxTextChars` measures characters as the plan words it rather than bytes; the refusal names the task's position in the CALLER's array, not among the kept rows.
+NOTES (2026-09-03): no `docmap_test.go` added — the package holds three non-test files, well under the ~10-file threshold the standard sets, and its sibling carriers (`internal/undo`, `internal/console`) carry none either.
 
 **What.** New package `internal/tasklist`, pure policy: no I/O, no events, no config. `Item{Text
 string; Done bool}`, json tags `text` / `done,omitempty`. `List` holds `[]Item`, is guarded by a
