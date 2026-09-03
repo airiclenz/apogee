@@ -121,4 +121,12 @@ model a tool-list slot.
   Each is a single unreplicated ask; one is added only when a second poll asks for it by name.
 - **Re-filed and re-denied** (unchanged): env/system-info tool (Qwen3.6-35B) — `terminal` covers
   it. Task/todo persistence (Qwen3.8) — Mechanism territory (guided decomposition), not a tool.
+  **REVERSED 2026-09-02** (owner, `docs/handoffs/archived/2026-09-02 - 00 - harness-over-mechanisms-parked-items.md`
+  parked item 2): the denial was right about what it refused and wrong about what was asked for. A
+  **Mechanism** that inspects a request and injects a decomposition the model did not ask for is
+  guided decomposition and is tuning; a plain tool the model owns prescribes nothing, fires on no
+  Turn the model did not open itself, and holds only the sentences the model wrote about its own
+  work. Shipped as `task_list` — engine-held, whole-list replace, re-rendered as a standing block —
+  [ADR 0072](../adr/0072-the-task-list-is-model-owned-session-state.md). The record above stands as
+  written; this is the distinction that overturned it.
 - Method lesson 1 re-confirmed: same roster, one model removes two tools, another removes none.

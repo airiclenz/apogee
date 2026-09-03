@@ -242,7 +242,9 @@ messages even with a non-empty list (the ride-along anchor); an `AGENTS.md` spel
 
 ---
 
-## 6. ADR 0072, the ADR 0023 addendum, and the reversed denial
+## 6. ADR 0072, the ADR 0023 addendum, and the reversed denial — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the reversal cites the handoff at `docs/handoffs/archived/2026-09-02 - 00 - harness-over-mechanisms-parked-items.md` — the plan names it unarchived, but it was archived before this item ran, so the cited path is the live one.
 
 **What.** Write `docs/adr/0072-the-task-list-is-model-owned-session-state.md` with front matter
 `Status: accepted` and `Amends: ADR 0023 (the 2026-08-25 per-session-constant bullet); ADR 0057
