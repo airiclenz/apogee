@@ -97,6 +97,14 @@ type DelegationSeat = agent.DelegationSeat
 // can assert the sentence its model reads without re-typing it. See internal/agent for the contract.
 const SeatFallbackNote = agent.SeatFallbackNote
 
+// DelegateReportBlock is the engine-owned standing block every DELEGATED agent carries on its
+// standing system message — a child is told that the agent waiting on it receives only its final
+// reply, and is asked to report what it found, changed and left unfinished by path:line. It has no
+// config key and no Mechanism gate: it is on under Bypass, at every depth above 0, routed and
+// unrouted alike. Re-exported so a Driver can assert the text its model reads without re-typing
+// it. See internal/agent for the contract.
+const DelegateReportBlock = agent.DelegateReportBlock
+
 // ----------------------------------------------------------------------------
 // Construction & autonomy (internal/domain)
 // ----------------------------------------------------------------------------

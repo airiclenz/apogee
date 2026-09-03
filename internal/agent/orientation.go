@@ -37,7 +37,10 @@ import (
 //
 // The context-files bullet stays LAST whatever is added, because it is the only one that speaks
 // about the content following the block rather than about the host: a bullet between it and those
-// blocks would separate the bridge from what it bridges to.
+// blocks would separate the bridge from what it bridges to. The rule binds BULLETS, inside this
+// asset. One engine-owned block is ratified into the gap between this block and those files' —
+// the delegate report block (delegatereport.go), on delegations only (owner, 2026-09-02) — and
+// the bridge survives it: the context files still follow, and the block changes no host fact.
 const (
 	orientationHeaderLine = iota
 	orientationWorkspaceLine
@@ -87,7 +90,10 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 //
 // The last bullet is the one that speaks about what follows the block rather than about the
 // host: it names the header the workspace blocks ride under and says they are project text, so
-// the fenced content below cannot be read as more harness facts.
+// the fenced content below cannot be read as more harness facts. On a delegation the delegate
+// report block (delegatereport.go) sits between this block and those headers; both of the
+// bullet's clauses stay true across it — the workspace blocks still follow under those headers,
+// and an engine-owned block changes none of the facts above.
 //
 // KV cache: every input is a per-session constant — the workspace and the roots are the host's
 // wiring, the scratch dir moves only at a session boundary, the context-file cache is refilled

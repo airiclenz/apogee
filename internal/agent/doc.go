@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-four files: the handle and its lifecycle, the loop proper, the tool path, and the
+// Twenty-six files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
@@ -71,7 +71,9 @@
 // contextfiles.go owns the workspace context files' discovery half — the session-scoped cache,
 // its loader, and the construction-time name gate. orientation.go composes the engine-owned
 // orientation block that rides directly after the prompt on that same standing system message,
-// ahead of those files' fenced blocks (prompts/orientation.txt).
+// ahead of those files' fenced blocks (prompts/orientation.txt). delegatereport.go is the
+// engine-owned block a DELEGATED agent additionally carries between the two — what its final
+// reply is for — and the forgery fence that keeps a repo file from spelling it.
 //
 // And doc.go this map.
 package agent

@@ -174,14 +174,20 @@ func (a *Agent) hasContextBlocks() bool {
 }
 
 // forgesStandingStructure reports whether one content line spells a line the standing system
-// message uses as its OWN furniture: a context-file header or footer, or the orientation block's
-// header. Leading whitespace is trimmed before the test — an indented forgery reads as furniture
-// to a model just as well as a flush one — but the line itself is never trimmed, only prefixed.
+// message uses as its OWN furniture: a context-file header or footer, the orientation block's
+// header, or the delegate report block's opening sentence. Leading whitespace is trimmed before
+// the test — an indented forgery reads as furniture to a model just as well as a flush one — but
+// the line itself is never trimmed, only prefixed.
+//
+// It is a CLOSED list and every engine-owned block belongs on it: a block this list does not know
+// can be forged by a repo file that reaches the model after the real one, where it reads as a
+// correction rather than as the workspace prose it is (F-19, orientation.go).
 func forgesStandingStructure(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	return strings.HasPrefix(trimmed, contextFileHeader) ||
 		strings.HasPrefix(trimmed, contextFileFooter) ||
-		strings.HasPrefix(trimmed, orientationHeader())
+		strings.HasPrefix(trimmed, orientationHeader()) ||
+		strings.HasPrefix(trimmed, delegateReportFence)
 }
 
 // fenceContent prefixes every line of a context file that spells the standing message's own
@@ -189,8 +195,8 @@ func forgesStandingStructure(line string) bool {
 // common case, which costs one Split and no copy.
 //
 // This is the fence's second half: the header/footer pair states where a repo's text begins and
-// ends, and this keeps the text between them from spelling either one, or the orientation
-// header, convincingly. Nothing else is rewritten — {{braces}}, markdown, indentation and every
+// ends, and this keeps the text between them from spelling either one, or an engine-owned block's
+// own opening line, convincingly. Nothing else is rewritten — {{braces}}, markdown, indentation and every
 // other byte travel exactly as written (ADR 0026 §3).
 func fenceContent(content string) string {
 	lines := strings.Split(content, "\n")

@@ -78,7 +78,24 @@ sent at all, routed and unrouted alike.
   is the floor and this plan adds none. Any change to the child's first user message, its tool set,
   its context-file inheritance or its orientation block: children already inherit all of these.
 
-## 1. The delegate report block
+## 1. The delegate report block — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-02): the plan places the new fence test "in `contextfiles_test.go`, beside the
+existing forged-orientation-header case" — those are two different files: the existing seam case is
+`TestContextSeam_ContentCannotForgeAHeaderOrTheOrientation` in `promptseam_test.go`. Wrote
+`TestFenceContentFencesTheDelegateReportBlock` in `contextfiles_test.go` (the file the plan's FILES
+list names), driving `fenceContent` directly and taking its prefix from `delegateReportFence`.
+NOTES (2026-09-02): `promptseam_test.go` is in the plan's FILES list but needed no edit. Regression
+guard (a) is satisfied at the helper instead: `withOrientation` (`orientation_test.go`) now composes
+the delegate block for a depth > 0 Agent, which is the plan's own first-named remedy, so
+`promptseam_test.go:868`'s child comparison passes unchanged and every other `withOrientation` call
+site stays correct.
+NOTES (2026-09-02): `delegateReportFence` is DERIVED from `DelegateReportBlock` (first sentence) via
+a panicking `mustFirstSentence` rather than a slice expression — a `""` prefix would make
+`strings.HasPrefix` true of every line and fence whole context files, so the failure mode is worth
+the guard.
+NOTES (2026-09-02): `doc.go`'s stale "Twenty-four files" corrected to "Twenty-six" (25 today plus
+`delegatereport.go`), as the item instructs.
 
 **What.** New `internal/agent/delegatereport.go`: an EXPORTED package const `DelegateReportBlock`
 holding the ratified text VERBATIM (below) — re-exported in `apogee.go` as
