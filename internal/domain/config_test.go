@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -197,5 +198,50 @@ func TestConfigCarriesBothGlobalRosterLists(t *testing.T) {
 	}
 	if len(cfg.EnabledTools) != 1 || cfg.EnabledTools[0] != "web_search" {
 		t.Errorf("Config.EnabledTools = %v, want [web_search]", cfg.EnabledTools)
+	}
+}
+
+// TestFloorConfigZeroValueKeepsEveryGuardOn pins the polarity the whole Floor rests on: every
+// field is a Disable… bool, so a zero FloorConfig — the one an embedder gets from a bare Config,
+// and the one a config.yaml that names none of the six keys produces — leaves all six guards ON.
+// A field spelled the other way round (an Enable…, or a guard whose off state is the zero value)
+// would silently drop the floor for every caller that never mentioned it, which is exactly the
+// regression ADR 0070's empty-list semantics survive by not having.
+func TestFloorConfigZeroValueKeepsEveryGuardOn(t *testing.T) {
+	t.Parallel()
+
+	var zero domain.Config
+
+	value := reflect.ValueOf(zero.Floor)
+	if value.NumField() == 0 {
+		t.Fatal("FloorConfig carries no fields — the six guards have no opt-out")
+	}
+	for i := range value.NumField() {
+		field := value.Type().Field(i)
+		if !strings.HasPrefix(field.Name, "Disable") {
+			t.Errorf("FloorConfig.%s is not spelled Disable… — the zero value must mean ON",
+				field.Name)
+			continue
+		}
+		if field.Type.Kind() != reflect.Bool {
+			t.Errorf("FloorConfig.%s is %s, want bool", field.Name, field.Type)
+			continue
+		}
+		if value.Field(i).Bool() {
+			t.Errorf("zero FloorConfig.%s = true — the guard is off before anyone asked",
+				field.Name)
+		}
+	}
+
+	// Opting one guard out leaves the other five alone: the fields are independent words.
+	one := domain.Config{Floor: domain.FloorConfig{DisableReadCache: true}}
+
+	if !one.Floor.DisableReadCache {
+		t.Error("Config.Floor.DisableReadCache = false, want true")
+	}
+	if one.Floor.DisableToolResultCap || one.Floor.DisableToolUseEnforcer ||
+		one.Floor.DisableEmptyResponseRecovery || one.Floor.DisableToolCallRepair ||
+		one.Floor.DisableToolLoopBreaker {
+		t.Errorf("opting out the read cache moved another guard: %+v", one.Floor)
 	}
 }

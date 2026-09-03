@@ -153,7 +153,15 @@ entry still fails `TestShipped_PinnedAgainstCatalogue`.
 
 **Commit:** `refactor(mechanisms): retired roll carries a release and a successor per ID`
 
-## 3. `internal/floor` — the shared substrate and `domain.FloorConfig`
+## 3. `internal/floor` — the shared substrate and `domain.FloorConfig` — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the copied helpers are re-homed by concern rather than under their source file names — `offramps.go` splits into `toolnames.go` (the spelling families, `toolSet`, `isReadTool`, `isFileMutatingTool`) and `conversation.go` (the history scans), `robustness.go`'s three correction helpers become `correction.go`, and `historyhints.go`'s five become `readerror.go`. `offramps.go` was not reused as a name because item 6's rule requires `off-ramp|OffRamp` to read zero across `internal/`; `intent.go`'s header comment lost its catalogue-row/off-ramp framing for the same reason. Content is verbatim apart from those comment rewordings.
+
+NOTES (2026-09-03): the item's copy list left most of the copied helpers with no caller at all in the new package, which golangci-lint's `unused` (`default: standard`) reports as dead code until items 4/5/7/8 wire them — so the copied tests (`TestToolCallPath`, `intent_test.go`, `TestResultIsReadErrorPrefersTheCommittedMarker`) are joined by coverage for the rest: the narration scans, `wroteRecently`'s window, `hasRecentProgress`, `normalizePath`, the anchored signal match, `buildCorrectionMessage`/`hasIssues`, `toolSet`, and every embedded prompt asset. `make lint` is clean.
+
+NOTES (2026-09-03): `robustness_test.go`'s `TestWriteDetectionSemanticsSplitOnApogeeWriteTools` asserts over `isWriteTool` too, which is NOT copied (it is the narrower content-repair predicate belonging to the lab rows), so only its `isFileMutatingTool` half moved, folded into `TestToolNamePredicates` beside `isReadTool`.
+
+NOTES (2026-09-03): the floor tests import `internal/domain/domaintest`, domain's own test adapter under `internal/domain/` — the one-deep-module rule's "only internal/domain and internal/context" is unbroken in non-test code, which imports `internal/domain` alone (`internal/context` is not needed until item 8).
 
 **What.** New package `internal/floor` (with `doc.go` + `docmap_test.go`, the `internal/agent`
 convention). COPY — the originals stay until their retire items delete them — the helpers the six

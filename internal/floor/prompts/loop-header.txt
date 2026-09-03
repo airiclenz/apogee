@@ -1,0 +1,1 @@
+STOP. You are in a loop — you just called [%s] with identical arguments as your previous turn.

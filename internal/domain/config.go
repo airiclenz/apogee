@@ -355,6 +355,46 @@ type Config struct {
 	// stays on under Bypass — and it applies to CHILD agents only: the main loop is the
 	// human's to stop, a delegate's is nobody's.
 	Delegation DelegationConfig
+
+	// Floor opts individual Floor guards OUT. Like Context and Delegation the guards are
+	// structural — they stay on under Bypass — and, being Disable… bools, the ZERO value keeps
+	// every one of them ON: an embedder that constructs a bare Config gets the floor.
+	Floor FloorConfig
+}
+
+// FloorConfig switches the Floor guards off one at a time (ADR 0071). A Floor guard changes only
+// what the model sees after its own failure, or shapes the request without steering it, so it needs
+// no per-model proof and is NOT a Mechanism: it is plain engine behaviour that stays on under
+// Bypass, and the fields below are the only way to take one away.
+//
+// Every field is a Disable… bool ON PURPOSE: the guards are the floor, so the zero value is the
+// full floor and only a deliberate opt-out removes one. The host folds in the six file-only config
+// keys by negation (tool-use-enforcer, empty-response-recovery, tool-call-repair, tool-loop-breaker,
+// tool-result-cap, read-cache); an embedder sets the fields directly.
+type FloorConfig struct {
+	// DisableToolUseEnforcer stops the engine retrying a Turn that narrated where the user asked
+	// for an action, letting the prose stand as the reply.
+	DisableToolUseEnforcer bool
+
+	// DisableEmptyResponseRecovery stops the engine retrying an empty reply with a
+	// completion-check nudge, letting the empty Turn end the Exchange.
+	DisableEmptyResponseRecovery bool
+
+	// DisableToolCallRepair stops the engine correcting a malformed or unknown tool call before
+	// it is dispatched, letting the bad call reach the tool path and fail there.
+	DisableToolCallRepair bool
+
+	// DisableToolLoopBreaker stops the engine breaking an identical repeated tool call with a
+	// directive naming the repeat, letting the loop run to the Turn budget.
+	DisableToolLoopBreaker bool
+
+	// DisableToolResultCap stops the engine truncating stale oversized tool results in the
+	// PROJECTED request, sending the full text of every result the conversation holds.
+	DisableToolResultCap bool
+
+	// DisableReadCache stops the engine capping a re-read of an unchanged file it has already
+	// read, sending the whole file again.
+	DisableReadCache bool
 }
 
 // DelegationConfig bounds a sub-agent run. It is NOT a Mechanism (ADR 0006): a delegate that
