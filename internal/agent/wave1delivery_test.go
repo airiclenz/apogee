@@ -167,3 +167,14 @@ func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 		}
 	}
 }
+
+// wireMessageContaining returns the index of the first wire message of ANY role containing substr,
+// or -1 — the tool-result and refusal counterpart to wireUserIndexContaining.
+func wireMessageContaining(msgs []provider.Message, substr string) int {
+	for i, m := range msgs {
+		if strings.Contains(m.Content, substr) {
+			return i
+		}
+	}
+	return -1
+}

@@ -149,3 +149,74 @@ func TestToolLoopBreakCreditsAnEditToolWrite(t *testing.T) {
 		})
 	}
 }
+
+// The repeat scan is bounded to the CURRENT Exchange: a user who asks for the same thing again
+// opens a new Exchange, and its first call — byte-identical to the last call of the previous one —
+// is the work just asked for, not a loop. Answering it with the directive would steer the model off
+// that work, which is the one thing a Floor guard may never do.
+func TestToolLoopBreakDoesNotFireAcrossAnExchangeBoundary(t *testing.T) {
+	t.Parallel()
+
+	history := []domain.Message{
+		domaintest.UserMessage("write a.go"),
+		domaintest.AssistantCallsMessage(writeCall("w1", "a.go")),
+		domaintest.ToolResultMessage("w1", "ok"),
+		domaintest.AssistantTextMessage("done"),
+		domaintest.UserMessage("write a.go again"), // a NEW Exchange opens here
+	}
+	if directive, ok := ToolLoopBreak(loopResponse(history, writeCall("w2", "a.go"))); ok {
+		t.Errorf("ToolLoopBreak = (%q, true) on a re-ask, want no directive", directive)
+	}
+}
+
+// An INTERJECTION is not an Exchange opening (domain.CurrentExchange skips it), so a remark dropped
+// into the running Exchange leaves the repeat in scope: the guard still fires on the loop the
+// interjection landed in the middle of.
+func TestToolLoopBreakStillFiresAcrossAnInterjection(t *testing.T) {
+	t.Parallel()
+
+	history := []domain.Message{
+		domaintest.UserMessage("write a.go"),
+		domaintest.AssistantCallsMessage(writeCall("w1", "a.go")),
+		domaintest.ToolResultMessage("w1", "ok"),
+		{Role: domain.RoleUser, Content: "also check the tests", Interjected: true},
+	}
+	if _, ok := ToolLoopBreak(loopResponse(history, writeCall("w2", "a.go"))); !ok {
+		t.Error("ToolLoopBreak returned ok = false; an interjection does not open an Exchange")
+	}
+}
+
+// The directive's recap is the current Exchange's too: it restates the request THIS Exchange opened
+// with and credits only the files this Exchange touched. A recap drawn from the whole conversation
+// restates a task the user has moved on from and credits work the current request never asked for.
+func TestToolLoopBreakRecapsTheCurrentExchangeOnly(t *testing.T) {
+	t.Parallel()
+
+	readB := domaintest.ReadCall("r1", "b.go")
+	history := []domain.Message{
+		domaintest.UserMessage("write a.go"),
+		domaintest.AssistantCallsMessage(writeCall("w1", "a.go")),
+		domaintest.ToolResultMessage("w1", "ok"),
+		domaintest.AssistantTextMessage("done"),
+		domaintest.UserMessage("now read b.go"), // the current Exchange opens
+		domaintest.AssistantCallsMessage(readB),
+		domaintest.ToolResultMessage("r1", "package b"),
+	}
+	directive, ok := ToolLoopBreak(loopResponse(history, domaintest.ReadCall("r2", "b.go")))
+
+	if !ok {
+		t.Fatal("ToolLoopBreak returned ok = false on an identical repeat inside one Exchange")
+	}
+	if !strings.Contains(directive, "now read b.go") {
+		t.Errorf("directive = %q, want it to restate this Exchange's request", directive)
+	}
+	if strings.Contains(directive, "write a.go") {
+		t.Errorf("directive = %q, want no trace of the PREVIOUS Exchange's request", directive)
+	}
+	if strings.Contains(directive, "a.go") {
+		t.Errorf("directive = %q, want no credit for a file the previous Exchange wrote", directive)
+	}
+	if !strings.Contains(directive, "b.go") {
+		t.Errorf("directive = %q, want it to credit the file this Exchange read", directive)
+	}
+}

@@ -680,9 +680,14 @@ is the only limiter the post-response guards share. **Six ship, on in every arm*
 included — each switched off by exactly one top-level, **file-only** boolean (no flag, no env;
 editable live in `/settings`) whose key names it:
 - **tool-call repair** (`tool-call-repair`) — an unknown tool, malformed arguments or a missing
-  required parameter answered with the correction the Turn re-streams with.
+  required parameter answered with the correction the Turn re-streams with. A call naming a tool the
+  engine *has* but this request's menu **withdrew** (Plan's filtered menu, a delegate's wrap-up Turn)
+  is left alone: that call belongs to the mode, and the mode's own refusal is the answer that reaches
+  the model.
 - **tool-loop breaker** (`tool-loop-breaker`) — a response repeating the previous Turn's exact
   calls answered with a directive that names the repeat and steers at the remaining work.
+  **[Exchange](#turns-and-stepping)-scoped**, scan and recap both: a human re-asking for the same
+  thing opens a new Exchange, and its first call is the work just asked for rather than a loop.
 - **empty-response recovery** (`empty-response-recovery`) — a reply carrying neither text nor a
   tool call answered with the completion-check nudge.
 - **tool-use enforcer** (`tool-use-enforcer`) — a second narration where an action was asked for

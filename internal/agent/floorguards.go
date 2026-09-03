@@ -76,7 +76,7 @@ func (a *Agent) runPostResponseGuards(turn int, resp *domain.Response) (retry bo
 		}
 	}
 	if !gates.DisableToolCallRepair {
-		if correction, fired := floor.ToolCallRepair(resp); fired {
+		if correction, fired := floor.ToolCallRepair(resp, a.registeredToolNames()); fired {
 			a.emitFloorGuard(turn, guardToolCallRepair, guardActionRetry)
 			return true, correction
 		}
@@ -94,6 +94,28 @@ func (a *Agent) runPostResponseGuards(turn int, resp *domain.Response) (retry bo
 		}
 	}
 	return false, ""
+}
+
+// registeredToolNames lists every tool name the resolved registry holds, WHATEVER the current
+// menu shows. It is the fact the tool-call repair guard needs to tell a hallucinated tool from one
+// this request's menu withdrew — Plan mode offers only what Plan can run (toolMenu), and a
+// delegate's wrap-up Turn is offered nothing at all — because a withdrawn tool's call belongs to
+// the mode that withdrew it: the Plan refusal (resolution.go) or the wrap-up drop (step) is the
+// answer the model must get, not a correction retry that pre-empts it.
+//
+// It reads a.tools on the worker goroutine, exactly as toolMenu does, and needs no lock for the
+// same reason: a tool-set swap is idle-only (SwapTools). A tool-less Agent lists nothing, which
+// leaves the guard its pre-2026-09-03 behaviour — every off-menu name reads as unknown.
+func (a *Agent) registeredToolNames() []string {
+	if a.tools == nil {
+		return nil
+	}
+	all := a.tools.All()
+	names := make([]string, 0, len(all))
+	for _, t := range all {
+		names = append(names, t.Name())
+	}
+	return names
 }
 
 // runPreToolExecGuards runs the pre-tool-exec Floor guards against the call the loop is about to

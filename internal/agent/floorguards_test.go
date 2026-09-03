@@ -753,3 +753,74 @@ func capturedToolResults(t *testing.T, req provider.Request) (older, fresh strin
 	}
 	return got[0], got[1]
 }
+
+// A tool the MODE withdrew is not a malformed call: Plan mode offers only what Plan can run, so a
+// write call it withdrew must reach the ladder's own refusal — the one that says why — instead of
+// being pre-empted by a repair-guard correction retry that spends a retry and never mentions the
+// mode. The guard stays out of the way; the mode answers.
+func TestFloorGuard_RepairLeavesAWithdrawnToolToTheMode(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := configWithTools(sink,
+		fakeTool{name: "read_file", readOnly: true, result: "package a"}, // stays on the Plan menu
+		fakeTool{name: "write_file", ran: &ran, result: "ok"},            // withdrawn by Plan
+	)
+	cfg.Bypass = true
+	cfg.Mode = domain.ModePlan
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "write_file", `{"path":"a.go","content":"package a"}`),
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "write a.go")
+
+	if len(responder.got) != 2 {
+		t.Fatalf("provider was called %d times, want 2 (no guard retry on a withdrawn tool)", len(responder.got))
+	}
+	if n := guardFireCountFor(sink.events, guardToolCallRepair); n != 0 {
+		t.Errorf("the repair guard fired %d times on a tool the mode withdrew, want 0", n)
+	}
+	if wireMessageContaining(responder.got[1].Messages, planRefusalReason) < 0 {
+		t.Errorf("the mode's refusal never reached the model: %+v", responder.got[1].Messages)
+	}
+	if ran != 0 {
+		t.Errorf("the withdrawn tool ran %d times, want 0 (Plan refuses it)", ran)
+	}
+}
+
+// The loop breaker is Exchange-scoped: a user who asks for the same thing again gets the work done,
+// not the loop directive. The second Exchange's first call is byte-identical to the first
+// Exchange's, and nothing fires.
+func TestFloorGuard_LoopBreakerDoesNotFireOnARepeatedRequest(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "package a"})
+	cfg.Bypass = true
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "read_file", `{"path":"a.go"}`),
+		contentScript("done"),
+		toolCallScript("c2", "read_file", `{"path":"a.go"}`), // the same call, a NEW Exchange
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "read a.go")
+	runExchange(t, a, "read a.go again")
+
+	if len(responder.got) != 4 {
+		t.Fatalf("provider was called %d times, want 4 (two clean Exchanges, no retry)", len(responder.got))
+	}
+	if n := guardFireCountFor(sink.events, guardToolLoopBreaker); n != 0 {
+		t.Errorf("the loop breaker fired %d times on a re-asked request, want 0", n)
+	}
+	if ran != 2 {
+		t.Errorf("read_file ran %d times, want 2 (once per Exchange)", ran)
+	}
+}

@@ -9,15 +9,25 @@ import (
 )
 
 // ToolLoopBreak is the tool-loop breaker guard (the `tool-loop-breaker` key, ADR 0071): when a
-// response repeats the exact tool calls of the immediately-previous assistant Turn, it hands back a
-// directive naming the repeated tools and steering the model at its remaining work, which the engine
-// re-streams the Turn with. ok is false — the no-op case — for a response with no tool calls, or one
-// whose calls differ from the previous Turn's.
+// response repeats the exact tool calls of the immediately-previous assistant Turn OF THE CURRENT
+// EXCHANGE, it hands back a directive naming the repeated tools and steering the model at its
+// remaining work, which the engine re-streams the Turn with. ok is false — the no-op case — for a
+// response with no tool calls, or one whose calls differ from that Turn's.
+//
+// EXCHANGE-SCOPED, and that is the whole guard's boundary (CONTEXT.md: Exchange). A repeat is only
+// a loop within the one user request it repeats inside: a human who asks for the same thing again
+// — re-running a build, re-reading a file after editing it elsewhere — opens a NEW Exchange whose
+// first call may legitimately be byte-identical to the last call of the previous one, and answering
+// that with "you are going in circles" steers the model off work the user just asked for. That
+// would make the guard worse than no guard, which a Floor guard may never be (ADR 0071 decision 1),
+// so both the repeat scan and the directive's own recap read the current Exchange alone. With no
+// Exchange open (no opening user message in the view) there is nothing to repeat inside and the
+// guard stands down.
 //
 // The comparison is order-independent (computeToolCallKey), so a reordered but otherwise identical
 // set of calls still reads as the repeat it is. The current response is not yet in the conversation
-// when the guard runs, so the most recent tool-calling assistant message genuinely is the previous
-// Turn.
+// when the guard runs, so the most recent tool-calling assistant message of the Exchange genuinely
+// is the previous Turn.
 //
 // NOTE (2026-07-04, carried from the Mechanism this guard was promoted from): apogee-sim gated
 // firing behind a per-Session count (threshold 2) and a 30s wall-clock cooldown (session_state.go
@@ -30,11 +40,12 @@ func ToolLoopBreak(resp *domain.Response) (directive string, ok bool) {
 		return "", false
 	}
 	conv := resp.View().Conversation()
-	prev := previousToolCallKey(conv)
+	ex := domain.CurrentExchange(conv)
+	prev := previousToolCallKey(ex)
 	if prev == "" || prev != computeToolCallKey(calls) {
 		return "", false
 	}
-	return buildToolLoopDirective(conv, calls), true
+	return buildToolLoopDirective(conv, ex, calls), true
 }
 
 // computeToolCallKey renders an order-independent key for a set of tool calls (apogee-sim
@@ -62,16 +73,24 @@ func computeToolCallKey(calls []domain.ToolCall) string {
 	return b.String()
 }
 
-// previousToolCallKey returns the key of the most recent assistant Turn that issued tool calls
-// (apogee-sim previousToolCallKey @pin), or "" if there is none.
-func previousToolCallKey(conv domain.ConversationView) string {
-	for i := conv.Len() - 1; i >= 0; i-- {
-		m := conv.At(i)
+// previousToolCallKey returns the key of the most recent assistant Turn IN ex that issued tool
+// calls, or "" if there is none — which is also what an unopened Exchange yields, RangeAfter being
+// a no-op there. It walks the Exchange body forward and keeps the last match rather than scanning
+// backwards from the end of the conversation, because the Exchange exposes no backward walk and
+// the body is short.
+//
+// This is where apogee departs from apogee-sim's previousToolCallKey @pin, which scanned the whole
+// conversation: the sim had no Exchange, so its scan crossed user requests and drew the directive
+// on a legitimate re-ask (fixed 2026-09-03).
+func previousToolCallKey(ex domain.ExchangeView) string {
+	var key string
+	ex.RangeAfter(func(_ int, m domain.Message) bool {
 		if m.Role == domain.RoleAssistant && len(m.ToolCalls) > 0 {
-			return computeToolCallKey(m.ToolCalls)
+			key = computeToolCallKey(m.ToolCalls)
 		}
-	}
-	return ""
+		return true
+	})
+	return key
 }
 
 // The directive's fixed fragments, each one asset file (prompts/*.txt) named for its role. The
@@ -85,7 +104,7 @@ var (
 	toolLoopHeader = mustPrompt("loop-header.txt") + " "
 	// toolLoopResultsAbove is the fixed reminder that the repeat bought nothing.
 	toolLoopResultsAbove = mustPrompt("results-above.txt") + " "
-	// toolLoopTask restates the user's first request (%s), when there is one.
+	// toolLoopTask restates the request the current Exchange opened with (%s), when there is one.
 	toolLoopTask = mustPrompt("task-reminder.txt") + " "
 	// toolLoopFilesWritten credits the files already written (%s).
 	toolLoopFilesWritten = mustPrompt("files-written.txt") + " "
@@ -100,9 +119,11 @@ var (
 )
 
 // buildToolLoopDirective renders the loop-breaking correction (apogee-sim buildToolLoopDirective
-// @pin), naming the repeated tools and steering the model toward its remaining work.
-func buildToolLoopDirective(conv domain.ConversationView, calls []domain.ToolCall) string {
-	ctx := extractConversationContext(conv)
+// @pin), naming the repeated tools and steering the model toward its remaining work. ex is the
+// Exchange the repeat happened inside, conv the view it was derived from — the recap reads both,
+// the opening user message for the task and the body for the file activity.
+func buildToolLoopDirective(conv domain.ConversationView, ex domain.ExchangeView, calls []domain.ToolCall) string {
+	ctx := extractConversationContext(conv, ex)
 	names := toolCallNames(calls)
 
 	var b strings.Builder
@@ -131,18 +152,24 @@ type conversationContext struct {
 	filesWritten []string
 }
 
-// extractConversationContext gathers the first user task (capped 150) and the distinct files read
-// and written, each capped at five (apogee-sim extractConversationContext @pin).
-func extractConversationContext(conv domain.ConversationView) conversationContext {
+// extractConversationContext gathers the task the current Exchange opened with (capped 150) and the
+// distinct files read and written INSIDE it, each capped at five (apogee-sim
+// extractConversationContext @pin, re-anchored on the Exchange). The sim recapped the whole
+// conversation — the first user message ever sent and every file any Exchange touched — which
+// restates a stale task and credits work the current request never asked for; the guard fires
+// inside one Exchange, so it recaps that Exchange.
+func extractConversationContext(conv domain.ConversationView, ex domain.ExchangeView) conversationContext {
 	var ctx conversationContext
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role == domain.RoleUser && ctx.task == "" && strings.TrimSpace(m.Content) != "" {
-			task := m.Content
-			if len(task) > 150 {
-				task = task[:150] + "..."
-			}
-			ctx.task = task
+	if !ex.Found() {
+		return ctx
+	}
+	if task := conv.At(ex.UserIndex()).Content; strings.TrimSpace(task) != "" {
+		if len(task) > 150 {
+			task = task[:150] + "..."
 		}
+		ctx.task = task
+	}
+	ex.RangeAfter(func(_ int, m domain.Message) bool {
 		if m.Role != domain.RoleAssistant {
 			return true
 		}

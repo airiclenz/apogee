@@ -31,7 +31,7 @@ func TestToolCallRepairUnknownToolYieldsCorrection(t *testing.T) {
 	t.Parallel()
 
 	resp := callResponse(repairMenu(), domain.ToolCall{ID: "c1", Tool: "frobnicate", Arguments: json.RawMessage(`{}`)})
-	correction, ok := ToolCallRepair(resp)
+	correction, ok := ToolCallRepair(resp, nil)
 
 	if !ok {
 		t.Fatal("ToolCallRepair returned ok = false for an unknown tool")
@@ -79,7 +79,7 @@ func TestToolCallRepairMalformedAndMissingArgs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			correction, ok := ToolCallRepair(callResponse(repairMenu(), tc.call))
+			correction, ok := ToolCallRepair(callResponse(repairMenu(), tc.call), nil)
 			if !ok {
 				t.Fatalf("ToolCallRepair returned ok = false for %s", tc.name)
 			}
@@ -100,12 +100,12 @@ func TestToolCallRepairIsANoOpOnAWellFormedResponse(t *testing.T) {
 		Tool:      "write_file",
 		Arguments: json.RawMessage(`{"path":"main.go","content":"package main\n"}`),
 	}
-	if correction, ok := ToolCallRepair(callResponse(repairMenu(), good)); ok || correction != "" {
+	if correction, ok := ToolCallRepair(callResponse(repairMenu(), good), nil); ok || correction != "" {
 		t.Errorf("ToolCallRepair(valid call) = (%q, %v), want (\"\", false)", correction, ok)
 	}
 
 	textOnly := domain.NewResponse("all done", "", nil, domain.FinishStop, domaintest.FakeLoopView{ToolMenu: repairMenu()})
-	if correction, ok := ToolCallRepair(textOnly); ok || correction != "" {
+	if correction, ok := ToolCallRepair(textOnly, nil); ok || correction != "" {
 		t.Errorf("ToolCallRepair(text-only) = (%q, %v), want (\"\", false)", correction, ok)
 	}
 }
@@ -117,7 +117,59 @@ func TestToolCallRepairWithNoToolMenuChecksArgumentsOnly(t *testing.T) {
 	t.Parallel()
 
 	resp := callResponse(nil, domain.ToolCall{ID: "c1", Tool: "frobnicate", Arguments: json.RawMessage(`{}`)})
-	if correction, ok := ToolCallRepair(resp); ok {
+	if correction, ok := ToolCallRepair(resp, nil); ok {
 		t.Errorf("ToolCallRepair(no menu) = (%q, true), want no correction", correction)
+	}
+}
+
+// A tool the ENGINE has but this request's menu withdrew is not the guard's business: Plan mode
+// offers only what Plan can run, and the mode's own refusal is the answer the model must get. The
+// guard stands down on such a call — arguments included — so nothing pre-empts that refusal.
+func TestToolCallRepairLeavesAWithdrawnToolToTheMode(t *testing.T) {
+	t.Parallel()
+
+	registered := []string{"read_file", "write_file", "shell"}
+	cases := []struct {
+		name string
+		call domain.ToolCall
+	}{
+		{"well-formed call to a withdrawn tool", domain.ToolCall{ID: "c1", Tool: "shell", Arguments: json.RawMessage(`{"cmd":"ls"}`)}},
+		{"withdrawn tool with empty arguments", domain.ToolCall{ID: "c1", Tool: "shell", Arguments: json.RawMessage("")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if correction, ok := ToolCallRepair(callResponse(repairMenu(), tc.call), registered); ok {
+				t.Errorf("ToolCallRepair = (%q, true) on a withdrawn tool, want the mode to answer it", correction)
+			}
+		})
+	}
+}
+
+// The withdrawal exemption is narrow: a name the engine does not have either is the hallucination
+// the guard exists for and is still corrected, and a withdrawn call never shields a malformed
+// SIBLING in the same response.
+func TestToolCallRepairStillCorrectsAroundAWithdrawnTool(t *testing.T) {
+	t.Parallel()
+
+	registered := []string{"read_file", "write_file", "shell"}
+
+	resp := callResponse(repairMenu(), domain.ToolCall{ID: "c1", Tool: "frobnicate", Arguments: json.RawMessage(`{}`)})
+	correction, ok := ToolCallRepair(resp, registered)
+	if !ok || !strings.Contains(correction, `function "frobnicate" not in the tool set`) {
+		t.Errorf("ToolCallRepair(unknown tool) = (%q, %v), want the unknown-tool correction", correction, ok)
+	}
+
+	resp = callResponse(repairMenu(),
+		domain.ToolCall{ID: "c1", Tool: "shell", Arguments: json.RawMessage(`{"cmd":"ls"}`)},
+		domain.ToolCall{ID: "c2", Tool: "write_file", Arguments: json.RawMessage(`{"path":"a.go"}`)},
+	)
+	correction, ok = ToolCallRepair(resp, registered)
+	if !ok || !strings.Contains(correction, `missing required parameter "content"`) {
+		t.Errorf("ToolCallRepair(withdrawn + malformed) = (%q, %v), want the sibling's correction", correction, ok)
+	}
+	if strings.Contains(correction, "shell") {
+		t.Errorf("correction = %q, want no complaint about the withdrawn tool", correction)
 	}
 }

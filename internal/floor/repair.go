@@ -15,20 +15,65 @@ import (
 // response with no tool calls, or one whose calls are all well formed: the no-op case, where the
 // response stands exactly as the model wrote it.
 //
-// The decision logic is apogee-sim's response validator @pin, unchanged by the promotion: the guard
-// changes only what the model sees after its OWN failure, which is why it needs no per-model proof
-// and stays on under Bypass. It reads nothing but resp — no clock, no filesystem, no state between
-// calls — so the same response always yields the same answer.
-func ToolCallRepair(resp *domain.Response) (correction string, ok bool) {
+// registered is every tool name the ENGINE holds, whatever the current menu shows, and it is what
+// separates a hallucinated tool from a WITHDRAWN one. A menu is not the whole tool set: Plan mode
+// offers only the tools Plan can run, and a delegate's wrap-up Turn is shown no tools at all — so a
+// call naming a registered tool that is off the menu is not a malformed call at all, it is a call
+// the MODE answers, with the refusal that says why (the Plan refusal, the wrap-up drop). Pre-empting
+// that with a correction retry spends a retry, replaces the reason the user's own mode gave with a
+// generic "not in the tool set", and leaves the model no wiser about the mode it is in — worse than
+// no guard, which a Floor guard may never be (ADR 0071 decision 1). Such a call is therefore left
+// ALONE, arguments included: the engine below has the better answer and it must reach the model.
+// A call naming a tool the engine does not have either is the hallucination the guard is for, and
+// is corrected as before — as is every remaining call in the same response, so one withdrawn call
+// never shields a genuinely malformed sibling.
+//
+// The decision logic is otherwise apogee-sim's response validator @pin, unchanged by the promotion:
+// the guard changes only what the model sees after its OWN failure, which is why it needs no
+// per-model proof and stays on under Bypass. It reads nothing but resp and registered — no clock, no
+// filesystem, no state between calls — so the same response always yields the same answer.
+func ToolCallRepair(resp *domain.Response, registered []string) (correction string, ok bool) {
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
 		return "", false
 	}
-	issues := validateToolCalls(calls, resp.View().Tools())
+	menu := resp.View().Tools()
+	checked := callsTheGuardOwns(calls, menu, registered)
+	if len(checked) == 0 {
+		return "", false
+	}
+	issues := validateToolCalls(checked, menu)
 	if !hasIssues(issues) {
 		return "", false
 	}
 	return buildCorrectionMessage(issues), true
+}
+
+// callsTheGuardOwns drops the calls that belong to the mode rather than to the guard — the ones
+// naming a registered tool the current menu withdrew — and returns the rest for validation.
+func callsTheGuardOwns(calls []domain.ToolCall, menu []domain.ToolDef, registered []string) []domain.ToolCall {
+	owned := make([]domain.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		if !withdrawnFromMenu(call.Tool, menu, registered) {
+			owned = append(owned, call)
+		}
+	}
+	return owned
+}
+
+// withdrawnFromMenu reports whether name is a tool the engine has but this request's menu did not
+// offer. A name the menu carries is on offer, and a name the engine does not have at all is a
+// hallucination, not a withdrawal — both are the guard's own business.
+func withdrawnFromMenu(name string, menu []domain.ToolDef, registered []string) bool {
+	if name == "" || toolKnown(name, menu) {
+		return false
+	}
+	for _, r := range registered {
+		if r == name {
+			return true
+		}
+	}
+	return false
 }
 
 // validateToolCalls collects the validation problems across every requested call (apogee-sim's
