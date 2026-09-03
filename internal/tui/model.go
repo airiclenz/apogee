@@ -436,6 +436,12 @@ type Model struct {
 	// workspace is fixed at launch and /clear opens the next session in the same one. A plain
 	// string, so it rides the value-copied Model (ADR 0011); "" means there is nothing to name and
 	// the footer drops the segment.
+	//
+	// It is escape-stripped as it is resolved, on the same seam the footer's other segments cross
+	// ([Model.footerLeftText]): a directory NAME is filesystem-authored text like any other, and a
+	// workspace root called "ws\x1b[31mRED" would otherwise hand the terminal a colour the theme
+	// never chose. Stripping here rather than at paint time keeps the field's one-resolution
+	// promise — every reader of m.workdir gets the sanitized spelling, once.
 	workdir       string
 	th            theme // the palette and reusable styles; rebuilt whenever the colour scheme changes (ADR 0040)
 	width, height int
@@ -628,7 +634,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	if err != nil {
 		home = ""
 	}
-	m.workdir = workdirDisplay(opts.Workspace, home)
+	m.workdir = stripEscapes(workdirDisplay(opts.Workspace, home))
 
 	// Seed the one-time start-up box as entries[0]. Seeding it here (rather than on the first
 	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on

@@ -98,9 +98,10 @@ func TestE2EHostileSurfacesKeepTheirOwnRows(t *testing.T) {
 			t.Errorf("the footer lost %q: %q", want, footer)
 		}
 	}
-	// Step 3 — the WORKDIR cell, reported rather than ruled on, exactly as the checklist asks: only
-	// host, model and effort were changed by the commits this item is about.
-	reportWorkdirCell(t, first, red)
+	// Step 3 — the WORKDIR cell. The checklist wrote it as a report because the workdir was trusted
+	// where host, model and effort were sanitised; it is stripped at construction now, so the step
+	// is ruled on like the rest of the row.
+	assertWorkdirCellIsNotRed(t, first, red)
 	assertNoLeakedColour(t, first, red)
 
 	// Steps 4 and 5 — the /skills note. One skill loaded, one that could not load, one shadowed, and
@@ -565,17 +566,14 @@ func ansiRed(t *testing.T) tuitest.Style {
 // one row: after every step, no cell carries the colour a hostile sequence asked for. A sequence that
 // survived sanitisation would have painted at least one.
 //
-// The FOOTER row is exempt, and reportWorkdirCell says why: its workdir segment is the one place
-// apogee hands a directory name to the terminal unstripped, and T-12 step 3 asks for that to be
-// reported rather than failed. Every other row of every frame is held to the rule.
+// EVERY row is held to the rule, the footer included. It used to be exempt — its workdir segment was
+// the one place apogee handed a directory name to the terminal unstripped, which T-12 step 3 asked
+// to have reported rather than failed. The workdir is escape-stripped at construction now
+// (assertWorkdirCellIsNotRed), so the exemption would only hide a regression.
 func assertNoLeakedColour(t *testing.T, f tuitest.Frame, red tuitest.Style) {
 	t.Helper()
 
-	footer := footerRowIndex(f)
 	for y := range f.Height() {
-		if y == footer {
-			continue
-		}
 		if _, ok := redRun(f, y, red); ok {
 			t.Errorf("row %d is painted in the escape's own red, which nothing in the theme is:\n%s", y, f)
 			return
@@ -606,21 +604,21 @@ func assertModelSegmentIsNotRed(t *testing.T, f tuitest.Frame, red tuitest.Style
 	t.Errorf("the footer row does not carry the model label: %q", f.Row(y))
 }
 
-// reportWorkdirCell performs T-12 step 3 — "report what the workdir does — do not fail T-12 on it
-// either way". The workdir is the one footer segment [Model.footerContent] does not put through
-// stripEscapes (internal/tui/model.go: the host, the model id and the effort default are stripped as
-// server- and config-authored text; the workdir is the operator's own path), so a workspace root
-// whose NAME carries a colour sequence paints the terminal with it. That is what this logs.
-func reportWorkdirCell(t *testing.T, f tuitest.Frame, red tuitest.Style) {
+// assertWorkdirCellIsNotRed is T-12 step 3, now a CLAIM rather than a report. The checklist wrote
+// the step as "report what the workdir does — do not fail T-12 on it either way" because the workdir
+// was the one footer segment that reached the terminal unstripped: the host, the model id and the
+// effort default were sanitised as server- and config-authored text, and the operator's own path was
+// trusted. A directory NAME is not the operator's promise — a checkout or an unpacked archive can
+// author one — so it is escape-stripped at construction now (internal/tui/model.go's workdir field),
+// and the step has something to rule on: the whole footer row reads on the footer's own colours.
+func assertWorkdirCellIsNotRed(t *testing.T, f tuitest.Frame, red tuitest.Style) {
 	t.Helper()
 
 	y := footerRowIndex(f)
 	if run, ok := redRun(f, y, red); ok {
-		t.Logf("T-12 step 3: the footer's workdir segment painted %q in the directory name's own "+
-			"red — the workdir is not escape-stripped; reported, not failed: %q", run.Text, f.Row(y))
-		return
+		t.Errorf("the footer's workdir segment painted %q in the directory name's own red — the "+
+			"workdir reached the terminal unstripped: %q", run.Text, f.Row(y))
 	}
-	t.Logf("T-12 step 3: the footer's workdir segment reads %q with no colour of its own", f.Row(y))
 }
 
 // redRun is the first run of row y painted in red's foreground, if any.

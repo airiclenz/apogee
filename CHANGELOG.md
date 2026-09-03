@@ -1127,6 +1127,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The footer's workdir segment is escape-stripped.** It was the one footer fact that reached the
+  terminal unsanitised — the host alias, the model id and the effort default were stripped as
+  server- and config-authored text, and the operator's own path was trusted — so a workspace whose
+  ROOT NAME carried a CSI (a legal directory name on every POSIX filesystem, and one a checkout or
+  an unpacked archive can author) painted the status line in a colour the theme never chose. The
+  display path is stripped once where it is resolved, so every reader of it gets the sanitized
+  spelling. T-12 step 3 of the release checklist, written as "report what the workdir does — do not
+  fail on it either way", is a claim now: the whole footer row is held to the no-leaked-colour rule
+  alongside every other row of every frame.
+
 - A tool call whose arguments answer one parameter twice with DIFFERING values is now refused before resolution instead of running as last-wins. `repeatedArgumentKeysResult` fires at both dispatch seams — the serial `resolveAndExecute` and the fan-out `prepareDelegation` — immediately after the colliding-keys check, so the fan-out and serial paths answer such a call identically and the colliding refusal keeps precedence. The model gets one constant wording, `invalid arguments: repeated with different values: "task" — spell each argument once`, that a retry loop can recognise. A byte-identical repeat still runs last-wins, unchanged.
 
 - Streamed tool calls now accumulate by their **wire index** instead of by arrival order.

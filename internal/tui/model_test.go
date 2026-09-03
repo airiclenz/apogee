@@ -6035,6 +6035,36 @@ func TestFooterOfflineKeepsItsErrorToneAtEveryWidth(t *testing.T) {
 	}
 }
 
+// TestFooterWorkdirIsEscapeStripped is the workdir segment's security seam. The footer's other
+// facts — host, model id, effort default — are put through stripEscapes as they are worded, but the
+// workdir crossed the row unsanitised: a workspace whose ROOT NAME carries a CSI (a legal directory
+// name on every POSIX filesystem, and one a checkout or an unpacked archive can author) painted the
+// footer in a colour the theme never chose. It is stripped once at construction now, where the
+// field is resolved.
+//
+// The claim is made twice — on the field and on the painted row — because either alone would pass a
+// fix that sanitised only the other.
+func TestFooterWorkdirIsEscapeStripped(t *testing.T) {
+	opts := testOpts
+	opts.Workspace = "/ws/proj\x1b[31mRED"
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+
+	const want = "proj[31mRED"
+	if strings.ContainsRune(m.workdir, 0x1b) {
+		t.Errorf("m.workdir keeps the ESC: %q", m.workdir)
+	}
+	if !strings.HasSuffix(m.workdir, want) {
+		t.Errorf("m.workdir = %q, want it to end %q — the sequence inert, its text kept", m.workdir, want)
+	}
+	footer := m.footerContent(120)
+	if strings.Contains(ansiPattern.ReplaceAllString(footer, ""), "\x1b") {
+		t.Errorf("the painted footer carries an ESC the theme did not author: %q", footer)
+	}
+	if flat := ansiPattern.ReplaceAllString(footer, ""); !strings.Contains(flat, want) {
+		t.Errorf("footer = %q, want the workdir shown inert as %q", flat, want)
+	}
+}
+
 // TestPopupBudgetShrinksToNothing pins the D2 floor change (item 7) and the body floor that
 // followed it. The row budget used to bottom out at six rows — `max(6, viewport.Height()-3)` — so
 // on a window with four rows to give it promised a pane the frame could not hold, and the surplus
