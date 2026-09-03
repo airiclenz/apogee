@@ -1,10 +1,12 @@
 package mechanisms
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/domain/domaintest"
 )
 
 // historyView builds a read-only LoopView over history — the window the post-tool-result and
@@ -114,5 +116,78 @@ func TestPostResponseCascadeOrder(t *testing.T) {
 		if m.Descriptor.ID != want[i] {
 			t.Errorf("cascade[%d] = %q, want %q (full order: %v)", i, m.Descriptor.ID, want[i], want)
 		}
+	}
+}
+
+// historyResponse builds a post-response working value with a FULL LoopView — text, tool calls, the
+// tool menu, and a conversation history — the shape the history-scanning post-response Mechanisms
+// read (they inspect the history through resp.View().Conversation(), unlike the Wave-1 repair
+// Mechanisms that need only the response). The view is a real domain.Request view so
+// Conversation()/Tools()/LastUser() behave exactly as in the loop.
+func historyResponse(history []domain.Message, tools []domain.ToolDef, text string, calls ...domain.ToolCall) *domain.Response {
+	view := domain.NewRequest("m", history, tools, domain.Budget{}, 0, nil).View()
+	finish := domain.FinishStop
+	if len(calls) > 0 {
+		finish = domain.FinishToolCalls
+	}
+	return domain.NewResponse(text, "", calls, finish, view)
+}
+
+// readCall is a read_file tool call over path — the read-shaped progress signal the family counts.
+// It and the three message helpers below are thin delegates to the shared hook-seam test adapter
+// (internal/domain/domaintest, D6): the package keeps its terse fixture vocabulary, the shapes are
+// owned in one place, and new tests use domaintest directly.
+func readCall(id, path string) domain.ToolCall { return domaintest.ReadCall(id, path) }
+
+// userMsg / assistantCall are terse conversation-history builders for the cross-Turn trigger tables.
+func userMsg(content string) domain.Message { return domaintest.UserMessage(content) }
+func assistantCall(calls ...domain.ToolCall) domain.Message {
+	return domaintest.AssistantCallsMessage(calls...)
+}
+
+// toolCallPath reads the file a call targets from the four sim-inherited spellings plus
+// destination, the key copy_file and move_file carry instead. The precedence is pinned here:
+// destination is read last, so a call carrying both path and destination still reports path.
+func TestToolCallPath(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args string
+		want string
+	}{
+		{name: "path", args: `{"path":"alpha.go"}`, want: "alpha.go"},
+		{name: "file_path", args: `{"file_path":"beta.go"}`, want: "beta.go"},
+		{name: "filePath", args: `{"filePath":"gamma.go"}`, want: "gamma.go"},
+		{name: "filename", args: `{"filename":"delta.go"}`, want: "delta.go"},
+		{
+			name: "copy_file reports the destination",
+			args: `{"source":"origin.go","destination":"copy.go"}`,
+			want: "copy.go",
+		},
+		{
+			name: "move_file reports the destination",
+			args: `{"source":"origin.go","destination":"moved.go","overwrite":true}`,
+			want: "moved.go",
+		},
+		{
+			name: "path keeps precedence over destination",
+			args: `{"destination":"copy.go","path":"alpha.go"}`,
+			want: "alpha.go",
+		},
+		{name: "source alone is not a path", args: `{"source":"origin.go"}`, want: ""},
+		{name: "arguments are not a JSON object", args: `"alpha.go"`, want: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := toolCallPath(json.RawMessage(tc.args))
+
+			if got != tc.want {
+				t.Errorf("toolCallPath(%s) = %q, want %q", tc.args, got, tc.want)
+			}
+		})
 	}
 }

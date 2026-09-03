@@ -265,16 +265,16 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 // listed twice or already pre-built into the registry (the already-registered rejection), and a
 // hook-less Mechanism all propagate as construction failures.
 // An empty list builds the OFF-RAMP FLOOR (mechanisms.OffRampFloor, ADR 0070) rather than nothing —
-// but only when the engine made the registry itself (cfg.Mechanisms == nil). That floor already
-// lives in every Driver's YAML→ID-list resolver; repeating it here is what keeps a library embedder
-// or a bench arm that hands New a Config with no EnableMechanisms on the same recovery guarantees
-// the TUI runs, instead of on a quieter agent nobody asked for. A HANDED-IN registry is never
-// floored: it is a caller who assembled the arm itself — both sub-agent spawn paths and Rebind pass
-// one — and flooring it would re-add rows that registry may already hold, failing construction with
-// "already registered". A NON-EMPTY list is built exactly as given, floor included or not: the
-// Drivers union the floor in before they get here, so an explicit `tool_use_enforcer: false` arrives
-// as a one-element list and stays one. Every other Capability keeps defaulting off (D1). The
-// ordering, incompatibility, and requirements gates then run over the merged registry unchanged.
+// but only when the engine made the registry itself (cfg.Mechanisms == nil). No shipped row declares
+// CapOffRamp any more, the two recoveries that did being Floor guards since ADR 0071, so that floor
+// is empty today and an embedder handing New a Config with no EnableMechanisms gets its recovery
+// guarantees from Config.Floor instead. A HANDED-IN registry is never floored: it is a caller who
+// assembled the arm itself — both sub-agent spawn paths and Rebind pass one — and flooring it would
+// re-add rows that registry may already hold, failing construction with "already registered". A
+// NON-EMPTY list is built exactly as given, floor included or not: the Drivers union the floor in
+// before they get here, so a resolved block arrives as the list it resolved to and stays that list.
+// Every Capability defaults off (D1). The ordering, incompatibility, and requirements gates then run
+// over the merged registry unchanged.
 //
 // The derived Deps come BACK so the caller can hold what the build opened: the Library store is the
 // one collaborator with a lifetime (a writer goroutine and pending observations), and the Agent that

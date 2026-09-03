@@ -153,16 +153,15 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 }
 
 // The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
-// syntax/autofix (item 5) and the empty_response_recovery/tool_use_enforcer off-ramps
-// (item 6), Wave 2 added the truncate_history history-rewrite (item 7), item 9 added the
+// syntax/autofix (item 5), Wave 2 added the truncate_history history-rewrite (item 7), item 9 added the
 // tool_result_cap pre-request capping Mechanism, Wave 3 added the toolfilter/filehint
 // request shapers (item 10) and the error_enrichment/read_loop/read_repeat/
 // cached_content_intercept history-aware family (item 11), Wave 4 added the decompose request
 // shaper plus the stall_nudge/list_nudge/tool_use_directive completion nudges (item 12), and item 14
 // added the library observe/inject Mechanism, so each is buildable and KnownIDs reports it, while a
-// deferred / un-ported ID is still an unknown-ID error. The tool-call validator and the
-// identical-repeat detector are NOT here: they were promoted to Floor guards (ADR 0071) and are on
-// the retired roll, so a `mechanisms:` key naming one is tolerated, never built.
+// deferred / un-ported ID is still an unknown-ID error. The tool-call validator, the identical-repeat
+// detector and the two Wave-1 recoveries (item 6) are NOT here: they were promoted to Floor guards
+// (ADR 0071) and are on the retired roll, so a `mechanisms:` key naming one is tolerated, never built.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
@@ -170,7 +169,7 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 		known[id] = true
 	}
 	// Every ported Mechanism that builds with no injected Deps.
-	for _, want := range []domain.MechanismID{"syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "error_enrichment", "read_loop", "read_repeat", "cached_content_intercept", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
+	for _, want := range []domain.MechanismID{"syntax", "autofix", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "error_enrichment", "read_loop", "read_repeat", "cached_content_intercept", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
 		}

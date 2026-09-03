@@ -224,36 +224,29 @@ func floorPlus(extra ...domain.MechanismID) []domain.MechanismID {
 	return out
 }
 
-// The floor is exactly the catalogue's CapOffRamp rows, sorted, and an explicit `false` is the only
-// thing that removes one: a `true` and an absent key both leave the row standing, and a row of any
-// other Capability never joins (ADR 0070's one exception to D1, harvested rather than hand-listed).
-func TestOffRampFloorIsTheCapOffRampRows(t *testing.T) {
+// NO catalogued row declares CapOffRamp any more: the two recoveries that did are Floor guards
+// since ADR 0071, on for every model and switched by their own top-level keys. So the floor is
+// EMPTY whatever the block says — which is the correct value for a machine that harvests the
+// Capability column rather than a hand-kept list, and is what makes ResolveEnabled resolve to
+// exactly what a block names (D1, with no exception left).
+func TestOffRampFloorIsEmptyWithNoCapOffRampRow(t *testing.T) {
 	t.Parallel()
 
-	var want []domain.MechanismID
 	for _, d := range Descriptors() {
 		if d.Capability == domain.CapOffRamp {
-			want = append(want, d.ID)
+			t.Fatalf("catalogued row %q still declares CapOffRamp; the promoted recoveries left the catalogue", d.ID)
 		}
 	}
-	if len(want) == 0 {
-		t.Fatal("no CapOffRamp row in the catalogue; the floor would be vacuous")
-	}
-	for _, block := range []map[string]bool{nil, {}, {string(liveExemplarID): true}, {string(want[0]): true}} {
-		if got := OffRampFloor(block); !slices.Equal(got, want) {
-			t.Errorf("OffRampFloor(%+v) = %v, want %v", block, got, want)
+	for _, block := range []map[string]bool{nil, {}, {string(liveExemplarID): true}, {"syntax": false}} {
+		if got := OffRampFloor(block); len(got) != 0 {
+			t.Errorf("OffRampFloor(%+v) = %v, want the empty floor", block, got)
 		}
-	}
-	if got := OffRampFloor(map[string]bool{string(want[0]): false}); !slices.Equal(got, want[1:]) {
-		t.Errorf("OffRampFloor(%q: false) = %v, want %v — an explicit false removes exactly that row",
-			want[0], got, want[1:])
 	}
 }
 
 // An enabled ID is selected; a `false` entry is not. ResolveEnabled returns the enabled IDs in
 // sorted canonical order for Config.EnableMechanisms — the engine builds them (ADR 0015 §1) — with
-// the off-ramp floor unioned in, so what a block names arrives BESIDE the two default-on off-ramps
-// rather than instead of them (ADR 0070).
+// the (now empty) off-ramp floor unioned in, so what a block names is exactly what is armed.
 func TestResolveEnabledEnablesOnlyTrue(t *testing.T) {
 	t.Parallel()
 	ids, _, err := ResolveEnabled(map[string]bool{"alpha": true, "beta": false}, fakeKnown)
@@ -267,44 +260,20 @@ func TestResolveEnabledEnablesOnlyTrue(t *testing.T) {
 	}
 }
 
-// Nothing enabled ⇒ the OFF-RAMP FLOOR and nothing else (ADR 0070): an absent block, an empty one,
-// and one that only switches an unrelated row off all resolve to the two off-ramps, because those
-// are recovery guarantees rather than small-model tuning. Every other Capability still defaults off
-// (D1) — a KNOWN key mapped to false selects nothing, disabled Mechanisms being validated by name.
-func TestResolveEnabledDefaultsToTheOffRampFloor(t *testing.T) {
+// Nothing enabled ⇒ NOTHING (D1): an absent block, an empty one, and one that only switches a row
+// off all resolve to no Mechanisms at all, the off-ramp floor having emptied when its two rows were
+// promoted to Floor guards (ADR 0071). A KNOWN key mapped to false selects nothing, disabled
+// Mechanisms being validated by name.
+func TestResolveEnabledDefaultsToNothing(t *testing.T) {
 	t.Parallel()
-	want := OffRampFloor(nil)
-	if len(want) == 0 {
-		t.Fatal("OffRampFloor(nil) is empty; the catalogue should carry two off-ramps")
-	}
 	for _, enabled := range []map[string]bool{nil, {}, {"off": false}} {
 		ids, _, err := ResolveEnabled(enabled, fakeKnown)
 		if err != nil {
 			t.Fatalf("ResolveEnabled(%+v): %v", enabled, err)
 		}
-		if !slices.Equal(ids, want) {
-			t.Errorf("ResolveEnabled(%+v) = %v; want the off-ramp floor %v", enabled, ids, want)
+		if len(ids) != 0 {
+			t.Errorf("ResolveEnabled(%+v) = %v; want nothing armed", enabled, ids)
 		}
-	}
-}
-
-// An explicit `false` on an off-ramp is the one thing that takes it off the floor, and it takes only
-// that one: the block is validated against the REAL catalogue here, since the floor names real rows
-// and a fake known-list would refuse the key as unknown before the floor was ever reached.
-func TestResolveEnabledExplicitFalseRemovesOneOffRamp(t *testing.T) {
-	t.Parallel()
-	floor := OffRampFloor(nil)
-	if len(floor) < 2 {
-		t.Fatalf("OffRampFloor(nil) = %v; want at least two rows for this case", floor)
-	}
-	off := floor[0]
-
-	ids, _, err := ResolveEnabled(map[string]bool{string(off): false}, KnownIDs())
-	if err != nil {
-		t.Fatalf("ResolveEnabled(%q: false): %v", off, err)
-	}
-	if !slices.Equal(ids, floor[1:]) {
-		t.Errorf("ResolveEnabled(%q: false) = %v; want the rest of the floor %v", off, ids, floor[1:])
 	}
 }
 

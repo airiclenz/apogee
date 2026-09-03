@@ -16,7 +16,7 @@ func TestReadRepeatRetriesOnRedundantReRead(t *testing.T) {
 		assistantCall(readCall("r1", "a.go")),
 		toolResult("r1", "package a\nfunc F() {}"),
 	}
-	resp := offrampResponse(history, nil, "", readCall("r2", "a.go"))
+	resp := historyResponse(history, nil, "", readCall("r2", "a.go"))
 	d := postResponse(t, readRepeatID, resp)
 	if d.Action != domain.ActionRetry {
 		t.Fatalf("Action = %q, want ActionRetry", d.Action)
@@ -35,7 +35,7 @@ func TestReadRepeatInertOnMixedResponse(t *testing.T) {
 		assistantCall(readCall("r1", "a.go")),
 		toolResult("r1", "package a"),
 	}
-	resp := offrampResponse(history, nil, "", readCall("r2", "a.go"), writeCall("w1", "b.go", "package b"))
+	resp := historyResponse(history, nil, "", readCall("r2", "a.go"), writeCall("w1", "b.go", "package b"))
 	if d := postResponse(t, readRepeatID, resp); d.Action != "" {
 		t.Errorf("Action = %q, want no action on a mixed read+write response", d.Action)
 	}
@@ -49,7 +49,7 @@ func TestReadRepeatInertOnNovelRead(t *testing.T) {
 		assistantCall(readCall("r1", "a.go")),
 		toolResult("r1", "package a"),
 	}
-	resp := offrampResponse(history, nil, "", readCall("r2", "c.go"))
+	resp := historyResponse(history, nil, "", readCall("r2", "c.go"))
 	if d := postResponse(t, readRepeatID, resp); d.Action != "" {
 		t.Errorf("Action = %q, want no action when the response reads a not-yet-read file", d.Action)
 	}

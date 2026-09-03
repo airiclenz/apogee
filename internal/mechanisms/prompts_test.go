@@ -53,7 +53,6 @@ func TestEmbeddedDirectivePromptsLoad(t *testing.T) {
 		"library-tool-use-note.txt":            0,
 		"library-shallow-note.txt":             0,
 		"library-injection-header.txt":         0,
-		"completion-check-nudge.txt":           0,
 	}
 
 	entries, err := promptFS.ReadDir("prompts")

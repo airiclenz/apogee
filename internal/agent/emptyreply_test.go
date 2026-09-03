@@ -104,10 +104,10 @@ func TestEmptyReplyFailsTheTurn(t *testing.T) {
 }
 
 // TestEmptyReplyGuardYieldsToRecoveredRetry pins the guard's placement, which is the whole reason
-// it sits after the post-response hook loop: a hook that answered the empty reply with an
-// ActionRetry — what `empty_response_recovery` does — gets its second attempt, and content that
-// arrives on it commits normally with no fault surfaced. The guard judges what the hook loop
-// RESOLVED to, never the attempt the hooks are still working on.
+// it sits after the Floor guards and the post-response hook loop: whoever answered the empty reply
+// with a retry — the empty-response recovery guard, or a hook — gets its second attempt, and content
+// that arrives on it commits normally with no fault surfaced. The guard judges what the seam
+// RESOLVED to, never the attempt still being worked on.
 func TestEmptyReplyGuardYieldsToRecoveredRetry(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0

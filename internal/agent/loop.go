@@ -534,11 +534,12 @@ const cappedDelegateReplyErrFmt = "delegate's reply hit the output cap apogee se
 // counts as empty: reasoning is not an answer to the user, and the Turn is just as much a non-answer
 // for carrying it.
 //
-// Placement is load-bearing. The guard runs only after the post-response hook loop has resolved, so
-// the `empty_response_recovery` Mechanism keeps first claim on an empty reply (its ActionRetry
-// re-streams the Turn before this is ever reached) and a hook retry that DID produce content passes
-// through untouched. Being engine-level, the guard also fires in Bypass, where no Mechanism is there
-// to catch the empty reply — failure honesty is provider/engine correctness, not a Mechanism's job.
+// Placement is load-bearing. It runs only after the Floor guards and the post-response hook loop
+// have resolved, so the empty-response recovery guard keeps first claim on an empty reply (its retry
+// re-streams the Turn before this is ever reached) and a retry that DID produce content passes
+// through untouched. This fault is what remains once the recovery has spent its attempts: the guard
+// is on for every model (ADR 0071), so the two are one ladder — recover first, and fail honestly
+// only when recovery is exhausted or switched off (`empty-response-recovery: false`).
 //
 // WHAT counts as a non-answer is replyFault's judgment, and it is one rule wider on a DELEGATE: a
 // child's output-capped reply with no tool call faults even when it carries visible text, because

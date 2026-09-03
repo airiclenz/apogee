@@ -483,16 +483,18 @@ func TestHostToolsThreadsTheSkillLookupOntoTheDefaultRoster(t *testing.T) {
 }
 
 // TestBuildEnabledMechanismsFloorsAFreshRegistry: an EnableMechanisms list the engine was handed
-// EMPTY builds the off-ramp floor rather than nothing (ADR 0070), while a list that names something
-// builds exactly what it names — the Drivers union the floor in before New sees it, so a resolved
-// `{"tool_use_enforcer": false}` arrives here as a one-element list and must stay one element.
+// EMPTY builds the off-ramp floor (ADR 0070) rather than nothing, while a list that names something
+// builds exactly what it names. The floor is harvested from the catalogue's CapOffRamp column, and
+// NO shipped row declares it any more — the two recoveries that did are Floor guards now (ADR 0071),
+// on for every model whatever the list says — so what an empty list builds today is nothing, and
+// what a one-element list builds is that one element.
 //
 // The claim is read off the registry the construction produced, never off fired events: what the
-// list BUILDS is the whole question, and an off-ramp only triggers on a malformed reply.
+// list BUILDS is the whole question, and a Mechanism only triggers on a reply that provokes it.
 func TestBuildEnabledMechanismsFloorsAFreshRegistry(t *testing.T) {
 	floor := mechanisms.OffRampFloor(nil)
-	if len(floor) < 2 {
-		t.Fatalf("OffRampFloor(nil) = %v; want the two catalogued off-ramps", floor)
+	if len(floor) != 0 {
+		t.Fatalf("OffRampFloor(nil) = %v; want the empty floor now that no row declares CapOffRamp", floor)
 	}
 
 	for _, tt := range []struct {
@@ -500,9 +502,9 @@ func TestBuildEnabledMechanismsFloorsAFreshRegistry(t *testing.T) {
 		ids  []domain.MechanismID
 		want []domain.MechanismID
 	}{
-		{"nil list", nil, floor},
-		{"empty list", []domain.MechanismID{}, floor},
-		{"one-element list", []domain.MechanismID{floor[1]}, []domain.MechanismID{floor[1]}},
+		{"nil list", nil, nil},
+		{"empty list", []domain.MechanismID{}, nil},
+		{"one-element list", []domain.MechanismID{"syntax"}, []domain.MechanismID{"syntax"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := baseConfig(&recordingSink{})

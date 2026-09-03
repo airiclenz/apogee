@@ -267,3 +267,238 @@ func mustLastMessageText(t *testing.T, events []domain.Event) string {
 	}
 	return me.Text
 }
+
+// A third narration on an action request the model never acted on is corrected into a tool call —
+// with NO catalogued Mechanism enabled and Bypass ON. The retried request carries the superseded
+// narration followed by the "use a tool" correction (the sim's retryForToolUse shape), the corrected
+// call is the one that dispatches, and the firing is booked as a FloorGuardEvent naming the key.
+func TestFloorGuard_ToolUseEnforcerRetriesUnderBypass(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := configWithTools(sink,
+		fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "contents"},
+		fakeTool{name: "write_file", result: "ok"},
+	)
+	cfg.Bypass = true
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		contentScript("I'll implement feature X."),
+		contentScript("Here is my plan."),
+		contentScript("I would edit main.go to add the parser."), // narration #3 — the guard retries
+		toolCallScript("c1", "read_file", `{"path":"main.go"}`),  // the corrected, acting response
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "please implement feature X")
+	runExchange(t, a, "continue")
+	runExchange(t, a, "please implement feature X now")
+
+	if len(responder.got) != 5 {
+		t.Fatalf("provider was called %d times, want 5", len(responder.got))
+	}
+	retried := responder.got[3].Messages
+	ai := wireMessageIndex(retried, "assistant", "I would edit main.go to add the parser.")
+	if ai < 0 {
+		t.Fatalf("retried request carries no superseded narration: %+v", retried)
+	}
+	ci := wireUserIndexContaining(retried, "You MUST use one of the available tools")
+	if ci != ai+1 {
+		t.Errorf("correction at index %d, want %d (immediately after the superseded narration)", ci, ai+1)
+	}
+	if wireUserIndexContaining(retried, "Respond with a tool call, not a text description.") < 0 {
+		t.Errorf("retried request lacks the sim's tool-use directive: %+v", retried)
+	}
+	if !hasGuardFire(sink.events, guardToolUseEnforcer, guardActionRetry) {
+		t.Error("no FloorGuardEvent for the tool-use enforcer with the retry action")
+	}
+	if ran != 1 {
+		t.Errorf("read_file ran %d times, want 1 (the corrected response acted)", ran)
+	}
+}
+
+// `tool-use-enforcer: false` gives the prose back: the same three narrations run to their end with
+// no retry, no firing, and the third narration standing as the Turn's answer.
+func TestFloorGuard_DisableToolUseEnforcerLeavesProseAlone(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink,
+		fakeTool{name: "read_file", readOnly: true, result: "contents"},
+		fakeTool{name: "write_file", result: "ok"},
+	)
+	cfg.Floor.DisableToolUseEnforcer = true
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		contentScript("I'll implement feature X."),
+		contentScript("Here is my plan."),
+		contentScript("I would edit main.go to add the parser."),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "please implement feature X")
+	runExchange(t, a, "continue")
+	runExchange(t, a, "please implement feature X now")
+
+	if len(responder.got) != 3 {
+		t.Fatalf("provider was called %d times, want 3 (no retry)", len(responder.got))
+	}
+	if guardFireCountFor(sink.events, guardToolUseEnforcer) != 0 {
+		t.Error("the tool-use enforcer fired with Floor.DisableToolUseEnforcer set")
+	}
+	if got := mustLastMessageText(t, sink.events); got != "I would edit main.go to add the parser." {
+		t.Errorf("final message = %q, want the narration to stand", got)
+	}
+}
+
+// An empty reply mid-task retries in place and the retried request carries the sim's
+// completion-check nudge verbatim as a role-safe user message — no catalogued Mechanism, Bypass on
+// — and no superseded assistant message, the empty draft having carried nothing.
+func TestFloorGuard_EmptyReplyDrawsTheCompletionCheckNudge(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
+	cfg.Bypass = true
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		emptyScript(),
+		contentScript("recovered"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "please implement the parser")
+
+	if len(responder.got) != 2 {
+		t.Fatalf("provider was called %d times, want 2", len(responder.got))
+	}
+	second := responder.got[1].Messages
+	if n := wireRoleCount(second, "assistant"); n != 0 {
+		t.Errorf("retried request carries %d assistant messages, want 0 (empty superseded reply)", n)
+	}
+	if wireMessageIndex(second, "user", wave1Nudge) < 0 {
+		t.Errorf("retried request does not carry the completion-check nudge verbatim: %+v", second)
+	}
+	if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
+		t.Error("no FloorGuardEvent for the empty-response recovery with the retry action")
+	}
+	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "recovered" {
+		t.Errorf("final MessageEvent = %+v (ok=%v), want %q", me, ok, "recovered")
+	}
+}
+
+// A responder that never produces anything terminates at the loop's maxPostResponseRetries — the
+// recovery guard cannot spin the loop. Past the cap the empty reply fails the Turn visibly
+// (loop.go reviewedOutcome) rather than committing a blank assistant message: recover first, fail
+// honestly when recovery is exhausted. The cap itself is unmoved, and that is what this test is for.
+func TestFloorGuard_AlwaysEmptyTerminatesAtCap(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		emptyScript(), emptyScript(), emptyScript(), emptyScript(),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	res := runExchange(t, a, "please implement the parser")
+
+	if res.Status != domain.StatusExchangeComplete || !res.Faulted {
+		t.Errorf("StepResult = {Status:%q Faulted:%v}, want {Status:%q Faulted:true} (the exhausted guard faults)",
+			res.Status, res.Faulted, domain.StatusExchangeComplete)
+	}
+	if len(responder.got) != maxPostResponseRetries+1 {
+		t.Errorf("provider was called %d times, want %d (the retry cap)",
+			len(responder.got), maxPostResponseRetries+1)
+	}
+	if _, ok := lastMessageEvent(sink.events); ok {
+		t.Error("a MessageEvent was emitted for a Turn that never produced a reply")
+	}
+	if got := a.conv.Len(); got != 1 {
+		t.Errorf("committed history has %d messages, want 1 (the user message; no blank assistant)", got)
+	}
+}
+
+// ADR 0071 decision 1 at the dispatch level: neither recovery guard carries strikes-3 suppression
+// nor a Turn-Budget throttle, so both still fire with Bypass ON and the global Turn Budget TRIPPED —
+// the posture in which a co-registered catalogued Mechanism (syntax) is withdrawn at dispatch.
+func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
+	t.Run("empty-response-recovery", func(t *testing.T) {
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
+		cfg.Bypass = true
+		cfg.Mechanisms = wave1Registry(t, "syntax")
+		responder := &captureAllResponder{scripts: [][]provider.Delta{
+			emptyScript(),
+			contentScript("recovered"),
+		}}
+
+		a, err := newAgent(cfg, responder)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		a.tracker.budgetTripped = true
+		a.tracker.harmfulStreak = turnBudgetLimit
+		runExchange(t, a, "please implement the parser")
+
+		if len(responder.got) != 2 {
+			t.Fatalf("provider was called %d times, want 2 (the guard must retry through the gates)", len(responder.got))
+		}
+		if wireMessageIndex(responder.got[1].Messages, "user", wave1Nudge) < 0 {
+			t.Errorf("retried request does not carry the nudge: %+v", responder.got[1].Messages)
+		}
+		if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
+			t.Error("no FloorGuardEvent for the empty-response recovery with the retry action")
+		}
+		if n := fireCountFor(sink.events, "syntax"); n != 0 {
+			t.Errorf("syntax fired %d times; a catalogued row must be withdrawn under Bypass + a tripped Turn Budget", n)
+		}
+	})
+
+	t.Run("tool-use-enforcer", func(t *testing.T) {
+		sink := &recordingSink{}
+		cfg := configWithTools(sink,
+			fakeTool{name: "read_file", readOnly: true, result: "contents"},
+			fakeTool{name: "write_file", result: "ok"},
+		)
+		cfg.Bypass = true
+		cfg.Mechanisms = wave1Registry(t, "syntax")
+		responder := &captureAllResponder{scripts: [][]provider.Delta{
+			contentScript("I'll implement feature X."),
+			contentScript("Here is my plan."),
+			contentScript("I would edit main.go to add the parser."),
+			toolCallScript("c1", "read_file", `{"path":"main.go"}`),
+			contentScript("done"),
+		}}
+
+		a, err := newAgent(cfg, responder)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		a.tracker.budgetTripped = true
+		a.tracker.harmfulStreak = turnBudgetLimit
+		runExchange(t, a, "please implement feature X")
+		runExchange(t, a, "continue")
+		runExchange(t, a, "please implement feature X now")
+
+		if len(responder.got) != 5 {
+			t.Fatalf("provider was called %d times, want 5 (the guard must retry through the gates)", len(responder.got))
+		}
+		retried := responder.got[3].Messages
+		if wireMessageIndex(retried, "assistant", "I would edit main.go to add the parser.") < 0 {
+			t.Errorf("retried request carries no superseded narration: %+v", retried)
+		}
+		if wireUserIndexContaining(retried, "You MUST use one of the available tools") < 0 {
+			t.Errorf("retried request carries no correction: %+v", retried)
+		}
+		if !hasGuardFire(sink.events, guardToolUseEnforcer, guardActionRetry) {
+			t.Error("no FloorGuardEvent for the tool-use enforcer with the retry action")
+		}
+		if n := fireCountFor(sink.events, "syntax"); n != 0 {
+			t.Errorf("syntax fired %d times; a catalogued row must be withdrawn under Bypass + a tripped Turn Budget", n)
+		}
+	})
+}

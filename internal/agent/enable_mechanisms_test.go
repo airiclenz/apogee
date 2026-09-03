@@ -18,32 +18,38 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// emptyThenContent scripts an empty first reply — which the empty_response_recovery off-ramp retries
-// in place — followed by a recovered content reply, the shape that makes the off-ramp fire through
-// the loop so a test can prove a catalogued Mechanism was armed by Config.EnableMechanisms alone.
-func emptyThenContent(recovered string) [][]provider.Delta {
-	return [][]provider.Delta{emptyScript(), contentScript(recovered)}
+// brokenThenFixed scripts a write_file call whose Go payload is unbalanced — which the syntax
+// Mechanism retries in place — followed by a recovered content reply, the shape that makes a
+// catalogued Mechanism fire through the loop so a test can prove one was armed by
+// Config.EnableMechanisms alone. The call itself is well formed (a known tool, valid arguments), so
+// the tool-call repair Floor guard that runs ahead of every hook stands down and leaves the seam to
+// the Mechanism.
+func brokenThenFixed(recovered string) [][]provider.Delta {
+	return [][]provider.Delta{
+		toolCallScript("c1", "write_file", `{"path":"main.go","content":"package main\nfunc main() {"}`),
+		contentScript(recovered),
+	}
 }
 
 // TestEnableMechanisms_ArmsNamedMechanism: a valid ID list with a nil Config.Mechanisms builds the
 // named catalogued Mechanism at construction and it fires through the real loop.
 func TestEnableMechanisms_ArmsNamedMechanism(t *testing.T) {
 	sink := &recordingSink{}
-	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	cfg.EnableMechanisms = []domain.MechanismID{"empty_response_recovery"}
-	responder := &captureAllResponder{scripts: emptyThenContent("recovered")}
+	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
+	cfg.EnableMechanisms = []domain.MechanismID{"syntax"}
+	responder := &captureAllResponder{scripts: brokenThenFixed("recovered")}
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	runExchange(t, a, "please implement the parser")
+	runExchange(t, a, "write the parser")
 
-	if !hasFire(sink.events, "empty_response_recovery", string(domain.ActionRetry)) {
-		t.Error("empty_response_recovery did not fire; Config.EnableMechanisms never armed it through construction")
+	if !hasFire(sink.events, "syntax", string(domain.ActionRetry)) {
+		t.Error("syntax did not fire; Config.EnableMechanisms never armed it through construction")
 	}
 	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "recovered" {
-		t.Errorf("final MessageEvent = %+v (ok=%v), want %q (the off-ramp drove the retry)", me, ok, "recovered")
+		t.Errorf("final MessageEvent = %+v (ok=%v), want %q (the Mechanism drove the retry)", me, ok, "recovered")
 	}
 }
 
@@ -117,26 +123,26 @@ func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
 // merged INTO the provided registry, not replacing it (locked decision 2).
 func TestEnableMechanisms_MergesWithProvidedExperimentalHook(t *testing.T) {
 	sink := &recordingSink{}
-	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
+	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
 	fired := false
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firingHook{fired: &fired}); err != nil {
 		t.Fatalf("AddExperimental: %v", err)
 	}
-	cfg.EnableMechanisms = []domain.MechanismID{"empty_response_recovery"}
-	responder := &captureAllResponder{scripts: emptyThenContent("recovered")}
+	cfg.EnableMechanisms = []domain.MechanismID{"syntax"}
+	responder := &captureAllResponder{scripts: brokenThenFixed("recovered")}
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	runExchange(t, a, "please implement the parser")
+	runExchange(t, a, "write the parser")
 
 	if !fired {
 		t.Error("the pre-existing experimental hook did not fire; the merge replaced the provided registry")
 	}
-	if fireCountFor(sink.events, "empty_response_recovery") == 0 {
-		t.Error("the catalogued empty_response_recovery did not fire; EnableMechanisms was not merged in")
+	if fireCountFor(sink.events, "syntax") == 0 {
+		t.Error("the catalogued syntax Mechanism did not fire; EnableMechanisms was not merged in")
 	}
 }
 
@@ -188,16 +194,16 @@ func armedIDs(a *Agent, at domain.HookPoint) []domain.MechanismID {
 // mechanisms are Config, not session state — so a resumed Agent arms the named Mechanism afresh.
 func TestEnableMechanisms_ResumeArmsIdentically(t *testing.T) {
 	sink := &recordingSink{}
-	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	cfg.EnableMechanisms = []domain.MechanismID{"empty_response_recovery"}
+	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
+	cfg.EnableMechanisms = []domain.MechanismID{"syntax"}
 
-	a, err := newAgent(cfg, &captureAllResponder{scripts: emptyThenContent("recovered")})
+	a, err := newAgent(cfg, &captureAllResponder{scripts: brokenThenFixed("recovered")})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	runExchange(t, a, "please implement the parser")
-	if !hasFire(sink.events, "empty_response_recovery", string(domain.ActionRetry)) {
-		t.Fatal("empty_response_recovery did not fire on the original Agent (test precondition)")
+	runExchange(t, a, "write the parser")
+	if !hasFire(sink.events, "syntax", string(domain.ActionRetry)) {
+		t.Fatal("syntax did not fire on the original Agent (test precondition)")
 	}
 	snap, err := a.Snapshot()
 	if err != nil {
@@ -205,18 +211,18 @@ func TestEnableMechanisms_ResumeArmsIdentically(t *testing.T) {
 	}
 
 	// Resume into a fresh Agent with an equivalent Config (fresh sink + registry) and drive another
-	// off-ramp-triggering Exchange: the resumed Agent must arm empty_response_recovery identically.
+	// Mechanism-triggering Exchange: the resumed Agent must arm syntax identically.
 	sink2 := &recordingSink{}
-	cfg2 := configWithTools(sink2, fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	cfg2.EnableMechanisms = []domain.MechanismID{"empty_response_recovery"}
-	b, err := resumeAgent(cfg2, snap, &captureAllResponder{scripts: emptyThenContent("recovered again")})
+	cfg2 := configWithTools(sink2, fakeTool{name: "write_file", result: "ok"})
+	cfg2.EnableMechanisms = []domain.MechanismID{"syntax"}
+	b, err := resumeAgent(cfg2, snap, &captureAllResponder{scripts: brokenThenFixed("recovered again")})
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
 	runExchange(t, b, "keep going")
 
-	if !hasFire(sink2.events, "empty_response_recovery", string(domain.ActionRetry)) {
-		t.Error("Resume did not arm empty_response_recovery; mechanisms must be rebuilt from Config, not session state")
+	if !hasFire(sink2.events, "syntax", string(domain.ActionRetry)) {
+		t.Error("Resume did not arm syntax; mechanisms must be rebuilt from Config, not session state")
 	}
 }
 

@@ -44,7 +44,7 @@ func TestReadRepeatInertAfterSameTurnReadThenWrite(t *testing.T) {
 		toolResult("r1", "package a"),
 		toolResult("w1", "wrote a.go"),
 	}
-	resp := offrampResponse(history, nil, "", readCall("r2", "a.go"))
+	resp := historyResponse(history, nil, "", readCall("r2", "a.go"))
 	if d := postResponse(t, readRepeatID, resp); d.Action != "" {
 		t.Errorf("Action = %q, want no action: a same-turn read-then-write supersedes the read (C-02)", d.Action)
 	}
@@ -63,7 +63,7 @@ func TestReadRepeatInertAfterReadThenEdit(t *testing.T) {
 		assistantCall(editCall("e1", "a.go")),
 		toolResult("e1", "edited a.go"),
 	}
-	resp := offrampResponse(history, nil, "", readCall("r2", "a.go"))
+	resp := historyResponse(history, nil, "", readCall("r2", "a.go"))
 	if d := postResponse(t, readRepeatID, resp); d.Action != "" {
 		t.Errorf("Action = %q, want no action: an edit_existing_file supersedes the earlier read", d.Action)
 	}
@@ -78,7 +78,7 @@ func TestReadRepeatFiresOnOpenFileReRead(t *testing.T) {
 		assistantCall(openCall("o1", "a.go")),
 		toolResult("o1", "File: a.go\n\npackage a"),
 	}
-	resp := offrampResponse(history, nil, "", openCall("o2", "a.go"))
+	resp := historyResponse(history, nil, "", openCall("o2", "a.go"))
 	if d := postResponse(t, readRepeatID, resp); d.Action != domain.ActionRetry {
 		t.Errorf("Action = %q, want ActionRetry: open_file counts as a read on both sides", d.Action)
 	}
@@ -167,50 +167,18 @@ func TestAutofixIgnoresEditToolCall(t *testing.T) {
 	}
 }
 
-// NOTE — offramps.go:98 (wroteRecently, the tool_use_enforcer stand-down) carries NO edit-tool test
-// here because the site cannot carry regression-detecting coverage. shouldEnforceToolUse ends with
-// `return !hasEverUsedTools(conv)`, and hasEverUsedTools reads the same signal wroteRecently does — an
-// assistant message with tool calls. The only history in which wroteRecently's edit branch could
-// matter is one that contains an edit call, but that same edit makes hasEverUsedTools true, which
-// forces the enforcer to stand down regardless of whether wroteRecently counts the edit. So mutating
-// the isFileMutatingTool branch at :98 (e.g. to isWriteTool, dropping the edit tools) cannot flip any
-// enforcer decision — a test claiming to pin it would pass under that mutation and be vacuous. See the
-// plan's item-7 dated NOTES for the full rationale. The three sites below (offramps.go:149,
-// toolloop.go:170, historyhints.go:106) DO discriminate the edit tools and are pinned genuinely.
-
-// hasRecentProgress (offramps.go, the empty_response_recovery gate at offramps.go:149) counts an
-// apogee edit tool as a file write, so an empty reply AFTER an edit is progress worth recovering even
-// past the early-turn grace and with fewer than two distinct reads — the same branch a write_file
-// would take. Without the edit the identical spinning-reads history has no progress and the off-ramp
-// is inert; the edit is the only difference, so it is what drives the isFileMutatingTool write branch.
-func TestEmptyResponseRecoveryTreatsRecentEditAsProgress(t *testing.T) {
-	t.Parallel()
-	// >3 assistant turns (past the grace) re-reading one file (fewer than two distinct paths): no
-	// progress on its own, so the off-ramp is inert — the control the edit is measured against.
-	spinning := []domain.Message{
-		userMsg("do it"),
-		assistantCall(readCall("c1", "a.go")),
-		assistantCall(readCall("c2", "a.go")),
-		assistantCall(readCall("c3", "a.go")),
-		assistantCall(readCall("c4", "a.go")),
-	}
-	if d := postResponse(t, emptyResponseRecoveryID, offrampResponse(spinning, toolMenu(), "")); d.Action != "" {
-		t.Fatalf("control decision = %+v, want inert: spinning reads of one file are not progress", d)
-	}
-
-	for _, tool := range []string{"edit_existing_file", "single_find_and_replace"} {
-		t.Run(tool, func(t *testing.T) {
-			t.Parallel()
-			withEdit := append(spinning[:len(spinning):len(spinning)],
-				assistantCall(mutatingCall("e1", tool, "a.go")),
-			)
-			d := postResponse(t, emptyResponseRecoveryID, offrampResponse(withEdit, toolMenu(), ""))
-			if d.Action != domain.ActionRetry || d.Inject != completionCheckNudge {
-				t.Errorf("decision = %+v, want ActionRetry with the nudge: a recent %s is progress worth recovering", d, tool)
-			}
-		})
-	}
-}
+// NOTE — wroteRecently (the tool-use enforcer's stand-down, internal/floor/conversation.go and
+// library.go's copy of the same scan) carries NO edit-tool test because the site cannot carry
+// regression-detecting coverage. shouldEnforceToolUse ends with `return !hasEverUsedTools(conv)`,
+// and hasEverUsedTools reads the same signal wroteRecently does — an assistant message with tool
+// calls. The only history in which wroteRecently's edit branch could matter is one that contains an
+// edit call, but that same edit makes hasEverUsedTools true, which forces the check to stand down
+// regardless of whether wroteRecently counts the edit. So mutating the isFileMutatingTool branch
+// there (e.g. to isWriteTool, dropping the edit tools) cannot flip any enforcement decision — a test
+// claiming to pin it would pass under that mutation and be vacuous. See the plan's item-7 dated
+// NOTES for the full rationale. The empty-reply guard's own progress branch is pinned in
+// internal/floor (emptyreply_test.go); the writtenPaths site below DOES discriminate the edit tools
+// and is pinned genuinely.
 
 // writtenPaths (historyhints.go:106) counts an apogee edit tool as a successful write, so
 // deriveWriteTarget excludes an edit_existing_file / single_find_and_replace-written path from the

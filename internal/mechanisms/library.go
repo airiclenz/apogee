@@ -262,11 +262,113 @@ func (m *libraryMechanism) observeToolNameHallucinations(issues []robustnessIssu
 	}
 }
 
+// shouldEnforceToolUse is the "narrates instead of acting" shape check (apogee-sim
+// shouldEnforceToolUse @pin), kept HERE because library is its last caller in this package: the
+// tool-use enforcer it was written for is a Floor guard now (ADR 0071) and internal/floor carries
+// its own copy of this predicate and the four scans below. The two halves are identical today and
+// diverge only when library itself retires; duplication is the price of keeping the lab layer from
+// depending on the engine's floor.
+//
+// It fires only when the model was given tools, replied with text and no tool call, the last user
+// message is an action request (not an analysis one), the model has not written recently, there have
+// been at least two assistant replies, the previous one was also text-only, and the model has never
+// used a tool — the signature of a model narrating a task it should be doing.
+func shouldEnforceToolUse(resp *domain.Response) bool {
+	view := resp.View()
+	if len(view.Tools()) == 0 {
+		return false
+	}
+	if len(resp.ToolCalls()) > 0 || strings.TrimSpace(resp.Text()) == "" {
+		return false
+	}
+
+	conv := view.Conversation()
+	last, _, ok := conv.LastUser()
+	if !ok {
+		return false
+	}
+	if !hasActionIntent(last.Content) || hasAnalysisIntent(last.Content) {
+		return false
+	}
+	if wroteRecently(conv, 2) {
+		return false
+	}
+	if assistantMessageCount(conv) < 2 {
+		return false
+	}
+	if !previousAssistantWasTextOnly(conv) {
+		return false
+	}
+	return !hasEverUsedTools(conv)
+}
+
+// assistantMessageCount counts the assistant messages in the conversation (apogee-sim
+// countAssistantMessages @pin) — the check needs at least two before it reports narration, so a
+// single text-only reply on the first Turn is not mistaken for a narration loop.
+func assistantMessageCount(conv domain.ConversationView) int {
+	count := 0
+	conv.Range(func(_ int, m domain.Message) bool {
+		if m.Role == domain.RoleAssistant {
+			count++
+		}
+		return true
+	})
+	return count
+}
+
+// wroteRecently reports whether any of the last window assistant messages issued a write-tool call
+// (apogee-sim wroteRecently @pin). A model that just wrote a file is making progress, so the check
+// stands down.
+func wroteRecently(conv domain.ConversationView, window int) bool {
+	seen := 0
+	for i := conv.Len() - 1; i >= 0 && seen < window; i-- {
+		m := conv.At(i)
+		if m.Role != domain.RoleAssistant {
+			continue
+		}
+		seen++
+		for _, tc := range m.ToolCalls {
+			if isFileMutatingTool(tc.Tool) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// previousAssistantWasTextOnly reports whether the most recent assistant message was text with no
+// tool calls (apogee-sim previousAssistantWasTextOnly @pin) — the check reports only a SECOND
+// consecutive narration, so one stray text reply does not trip it.
+func previousAssistantWasTextOnly(conv domain.ConversationView) bool {
+	for i := conv.Len() - 1; i >= 0; i-- {
+		m := conv.At(i)
+		if m.Role == domain.RoleAssistant {
+			return len(m.ToolCalls) == 0 && strings.TrimSpace(m.Content) != ""
+		}
+	}
+	return false
+}
+
+// hasEverUsedTools reports whether any assistant message issued a tool call (apogee-sim
+// toolsets.HasEverUsedTools @pin). Once the model has shown it can call tools, the check stops — a
+// later text reply is a considered choice, not an inability to act.
+func hasEverUsedTools(conv domain.ConversationView) bool {
+	used := false
+	conv.Range(func(_ int, m domain.Message) bool {
+		if m.Role == domain.RoleAssistant && len(m.ToolCalls) > 0 {
+			used = true
+			return false
+		}
+		return true
+	})
+	return used
+}
+
 // observeToolUseEnforcement records the "narrates instead of acting" behavioural pattern when the
 // response meets the tool-use enforcer's trigger (apogee-sim observeToolUseEnforcement @pin). apogee
-// detects the condition directly via shouldEnforceToolUse (the enforcer's own shape check) rather than
-// reading a set flag, so the observation is self-contained — it does not depend on the enforcer
-// Mechanism being enabled, and it runs before the enforcer in the post-response cascade regardless.
+// detects the condition directly via shouldEnforceToolUse (the shape check above) rather than
+// reading a set flag, so the observation is self-contained — it does not depend on any guard or
+// Mechanism being enabled, and it runs on every response the library Mechanism sees.
 func (m *libraryMechanism) observeToolUseEnforcement(resp *domain.Response) {
 	if !shouldEnforceToolUse(resp) {
 		return

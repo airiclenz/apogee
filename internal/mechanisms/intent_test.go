@@ -3,7 +3,7 @@ package mechanisms
 import "testing"
 
 // hasActionIntent recognises imperative action requests and rejects questions and empty input —
-// the classifier the tool_use_enforcer off-ramp gates on (apogee-sim intent parity).
+// the classifier the narration check gates on (apogee-sim intent parity).
 func TestHasActionIntent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

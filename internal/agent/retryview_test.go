@@ -152,13 +152,15 @@ func (h viewCaptureHook) PostResponse(_ context.Context, resp *domain.Response) 
 	return domain.PostResponseDecision{}, nil
 }
 
-// emptyRecoveryWithCapture builds a config that runs the production empty_response_recovery
-// off-ramp AND an experimental view-capturing hook, so a test can drive a real empty-retry
-// cycle and observe the committedLen-bounded View() on the retry pass.
+// emptyRecoveryWithCapture builds a config carrying an experimental view-capturing hook, so a test
+// can drive a real empty-retry cycle — the empty-response recovery Floor guard is on for every model
+// (ADR 0071), no `mechanisms:` block needed — and observe the committedLen-bounded View() on the
+// retry pass. The guard short-circuits the hook cascade on the empty draft, exactly as the Mechanism
+// it was promoted from did, so the capture sees the RETRY pass alone.
 func emptyRecoveryWithCapture(t *testing.T, sink domain.EventSink, views *[]domain.ConversationView, tools ...domain.Tool) domain.Config {
 	t.Helper()
 	cfg := configWithTools(sink, tools...)
-	cfg.Mechanisms = wave1Registry(t, "empty_response_recovery")
+	cfg.Mechanisms = domain.NewMechanismRegistry()
 	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, viewCaptureHook{views: views}); err != nil {
 		t.Fatalf("AddExperimental: %v", err)
 	}
@@ -188,7 +190,7 @@ func TestRetryView_EmptySupersededExchangeOpeningKeepsRealUserAsk(t *testing.T) 
 	cfg := emptyRecoveryWithCapture(t, sink, &views,
 		fakeTool{name: "read_file", readOnly: true, result: "contents"})
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		emptyScript(),              // Exchange-opening empty reply — empty_response_recovery retries
+		emptyScript(),              // Exchange-opening empty reply — the recovery guard retries
 		contentScript("recovered"), // the retry pass; its bounded View() is what the capture observes
 	}}
 
@@ -201,8 +203,8 @@ func TestRetryView_EmptySupersededExchangeOpeningKeepsRealUserAsk(t *testing.T) 
 	if len(responder.got) != 2 {
 		t.Fatalf("provider was called %d times, want 2 (empty draft, retry)", len(responder.got))
 	}
-	if !hasFire(sink.events, "empty_response_recovery", string(domain.ActionRetry)) {
-		t.Fatal("empty_response_recovery did not retry — the empty-superseded path was never exercised")
+	if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
+		t.Fatal("the empty-response recovery guard did not retry — the empty-superseded path was never exercised")
 	}
 	if len(views) != 1 {
 		t.Fatalf("captured %d retry-pass views, want 1", len(views))
@@ -248,7 +250,7 @@ func TestRetryView_EmptySupersededToolContinuationKeepsToolResult(t *testing.T) 
 		fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "package a\nfunc F() {}"})
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		toolCallScript("c1", "read_file", `{"path":"a.go"}`), // turn 0: a tool call commits assistant + tool result
-		emptyScript(),              // turn 1: empty reply — empty_response_recovery retries
+		emptyScript(),              // turn 1: empty reply — the recovery guard retries
 		contentScript("recovered"), // the retry pass; its bounded View() is what the capture observes
 	}}
 
@@ -264,8 +266,8 @@ func TestRetryView_EmptySupersededToolContinuationKeepsToolResult(t *testing.T) 
 	if ran != 1 {
 		t.Errorf("read_file ran %d times, want 1", ran)
 	}
-	if !hasFire(sink.events, "empty_response_recovery", string(domain.ActionRetry)) {
-		t.Fatal("empty_response_recovery did not retry — the tool-continuation empty path was never exercised")
+	if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
+		t.Fatal("the empty-response recovery guard did not retry — the tool-continuation empty path was never exercised")
 	}
 	if len(views) == 0 {
 		t.Fatal("no retry-pass view captured")
@@ -329,8 +331,8 @@ func TestRetryView_DoubleEmptyRetryKeepsBoundary(t *testing.T) {
 	if len(responder.got) != 3 {
 		t.Fatalf("provider was called %d times, want 3 (two empty retries + recovery)", len(responder.got))
 	}
-	if n := fireCountFor(sink.events, "empty_response_recovery"); n != 2 {
-		t.Errorf("empty_response_recovery fired %d times, want 2 (both empty replies retried)", n)
+	if n := guardFireCountFor(sink.events, guardEmptyResponseRecovery); n != 2 {
+		t.Errorf("the empty-response recovery guard fired %d times, want 2 (both empty replies retried)", n)
 	}
 	if len(views) != 1 {
 		t.Fatalf("captured %d retry-pass views, want 1", len(views))

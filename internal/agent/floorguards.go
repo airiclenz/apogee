@@ -10,8 +10,10 @@ import (
 // a FloorGuardEvent names — so an observer never has to map an internal name back to the switch
 // that turns the behaviour off.
 const (
-	guardToolCallRepair  = "tool-call-repair"
-	guardToolLoopBreaker = "tool-loop-breaker"
+	guardToolCallRepair        = "tool-call-repair"
+	guardToolLoopBreaker       = "tool-loop-breaker"
+	guardEmptyResponseRecovery = "empty-response-recovery"
+	guardToolUseEnforcer       = "tool-use-enforcer"
 )
 
 // The actions a Floor guard books on its event: a guard that re-streams the Turn with a correction
@@ -46,15 +48,17 @@ func (a *Agent) floorConfig() domain.FloorConfig {
 // (runPostResponseHooks): the guards are engine behaviour every model runs with, so a malformed or
 // looping response is repaired before a catalogued Mechanism ever looks at it.
 //
-// The order is ratified (ADR 0071): tool-loop breaker, then tool-call repair — the coarser "you are
-// going in circles" judgment before the finer "this call is malformed" one, matching the cascade the
-// two Mechanisms resolved to before they were promoted. THE FIRST GUARD TO FIRE WINS: its correction
-// is the one the Turn re-streams with, and the remaining guards do not run, exactly as an
-// ActionRetry short-circuits the hook cascade.
+// The order is ratified (ADR 0071): tool-loop breaker, tool-call repair, empty-response recovery,
+// tool-use enforcer — the coarser "you are going in circles" judgment before the finer "this call is
+// malformed" one, then the two recoveries for a Turn that produced no usable call at all. The four
+// triggers are disjoint in practice (a response either carries calls or does not), so the order is
+// about a stable answer rather than a contested one. THE FIRST GUARD TO FIRE WINS: its correction is
+// the one the Turn re-streams with, and the remaining guards do not run, exactly as an ActionRetry
+// short-circuits the hook cascade.
 //
-// Neither guard carries strikes-3 suppression or a Turn-Budget throttle (ADR 0071 decision 1): a
-// Floor guard cannot regress Bypass, so it is never withdrawn. The per-Turn maxPostResponseRetries
-// bound — shared with the hook retries, counted once by the caller — is the only limiter.
+// No guard carries strikes-3 suppression or a Turn-Budget throttle (ADR 0071 decision 1): a Floor
+// guard cannot regress Bypass, so it is never withdrawn. The per-Turn maxPostResponseRetries bound —
+// shared with the hook retries, counted once by the caller — is the only limiter.
 func (a *Agent) runPostResponseGuards(turn int, resp *domain.Response) (retry bool, inject string) {
 	gates := a.floorConfig()
 
@@ -67,6 +71,18 @@ func (a *Agent) runPostResponseGuards(turn int, resp *domain.Response) (retry bo
 	if !gates.DisableToolCallRepair {
 		if correction, fired := floor.ToolCallRepair(resp); fired {
 			a.emitFloorGuard(turn, guardToolCallRepair, guardActionRetry)
+			return true, correction
+		}
+	}
+	if !gates.DisableEmptyResponseRecovery {
+		if nudge, fired := floor.RecoverEmpty(resp); fired {
+			a.emitFloorGuard(turn, guardEmptyResponseRecovery, guardActionRetry)
+			return true, nudge
+		}
+	}
+	if !gates.DisableToolUseEnforcer {
+		if correction, fired := floor.EnforceToolUse(resp); fired {
+			a.emitFloorGuard(turn, guardToolUseEnforcer, guardActionRetry)
 			return true, correction
 		}
 	}

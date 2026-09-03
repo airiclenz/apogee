@@ -111,7 +111,7 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.SystemPrompt = "the standing prompt"
 	cfg.Context.MaxContextTokens = 8192
-	cfg.EnableMechanisms = []domain.MechanismID{"empty_response_recovery"}
+	cfg.EnableMechanisms = []domain.MechanismID{"autofix"}
 	responder := blockingResponder{started: make(chan struct{})}
 
 	a, err := newAgent(cfg, responder)
@@ -158,7 +158,7 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 // the validate-then-commit guarantee.
 func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"empty_response_recovery"}
+	cfg.EnableMechanisms = []domain.MechanismID{"autofix"}
 
 	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if err != nil {
@@ -178,7 +178,7 @@ func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 	if !hasRegistered(a.registry, "syntax") {
 		t.Errorf("rebuilt registry = %v, want it to hold the newly enabled syntax", registeredIDs(a.registry))
 	}
-	if hasRegistered(a.registry, "empty_response_recovery") {
+	if hasRegistered(a.registry, "autofix") {
 		t.Errorf("rebuilt registry = %v, want the previous model's set gone", registeredIDs(a.registry))
 	}
 

@@ -43,10 +43,17 @@ type retiredRow struct {
 //     failure, so it needs no per-model proof and runs for every model (ADR 0071).
 //   - validate (retired v0.20.0) — PROMOTED. The tool-call validator became the `tool-call-repair`
 //     Floor guard, on the same reasoning.
+//   - empty_response_recovery (retired v0.20.0) — PROMOTED. The empty-reply recovery became the
+//     `empty-response-recovery` Floor guard; it always ran under Bypass, so promoting it changes
+//     who gets it, not what it does.
+//   - tool_use_enforcer (retired v0.20.0) — PROMOTED. The narration off-ramp became the
+//     `tool-use-enforcer` Floor guard, on the same reasoning.
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
 	{ID: "validate", Release: "v0.20.0", Successor: "tool-call-repair"},
+	{ID: "empty_response_recovery", Release: "v0.20.0", Successor: "empty-response-recovery"},
+	{ID: "tool_use_enforcer", Release: "v0.20.0", Successor: "tool-use-enforcer"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is
@@ -138,15 +145,15 @@ func OffRampFloor(block map[string]bool) []domain.MechanismID {
 // deterministic; the dispatch order is the registry's own topo-sort (ADR 0003), independent of this
 // order.
 //
-// The OFF-RAMP FLOOR (OffRampFloor, ADR 0070) is unioned into the answer: the catalogued off-ramps
-// are enabled unless the block names one explicitly `false`, so an absent or empty block resolves to
-// the two of them rather than to nothing, `{"tool_use_enforcer": false}` resolves to
-// empty_response_recovery alone, and a block enabling other rows gets them BESIDE the floor. Every
-// other Capability is still armed only by being named (D1). The union is deduplicated and re-sorted,
-// so a block that spells an off-ramp out as `true` yields it once, in canonical position. The floor
-// is read from the production catalogue rather than from the `known` argument: `known` is the list a
-// caller validates spelling against (a test may hand a fake one), while the floor is about which
-// rows this build actually ships.
+// The OFF-RAMP FLOOR (OffRampFloor, ADR 0070) is unioned into the answer: a catalogued row whose
+// Capability is CapOffRamp is enabled unless the block names it explicitly `false`. NO SHIPPED ROW
+// DECLARES IT any more — the two recoveries that did are Floor guards now (ADR 0071), on for every
+// model and switched by their own top-level keys — so the union contributes nothing and every row is
+// armed only by being named (D1). The union is deduplicated and re-sorted, so a block that spells a
+// floored row out as `true` would yield it once, in canonical position. The floor is read from the
+// production catalogue rather than from the `known` argument: `known` is the list a caller validates
+// spelling against (a test may hand a fake one), while the floor is about which rows this build
+// actually ships.
 //
 // A RETIRED ID (RetiredIDs — a row this build removed) is DROPPED from ids, silently and whatever
 // its value: the key was valid at the release before the removal, so refusing it would break a

@@ -99,12 +99,12 @@ func TestWriteMechanismReportsWhichHalfFailed(t *testing.T) {
 	})
 }
 
-// The read half of the same seam: what the `/settings` Mechanism list SAYS about an off-ramp whose
-// key the `mechanisms:` block never names. That row is armed — an off-ramp reads ON unless the block
-// says `false` (ADR 0070) — and the list has to show the posture the run is actually in. The floor
-// itself (mechanisms.OffRampFloor) and the sibling startup projection (withOffRampFloor) are both
-// pinned; this list is the third reader of the same rule and nothing asserted it applied it, so a row
-// could regress to reading OFF for a Mechanism the engine is running.
+// The read half of the same seam: what the `/settings` Mechanism list SAYS about the rows a
+// `mechanisms:` block names and the rows it leaves out. The list has to show the posture the run is
+// actually in — the floor unioned in on top of the block (ADR 0070). No catalogued row declares
+// CapOffRamp any more, the two recoveries that did being Floor guards since ADR 0071, so the floor
+// contributes nothing today and the list is exactly what the block says: the named row ON, every
+// other row listed and OFF.
 func TestListMechanismsAppliesTheOffRampFloor(t *testing.T) {
 	t.Parallel()
 
@@ -113,14 +113,13 @@ func TestListMechanismsAppliesTheOffRampFloor(t *testing.T) {
 		t.Fatalf("wireSession: %v", err)
 	}
 	// The list re-reads the FILE rather than the resolution this run started on, so the block is
-	// written here — and it names one ordinary Mechanism and no off-ramp at all, which is exactly the
-	// posture the floor exists for.
+	// written here — and it names one ordinary Mechanism and nothing else.
 	const named = "autofix"
 	path := filepath.Join(w.roots.config, "config.yaml")
 	if err := os.WriteFile(path, []byte("mechanisms:\n  "+named+": true\n"), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
-	// The OFF half's id is taken from the catalogue rather than hard-coded: a row that later joins the
+	// The OFF half's id is taken from the catalogue rather than hard-coded: a row that later joined the
 	// off-ramp Capability would otherwise turn this half into a silent contradiction of the one above.
 	var ordinary string
 	for _, d := range mechanisms.Descriptors() {
@@ -138,21 +137,17 @@ func TestListMechanismsAppliesTheOffRampFloor(t *testing.T) {
 		enabled[toggle.ID] = toggle.Enabled
 	}
 
-	floor := mechanisms.OffRampFloor(nil)
-	if len(floor) == 0 {
-		t.Fatal("the off-ramp floor is empty; every assertion below would pass vacuously")
-	}
-	for _, id := range floor {
+	for _, id := range mechanisms.OffRampFloor(nil) {
 		if on, listed := enabled[string(id)]; !listed || !on {
-			t.Errorf("%s = (enabled %v, listed %v), want an armed row: an off-ramp the block never "+
-				"names is ON (ADR 0070), and the pane must not say the recovery is off", id, on, listed)
+			t.Errorf("%s = (enabled %v, listed %v), want an armed row: a floored row the block never "+
+				"names is ON (ADR 0070), and the pane must not say it is off", id, on, listed)
 		}
 	}
 	if !enabled[named] {
 		t.Errorf("%s reads OFF; the block names it true and the list is answered from the file", named)
 	}
 	if on, listed := enabled[ordinary]; !listed || on {
-		t.Errorf("%s = (enabled %v, listed %v), want a listed row reading OFF: the floor arms the "+
-			"off-ramps, not every Mechanism the block leaves out", ordinary, on, listed)
+		t.Errorf("%s = (enabled %v, listed %v), want a listed row reading OFF: the floor arms only "+
+			"what declares CapOffRamp, not every Mechanism the block leaves out", ordinary, on, listed)
 	}
 }

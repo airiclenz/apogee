@@ -96,7 +96,7 @@ func isWriteTool(name string) bool { return writeToolNames[name] }
 // verified against internal/tools, and pinned to its registered menu there), reusing
 // wave4WriteTools (decompose.go) as the single source of that superset. The history-family
 // Mechanisms — read_repeat, read_loop, cached_content_intercept, error_enrichment,
-// the off-ramps, and deriveWriteTarget — use it so their write-since /
+// library's narration check, and deriveWriteTarget — use it so their write-since /
 // read-then-write / progress detection sees apogee's real edit menu, not just the sim spellings.
 func isFileMutatingTool(name string) bool { return wave4WriteTools[name] }
 
@@ -131,9 +131,9 @@ func replaceContentArg(args json.RawMessage, content string) (json.RawMessage, e
 	return json.Marshal(m)
 }
 
-// toolNames lists the tool-menu names, for the "Available tools: …" line the tool_use_enforcer
-// correction carries. It lived beside the tool-call validator until that behaviour was promoted to
-// the tool-call-repair Floor guard (ADR 0071), and moved here with its one surviving caller.
+// toolNames lists the tool-menu names for an issue's "available_tools" context. It lived beside the
+// tool-call validator until that behaviour was promoted to the tool-call-repair Floor guard
+// (ADR 0071), and moved here with its one surviving caller.
 func toolNames(tools []domain.ToolDef) []string {
 	names := make([]string, len(tools))
 	for i, t := range tools {

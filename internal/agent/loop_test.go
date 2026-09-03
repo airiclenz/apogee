@@ -218,11 +218,11 @@ func TestIDLessNativeCallIsDroppedWhileItsSiblingDispatches(t *testing.T) {
 // the text parser gets its turn (a no-op on a native profile) and the empty-reply guard faults the
 // Turn. The alternative, dispatching it, is what the drop exists to prevent.
 //
-// The off-ramp floor (ADR 0070) sits between the two now: a Config with no EnableMechanisms arms
-// empty_response_recovery, which retries the empty reply in place up to maxPostResponseRetries
-// times before the loop proceeds with the last one. So the same reply is scripted four times — the
-// first call and its three retries — and the Turn ends on the same fault, with the same wording,
-// after the recovery has had its turns.
+// The empty-response recovery Floor guard sits between the two now: it is on for every model
+// (ADR 0071) and retries the empty reply in place up to maxPostResponseRetries times before the loop
+// proceeds with the last one. So the same reply is scripted four times — the first call and its
+// three retries — and the Turn ends on the same fault, with the same wording, after the recovery has
+// had its turns.
 func TestAReplyWhoseOnlyNativeCallLacksAnIDFaults(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0

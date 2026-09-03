@@ -264,7 +264,25 @@ lets the bad call through; the event carries the key name. Retired-ID notice tes
 
 **Commit:** `feat(floor): tool-call repair and tool-loop breaker are floor guards`
 
-## 5. Post-response guards: tool-use enforcer and empty-response recovery
+## 5. Post-response guards: tool-use enforcer and empty-response recovery — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the item's regression guard named only `readToolNames` as a surviving offramps.go caller, but `library.go:271` calls `shouldEnforceToolUse` (tooluseenforcer.go) and through it `wroteRecently`, `assistantMessageCount`, `previousAssistantWasTextOnly` and `hasEverUsedTools` — so those five moved into `library.go` (its sole caller, and the file that retires them at item 17) rather than being deleted, on item 4's `validateToolCalls` precedent: `internal/floor` carries its own copy and the two halves diverge only when `library` retires. `hasRecentProgress` had no surviving caller and went with the row.
+
+NOTES (2026-09-03): `offramps_test.go` could not simply be deleted — its fixtures `offrampResponse`/`readCall`/`userMsg`/`assistantCall` and `TestToolCallPath` are used by `cachedcontent_test.go`, `errorenrich_test.go`, `readloop_test.go`, `readrepeat_test.go`, `library_test.go` and `writedetection_test.go`. They moved into `historyhints_test.go` beside the helpers they exercise, and `offrampResponse` was renamed `historyResponse` (item 6's rule requires `off-ramp|OffRamp` to read zero across `internal/`, and the name names a concept this item retires); `assistantText` had no surviving caller and went with the row.
+
+NOTES (2026-09-03): `internal/mechanisms/prompts/completion-check-nudge.txt` was deleted with the row (item 3 copied it into `internal/floor/prompts/`) and its `prompts_test.go` roster entry with it — the grammar precedent for a retired row's assets.
+
+NOTES (2026-09-03): `TestEmptyResponseRecoveryTreatsRecentEditAsProgress` (the 2026-08-10 edit-tool write-detection pin) moved from `writedetection_test.go` into `internal/floor/emptyreply_test.go` recast over `RecoverEmpty`, its subject having moved; the file's NOTE paragraph about `wroteRecently`'s untestable branch was repointed at the new homes.
+
+NOTES (2026-09-03): three `internal/mechanisms/retired_test.go` cases (`TestOffRampFloorIsTheCapOffRampRows`, `TestResolveEnabledDefaultsToTheOffRampFloor`, `TestResolveEnabledExplicitFalseRemovesOneOffRamp`) asserted the catalogue CARRIES CapOffRamp rows and failed the moment the second one retired, so they were recast over the now-empty floor (the machinery itself is untouched — item 6 removes it). `TestBuildEnabledMechanismsFloorsAFreshRegistry` (`internal/agent/construct_test.go`) failed the same way and was recast the same way; `enable_mechanisms_test.go`'s `NilAndEmptyBuildTheOffRampFloor` still passes vacuously and is left to item 6.
+
+NOTES (2026-09-03): the item's Acceptance excludes `cmd/apogee`, but two of its tests failed on the emptied floor — `TestListMechanismsAppliesTheOffRampFloor` (`wire_options_test.go`) and `TestSettingsRowsFormatEffectiveValues`'s `"4 mechanisms"` pin. Rather than commit a red package between items 5 and 6, both assertions were made honest about the empty floor with no OffRampFloor machinery touched; item 6 owns their final shape.
+
+NOTES (2026-09-03): the recast of `enable_mechanisms_test.go` needed a surviving catalogued row that fires through a scripted loop — `syntax`, driven by a well-formed `write_file` call with unbalanced Go content (well-formed so the tool-call repair guard ahead of it stands down). `rebind_test.go` swapped to `autofix`. `wave1delivery_test.go`'s four off-ramp tests moved into `floorguards_test.go` recast over the guards (item 4's precedent), keeping the Bypass + tripped-Turn-Budget pin as ADR 0071 decision 1's dispatch-level proof.
+
+NOTES (2026-09-03): consequential edits — internal/agent/construct.go, internal/agent/loop_test.go, internal/agent/emptyreply_test.go, internal/domain/domaintest/domaintest.go, internal/mechanisms/{doc.go,prompts.go,intent.go,intent_test.go,robustness.go,retired.go,catalogue_test.go}: made necessary by the retirement; each named one of the two rows, `offramps.go`, or the off-ramp floor as live.
+
+NOTES (2026-09-03): `internal/validated/shipped_test.go:95,:98` still spell both IDs — it pins the SHIPPED gemma JSON verbatim, which item 18 retires; item 2's `DropRetired` relaxation absorbs the two new roll entries, so the file needed no edit here.
 
 **What.** Depends on 4. Move `tooluseenforcer.go:52-107` → `internal/floor/tooluse.go`
 (`EnforceToolUse(resp) (correction string, ok bool)`) and `emptyresponse.go:51-99` →

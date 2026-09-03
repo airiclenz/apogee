@@ -1,6 +1,7 @@
 package mechanisms
 
 import (
+	"encoding/json"
 	"path"
 	"regexp"
 	"strings"
@@ -21,8 +22,9 @@ import (
 // This file carries the helpers the family shares. The read/write tool-name sets and the
 // path/error-content sniffers are ported from apogee-sim (internal/toolsets/toolsets.go,
 // internal/proxy/{read_loop_detector,error_enrichment,next_step}.go @pin). The read-tool set
-// (readToolNames / isReadTool / toolCallPath, offramps.go) already lives in the package and is
-// reused here. Write detection has TWO semantics (robustness.go): the history family asks "did this
+// (readToolNames / isReadTool / toolCallPath) lives here, having outlived the two recovery rows
+// that first carried it — both are Floor guards now (ADR 0071), and internal/floor keeps its own
+// copy. Write detection has TWO semantics (robustness.go): the history family asks "did this
 // call mutate a file / was it a write action" and so uses isFileMutatingTool — the apogee-complete
 // superset that also carries apogee's own edit tools; only the content-repair Mechanisms (syntax,
 // autofix) use the narrower sim-only isWriteTool.
@@ -35,6 +37,39 @@ var listToolNames = toolSet(listSpellings)
 
 // isListTool reports whether name is one of the directory-listing tools greenfield detection reads.
 func isListTool(name string) bool { return listToolNames[name] }
+
+// readToolNames are the tools whose calls count as a file read across the history family. It
+// composes from the read spelling family (readSpellings, decompose.go) — apogee-sim's ReadTools
+// @pin plus the retired open_file spelling, a separate read tool until it merged into read_file on
+// 2026-08-11, kept because models may still emit the name — so the cot/filehint/library read sets
+// that share the family stay identical by construction rather than by hand-maintained copies.
+var readToolNames = toolSet(readSpellings)
+
+// isReadTool reports whether name is one of the file-reading tools progress detection counts.
+func isReadTool(name string) bool { return readToolNames[name] }
+
+// toolCallPath extracts the file path a tool call targets, matching apogee-sim's
+// toolsets.ExtractPath @pin (path / file_path / filePath / filename) plus destination — the second
+// half of the source/destination pair copy_file and move_file carry (internal/tools/file_ops.go).
+// "" when the arguments are not a JSON object or carry no path key — the "no path to count" case
+// progress detection skips.
+//
+// destination is read LAST, so a call carrying one of the four original spellings alongside it
+// keeps today's precedence. Reporting the destination — the file the write landed on — matches
+// deriveWriteTarget's semantics; the accepted limit is that a move's vacated SOURCE stays invisible
+// to the path-keyed family, cache invalidation included (destination-only, owner call 2026-08-22).
+func toolCallPath(args json.RawMessage) string {
+	var m map[string]any
+	if json.Unmarshal(args, &m) != nil {
+		return ""
+	}
+	for _, key := range []string{"path", "file_path", "filePath", "filename", "destination"} {
+		if v, ok := m[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // normalizePath canonicalises a file path for cross-Turn comparison (apogee-sim normalizePath
 // @pin): a leading "./" is dropped and the path is lexically cleaned, so "./a/b" and "a/b" compare
