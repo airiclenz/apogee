@@ -1130,7 +1130,17 @@ code-tree pointers — `config.yaml`'s is written into `~/.apogee/config.yaml` o
 
 **Commit:** `docs(design): archive the Mechanism catalogue with the wave's verdicts`
 
-## 21. `CONTEXT.md` — Floor guards enter the language; the nudges leave it
+## 21. `CONTEXT.md` — Floor guards enter the language; the nudges leave it — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the glossary is written against the LANDED end state, not the plan's forecast — the six keys, `domain.FloorConfig`'s zero-value-on `Disable…` bools, the request-projection cap and the archived catalogue link are all as shipped.
+
+NOTES (2026-09-03): beyond the item's enumerated sites — its rule being a floor, not a ceiling — three further CONTEXT.md sites were restated because this item's own change made them false: the opening two paragraphs (`:3-14`, which claimed apogee "runs a layer of gated, self-regulating Mechanisms" and framed the hard constraint on Mechanisms alone), the **Hook point** bullets that named `error_enrichment` and `truncate_history` as hook homes, and **Pruning**'s `_Avoid_` line, which contrasted a prune with the retired **History truncation**.
+
+NOTES (2026-09-03): the acceptance grep's surviving hits outside **Retired terms** are all deliberate and correct: rule **D1** (still binds catalogued rows — ADR 0071 Decision 2), the **Mechanism descriptor**'s `off-ramp` `Capability` value (still in `domain.Capability`'s enum, carried by no shipped row — restated to say so), the new **Floor guard** entry's `_Avoid_` pointer INTO Retired terms, and the always-on **syntax trailer** (`internal/tools/syntaxtrailer.go`), which the wave does not touch.
+
+NOTES (2026-09-03): the `#floor-guard` anchor follows the file's existing entry-anchor convention (`#intervention`, `#off-ramp-exempt-mechanism`); the one live link to `#off-ramp-exempt-mechanism` was inside the **Mechanism** entry this item rewrites, and no other repo doc links the removed anchors.
+
+NOTES (2026-09-03): retry fix — the **Floor guard** entry's parenthetical said the six keys carry "no flag, no `/settings` toggle"; item 11 (`c8fbd22a`) shipped all six as `Editable: true` registry rows with live apply (`internal/config/registry.go:409-444`, `cmd/apogee/wire_settings.go:737-744`). It now reads "no flag, no env; editable live in `/settings`" — which is also the repo's own sense of **file-only** (cf. `prune-tool-results` at `CONTEXT.md:1351`). No other sentence in the entry, or in this item's diff, repeated the claim (grep for `file-only|/settings|toggle|editable` over the file and the diff).
 
 **What.** Depends on 1. Add a **Floor guard** entry under "Safety and autonomy" beside **Bypass mode**
 (`:672-684`): the definition from ADR 0071, the six guards with their keys, "on in every arm, not a

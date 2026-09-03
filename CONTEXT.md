@@ -2,11 +2,12 @@
 
 Apogee is a terminal **coding agent** built for smaller local models — while working
 even better with bigger ones — that owns the full agentic loop — provider, tools,
-context, and sessions — and runs a layer of gated, self-regulating **Mechanisms**
-inside that loop to give smaller models the help they need.
-The hard constraint, inherited unchanged from the predecessor projects: **Apogee's
-Mechanisms must never make the underlying model perform worse than the same agent with
-those Mechanisms off.** That floor is **Bypass mode** (Mechanisms off, structure on) —
+context, and sessions — and runs six **Floor guards** inside that loop: engine behaviour
+every model runs with, above which a gated, self-regulating **Mechanism** lab surface can be
+armed for measurement.
+The hard constraint, inherited unchanged from the predecessor projects: **nothing Apogee puts in
+front of a model may make that model perform worse than the same agent without it.** That floor is
+**Bypass mode** (catalogued Mechanisms off, structure and Floor guards on) —
 **not** a naked model, because Budget, Compaction and Pruning are structural and load-bearing (a
 truly naked model just overflows its context window). The constraint is **proved at bench
 time** as a ground-truth, distributional non-inferiority gate against Bypass (see
@@ -669,19 +670,53 @@ privilege ladder**. Four:
   ADR 0012 reversed ADR 0004 here).
 _Avoid_: "permission level", "trust mode".
 
+**Floor guard**:
+Plain **engine behaviour** that changes only what the model sees **after its own failure**, or
+shapes the request **without steering it** — so it needs no per-model proof and cannot regress
+Bypass ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)).
+A Floor guard is **not a Mechanism**: no catalogue row, no `MechanismID`, no descriptor, no
+Capability, no strikes and no Turn-Budget throttle — the per-Turn `maxPostResponseRetries` bound
+is the only limiter the post-response guards share. **Six ship, on in every arm** — Bypass
+included — each switched off by exactly one top-level, **file-only** boolean (no flag, no env;
+editable live in `/settings`) whose key names it:
+- **tool-call repair** (`tool-call-repair`) — an unknown tool, malformed arguments or a missing
+  required parameter answered with the correction the Turn re-streams with.
+- **tool-loop breaker** (`tool-loop-breaker`) — a response repeating the previous Turn's exact
+  calls answered with a directive that names the repeat and steers at the remaining work.
+- **empty-response recovery** (`empty-response-recovery`) — a reply carrying neither text nor a
+  tool call answered with the completion-check nudge.
+- **tool-use enforcer** (`tool-use-enforcer`) — a second narration where an action was asked for
+  answered with the tool menu and the instruction to call one of it.
+- **read cache** (`read-cache`) — a redundant re-read of a file already read successfully and not
+  written since, capped to a header slice so the copy already in the conversation stands.
+- **tool-result cap** (`tool-result-cap`) — every older tool result that outgrew its fraction of
+  the Budget trimmed in the **request projection**, the conversation itself untouched (see
+  [Tool-result capping](#tool-result-capping)).
+The decision logic is **pure policy** in `internal/floor`; the seams that call it, the live on/off
+gate and the events a firing emits are `internal/agent`'s. `domain.FloorConfig` spells the six as
+`Disable…` bools, so an embedder handing `New` a bare `Config` gets the **whole floor**. A firing
+reaches every Driver as a **`FloorGuardEvent`** keyed by the guard's config key
+(`MechanismFiredEvent` stays for the lab rows).
+_Avoid_: "Mechanism" for a guard (a guard is not catalogued, gated or self-regulating, and no bench
+arm switches it on), "off-ramp" (the Capability that named two of them — see
+[Retired terms](#retired-terms)), "always-on Mechanism".
+
 **Bypass mode**:
-A `Config` flag **orthogonal to Agent mode** that turns Apogee's Mechanisms off while
-leaving the agent's structure intact. It disables the `proactive-nudge` and
-`response-repair` Mechanisms and makes the **Library inert** (no inject, no observe, no
-write), but **keeps the exempt off-ramps** (e.g. `empty_response_recovery`) so the floor is
-*functional* — a baseline that quit at the first stumble would pass the hard constraint
-trivially. Since [ADR 0070](docs/adr/0070-off-ramp-mechanisms-ship-on-by-default.md) those same
-off-ramps are also what a **default** run arms, so the Bypass floor and the shipped default no
-longer disagree about them. Budget, Compaction, and the rest of the loop still run: Bypass is the honest
+A `Config` flag **orthogonal to Agent mode** that turns the catalogued **Mechanisms** — the lab
+rows — off while leaving the agent's structure intact. It says nothing about the
+[Floor guards](#floor-guard), which stay on in **every** arm, so the floor is *functional* — a
+baseline that quit at the first stumble would pass the hard constraint trivially. With the shipped
+catalogue frozen **empty** ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)),
+`--bypass` on a stock install switches nothing off in effect: the honest floor it names is now the
+engine's own — guards on, nothing armed above them — and the control arm and the shipped
+default are literally the same agent unless a bench arm arms something. Budget, Compaction, and the
+rest of the loop still run: Bypass is the honest
 "Mechanisms-off" floor, **not** a naked model. It is also the bench's **aggregate control
 arm** — the same code path users can run — against which the hard-constraint non-inferiority
-gate is proved. See [ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md).
-_Avoid_: "naked model" (Bypass keeps the structural reducers on), "disabled mode", "raw mode".
+gate is proved. See [ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md) and
+ADR 0071 above.
+_Avoid_: "naked model" (Bypass keeps the structural reducers and every Floor guard on), "disabled
+mode", "raw mode".
 
 **Approval**:
 The human-in-the-loop gate on a single tool call — the primary safety guarantee in
@@ -1021,16 +1056,22 @@ _Avoid_: "MCP plugin", "MCP proxy" (it is a client; there is no proxy).
 
 **Mechanism**:
 A unit of gated, self-regulating behaviour that fires at a defined **Hook point** in
-the loop to help a small LLM. The catalogue of Mechanisms is the current best guess at
-what helps, decided by evidence (the external bench), not a fixed contract. Every
-Mechanism is *gated* (by conversation state, resource pressure, prompt shape, or model
-output) and subject to self-regulation unless declared exempt. Every catalogued Mechanism
-**ships off** until an A/B bench run turns it on (rule D1) — with one exception, the
-[Off-ramps](#off-ramp-exempt-mechanism), which ship **on**
-([ADR 0070](docs/adr/0070-off-ramp-mechanisms-ship-on-by-default.md)).
+the loop to help a small LLM. Since [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) the
+term names the **lab surface**: the hook API, the registry, `Config.EnableMechanisms`, the
+`mechanisms:` key, the `/settings` row and `--bypass` all stand, because they are how a bench arm
+arms an intervention without patching the engine — but the **shipped catalogue is frozen and
+empty**. The six rows every model benefited from became [Floor guards](#floor-guard); the other
+fourteen retired onto the **retired roll** (`internal/mechanisms/retired.go`), which answers an old
+config naming any of them with the release that retired the ID and, for a promoted one, the config
+key that succeeds it. A stock install therefore runs **zero Mechanisms**, and that is the intended
+end state, not a transitional one. Every catalogued Mechanism is *gated* (by conversation state,
+resource pressure, prompt shape, or model output), is subject to self-regulation unless declared
+exempt, and **ships off** until an A/B bench run turns it on (rule D1) — a gate that binds
+catalogued rows alone, never a Floor guard.
 _Avoid_: "intervention" (that is the bench's per-Turn experiment — a different surface,
 see [Intervention](#intervention)), "transform"/"analyzer"/"injector" as a *kind* (these
-were the retired proxy-era taxonomy — see below), "rule".
+were the retired proxy-era taxonomy — see below), "rule", "Mechanism" for a
+[Floor guard](#floor-guard) (a guard is engine behaviour, not a catalogue row).
 
 **Hook point**:
 *Where* in the loop a Mechanism fires — the primary classification of a Mechanism.
@@ -1040,12 +1081,11 @@ Four positions plus a cross-cutting capability:
 - **post-response** — inspect the model response and choose an action (see below)
   before the loop acts on it.
 - **pre-tool-exec** — act between the decision to run a tool and its execution.
-- **post-tool-result** — act on a tool result before the model next sees it (home of
-  `error_enrichment`; `correct_tool_result` is **deferred** — owner-ratified 2026-07-04,
-  a bench-side experimental hook until a production trigger is found). New to the loop;
-  the proxy could not host it.
-- **history-rewrite** — a capability that edits conversation state (home of
-  `truncate_history`); may attach at more than one point.
+- **post-tool-result** — act on a tool result before the model next sees it
+  (`correct_tool_result` is **deferred** — owner-ratified 2026-07-04, a bench-side experimental
+  hook until a production trigger is found). New to the loop; the proxy could not host it.
+- **history-rewrite** — a capability that edits conversation state; may attach at more than one
+  point. No shipped row attaches here or at post-tool-result: both are lab positions now.
 _Avoid_: "stage" (a pre-request-only, pipeline-era word), "phase".
 
 **Post-response decision**:
@@ -1075,7 +1115,9 @@ an Exchange boundary or survives as two contradictory copies.
 
 **Mechanism descriptor**:
 Per-Mechanism metadata orthogonal to its hook point: `Capability` (off-ramp /
-proactive-nudge / response-repair), `SuppressionPolicy` (exempt or strikes-3), and the
+proactive-nudge / response-repair — `off-ramp` survives as a lab value carried by no shipped row,
+since the two that carried it are [Floor guards](#floor-guard) now),
+`SuppressionPolicy` (exempt or strikes-3), and the
 stacking relations — the set of Mechanisms it is declared incompatible with, and the set
 it **requires** enabled (an enable-time constraint: switching a Mechanism on without its
 requirements is a config error, so dependent Mechanisms are benched and shipped as a
@@ -1121,37 +1163,10 @@ The **global** withdrawal rule: after several consecutive **harmful** Turns (the
 only on a harmful Turn; a neutral Turn freezes it, R3), all non-exempt Mechanisms are suppressed,
 cleared when productive activity resumes.
 
-**Off-ramp** (Exempt Mechanism):
-A Mechanism never subject to Adaptive Suppression or the Turn Budget, because suppressing
-it would leave the model with **no way out of a failed Turn** (e.g. `empty_response_recovery`
-— without it an empty response just ends the conversation). Exempt status is declared in
-the Mechanism descriptor. Off-ramps are also the **one exception to D1's default-off rule**:
-they ship **enabled**, a `mechanisms:` block that never names one arms it anyway, and only an
-explicit `<id>: false` turns one off
-([ADR 0070](docs/adr/0070-off-ramp-mechanisms-ship-on-by-default.md)). They are recovery
-guarantees, not small-model tuning — they fire only on a failed Turn and survive Bypass — so
-the bench gate D1 asks of every other Capability does not apply to them.
-_Avoid_: "always-on Mechanism" (a structurally-always-on Transform is not the same as an
-off-ramp — the former is just untracked, the latter is a deliberate recovery guarantee).
-
-**Library**:
-Apogee's **cross-session, per-model learning store**: it observes completed Turns and
-records per-model observations with Bayesian confidence, then a pre-request Mechanism
-injects qualifying observations to make Apogee better at a given model over time.
-File-backed under `~/.apogee/library/`. It keys observations on a **confidence-tagged
-`ModelFingerprint`**, resolved best-available — **weights-hash (high)** → **behavioral probe
-(medium)** → **metadata label (low)** — where **confidence gates injection** ("prefer not to
-inject under uncertainty"). The old "Library vs Failure library" ambiguity is **resolved by
-the repo split**: the runtime Library lives in Apogee; the development-time **Failure
-library** is now a [bench](#validation-and-the-bench) artifact.
-_Avoid_: "the failure library" (that is the bench's term), "cache" (the Library is learned
-evidence, not a cache), "keyed on the model name" (that was the predecessor's gap — keying
-is now the fingerprint).
-
 ### Context and history
 
-These five are distinct operations — "compress", "compact", "truncate", and "decompose"
-must **not** be used interchangeably.
+These are distinct operations — "compress", "compact", "cap", and "prune" must **not** be
+used interchangeably.
 
 **Budget**:
 The allocation of the model's context window across the parts of a request — system
@@ -1197,7 +1212,8 @@ tool menu fold in **after** it within that one message, as does the engine's
 reaches by construction: the Compaction summariser's instruction and the probe battery's. It is
 **config-tier**, part of the Bypass floor in both arms, never a Mechanism — and which home a new
 sentence of guidance belongs in (host fact → Orientation block, standing steering → this template,
-model-gated and measured → Mechanism, task-shaped → Skill) is ADR 0064's placement rule. See
+floor-wide and failure-shaped → [Floor guard](#floor-guard), model-gated and measured → Mechanism,
+task-shaped → Skill) is ADR 0064's placement rule. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) and
 [ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md) and
 [ADR 0067](docs/adr/0067-system-prompt-layers-are-an-explicit-additive-channel.md).
@@ -1315,15 +1331,18 @@ self-regulating loop behaviour).
 
 **Tool-result capping**:
 Per-tool-result truncation of any single result that exceeds its fraction of the Budget,
-with head/tail preservation, protecting the most recent Turn. A **pre-request Mechanism**;
-implemented **once** (the surviving half of the predecessor's `compress`). Beneath it sits a
-**structural floor** — not a Mechanism, so never off and never withdrawn: a single result
+with head/tail preservation, protecting the most recent Turn. A **[Floor guard](#floor-guard)**
+(`tool-result-cap`) since [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md),
+on in every arm and applied to the **request projection** — the committed conversation is never
+rewritten — implemented **once** (the surviving half of the predecessor's `compress`). Beneath it
+sits a **structural floor** — not even a guard, so no key turns it off: a single result
 whose estimate exceeds the *entire* History allocation is clamped as it enters the
 conversation, because a result that large survives no reducer and would overflow even the
 emergency fold that exists to rescue the Turn. Both render the same head/tail-plus-marker
-elision (`context.TruncateToolResult`), so the model reads one idiom; the Mechanism's tighter
-cap fires first when it is enabled.
-_Avoid_: "compression", "compaction" (capping is per-result and non-generative).
+elision (`context.TruncateToolResult`), so the model reads one idiom; the guard's tighter
+cap fires first unless `tool-result-cap: false` stands it down.
+_Avoid_: "compression", "compaction" (capping is per-result and non-generative), "Mechanism"
+(the cap was a catalogued row until ADR 0071; it is engine behaviour now).
 
 **Pruning**:
 The **structural** conversation-level reducer that collapses *stale tool results* — and nothing
@@ -1341,8 +1360,8 @@ invalidates the upstream prefix cache
 ([ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §6), which is why the
 band is wide rather than a single threshold.
 _Avoid_: "compaction" (Pruning is mechanical and drops nothing but tool output; Compaction is
-generative and summarises everything), "truncation" (capping and History truncation both shorten
-text in place; a prune replaces a whole result with a stub naming the call that produced it).
+generative and summarises everything), "truncation" (the tool-result cap shortens text in place;
+a prune replaces a whole result with a stub naming the call that produced it).
 
 **Tool summary**:
 The **structured half** of a tool's outcome, carried beside the prose half on the same
@@ -1410,34 +1429,6 @@ results clears what it can at a Turn boundary before the estimate-driven trigger
 a model call is spent only on history that pruning could not relieve. See
 [ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md).
 _Avoid_: "compression", "truncation" (Compaction is generative and summarises).
-
-**History truncation**:
-The **cheap alternative** to Compaction: *mechanically* dropping the middle of the
-conversation, keeping the last N exchanges. Config-gated, **off by default**; a
-history-rewrite Mechanism, validated against Compaction via the bench.
-_Avoid_: "compaction" (truncation is mechanical and lossy, not generative).
-
-**Guided decomposition**:
-The Mechanism (`guided_decomposition`) that **avoids** context growth rather than reducing
-it: when measured Budget signals show the task cannot fit — resolved file context exceeding
-its allocation at the first Turn, or history exceeding its allocation mid-Exchange — it
-steers the model's **own primary call** to enumerate the remaining subtasks, then converts
-that enumeration into `sub_agent` delegations, **one batch of up to the Parallel agents cap
-per Turn** (cap 1 = one per Turn, the serialized floor), carrying the not-yet-delegated
-items as a Deferred Response Action. The work happens in child Sessions;
-only their bounded reports come home. It is a proactive-nudge (off under Bypass), requires
-`tool_result_cap` (the only reducer that *shapes* a request mid-Exchange — the emergency fold
-also acts there, but reactively, lossily, and once per Turn), fires at top level only
-(`Depth == 0`), and no-ops benignly when `sub_agent` is not offered or the model ignores the
-steer. Because the enumeration is the model's own visible response, the queue survives
-suppression in honest history. See
-[ADR 0014](docs/adr/0014-guided-decomposition-steers-the-primary-call-and-serializes-delegation.md).
-_Avoid_: "planner" (Plan is an autonomy mode), "orchestrator" (that is the sub-agent spawn
-machinery, ADR 0013), "auto-decomposition" (the model performs the semantic split; the
-Mechanism only decides when to ask and serializes the follow-through). Not to be conflated with
-the **`decompose`** Mechanism (a prompt-shaping nudge; steers wording, not delegation — the two
-are declared incompatible), nor with an **Interjection** (a *human's* mid-Exchange message —
-"steer" here is the Mechanism sense, a directive shaping the model's own primary call).
 
 ### Deliverables and presentation
 
@@ -1596,9 +1587,9 @@ moved — the bindings did), "rehome" as a noun for a server switch (the operati
 The model identity a completed **model battery** earns — the model's own advertised label, at
 **medium** confidence. The battery raises an identity's *tier*; it never re-spells it (ADR 0021,
 Amendment 2026-07-22), because that label is the key [Validated set](#validation-and-the-bench)
-entries, user aliases and [Library](#self-regulation) observations are all filed under, and a
+entries and user aliases are both filed under, and a
 probe that renamed the model would orphan every one of them. It is the middle rung of the
-Library's best-available ladder — weights-hash (**high**) → behavioral fingerprint (**medium**) →
+`ModelFingerprint`'s own best-available ladder — weights-hash (**high**) → behavioral fingerprint (**medium**) →
 metadata label (**low**) — and the *only* source of `ConfidenceMedium`, because identity is
 resolved offline at startup: it reaches later sessions **through a persisted probe record**
 (versioned, owner-private, keyed on endpoint + advertised label + probe timestamp; any defect is
@@ -1650,17 +1641,23 @@ it a Mechanism (it is a candidate, not a catalogued one).
 A **per-model** enable set of catalogued Mechanisms that has passed the aggregate
 non-inferiority gate against Bypass **on that model** (ADR 0009) — proven *safe* there;
 benefit is deliberately **not** part of the claim (non-inferiority is the bar, superiority is
-not required). Keyed exactly as the [Library](#self-regulation) keys its observations: the
+not required). Keyed on the
 confidence-tagged `ModelFingerprint`, resolved best-available — the evidence attaches to the
 precise model measured, and any carry-over to a sibling quant or family member is an explicit
 human decision, never automatic. A model with no Validated set runs the catalogue's global
-defaults (the D1 floor). An entry is produced only by a completed, pre-registered aggregate
+defaults (the D1 floor) — and with the shipped catalogue empty, that is the
+[Floor guards](#floor-guard) and nothing above them. An entry is produced only by a completed, pre-registered aggregate
 Campaign passing the gate on that model — with engagement verified — regardless of who runs it.
 A matching set applies **whole or not at all** — a subset, or a merge with hand-picked
 Mechanisms, is a different, *unvalidated* stack — and applies *automatically* only at ≥ medium
 fingerprint confidence; below that it is **offered**, and applying it (like carrying it over to
 an aliased model) is an explicit config decision. Explicit mechanism config and Bypass take
-precedence over auto-application.
+precedence over auto-application. The **shipped roster is empty**: the one curated entry apogee
+shipped (gemma) retired with the fourteen rows, because its evidence was a leave-one-out campaign
+over a fifteen-member stack nine of whose members no longer exist and a measured set is its members
+([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)).
+The surface itself stays whole — a **user's own** `~/.apogee/validated/*.json` entry still resolves,
+still applies, and sheds any id that has since retired rather than being skipped as a set.
 _Avoid_: "recommended set" (promises help; the bar is safety), "default set" (an unknown model's
 default is the floor, not a set), "per-architecture set" (the key is the fingerprint, not the
 family).
@@ -1695,3 +1692,44 @@ vocabulary can map forward:
   *kinds* of Mechanism) → retired as the taxonomy; Mechanisms are now classified by
   [Hook point](#mechanism-and-hook-points). The distinctions that still matter survive
   as attributes (post-response decisions; Deferred-Action vs Request-prep-Hint).
+
+The rest were canonical in **this** glossary and retired with the mechanism wave of
+[ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md),
+which promoted six catalogue rows to [Floor guards](#floor-guard) and retired the other fourteen
+in **v0.20.0** on ratified verdicts rather than on ADR 0016's older "inert by construction"
+precondition. Their source, tests and assets are deleted; every id stays on the **retired roll**
+(`internal/mechanisms/retired.go`) with the release that retired it, so an old `mechanisms:` block
+naming one gets a message rather than an unknown-id failure, and the archived
+[catalogue](docs/design/archived/mechanism-catalogue.md) records the per-row verdict.
+
+- **Off-ramp** (Exempt Mechanism) → retired as a shipped concept: a Mechanism exempt from Adaptive
+  Suppression and the Turn Budget because suppressing it would leave the model with no way out of a
+  failed Turn. The two rows that carried the Capability — `empty_response_recovery` and
+  `tool_use_enforcer` — are Floor guards now, on in every arm, so there is no D1 default-off rule
+  left for them to be the exception to. The `off-ramp` **Capability value** survives in the
+  descriptor enum as lab vocabulary, carried by no shipped row.
+- **Library** (the cross-session, per-model **learning store** that observed completed Turns and
+  injected qualifying observations through a pre-request Mechanism) → retired with the `library`
+  Mechanism: nothing observes Turns or injects learned text any more, and `~/.apogee/library/` on
+  disk is never touched. `internal/library`'s other half stays and is not this term — the
+  confidence-tagged `ModelFingerprint` and the persisted probe record, which serve
+  [Validated sets](#validation-and-the-bench) and `probe model`. The **Failure library** was always
+  the bench's own term and is unaffected.
+- **History truncation** (`truncate_history`) → retired unshipped: the cheap alternative to
+  Compaction, mechanically dropping the middle of the conversation and keeping the last N
+  exchanges. [Compaction](#context-and-history) is the conversation-level reducer, with
+  [Pruning](#context-and-history) as the cheap structural pass beneath it.
+- **Guided decomposition** (`guided_decomposition`) and **`decompose`** → retired. The first steered
+  the model's own primary call to enumerate remaining subtasks under measured Budget pressure and
+  converted that enumeration into paced `sub_agent` delegations; the second was a prompt-shaping
+  nudge that steered wording, not delegation. A model still delegates through the `sub_agent` tool
+  on its own initiative — nothing prompts it to.
+  [ADR 0014](docs/adr/0014-guided-decomposition-steers-the-primary-call-and-serializes-delegation.md)
+  stands as history and binds nothing shipped.
+- The rest of the nudge catalogue — `stall_nudge`, `list_nudge`, `tool_use_directive`, `filehint`,
+  `read_loop`, `read_repeat`, `toolfilter`, `error_enrichment`, `syntax`, `autofix` → retired
+  unshipped, their catalogue verdicts never having left `pending`. Two names survive elsewhere
+  and are not these rows: the always-on **syntax trailer** the four writing tools append
+  (`internal/tools/syntaxtrailer.go`) is unrelated to the `syntax` Mechanism, and the
+  [read cache](#floor-guard) is `cached_content_intercept` promoted, not `read_repeat`, whose twin
+  it was.
