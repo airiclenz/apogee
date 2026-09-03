@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-seven files: the handle and its lifecycle, the loop proper, the tool path, and the
+// Twenty-eight files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
