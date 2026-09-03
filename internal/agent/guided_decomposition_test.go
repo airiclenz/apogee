@@ -3,7 +3,7 @@ package agent
 // Loop-level end-to-end acceptance for the guided_decomposition Mechanism (ADR 0014, plan item 5):
 // the whole stack driven through the REAL loop with nothing of the Mechanism mocked. The Mechanism is
 // built through the production catalogue (wave1Registry → mechanisms.Build — the seam the config
-// surface drives) and stacked with its Required peer tool_result_cap, so these tests prove the
+// surface drives), with the tool-result cap it used to be stacked with now a Floor guard, so these tests prove the
 // registry-built dispatch path end-to-end: an oversized primary call gets the enumeration steer; the
 // model's list is intercepted into a REAL nested sub_agent fan-out serialized one delegation per Turn;
 // the remaining-items directive rides the deferred-correction queue (and survives a snapshot/resume);
@@ -57,7 +57,8 @@ const gdWindow = 2000
 func gdOversizedInput() string { return strings.Repeat("decompose this large task into parts ", 60) }
 
 // gdConfig wires the sub_agent recursion point, the discovered window, and the production-catalogue
-// guided_decomposition + tool_result_cap stack (the Required peer) onto a fresh Config.
+// guided_decomposition row onto a fresh Config. The tool-result cap it used to be stacked with is a
+// Floor guard now (ADR 0071), so it is already on and needs no arming.
 func gdConfig(t *testing.T, sink domain.EventSink) domain.Config {
 	t.Helper()
 	return gdConfigWithTools(t, sink)
@@ -69,7 +70,7 @@ func gdConfigWithTools(t *testing.T, sink domain.EventSink, extra ...domain.Tool
 	t.Helper()
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, extra...) // registers sub_agent so the fan-out has a target
 	cfg.Context.MaxContextTokens = gdWindow
-	cfg.Mechanisms = wave1Registry(t, "guided_decomposition", "tool_result_cap")
+	cfg.Mechanisms = wave1Registry(t, "guided_decomposition")
 	return cfg
 }
 

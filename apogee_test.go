@@ -216,9 +216,10 @@ func mustAdd(t *testing.T, registry *apogee.MechanismRegistry, m orderingMech) {
 }
 
 // TestCataloguedMechanisms asserts the public catalogue query is non-empty, sorted by ID, and
-// exposes the ADR 0014 guided_decomposition ↔ tool_result_cap Requires relation — all through the
+// exposes the ADR 0014 guided_decomposition ↔ decompose IncompatibleWith relation — all through the
 // public surface only (no internal import), so it also guards that the descriptor metadata is
-// reachable without building any Mechanism (ADR 0015 §3).
+// reachable without building any Mechanism (ADR 0015 §3). The Requires relation it used to read is
+// gone from the catalogue: its peer, tool_result_cap, is the `tool-result-cap` Floor guard now.
 func TestCataloguedMechanisms(t *testing.T) {
 	got := apogee.CataloguedMechanisms()
 	if len(got) == 0 {
@@ -242,22 +243,25 @@ func TestCataloguedMechanisms(t *testing.T) {
 	if gd == nil {
 		t.Fatal("CataloguedMechanisms() missing guided_decomposition")
 	}
-	if len(gd.Requires) != 1 || gd.Requires[0] != "tool_result_cap" {
-		t.Errorf("guided_decomposition Requires = %v, want [tool_result_cap]", gd.Requires)
+	if len(gd.IncompatibleWith) != 2 || gd.IncompatibleWith[0] != "decompose" {
+		t.Errorf("guided_decomposition IncompatibleWith = %v, want [decompose truncate_history]", gd.IncompatibleWith)
 	}
 }
 
 // TestCataloguedMechanisms_ReturnsClonedDescriptors pins the documented clone contract (ADR 0015 §3):
 // each query returns descriptors whose slice fields are independent of the static catalogue, so a
-// caller may mutate a returned descriptor's Requires / IncompatibleWith freely (e.g. to compute a
+// caller may mutate a returned descriptor's IncompatibleWith freely (e.g. to compute a
 // leave-one-out arm) without corrupting a later query. Mutating an element of the FIRST result's
 // slices must leave a SECOND query pristine — reverting cloneDescriptor's slices.Clone would let the
 // mutation reach back into the shared catalogue row and fail this test.
+//
+// It exercises IncompatibleWith alone: no catalogued row declares Requires any more, the one that did
+// having named the tool-result cap now promoted to a Floor guard. Both fields are cloned by the same
+// slices.Clone, so the contract stands on either.
 func TestCataloguedMechanisms_ReturnsClonedDescriptors(t *testing.T) {
 	first := apogee.CataloguedMechanisms()
 
-	// guided_decomposition carries BOTH a non-empty Requires ([tool_result_cap]) and a non-empty
-	// IncompatibleWith ([decompose, truncate_history]), so it exercises both cloned slice fields.
+	// guided_decomposition carries a non-empty IncompatibleWith ([decompose, truncate_history]).
 	idx := -1
 	for i := range first {
 		if first[i].ID == "guided_decomposition" {
@@ -268,16 +272,14 @@ func TestCataloguedMechanisms_ReturnsClonedDescriptors(t *testing.T) {
 	if idx == -1 {
 		t.Fatal("CataloguedMechanisms() missing guided_decomposition")
 	}
-	if len(first[idx].Requires) == 0 || len(first[idx].IncompatibleWith) == 0 {
-		t.Fatalf("guided_decomposition Requires=%v IncompatibleWith=%v; the clone test needs both non-empty",
-			first[idx].Requires, first[idx].IncompatibleWith)
+	if len(first[idx].IncompatibleWith) == 0 {
+		t.Fatalf("guided_decomposition IncompatibleWith=%v; the clone test needs it non-empty",
+			first[idx].IncompatibleWith)
 	}
 
-	wantRequires := first[idx].Requires[0]
 	wantIncompatible := first[idx].IncompatibleWith[0]
 
-	// Mutate the returned slice elements in place — reachable only if the caller owns the backing array.
-	first[idx].Requires[0] = "mutated_requirement"
+	// Mutate the returned slice element in place — reachable only if the caller owns the backing array.
 	first[idx].IncompatibleWith[0] = "mutated_incompatible"
 
 	second := apogee.CataloguedMechanisms()
@@ -291,10 +293,6 @@ func TestCataloguedMechanisms_ReturnsClonedDescriptors(t *testing.T) {
 	if gd == nil {
 		t.Fatal("second CataloguedMechanisms() missing guided_decomposition")
 	}
-	if gd.Requires[0] != wantRequires {
-		t.Errorf("Requires[0] = %q after mutating the first result; want the pristine %q — the returned slice aliases the static catalogue",
-			gd.Requires[0], wantRequires)
-	}
 	if gd.IncompatibleWith[0] != wantIncompatible {
 		t.Errorf("IncompatibleWith[0] = %q after mutating the first result; want the pristine %q — the returned slice aliases the static catalogue",
 			gd.IncompatibleWith[0], wantIncompatible)
@@ -303,10 +301,22 @@ func TestCataloguedMechanisms_ReturnsClonedDescriptors(t *testing.T) {
 
 // TestEnableErrors_MatchableThroughRoot proves the enable-time sentinels are matchable through the
 // root re-exports: a half-armed Requires stack fails New with apogee.ErrMissingRequirement and a
-// bogus ID fails with apogee.ErrUnknownMechanism (ADR 0015 §4, locked decision 5).
+// bogus ID fails with apogee.ErrUnknownMechanism (ADR 0015 §4, locked decision 5). The half stack is
+// a registry a host injects rather than a catalogue pair: no catalogued row declares Requires any
+// more, its one declarer's peer having become a Floor guard, while the gate and the sentinel stay.
 func TestEnableErrors_MatchableThroughRoot(t *testing.T) {
 	half := validConfig()
-	half.EnableMechanisms = []apogee.MechanismID{"guided_decomposition"} // Requires tool_result_cap
+	registry := apogee.NewMechanismRegistry()
+	if err := registry.Add(apogee.RegisteredMechanism{
+		Descriptor: apogee.MechanismDescriptor{
+			ID:       "half_stack",
+			Requires: []apogee.MechanismID{"absent_peer"},
+		},
+		Hook: orderingMech{id: "half_stack"},
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	half.Mechanisms = registry
 	if _, err := apogee.New(half); !errors.Is(err, apogee.ErrMissingRequirement) {
 		t.Errorf("New(half-stack) err = %v, want ErrMissingRequirement", err)
 	}

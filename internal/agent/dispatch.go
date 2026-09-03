@@ -1320,11 +1320,11 @@ func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
 // follow-up B). Keying the floor to the fold's own unknown-window budget makes the two meet exactly:
 // content that survives the clamp is, by construction, content the fold can still render.
 //
-// The threshold sits deliberately far above the `tool_result_cap` Mechanism's: the whole History
+// The threshold sits deliberately far above the tool-result-cap Floor guard's: the whole History
 // allocation (~60% of the working room, ~48% of the window at the default reserve), chosen because
 // it sits BELOW the emergency fold's own transcript budget at every window an agent can
 // realistically run in, which is the property that keeps the fold survivable — while the
-// Mechanism's tighter 40%-of-working-room nudge shapes the ordinary case. That ordering is
+// guard's tighter 40%-of-working-room cap shapes the ordinary case. That ordering is
 // arithmetic, not an invariant: the fold budgets its transcript at window - compactMaxTokens -
 // compactPromptOverheadTokens (= window - 4608), so the floor stays under it only while
 // 0.6*(window - reserve) < window - 4608 — windows above ~8.9k tokens at the default reserve.
@@ -1339,11 +1339,11 @@ func (a *Agent) structuralFloor() int {
 
 // clampToBound is the RENDERING both structural clamps share: content whose estimated tokens exceed
 // bound is replaced by the head/tail-plus-marker elision (context.TruncateToolResult — the same
-// shape `tool_result_cap` renders), so the model reads ONE "the middle was dropped, re-read the
+// shape the tool-result-cap guard renders), so the model reads ONE "the middle was dropped, re-read the
 // range" idiom whichever seam produced it. Content within bound is returned untouched.
 //
 // It never GROWS content: a pathological few-very-long-lines body the head/tail form cannot shrink
-// is left whole (the same guard tool_result_cap applies).
+// is left whole (the same check the tool-result-cap guard applies).
 func (a *Agent) clampToBound(content string, bound int) string {
 	b := a.budget()
 	if b.EstimateTokens(len(content)) <= bound {
@@ -1361,12 +1361,14 @@ func (a *Agent) clampToBound(content string, bound int) string {
 // instead of whole.
 //
 // It is structural, not a Mechanism (ADR 0006's floor): it consults no config, is never disabled
-// under Bypass, and self-regulation cannot withdraw it. The `tool_result_cap` Mechanism stays the
-// A/B-able tuning valve above it and cannot substitute for it — it is default-off, bypass-disabled,
-// withdrawable, and caps only the turns BEFORE the most recent tool call, so the freshly appended
-// result (the one that overflows) is exactly the one it never touches.
+// under Bypass, and self-regulation cannot withdraw it. The tool-result-cap Floor guard is the
+// tighter working cap above it and cannot substitute for it — the guard caps only the turns BEFORE
+// the most recent tool call, so the freshly appended result (the one that overflows) is exactly the
+// one it never touches. Both are structural now, and the difference is WHAT each edits: the clamp
+// edits the conversation, the guard the projected request; only the guard has a key
+// (`tool-result-cap`) a user can switch off.
 //
-// Unlike the Mechanism, which edits only the projected request, this clamp edits the conversation
+// Unlike the guard, which edits only the projected request, this clamp edits the conversation
 // itself: the raw result never reaches history, and so never reaches a snapshot or the rendered
 // transcript. That is the price of a floor that must hold for every later reducer — and the model
 // is told, in the marker, to re-read the omitted range.

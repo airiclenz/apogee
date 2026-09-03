@@ -17,9 +17,10 @@
 //
 // # The Mechanism files, one line each
 //
-// Thirteen files carrying fifteen catalogue rows — one row per file, except cot.go, which
+// Twelve files carrying fourteen catalogue rows — one row per file, except cot.go, which
 // carries three. Each holds its Mechanism's init() registration, descriptor, constructor, hook
-// implementation, and the logic only that Mechanism uses.
+// implementation, and the logic only that Mechanism uses. prompts.go is described with them and
+// registers nothing: it holds the prompt-asset embed several of them load through.
 //
 // autofix.go is formatter repair: a written file is handed to the language's real formatter in a
 // gated sub-process and the repaired content is spliced back into the call. cot.go is the Wave-4 completion-nudge
@@ -37,9 +38,8 @@
 // re-read in the response about to be sent. syntax.go is the write-content syntax-check Mechanism
 // (the checker itself is the internal/syntaxcheck package). toolfilter.go narrows the tool menu before the
 // request goes out. prompts.go declares this package's prompt-asset embed and its mustPrompt
-// loader (the prompts/ directory, below) — cot.go, decompose.go, emptyresponse.go and library.go
-// load their own assets through it. toolresultcap.go caps oversized tool results mid-Exchange — the one reducer that shapes a
-// request rather than the history. truncatehistory.go is the drop-the-middle history rewrite.
+// loader (the prompts/ directory, below) — cot.go, decompose.go and library.go
+// load their own assets through it. truncatehistory.go is the drop-the-middle history rewrite.
 //
 // # The shared plumbing, one line each
 //

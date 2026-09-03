@@ -226,7 +226,7 @@ func (a *Agent) shouldAutoCompact() bool {
 	// S2: auto-compaction is Exchange-boundary-only. At the top-of-step() placement inExchange is
 	// false only at an Exchange opening (before pendingInput is consumed), so a mid-Exchange
 	// over-budget Turn (a tool-continuation) defers the fold to the next opening — the
-	// tool_result_cap Mechanism and the loop's structural floor on a single oversized result shape
+	// tool-result-cap Floor guard and the loop's structural floor on a single oversized result shape
 	// the request mid-Exchange, and emergencyFold rescues it once the window is actually blown
 	// (ADR 0018). Folding on THIS estimate mid-Exchange would leave the request ending in an
 	// assistant summary; the emergency fold pays for the exception with its user bridge.

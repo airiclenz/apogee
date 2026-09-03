@@ -43,9 +43,9 @@
 // nothing in this package changes for it. The pure token arithmetic behind both triggers (the ceil
 // chars→token conversion and the History compare) lives on domain.Budget (one implementation,
 // ADR 0010's lowest-layer rule); this package keeps the calibration (TokenEstimator) and delegates
-// the math. Tool-result capping is the second consumer, but it lives in package mechanisms
-// (tool_result_cap): it is a config-gated pre-request Mechanism, not structural, so it reads the
-// Budget through the hook surface rather than living here. Its head/tail elision RENDERING does
+// the math. Tool-result capping is the second consumer, but it lives in package floor (the
+// tool-result-cap guard): it shapes the projected request rather than the working context, so it
+// reads the Budget off the Request it is handed rather than living here. Its head/tail elision RENDERING does
 // live here (TruncateToolResult), shared with the loop's structural floor on a single oversized
 // tool result so both reducers elide with one shape and one marker.
 package context

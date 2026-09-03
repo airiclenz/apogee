@@ -13,8 +13,8 @@ import (
 
 // guided_decomposition registers the guided-decomposition Mechanism's catalogue row (ADR 0014).
 // Default-off (D1) — the config surface builds it only when the `mechanisms:`
-// block enables it, and it is benched as a stack with tool_result_cap (Requires, below) so the
-// bench measures the two together. It steers the PRIMARY call, on an oversized task, to first
+// block enables it. It was benched as a stack with the tool-result cap, which is now the
+// `tool-result-cap` Floor guard and so runs in every arm (ADR 0071). It steers the PRIMARY call, on an oversized task, to first
 // enumerate the work as a numbered list of self-contained subtasks, then paces the fan-out at one
 // BATCH of min(Parallel agents cap, remaining) sub_agent delegations per Turn (ADR 0014 amendment
 // 2026-08-07; cap 1 — no server slots advertised — is the ratified one-per-Turn floor). Two halves on
@@ -52,7 +52,7 @@ const (
 // delegated task and named in the follow-through directive. Child reports accumulate in one Exchange
 // that no generative reducer can fold mid-Exchange — a batch's reports land faster still, which makes
 // the coupling tighter, not looser (amendment 2026-08-07) — so each child is asked to report tersely
-// to keep the accumulation small; tool_result_cap (the Required peer) caps whatever is left.
+// to keep the accumulation small; the tool-result-cap Floor guard caps whatever is left.
 const guidedDecompositionReportHygiene = "When done, report back a single compact result — the key " +
 	"findings, decisions, and file paths only, not a step-by-step narration of what you did."
 
@@ -105,14 +105,14 @@ func newGuidedDecomposition(Deps) (any, error) {
 // 2) — and IncompatibleWith truncate_history — a mid-Exchange truncation longer than its keep window
 // can drop the enumeration message the cursor re-derives the remainder from, destroying the fan-out
 // mid-flight (F7; one-sided declaration suffices — detectIncompatibility is symmetric in effect). It
-// Requires tool_result_cap, the peer it is benched as a stack with; enabling it without
-// tool_result_cap is a startup error (ValidateRequirements, locked decision 3 / ADR 0014 §4).
+// declares NO Requires edge any more: the tool-result cap it used to name as its Required peer
+// (locked decision 3 / ADR 0014 §4) is the `tool-result-cap` Floor guard now, so every run it is
+// enabled in already caps oversized results and there is nothing left for the gate to insist on.
 var guidedDecompositionDescriptor = domain.MechanismDescriptor{
 	ID:               guidedDecompositionID,
 	Capability:       domain.CapProactiveNudge,
 	Suppression:      domain.SuppressStrikesThree,
 	IncompatibleWith: []domain.MechanismID{decomposeID, truncateHistoryID},
-	Requires:         []domain.MechanismID{toolResultCapID},
 }
 
 // PreRequest injects the enumeration steer on an oversized primary call so the model first plans the
@@ -511,8 +511,8 @@ func guidedDecompositionDirective(remaining []string, width int) string {
 // guidedDecompositionRemainder re-derives the outstanding subtasks from honest history (locked
 // decision 1): the enumeration is the model's own list+delegation message in the current Exchange,
 // and the dispatched tasks are the sub_agent calls recorded in that same Exchange plus this Turn's
-// own calls. It reads the CALLS, never the child results, so a report capped by tool_result_cap (the
-// Required peer) leaves the cursor's ground truth intact. Consumption is EXACT-MATCH and CONSUME-ONCE
+// own calls. It reads the CALLS, never the child results, so a report capped by the tool-result-cap
+// Floor guard leaves the cursor's ground truth intact. Consumption is EXACT-MATCH and CONSUME-ONCE
 // (item 3): an enumeration item is removed only by a dispatched task equal to the item itself or to
 // the item plus the appended hygiene ask, and each dispatched task consumes at most one item
 // occurrence — so two identical items need two dispatches, and a longer prefix-nested item never

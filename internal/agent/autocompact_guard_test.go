@@ -72,7 +72,7 @@ func countCompactionErrors(events []domain.Event) int {
 
 // TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening drives an Exchange whose history crosses the
 // Budget threshold mid-flight (a large tool result), so the continuation Turn is over budget while
-// inExchange: the fold must NOT fire there (tool_result_cap is the mid-Exchange relief valve, S2), and
+// inExchange: the fold must NOT fire there (the tool-result-cap guard is the mid-Exchange relief valve, S2), and
 // must instead fire at the next Exchange opening where the same over-budget history is folded.
 func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 	sink := &recordingSink{}

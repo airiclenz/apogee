@@ -15,14 +15,16 @@ const (
 	guardEmptyResponseRecovery = "empty-response-recovery"
 	guardToolUseEnforcer       = "tool-use-enforcer"
 	guardReadCache             = "read-cache"
+	guardToolResultCap         = "tool-result-cap"
 )
 
 // The actions a Floor guard books on its event: a guard that re-streams the Turn with a correction
-// took guardActionRetry, and one that reshaped a pending tool call before it ran took
-// guardActionIntercept.
+// took guardActionRetry, one that reshaped a pending tool call before it ran took
+// guardActionIntercept, and one that shrank content in the outgoing request took guardActionCap.
 const (
 	guardActionRetry     = "retry"
 	guardActionIntercept = "intercept"
+	guardActionCap       = "cap"
 )
 
 // SetFloor replaces the live Floor-guard gates for the rest of the session, mirroring
@@ -111,6 +113,26 @@ func (a *Agent) runPreToolExecGuards(turn int, call *domain.ToolCall) {
 	}
 	if floor.CacheRead(a.loopView(turn), domain.NewToolCallEdit(call)) {
 		a.emitFloorGuard(turn, guardReadCache, guardActionIntercept)
+	}
+}
+
+// runPreRequestGuards runs the pre-request Floor guards against the request the loop is about to
+// send, reshaping it in place. Like the other two seams it runs BEFORE the lab hooks at this seam
+// (runPreRequestHooks), so a catalogued Mechanism shapes the request the floor left behind.
+//
+// There is one guard here today — the tool-result cap — so there is no order to ratify. It edits
+// only the PROJECTED REQUEST: the conversation keeps every result whole, so a later Turn, a session
+// snapshot and the rendered transcript are unaffected by what the model was spared reading again.
+//
+// The guard runs on EVERY request the Turn sends, the re-derived one a fold produced included: the
+// fold rewrote the history, so the results the cap would have trimmed may not even be there any
+// more, and re-asking is cheaper than reasoning about which ones survived.
+func (a *Agent) runPreRequestGuards(turn int, req *domain.Request) {
+	if a.floorConfig().DisableToolResultCap {
+		return
+	}
+	if capped := floor.CapToolResults(req); capped > 0 {
+		a.emitFloorGuard(turn, guardToolResultCap, guardActionCap)
 	}
 }
 

@@ -554,11 +554,12 @@ func hermeticArm(t *testing.T, enable []apogee.MechanismID) (*apogee.Agent, erro
 }
 
 // TestBenchReadinessConstructionRefusals proves the campaign's fail-loud arms refuse construction
-// through the PUBLIC surface with a matchable sentinel: a half-armed Requires stack
-// (guided_decomposition without its required tool_result_cap peer, ADR 0014) fails
-// apogee.ErrMissingRequirement, and a bogus catalogue ID fails apogee.ErrUnknownMechanism — the same
-// startup gate the bench hits when it mis-plans an arm, asserted only through errors.Is on the root
-// sentinels.
+// through the PUBLIC surface with a matchable sentinel: an incompatible pair
+// (guided_decomposition with decompose, ADR 0014) fails apogee.ErrIncompatibleMechanisms, and a
+// bogus catalogue ID fails apogee.ErrUnknownMechanism — the same startup gate the bench hits when it
+// mis-plans an arm, asserted only through errors.Is on the root sentinels. The half-armed Requires
+// arm it used to carry has no catalogued case left: the peer it named is a Floor guard now, and
+// ErrMissingRequirement is proved over an injected registry in apogee_test.go.
 func TestBenchReadinessConstructionRefusals(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -567,9 +568,9 @@ func TestBenchReadinessConstructionRefusals(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "half-armed Requires stack",
-			enable:  []apogee.MechanismID{"guided_decomposition"},
-			wantErr: apogee.ErrMissingRequirement,
+			name:    "incompatible pair",
+			enable:  []apogee.MechanismID{"decompose", "guided_decomposition"},
+			wantErr: apogee.ErrIncompatibleMechanisms,
 		},
 		{
 			name:    "unknown catalogue ID",

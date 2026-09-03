@@ -9,8 +9,8 @@ import "strings"
 // Two reducers may shrink a single oversized tool result, at different moments and against
 // different ceilings: the loop's STRUCTURAL floor clamps a pathologically large result as it
 // enters the conversation (internal/agent appendToolResult), and the config-gated
-// `tool_result_cap` Mechanism trims older results in the projected request
-// (internal/mechanisms). They must render the elision IDENTICALLY — one head/tail shape and
+// tool-result-cap Floor guard trims older results in the projected request
+// (internal/floor). They must render the elision IDENTICALLY — one head/tail shape and
 // one marker — so the model learns a single "the middle was dropped, re-read the range" idiom
 // no matter which reducer produced it. The rendering therefore lives here, in the package that
 // owns the working context, rather than being duplicated in either caller.

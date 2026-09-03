@@ -57,7 +57,7 @@ func SaveMechanismSetting(path, id string, enabled bool) error {
 
 // writableMechanismID refuses an id this writer cannot put in the file as a plain key, BEFORE the
 // config is opened — so "refused" and "written" can never be the same outcome. A catalogue id is an
-// identifier (`tool_result_cap`), and an id a YAML reader would take back out under a different
+// identifier (`truncate_history`), and an id a YAML reader would take back out under a different
 // name — one needing quotes, one spanning lines, an empty one — would leave the block naming a
 // Mechanism nobody enabled while the one that was asked for stayed off.
 func writableMechanismID(id string) (string, error) {

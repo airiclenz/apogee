@@ -108,6 +108,20 @@ func (m incompatMech) row() domain.RegisteredMechanism {
 }
 func (incompatMech) PreRequest(context.Context, *domain.Request) error { return nil }
 
+// requiresMech is a minimal pre-request Mechanism declaring a Requires constraint — the fixture for
+// the construction-time requirements gate. It is synthetic rather than a catalogue row because no
+// catalogued Mechanism declares Requires any more: the one that did named the tool-result cap, which
+// is a Floor guard now (ADR 0071), while Requires itself stays lab API.
+type requiresMech struct {
+	id       domain.MechanismID
+	requires []domain.MechanismID
+}
+
+func (m requiresMech) row() domain.RegisteredMechanism {
+	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id, Requires: m.requires}, Hook: m}
+}
+func (requiresMech) PreRequest(context.Context, *domain.Request) error { return nil }
+
 // driveToolExchange drives one full Exchange whose first Turn carries a tool call and whose
 // second closes with text — so every one of the five hook points is exercised at least once.
 func driveToolExchange(t *testing.T, cfg domain.Config) {

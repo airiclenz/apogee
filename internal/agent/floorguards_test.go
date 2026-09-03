@@ -662,3 +662,92 @@ func TestFloorGuard_ReadCacheSkipsAToolWithoutAMaxLinesSchema(t *testing.T) {
 		t.Errorf("the read cache fired %d times against an undeclared schema, want 0", n)
 	}
 }
+
+// The tool-result cap is engine behaviour on the REQUEST PROJECTION: an oversized result from an
+// earlier Turn goes out trimmed to the shared head/tail elision while the conversation keeps every
+// byte of it, with NO catalogued Mechanism enabled and Bypass ON. The freshest tool-call Turn is
+// never touched, so the result the model just asked for always arrives whole.
+//
+// The opt-out is the same run with Floor.DisableToolResultCap set: the older result goes out whole
+// and nothing is booked.
+func TestFloorGuard_ToolResultCapTrimsAnOlderResultUnderBypass(t *testing.T) {
+	cases := []struct {
+		name      string
+		disabled  bool
+		wantFires int
+	}{
+		{name: "on by default", wantFires: 1},
+		{name: "DisableToolResultCap", disabled: true, wantFires: 0},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			big := numberedLines(200)
+			sink := &recordingSink{}
+			cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: big})
+			cfg.Context.MaxContextTokens = floorWindow
+			cfg.Bypass = true
+			cfg.Floor.DisableToolResultCap = tc.disabled
+			responder := &captureAllResponder{scripts: [][]provider.Delta{
+				toolCallScript("c1", "lookup", `{"q":"one"}`),
+				toolCallScript("c2", "lookup", `{"q":"two"}`),
+				contentScript("done"),
+			}}
+
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			runExchange(t, a, "look things up")
+
+			if len(responder.got) != 3 {
+				t.Fatalf("the model was called %d times, want 3", len(responder.got))
+			}
+			// The third request carries both results: c1's is now an OLDER result (c2's Turn is the
+			// most recent tool-call Turn), c2's is protected.
+			older, fresh := capturedToolResults(t, responder.got[2])
+			if fresh != big {
+				t.Errorf("the freshest result was reshaped: %d chars, want the whole %d", len(fresh), len(big))
+			}
+			if tc.disabled {
+				if older != big {
+					t.Errorf("with the guard off the older result was capped: %d chars, want %d", len(older), len(big))
+				}
+			} else {
+				if len(older) >= len(big) {
+					t.Errorf("the older result was not capped: %d chars, was %d", len(older), len(big))
+				}
+				if !strings.Contains(older, "start_line/end_line") {
+					t.Errorf("the capped result is missing the shared elision marker:\n%.200s", older)
+				}
+			}
+			// Whatever the request carried, the conversation keeps the full text — the guard edits
+			// the projection alone.
+			if got := a.conv.At(2).Content; got != big {
+				t.Errorf("the guard edited the conversation: %d chars committed, want the whole %d", len(got), len(big))
+			}
+			if n := guardFireCountFor(sink.events, guardToolResultCap); n != tc.wantFires {
+				t.Fatalf("the tool-result cap fired %d times, want %d", n, tc.wantFires)
+			}
+			if tc.wantFires > 0 && !hasGuardFire(sink.events, guardToolResultCap, guardActionCap) {
+				t.Errorf("no FloorGuardEvent{Guard: %q, Action: %q}", guardToolResultCap, guardActionCap)
+			}
+		})
+	}
+}
+
+// capturedToolResults returns the two tool-result message contents of a captured wire request
+// carrying exactly two, in conversation order.
+func capturedToolResults(t *testing.T, req provider.Request) (older, fresh string) {
+	t.Helper()
+	var got []string
+	for _, m := range req.Messages {
+		if m.Role == "tool" {
+			got = append(got, m.Content)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("request carried %d tool results, want 2", len(got))
+	}
+	return got[0], got[1]
+}

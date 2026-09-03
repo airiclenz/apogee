@@ -55,13 +55,15 @@ func TestGuidedDecompositionDescriptorAndOrdering(t *testing.T) {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
 	// IncompatibleWith decompose (locked decision 2) and truncate_history (F7 — a mid-Exchange
-	// truncation can drop the enumeration message the cursor re-derives from), and Requires
-	// tool_result_cap (locked decision 3).
+	// truncation can drop the enumeration message the cursor re-derives from).
 	if len(d.IncompatibleWith) != 2 || d.IncompatibleWith[0] != decomposeID || d.IncompatibleWith[1] != truncateHistoryID {
 		t.Errorf("IncompatibleWith = %v, want [%q %q]", d.IncompatibleWith, decomposeID, truncateHistoryID)
 	}
-	if len(d.Requires) != 1 || d.Requires[0] != toolResultCapID {
-		t.Errorf("Requires = %v, want [%q]", d.Requires, toolResultCapID)
+	// NO Requires edge: locked decision 3's Required peer, tool_result_cap, is the `tool-result-cap`
+	// Floor guard now (ADR 0071), so the capping it insisted on runs in every arm and a gate naming a
+	// retired ID could only ever refuse.
+	if len(d.Requires) != 0 {
+		t.Errorf("Requires = %v, want none — the Required peer is a Floor guard now", d.Requires)
 	}
 	// After toolfilter — the sub_agent-presence gate must read the final (post-toolfilter) menu.
 	if o := m.Ordering; len(o.After) != 1 || o.After[0] != toolFilterID {
@@ -81,14 +83,14 @@ func TestGuidedDecompositionDescriptorAndOrdering(t *testing.T) {
 // than its keep window can drop the enumeration message the cursor re-derives the remainder from,
 // destroying the fan-out mid-flight. One-sided declaration on guided_decomposition suffices —
 // detectIncompatibility is symmetric in effect — so co-registering the two fails
-// ValidateIncompatibilities and names the pair, while the valid stack (guided_decomposition +
-// tool_result_cap, its Required peer) validates cleanly.
+// ValidateIncompatibilities and names the pair, while guided_decomposition on its own validates
+// cleanly.
 func TestGuidedDecompositionIncompatibleWithTruncateHistory(t *testing.T) {
 	t.Parallel()
 
-	// The full stack the bench arms plus truncate_history is refused, naming both offenders.
+	// The row the bench arms plus truncate_history is refused, naming both offenders.
 	reg := domain.NewMechanismRegistry()
-	for _, id := range []domain.MechanismID{guidedDecompositionID, toolResultCapID, truncateHistoryID} {
+	for _, id := range []domain.MechanismID{guidedDecompositionID, truncateHistoryID} {
 		if err := reg.Add(mustBuild(t, id)); err != nil {
 			t.Fatalf("Add(%q): %v", id, err)
 		}
@@ -101,19 +103,19 @@ func TestGuidedDecompositionIncompatibleWithTruncateHistory(t *testing.T) {
 		t.Errorf("error %q does not name the incompatible pair %q/%q", msg, guidedDecompositionID, truncateHistoryID)
 	}
 
-	// The valid stack (guided_decomposition + its Required tool_result_cap, no truncate_history) still
-	// validates on every gate — the new relation refuses only the truncate_history combination.
+	// guided_decomposition without truncate_history still validates on every gate — the new relation
+	// refuses only the truncate_history combination.
 	valid := domain.NewMechanismRegistry()
-	for _, id := range []domain.MechanismID{guidedDecompositionID, toolResultCapID} {
+	for _, id := range []domain.MechanismID{guidedDecompositionID} {
 		if err := valid.Add(mustBuild(t, id)); err != nil {
 			t.Fatalf("Add(%q): %v", id, err)
 		}
 	}
 	if err := valid.ValidateIncompatibilities(); err != nil {
-		t.Errorf("ValidateIncompatibilities on guided_decomposition + tool_result_cap = %v, want nil", err)
+		t.Errorf("ValidateIncompatibilities on guided_decomposition alone = %v, want nil", err)
 	}
 	if err := valid.ValidateRequirements(); err != nil {
-		t.Errorf("ValidateRequirements on guided_decomposition + tool_result_cap = %v, want nil", err)
+		t.Errorf("ValidateRequirements on guided_decomposition alone = %v, want nil", err)
 	}
 }
 
@@ -1080,7 +1082,7 @@ func TestGuidedDecompositionOffScriptTaskLeavesRemainderIntact(t *testing.T) {
 }
 
 // The remainder is a cursor over the sub_agent CALLS, not their results: an older child report
-// capped to empty by tool_result_cap (the Required peer) leaves the derivation exact.
+// capped to empty by the tool-result-cap Floor guard leaves the derivation exact.
 func TestGuidedDecompositionDerivesFromCallsNotCappedResults(t *testing.T) {
 	t.Parallel()
 	enumeration := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
@@ -1090,7 +1092,7 @@ func TestGuidedDecompositionDerivesFromCallsNotCappedResults(t *testing.T) {
 		directive,
 		{Role: domain.RoleUser, Content: "big task"},
 		{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
-		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: ""}, // capped away by tool_result_cap
+		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: ""}, // capped away by the tool-result-cap guard
 	}
 	resp := guidedResponse(history, "", guidedSubAgentCall("c2", "Add unit tests "+guidedDecompositionReportHygiene))
 	decision := fireGuidedPostResponse(t, resp)

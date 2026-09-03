@@ -1,13 +1,17 @@
 package main
 
-// Config-surface acceptance for the guided_decomposition stack (ADR 0014, plan item 5): the
+// Config-surface acceptance for guided_decomposition (ADR 0014, plan item 5): the
 // `mechanisms:` block resolves to Config.EnableMechanisms (mechanisms.ResolveEnabled over the production
-// catalogue) and construction (apogee.New) enforces the ADR 0014 §4 stacking gates — Requires
-// tool_result_cap, IncompatibleWith decompose — as loud startup errors, not silent misconfiguration.
+// catalogue) and construction (apogee.New) enforces the ADR 0014 §4 stacking gates — IncompatibleWith
+// decompose — as a loud startup error, not silent misconfiguration.
+//
+// The Requires half of §4 no longer has a config-surface case: the peer it named, tool_result_cap, is
+// the `tool-result-cap` Floor guard now (ADR 0071), so guided_decomposition declares no Requires edge
+// and no catalogued row does. ErrMissingRequirement stays covered where the gate itself lives —
+// internal/domain over synthetic rows, internal/agent over an injected registry.
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -26,45 +30,41 @@ func guidedEnable(t *testing.T, cfg *apogee.Config, enabled map[string]bool) {
 	cfg.EnableMechanisms = ids
 }
 
-// Enabling guided_decomposition without its Required peer tool_result_cap is a loud startup error
-// with the ADR 0014 §4 wording (the item-1 ValidateRequirements gate, surfaced through New).
-func TestGuidedDecomposition_RequiresToolResultCapToBoot(t *testing.T) {
+// Enabling guided_decomposition from the `mechanisms:` block boots cleanly — the capping peer it
+// used to require is engine behaviour now, so the row arms on its own.
+func TestGuidedDecomposition_BootsFromTheConfigSurface(t *testing.T) {
 	t.Parallel()
 	cfg := validCfg(t)
 	guidedEnable(t, &cfg, map[string]bool{"guided_decomposition": true})
 
-	_, err := apogee.New(cfg)
-	if err == nil {
-		t.Fatal("New with guided_decomposition but no tool_result_cap: want a startup error, got nil")
+	agent, err := apogee.New(cfg)
+	if err != nil {
+		t.Fatalf("New with guided_decomposition: %v", err)
 	}
-	const want = `mechanism "guided_decomposition" requires "tool_result_cap" — enable both or neither; they are benched as a stack`
-	if !strings.Contains(err.Error(), want) {
-		t.Errorf("error = %q, want it to contain %q", err.Error(), want)
-	}
+	t.Cleanup(func() { _ = agent.Close() })
 }
 
-// Enabling the full stack (guided_decomposition + tool_result_cap) boots cleanly.
-func TestGuidedDecomposition_BootsWithToolResultCap(t *testing.T) {
+// A `mechanisms:` block still naming the retired tool_result_cap key boots exactly as before — the
+// key is dropped with a notice, never refused (the roll's whole purpose).
+func TestGuidedDecomposition_RetiredCapKeyStillBoots(t *testing.T) {
 	t.Parallel()
 	cfg := validCfg(t)
 	guidedEnable(t, &cfg, map[string]bool{"guided_decomposition": true, "tool_result_cap": true})
 
 	agent, err := apogee.New(cfg)
 	if err != nil {
-		t.Fatalf("New with the guided_decomposition + tool_result_cap stack: %v", err)
+		t.Fatalf("New with a block still naming the retired tool_result_cap: %v", err)
 	}
 	t.Cleanup(func() { _ = agent.Close() })
 }
 
 // guided_decomposition and decompose steer the same "task too big" symptom by different means and are
-// declared incompatible (locked decision 2): enabling both (with tool_result_cap present so only the
-// incompatibility can surface) is refused at construction.
+// declared incompatible (locked decision 2): enabling both is refused at construction.
 func TestGuidedDecomposition_IncompatibleWithDecompose(t *testing.T) {
 	t.Parallel()
 	cfg := validCfg(t)
 	guidedEnable(t, &cfg, map[string]bool{
 		"guided_decomposition": true,
-		"tool_result_cap":      true, // satisfies Requires, so ONLY the decompose incompatibility surfaces
 		"decompose":            true,
 	})
 

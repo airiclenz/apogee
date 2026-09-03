@@ -5,10 +5,9 @@ package agent
 // head/tail elision as it enters the conversation. These tests pin the four properties the item
 // names — over the allocation is clamped, under it passes verbatim, an unknown window measures
 // against the conservative assumed ceiling instead (unknownwindow_test.go owns that case), and the
-// tighter `tool_result_cap` Mechanism still governs what the REQUEST carries.
+// tighter tool-result-cap Floor guard still governs what the REQUEST carries.
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -149,15 +148,17 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 }
 
 // TestToolResultCapKeepsTheTighterCapAboveTheFloor pins the division of labour: a result between
-// the two ceilings — over the Mechanism's 40%-of-working-room nudge, under the floor's whole
+// the two ceilings — over the guard's 40%-of-working-room cap, under the floor's whole
 // History allocation — is committed to the conversation WHOLE (the floor is a floor, not the
-// working cap) while the projected request carries the Mechanism's tighter cap. The floor edits
-// history; the Mechanism edits only the request.
+// working cap) while the projected request carries the guard's tighter cap. The floor edits
+// history; the guard edits only the request.
+//
+// The guard needs no arming: it is engine behaviour on by default (ADR 0071), so this drives the
+// pre-request seam the loop drives — runPreRequestGuards — over a stock Config.
 func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink)
 	cfg.Context.MaxContextTokens = floorWindow
-	cfg.EnableMechanisms = []domain.MechanismID{"tool_result_cap"}
 	a, err := newAgent(cfg, echoResponder{reply: "unused"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -165,7 +166,7 @@ func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 
 	b := a.budget()
 	floorChars := int(float64(b.History) * b.CharsPerToken)
-	// The Mechanism's ceiling is 40% of the working room (mechanisms.toolResultBudgetFraction);
+	// The guard's ceiling is 40% of the working room (floor.toolResultBudgetFraction);
 	// the floor's is the whole History allocation (~60% of it). A payload at ~85% of the floor
 	// sits between the two.
 	between := numberedLines(200)
@@ -184,17 +185,49 @@ func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 	}
 
 	req, _ := a.buildRequest(0)
-	if err := a.runPreRequestHooks(context.Background(), 0, req); err != nil {
-		t.Fatalf("runPreRequestHooks: %v", err)
-	}
+	a.runPreRequestGuards(0, req)
 	projected := req.State().Messages[2].Content
 	if len(projected) >= len(between) {
-		t.Fatalf("tool_result_cap did not cap the older result: %d chars projected, was %d", len(projected), len(between))
+		t.Fatalf("the tool-result cap did not cap the older result: %d chars projected, was %d", len(projected), len(between))
 	}
 	if !strings.Contains(projected, "start_line/end_line") {
 		t.Errorf("capped request message missing the shared elision marker:\n%.200s", projected)
 	}
 	if a.conv.At(2).Content != between {
-		t.Error("the Mechanism edited the conversation; it may only edit the projected request")
+		t.Error("the guard edited the conversation; it may only edit the projected request")
+	}
+
+	// The firing is booked as a FloorGuardEvent naming the guard's own config key.
+	if !hasGuardFire(sink.events, guardToolResultCap, guardActionCap) {
+		t.Errorf("no %q FloorGuardEvent; the seam capped without booking a firing", guardToolResultCap)
+	}
+}
+
+// TestToolResultCapOptOutSendsTheResultWhole pins the key: with Floor.DisableToolResultCap set the
+// pre-request seam leaves the oversized older result exactly as the conversation holds it.
+func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink)
+	cfg.Context.MaxContextTokens = floorWindow
+	cfg.Floor.DisableToolResultCap = true
+	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	between := numberedLines(200)
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "go"})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
+	a.appendToolResult(0, domain.ToolResult{CallID: "c1", Content: between})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "lookup"}}})
+	a.appendToolResult(0, domain.ToolResult{CallID: "c2", Content: "small"})
+
+	req, _ := a.buildRequest(0)
+	a.runPreRequestGuards(0, req)
+	if got := req.State().Messages[2].Content; got != between {
+		t.Errorf("the opted-out guard still capped: %d chars projected, want the whole %d", len(got), len(between))
+	}
+	if hasGuardFire(sink.events, guardToolResultCap, guardActionCap) {
+		t.Error("an opted-out guard booked a firing")
 	}
 }

@@ -1,7 +1,6 @@
-package mechanisms
+package floor
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -16,9 +15,9 @@ func capBudget() domain.Budget {
 	return domain.Budget{ContextLimit: 1000, ResponseReserve: 200, CharsPerToken: 4}
 }
 
-// lines builds an n-line payload each line `line`, so its length is comfortably over maxChars and it
-// has enough lines that head+tail (40) genuinely elides a middle.
-func lines(n int, line string) string {
+// capLines builds an n-line payload each line `line`, so its length is comfortably over maxChars and
+// it has enough lines that head+tail (40) genuinely elides a middle.
+func capLines(n int, line string) string {
 	rows := make([]string, n)
 	for i := range rows {
 		rows[i] = line
@@ -26,40 +25,16 @@ func lines(n int, line string) string {
 	return strings.Join(rows, "\n")
 }
 
-// buildRequest is a Request carrying msgs and b — the pre-request working value the Mechanism shapes.
-func buildRequest(msgs []domain.Message, b domain.Budget) *domain.Request {
+// capRequest is a Request carrying msgs and b — the pre-request working value the guard shapes.
+func capRequest(msgs []domain.Message, b domain.Budget) *domain.Request {
 	return domain.NewRequest("m", msgs, nil, b, 0, nil)
 }
 
-func TestToolResultCapDescriptorAndOrdering(t *testing.T) {
-	t.Parallel()
-	m, err := Build(toolResultCapID, Deps{})
-	if err != nil {
-		t.Fatalf("Build(%q): %v", toolResultCapID, err)
-	}
-	d := m.Descriptor
-	if d.ID != toolResultCapID {
-		t.Errorf("ID = %q, want %q", d.ID, toolResultCapID)
-	}
-	if d.Capability != domain.CapProactiveNudge {
-		t.Errorf("Capability = %q, want proactive-nudge (Bypass-disabled context shaper, footnote 2)", d.Capability)
-	}
-	if d.Suppression != domain.SuppressStrikesThree {
-		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
-	}
-	if o := m.Ordering; len(o.Before) != 0 || len(o.After) != 1 || o.After[0] != decomposeID {
-		t.Errorf("Ordering = %+v, want After [decompose] (§Ordering seed, ratified into Table A 2026-07-04)", o)
-	}
-	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
-		t.Error("tool_result_cap does not implement PreRequestHook")
-	}
-}
-
-// TestToolResultCapTrimsOversizedResult caps an over-budget tool result to head+tail+marker and
+// TestCapToolResultsTrimsOversizedResult caps an over-budget tool result to head+tail+marker and
 // leaves an under-budget one whole — the core capping behaviour.
-func TestToolResultCapTrimsOversizedResult(t *testing.T) {
+func TestCapToolResultsTrimsOversizedResult(t *testing.T) {
 	t.Parallel()
-	big := lines(200, "a line of tool output that repeats to blow past the per-result budget ceiling")
+	big := capLines(200, "a line of tool output that repeats to blow past the per-result budget ceiling")
 	small := "a short, in-budget tool result"
 	msgs := []domain.Message{
 		{Role: domain.RoleUser, Content: "go"},
@@ -71,14 +46,14 @@ func TestToolResultCapTrimsOversizedResult(t *testing.T) {
 	}
 	// The most recent tool-call Turn is c2's (index 3); its result (index 4) is protected, so an
 	// oversized c2 result would still be spared. Make c1 (older, index 2) the one that gets capped.
-	req := buildRequest(msgs, capBudget())
+	req := capRequest(msgs, capBudget())
 
 	before := req.Revision()
-	if err := (toolResultCapMechanism{}).PreRequest(context.Background(), req); err != nil {
-		t.Fatalf("PreRequest: %v", err)
+	if capped := CapToolResults(req); capped != 1 {
+		t.Fatalf("CapToolResults capped %d results, want 1 (the oversized older one)", capped)
 	}
 	if req.Revision() == before {
-		t.Fatal("PreRequest booked no mutation; the oversized older result should have been capped")
+		t.Fatal("the guard booked no mutation; the oversized older result should have been capped")
 	}
 
 	got := req.State().Messages
@@ -98,20 +73,20 @@ func TestToolResultCapTrimsOversizedResult(t *testing.T) {
 	}
 }
 
-// TestToolResultCapProtectsMostRecentTurn pins that a result from the most recent tool-call Turn is
+// TestCapToolResultsProtectsMostRecentTurn pins that a result from the most recent tool-call Turn is
 // never capped even when it is oversized (apogee-sim findMostRecentAssistantTurn protection).
-func TestToolResultCapProtectsMostRecentTurn(t *testing.T) {
+func TestCapToolResultsProtectsMostRecentTurn(t *testing.T) {
 	t.Parallel()
-	big := lines(200, "freshest tool output that is oversized but belongs to the most recent turn")
+	big := capLines(200, "freshest tool output that is oversized but belongs to the most recent turn")
 	msgs := []domain.Message{
 		{Role: domain.RoleUser, Content: "go"},
 		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file"}}},
 		{Role: domain.RoleTool, ToolCallID: "c1", Content: big},
 	}
-	req := buildRequest(msgs, capBudget())
+	req := capRequest(msgs, capBudget())
 
-	if err := (toolResultCapMechanism{}).PreRequest(context.Background(), req); err != nil {
-		t.Fatalf("PreRequest: %v", err)
+	if capped := CapToolResults(req); capped != 0 {
+		t.Fatalf("CapToolResults capped %d results; the most recent Turn must be protected", capped)
 	}
 	if req.Revision() != 0 {
 		t.Fatal("the most recent Turn's result was capped; it must be protected")
@@ -121,11 +96,11 @@ func TestToolResultCapProtectsMostRecentTurn(t *testing.T) {
 	}
 }
 
-// TestToolResultCapInertWhenWindowUnknown pins the no-basis case: a zero Budget (no discovered
+// TestCapToolResultsInertWhenWindowUnknown pins the no-basis case: a zero Budget (no discovered
 // window ⇒ a zero Allocation) yields a zero ceiling, so capping is a no-op even for a huge result.
-func TestToolResultCapInertWhenWindowUnknown(t *testing.T) {
+func TestCapToolResultsInertWhenWindowUnknown(t *testing.T) {
 	t.Parallel()
-	big := lines(500, "huge output that would be capped if there were a budget to cap against")
+	big := capLines(500, "huge output that would be capped if there were a budget to cap against")
 	msgs := []domain.Message{
 		{Role: domain.RoleUser, Content: "go"},
 		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file"}}},
@@ -133,10 +108,10 @@ func TestToolResultCapInertWhenWindowUnknown(t *testing.T) {
 		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "read_file"}}},
 		{Role: domain.RoleTool, ToolCallID: "c2", Content: "recent"},
 	}
-	req := buildRequest(msgs, domain.Budget{}) // window unknown
+	req := capRequest(msgs, domain.Budget{}) // window unknown
 
-	if err := (toolResultCapMechanism{}).PreRequest(context.Background(), req); err != nil {
-		t.Fatalf("PreRequest: %v", err)
+	if capped := CapToolResults(req); capped != 0 {
+		t.Fatalf("CapToolResults capped %d results with no discovered window; it must be inert", capped)
 	}
 	if req.Revision() != 0 {
 		t.Fatal("capping fired with no discovered window; it must be inert")
@@ -146,22 +121,9 @@ func TestToolResultCapInertWhenWindowUnknown(t *testing.T) {
 	}
 }
 
-// TestToolResultCapBuildsFromCatalogue proves the catalogue row is wired: Build returns a working
-// Mechanism under the canonical ID.
-func TestToolResultCapBuildsFromCatalogue(t *testing.T) {
-	t.Parallel()
-	m, err := Build(toolResultCapID, Deps{})
-	if err != nil {
-		t.Fatalf("Build(%q): %v", toolResultCapID, err)
-	}
-	if m.Descriptor.ID != toolResultCapID {
-		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, toolResultCapID)
-	}
-}
-
-// TestToolResultCapCeiling pins the arithmetic: maxChars = (window - reserve) * charsPerToken *
+// TestCapToolResultsCeiling pins the arithmetic: maxChars = (window - reserve) * charsPerToken *
 // fraction, and a non-positive working window yields a zero ceiling.
-func TestToolResultCapCeiling(t *testing.T) {
+func TestCapToolResultsCeiling(t *testing.T) {
 	t.Parallel()
 	if got, want := capMaxChars(capBudget()), 1280; got != want {
 		t.Errorf("capMaxChars = %d, want %d ((1000-200)*4*0.4)", got, want)
@@ -171,13 +133,14 @@ func TestToolResultCapCeiling(t *testing.T) {
 	}
 }
 
-// jsonResult keeps the tool-result-as-JSON case honest: a capped result is still plain text with a
-// marker, not required to stay valid JSON (the model is told to re-read for the omitted range).
-func TestToolResultCapMarkerIsActionable(t *testing.T) {
+// TestCapToolResultsMarkerIsActionable keeps the tool-result-as-JSON case honest: a capped result is
+// still plain text with a marker, not required to stay valid JSON (the model is told to re-read for
+// the omitted range).
+func TestCapToolResultsMarkerIsActionable(t *testing.T) {
 	t.Parallel()
 	// A read_file-style result the model would want to re-read a range of. A later tool-call Turn
 	// (c2) makes c1's result an OLDER result eligible for capping (the most recent Turn is spared).
-	content := lines(300, `{"line": "some structured output that is long"}`)
+	content := capLines(300, `{"line": "some structured output that is long"}`)
 	msgs := []domain.Message{
 		{Role: domain.RoleUser, Content: "read it"},
 		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"big.json"}`)}}},
@@ -186,9 +149,9 @@ func TestToolResultCapMarkerIsActionable(t *testing.T) {
 		{Role: domain.RoleTool, ToolCallID: "c2", Content: "small recent result"},
 		{Role: domain.RoleAssistant, Content: "done reading"},
 	}
-	req := buildRequest(msgs, capBudget())
-	if err := (toolResultCapMechanism{}).PreRequest(context.Background(), req); err != nil {
-		t.Fatalf("PreRequest: %v", err)
+	req := capRequest(msgs, capBudget())
+	if capped := CapToolResults(req); capped != 1 {
+		t.Fatalf("CapToolResults capped %d results, want 1", capped)
 	}
 	capped := req.State().Messages[2].Content
 	if !strings.Contains(capped, "truncated") || !strings.Contains(capped, "start_line/end_line") {
@@ -221,5 +184,50 @@ func TestCapMaxCharsFollowsTheWorkingCeiling(t *testing.T) {
 	if tight >= loose {
 		t.Errorf("capMaxChars = %d bounded vs %d unbounded; the working ceiling did not shrink the cap",
 			tight, loose)
+	}
+}
+
+// TestCapToolResultsCountsEveryCappedResult pins the return value the seam gates its event on: two
+// oversized older results are both capped and both counted, so one firing is booked for the pass
+// rather than one per message.
+func TestCapToolResultsCountsEveryCappedResult(t *testing.T) {
+	t.Parallel()
+	big := capLines(200, "an oversized older tool result that has outgrown its share of the budget")
+	msgs := []domain.Message{
+		{Role: domain.RoleUser, Content: "go"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: big},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c2", Content: big},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c3", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c3", Content: "the freshest result, protected"},
+	}
+	req := capRequest(msgs, capBudget())
+	if capped := CapToolResults(req); capped != 2 {
+		t.Fatalf("CapToolResults capped %d results, want 2", capped)
+	}
+}
+
+// TestCapToolResultsNeverGrowsAResult pins the sim's one deliberate departure: a pathological
+// few-very-long-lines result the head/tail form cannot shrink is left WHOLE rather than replaced by
+// a longer rendering (the sim replaced unconditionally).
+func TestCapToolResultsNeverGrowsAResult(t *testing.T) {
+	t.Parallel()
+	// Two lines, both far over the ceiling: head (20 lines) plus tail (20 lines) covers the whole
+	// body, so the elision can only add its marker.
+	blob := strings.Repeat("x", 4000) + "\n" + strings.Repeat("y", 4000)
+	msgs := []domain.Message{
+		{Role: domain.RoleUser, Content: "go"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: blob},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c2", Content: "recent"},
+	}
+	req := capRequest(msgs, capBudget())
+	if capped := CapToolResults(req); capped != 0 {
+		t.Fatalf("CapToolResults capped %d results; a result the elision cannot shrink must be left whole", capped)
+	}
+	if got := req.State().Messages[2].Content; got != blob {
+		t.Errorf("unshrinkable result was rewritten: %d chars, was %d", len(got), len(blob))
 	}
 }

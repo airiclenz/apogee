@@ -51,6 +51,9 @@ type retiredRow struct {
 //   - cached_content_intercept (retired v0.20.0) — PROMOTED. The redundant-re-read interceptor
 //     became the `read-cache` Floor guard: it shapes the pending read without steering the model,
 //     so it needs no per-model proof and runs for every model (ADR 0071).
+//   - tool_result_cap (retired v0.20.0) — PROMOTED. The per-result trimmer became the
+//     `tool-result-cap` Floor guard: it shrinks what an old result costs in the projected request
+//     and tells the model how to read the omitted range back, so it shapes without steering.
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
@@ -58,6 +61,7 @@ var retired = []retiredRow{
 	{ID: "empty_response_recovery", Release: "v0.20.0", Successor: "empty-response-recovery"},
 	{ID: "tool_use_enforcer", Release: "v0.20.0", Successor: "tool-use-enforcer"},
 	{ID: "cached_content_intercept", Release: "v0.20.0", Successor: "read-cache"},
+	{ID: "tool_result_cap", Release: "v0.20.0", Successor: "tool-result-cap"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

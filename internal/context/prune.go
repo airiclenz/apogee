@@ -117,7 +117,7 @@ type pruneCandidate struct {
 
 // pruneProtectedIndex is the index of the keepTurns-th most recent assistant message carrying
 // tool calls — the start of the protected recent window, clamped up to conv.PrefixEnd so the
-// protected prefix is never a candidate. It generalises internal/mechanisms
+// protected prefix is never a candidate. It generalises internal/floor's
 // mostRecentToolCallTurn (keepTurns == 1) with one deliberate difference: where that helper
 // protects NOTHING when the conversation holds too few tool-calling Turns, this one reports
 // ok == false, because "the most recent keepTurns Turns are never touched" cannot be honoured

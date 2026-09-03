@@ -8,7 +8,7 @@ package agent
 // a.registry.ForSubAgent(), which hands the child that catalogue in a container of its own) and
 // CLEARS EnableMechanisms so the child does not rebuild those IDs into the inherited registry and
 // trip the already-registered rejection. These tests arm guided_decomposition +
-// tool_result_cap by ID with Config.Mechanisms left nil (the engine BUILDS the stack), drive one
+// syntax by ID with Config.Mechanisms left nil (the engine BUILDS the stack), drive one
 // real delegation, and prove the child ran the inherited stack — through New and through Resume, the
 // one construction path the ADR names.
 
@@ -21,28 +21,19 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// gdEnableStack is the production arm under test: the guided_decomposition stack with its Required
-// peer, left for the engine to BUILD (Config.Mechanisms nil). A spawned sub-agent must inherit this
-// built registry, not rebuild it.
-var gdEnableStack = []domain.MechanismID{"guided_decomposition", "tool_result_cap"}
+// gdEnableStack is the production arm under test: two catalogued rows left for the engine to BUILD
+// (Config.Mechanisms nil), one of which — syntax — is a response-repair row a CHILD can trip. A
+// spawned sub-agent must inherit this built registry, not rebuild it. (The stack used to name the
+// tool-result cap as guided_decomposition's Required peer; that is the `tool-result-cap` Floor guard
+// now, on for every agent at every Depth and so no proof that a registry was inherited.)
+var gdEnableStack = []domain.MechanismID{"guided_decomposition", "syntax"}
 
-// subAgentCapResult is a big, many-lined read_file result sized to sit BETWEEN the two per-result
-// ceilings at gdWindow: over tool_result_cap's (working budget 1600 tokens × 4 chars/token × 0.4 ≈
-// 2560 chars) and under the loop's structural floor (the whole History allocation, ~960 tokens ≈
-// 3840 chars — a result over THAT is clamped on the way into the conversation and would reach the
-// Mechanism already small, firing nothing). It is long enough that the head/tail trim strictly
-// shrinks it, so an older copy — once it falls out of tool_result_cap's protected most-recent-Turn
-// window — is capped, firing the Mechanism once inside the child.
-func subAgentCapResult() string {
-	return strings.Repeat("scanned a source line wide enough to matter for the budget\n", 60)
-}
-
-// enableMechanismsSubAgentConfig arms the guided_decomposition stack by ID (Config.Mechanisms left
-// nil so the engine builds it), wires the sub_agent recursion point plus a read_file tool the child
-// can call, and sets the discovered window so tool_result_cap has a non-zero ceiling.
+// enableMechanismsSubAgentConfig arms the stack by ID (Config.Mechanisms left nil so the engine
+// builds it), wires the sub_agent recursion point plus a write_file tool the child can call, and
+// sets the discovered window the delegation is budgeted against.
 func enableMechanismsSubAgentConfig(sink domain.EventSink) domain.Config {
 	cfg := subAgentConfig(sink, domain.ModeAskBefore,
-		fakeTool{name: "read_file", readOnly: true, result: subAgentCapResult()})
+		fakeTool{name: "write_file", result: "ok"})
 	cfg.EnableMechanisms = gdEnableStack
 	cfg.Context.MaxContextTokens = gdWindow
 	return cfg
@@ -50,17 +41,16 @@ func enableMechanismsSubAgentConfig(sink domain.EventSink) domain.Config {
 
 // enableMechanismsSubAgentScripts is the run-ordered script the shared responder replays across the
 // parent AND its one child: the parent delegates unprompted (a modest opening ask, so signal A never
-// fires; the committed delegation then keeps the once-per-Exchange gate quiet), and the child makes
-// two read_file Turns so the FIRST (older) oversized result falls out of tool_result_cap's protected
-// most-recent-Turn window and is capped on the child's third request — firing the inherited Mechanism
-// at Depth 1 — before the child and then the parent each answer.
+// fires; the committed delegation then keeps the once-per-Exchange gate quiet), and the child writes
+// a Go file whose payload is unbalanced — which the inherited syntax row retries in place, firing at
+// Depth 1 — before the child and then the parent each answer. The call itself is well formed, so the
+// tool-call repair Floor guard ahead of every hook stands down and leaves the seam to the Mechanism.
 func enableMechanismsSubAgentScripts() [][]provider.Delta {
 	return [][]provider.Delta{
-		subAgentCallScript("s1", "investigate the auth module and report the entry points"), // parent T0: unprompted delegation
-		toolCallScript("r0", "read_file", `{"path":"auth.go"}`),                             // child T0: first (soon-older) read
-		toolCallScript("r1", "read_file", `{"path":"login.go"}`),                            // child T1: second read → the first result is now unprotected
-		contentScript("child: entry points catalogued"),                                     // child T2: final report (tool_result_cap fires on this request)
-		contentScript("parent: synthesized the delegated investigation"),                    // parent T1: final answer
+		subAgentCallScript("s1", "investigate the auth module and report the entry points"),               // parent T0: unprompted delegation
+		toolCallScript("w0", "write_file", `{"path":"auth.go","content":"package auth\nfunc Login() {"}`), // child T0: unbalanced write → syntax retries
+		contentScript("child: entry points catalogued"),                                                   // child T0 (re-streamed): final report
+		contentScript("parent: synthesized the delegated investigation"),                                  // parent T1: final answer
 	}
 }
 
@@ -130,7 +120,7 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 
 	// The spawn succeeded: the sub_agent tool result the parent saw is the child's report, not a
 	// construction error. Reverting subagent.go's `childCfg.EnableMechanisms = nil` breaks exactly
-	// this — the child would rebuild guided_decomposition/tool_result_cap into the registry it
+	// this — the child would rebuild guided_decomposition/syntax into the registry it
 	// inherited and fail with the already-registered rejection, surfacing "could not construct
 	// sub-agent" here.
 	subRes, ok := lastSubAgentResult(sink.events)
@@ -152,11 +142,11 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 		t.Errorf("parent answer event Depth = %d, want 0", d)
 	}
 
-	// The child ran the INHERITED stack: tool_result_cap capped the child's older oversized read
-	// result, booking a fire at Depth 1. A child on an empty registry (the EnableMechanisms clear
+	// The child ran the INHERITED stack: syntax retried the child's unbalanced write in place,
+	// booking a fire at Depth 1. A child on an empty registry (the EnableMechanisms clear
 	// mis-applied to Mechanisms, or the inheritance dropped) books no such fire.
-	if !hasFireAtDepth(sink.events, "tool_result_cap", 1) {
-		t.Errorf("no tool_result_cap fire at Depth 1; the child did not run the inherited EnableMechanisms stack. fires=%+v",
+	if !hasFireAtDepth(sink.events, "syntax", 1) {
+		t.Errorf("no syntax fire at Depth 1; the child did not run the inherited EnableMechanisms stack. fires=%+v",
 			mechanismFires(sink.events))
 	}
 }

@@ -205,15 +205,15 @@ type discardSink struct{}
 
 func (discardSink) Emit(apogee.Event) {}
 
-// Example_enableMechanismStack arms the guided_decomposition + tool_result_cap stack by ID through
-// Config.EnableMechanisms. guided_decomposition Requires tool_result_cap (ADR 0014), so both must be
-// enabled together — enabling one alone fails New with ErrMissingRequirement.
+// Example_enableMechanismStack arms catalogued Mechanisms by ID through Config.EnableMechanisms.
+// The pair must be compatible: guided_decomposition is IncompatibleWith decompose (ADR 0014), so
+// arming those two together fails New with ErrIncompatibleMechanisms.
 func Example_enableMechanismStack() {
 	cfg := apogee.Config{
 		Endpoint:         "http://localhost:11434",
 		Model:            "local-model",
 		Events:           discardSink{},
-		EnableMechanisms: []apogee.MechanismID{"guided_decomposition", "tool_result_cap"},
+		EnableMechanisms: []apogee.MechanismID{"guided_decomposition", "toolfilter"},
 	}
 	ag, err := apogee.New(cfg)
 	if err != nil {
@@ -224,20 +224,20 @@ func Example_enableMechanismStack() {
 
 	fmt.Println("armed:", cfg.EnableMechanisms)
 	// Output:
-	// armed: [guided_decomposition tool_result_cap]
+	// armed: [guided_decomposition toolfilter]
 }
 
 // Example_cataloguedMechanisms plans a leave-one-out arm from CataloguedMechanisms() — the bench's
-// idiom: to leave a Mechanism out, also drop every Mechanism that Requires it, so no half-armed stack
-// reaches New (which would refuse with ErrMissingRequirement). Dropping tool_result_cap therefore also
-// drops guided_decomposition, which Requires it.
+// idiom: to leave a Mechanism out, also drop every Mechanism declared incompatible with the ones
+// left, so no refused pair reaches New (which would refuse with ErrIncompatibleMechanisms). Leaving
+// decompose in therefore drops guided_decomposition, which is IncompatibleWith it.
 func Example_cataloguedMechanisms() {
-	const leaveOut = apogee.MechanismID("tool_result_cap")
+	const leaveOut = apogee.MechanismID("truncate_history")
 
 	var arm []apogee.MechanismID
 	for _, d := range apogee.CataloguedMechanisms() {
-		if d.ID == leaveOut || slices.Contains(d.Requires, leaveOut) {
-			continue // the left-out Mechanism, and any stack that Requires it
+		if d.ID == leaveOut || slices.Contains(d.IncompatibleWith, apogee.MechanismID("decompose")) {
+			continue // the left-out Mechanism, and any row that refuses to stack with decompose
 		}
 		arm = append(arm, d.ID)
 	}
@@ -245,6 +245,6 @@ func Example_cataloguedMechanisms() {
 	fmt.Println("left out:", leaveOut)
 	fmt.Println("guided_decomposition still armed:", slices.Contains(arm, "guided_decomposition"))
 	// Output:
-	// left out: tool_result_cap
+	// left out: truncate_history
 	// guided_decomposition still armed: false
 }

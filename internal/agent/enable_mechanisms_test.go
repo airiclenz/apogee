@@ -64,12 +64,17 @@ func TestEnableMechanisms_UnknownIDFailsConstruction(t *testing.T) {
 	}
 }
 
-// TestEnableMechanisms_HalfStackFailsRequirement: enabling guided_decomposition without its Required
-// peer tool_result_cap fails the requirements gate with ErrMissingRequirement (ADR 0014 §4 stacking,
-// re-checked over the merged registry).
+// TestEnableMechanisms_HalfStackFailsRequirement: a registered row whose Required peer is absent
+// fails the requirements gate with ErrMissingRequirement (ADR 0014 §4 stacking, re-checked over the
+// merged registry). The row is synthetic: no catalogued Mechanism declares Requires any more — the
+// one that did named the tool-result cap, now a Floor guard — while the gate itself stays.
 func TestEnableMechanisms_HalfStackFailsRequirement(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"guided_decomposition"}
+	reg := domain.NewMechanismRegistry()
+	if err := reg.Add(requiresMech{id: "half_stack", requires: []domain.MechanismID{"absent_peer"}}.row()); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	cfg.Mechanisms = reg
 
 	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if !errors.Is(err, domain.ErrMissingRequirement) {
@@ -295,8 +300,10 @@ func TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent(t *testing.T) {
 
 // TestBuildMechanisms_RefusesWhatConstructionRefuses: the errors are the construction errors, raised
 // where the host can still name the config that asked for them — an unknown ID wrapping
-// ErrUnknownMechanism, and a half stack the requirements gate refuses (guided_decomposition Requires
-// tool_result_cap), exactly as New refuses the same two lists.
+// ErrUnknownMechanism, and a pair the incompatibility gate refuses (guided_decomposition
+// IncompatibleWith decompose), exactly as New refuses the same two lists. BuildMechanisms builds
+// into a FRESH registry and never reads cfg.Mechanisms, so the refusal it is checked on has to be
+// one a catalogue pair can still trip.
 func TestBuildMechanisms_RefusesWhatConstructionRefuses(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 
@@ -305,8 +312,8 @@ func TestBuildMechanisms_RefusesWhatConstructionRefuses(t *testing.T) {
 		t.Errorf("BuildMechanisms with an unknown ID = %v, want ErrUnknownMechanism", err)
 	}
 
-	_, err = BuildMechanisms(cfg, []domain.MechanismID{"guided_decomposition"})
-	if !errors.Is(err, domain.ErrMissingRequirement) {
-		t.Errorf("BuildMechanisms with a half stack = %v, want ErrMissingRequirement", err)
+	_, err = BuildMechanisms(cfg, []domain.MechanismID{"guided_decomposition", "decompose"})
+	if !errors.Is(err, domain.ErrIncompatibleMechanisms) {
+		t.Errorf("BuildMechanisms with an incompatible pair = %v, want ErrIncompatibleMechanisms", err)
 	}
 }

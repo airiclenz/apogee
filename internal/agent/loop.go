@@ -148,6 +148,8 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		}
 	}
 
+	a.runPreRequestGuards(turn, t.req)
+
 	if err := a.runPreRequestHooks(ctx, turn, t.req); err != nil {
 		// The request was never sent, so degrade the Turn with no assistant message. The drained
 		// corrections need no re-queue here: the abandoned Exchange clears the whole deferred queue
@@ -206,9 +208,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		case foldFolded:
 			// The fold rewrote the conversation and refold re-derived every stale local (rollback,
 			// req, deferred, deferredFloor) against the folded history, latching t.foldSpent.
-			// Pre-request hooks run per REQUEST, so they run again over the rebuilt one and keep
-			// their pre-request failure semantics: no assistant message, Turn degraded (the
+			// The pre-request floor and hooks run per REQUEST, so they run again over the rebuilt
+			// one and keep their pre-request failure semantics: no assistant message, Turn degraded (the
 			// abandoned Exchange clears the deferred queue — F6).
+			a.runPreRequestGuards(turn, t.req)
 			if err := a.runPreRequestHooks(ctx, turn, t.req); err != nil {
 				return a.turns.end(t, endAbandoned), nil
 			}
