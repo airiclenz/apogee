@@ -253,7 +253,7 @@ promise — the Go API may still move while the tool hardens — but every relea
 prebuilt binaries for all six targets and a Homebrew formula. Functionally the loop is
 complete: full tool suite, MCP client, parallel sub-agents, skills, sessions, schedules,
 and OS-confined Auto mode on all three platforms. What changed lately lives in the
-[CHANGELOG](CHANGELOG.md); what is next lives in [`ISSUES.md`](ISSUES.md).
+[CHANGELOG](CHANGELOG.md); what is next lives in the issue register (`bd`).
 
 ## Why Go
 

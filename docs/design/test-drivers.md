@@ -772,7 +772,7 @@ those is an accepted limit, and its cell says so.
 Four of the limit cells are irreducible, the claim leaving the machine altogether: font tofu
 (T-20), felt flicker (T-24), what a real desktop application does with the file (T-19), and
 `brew upgrade` before its release exists together with the newcomer walk's Homebrew and OpenRouter
-steps (T-21, T-23). Those four are recorded in `ISSUES.md` under "Test drivers — residue" as
+steps (T-21, T-23). Those four are recorded in the issue register (`bd`, `apogee-n6z`) as
 accepted proxies with no open work.
 
 | Claim class | Driver | Example test | Not observable by any driver |

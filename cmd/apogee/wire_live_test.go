@@ -285,8 +285,8 @@ func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T
 }
 
 // The startup line a human sees when their `mechanisms:` block still names a Mechanism this
-// release retired (ISSUES.md, 2026-08-29: the notice's producer and the helper's wording were
-// pinned, the boundary that prints it was not).
+// release retired (the issue register, 2026-08-29: the notice's producer and the helper's
+// wording were pinned, the boundary that prints it was not).
 //
 // This is the ONE resolver path that may write to stderr — startup runs before the alt screen —
 // so the assertion is about the process stream rather than a returned string, and the test is

@@ -1287,7 +1287,8 @@ command in that session pays nothing. And one limit: what the Windows fence cove
 workspace-scoped writes. A low-integrity process cannot write to an unmarked directory
 at all, so a confined `go build`, `pip install` or `npm ci` fails when it reaches its
 cache or `%TEMP%` outside the workspace — giving the toolchain a box-local temp and
-cache directory is a recorded follow-on (`ISSUES.md`), not something Apogee does yet.
+cache directory is a recorded follow-on in the issue register (`bd`, `apogee-m3p`), not
+something Apogee does yet.
 
 If the machine is disposable and you would rather have Auto unfenced there, `/confine`
 is the route. `/confine` (or `/confine status`) reports the backend, what it can

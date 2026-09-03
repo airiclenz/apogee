@@ -596,10 +596,10 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 			next: head + span + 1, // the span is elided whole: it is read in the run's own view
 		}
 	}
-	// Adjacent SKILL FETCHES fold the same way delegations do, under one "✦ Skill (N)"
-	// (ISSUES.md, "load_skill renders as a raw tool"): a fetch is the run taking instructions on,
-	// and two of them in a row are one act with two rows, not two cards. It is one mechanism with
-	// two participants — the same derivation asked of another tool name (ownGroupAt) and the same
+	// Adjacent SKILL FETCHES fold the same way delegations do, under one "✦ Skill (N)" (the issue
+	// register, "load_skill renders as a raw tool"): a fetch is the run taking instructions on, and
+	// two of them in a row are one act with two rows, not two cards. It is one mechanism with two
+	// participants — the same derivation asked of another tool name (ownGroupAt) and the same
 	// painter — so nothing here restates what a group is.
 	//
 	// It is asked AFTER the two delegation branches because a delegation head answers those and

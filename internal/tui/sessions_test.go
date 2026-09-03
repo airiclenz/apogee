@@ -220,9 +220,10 @@ func TestSessionBrowserResumeHappyPath(t *testing.T) {
 // Resume-time notices never accumulate in the record. Opening the SAME session twice — each time
 // resuming, then saving what the view holds back over the record — leaves the stored scrollback
 // exactly as the conversation left it, while the human still sees the notices on every reopen. This
-// is the ISSUES.md defect: they used to persist, so a record collected one more "resumed:" line per
-// resume, forever. The workspace loads a context file here too, because the "context: …" notice the
-// restore reprints is re-derived exactly as the resume line is and must compound no more than it.
+// is the defect the issue register records: they used to persist, so a record collected one more
+// "resumed:" line per resume, forever. The workspace loads a context file here too, because the
+// "context: …" notice the restore reprints is re-derived exactly as the resume line is and must
+// compound no more than it.
 func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 	var src transcript
 	src.addUser("what is the capital of france", nil)

@@ -130,10 +130,10 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 }
 
 // Adjacent skill fetches fold under ONE "✦ Skill (N)" umbrella, one row per fetch, in the very
-// shape the fan-out above pins for delegations (ISSUES.md, "load_skill renders as a raw tool") —
-// because it is the same derivation and the same painter, asked of another tool name (ownGroup,
-// renderSubAgentGroup). Each row carries the SKILL that answered, off the retarget item 1 landed,
-// and none of the delegation-only markings: no ✓ for having reported, no run to open.
+// shape the fan-out above pins for delegations (the issue register, "load_skill renders as a raw
+// tool") — because it is the same derivation and the same painter, asked of another tool name
+// (ownGroup, renderSubAgentGroup). Each row carries the SKILL that answered, off the retarget item
+// 1 landed, and none of the delegation-only markings: no ✓ for having reported, no run to open.
 func TestRenderSkillGroupSketchStates(t *testing.T) {
 	build := func(fetches ...[3]string) *transcript {
 		tr := &transcript{}
@@ -745,7 +745,7 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// A delegation that never ran shows the prompt it carried (ISSUES.md, 2026-08-11)
+// A delegation that never ran shows the prompt it carried (the issue register, 2026-08-11)
 // ----------------------------------------------------------------------------
 
 // refusedDelegation folds a delegation that NEVER RAN: the call, then the refusal its result
@@ -910,8 +910,9 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 	})
 }
 
-// TestNeverRanDelegationRowIsExpandableAtEveryWidth is the pair of findings ISSUES.md left over the
-// unframed reading, pinned together because they are one row's two halves (2026-08-27).
+// TestNeverRanDelegationRowIsExpandableAtEveryWidth is the pair of findings the issue register
+// left over the unframed reading, pinned together because they are one row's two halves
+// (2026-08-27).
 //
 // A delegation that never ran opens onto the prompt it carried (unframedSubAgentView), and that body
 // exists at every width — so the ▶ that says so cannot be the promote-guard's to grant. It used to
@@ -1016,7 +1017,7 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 // are the same delegation. A member of a fan-out painted a bare, unreachable row while an identical
 // delegation standing alone opened fine, so which siblings happened to fold beside a child decided
 // whether a reader could watch it at all — in exactly the case parallel delegation exists to make
-// (ADR 0039). ISSUES.md, 2026-09-01.
+// (ADR 0039). Recorded in the issue register, 2026-09-01.
 func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
 	const width = 80
 
@@ -1366,10 +1367,10 @@ func TestRunHeadOwnsNoBlockState(t *testing.T) {
 	}
 }
 
-// A finished delegation says its report ONCE (ISSUES.md, "Finished sub-agents print the sub-agent
-// output twice"). The early, badly formatted copy was the head's own tool-result body, laid out
-// above the run's span the moment the head was opened; the copy that stays is the child's last
-// assistant row, inside the run where it was said.
+// A finished delegation says its report ONCE (the issue register, "Finished sub-agents print the
+// sub-agent output twice"). The early, badly formatted copy was the head's own tool-result body,
+// laid out above the run's span the moment the head was opened; the copy that stays is the child's
+// last assistant row, inside the run where it was said.
 //
 // Both halves are pinned on one fixture: the conversation's row, which carries the report's first
 // line as its gist and no more of it anywhere, and the run's own view, where the report stands

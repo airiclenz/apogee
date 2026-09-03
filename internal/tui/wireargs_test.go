@@ -178,9 +178,9 @@ func TestWireArgsSurvivesTheTranscriptEncoder(t *testing.T) {
 // TestContentArgsMatchToolSchemas cross-checks [contentArgs] against the schemas the write/edit
 // tools actually publish. The map spells those content keys a second time and keys them by tool
 // NAME, so a rename in internal/tools — of a tool or of one of its arguments — would leave this
-// side silently matching nothing and quietly push file bodies onto the wire (ISSUES.md:137). The
-// registry is the same one the engine gives an Agent, so the check reads the shipped schemas
-// rather than a copy of them.
+// side silently matching nothing and quietly push file bodies onto the wire. The registry is the
+// same one the engine gives an Agent, so the check reads the shipped schemas rather than a copy
+// of them.
 func TestContentArgsMatchToolSchemas(t *testing.T) {
 	t.Parallel()
 

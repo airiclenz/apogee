@@ -69,9 +69,9 @@ func availability(ok bool) string {
 // caps.FSWrite == false. That is not a malfunction: the ladder is doing exactly what ADR 0012
 // says ("confine if you can, gate if you can't"), so every terminal command takes the Approval
 // path. Nothing said so, which is why Auto read as broken on containers where
-// landlock_create_ruleset returns ENOSYS (ISSUES.md, 2026-07-21). The notice states the blast
-// radius plainly and names the sanctioned route to the user's OWN decision — it never loosens
-// anything by itself.
+// landlock_create_ruleset returns ENOSYS (the issue register, 2026-07-21). The notice states the
+// blast radius plainly and names the sanctioned route to the user's OWN decision — it never
+// loosens anything by itself.
 //
 // It returns "" (no notice) in every other cell: the three lower modes make no confinement
 // promise, an already-unconfined Auto has its own louder warning at the call site, and a

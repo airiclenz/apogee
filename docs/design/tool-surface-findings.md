@@ -1,12 +1,13 @@
 # Tool-surface findings — the 2026-08-10 poll round and its 2026-08-16 second round
 
 **Provenance:** recorded 2026-08-10 at the close of the tool-surface plan and extended 2026-08-16
-by a second poll round; relocated 2026-08-19 from `ISSUES.md`, where it lived as the *Tool-surface
-findings (4-poll round, 2026-08-10)* entry. This document is the authoritative record — both poll
-rounds, the bench arms, the grill topics, the deferred candidates, the engine-level notes, the
-denials and the method lessons. The text below is that entry's body unchanged apart from relative
-ADR links repointed for this directory; `ISSUES.md` keeps a pointer entry listing the live gates
-only.
+by a second poll round; relocated 2026-08-19 out of the issue register, where it lived as the
+*Tool-surface findings (4-poll round, 2026-08-10)* entry. This document is the authoritative
+record — both poll rounds, the bench arms, the grill topics, the deferred candidates, the
+engine-level notes, the denials and the method lessons. The text below is that entry's body
+unchanged apart from relative ADR links repointed for this directory; the issue register (`bd`,
+`apogee-304`) keeps a pointer entry listing the live gates only, with the seven bench arms as
+`apogee-304.1` … `apogee-304.7` in the order (a)…(g).
 
 **Status:** recorded 2026-08-10 at the close of the tool-surface plan (`2026-08-10 - 00`, under
 `docs/plans/`, archived on completion). Four polls of the target class — Qwen3.6-35B-A3B ×2,

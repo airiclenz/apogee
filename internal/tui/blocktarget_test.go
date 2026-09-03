@@ -393,9 +393,10 @@ func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 
 // The "+N more lines" count RIDES the outcome slot rather than standing on a row of its own, and it
 // is painted with that slot in one style — apogee's own marker role, never the body's tone, because
-// the count is apogee's reading of the block and not a line the tool wrote (ISSUES.md, 2026-08-11).
-// The negative half is the whole point of the fold: a collapsed lone call paints its header and one
-// row, so no marker line is left for a body line opening with "+" to be mistaken for.
+// the count is apogee's reading of the block and not a line the tool wrote (the issue register,
+// 2026-08-11). The negative half is the whole point of the fold: a collapsed lone call paints its
+// header and one row, so no marker line is left for a body line opening with "+" to be mistaken
+// for.
 func TestRemainderCountRidesTheOutcomeSlot(t *testing.T) {
 	th := newTheme(scheme.Default())
 	tr := &transcript{}

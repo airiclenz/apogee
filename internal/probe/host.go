@@ -89,10 +89,10 @@ func GatherHost(ctx context.Context, in Inputs) Host {
 // wording is table-testable without a host, an endpoint, or a captured stdout.
 //
 // The order is the order the questions get asked: which machine is this, what can Auto do here
-// (the question the command exists for — ISSUES.md's "diagnosable without running an agent"), and
-// is the Upstream answering. It closes with the SAME degradation notice the session prints at
-// startup when Auto would gate here, so the off-session diagnosis and the in-session one are
-// literally the same sentence.
+// (the question the command exists for — the issue register's "diagnosable without running an
+// agent"), and is the Upstream answering. It closes with the SAME degradation notice the session
+// prints at startup when Auto would gate here, so the off-session diagnosis and the in-session
+// one are literally the same sentence.
 func (h Host) Report() string {
 	lines := []string{
 		"apogee probe — host report",

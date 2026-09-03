@@ -21,9 +21,9 @@ import (
 // 60%/40% band instead of a single threshold: rare and larger beats frequent and small, and the
 // band is what makes the trade affordable rather than something the engine has to schedule around.
 //
-// What this is NOT: the generative mid-Exchange reducer ISSUES.md still tracks. That entry stays
-// open and unclaimed — it wants a summary of the CONVERSATION and its own grill and bench
-// evidence, where this is a non-generative rewrite of tool RESULTS that needs neither.
+// What this is NOT: the generative mid-Exchange reducer the issue register still tracks. That
+// entry stays open and unclaimed — it wants a summary of the CONVERSATION and its own grill and
+// bench evidence, where this is a non-generative rewrite of tool RESULTS that needs neither.
 
 // autoPrune rewrites stale tool results into stubs at a Turn boundary when the history has grown
 // past its share of the Budget, and reports the reclaim as one PruneEvent.

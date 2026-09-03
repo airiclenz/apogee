@@ -254,11 +254,11 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 // The head is ONE summarised line: the report body is elided along with the span, because the
 // summary slot already carries that report's first line and no block says the same thing twice in
 // two adjacent rows (layout.md, "A sub-agent run collapses to its call block"). That elision is
-// also what closed the double print (ISSUES.md, "Finished sub-agents print the sub-agent output
-// twice"): the body this block laid out while the head was open WAS the delegation's report,
-// unformatted, standing above the same report as the span's own last assistant row. The count in
-// the summary is what says work is hidden behind the header, so the run needs no "+N more lines"
-// marker to say it too — and the header is a target however short the report is
+// also what closed the double print (the issue register, "Finished sub-agents print the sub-agent
+// output twice"): the body this block laid out while the head was open WAS the delegation's
+// report, unformatted, standing above the same report as the span's own last assistant row. The
+// count in the summary is what says work is hidden behind the header, so the run needs no "+N more
+// lines" marker to say it too — and the header is a target however short the report is
 // (blockState.elides), so nothing is unreachable.
 //
 // The head's view is COPIED before its summary is replaced and its body dropped, so both are
@@ -299,7 +299,7 @@ const unframedSubAgentPromptLead = "task: "
 // not depend on: a refusal short enough to keep the outcome slot leaves the block bodiless, so the
 // body-counting rule beside it answered "nothing to reveal" at wide widths and "something" at narrow
 // ones, and the indicator, the click surface and the prompt underneath them all came and went with
-// the terminal's columns (ISSUES.md, 2026-08-27).
+// the terminal's columns (the issue register, 2026-08-27).
 //
 // A delegation with no prompt to show — an empty task, whitespace alone, a record replayed from a
 // session written before the text was retained (transcriptbridge.go) — answers false: the readings
@@ -596,9 +596,10 @@ func groupLabelOf(members []subAgentMember) string {
 // very mark and refuses for one case alone, a delegation that is over with nothing behind it
 // (ADR 0063). So a gate on the head having REPORTED does not withhold a dead affordance: it
 // withholds the one row a reader reaches a working child through, leaving every member of a fan-out
-// unopenable while the identical delegation standing alone opened fine (ISSUES.md, 2026-09-01).
-// Which siblings happened to fold beside a delegation is a fact about its frame and never about
-// what is behind its row, so the lone block's rule asks this ungated too (blockHidesWhenCollapsed).
+// unopenable while the identical delegation standing alone opened fine (the issue register,
+// 2026-09-01). Which siblings happened to fold beside a delegation is a fact about its frame and
+// never about what is behind its row, so the lone block's rule asks this ungated too
+// (blockHidesWhenCollapsed).
 func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room int,
 	expanded, spanned bool) (lines []string, hides bool) {
 	if !spanned {
@@ -626,8 +627,8 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 // The BODY is dropped because the summary already carries the report's first line and no block says
 // the same thing twice in two adjacent rows — the defect this closed was exactly that, the report
 // laid out here in full above the formatted copy the span's last assistant row already held
-// (ISSUES.md, "Finished sub-agents print the sub-agent output twice"). It is a paint-time act on
-// facts the entry keeps whole, so the report the run view opens on is the one the delegation
+// (the issue register, "Finished sub-agents print the sub-agent output twice"). It is a paint-time
+// act on facts the entry keeps whole, so the report the run view opens on is the one the delegation
 // actually returned.
 //
 // One reading serves the lone block and the folded group's member row alike (renderSubAgentRun,

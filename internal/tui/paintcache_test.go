@@ -364,8 +364,8 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 
 // The reuse property — the reason the cache exists. A long settled scrollback with a reply streaming
 // underneath it: one more token must cost the TAIL and nothing else, which is exactly the shape of
-// the 100%-GPU report this item answers (ISSUES.md). The miss counter is the instrument, because the
-// output alone cannot tell a reused paint from a re-computed identical one.
+// the 100%-GPU report this item answers (the issue register). The miss counter is the instrument,
+// because the output alone cannot tell a reused paint from a re-computed identical one.
 //
 // The streaming tail is not a cached block at all (renderView paints t.pending straight, and it
 // changes on every token), so the number a token append must not move is the count of paints

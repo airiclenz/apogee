@@ -405,7 +405,7 @@ func (e *lineEditor) caretToRune(off int) {
 // deleteSelection cuts a drag-selection's span out of the value and leaves the caret where that span
 // began. It is what Backspace and Del mean while the field holds a highlight: the human can SEE what
 // is selected, so the destructive keys must take exactly that rather than the one rune beside the
-// caret (ISSUES.md — the highlight used to vanish and the selected text survive).
+// caret (the issue register — the highlight used to vanish and the selected text survive).
 //
 // The span arrives as an argument rather than being read off the caller's selection state because
 // handleKey's chokepoint has already dropped the live selection by the time the two keys are routed

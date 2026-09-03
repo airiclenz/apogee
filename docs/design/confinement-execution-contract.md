@@ -493,7 +493,7 @@ one level down (D2), for free, with no threading.
 > child's side: `platform.Host.ScopeEnv` now takes the workspace root and drops workspace-resident
 > `PATH` entries, so git and the Go toolchain cannot redo the lookup the fence just refused. The
 > ergonomics cost — an activated `<repo>/.venv/bin/python3` or `node_modules/.bin` is refused, with
-> no switch — is accepted and recorded in `ISSUES.md` L5.
+> no switch — is accepted and recorded in the issue register (`bd`, `apogee-8wy`) as L5.
 
 > **Amended 2026-08-13 (the shell and the interpreter scope their child's `PATH` too;
 > hostile-bytes residuals, item 2).** The scrub above reached only the allowlisted environments:

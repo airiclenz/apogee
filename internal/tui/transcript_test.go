@@ -1374,7 +1374,7 @@ func runCall(tr *transcript, id, command, output string, depth int) {
 // There is no second shape to toggle into. Expanding a run opens its VIEW (runview.go), so the fold
 // is refused here and the row does not move — which is also what closed the double print: the body
 // this head laid out open WAS the report, unformatted, above the formatted copy the run's own last
-// assistant row already carried (ISSUES.md, 2026-08-30).
+// assistant row already carried (the issue register, 2026-08-30).
 func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)

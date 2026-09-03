@@ -77,8 +77,9 @@ type subprocessSpec struct {
 // apogeeSecretEnvVars names the environment variables that carry apogee's OWN credentials. A
 // subprocess launched for the MODEL — a shell command line, a Python snippet — has no business
 // reading the key apogee talks to its inference server with: the model chooses what that
-// subprocess does, and an exfiltration from inside the box is one request away (ISSUES.md L3
-// accepts that reading is possible; it does not oblige apogee to hand over its own secrets).
+// subprocess does, and an exfiltration from inside the box is one request away (the issue
+// register's `apogee-8wy` L3 accepts that reading is possible; it does not oblige apogee to hand
+// over its own secrets).
 //
 // The name is a literal rather than internal/config's EnvAPIKey because internal/config imports
 // THIS package (its tool-name reconciliation), so the dependency cannot point back — which is

@@ -203,7 +203,7 @@ func fitClipTail(th theme, row string, width int) string {
 // content the two measures agree about (everything without VS16) the two wraps are identical, which
 // is why this is a rename rather than a re-layout. A caller that then pads with a lipgloss Width
 // style hands the gain straight back — lipgloss folds in GraphemeWidth — which is why the user
-// block below squares its own rows and why the pop-up pane still does not (ISSUES.md).
+// block below squares its own rows and why the pop-up pane still does not (the issue register).
 //
 // No line it returns is wider than limit in the width authority's measure — layout.md's absolute
 // cap, enforced here rather than assumed. The upstream wrap does not hold it on its own, in either

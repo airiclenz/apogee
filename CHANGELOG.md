@@ -179,6 +179,21 @@ point is a **minor** bump, not a breaking change.
   archived path. The `Request.InjectContext` entry in `ISSUES.md` no longer cites
   `internal/mechanisms/filehint.go`, a file item 14 deleted.
 
+- **`ISSUES.md` is migrated into beads and deleted — the issue register is now `bd`.** All 26
+  entries, the open tool-row defect and the 25 parked entries, became 65 beads. An entry that was a
+  *list* of independently actionable bullets is now an **epic** whose children are those bullets, so
+  `bd ready` returns a workable unit rather than a ten-item blob; the two entries that recorded
+  standing rules rather than work — the TUI width authority's rules, and the test-driver claims no
+  driver observes — are `decision` beads, closed on creation. Every body moved verbatim, its
+  `file:line` citations intact, because each entry's payload is the design that stops the work being
+  re-derived when it is picked up. Live Go comments and documentation that pointed at the file now
+  name the register, and the citations that named a specific entry carry its bead ID: the
+  security-review Lows are `apogee-8wy`, the tool-surface findings `apogee-304` with the seven bench
+  arms as its children, the test-driver residue `apogee-n6z`. `.beads/issues.jsonl` is committed as
+  a readable fallback for a clone without `bd` installed. The `ISSUES.md` mentions that survive in
+  `CHANGELOG.md`, `docs/adr/`, `docs/reviews/` and archived plans are historical and stay — the same
+  precedent the 2026-08-13 `TODO.md` rename set.
+
 ## [0.20.0] — 2026-09-03
 
 ### Added

@@ -91,7 +91,7 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 // It is the count alone and never a row of its own. The marker used to hang beneath the leader row,
 // which cost every collapsed block a second row to say something the slot had the width for; folded
 // into the slot it says the same thing in the row the block was going to spend anyway, and a
-// collapsed lone call is exactly its header and its row (ISSUES.md, 2026-08-11).
+// collapsed lone call is exactly its header and its row (the issue register, 2026-08-11).
 //
 // The wording is collapseAtCap's, the one place every collapsed shape counts its remainder, so the
 // slot's tail and the prompt block's see-more stay two voices about one number (splitAtCap).

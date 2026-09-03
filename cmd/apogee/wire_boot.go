@@ -319,8 +319,8 @@ func (w *rootWiring) announceConfinement() {
 
 	// The mirror branch: Auto WITH confinement asked for, on a host whose backend cannot
 	// enforce it. The ladder gates every terminal command instead — correct, but silent until
-	// now, which is what made Auto look broken (ISSUES.md, 2026-07-21). Say it once, name the
-	// backend, and point at /confine.
+	// now, which is what made Auto look broken (the issue register, 2026-07-21). Say it once,
+	// name the backend, and point at /confine.
 	if notice := probe.DegradedNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
 		fmt.Fprintln(os.Stderr, notice)
 	}

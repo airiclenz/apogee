@@ -97,11 +97,12 @@
 // breadcrumb naming the way back. So the run reads as what was ASKED, then the work, then what came
 // back, and the row it left behind says what the delegation IS and how the run went. Nothing is
 // printed twice for it either: the body this head used to lay out open was that same report,
-// unformatted, above the formatted copy the span already carried (ISSUES.md, 2026-08-30). While anything behind a block's header is still waiting for a result, that
-// header's ✦ blinks against a bare cell ([blockState.star]) on the STATUS SPINNER's half-second
-// phase ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick
-// repaints the viewport only on the tick that flips that phase and only while
-// [transcript.hasOpenToolCall] holds, so an idle chain costs no repaints.
+// unformatted, above the formatted copy the span already carried (the issue register, 2026-08-30).
+// While anything behind a block's header is still waiting for a result, that header's ✦ blinks
+// against a bare cell ([blockState.star]) on the STATUS SPINNER's half-second phase
+// ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick repaints
+// the viewport only on the tick that flips that phase and only while [transcript.hasOpenToolCall]
+// holds, so an idle chain costs no repaints.
 //
 // The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
 // between the input box and the engine without thickening the renderer (ADR 0011 still holds):

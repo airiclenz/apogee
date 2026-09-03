@@ -340,9 +340,9 @@ func observeThinking(responses ...provider.RawResponse) ThinkingObservation {
 }
 
 // promptFS carries the battery's prompt text as plain files under prompts/. The prompts are
-// assets rather than Go string literals so the wording can be read and edited as prose
-// (ISSUES.md: hard-coded prompt literals), and go:embed compiles them into the binary — the text
-// ships inside the single binary, is never read from disk at runtime, and is never
+// assets rather than Go string literals so the wording can be read and edited as prose (the
+// issue register: hard-coded prompt literals), and go:embed compiles them into the binary — the
+// text ships inside the single binary, is never read from disk at runtime, and is never
 // user-overridable.
 //
 // The invariant the old const block stated travels with the text: every byte under prompts/ is

@@ -90,8 +90,8 @@ func Compact(ctx context.Context, c Completer, conv *domain.Conversation, maxTra
 var errEmptySummary = fmt.Errorf("apogee: compaction produced an empty summary")
 
 // promptFS carries this package's prompt text as plain files under prompts/. The prompts are
-// assets rather than Go string literals so the wording can be read and edited as prose
-// (ISSUES.md: hard-coded prompt literals), and go:embed compiles them into the binary — the
+// assets rather than Go string literals so the wording can be read and edited as prose (the
+// issue register: hard-coded prompt literals), and go:embed compiles them into the binary — the
 // text ships inside the single binary, is never read from disk at runtime, and is never
 // user-overridable.
 //

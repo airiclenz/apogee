@@ -579,12 +579,13 @@ func TestClipWrapSurvivesNarrowWidths(t *testing.T) {
 // point rather than through wrapText again, so a surface that grew a wrap of its own would show up
 // here.
 //
-// The pop-up body is the third surface ISSUES.md named and it is deliberately NOT here: its wrap does
-// move with the others, but the pane it lands in is composed by lipgloss — Style.Width pads, and
-// past its width WRAPS, in GraphemeWidth whatever the painter is doing — so a VS16 line the
-// authority calls short enough is folded back into two pane rows. That fold is the pane's, not the
-// wrap's: it is reachable today through pop-up ROWS, which never touch wrapText at all, and it is
-// the lipgloss pane's own deliberate behaviour rather than a residue tracked anywhere.
+// The pop-up body is the third surface the issue register names and it is deliberately NOT here:
+// its wrap does move with the others, but the pane it lands in is composed by lipgloss —
+// Style.Width pads, and past its width WRAPS, in GraphemeWidth whatever the painter is doing — so a
+// VS16 line the authority calls short enough is folded back into two pane rows. That fold is the
+// pane's, not the wrap's: it is reachable today through pop-up ROWS, which never touch wrapText at
+// all, and it is the lipgloss pane's own deliberate behaviour rather than a residue tracked
+// anywhere.
 func TestWrappedSurfacesBreakInThePaintersMeasure(t *testing.T) {
 	t.Parallel()
 

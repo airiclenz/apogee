@@ -13,7 +13,7 @@ import (
 // ----------------------------------------------------------------------------
 
 // degradedHost is the situation the command exists for: a real backend that cannot fence the
-// filesystem here, so Auto gates every terminal command (ISSUES.md, 2026-07-21).
+// filesystem here, so Auto gates every terminal command (the issue register, 2026-07-21).
 var degradedHost = ConfinementInfo{
 	Backend: "landlock",
 	Caps:    domain.ConfinementCaps{FSWrite: false, NetworkEgress: false},

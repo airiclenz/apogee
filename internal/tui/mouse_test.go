@@ -497,9 +497,10 @@ func dragSelect(t *testing.T, m Model, fromCol, toCol int) Model {
 	return step(t, m, leftRelease(x0+toCol, y0))
 }
 
-// TestSelectionDeleteKeys is ISSUES.md's "backspace/del on selected text should delete it": with a
-// highlight standing, both destructive keys take the whole span and seat the caret where the span
-// began — whichever direction the drag ran, since a right-to-left drag names the same text.
+// TestSelectionDeleteKeys is the issue register's "backspace/del on selected text should delete
+// it": with a highlight standing, both destructive keys take the whole span and seat the caret
+// where the span began — whichever direction the drag ran, since a right-to-left drag names the
+// same text.
 func TestSelectionDeleteKeys(t *testing.T) {
 	cases := []struct {
 		name           string

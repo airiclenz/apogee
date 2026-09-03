@@ -7,8 +7,8 @@ import (
 
 // The Floor guards' fixed model-facing text. Every sentence a guard puts in front of the model is
 // an asset file under prompts/ rather than a Go string literal, so the wording can be read and
-// edited as prose (ISSUES.md: hard-coded prompt literals), and go:embed compiles it into the
-// binary — the text ships inside the single binary, is never read from disk at runtime, and is
+// edited as prose (the issue register: hard-coded prompt literals), and go:embed compiles it into
+// the binary — the text ships inside the single binary, is never read from disk at runtime, and is
 // never user-overridable. Only the fixed text is an asset: the branching, the `%s` substitutions
 // and the joining spaces stay in the guard that renders them.
 //

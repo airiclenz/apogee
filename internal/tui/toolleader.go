@@ -239,7 +239,7 @@ const noRemainder = ""
 // slotText is the outcome slot's whole text: what the call came to, and — on a collapsed paint that
 // hides body — the count of what it is hiding, as "12 lines · +5 more lines". The count rides the
 // slot rather than a row beneath it, so a collapsed lone call spends its header and ONE row and a
-// scrollback of them reads as a list (ISSUES.md, 2026-08-11).
+// scrollback of them reads as a list (the issue register, 2026-08-11).
 //
 // Either half alone is that half alone, with no separator to trail or to open on: a call still in
 // flight has no summary yet and a block that hides nothing has no count, and both are ordinary.

@@ -3874,8 +3874,8 @@ func frameRule(t *testing.T, m Model) ([]string, int) {
 // and the approval prompt used to be stacked between the transcript and that gap row, so each of
 // them painted one empty row between its bottom border and the ▔ hairline — while the autocomplete
 // dropdown and the staged-interjection band, which sit in the OTHER slot, hugged the input box with
-// no such spacer. That asymmetry is the reported inconsistency (ISSUES.md); the panes now seat flush
-// on the chrome and the gap separates the session area from the pane instead.
+// no such spacer. That asymmetry is the reported inconsistency (the issue register); the panes now
+// seat flush on the chrome and the gap separates the session area from the pane instead.
 //
 // The frame's total height is asserted with it: this is a stacking reorder and nothing else, so the
 // frame still fills the window exactly (D2) and the row arithmetic behind it is untouched.
