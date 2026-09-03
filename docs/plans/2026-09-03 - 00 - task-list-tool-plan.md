@@ -390,7 +390,9 @@ prints a line; `grep -n "30-tool" README.md` prints a line.
 
 ---
 
-## 9. End to end: the list reaches the wire and survives a resume
+## 9. End to end: the list reaches the wire and survives a resume — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the fixture's turns are all `when:` + `repeat: true` as the item's regression guard directs, so `AssertConsumed` cannot fail on an unserved turn; it is called anyway as the item asks. Liveness of both block assertions was proved by temporarily mutating the asserted row — both sites failed, then passed again on restore.
 
 **What.** New `cmd/apogee/e2e_tasklist_test.go` plus `cmd/apogee/testdata/stubllm/tasklist.yaml`,
 following `docs/design/test-drivers.md`'s "Writing a new e2e test" checklist. Every turn matches on

@@ -1,0 +1,40 @@
+# The upstream TestE2ETaskListReachesTheWireAndSurvivesAResume talks to: one prompt that makes the
+# model write its checklist down, and — after a `--continue` relaunch — one that asks what is left.
+#
+# Every turn matches on `when:` and repeats, because the run spans TWO launches: the resumed session
+# replays the whole conversation, so an ordered script would have spent its turns in the first run
+# and answered the second with an HTTP 500. The title turn sits above the prompt's own for smoke.yaml's
+# reason — `auto-title:` is on by default, so a driven TUI asks for a session title off the first
+# prompt — and the trailing catch-all answers anything neither prompt claims.
+model: tasklist-model
+turns:
+    # The session title, matched before any prompt's own turn.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Parser work checklist
+    # The wrap-up, once the list has been written. Matched AHEAD of the prompt turns so a request
+    # carrying the tool's result can never be answered as a fresh request — and it is the request
+    # the test reads: the one whose system content carries the block the call just changed.
+    - when:
+        tool_result: task_list
+      repeat: true
+      text: The list is written down.
+    # The first prompt: the complete list in one call, one row already done. Three rows rather than
+    # one, so the block under assertion is a LIST and the done row is told from the open ones by its
+    # marker rather than by being the only row there is.
+    - when:
+        last_message: ^Plan the parser work
+      repeat: true
+      tool_calls:
+        - name: task_list
+          arguments: '{"tasks":[{"text":"wire the parser seam","done":true},{"text":"cover the seam with a test"},{"text":"update the manual"}]}'
+    # The second prompt, sent after the `--continue` relaunch. A resumed session issues no request
+    # until it is asked something, so this turn is what puts the restored list back on the wire.
+    - when:
+        last_message: ^What is still open
+      repeat: true
+      text: Two tasks are still open.
+    # Anything else — a Mechanism's own call, or a round neither prompt claims.
+    - repeat: true
+      text: Nothing else to add.
