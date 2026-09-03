@@ -116,7 +116,14 @@ internal/tasklist/tasklist.go` are each ≥ 1.
 
 ---
 
-## 3. The `task_list` tool
+## 3. The `task_list` tool — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the schema is built with `fmt.Sprintf` from `tasklist.MaxItems` and
+`tasklist.MaxTextChars` rather than hard-coded numbers, so the caps the model is told and the caps
+`Replace` enforces cannot drift; the item said "caps inline", which this still is.
+NOTES (2026-09-03): `internal/tools/doc.go`'s file-count word was bumped Twenty-nine → Thirty as the
+item asks, but the count was already stale before this item (the package's tool files number more
+than either figure) — pre-existing drift, left alone.
 
 **What.** `internal/tools/task_list.go` on `console_read.go`'s anatomy: a spec, an args struct, a
 stateless `TaskList`, `NewTaskList()`, `ReadOnly() bool { return true }`, both interface assertions;

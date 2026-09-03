@@ -256,6 +256,9 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
 		NewSubAgentWith(SubAgentOptions{SeatChoice: host.SubAgentSeatChoice}),
+		// task_list (ADR 0072) is the last DEFAULT-ON slot: it holds the model's own checklist as
+		// engine state, so it is offered to every model and `tools.disabled:` is what turns it off.
+		NewTaskList(),
 		// The Console family (ADR 0059) sits last because it is the first family registered
 		// DEFAULT-OFF: nothing here reaches a default menu, so its place in build order costs no
 		// model a slot, and a roster that lifts it appends it after the tools every model gets.

@@ -130,7 +130,7 @@ The names this build knows are fixed. In menu order they are `read_file`, `write
 `grep`, `find_files`, `single_find_and_replace`, `multi_find_and_replace`, `edit_existing_file`,
 `view_diff`, `copy_file`, `move_file`, `delete_file`, `terminal`, `python_exec`, `git_branch`,
 `git_commit`, `git_diff_range`, `git_status`, `git_log`, `diagnostics`, `run_tests`, `web_fetch`,
-`http_request`, `web_search`, `sub_agent`, the default-off Console four `console_open`,
+`http_request`, `web_search`, `sub_agent`, `task_list`, the default-off Console four `console_open`,
 `console_send`, `console_read` and `console_close`, `load_skill` — the model's own door onto the
 [skill catalogue](#skills-apogee-ships--use-shipped-skills), which every apogee run wires — and
 the two the **host** supplies rather than the build — `ask_user` and `present_document`, which the

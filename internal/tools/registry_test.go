@@ -23,7 +23,7 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log",
 		"diagnostics", "run_tests",
 		"web_fetch", "http_request", "web_search",
-		"sub_agent",
+		"sub_agent", "task_list",
 	} {
 		if _, ok := registry.Lookup(name); !ok {
 			t.Errorf("default registry is missing %q", name)
@@ -31,10 +31,10 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 	}
 
 	// ask_user (no Asker) and present_document (no Presenter) are omitted when NewDefaultRegistry
-	// uses a zero HostTools, so the default set is 25 (21 base/exec/git/diag/tests + 3 network +
-	// sub_agent).
-	if got := len(registry.All()); got != 25 {
-		t.Errorf("default registry holds %d tools, want 25", got)
+	// uses a zero HostTools, so the default set is 26 (21 base/exec/git/diag/tests + 3 network +
+	// sub_agent + task_list).
+	if got := len(registry.All()); got != 26 {
+		t.Errorf("default registry holds %d tools, want 26", got)
 	}
 	if _, ok := registry.Lookup("ask_user"); ok {
 		t.Error("ask_user must NOT be registered without an Asker")
@@ -57,7 +57,7 @@ func TestNewDefaultRegistry_MenuOrderIsDeterministic(t *testing.T) {
 		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log",
 		"diagnostics", "run_tests",
 		"web_fetch", "http_request", "web_search",
-		"sub_agent",
+		"sub_agent", "task_list",
 	}
 	for i, tool := range registry.All() {
 		if tool.Name() != want[i] {
@@ -83,8 +83,8 @@ func TestNewDefaultRegistryWithHost_RegistersAskUserOnlyWithAsker(t *testing.T) 
 	if got := all[len(all)-1].Name(); got != "ask_user" {
 		t.Errorf("ask_user should be last in the menu, got last = %q", got)
 	}
-	if got := len(all); got != 26 {
-		t.Errorf("registry with Asker holds %d tools, want 26", got)
+	if got := len(all); got != 27 {
+		t.Errorf("registry with Asker holds %d tools, want 27", got)
 	}
 }
 
@@ -106,14 +106,14 @@ func TestNewDefaultRegistryWithHost_RegistersPresentDocumentOnlyWithPresenter(t 
 	if _, ok := reg.Lookup("ask_user"); ok {
 		t.Error("ask_user must stay absent when only a Presenter is configured")
 	}
-	if got := len(reg.All()); got != 26 {
-		t.Errorf("registry with a Presenter holds %d tools, want 26", got)
+	if got := len(reg.All()); got != 27 {
+		t.Errorf("registry with a Presenter holds %d tools, want 27", got)
 	}
 
 	// Both delegates ⇒ both tools, present_document last in the menu.
 	both := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}}).All()
-	if got := len(both); got != 27 {
-		t.Errorf("registry with both delegates holds %d tools, want 27", got)
+	if got := len(both); got != 28 {
+		t.Errorf("registry with both delegates holds %d tools, want 28", got)
 	}
 	if got := both[len(both)-1].Name(); got != "present_document" {
 		t.Errorf("present_document should be last in the menu, got last = %q", got)
@@ -262,6 +262,9 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		// sub_agent (P3.13): the recursion point carries NO disposition marker — it is not
 		// read-only (its blast radius is owned per-child-call one level down, ADR 0013).
 		"sub_agent": false,
+		// task_list (ADR 0072): writing down what you mean to do touches nothing the host owns —
+		// read-only, ungated in every mode and offered in Plan.
+		"task_list": true,
 		// ask_user (P3.11): asking a question writes nothing — read-only, runs in Plan.
 		"ask_user": true,
 		// present_document (ADR 0019): showing a document writes nothing — read-only, runs in
@@ -426,8 +429,8 @@ func TestNewDefaultRegistry_OmitsTheConsoleFamily(t *testing.T) {
 			t.Errorf("%q ships default-off but a call could resolve it with nothing lifting it", name)
 		}
 	}
-	if got := len(registry.All()); got != 25 {
-		t.Errorf("default registry holds %d tools, want the 25 it held before the Console family — a default-off family must not grow the default menu", got)
+	if got := len(registry.All()); got != 26 {
+		t.Errorf("default registry holds %d tools, want the 26 it held before the Console family — a default-off family must not grow the default menu", got)
 	}
 }
 

@@ -182,7 +182,7 @@
 //
 // # The tool files, one line each
 //
-// Twenty-nine files carry the built-ins, grouped by what a call to them can do — which is
+// Thirty files carry the built-ins, grouped by what a call to them can do — which is
 // also what the dispatch disposition keys on (ADR 0012). A file holds a tool FAMILY, not
 // always a single tool: the two-tool file_ops.go and the five-tool git.go each keep a
 // family's shared argument shape and error wording in one place.
@@ -257,6 +257,9 @@
 // catalog (ADR 0065), rendering a found body the way the loop renders an attached one and a miss
 // as candidate ids to ask again with. sub_agent.go is sub_agent — the recursion point that
 // drives a nested Agent and deliberately carries none of the disposition markers.
+// task_list.go is task_list, the model's own checklist (ADR 0072): a whole-list replace over the
+// list the engine holds and reaches the call through (internal/tasklist), read-only because
+// writing down what you mean to do touches nothing the host owns.
 //
 // # The package spine, one line each
 //
