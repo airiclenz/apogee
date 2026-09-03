@@ -434,6 +434,17 @@ var toolRegistry = map[string]toolPresenter{
 		stat:    delegationStat,    // the engine's own result envelope: done, capped, steered
 		failure: delegationFailure, // a failed delegation reads red, and still says it was steered
 	},
+	// task_list is the model's own checklist, held as engine session state (ADR 0072). No target:
+	// its one argument IS the list, so the list is the target — the same reason git_status carries
+	// none — and the rendered list the tool echoes back is both the branch row and the body under
+	// it. No contentArgs row either: the tasks array is the call's whole point, and repeating it
+	// above the result it produced would say the same thing twice; the session record keeps it.
+	"task_list": {
+		label:  "Task List",
+		verb:   "updating the task list",
+		detail: outputDetail, // the block the model reads: the header line, then one row per task
+		stat:   openTasksStat,
+	},
 	askUserToolName: {
 		label:   "Ask User",
 		verb:    "asking",
@@ -992,6 +1003,46 @@ func taggedDiffCounts(content string) (added, removed int) {
 	}
 	return added, removed
 }
+
+// openTasksStat words task_list's slot as how many tasks are still to do: the rows of the list the
+// tool echoed back that wear the open marker. The list is the model's OWN text, so this reads only
+// the two markers internal/tasklist puts at the head of a row — the checkbox glyphs the question
+// pane already draws (askCheckedMarker) — and never a row's words, which means a task whose text
+// happens to open with a bracket cannot be miscounted as a row of its own.
+//
+// A result carrying no rows at all declines rather than saying "0 open": that is a cleared list or
+// a refusal, and the tool's own sentence says what happened far better than a zero would. An error
+// result declines for the same reason — the failure line is the outcome there — which the presenter
+// already guarantees by never reaching a stat hook on one (toolView.enrichWithResult); stating it
+// here keeps the hook TOTAL on its own, as every stat read off output is.
+func openTasksStat(res domain.ToolResult) (statValue, bool) {
+	if res.IsError {
+		return statValue{}, false
+	}
+	open, rows := 0, 0
+	for _, ln := range splitLines(res.Content) {
+		switch {
+		case strings.HasPrefix(ln, taskListOpenMarker):
+			open++
+			rows++
+		case strings.HasPrefix(ln, taskListDoneMarker):
+			rows++
+		}
+	}
+	if rows == 0 {
+		return statValue{}, false
+	}
+	return countedStat(open, "open"), true
+}
+
+// taskListOpenMarker and taskListDoneMarker are the row prefixes internal/tasklist renders a task
+// list with — the ask pane's own checkbox glyphs plus the single space that separates a marker from
+// its text. They are spelled from those constants rather than repeated as literals so the two
+// checkbox shapes the program shows a human and a model cannot drift apart.
+const (
+	taskListOpenMarker = askUncheckedMarker + " "
+	taskListDoneMarker = askCheckedMarker + " "
+)
 
 // ----------------------------------------------------------------------------
 // Extractor helpers

@@ -184,3 +184,124 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 		}
 	})
 }
+
+// TestToolRegistryPresentsTheTaskListCall pins the whole card a task_list call draws (ADR 0072):
+// the registry's own label and verb rather than the raw-name fallback a dynamic tool falls to, no
+// target — its one argument IS the list, the same reason git_status carries none — and the list the
+// tool echoed back laid out beneath the branch with the open count in the outcome slot.
+//
+// The body is asserted to carry the done row UNNUMBERED, which is the prose half of the numbering
+// rule (TestFileContentBodiesAreNumbered, whose walk reaches every registry entry): a task list is
+// the model's own text and sits on no file's lines, so a gutter here would claim a position that
+// does not exist.
+func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
+	t.Parallel()
+
+	const rendered = "Task list — yours to maintain; call task_list with the COMPLETE list to update it (2 open, 1 done):\n" +
+		"[✔] read the plan\n" +
+		"[ ] write the code\n" +
+		"[ ] run the tests"
+
+	call := domain.ToolCall{
+		ID:   "1",
+		Tool: "task_list",
+		Arguments: []byte(`{"tasks":[{"text":"read the plan","done":true},` +
+			`{"text":"write the code"},{"text":"run the tests"}]}`),
+	}
+
+	tv := presentToolCall(call, "", workspaceRoot{})
+	if tv.Label != "Task List" {
+		t.Errorf("label = %q, want %q — the raw name is the fallback a dynamic tool takes", tv.Label, "Task List")
+	}
+	if want := "updating the task list"; tv.Verb != want {
+		t.Errorf("verb = %q, want %q", tv.Verb, want)
+	}
+	if tv.Target != "" {
+		t.Errorf("target = %q, want none — the list itself is the target", tv.Target)
+	}
+
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: rendered}, workspaceRoot{})
+
+	if want := "2 open"; tv.Summary.Text != want {
+		t.Errorf("outcome slot = %q, want %q", tv.Summary.Text, want)
+	}
+	body := tv.Details.all()
+	var carriesDoneRow bool
+	for i, line := range body {
+		if line.Gutter != "" {
+			t.Errorf("body row %d (%q) carries the gutter %q, want none — a task list sits on no file's lines",
+				i, line.Text, line.Gutter)
+		}
+		if strings.Contains(line.Text, "[✔] read the plan") {
+			carriesDoneRow = true
+		}
+	}
+	if !carriesDoneRow {
+		t.Errorf("body = %v, want it to carry the ticked row the tool rendered", body)
+	}
+}
+
+// TestToolRegistryTaskListStatCountsOpenRows pins the readings the outcome slot makes off the list
+// the tool echoed back. It counts only rows wearing a marker, so a task whose own text opens with a
+// bracket is never miscounted, and it DECLINES where there is no list to count — a cleared list, a
+// refusal, an error result — which leaves the tool's own sentence in the slot rather than a `0 open`
+// that would read as a finished job.
+func TestToolRegistryTaskListStatCountsOpenRows(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		result domain.ToolResult
+		want   string
+		wantOK bool
+	}{
+		{
+			name:   "counts the open rows and not the done ones",
+			result: domain.ToolResult{Content: "Task list — … (2 open, 1 done):\n[✔] one\n[ ] two\n[ ] three"},
+			want:   "2 open",
+			wantOK: true,
+		},
+		{
+			name:   "a single open task is not pluralised into another word",
+			result: domain.ToolResult{Content: "Task list — … (1 open, 0 done):\n[ ] the only one"},
+			want:   "1 open",
+			wantOK: true,
+		},
+		{
+			name:   "a list with everything ticked reads zero open",
+			result: domain.ToolResult{Content: "Task list — … (0 open, 2 done):\n[✔] one\n[✔] two"},
+			want:   "0 open",
+			wantOK: true,
+		},
+		{
+			name:   "a task's own bracket is text, not a row marker",
+			result: domain.ToolResult{Content: "Task list — … (1 open, 0 done):\n[ ] fix [ ] in the parser"},
+			want:   "1 open",
+			wantOK: true,
+		},
+		{
+			name:   "a cleared list has no rows to count",
+			result: domain.ToolResult{Content: ""},
+			wantOK: false,
+		},
+		{
+			name:   "a refusal keeps its prose floor",
+			result: domain.ToolResult{Content: "the task list holds at most 40 tasks; that call carried 41", IsError: true},
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := toolRegistry["task_list"].stat(tc.result)
+			if ok != tc.wantOK {
+				t.Fatalf("stat ok = %v, want %v (got %q)", ok, tc.wantOK, got.spell())
+			}
+			if ok && got.spell() != tc.want {
+				t.Errorf("stat = %q, want %q", got.spell(), tc.want)
+			}
+		})
+	}
+}

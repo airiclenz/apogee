@@ -282,7 +282,15 @@ never by a line number — plan `2026-09-02 - 07` item 3 appended a 2026-09-02 a
 
 ---
 
-## 7. The TUI presents the call
+## 7. The TUI presents the call — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the stat's two row markers are spelled from `askUncheckedMarker`/`askCheckedMarker` (`internal/tui/ask.go`) plus a space, as new `taskListOpenMarker`/`taskListDoneMarker` constants, rather than as bare `"[ ] "`/`"[✔] "` literals — the plan's ratified marker call names those glyphs as the source, and `internal/tasklist`'s own markers are unexported.
+
+NOTES (2026-09-03): `openTasksStat` declines a result carrying no marker rows at all (a cleared list, a refusal) and, defensively, an `IsError` result — the presenter already never reaches a stat hook on a failed result, but the hook stays total on its own like every other output-read stat.
+
+NOTES (2026-09-03): consequential edit — docs/layout/tool-layout.md: made necessary by the new registry entry, a dated 2026-09-03 note was added beside the new table row (the file's convention for an arriving row, as the Console family and split-diff waves did) recording why the row has no target and why its slot declines on a rowless result.
+
+NOTES (2026-09-03): `docs/plans/2026-09-03 - 01 - driver-parity-and-residues-plan.md:99` quotes the oversize warning's old literal (`"— trim context files or the system prompt"`). Left untouched — it belongs to another, unexecuted plan whose own text says the strings are "the TUI's CURRENT wording, moved verbatim", so an implementer reads the code rather than that quotation.
 
 **What.** One `toolRegistry` entry for `task_list` in `internal/tui/toolregistry.go`: `label: "Task
 List"`, `verb: "updating the task list"`, no `target` (the list is the target, as the `git_status`

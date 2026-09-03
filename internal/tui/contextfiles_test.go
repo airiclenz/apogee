@@ -124,7 +124,7 @@ func TestContextFilesNoticeBudgetWarn(t *testing.T) {
 			title:    "over its share",
 			standing: 4242,
 			share:    3900,
-			want:     "standing system content ~4.1k tokens exceeds its Budget share (~3.8k) — trim context files or the system prompt",
+			want:     "standing system content ~4.1k tokens exceeds its Budget share (~3.8k) — trim context files, the task list or the system prompt",
 		},
 		{title: "exactly at its share", standing: 3900, share: 3900},
 		{title: "inside its share", standing: 800, share: 3900},

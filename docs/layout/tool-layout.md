@@ -7,7 +7,8 @@ quoting — and its tool sections point here.
 
 **As implemented**, four things below read differently on screen. Each was
 settled at implementation time and argued in that plan's item notes: labels are
-Title Case (`Diff Preview`, `Find Files`, `Git Status`, `Ask User`, `Sub-Agent`)
+Title Case (`Diff Preview`, `Find Files`, `Git Status`, `Ask User`, `Sub-Agent`,
+`Task List`)
 rather than sentence case; no stat carries a duration, because no result exposes
 one and design call 14 rules out growing the engine for presentation;
 `ask_user`'s right slot keeps the human's own answer rather than
@@ -320,6 +321,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | present_document | Present | document title (path fallback) | — | path + title |
 | ask_user | Ask user | the question | `answered` / `pending` | question + choices + the answer |
 | sub_agent | Sub-agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed` | task text + result summary |
+| task_list | Task list | — | `N open` | the list, one row per task |
 | load_skill | Skill | the loaded skill (the query until one is) | — | the skill body |
 
 Notes:
@@ -343,6 +345,11 @@ Notes:
   instead, because the command it started is already the row's target and the
   id is nowhere else on the card. The header line and the status line are read
   off the body they were taken from, so no Console card states a fact twice.
+- **2026-09-03** — the `task_list` row above arrived with the tool itself
+  (ADR 0072). It carries no target because its one argument IS the list, and
+  its slot counts the OPEN rows of the list the tool echoed back: a result
+  with no rows at all — a cleared list, or a refusal — declines the slot and
+  keeps the tool's own sentence there rather than reading `0 open`.
 - git_commit never promotes its one-line output into the slot at any width: the
   line repeats the subject the row already leads with, so the slot holds the
   short hash above and the line lays out in the body.

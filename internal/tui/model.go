@@ -791,7 +791,7 @@ func (m *Model) noteContextFiles() {
 	if report.Oversize() {
 		m.transcript.addEphemeralNote("standing system content ~" + format.TokensFine(report.StandingTokens) +
 			" tokens exceeds its Budget share (~" + format.TokensFine(report.SystemShare) +
-			") — trim context files or the system prompt")
+			") — trim context files, the task list or the system prompt")
 	}
 }
 
