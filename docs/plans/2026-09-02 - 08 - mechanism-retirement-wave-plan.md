@@ -86,7 +86,9 @@ the first pass left it.
 
 ---
 
-## 1. ADR 0071 — Floor guards are engine behaviour; the nudge catalogue retires
+## 1. ADR 0071 — Floor guards are engine behaviour; the nudge catalogue retires — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): retry — the previous attempt left the ADR untracked in the tree; kept it and applied the DECISION to the Context section's time-framing clause ("Four years of catalogue and two years of ports later" → "Two months of catalogue and four port waves later", matching the catalogue's 2026-07-04 ratification).
 
 **What.** Write `docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md`
 (`Status: accepted`, `Supersedes: ADR 0009 for structural behaviour; ADR 0070 Option C`,
