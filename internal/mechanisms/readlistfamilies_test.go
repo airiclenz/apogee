@@ -9,32 +9,12 @@ import (
 	"github.com/airiclenz/apogee/internal/library"
 )
 
-// The four tests below pin the F8 gap fixes: each list set was hand-maintained short of the complete
+// The three tests below pin the F8 gap fixes: each list set was hand-maintained short of the complete
 // five-spelling list family, so it composes from listSpellings and now carries the previously-missing
 // apogee spelling. Every test exercises the newly-covered spelling through the mechanism's observable
 // behaviour and FAILS if that set drops the spelling (verified by reverting each while writing). The
 // spellings the sets already carried have their own coverage elsewhere (the camelCase listFiles /
 // readFile tests), so each test uses only the spelling its gap fix adds.
-
-// list_directory keeps cot's read-only streak alive: a run of turns calling only list_directory is
-// still exploration, so the stall nudge fires at the threshold. Pins the gap fix adding list_directory
-// to cotReadOnlyTools via the list family — the other four list spellings were already counted, so
-// only list_directory discriminates this addition.
-func TestCotReadOnlyStreakCountsListDirectory(t *testing.T) {
-	t.Parallel()
-	msgs := append([]domain.Message{
-		{Role: domain.RoleSystem, Content: "SYS"},
-	}, readOnlyTurns(cotStallThreshold, "list_directory")...)
-	msgs = append(msgs, domain.Message{Role: domain.RoleUser, Content: "now fix the failing test"})
-
-	req := shaperRequest(msgs, cotMenu)
-	if err := (stallNudgeMechanism{}).PreRequest(context.Background(), req); err != nil {
-		t.Fatalf("PreRequest: %v", err)
-	}
-	if !hasSystemMarker(req, cotStallMarker) {
-		t.Fatal("a list_directory-only read-only streak did not advance the stall window; cotReadOnlyTools must carry list_directory")
-	}
-}
 
 // The library shallow-exploration observation fires on apogee's camelCase list spellings (listFiles /
 // listDir): a listing with no read on an analysis request records the behavioural pattern. Pins the gap

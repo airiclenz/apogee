@@ -155,13 +155,13 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 // The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
 // syntax/autofix (item 5), Wave 2 added the truncate_history history-rewrite (item 7), Wave 3 added the toolfilter/filehint
 // request shapers (item 10) and the error_enrichment/read_loop/read_repeat history-aware family
-// (item 11), Wave 4 added the decompose request
-// shaper plus the stall_nudge/list_nudge/tool_use_directive completion nudges (item 12), and item 14
-// added the library observe/inject Mechanism, so each is buildable and KnownIDs reports it, while a
-// deferred / un-ported ID is still an unknown-ID error. The tool-call validator, the identical-repeat
-// detector, the redundant-re-read interceptor, the per-result trimmer and the two Wave-1 recoveries
-// (item 6) are NOT here: they were promoted to Floor guards (ADR 0071) and are on the retired roll,
-// so a `mechanisms:` key naming one is tolerated, never built.
+// (item 11), and item 14 added the library observe/inject Mechanism, so each is buildable and
+// KnownIDs reports it, while a deferred / un-ported ID is still an unknown-ID error. The tool-call
+// validator, the identical-repeat detector, the redundant-re-read interceptor, the per-result
+// trimmer and the two Wave-1 recoveries (item 6) are NOT here: they were promoted to Floor guards
+// (ADR 0071) and are on the retired roll. Neither are Wave 4's decompose request shaper and its
+// stall_nudge/list_nudge/tool_use_directive completion nudges: they were retired outright on the
+// same verdict. A `mechanisms:` key naming any of them is tolerated, never built.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
@@ -169,7 +169,7 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 		known[id] = true
 	}
 	// Every ported Mechanism that builds with no injected Deps.
-	for _, want := range []domain.MechanismID{"syntax", "autofix", "truncate_history", "toolfilter", "filehint", "error_enrichment", "read_loop", "read_repeat", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
+	for _, want := range []domain.MechanismID{"syntax", "autofix", "truncate_history", "toolfilter", "filehint", "error_enrichment", "read_loop", "read_repeat"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
 		}
@@ -196,8 +196,8 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 }
 
 // TestPreRequestOrderingSeeds pins the pre-request dispatch order the §Ordering seeds declare
-// (review-fixes item 11 / option A, ratified into Table A 2026-07-04): the cot nudges and library
-// inject before toolfilter, and toolfilter before decompose. It builds the REAL Mechanisms and
+// (review-fixes item 11 / option A, ratified into Table A 2026-07-04): library injects before
+// toolfilter narrows the menu. It builds the REAL Mechanisms and
 // topo-sorts them through the registry, so a future rename or a dropped Before/After edge fails
 // loudly here — the finding this item closes was that the seeds lived only in catalogue prose, not
 // in the code. The seed's trailing shaper, tool_result_cap, is a Floor guard now (ADR 0071) and runs
@@ -206,13 +206,10 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	t.Parallel()
 	deps := Deps{Library: library.NewStore(t.TempDir())}
 	// Every pre-request Mechanism, including the unordered request-prep injectors (filehint/read_loop),
-	// so the pin reflects the production registry. stall_nudge and list_nudge are
-	// IncompatibleWith each other and never co-enabled in production, but Ordered is a pure topo-sort
-	// that does not gate on incompatibility, so registering both here only exercises their shared
-	// Before edge.
+	// so the pin reflects the production registry. The three completion nudges and decompose retired
+	// in v0.20.0 (ADR 0071), so library is the only row left declaring the Before-toolfilter edge.
 	ids := []domain.MechanismID{
-		"toolfilter", "decompose", "guided_decomposition",
-		"stall_nudge", "list_nudge", "tool_use_directive", "library",
+		"toolfilter", "guided_decomposition", "library",
 		"filehint", "read_loop",
 	}
 	reg := domain.NewMechanismRegistry()
@@ -237,19 +234,15 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 		pos[m.Descriptor.ID] = i
 	}
 
-	// Every cot nudge and library injects before toolfilter narrows the menu — assert each one
-	// DECLARES its Before-toolfilter edge, not merely that it sorts ahead of toolfilter. Under the
-	// D4 stable-ID tiebreak these four canonical IDs already sort before "toolfilter" even with the
-	// edge dropped, so an emergent-position check passes vacuously and would not catch an
-	// accidentally-deleted edge; inspecting the declared Ordering guards each edge independently.
-	for _, before := range []domain.MechanismID{"stall_nudge", "list_nudge", "tool_use_directive", "library"} {
+	// library injects before toolfilter narrows the menu — assert it DECLARES its Before-toolfilter
+	// edge, not merely that it sorts ahead of toolfilter. Under the D4 stable-ID tiebreak "library"
+	// already sorts before "toolfilter" even with the edge dropped, so an emergent-position check
+	// passes vacuously and would not catch an accidentally-deleted edge; inspecting the declared
+	// Ordering guards the edge independently.
+	for _, before := range []domain.MechanismID{"library"} {
 		if !slices.Contains(built[before].Ordering.Before, "toolfilter") {
 			t.Errorf("%s does not declare Before toolfilter (Ordering = %+v)", before, built[before].Ordering)
 		}
-	}
-	// The transform chain: toolfilter before decompose.
-	if pos["toolfilter"] >= pos["decompose"] {
-		t.Errorf("want toolfilter@%d < decompose@%d", pos["toolfilter"], pos["decompose"])
 	}
 	// guided_decomposition declares After toolfilter (its sub_agent-presence gate must read the final,
 	// post-toolfilter menu) — assert the DECLARED edge, not merely that it sorts after toolfilter, and

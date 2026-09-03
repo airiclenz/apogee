@@ -82,7 +82,7 @@ var libraryAnalysisOnlyTags = map[string]bool{"shallow_exploration": true}
 
 // libraryListTools / libraryReadTools are the list- and read-tool name sets the shallow-exploration
 // observation keys on (apogee-sim observer.go @pin). They compose from the shared spelling families
-// (listSpellings / readSpellings, decompose.go), so the observation fires on apogee's real menu, not
+// (listSpellings / readSpellings, historyhints.go), so the observation fires on apogee's real menu, not
 // just the sim's: the list set now carries the full family — the F8 gap fix adds listFiles / listDir
 // to the list_files / list_directory / list_dir it had — and the read set carries the retired
 // open_file spelling a model may still emit alongside the sim's.

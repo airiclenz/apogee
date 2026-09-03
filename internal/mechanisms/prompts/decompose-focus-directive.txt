@@ -1,1 +1,0 @@
-Focus on one action at a time. When given a task, perform the first concrete step by calling the appropriate tool. Never write code or file contents as text in your response — always use the provided tools to create and modify files. Do not plan ahead or describe future steps.

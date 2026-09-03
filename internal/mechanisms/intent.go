@@ -8,7 +8,8 @@ import (
 // The intent classifier ported inline from apogee-sim internal/intent/intent.go @pin
 // (catalogue C6: intent is a shared helper, never its own catalogue row — it fires no hook and
 // carries no descriptor). Its first consumer was the narration recovery, a Floor guard since ADR
-// 0071 (internal/floor keeps its own copy); library, decompose and cot read the same functions. It is a cheap lexical heuristic: does the
+// 0071 (internal/floor keeps its own copy); library and toolfilter read the same functions. It is a
+// cheap lexical heuristic: does the
 // user's last message ask for an ACTION (edit/create/run …) as opposed to ANALYSIS (summarize/
 // explain …) or a question. A Mechanism uses it to decide whether narrating instead of acting is a
 // failure worth correcting (an analysis request answered in prose is fine; an action request is not).

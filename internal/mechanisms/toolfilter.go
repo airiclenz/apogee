@@ -17,11 +17,10 @@ import (
 func init() {
 	register(row{
 		descriptor: toolFilterDescriptor,
-		// Ordering declares toolfilter Before decompose (catalogue Table A: "trim the menu before the
-		// user-message rewrite"). decompose landed in item 12, so the edge names its canonical const like
-		// every other constraint in the package — the raw "decompose" literal this edge carried while the
-		// Mechanism was still absent was the one rename-fragile cross-reference left in the catalogue.
-		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{decomposeID}},
+		// No ordering constraint any more: the Before-decompose edge (catalogue Table A, "trim the menu
+		// before the user-message rewrite") named a row that retired in v0.20.0 (ADR 0071), and an edge
+		// naming an absent ID is ignored by the topo-sort anyway. The remaining pre-request rows read the
+		// menu rather than rewrite the user message, so none of them needs the menu trimmed first.
 		construct: newToolFilter,
 	})
 }
@@ -52,7 +51,7 @@ var toolFilterStopWords = map[string]bool{
 
 // toolFilterAnalysisKeep are the read-only exploration tools kept regardless of keyword score when
 // the user's request is analysis-focused (apogee-sim toolfilter.go:57-62 @pin). It composes from the
-// shared read and list spelling families (readSpellings / listSpellings, decompose.go) plus toolfilter's
+// shared read and list spelling families (readSpellings / listSpellings, historyhints.go) plus toolfilter's
 // own local search spellings (grep / search_files), so a mixed MCP menu still triggers: the list family
 // now completes the F8 gap that had left listFiles / listDir out of the analysis-keep set.
 var toolFilterAnalysisKeep = toolSet(

@@ -243,8 +243,8 @@ func TestCataloguedMechanisms(t *testing.T) {
 	if gd == nil {
 		t.Fatal("CataloguedMechanisms() missing guided_decomposition")
 	}
-	if len(gd.IncompatibleWith) != 2 || gd.IncompatibleWith[0] != "decompose" {
-		t.Errorf("guided_decomposition IncompatibleWith = %v, want [decompose truncate_history]", gd.IncompatibleWith)
+	if len(gd.IncompatibleWith) != 1 || gd.IncompatibleWith[0] != "truncate_history" {
+		t.Errorf("guided_decomposition IncompatibleWith = %v, want [truncate_history]", gd.IncompatibleWith)
 	}
 }
 

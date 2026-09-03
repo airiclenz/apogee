@@ -100,9 +100,10 @@ func newGuidedDecomposition(Deps) (any, error) {
 
 // guidedDecompositionDescriptor identifies guided_decomposition as a strikes-3 proactive-nudge
 // Mechanism (ADR 0014 §1): disabled under Bypass (D5) and withdrawn by self-regulation after
-// repeated non-help. It is IncompatibleWith decompose — the two steer the same "task too big"
+// repeated non-help. Its incompatibility with decompose — the two steered the same "task too big"
 // symptom through different means (delegation vs prompt wording) and must not stack (locked decision
-// 2) — and IncompatibleWith truncate_history — a mid-Exchange truncation longer than its keep window
+// 2) — went with that row when it retired in v0.20.0 (ADR 0071). It stays
+// IncompatibleWith truncate_history — a mid-Exchange truncation longer than its keep window
 // can drop the enumeration message the cursor re-derives the remainder from, destroying the fan-out
 // mid-flight (F7; one-sided declaration suffices — detectIncompatibility is symmetric in effect). It
 // declares NO Requires edge any more: the tool-result cap it used to name as its Required peer
@@ -112,7 +113,7 @@ var guidedDecompositionDescriptor = domain.MechanismDescriptor{
 	ID:               guidedDecompositionID,
 	Capability:       domain.CapProactiveNudge,
 	Suppression:      domain.SuppressStrikesThree,
-	IncompatibleWith: []domain.MechanismID{decomposeID, truncateHistoryID},
+	IncompatibleWith: []domain.MechanismID{truncateHistoryID},
 }
 
 // PreRequest injects the enumeration steer on an oversized primary call so the model first plans the

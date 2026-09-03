@@ -29,8 +29,86 @@ import (
 // superset that also carries apogee's own edit tools; only the content-repair Mechanisms (syntax,
 // autofix) use the narrower sim-only isWriteTool.
 
+// wave4WriteTools is the write-tool set the history family inspects for "has the model written a
+// file yet" — apogee-sim toolsets.WriteTools @pin extended with apogee's own write-tool spellings
+// (edit_existing_file / single_&_multi_find_and_replace, joined 2026-08-10 by the file-operation
+// trio copy_file / move_file / delete_file), so the scans fire on apogee's real menu (apogee's
+// read_file / list_dir / grep already appear in the sim's read/list/search sets, so only the write
+// set needs the apogee names added). It is the apogee-complete file-mutation superset and doubles
+// as the single source for isFileMutatingTool (robustness.go, semantic (b) of write detection —
+// S1, 2026-07-04): both point at this one set.
+//
+// Its apogee half is exactly internal/tools' workspaceScopedWriter set — the built-ins whose
+// execution mutates a NAMED workspace file. TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin
+// (writedetection_test.go) pins that correspondence against the registered menu, so a write tool
+// added to internal/tools can no longer land here as a silent non-write. The sim spellings above it
+// are additive: they name no registered apogee tool and the pin never asks them to.
+var wave4WriteTools = map[string]bool{
+	"write_file": true, "writeFile": true, "write_to_file": true, "create_file": true,
+	"edit_file": true, "editFile": true, "replace_in_file": true,
+	"edit_existing_file": true, "single_find_and_replace": true, "multi_find_and_replace": true,
+	"copy_file": true, "move_file": true, "delete_file": true,
+}
+
+// readSpellings and listSpellings are the read- and list-tool SPELLING families: each lists one tool
+// concept written every way apogee's real menu can present it, so a newly-supported spelling is added
+// in ONE place and every set composed from it inherits the addition (F8, post-v1.3.0 review). They are
+// the read/list counterparts of wave4WriteTools above — the write side's single source. The families
+// carry SPELLINGS only: WHICH concepts a given set treats as a read or a list stays that set's own
+// documented membership (the sets serve different purposes and several carry @pin rationales), so each
+// set below composes from a family via toolSet and adds its own local spellings rather than
+// hand-copying the family's — the drift class this consolidation closes.
+var (
+	// readSpellings is apogee-sim's read-tool set (toolsets.ReadTools @pin: read_file / readFile) plus
+	// apogee's own open_file spelling — read_file.go renderFile is read-only and returns the file
+	// body, so it counts as a file read wherever a read set is consulted. "open_file" is a RETIRED
+	// tool name (merged into read_file on 2026-08-11) kept as a spelling a model may still emit,
+	// exactly like "readFile", which was never a registered tool either.
+	readSpellings = []string{"read_file", "readFile", "open_file"}
+
+	// listSpellings is apogee-sim's list-tool set (toolsets.ListTools @pin: list_files / listFiles /
+	// list_dir / listDir) plus apogee's own list_directory spelling, so a directory listing counts
+	// however the menu spells it. The four gap fixes (F8) are exactly the sets below that had been
+	// hand-maintained short of this complete family.
+	listSpellings = []string{"list_files", "listFiles", "list_dir", "listDir", "list_directory"}
+)
+
+// toolSet unions one or more spelling groups — the families above and/or a set's own local spellings —
+// into a name→true membership set. It is the composition seam F8 introduces: a set names the families
+// it draws from instead of copying their spellings, so a family addition reaches every set at once.
+func toolSet(groups ...[]string) map[string]bool {
+	set := make(map[string]bool)
+	for _, g := range groups {
+		for _, name := range g {
+			set[name] = true
+		}
+	}
+	return set
+}
+
+// hasWrittenFiles reports whether any assistant message issued a write-tool call — the "model has
+// already started writing" signal filehint gates on (apogee-sim toolsets.HasWrittenFiles @pin, over
+// wave4WriteTools so apogee's own write tools count; filehint's private copy of the scan and its
+// duplicate write set folded here, item 7).
+func hasWrittenFiles(conv domain.ConversationView) bool {
+	found := false
+	conv.Range(func(_ int, m domain.Message) bool {
+		if m.Role != domain.RoleAssistant {
+			return true
+		}
+		for _, tc := range m.ToolCalls {
+			if wave4WriteTools[tc.Tool] {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
 // listToolNames are the directory-listing calls greenfield detection inspects for an empty workspace.
-// It composes from the list spelling family (listSpellings, decompose.go) — apogee-sim's ListTools
+// It composes from the list spelling family (listSpellings, above) — apogee-sim's ListTools
 // @pin plus apogee's own list_directory — the complete five-spelling family the other list sets now
 // consolidate onto.
 var listToolNames = toolSet(listSpellings)
@@ -39,9 +117,9 @@ var listToolNames = toolSet(listSpellings)
 func isListTool(name string) bool { return listToolNames[name] }
 
 // readToolNames are the tools whose calls count as a file read across the history family. It
-// composes from the read spelling family (readSpellings, decompose.go) — apogee-sim's ReadTools
+// composes from the read spelling family (readSpellings, above) — apogee-sim's ReadTools
 // @pin plus the retired open_file spelling, a separate read tool until it merged into read_file on
-// 2026-08-11, kept because models may still emit the name — so the cot/filehint/library read sets
+// 2026-08-11, kept because models may still emit the name — so the filehint/library read sets
 // that share the family stay identical by construction rather than by hand-maintained copies.
 var readToolNames = toolSet(readSpellings)
 

@@ -57,7 +57,7 @@ const fileHintMarker = "Based on the directory listing, these files are likely m
 
 // fileHintListTools / fileHintReadTools name the directory-listing and file-reading tools whose
 // interplay opens and closes a hint opportunity. They compose from the shared spelling families
-// (listSpellings / readSpellings, decompose.go) so a mixed MCP menu still triggers: the list set now
+// (listSpellings / readSpellings, historyhints.go) so a mixed MCP menu still triggers: the list set now
 // carries the full family — the F8 gap fix adds listDir to the list_dir / list_files / listFiles /
 // list_directory it had — and the read set carries the retired open_file spelling alongside the sim's.
 var (
@@ -106,7 +106,7 @@ func (fileHintMechanism) PreRequest(_ context.Context, req *domain.Request) erro
 		return nil
 	}
 	// The "model has already shared written files" signal that suppresses the greenfield skip is
-	// the package-shared write scan over wave4WriteTools (hasWrittenFiles, decompose.go) — the
+	// the package-shared write scan over wave4WriteTools (hasWrittenFiles, historyhints.go) — the
 	// Mechanism's private copy of the scan and of the write set was folded there (item 7).
 	if fileHintIsCreationFocused(userPrompt) && !hasWrittenFiles(conv) {
 		return nil

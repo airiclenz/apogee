@@ -611,7 +611,21 @@ with only that flag set; the `--bypass` help text is pinned.
 
 **Commit:** `feat(cmd): floor-guard keys reach the engine and apply live from /settings`
 
-## 12. Retire the three completion nudges and `decompose`
+## 12. Retire the three completion nudges and `decompose` — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the item's fix list is a floor, not a ceiling. Beyond it, the symbol grep reached `internal/agent/{enable_mechanisms_test.go,rebind_test.go}`, `apogee_test.go`, `example_test.go` and `cmd/apogee/guided_decomposition_test.go` — all five built the incompatible-pair case out of `guided_decomposition` + `decompose`, which after the retirement either draws `ErrUnknownMechanism` or (through `ResolveEnabled`, which drops a retired key) refuses nothing at all. Each was recast over the surviving `guided_decomposition` ⊥ `truncate_history` edge (F7); `cmd/apogee`'s retired-key-still-boots test became table-driven over both `tool_result_cap` and `decompose`.
+
+NOTES (2026-09-03): the plan lists `writedetection_test.go`'s "decompose uses" as a fix, but the file names no retiring row — instead it BECAME the new home of `TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin` plus `workspaceWritingBuiltins` / `writeCapableNonFileBuiltins` and the three host-delegate stubs, as the regression guard directs (it imports `internal/tools`, which item 3's one-deep-module rule bars from `internal/floor`).
+
+NOTES (2026-09-03): `oneTool` (`decompose_test.go`'s minimal menu) is still called by `library_test.go:110`, so it moved to `toolfilter_test.go` beside `shaperRequest` — the symbol grep's rule, applied to a test fixture.
+
+NOTES (2026-09-03): DEVIATION — `cmd/apogee/schedule_test.go`'s validated-set half could not simply swap one ID for another. Its evidence was decompose's step hint standing in the firing's FIRST system prompt, and no surviving catalogued row marks a fresh request's system prompt (toolfilter needs 30+ tools and the firing menu carries 7; filehint/read_loop need history; guided_decomposition needs an oversized ask and injects a user message, not a system one). The set now names `toolfilter` and the proof moved to the roster the Firing composed, read through the package's `runOnce` seam while the real run still reaches the upstream — so the test drops `t.Parallel()`, exactly as the file's other seam-swapping tests do. `firingUpstream`'s system-prompt capture had no reader left and went with it.
+
+NOTES (2026-09-03): `benchreadiness_test.go`'s mechanisms-on arm loses `decompose` (the plan's "replace the four IDs with an experimental hook" reads as replacing the retiring ID; item 19 rewrites the arm). The fired stream is now `[toolfilter experimental]` pairs, and the deterministic-order pin moved onto the enable set's other declared edge — `library` Before `toolfilter` — which keeps `orderedIndex` honest rather than leaving it unused.
+
+NOTES (2026-09-03): consequential edits — internal/mechanisms/{doc.go,prompts.go,intent.go,robustness.go,library.go,historyscan.go,filehint.go,toolfilter.go,catalogue_test.go}, internal/domain/hooks.go, internal/agent/selfreg.go: made necessary by the retirement; each named cot/decompose as a live row, pointed at `decompose.go` as the spelling families' home, or (doc.go) carried a file/row count and asset roster my deletion made wrong. doc.go's count line was corrected to the true ten files / ten rows rather than left at a number the deletion made further wrong (items 7 and 8's precedent).
+
+NOTES (2026-09-03): `internal/config/config_test.go:586` still spells `Mechanisms: {"decompose": true}` — a YAML round-trip fixture that never reaches the catalogue and that a retired key must keep parsing, so it needed no edit. `internal/validated/shipped_test.go:95-97` also still spells the four IDs: it pins the shipped gemma JSON verbatim (item 18's), and item 2's `DropRetired` relaxation absorbs the four new roll entries.
 
 **What.** Depends on 2. Delete `cot.go`, `cot_test.go`, `decompose.go`, `decompose_test.go`, the five
 assets `cot-*.txt`, `decompose-*.txt`; move `readSpellings`/`wave4WriteTools` (and `toolSet` if it lives

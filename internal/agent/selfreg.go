@@ -72,7 +72,7 @@ type selfRegulator struct {
 	// LoopView.Fired answers from (R4: interventions, not invocations). It is shared BY
 	// REFERENCE into each Request's view (buildRequest / loopView pass it to domain.NewRequest),
 	// so a Mechanism querying Fired sees a peer's fire from earlier in the same hook pass (the
-	// decompose↔read_loop coupling seam, D2). It is only read through the view; only recordFire
+	// cross-Mechanism coupling seam, D2). It is only read through the view; only recordFire
 	// writes it.
 	fireCounts map[domain.MechanismID]int
 

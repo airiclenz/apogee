@@ -1,1 +1,0 @@
-You have been exploring and reading files for several turns without making any changes. Now proceed with the required modifications — use write_file or edit_file to implement the changes.

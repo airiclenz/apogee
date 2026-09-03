@@ -9,7 +9,7 @@ import (
 // readrepeat's recent-successful-reads, the write-path collection deriveWriteTarget filters
 // against — differing subtly in role, window, and success handling. This file owns ONE copy of
 // each shared shape, beside the F8 spelling families it composes with (readSpellings /
-// listSpellings, decompose.go; wave4WriteTools as the write side's single source): the SCAN is
+// listSpellings, historyhints.go; wave4WriteTools as the write side's single source): the SCAN is
 // shared, while per-Mechanism MEMBERSHIP (which tool-name set counts) and THRESHOLDS (how many
 // hits matter) stay at the call site — passed as set parameters, applied to the returned counts.
 // A composite walk no shared shape expresses without contortion stays local to its Mechanism with

@@ -182,14 +182,14 @@ func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
 		t.Errorf("rebuilt registry = %v, want the previous model's set gone", registeredIDs(a.registry))
 	}
 
-	// guided_decomposition is IncompatibleWith decompose: enabling both must fail the stacking gates
+	// guided_decomposition is IncompatibleWith truncate_history: enabling both must fail the stacking gates
 	// BEFORE anything is committed. (Rebind builds into a FRESH registry, so the refusal has to be
 	// one a catalogue pair can trip — the requirements gate has no catalogued declarer left, its one
 	// Required peer having become a Floor guard.)
 	rebuilt := a.registry
 	err = a.Rebind(RebindSpec{
 		Model:            "third-model",
-		EnableMechanisms: []domain.MechanismID{"guided_decomposition", "decompose"},
+		EnableMechanisms: []domain.MechanismID{"guided_decomposition", "truncate_history"},
 	})
 	if !errors.Is(err, domain.ErrIncompatibleMechanisms) {
 		t.Fatalf("Rebind with an incompatible pair err = %v, want it to wrap ErrIncompatibleMechanisms", err)

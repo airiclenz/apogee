@@ -330,8 +330,8 @@ type LoopView interface {
 	// Fired reports how many times a Mechanism has ACTED this Session (R4): an
 	// invocation is booked only when it mutated its working value or returned a
 	// non-zero post-response Action — an inspect-and-do-nothing invocation is not a
-	// fire. It is the seam for cross-Mechanism coupling (e.g. decompose muting itself
-	// once a read-loop Mechanism has fired) without a shared mutable meta map. An
+	// fire. It is the seam for cross-Mechanism coupling (a Mechanism muting itself
+	// once a peer has fired) without a shared mutable meta map. An
 	// experimental hook's synthetic ID keeps counting every invocation (bench
 	// observability).
 	Fired(id MechanismID) int
@@ -401,7 +401,7 @@ type Request struct {
 // messages and tools slices are copied, so a hook mutating the Request never reaches
 // back into the loop's conversation storage. fired, in contrast, is shared BY REFERENCE:
 // it is the loop's live per-Session fire ledger LoopView.Fired reads, so a Mechanism can
-// see a peer's fire from earlier in the same hook pass (the decompose↔read_loop coupling
+// see a peer's fire from earlier in the same hook pass (the cross-Mechanism coupling
 // seam). It is only ever read through the view — no view operation mutates it — so the
 // shared reference is safe. nil is fine (Fired then reports 0 for every Mechanism).
 func NewRequest(model string, messages []Message, tools []ToolDef, budget Budget, turn int, fired map[MechanismID]int) *Request {
@@ -494,7 +494,7 @@ func (r *Request) Extra(key string) (json.RawMessage, bool) {
 
 // AppendToSystem appends text to the first system message (creating one if absent),
 // but is a no-op if marker already occurs there — the idempotent inject the nudge
-// Mechanisms (library, cot, decompose) share. Reports whether it injected. The caller
+// Mechanisms (library today) share. Reports whether it injected. The caller
 // embeds marker within text so a second call with the same marker is a no-op.
 func (r *Request) AppendToSystem(marker, text string) (injected bool) {
 	if i := firstIndex(r.messages, RoleSystem); i >= 0 && strings.Contains(r.messages[i].Content, marker) {

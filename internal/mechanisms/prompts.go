@@ -6,8 +6,8 @@ import (
 )
 
 // promptFS carries this package's prompt text as plain files under prompts/ — the fixed wording of
-// every catalogued Mechanism that speaks to the model: the CoT, decompose and library-injection
-// assets that cot.go, decompose.go and library.go load. They are
+// every catalogued Mechanism that speaks to the model: the library-injection assets that
+// library.go loads. They are
 // assets rather than Go string literals so the wording can be read and edited as prose (ISSUES.md:
 // hard-coded prompt literals), and go:embed compiles them into the binary — the text ships inside
 // the single binary, is never read from disk at runtime, and is never user-overridable. Only the

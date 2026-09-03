@@ -14,6 +14,10 @@ func shaperRequest(msgs []domain.Message, tools []domain.ToolDef) *domain.Reques
 	return domain.NewRequest("m", msgs, tools, domain.Budget{}, 0, nil)
 }
 
+// oneTool is a minimal non-empty tool menu, for a shaper that skips entirely when no tools are
+// present. It moved here from decompose_test.go when that row retired; library_test.go shares it.
+var oneTool = []domain.ToolDef{{Name: "write_file"}}
+
 // genericTools builds n distinctly-named tools with no keyword affinity, so scoring alone leaves
 // them tied at zero (the recently-used / analysis-keep paths decide what survives).
 func genericTools(n int) []domain.ToolDef {
@@ -48,8 +52,9 @@ func TestToolFilterDescriptorAndOrdering(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	if o := m.Ordering; len(o.Before) != 1 || o.Before[0] != "decompose" {
-		t.Errorf("Ordering = %+v, want Before decompose (catalogue Table A)", o)
+	// No ordering edge left: the Before-decompose edge went with decompose's retirement (ADR 0071).
+	if o := m.Ordering; len(o.Before) != 0 || len(o.After) != 0 {
+		t.Errorf("Ordering = %+v, want none — the Before-decompose edge retired with decompose", o)
 	}
 	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 		t.Error("toolfilter does not implement PreRequestHook")

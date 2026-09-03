@@ -43,10 +43,9 @@ const (
 	// plain reply instead of asking for a tool — how a fork continuation ends in one Turn.
 	closeMarker = "PLEASE_CLOSE"
 
-	// complexPrompt is analysis-AND-action intent with six numbered steps: enough structural
-	// complexity for decompose to act (score 10 ⇒ "complex"), an action verb so its step-hint
-	// branch engages, and an analysis verb so toolfilter keeps the read tools and the library
-	// observer records the shallow-exploration note (list-without-read on an analysis request).
+	// complexPrompt is analysis-AND-action intent with six numbered steps: an analysis verb so
+	// toolfilter keeps the read tools and the library observer records the shallow-exploration note
+	// (list-without-read on an analysis request), and an action verb so the ask reads as real work.
 	complexPrompt = "please analyze and then refactor the payment service by working through these steps.\n" +
 		"1. read the config parser module.\n" +
 		"2. update the request validation logic.\n" +
@@ -65,13 +64,14 @@ var allHooks = []apogee.HookPoint{
 	apogee.HookHistoryRewrite,
 }
 
-// enabledMechanisms is the multi-wave set the mechanisms-on arm enables via Config: two
-// request shapers that ACT every pre-request (toolfilter — wave 3, decompose — wave 4),
-// one history-rewrite shaper that stays inspect-only on a short conversation (truncate_history
-// — wave 2), and the learning Mechanism whose observe half writes into the injected LibraryDir
-// (library — item 14). toolfilter declares "Before decompose", so their fired order is the
-// registry's deterministic dispatch order.
-var enabledMechanisms = []apogee.MechanismID{"toolfilter", "decompose", "truncate_history", "library"}
+// enabledMechanisms is the multi-wave set the mechanisms-on arm enables via Config: one
+// request shaper that ACTS every pre-request (toolfilter — wave 3), one history-rewrite shaper
+// that stays inspect-only on a short conversation (truncate_history — wave 2), and the learning
+// Mechanism whose observe half writes into the injected LibraryDir (library — item 14). library
+// declares "Before toolfilter", so their fired order is the registry's deterministic dispatch
+// order. The wave-4 decompose shaper that used to sit beside toolfilter here retired in v0.20.0
+// (ADR 0071).
+var enabledMechanisms = []apogee.MechanismID{"toolfilter", "truncate_history", "library"}
 
 // ----------------------------------------------------------------------------
 // The scripted OpenAI-compatible streaming model (one responder, both arms)
@@ -403,18 +403,19 @@ func TestBenchReadinessContract(t *testing.T) {
 	// The enabled shapers actually ACT (they book fires); an inspect-only Mechanism does not.
 	mechFires := firedEvents(mechSink.events)
 	preIDs := firedIDsAt(mechFires, apogee.HookPreRequest)
-	if len(preIDs) == 0 || len(preIDs)%3 != 0 {
-		t.Fatalf("pre-request fired stream = %v, want repeating [toolfilter decompose experimental] triples", preIDs)
+	if len(preIDs) == 0 || len(preIDs)%2 != 0 {
+		t.Fatalf("pre-request fired stream = %v, want repeating [toolfilter experimental] pairs", preIDs)
 	}
-	want := []string{"toolfilter", "decompose", "experimental"}
+	want := []string{"toolfilter", "experimental"}
 	for i, id := range preIDs {
-		if id != want[i%3] {
-			t.Errorf("pre-request fired[%d] = %q, want %q (deterministic order: shapers in Ordered() order, then the experimental hook)", i, id, want[i%3])
+		if id != want[i%2] {
+			t.Errorf("pre-request fired[%d] = %q, want %q (deterministic order: shapers in Ordered() order, then the experimental hook)", i, id, want[i%2])
 		}
 	}
-	// The observed order is the registry's deterministic dispatch order (toolfilter Before decompose).
-	if ti, di := orderedIndex(mechReg, apogee.HookPreRequest, "toolfilter"), orderedIndex(mechReg, apogee.HookPreRequest, "decompose"); ti < 0 || di < 0 || ti >= di {
-		t.Errorf("Ordered(pre-request) has toolfilter@%d, decompose@%d; want toolfilter strictly before decompose", ti, di)
+	// The registry's deterministic dispatch order, read off the enabled set's own declared edge:
+	// library declares Before toolfilter, so it is dispatched first even though it books no fire.
+	if li, ti := orderedIndex(mechReg, apogee.HookPreRequest, "library"), orderedIndex(mechReg, apogee.HookPreRequest, "toolfilter"); li < 0 || ti < 0 || li >= ti {
+		t.Errorf("Ordered(pre-request) has library@%d, toolfilter@%d; want library strictly before toolfilter", li, ti)
 	}
 
 	// === Assertion 2: R4 — an inspect-only invocation books no fired event ===
@@ -555,7 +556,7 @@ func hermeticArm(t *testing.T, enable []apogee.MechanismID) (*apogee.Agent, erro
 
 // TestBenchReadinessConstructionRefusals proves the campaign's fail-loud arms refuse construction
 // through the PUBLIC surface with a matchable sentinel: an incompatible pair
-// (guided_decomposition with decompose, ADR 0014) fails apogee.ErrIncompatibleMechanisms, and a
+// (guided_decomposition with truncate_history, ADR 0014 F7) fails apogee.ErrIncompatibleMechanisms, and a
 // bogus catalogue ID fails apogee.ErrUnknownMechanism — the same startup gate the bench hits when it
 // mis-plans an arm, asserted only through errors.Is on the root sentinels. The half-armed Requires
 // arm it used to carry has no catalogued case left: the peer it named is a Floor guard now, and
@@ -569,7 +570,7 @@ func TestBenchReadinessConstructionRefusals(t *testing.T) {
 	}{
 		{
 			name:    "incompatible pair",
-			enable:  []apogee.MechanismID{"decompose", "guided_decomposition"},
+			enable:  []apogee.MechanismID{"truncate_history", "guided_decomposition"},
 			wantErr: apogee.ErrIncompatibleMechanisms,
 		},
 		{

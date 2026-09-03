@@ -54,10 +54,11 @@ func TestGuidedDecompositionDescriptorAndOrdering(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	// IncompatibleWith decompose (locked decision 2) and truncate_history (F7 — a mid-Exchange
-	// truncation can drop the enumeration message the cursor re-derives from).
-	if len(d.IncompatibleWith) != 2 || d.IncompatibleWith[0] != decomposeID || d.IncompatibleWith[1] != truncateHistoryID {
-		t.Errorf("IncompatibleWith = %v, want [%q %q]", d.IncompatibleWith, decomposeID, truncateHistoryID)
+	// IncompatibleWith truncate_history alone (F7 — a mid-Exchange truncation can drop the
+	// enumeration message the cursor re-derives from). The decompose edge (locked decision 2) went
+	// with that row when it retired in v0.20.0 (ADR 0071).
+	if len(d.IncompatibleWith) != 1 || d.IncompatibleWith[0] != truncateHistoryID {
+		t.Errorf("IncompatibleWith = %v, want [%q]", d.IncompatibleWith, truncateHistoryID)
 	}
 	// NO Requires edge: locked decision 3's Required peer, tool_result_cap, is the `tool-result-cap`
 	// Floor guard now (ADR 0071), so the capping it insisted on runs in every arm and a gate naming a

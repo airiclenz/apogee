@@ -17,11 +17,6 @@ func TestPromptAssetsKeepTheirMarkers(t *testing.T) {
 		marker    string
 		directive string
 	}{
-		{"cot_tool_use", cotToolUseMarker, cotToolUseDirective},
-		{"cot_stall", cotStallMarker, cotStallDirective},
-		{"cot_list_nudge", cotListNudgeMarker, cotListNudgeDirective},
-		{"decompose_focus", decomposeFocusMarker, decomposeFocusDirective},
-		{"decompose_continuation", decomposeContinuationMarker, decomposeContinuationDirective},
 		{"library_injection", libraryInjectionMarker, libraryInjectionHeader},
 	}
 	for _, tc := range cases {
@@ -45,14 +40,9 @@ func TestEmbeddedDirectivePromptsLoad(t *testing.T) {
 
 	verbs := map[string]int{
 		// The whole-text directives and notes the Mechanisms inject verbatim.
-		"cot-tool-use-directive.txt":           0,
-		"cot-stall-directive.txt":              0,
-		"cot-list-nudge-directive.txt":         0,
-		"decompose-focus-directive.txt":        0,
-		"decompose-continuation-directive.txt": 0,
-		"library-tool-use-note.txt":            0,
-		"library-shallow-note.txt":             0,
-		"library-injection-header.txt":         0,
+		"library-tool-use-note.txt":    0,
+		"library-shallow-note.txt":     0,
+		"library-injection-header.txt": 0,
 	}
 
 	entries, err := promptFS.ReadDir("prompts")

@@ -54,6 +54,13 @@ type retiredRow struct {
 //   - tool_result_cap (retired v0.20.0) — PROMOTED. The per-result trimmer became the
 //     `tool-result-cap` Floor guard: it shrinks what an old result costs in the projected request
 //     and tells the model how to read the omitted range back, so it shapes without steering.
+//   - stall_nudge, list_nudge, tool_use_directive (retired v0.20.0) — RETIRED OUTRIGHT on a
+//     ratified verdict (ADR 0071). The three completion nudges apogee-sim's `cot` Transform split
+//     into steered the model with proactive directives, which is exactly what a Floor guard may not
+//     do, and no per-model A/B ever earned them a place (ADR 0009's gate).
+//   - decompose (retired v0.20.0) — RETIRED OUTRIGHT on the same verdict. The task-decomposition
+//     steer collapsed complex prompts in history and hinted a single next step into the system
+//     prompt: it rewrites what the human asked for, so it steers rather than shapes.
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
@@ -62,6 +69,10 @@ var retired = []retiredRow{
 	{ID: "tool_use_enforcer", Release: "v0.20.0", Successor: "tool-use-enforcer"},
 	{ID: "cached_content_intercept", Release: "v0.20.0", Successor: "read-cache"},
 	{ID: "tool_result_cap", Release: "v0.20.0", Successor: "tool-result-cap"},
+	{ID: "stall_nudge", Release: "v0.20.0"},
+	{ID: "list_nudge", Release: "v0.20.0"},
+	{ID: "tool_use_directive", Release: "v0.20.0"},
+	{ID: "decompose", Release: "v0.20.0"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

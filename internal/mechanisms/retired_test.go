@@ -104,6 +104,41 @@ func TestRetiredReleaseAndSuccessorAnswerPerID(t *testing.T) {
 	}
 }
 
+// The rows this wave retired OUTRIGHT are on the real roll too, each with its release and NO
+// successor — a `mechanisms:` block still naming one starts, arms nothing, and earns the plain line
+// that names the release the user would look up rather than a key that does not exist.
+func TestRetiredOutrightRowsCarryTheirReleaseAndNoSuccessor(t *testing.T) {
+	t.Parallel()
+
+	for _, id := range []domain.MechanismID{"decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
+		t.Run(string(id), func(t *testing.T) {
+			t.Parallel()
+
+			if !IsRetired(id) {
+				t.Fatalf("IsRetired(%q) = false; a retired row must stay on the roll so a saved config still starts", id)
+			}
+			if got := RetiredRelease(id); got != "v0.20.0" {
+				t.Errorf("RetiredRelease(%q) = %q, want %q", id, got, "v0.20.0")
+			}
+			if got := Successor(id); got != "" {
+				t.Errorf("Successor(%q) = %q, want \"\" — the row retired outright, it was not promoted", id, got)
+			}
+
+			ids, notices, err := ResolveEnabled(map[string]bool{string(id): true}, exemplarKnown())
+			if err != nil {
+				t.Fatalf("ResolveEnabled(%q): a retired id must be tolerated, got %v", id, err)
+			}
+			if len(ids) != 0 {
+				t.Errorf("ResolveEnabled armed the retired id %q: %v", id, ids)
+			}
+			want := `apogee: mechanism "` + string(id) + `" was retired in v0.20.0 and is ignored; remove it from mechanisms:`
+			if len(notices) != 1 || notices[0] != want {
+				t.Errorf("notices = %q, want [%q]", notices, want)
+			}
+		})
+	}
+}
+
 // The rows this wave PROMOTED are on the real roll, each with its release and the Floor-guard key
 // that governs the behaviour now — so a saved `mechanisms:` block naming one still starts, and the
 // notice it earns names the key rather than telling the user the behaviour is gone. This pins the

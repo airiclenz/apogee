@@ -44,31 +44,39 @@ func TestGuidedDecomposition_BootsFromTheConfigSurface(t *testing.T) {
 	t.Cleanup(func() { _ = agent.Close() })
 }
 
-// A `mechanisms:` block still naming the retired tool_result_cap key boots exactly as before — the
-// key is dropped with a notice, never refused (the roll's whole purpose).
-func TestGuidedDecomposition_RetiredCapKeyStillBoots(t *testing.T) {
+// A `mechanisms:` block still naming a retired key boots exactly as before — the key is dropped with
+// a notice, never refused (the roll's whole purpose). Both of this row's own retired relations are
+// covered: tool_result_cap, the peer it once Required, and decompose, the peer it once declared
+// IncompatibleWith — a block naming either was valid at v0.20.0 and must still start.
+func TestGuidedDecomposition_RetiredKeysStillBoot(t *testing.T) {
 	t.Parallel()
-	cfg := validCfg(t)
-	guidedEnable(t, &cfg, map[string]bool{"guided_decomposition": true, "tool_result_cap": true})
+	for _, retired := range []string{"tool_result_cap", "decompose"} {
+		t.Run(retired, func(t *testing.T) {
+			t.Parallel()
+			cfg := validCfg(t)
+			guidedEnable(t, &cfg, map[string]bool{"guided_decomposition": true, retired: true})
 
-	agent, err := apogee.New(cfg)
-	if err != nil {
-		t.Fatalf("New with a block still naming the retired tool_result_cap: %v", err)
+			agent, err := apogee.New(cfg)
+			if err != nil {
+				t.Fatalf("New with a block still naming the retired %s: %v", retired, err)
+			}
+			t.Cleanup(func() { _ = agent.Close() })
+		})
 	}
-	t.Cleanup(func() { _ = agent.Close() })
 }
 
-// guided_decomposition and decompose steer the same "task too big" symptom by different means and are
-// declared incompatible (locked decision 2): enabling both is refused at construction.
-func TestGuidedDecomposition_IncompatibleWithDecompose(t *testing.T) {
+// guided_decomposition and truncate_history cannot stack — a mid-Exchange truncation can drop the
+// enumeration message the fan-out cursor re-derives from (F7) — so enabling both is refused at
+// construction. The decompose half of this gate (locked decision 2) went with that row's retirement.
+func TestGuidedDecomposition_IncompatibleWithTruncateHistory(t *testing.T) {
 	t.Parallel()
 	cfg := validCfg(t)
 	guidedEnable(t, &cfg, map[string]bool{
 		"guided_decomposition": true,
-		"decompose":            true,
+		"truncate_history":     true,
 	})
 
 	if _, err := apogee.New(cfg); !errors.Is(err, apogee.ErrIncompatibleMechanisms) {
-		t.Errorf("New with decompose also enabled: err = %v, want ErrIncompatibleMechanisms", err)
+		t.Errorf("New with truncate_history also enabled: err = %v, want ErrIncompatibleMechanisms", err)
 	}
 }

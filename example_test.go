@@ -227,24 +227,24 @@ func Example_enableMechanismStack() {
 	// armed: [guided_decomposition toolfilter]
 }
 
-// Example_cataloguedMechanisms plans a leave-one-out arm from CataloguedMechanisms() — the bench's
-// idiom: to leave a Mechanism out, also drop every Mechanism declared incompatible with the ones
-// left, so no refused pair reaches New (which would refuse with ErrIncompatibleMechanisms). Leaving
-// decompose in therefore drops guided_decomposition, which is IncompatibleWith it.
+// Example_cataloguedMechanisms plans an arm around one Mechanism from CataloguedMechanisms() — the
+// bench's idiom: keep the Mechanism the arm is about, then drop every row declared incompatible with
+// it, so no refused pair reaches New (which would refuse with ErrIncompatibleMechanisms). Arming
+// truncate_history therefore drops guided_decomposition, which is IncompatibleWith it.
 func Example_cataloguedMechanisms() {
-	const leaveOut = apogee.MechanismID("truncate_history")
+	const armAbout = apogee.MechanismID("truncate_history")
 
 	var arm []apogee.MechanismID
 	for _, d := range apogee.CataloguedMechanisms() {
-		if d.ID == leaveOut || slices.Contains(d.IncompatibleWith, apogee.MechanismID("decompose")) {
-			continue // the left-out Mechanism, and any row that refuses to stack with decompose
+		if d.ID != armAbout && slices.Contains(d.IncompatibleWith, armAbout) {
+			continue // a row that refuses to stack with the one this arm is about
 		}
 		arm = append(arm, d.ID)
 	}
 
-	fmt.Println("left out:", leaveOut)
+	fmt.Println("arm about:", armAbout)
 	fmt.Println("guided_decomposition still armed:", slices.Contains(arm, "guided_decomposition"))
 	// Output:
-	// left out: truncate_history
+	// arm about: truncate_history
 	// guided_decomposition still armed: false
 }
