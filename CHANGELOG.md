@@ -889,6 +889,15 @@ point is a **minor** bump, not a breaking change.
   facts in priority order — the effort word first, then the workdir, then the host, then the model
   truncated and dropped — so the mode marker keeps its seat. Not yet wired to the painter.
 
+- A delegated sub-agent now carries an engine-owned standing block telling it that its FINAL reply
+  is the only thing the delegating agent receives, and asking it to report what it found, changed
+  and left unfinished by citing `path:line` rather than pasting file bodies. It has no config key
+  and no Mechanism gate: on under Bypass, at every depth above 0, routed and unrouted alike. It
+  rides between the orientation block and the workspace context files under the same ride-along
+  rule, so a session with no prompt and no context files still seeds nothing (ADR 0023 §6).
+
+- Documented the delegate report block: ADR 0023 gains a 2026-09-02 addendum for the child-only fourth part of the standing system message, `CONTEXT.md` gains a **Delegate report block** term and the updated wire order, and the manual describes the block a delegated sub-agent carries.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
