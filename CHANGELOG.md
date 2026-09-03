@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-09-03
+
 ### Added
 
 - ADR 0067 records `system-prompt-layers` as an explicit additive prompt channel: layers append
