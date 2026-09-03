@@ -1,8 +1,13 @@
 # ISSUES — open defects and parked work
 
+> **FROZEN — being retired into beads (`bd`).** The register of record is now the beads tracker:
+> `bd ready`, `bd show <id>`, `bd create`. Do **not** add an item to this file. The sections below
+> are read-only history until their entries are migrated into beads, after which this file is
+> deleted. `CHANGELOG.md` remains the closed trail either way.
+
 ## Conventions
 
-The single register of known issues and deliberately deferred work (it absorbed `TODO.md` on
+*(Historical — superseded by the freeze notice above.)* The single register of known issues and deliberately deferred work (it absorbed `TODO.md` on
 2026-08-13). Two sections:
 
 - **Open defects** — verified, unfixed problems, each with current file:line evidence.
@@ -25,7 +30,7 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [ ] Tool calls with errors display to much  information right now. They also might cut-off the tool name:
+- [ ] Tool calls with errors display to much information right now (Supergoups, Sub-Agents. ...). They also might cut-off the tool name:
   ✦ Tools (11 calls)
     ┝ List ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 1 entries ▶
     ┝ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 90 lines ▶
@@ -119,32 +124,6 @@ mode/approvals/confinement/MCP into the record (the last per ADR 0008). The benc
 
 ---
 
-### Phase-4 mechanism catalogue — deliberately dropped / folded / deferred
-
-**Status:** recorded 2026-07-04 at the Phase-4 close-out (`v1.2.0`). Every verdict below is
-recorded in full — evidence, rationale, ledger row — in
-`docs/design/mechanism-catalogue.md` (Table C, the port ledger, Table B); this entry is the
-deferral trail's pointer, not the record. **None is a live gap**; revisit a verdict only if the
-bench finds a specific win.
-
-- **`codeinfo` — DROPPED (C7):** its specific missed-call-site signal is not significant
-  (OR 0.69, p=0.32, gpt-oss-20b, N=75/arm).
-- **`correct_tool_result` — DEFERRED, not dropped (owner-ratified 2026-07-04):** the sim defines
-  no production trigger (lab-only, operator-supplied correction); the experimental
-  post-tool-result hook is the lab surface. A bench-discovered trigger motivates a **new** plan
-  item — the only path to porting.
-- **`compress` external-client-compaction sniffing — DROPPED (C3):** apogee owns the loop, no
-  external client to sniff. The surviving halves shipped: `tool_result_cap`, generative
-  Compaction, `truncate_history`.
-- **`intent` / `cot` / `feed_forward_correction` — FOLDED (C4/C5/C6):** absorbed into the inline
-  classifier, the three completion nudges, and `validate`'s retry-in-place — no catalogue rows
-  of their own.
-- **Un-ported sim refinements — bench-pending (R2):** the off-ramps' retry-ladder refinements and
-  `tool_loop_interceptor`'s count threshold + wall-clock cooldown; the loop's strikes-3
-  self-regulation + `maxPostResponseRetries` substitute.
-
----
-
 ### Configurable tool × mode security matrix
 
 **Status:** parked 2026-06-24 (Phase-3 grill). Post-v1, **additive** — config is additive,
@@ -213,28 +192,6 @@ an extra prompt rather than a broken tool, and the export is purely additive whe
 
 ---
 
-### A door left open by the Mechanism-registration collapse
-
-**Status:** parked 2026-07-25 (`docs/plans/archived/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`,
-"Explicit non-goals" + D4; [ADR 0003](docs/adr/0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md)
-amendment 2026-07-25). It was named out of scope by that plan and recorded here so the door is
-documented rather than silently shut. **It is not a live gap.**
-
-- **`internal/mechanisms` declares which `Deps` a row needs, but does not construct them.** A row now
-  carries `needs DepNeeds`, and `DepsNeeded(ids)` ORs the flags for an enabled set, so the engine
-  derives exactly the collaborators the enabled rows asked for and its build loop is uniform for every
-  ID. The **construction** stays in `internal/agent`'s `deriveDeps` — the library store under
-  `Config.LibraryDir`, the corrupt-store-degrades-to-empty stderr notice, and the
-  `ResolveFingerprintFrom` identity ladder. Moving that wiring next to the row that needs it reads
-  better and was considered, but it contradicts
-  [ADR 0015](docs/adr/0015-catalogued-mechanisms-are-enabled-by-id-through-config.md) §2 (*"Deps stay
-  internal; the engine derives them from Config"*) for no gain the declaration does not already give.
-  Revisit only if a **second** `Deps`-bearing Mechanism arrives and the derivation genuinely wants to
-  live beside its row — and treat it as an ADR 0015 amendment, not a refactor, because §2 is what
-  makes "arming the library Mechanism against a different model than the loop runs" unrepresentable.
-
----
-
 ### `Request.InjectContext` placement — a `domain` data type encodes chat-template role-safety policy
 
 **Status:** parked 2026-07-26 — carried out of the 2026-07-24 architecture-deepening review so that
@@ -295,12 +252,10 @@ engine's reducers — which is the whole of the observation.
   policy and the boundary derivation are load-bearing for each other; any move must say what happens
   to that pairing.
 
-**Blast radius, so it is known before the grill, not during.** Five non-test callers:
-`internal/agent/loop.go:369` (the retry correction) and `:699` (the deferred-correction drain), and
-the Mechanisms `readloop.go:89`, `filehint.go:111`, `guideddecomposition.go:159`. Several Mechanisms
-additionally *reason about* where the inject lands — `guideddecomposition.go` (`:175`, `:196`,
-`:373`, `:516`) keys its idempotency and boundary logic on the roles `InjectContext` writes — so the
-ladder's behaviour is depended on beyond the call itself.
+**Blast radius, so it is known before the grill, not during.** Two non-test callers:
+`internal/agent/loop.go:497` (the retry correction) and `:922` (the deferred-correction drain).
+Nothing else calls it, and nothing else keys idempotency or boundary logic on the roles
+`InjectContext` writes — the ladder's behaviour is depended on by the loop alone.
 
 **What a grill has to settle (the branch points, so nothing is re-derived):**
 
@@ -392,10 +347,11 @@ A child agent now folds at quiescent *Turn* boundaries under budget pressure
 (`midExchangeCompaction` — `internal/agent/compact.go`, set by `newChildAgent`), because a
 delegation's whole life is one Exchange and the boundary the trigger waits for never comes for it.
 What stays parked is the same lift for the MAIN loop, where a long multi-Turn Exchange still has
-no generative reducer available for its entire life — only `tool_result_cap` (default-off) can
-reduce mid-Exchange there, and guided decomposition covers it with a descriptor `Requires` on
-`tool_result_cap`. That change touches a structural reducer's contract on the very arm the bench
-measures (it interacts with the saturation logic, the protected prefix, and bench comparability),
+no generative reducer available for its entire life — the only thing that reduces mid-Exchange
+there is the tool-result-cap **Floor guard** (the `tool-result-cap` key, on by default), and it
+trims the projected request rather than folding the conversation. That change touches a structural
+reducer's contract on the very arm the bench measures (it interacts with the saturation logic, the
+protected prefix, and bench comparability),
 so it needs its own grill and bench evidence — deliberately not a rider on the decomposition work.
 
 ---
@@ -430,17 +386,19 @@ prompt, simplifying output formatting — selected by the tier the probe observe
 mission's "prompt complexity tier" and aims squarely at the smallest models, the ones this
 project exists for.
 
-Why it is not built with the probe: this is model-facing behaviour inside the loop, i.e. a
-**Mechanism** by definition, and a Mechanism earns its place on the non-inferiority gate against
-Bypass, per model, with a catalogue row and a Table B bench-validation entry
+Why it is not built with the probe: this is model-facing behaviour inside the loop, so it is a
+**lab row** on the Mechanism registry — earning its place per model on the non-inferiority gate
+against Bypass, with a Table B bench-validation entry
 ([ADR 0009](docs/adr/0009-the-ab-decision-rule.md); the Phase-5 settled design: nothing
-model-facing ships default-on without bench evidence). Shipping it alongside the probe would
-mean either an unvalidated default-on transform or a catalogue row with a placeholder where its
-evidence belongs. The tier signal costs nothing and is already there when the evidence is.
+model-facing ships default-on without bench evidence) — or, if the evidence turns out to hold for
+every model, a **Floor guard**, which takes a verdict of its own under
+[ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md).
+Shipping it alongside the probe would mean an unvalidated transform in front of every model
+either way. The tier signal costs nothing and is already there when the evidence is.
 
-When picked up: catalogue it as a **pre-request** Mechanism, **default-off**, gated on a stored
-probe record's tier (so it no-ops entirely for an un-probed model), and bench it on at least one
-small model before any default flips. Open design questions kept warm: whether slimming applies
+When picked up: build it as a **pre-request** transform, **off** until a stored probe record's tier
+arms it (so it no-ops entirely for an un-probed model), and bench it on at least one small model
+before it reaches anyone by default. Open design questions kept warm: whether slimming applies
 per-request or per-session (a mid-session change of tool descriptions is a history-consistency
 question), and whether the tier or the individual battery findings (native tool calls vs. JSON
 vs. multi-step) are the better gate — the findings are strictly more informative, the tier is
@@ -460,33 +418,6 @@ obligation the old entry attached to it is discharged: because the user's prompt
 directives and the profile's tool block merge into **one** system message, a host-supplied block
 would replace the rendered block *inside that same message* without reshaping anything ADR 0023
 decided — the two compose; they do not fight. Build only if an embedder asks.
-
----
-
-### A marker phrase in the standing system content suppresses that Mechanism's directive
-
-**Status:** filed 2026-07-28, the entry
-[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)'s
-Consequences asked for (that ADR carries the full record and the rejected alternatives);
-[ADR 0026](docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md) widened it to a
-second source. **Accepted, not a defect to fix on sight** — revisit if a real prompt trips it.
-
-`Request.AppendToSystem(marker, text)` is idempotent by `strings.Contains` over the FIRST system
-message, and the markers are natural-language phrases — `decompose`'s `"Focus on one action"`,
-`cot`'s `"have not read any files yet"`, `library`'s `"[Apogee context notes"`. That message is now
-content the user supplies: the configured system prompt (ADR 0023) and, since ADR 0026, the
-workspace context files folded in beside it. A prompt — or a repo's own `AGENTS.md` — that happens
-to contain one of those phrases therefore reads as "already injected", and the Mechanism stays
-quiet.
-
-It is a **suppression, not a corruption**: the request stays well-formed, and the user's own
-sentence on that subject is what the model reads instead. The blast radius is bounded to the
-catalogued nudge Mechanisms, which are default-off and enabled per model on bench evidence
-([ADR 0015](docs/adr/0015-catalogued-mechanisms-are-enabled-by-id-through-config.md)).
-
-**Standing (do not re-file as new ideas):** both obvious fixes were weighed and declined in ADR
-0023 — a non-textual idempotency channel changes the hook API's contract for every Mechanism, and
-opaque sentinel strings would put text in front of the model whose only reader is apogee.
 
 ---
 
@@ -601,8 +532,8 @@ the human to run `/schedule`?
 **Why not now — two costs, one thin benefit.** The benefit is a keystroke: a TUI-hosted Schedule
 dies with the process, so the model would only ever set up something short-lived the human can
 create with one command. Against that: (1) **catalogue dilution** — every schema costs context and
-tool-selection accuracy for the 4B–35B target class, tools are not per-model curated the way
-Mechanisms are, and a tool relevant in one session in fifty is exactly what the never-worse
+tool-selection accuracy for the 4B–35B target class, tools are not per-model curated the way a
+lab Mechanism row is, and a tool relevant in one session in fifty is exactly what the never-worse
 invariant says to refuse; (2) **authorization inversion** — ADR 0033 decision 3 makes the *human's*
 creation choice the mode authorization, and a model-created Auto schedule is the model granting its
 future self unattended runs; inside a Firing it is self-replication (a firing scheduling more
@@ -722,8 +653,8 @@ and left deferred by
 decision for **B2 alone**. **B1** attaches a matched skill's body to a message carrying no `/id`.
 **Deferred because** it puts catalog-derived prompt text in front of the model that the user did not
 ask for, which changes the model's input on apogee's own initiative — a **Mechanism** in the exact
-sense of ADR 0003, so it must be catalogued, gated per model, and bound by the Bypass never-worse
-floor. **Before it is built:** its own grill, an ADR **explicitly superseding ADR 0061 decision 4
+sense of ADR 0003, so it enters as a **lab row** on the registry, gated per model and bound by the
+Bypass never-worse floor. **Before it is built:** its own grill, an ADR **explicitly superseding ADR 0061 decision 4
 for B1**, and a bench arm against Bypass. **The reusable half exists:** `skills.Catalog.Suggest`
 (plan `docs/plans/archived/2026-08-27 - 01 - skill-suggestions-band-plan.md`) is engine-level and
 model-free, so B1 would consume the matcher rather than grow a second one — as `Catalog.Lookup`,
@@ -855,3 +786,44 @@ kind-switch it names did not exist before this plan.
   default is therefore reached by no test, and a fourth report added later inherits the walk's guard
   for three of the four resolvers only — the follow answer it forgot to state would panic at first
   paint rather than fail the build's own guard test.
+
+---
+
+### Manual gaps — shipped behaviour the user-facing manual never states (2026-09-03)
+
+**Status:** recorded 2026-09-03 at the close of the README/SEO documentation pass. Each item is a
+key or behaviour a user meets that no page under `docs/manual/` documents; the four *wrong*
+statements that pass found were fixed in that run and are not listed here. Independent of
+`docs/plans/2026-09-02 - 08 - mechanism-retirement-wave-plan.md` item 22, which owns the
+Mechanism → Floor-guard rewrite of the same pages.
+
+- [ ] **`validated-sets:` is undocumented.** The key parses `enable:` and `alias:`
+  (`internal/config/config.go`) and carries two `/settings` rows, and
+  `docs/manual/configuration.md:172-173` leans on "the Validated set" as a known term, but no page
+  says what one is or how a set is matched to a model.
+- [ ] **Four `ui.*` keys are undocumented.** `ui.spinner`, `ui.spinner-color`, `ui.show-scrollbar`
+  and `ui.color-scheme` parse and carry `/settings` rows; `configuration.md` documents only
+  `ui.stall-after` and `ui.skill-suggestions`, and `ui.inspector` is named only in passing at
+  `docs/manual/commands.md:32`.
+- [ ] **`auto-title:` is missing from `configuration.md`.** The key is described in
+  `docs/manual/sessions.md` and `docs/manual/headless.md` but absent from the configuration
+  reference, which is where a reader looks up a key by name.
+- [ ] **Per-`servers:`-entry `bypass:` and `mechanisms:` are omitted from the entry inventory.**
+  Both parse (`internal/config/config.go:1608-1609`) and the starter template names them, but the
+  entry-key list at `docs/manual/configuration.md:684-692` does not.
+- [ ] **`model-profiles:` `tool-call-format:` and `tool-call-pattern:` are undocumented**
+  (`internal/config/config.go:2297-2298`), and the `thinking:` sub-keys `style:` / `start:` /
+  `end:` are alluded to at `docs/manual/configuration.md:563` without being specified — so a
+  profile for a non-native-tool-call model cannot be written from the manual alone.
+- [ ] **The dangerous-action guard is documented nowhere user-facing.** The two-tier guard (hard
+  refusal, then forced look) runs in every mode; `docs/manual/` has no occurrence of it, and it
+  lives only in `docs/adr/` and `docs/design/`.
+- [ ] **Approval-pane semantics are undocumented** — that "always allow this session" is scoped to
+  the call rather than the tool and is honoured across the whole sub-agent tree, that MCP grants are
+  server-grain, and that the decision keys arm one frame after the pane paints.
+- [ ] **Side-by-side diff rendering is undocumented.** `docs/manual/commands.md` contains no
+  occurrence of "diff", though every write, `view_diff` and `git_diff_range` renders one.
+- [ ] **Path near-miss suggestions are undocumented** — `read_file`, `list_dir`, `grep` and
+  `find_files` answer a miss with `did you mean: …`.
+- [ ] **Status-line detail is undocumented** — the per-run activity slot for concurrent delegations
+  and the `tok/s` readout; the manual names the status line only for the esc-stop hint.

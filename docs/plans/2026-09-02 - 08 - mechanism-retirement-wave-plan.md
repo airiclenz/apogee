@@ -1226,7 +1226,15 @@ item rewrites.
 
 **Commit:** `docs: Floor guards in README, AGENTS.md and the manual; the nudge catalogue leaves them`
 
-## 23. `ISSUES.md` — the entries the wave closes or reframes
+## 23. `ISSUES.md` — the entries the wave closes or reframes — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the working tree carried owner edits to `ISSUES.md` made before this run (the "FROZEN — being retired into beads" notice, the Conventions historical marker, the reworded tool-call-error open defect, and the new "Manual gaps" entry). They are preserved untouched and ride along in this item's commit.
+
+NOTES (2026-09-03): the stale `docs/design/mechanism-catalogue.md` pointer at the old `:131` needed no repoint — it sat inside the Phase-4 catalogue entry this item removes, so the removal resolves it.
+
+NOTES (2026-09-03): floor-not-ceiling — in "Adaptive prompt complexity" the item named only the "a Mechanism by definition" clause, but the same entry's closing "When picked up: catalogue it as a pre-request Mechanism, default-off" sentence was falsified by the same change and was reworded with it (no catalogue row to take).
+
+NOTES (2026-09-03): the removed marker-phrase entry described suppression of *Mechanism* directives (`decompose`, `cot`, `library` markers) — all deleted — so it is closed as written. The `AppendToSystem` idempotency-by-phrase pattern itself survives for the engine's own delegate wrap-up directive (`internal/agent/subagent.go:88`, marker "no further tool calls are possible"): a user prompt or `AGENTS.md` containing that phrase would still suppress it. Same accepted, not-a-defect posture as the removed entry; noted here rather than re-filed, since `ISSUES.md` is frozen and this is neighbouring engine behaviour, not this wave's work.
 
 **What.** Depends on 17, 21. REMOVE (closed; the closeout records them in `CHANGELOG.md`): "Phase-4
 mechanism catalogue — deliberately dropped / folded / deferred" (`:115-137`, verdicts now in the archived
