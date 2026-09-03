@@ -874,8 +874,9 @@ ui:
 # proven it a win — so this block is how you opt one in, and a block that is absent or empty arms
 # nothing at all. Map each ID to true to enable it; an unknown ID is a startup error that lists the
 # IDs this build knows. Bypass still wins: an enabled Mechanism does not fire under --bypass. The
-# catalogue fills in as the port waves land (see docs/design/mechanism-catalogue.md); until a
-# Mechanism's wave ships, enabling its ID errors.
+# shipped catalogue is EMPTY (ADR 0071) — the wave's per-row verdicts are in the archived map at
+# docs/design/archived/mechanism-catalogue.md — so in a stock build this block has nothing to name,
+# and an ID retired by that wave earns a one-line notice rather than a refusal.
 #
 # THE RECOVERY GUARANTEES ARE NOT IN HERE (ADR 0071). The guards every model benefits from — the
 # empty-reply recovery, the narrated-instead-of-acted recovery and their four siblings — are Floor

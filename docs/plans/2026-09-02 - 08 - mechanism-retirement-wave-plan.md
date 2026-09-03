@@ -1088,7 +1088,19 @@ the `/settings` empty-list line is pinned by exact string; `TestDocMapNamesEvery
 
 **Commit:** `test: pin the empty shipped catalogue and the /settings empty-list line`
 
-## 20. Archive the catalogue with verdicts
+## 20. Archive the catalogue with verdicts — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): `CONTEXT.md` carries no pointer to the catalogue path (checked: no `mechanism-catalogue` or `mechanism catalogue` match), so it drops from this item's Files; its prose is item 21's.
+
+NOTES (2026-09-03): `docs/manual/configuration.md:88` is the one remaining hit of the item's grep rule and was left untouched on the run's standing directive that items 22/23 own that file (it carries pre-existing owner hunks). Item 22 rewrites `configuration.md:52-89` wholesale, which deletes that pointer line — the grep rule reads zero after item 22, not after this one. Not a regression: a doc cross-reference already scheduled for deletion by the next item, not a path apogee announces.
+
+NOTES (2026-09-03): consequential edit — docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md: made necessary by the `git mv` (two relative links, :11 and :21, both link-only; the same exemption the item grants ADR 0070).
+
+NOTES (2026-09-03): the plan cited `internal/config/defaults/config.yaml:836`; the live line is `:877` (drift from items 10/11 landing the six Floor-guard keys above it). Same site, repointed there.
+
+NOTES (2026-09-03): the verdict table reflects the LANDED end state, not the plan's forecast — the shipped catalogue and `internal/validated/shipped.json` are both empty, and the one-line retirement reasons are taken verbatim in substance from `internal/mechanisms/retired.go` so the doc and the roll cannot drift apart.
+
+NOTES (2026-09-03): `AGENTS.md` carries pre-existing owner hunks (the beads issue-register rewrite) that predate this run; they ride along in this item's commit. `internal/config/defaults/config.yaml`'s `mechanisms:` preamble sentence was reworded, not merely repointed — "the catalogue fills in as the port waves land" is made false by this archival, so a bare path swap would have shipped a false statement into every user's first-run `~/.apogee/config.yaml`.
 
 **What.** Depends on 1. `git mv docs/design/mechanism-catalogue.md docs/design/archived/mechanism-catalogue.md`;
 prepend the archive header the two siblings use (archived 2026-09-02, successor: ADR 0071 and the

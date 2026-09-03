@@ -7,7 +7,7 @@ Amends: ADR 0006 (Bypass floor), ADR 0015 ("EnableMechanisms is the one enable p
 
 ## Context
 
-Rule **D1** of the [mechanism catalogue](../design/mechanism-catalogue.md) says every catalogued
+Rule **D1** of the [mechanism catalogue](../design/archived/mechanism-catalogue.md) says every catalogued
 Mechanism ships **off** until an A/B bench run proves it a win. That rule exists because a
 Mechanism is *tuning*: it changes what a model is shown or asked before the model has failed at
 anything, and a change like that can help one model and hurt the next. Shipping tuning unproven

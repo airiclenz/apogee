@@ -45,11 +45,11 @@ import (
 const (
 	// adaptiveSuppressStrikes is how many consecutive harmful judgments a Mechanism's fires may
 	// accrue before Adaptive Suppression withdraws it for the rest of the Session — apogee-sim's
-	// shipped default (docs/design/mechanism-catalogue.md §"Self-regulation constants").
+	// shipped default (docs/design/archived/mechanism-catalogue.md §"Self-regulation constants").
 	adaptiveSuppressStrikes = 3
 	// turnBudgetLimit is how many harmful Turns (with no productive Turn in between) trip the
 	// global Turn Budget, withdrawing every non-exempt Mechanism until productive activity
-	// resumes — apogee-sim's shipped default (docs/design/mechanism-catalogue.md
+	// resumes — apogee-sim's shipped default (docs/design/archived/mechanism-catalogue.md
 	// §"Self-regulation constants").
 	turnBudgetLimit = 8
 )

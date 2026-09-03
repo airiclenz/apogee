@@ -8,7 +8,7 @@ Amends: ADR 0006, ADR 0014, ADR 0015 D1, ADR 0016 (2026-08-29 amendment)
 
 ## Context
 
-The [mechanism catalogue](../design/mechanism-catalogue.md) holds twenty rows behind one gate:
+The [mechanism catalogue](../design/archived/mechanism-catalogue.md) holds twenty rows behind one gate:
 rule **D1** — a Mechanism ships **off** until an A/B bench run proves it a win, under the
 per-Mechanism non-inferiority test of [ADR 0009](0009-the-ab-decision-rule.md). That gate was
 written for *tuning*: behaviour that changes what a model is shown or asked **before** the model
@@ -18,7 +18,7 @@ the right gate, and it stays.
 Two months of catalogue and four port waves later, the gate has produced almost no evidence.
 One row carries a real measurement — `cached_content_intercept`, help rate **0.73** (11/4/1),
 `repeated_tool_call` 0.91→0.15 per run on gpt-oss-20b, inert-but-correct on gemma
-([`catalogue.md:191`](../design/mechanism-catalogue.md)). One curated set exists (the gemma
+([`catalogue.md:191`](../design/archived/mechanism-catalogue.md)). One curated set exists (the gemma
 Validated entry). Every other row's verdict column still reads `pending`. The parked-item brief
 that opened this wave states the position plainly: freeze the catalogue, promote the structural
 few, retire the nudges — "`read_repeat`/`cached_content_intercept` (the one row with real

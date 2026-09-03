@@ -1,5 +1,15 @@
 # Mechanism Catalogue — Phase 4 (ratified against the pinned apogee-sim source)
 
+> **ARCHIVED (2026-09-02) — history, not ground truth.** Superseded by
+> [ADR 0071](../../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)
+> and the **Floor guard** entry in `CONTEXT.md`. The catalogue this file maps is now empty in a
+> shipped build: six of its rows became **Floor guards** — plain engine behaviour, on for every
+> model including under `--bypass`, each switched by its own top-level configuration key — and
+> fourteen retired outright on a ratified verdict. The **Verdicts (2026-09-02)** table below records
+> where every row went. The machine-readable roll a saved `mechanisms:` block is still read against
+> is `internal/mechanisms/retired.go`; the hook API, registry, `mechanisms:` key and `--bypass`
+> survive as the bench's lab surface. Nothing below this header is amended further.
+
 **Status:** ✅ **Ratified 2026-07-04** (Phase-4 plan item 1). This is the **authoritative
 map** for wave composition: every catalogued Mechanism apogee will register, its hook point,
 descriptor, ordering/incompatibility constraints, the port wave (plan items 5–14), and a
@@ -104,6 +114,46 @@ not apply to them; every other Capability keeps D1 unchanged.
 Relocations carried from the survey (plan item 1): `cached_content_intercept` → `pre-tool-exec`;
 `error_enrichment` → `post-tool-result`. `filehint` is pre-request (explicit assignment,
 `archived/hook-mutation-api.md` §8 #7); `grammar` was too, until it was retired (see its Table A row).
+
+---
+
+## Verdicts (2026-09-02)
+
+Where every Table A row went when the wave of ADR 0071 landed. **PROMOTED** means the behaviour is
+now a **Floor guard** — plain engine behaviour in `internal/floor`, on for every model including
+under `--bypass`, switched by the named top-level configuration key and no longer a Mechanism at
+all: no ID, no descriptor, no strikes. **RETIRED** means the row and its source were deleted on a
+ratified verdict; its ID survives only on `internal/mechanisms/retired.go`, so a saved
+`mechanisms:` block naming it is noticed rather than refused. After this table the shipped
+catalogue is **empty** and so is the shipped Validated-set roster.
+
+| apogee ID | Verdict | Where it went |
+|---|---|---|
+| `tool_use_enforcer` | **PROMOTED → `tool-use-enforcer`** | The narration off-ramp: it fires only after a Turn has already failed, so it needs no per-model proof. |
+| `empty_response_recovery` | **PROMOTED → `empty-response-recovery`** | The empty-reply recovery; it always ran under Bypass, so promotion changes who gets it, not what it does. |
+| `read_repeat` | **RETIRED** — twin of the promoted read cache; the two were mutually exclusive on one symptom and only the interceptor carried evidence, so the hinting half goes. | — |
+| `tool_loop_interceptor` | **PROMOTED → `tool-loop-breaker`** | The identical-repeat-turn detector; it changes only what the model sees after its own failure. |
+| `validate` | **PROMOTED → `tool-call-repair`** | The tool-call validator and its retry-in-place correction, on the same reasoning. |
+| `syntax` | **RETIRED** — re-streaming a Turn because a written file failed a syntax check corrects the model's work for it on a signal the tool result already carries; the structural syntax trailer (`internal/syntaxcheck`) is the shaping answer and stays. | — |
+| `autofix` | **RETIRED** — handing a written payload to an external formatter in a gated sub-process rewrote the model's file behind its back, and paid a per-write subprocess for it. | — |
+| `correct_tool_result` | **FROZEN WITH THE CATALOGUE** — never ported (no production trigger existed); the deferral ends here with the map that carried it. The post-tool-result hook it would have used survives as lab surface. | — |
+| `truncate_history` | **RETIRED** — the drop-the-middle history rewrite never earned its place against generative Compaction, which makes the same context decision better and announces it. | — |
+| `tool_result_cap` | **PROMOTED → `tool-result-cap`** | The per-result trimmer shrinks what an old result costs in the projected request and tells the model how to read the omitted range back: it shapes without steering. |
+| `toolfilter` | **RETIRED** — scoring the tool menu down to ten entries decides for the model what it may reach for, and a wrongly trimmed menu removes the tool the task needed; `tools.disabled` answers a menu a model cannot handle. | — |
+| `filehint` | **RETIRED** — scoring a freshly listed directory against the prompt and naming which files to read first picks the model's next move for it, and no per-model A/B ever earned it a place. | — |
+| `grammar` | **RETIRED 2026-08-29** (before this wave, `v0.18.7`) — the capability gate was never wired and the provider wire carries no `response_format`, so it no-op'd on every backend from the port onwards. | — |
+| `error_enrichment` | **RETIRED** — appending category-shaped suggestions to a repeated tool error tells the model what to try next instead of handing it what the tool said. | — |
+| `read_loop` | **RETIRED** — the re-read detector's hints went past shaping into instruction ("the workspace is empty, create X"), deriving a write target from the prompt and steering the model at it. | — |
+| `cached_content_intercept` | **PROMOTED → `read-cache`** | The one row with a real measurement (help rate 0.73; `repeated_tool_call` 0.91→0.15 per run on gpt-oss-20b). It shapes the pending read without steering the model. |
+| `decompose` | **RETIRED** — collapsing complex prompts in history and hinting a single next step rewrites what the human asked for. | — |
+| `stall_nudge` | **RETIRED** — a proactive completion directive, which is exactly what a Floor guard may not be, and no per-model A/B ever earned it a place. | — |
+| `list_nudge` | **RETIRED** — the same verdict as its two `cot` siblings: a proactive directive with no evidence behind it. | — |
+| `tool_use_directive` | **RETIRED** — the same verdict as its two `cot` siblings. | — |
+| `library` | **RETIRED** — injecting remembered per-model behavioural notes into the system prompt tells the model what to do before it has done anything wrong. The store went with it; `internal/library` keeps only the fingerprint resolver and the probe record, and an existing `~/.apogee/library` is left on disk, simply never read again. | — |
+| `guided_decomposition` | **RETIRED** — the enumeration steer and its batched `sub_agent` fan-out (ADR 0014) told the model how to plan its own work and then dispatched delegations it never asked for: the most steering row the catalogue carried. | — |
+
+Six promoted, fourteen retired outright, one frozen, one already retired: the shipped catalogue is
+empty. Table B's *Bench validation* column — `pending` on nearly every row — is why (ADR 0071).
 
 ---
 
@@ -493,7 +543,7 @@ design decision (no convicted set, no pre-committed follow-up).
 
 Curation record, distinct from the evidence ledger above (which stays append-only,
 ledger-entries-only per L9). Per
-[ADR 0016](../adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md), a
+[ADR 0016](../../adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md), a
 **Validated set** is a per-model enable set that passed the aggregate non-inferiority gate
 against Bypass on that model, engagement verified; it is keyed by the confidence-tagged
 `ModelFingerprint` and claims *safe on this model*, not helpful. The runtime surface is
@@ -512,3 +562,13 @@ off-switch, and an explicit `mechanisms:` block or Bypass always wins (whole-set
 Not a Validated set: the full 17-member base stack on gemma (failed the gate twice);
 anything on `qwen25-coder-14b` (campaigns measured a non-engaged loop — void either way).
 `truncate_history`'s global verdict stays open; it is simply not in gemma's set.
+
+**Retired 2026-09-02 with the catalogue.** The `gemma-4-e4b-it-qat` entry above is gone from
+`internal/validated/shipped.json`, which now ships `[]`: nine of its fifteen members retired
+outright in this wave and the other six became Floor guards every model gets anyway, so nothing
+was left for the set to enable and its evidence — measured over a stack that no longer exists — is
+void either way (ADR 0016's whole-set-or-nothing rule, as amended 2026-08-29). The `validated`
+package, the `validated-sets:` config block and the Probe path that produces an entry all stay:
+what retired is the shipped roster, not the surface. A user-local entry under
+`~/.apogee/validated/*.json` naming retired IDs still resolves — the retired members are dropped
+with a notice rather than refused — so a curation someone measured themselves survives the wave.
