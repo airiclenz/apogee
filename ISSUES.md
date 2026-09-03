@@ -867,3 +867,27 @@ not exist before this plan.
   AUTO-APPLIES" report survive only as unit pins over hand-built decisions
   (`internal/probe/model_test.go:105,123`). Nothing walks the path a user takes from a saved
   record to an applied set.
+
+---
+
+### beads owns the git hook path (2026-09-03)
+
+**Status:** recorded 2026-09-03 at the close of
+`docs/plans/2026-09-02 - 08 - mechanism-retirement-wave-plan.md`, by owner decision at that run's
+deferral gate: the tracker is the owner's tooling choice rather than a defect of that wave, but the
+sweep below already cost the run one recovery, so it stays visible rather than being accepted
+silently. Not a regression in apogee itself — nothing the program does changed.
+
+- [ ] **`core.hooksPath` now points at `.beads/hooks`, so the repo's own `.git/hooks` no longer
+  run.** `bd init` set the path repo-wide, which retires `.git/hooks` wholesale rather than
+  layering on it. The commit-msg attribution stripper (AGENTS.md: no AI attribution trailers) was
+  copied into `.beads/hooks/commit-msg`, so that behaviour survives — but the repo's hooks and
+  beads' are now one path that beads owns, and the next `bd` upgrade that rewrites the directory
+  is the thing standing between the stripper and silence. `.git/hooks/commit-msg` is still on disk
+  and now dead.
+- [ ] **beads' `pre-commit` hook sweeps unrelated staged files into the commit.**
+  `.beads/hooks/pre-commit` delegates to `bd hooks run pre-commit`, which stages tracker state of
+  its own; during the retirement wave it swallowed item 17's 22 staged deletions into the `bd init`
+  commit, and recovering took a ratified history split. Until that is understood, a commit in this
+  repo has to be made with `git commit --no-verify` to be sure it carries only what was staged for
+  it.
