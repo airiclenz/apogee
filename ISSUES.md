@@ -827,3 +827,43 @@ Mechanism → Floor-guard rewrite of the same pages.
   `find_files` answer a miss with `did you mean: …`.
 - [ ] **Status-line detail is undocumented** — the per-run activity slot for concurrent delegations
   and the `tok/s` readout; the manual names the status line only for the esc-stop hint.
+
+---
+
+### Mechanism retirement wave — residue (2026-09-03)
+
+**Status:** recorded 2026-09-03 at the close of
+`docs/plans/2026-09-02 - 08 - mechanism-retirement-wave-plan.md`. Each line is a gap left open by
+that wave's own delivered work — the six Floor-guard promotions and the emptying of the shipped
+Mechanism catalogue. None is a regression: every one is a hole in behaviour or coverage that did
+not exist before this plan.
+
+- [ ] **A shed Validated-set member never names the key that governs it now.**
+  `retiredSetMemberNotice` (`cmd/apogee/validatedsets.go:243-251`) names the entry, the ID and
+  `mechanisms.RetiredRelease(id)`, but not `mechanisms.Successor(id)` — the accessor item 2 added
+  for exactly this reading. A member shed because it became a **Floor guard**
+  (`internal/mechanisms/retired.go:105-110`) therefore tells the reader the row is gone without
+  telling them the behaviour survives under `tool-call-repair`, `read-cache` and the rest, where
+  the `mechanisms:` startup notice for the same ID does say so.
+- [ ] **`TestMechanismIDsConstructsUnderBypass` is vacuous.** Its comment
+  (`cmd/apogee/wire_tools_test.go:277-280`) still calls `validate` "a real catalogued Mechanism",
+  but `validate` retired in this wave, so `ResolveEnabled` drops it
+  (`cmd/apogee/wire_tools_test.go:283`) and the test builds an Agent with an EMPTY
+  `EnableMechanisms` — it no longer proves the config → `EnableMechanisms` → engine-build path is
+  coherent end-to-end. Pinning it again needs a test-registered row, since the shipped catalogue
+  is empty by design.
+- [ ] **`internal/floor`'s write-tool superset is unpinned.** `wave4WriteTools`
+  (`internal/floor/toolnames.go:14-52`) decides whether a call invalidates the read cache and
+  whether an empty reply was preceded by a write, but the test that cross-checked the map against
+  every workspace-writing builtin (`TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin`) died
+  with `internal/mechanisms/writedetection_test.go`. `internal/floor/toolnames_test.go` pins only
+  a hand-written case table, so a writing tool added to `internal/tools` later is simply absent
+  from the map and the guards go stale silently. Re-homing the coverage test needs a call on
+  floor's "never imports `internal/tools`" rule (`internal/floor/doc.go:13-15`).
+- [ ] **The Validated-set applying rung has no end-to-end coverage while the shipped catalogue is
+  empty.** `setApplied`, `appliedNotice` and the canonical member sort
+  (`cmd/apogee/validatedsets.go:169,207-213`) can no longer be reached by any shipped
+  configuration — every shipped entry retired — so the rung and `probe model`'s "now
+  AUTO-APPLIES" report survive only as unit pins over hand-built decisions
+  (`internal/probe/model_test.go:105,123`). Nothing walks the path a user takes from a saved
+  record to an applied set.

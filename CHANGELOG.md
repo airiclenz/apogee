@@ -8,6 +8,177 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Changed
+
+- ADR 0071 records that the six structural Mechanisms become **Floor guards** — plain engine
+  behaviour, on by default, each behind one file-only config key — and that the shipped nudge
+  catalogue and gemma Validated entry retire. It supersedes ADR 0009 for structural behaviour and
+  ADR 0070 Option C, and amends ADR 0006, ADR 0014, ADR 0015 D1 and ADR 0016's 2026-08-29 amendment.
+
+- The retired-Mechanism roll now carries a **release and a successor per ID** instead of one
+  release string for the whole roll. `mechanisms.RetiredRelease(id)` and `mechanisms.Successor(id)`
+  replace the `RetiredRelease` const, so a row retired in a later wave names its own release in
+  every notice a user reads (the `mechanisms:` startup line and a Validated set's shed line). A
+  row retired because its behaviour became a **Floor guard** carries the top-level config key that
+  governs it now, and earns two new notices: asking for it says the guard is already on and names
+  the key, and — new — switching it OFF says the old `mechanisms:` spelling no longer turns it off
+  and names the key that does, where before that case was silent and left the user believing a
+  guard was off when it was on.
+- The shipped Validated-set drift pin (`internal/validated`) now sheds retired members before
+  validating, exactly as the runtime path does, so a removal recorded on the roll no longer fails
+  the build; a removal with **no** roll entry still trips it.
+
+- **`internal/floor` — the Floor guards' shared substrate.** A new pure-policy package holds the
+  tool-name spelling families, the read-only conversation scans, the read-error inspection, the
+  action-vs-analysis intent classifier, the model-facing correction renderer and the embedded prompt
+  assets the six Floor guards share (ADR 0071). It imports `internal/domain` and `internal/context`
+  and nothing else, fires at no seam and holds no state; the seams, the live gate and the events
+  stay in `internal/agent`. `domain.Config` gains `Floor domain.FloorConfig`, six `Disable…` bools
+  whose ZERO value keeps every guard ON — an embedder that constructs a bare `Config` still gets the
+  floor. No guard runs from the new package yet; the originals still serve their catalogue rows.
+
+- **Tool-call repair and the tool-loop breaker are Floor guards.** The two behaviours that used to
+  ship as the default-off `validate` and `tool_loop_interceptor` Mechanisms are now plain engine
+  behaviour (ADR 0071): a malformed or unknown tool call is corrected and the Turn re-streamed, and
+  a response repeating the previous Turn's exact calls draws the loop-breaking directive — for every
+  model, with no `mechanisms:` block, and on under Bypass. Both run BEFORE the lab hooks at the
+  post-response seam, in the order loop breaker → repair, and share the Turn's existing retry
+  budget; neither carries strikes-3 suppression or a Turn-Budget throttle. Each firing reaches every
+  Driver as the new `FloorGuardEvent`, naming the guard by its configuration key.
+
+- **`validate` and `tool_loop_interceptor` retired from the catalogue.** A saved `mechanisms:` block
+  naming either still starts: the key is dropped and a notice says which top-level key governs the
+  behaviour now (`tool-call-repair`, `tool-loop-breaker` — the keys themselves arrive with the
+  configuration surface). Both are on the retired roll under `v0.20.0` with their successor key.
+
+- The tool-use enforcer and the empty-response recovery are Floor guards: engine behaviour every model runs with, on under Bypass and switched by `tool-use-enforcer:` / `empty-response-recovery:` rather than by a `mechanisms:` entry. The `tool_use_enforcer` and `empty_response_recovery` catalogue rows retire (`v0.20.0`); a `mechanisms:` block still naming one is tolerated and says which top-level key governs the behaviour now. With no catalogued row left declaring the off-ramp Capability, a `mechanisms:` block resolves to exactly what it names.
+
+- The `mechanisms:` block now arms exactly what it names. No catalogued Mechanism is on by default any more: the two recovery guarantees that were floored in became Floor guards in this wave, engine behaviour switched by their own top-level keys, so the off-ramp floor that used to be unioned into every resolution — at startup, at a `/settings` apply, per delegate, in a headless run — is gone, and an empty or absent block arms nothing.
+
+- The read cache is a Floor guard: a re-read of a file already read successfully, and not written since, is capped to a header-only slice so the copy already in the conversation stands — engine behaviour every model runs with, on under Bypass and switched by `read-cache:` rather than by a `mechanisms:` entry. The `cached_content_intercept` catalogue row retires (`v0.20.0`); a `mechanisms:` block still naming it is tolerated and says which top-level key governs the behaviour now. With that row gone, the re-read family's pairwise exclusivity is just `read_loop` against `read_repeat`.
+
+- The tool-result cap is a Floor guard: every tool result from an earlier Turn that has outgrown its
+  share of the working budget is trimmed to the shared head/tail elision in the outgoing request, for
+  every model and under Bypass, with the conversation itself left whole. The `tool_result_cap`
+  Mechanism retires into it — a `mechanisms:` block still naming the ID is tolerated with a notice
+  that names the `tool-result-cap` key. `guided_decomposition` no longer Requires it: the capping it
+  insisted on now runs in every arm.
+
+- Floor-guard firings now reach every Driver as `FloorGuardEvent`: the TUI records one in its hidden debug view as `guard <key>: <action>` (the guard's own config key, so the switch that turns the behaviour off is named on the line), while headless stderr and the session record stay silent for it, exactly as they already are for a Mechanism firing. The variant is re-exported from the root package so an external Driver can name it.
+
+- Six new config keys switch the Floor guards off one at a time — `tool-use-enforcer`,
+  `empty-response-recovery`, `tool-call-repair`, `tool-loop-breaker`, `tool-result-cap` and
+  `read-cache`. Each is config-file only and defaults to true: the guards are the engine's own
+  behaviour now (ADR 0071), so they stay on under `--bypass` and a `mechanisms:` row can no longer
+  turn one off. The first-run `config.yaml` template documents all six, and `/settings` lists them.
+
+- The six floor-guard keys (`tool-use-enforcer`, `empty-response-recovery`, `tool-call-repair`, `tool-loop-breaker`, `tool-result-cap`, `read-cache`) now reach the engine: they are folded into the Agent's `Config.Floor` at both composition roots, apply live from `/settings` in the Session section, and are carried into a scheduled Firing from the session's live options. `--bypass`'s help now says what stays on: the lab Mechanisms go, the Floor guards and the structural reducers stay (ADR 0071).
+
+- Retired the `stall_nudge`, `list_nudge`, `tool_use_directive` and `decompose` Mechanisms (ADR 0071). A `mechanisms:` block still naming one starts as before: the key is dropped with a notice naming the release it retired in, never refused.
+
+- Retired the `guided_decomposition` Mechanism (ADR 0071). The enumeration steer and its batched
+  sub-agent fan-out steered the model rather than shaping the request, and no per-model A/B ever
+  earned it a place. A `mechanisms:` block still naming it starts as before, arms nothing, and
+  earns a notice naming the release it retired in.
+
+- Retired the `filehint`, `read_loop` and `toolfilter` Mechanisms (ADR 0071). All three steered the
+  model rather than shaping what it sees — picking which files to read next, deriving a write target
+  and telling the model to create it, and trimming the tool menu down to ten entries — and no
+  per-model A/B ever earned them a place. A `mechanisms:` block still naming one starts as before,
+  arms nothing, and says so once; use `tools.disabled` to shrink a tool menu a model cannot handle.
+
+- Retired the `truncate_history`, `error_enrichment` and `read_repeat` Mechanisms (ADR 0071, ratified verdict). A `mechanisms:` block still naming one of them starts as before, arms nothing, and says so once — the drop-the-middle history rewrite loses to structural Compaction, the repeated-error suggestions steered rather than shaped, and the redundant-re-read symptom is covered for every model by the `read-cache` floor guard.
+
+- The `syntax` and `autofix` Mechanisms retire (ADR 0071). The write-content syntax check and the external-formatter repair are gone; a `mechanisms:` block still naming either starts and says so. The structural syntax trailer the writing tools append (`internal/syntaxcheck`) is unaffected, and no shipped Mechanism spawns a subprocess any more.
+
+- The `library` Mechanism retires (ADR 0071). The cross-session observation store it injected from
+  is gone with it: `internal/library` keeps only the model-fingerprint resolver and the
+  behavioral-probe record that `apogee probe model` writes, and the `library-dir` state root and
+  `Config.LibraryDir` are removed. An existing `~/.apogee/library` is left on disk and simply never
+  read again. A `mechanisms: {library: true}` block still loads — the key earns the retired notice
+  naming v0.20.0 and is ignored. With it the shipped Mechanism catalogue is EMPTY: the hook API,
+  the registry, `mechanisms:`, `/settings` and `--bypass` stay as the bench's lab surface.
+
+- **The shipped Validated set retires.** `gemma-4-e4b-it-qat` named fifteen catalogued
+  Mechanisms and every one of them retired in this wave (ADR 0071), so the entry had nothing
+  left to enable and the shipped roster ships empty. A config carrying the alias line apogee
+  itself printed still STARTS: the entry key is on a new retired-entry roll, so it draws one
+  notice — `validated-set entry "gemma-4-e4b-it-qat" was retired in v0.20.0 and no longer
+  applies; remove the alias` — instead of the dangling-alias refusal an unknown target earns.
+  The roll is read only where the entry lookup missed, so your OWN entry filed under that key
+  still applies unchanged. A saved record whose every member retired no longer reaches the
+  applying rung at all (an empty set passed the catalogue check vacuously and armed nothing
+  behind a "validated set applied" banner); it earns one line — `names only retired mechanisms
+  and no longer applies; remove it` — rather than one line per shed member, and `probe model`
+  claims no effect for it. The Validated-set surface itself is untouched: a set you measured
+  yourself under `~/.apogee/validated` applies exactly as before.
+
+- `/settings` → `mechanisms` now OPENS on a build with no catalogued Mechanisms and paints one line — `no catalogued Mechanisms in this build — the Floor guards are the Session keys` — instead of answering ⏎ with nothing, which read as a broken key. An unwired seam still opens nothing.
+
+- **The Mechanism catalogue is archived, with a verdict for every row it carried.**
+  `docs/design/mechanism-catalogue.md` moves to `docs/design/archived/mechanism-catalogue.md`
+  under the archive header its two siblings use, and gains a **Verdicts (2026-09-02)** table
+  above Table A: one row per catalogued ID saying where it went — six `PROMOTED` to a named
+  Floor-guard key (`tool-use-enforcer`, `empty-response-recovery`, `tool-call-repair`,
+  `tool-loop-breaker`, `tool-result-cap`, `read-cache`), fourteen `RETIRED` outright with the
+  one-line reason from the roll, `correct_tool_result` frozen with the map that carried it, and
+  `grammar` already retired in v0.18.7. §Validated sets records the `gemma-4-e4b-it-qat` entry's
+  retirement: `internal/validated/shipped.json` now ships `[]`, while the `validated` package,
+  the `validated-sets:` block and user-local entries all stay. Every live pointer to the old path
+  moves with it — `AGENTS.md`, ADR 0070, ADR 0071, `internal/agent/selfreg.go` and the
+  first-run `config.yaml` template, whose `mechanisms:` preamble now says the shipped catalogue
+  is empty rather than promising rows that later port waves would fill in.
+  (`docs/design/archived/mechanism-catalogue.md`; ADR 0071.)
+
+- CONTEXT.md now speaks the wave's language. A new **Floor guard** entry sits beside **Bypass
+  mode** under *Safety and autonomy*, defining the term from ADR 0071 and naming the six guards
+  with their config keys, their `internal/floor` policy home and the `FloorGuardEvent` a firing
+  emits. **Bypass mode** switches off lab rows only; **Mechanism** names the frozen, empty lab
+  catalogue and the retired roll behind it; **Tool-result capping** is described as the guard it
+  became; **Validated set** records an empty shipped roster with the user-directory surface
+  intact; and the `ModelFingerprint`'s best-available ladder is stated in its own right now that
+  no Library owns it. **Off-ramp**, **Library**, **History truncation**, **Guided
+  decomposition**/`decompose` and the ten remaining nudge IDs move to **Retired terms** with the
+  release, the successor and what survives under each old name.
+
+- **The user-facing docs describe the Floor guards.** `AGENTS.md`'s hard-invariant line, the
+  README's "Why apogee" bullet and the manual now state the floor rule — nothing apogee puts in
+  front of a model may make that model perform worse than the bare loop — and name the six guards
+  that carry it. `docs/manual/configuration.md` gains a Floor guards passage (the six top-level
+  keys with their defaults, file-only but live in `/settings`, never withdrawn by `--bypass`)
+  followed by a short `mechanisms:` lab note: the shipped catalogue is empty, an unknown ID is
+  still a startup error, and a retired ID earns a notice that names the key governing the
+  behaviour now. `commands.md` says the `/settings` toggle list is empty in a shipped build and
+  points at the six Session rows; `headless.md` and `daemon.md` note the promoted-key notice;
+  `probe.md` drops the retired Library observations; the manual index and the README doc table
+  say "the Floor guards" where they said "mechanisms".
+
+- `ISSUES.md` drops the three entries the Mechanism retirement wave closes — the Phase-4
+  catalogue verdict trail (its record now lives in the archived catalogue), the
+  Mechanism-registration `Deps` door, and the marker-phrase directive-suppression entry — and
+  restates the four live entries the wave falsified (`Request.InjectContext` placement,
+  mid-Exchange auto-compaction, adaptive prompt complexity, the model-facing `schedule` tool and
+  B1 skill auto-attach) in Floor-guard / lab-row terms.
+
+- **Two Floor-guard regressions from the promotion are closed.** The **tool-loop breaker** is now
+  scoped to the current **Exchange**, scan and recap both: a user re-asking for the same thing opens
+  a new Exchange, so its first call — byte-identical to the previous Exchange's last one — is the
+  work just asked for and no longer draws the "you are in a loop" directive, and the directive's own
+  recap restates *this* Exchange's request and the files *it* touched instead of the first request
+  ever sent. The **tool-call repair** guard now leaves a call naming a tool the engine has but the
+  request's menu withdrew — Plan mode's filtered menu, a delegate's wrap-up Turn — to the mode that
+  withdrew it: the Plan refusal reaches the model instead of a generic "not in the tool set"
+  correction retry that spent a retry and never mentioned the mode. A tool the engine does not have
+  at all is still the hallucination the guard corrects, and a withdrawn call never shields a
+  malformed sibling in the same response.
+
+- **Two dangling doc references from the mechanism-retirement wave repointed.** Item 20's
+  `git mv` of the mechanism catalogue into `docs/design/archived/` left the superseded-by
+  headers of its two archived siblings (`hook-mutation-api.md`, `technical-design.md`)
+  pointing at the pre-move `docs/design/mechanism-catalogue.md`; all three now name the
+  archived path. The `Request.InjectContext` entry in `ISSUES.md` no longer cites
+  `internal/mechanisms/filehint.go`, a file item 14 deleted.
+
 ## [0.20.0] — 2026-09-03
 
 ### Added
