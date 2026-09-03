@@ -322,9 +322,9 @@ type Options struct {
 	ModelProfiles []profiles.Entry
 
 	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), loaded from
-	// the config file only (default-empty ⇒ the OFF-RAMP FLOOR alone: every other Capability is
-	// default OFF under D1, while the two off-ramps are armed unless named explicitly false —
-	// ADR 0070, folded in by withOffRampFloor / mechanisms.ResolveEnabled). ApplyConfig
+	// the config file only (default-empty ⇒ nothing armed: no catalogued row is on by default under
+	// D1, and the Floor guards the run still carries are Config.Floor's own top-level keys rather
+	// than entries of this block — ADR 0071). ApplyConfig
 	// sets it from settings; runRoot validates every key against the catalogue and folds the enabled
 	// IDs into apogee.Config.EnableMechanisms, which the engine builds catalogue rows from and merges
 	// into apogee.Config.Mechanisms (ADR 0015 §1).

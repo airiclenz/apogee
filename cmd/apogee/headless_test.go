@@ -20,7 +20,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
@@ -476,10 +475,10 @@ func TestHeadlessReportsARetiredMechanism(t *testing.T) {
 	if strings.Contains(out, "mechanism") {
 		t.Errorf("the notice reached stdout, where a pipeline reads the answer: %q", out)
 	}
-	// The retired id is dropped, and what remains is the off-ramp floor (ADR 0070) — a headless run
-	// keeps the recovery guarantees whatever else the block asked for.
-	if want := mechanisms.OffRampFloor(nil); !slices.Equal(stub.spec.Config.EnableMechanisms, want) {
-		t.Errorf("EnableMechanisms = %v, want the off-ramp floor %v", stub.spec.Config.EnableMechanisms, want)
+	// The retired id is dropped and nothing stands in its place: no catalogued row is on by default,
+	// a headless run getting its recovery guarantees from the Floor guards instead (ADR 0071).
+	if got := stub.spec.Config.EnableMechanisms; len(got) != 0 {
+		t.Errorf("EnableMechanisms = %v, want nothing armed", got)
 	}
 }
 

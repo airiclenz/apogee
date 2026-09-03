@@ -482,21 +482,15 @@ func TestHostToolsThreadsTheSkillLookupOntoTheDefaultRoster(t *testing.T) {
 	}
 }
 
-// TestBuildEnabledMechanismsFloorsAFreshRegistry: an EnableMechanisms list the engine was handed
-// EMPTY builds the off-ramp floor (ADR 0070) rather than nothing, while a list that names something
-// builds exactly what it names. The floor is harvested from the catalogue's CapOffRamp column, and
-// NO shipped row declares it any more — the two recoveries that did are Floor guards now (ADR 0071),
-// on for every model whatever the list says — so what an empty list builds today is nothing, and
-// what a one-element list builds is that one element.
+// TestBuildEnabledMechanismsEmptyListBuildsNothing: an EnableMechanisms list the engine was handed
+// EMPTY builds NOTHING, while a list that names something builds exactly what it names. No
+// catalogued row is on by default — the two recoveries that once were are Floor guards now
+// (ADR 0071), engine behaviour switched by Config.Floor whatever this list says — so an embedder
+// handing New a Config with no EnableMechanisms gets an unarmed registry and its guards regardless.
 //
 // The claim is read off the registry the construction produced, never off fired events: what the
 // list BUILDS is the whole question, and a Mechanism only triggers on a reply that provokes it.
-func TestBuildEnabledMechanismsFloorsAFreshRegistry(t *testing.T) {
-	floor := mechanisms.OffRampFloor(nil)
-	if len(floor) != 0 {
-		t.Fatalf("OffRampFloor(nil) = %v; want the empty floor now that no row declares CapOffRamp", floor)
-	}
-
+func TestBuildEnabledMechanismsEmptyListBuildsNothing(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		ids  []domain.MechanismID
@@ -521,12 +515,12 @@ func TestBuildEnabledMechanismsFloorsAFreshRegistry(t *testing.T) {
 	}
 }
 
-// TestBuildEnabledMechanismsNeverFloorsAHandedInRegistry is the bite test for the floor's one
-// exception. A sub-agent spawn hands the child its parent's registry and CLEARS EnableMechanisms
-// (subagent.go), because those rows are already built into what it inherited. If the engine floored
-// a handed-in registry too, it would re-add the parent's own off-ramps and MechanismRegistry.Add
-// would refuse them as already registered — failing every delegation from a parent that was itself
-// built with nil lists, which after this change is every default parent there is.
+// TestBuildEnabledMechanismsNeverFloorsAHandedInRegistry pins the inheritance seam an empty list
+// has to leave alone. A sub-agent spawn hands the child its parent's registry and CLEARS
+// EnableMechanisms (subagent.go), because those rows are already built into what it inherited. If
+// construction added anything of its own to a handed-in registry, it would re-add rows that registry
+// may already hold and MechanismRegistry.Add would refuse them as already registered — failing the
+// delegation. An empty list building nothing is what keeps that seam quiet.
 func TestBuildEnabledMechanismsNeverFloorsAHandedInRegistry(t *testing.T) {
 	parentCfg := baseConfig(&recordingSink{})
 	parent, err := newAgent(parentCfg, echoResponder{reply: "hi"})
@@ -542,7 +536,7 @@ func TestBuildEnabledMechanismsNeverFloorsAHandedInRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent (child off an inherited registry): %v — a handed-in registry must never be floored", err)
 	}
-	if got, want := armedIDs(child, domain.HookPostResponse), mechanisms.OffRampFloor(nil); !slices.Equal(got, want) {
-		t.Errorf("child armed %v, want the inherited floor %v exactly once", got, want)
+	if got := armedIDs(child, domain.HookPostResponse); len(got) != 0 {
+		t.Errorf("child armed %v, want nothing: an empty list adds nothing to what it inherited", got)
 	}
 }

@@ -216,53 +216,25 @@ func TestResolveEnabledNoticesNameAPromotedRowsFloorGuardKey(t *testing.T) {
 // constructor is needed here — the unknown-ID cases below drive the REAL catalogue via KnownIDs).
 var fakeKnown = []domain.MechanismID{"alpha", "beta", "off"}
 
-// floorPlus is the off-ramp floor with extra ids folded in, sorted — the shape ResolveEnabled hands
-// back for a block that enables those ids, spelled once so a case reads as "the floor plus these".
-func floorPlus(extra ...domain.MechanismID) []domain.MechanismID {
-	out := append(OffRampFloor(nil), extra...)
-	slices.Sort(out)
-	return out
-}
-
-// NO catalogued row declares CapOffRamp any more: the two recoveries that did are Floor guards
-// since ADR 0071, on for every model and switched by their own top-level keys. So the floor is
-// EMPTY whatever the block says — which is the correct value for a machine that harvests the
-// Capability column rather than a hand-kept list, and is what makes ResolveEnabled resolve to
-// exactly what a block names (D1, with no exception left).
-func TestOffRampFloorIsEmptyWithNoCapOffRampRow(t *testing.T) {
-	t.Parallel()
-
-	for _, d := range Descriptors() {
-		if d.Capability == domain.CapOffRamp {
-			t.Fatalf("catalogued row %q still declares CapOffRamp; the promoted recoveries left the catalogue", d.ID)
-		}
-	}
-	for _, block := range []map[string]bool{nil, {}, {string(liveExemplarID): true}, {"syntax": false}} {
-		if got := OffRampFloor(block); len(got) != 0 {
-			t.Errorf("OffRampFloor(%+v) = %v, want the empty floor", block, got)
-		}
-	}
-}
-
 // An enabled ID is selected; a `false` entry is not. ResolveEnabled returns the enabled IDs in
-// sorted canonical order for Config.EnableMechanisms — the engine builds them (ADR 0015 §1) — with
-// the (now empty) off-ramp floor unioned in, so what a block names is exactly what is armed.
+// sorted canonical order for Config.EnableMechanisms — the engine builds them (ADR 0015 §1) — and
+// nothing beside them: no catalogued row is on by default, so what a block names is exactly what is
+// armed, the Floor guards being Config.Floor's own keys (ADR 0071).
 func TestResolveEnabledEnablesOnlyTrue(t *testing.T) {
 	t.Parallel()
 	ids, _, err := ResolveEnabled(map[string]bool{"alpha": true, "beta": false}, fakeKnown)
 	if err != nil {
 		t.Fatalf("ResolveEnabled: %v", err)
 	}
-	want := append([]domain.MechanismID{"alpha"}, OffRampFloor(nil)...)
-	slices.Sort(want)
+	want := []domain.MechanismID{"alpha"}
 	if !slices.Equal(ids, want) {
-		t.Errorf("ResolveEnabled = %v; want %v (the `false` entry is skipped, the floor is added)", ids, want)
+		t.Errorf("ResolveEnabled = %v; want %v (the `false` entry is skipped, and nothing is floored in)", ids, want)
 	}
 }
 
 // Nothing enabled ⇒ NOTHING (D1): an absent block, an empty one, and one that only switches a row
-// off all resolve to no Mechanisms at all, the off-ramp floor having emptied when its two rows were
-// promoted to Floor guards (ADR 0071). A KNOWN key mapped to false selects nothing, disabled
+// off all resolve to no Mechanisms at all, no catalogued row being on by default since the two
+// recoveries that were became Floor guards (ADR 0071). A KNOWN key mapped to false selects nothing, disabled
 // Mechanisms being validated by name.
 func TestResolveEnabledDefaultsToNothing(t *testing.T) {
 	t.Parallel()
@@ -305,15 +277,14 @@ func TestResolveEnabledUnknownDisabledKeyErrors(t *testing.T) {
 		t.Errorf("error = %q, want it to list the known catalogue (e.g. %q)", err, liveExemplarID)
 	}
 
-	// The same key spelled correctly and disabled is fine: validated by name, never enabled. What
-	// comes back is the off-ramp floor alone — switching a non-off-ramp row off adds nothing and
-	// takes nothing away (ADR 0070).
+	// The same key spelled correctly and disabled is fine: validated by name, never enabled. Nothing
+	// comes back at all — switching a row off adds nothing, and no catalogued row is on by default.
 	ids, _, err := ResolveEnabled(map[string]bool{string(liveExemplarID): false}, exemplarKnown())
 	if err != nil {
 		t.Fatalf(`{%q: false}: %v`, liveExemplarID, err)
 	}
-	if want := OffRampFloor(nil); !slices.Equal(ids, want) {
-		t.Errorf(`{%q: false} = %v; want the off-ramp floor %v (a disabled Mechanism is never enabled)`, liveExemplarID, ids, want)
+	if len(ids) != 0 {
+		t.Errorf(`{%q: false} = %v; want nothing armed (a disabled Mechanism is never enabled)`, liveExemplarID, ids)
 	}
 }
 
@@ -335,17 +306,17 @@ func TestResolveEnabledUnknownIDNamesAnEmptyCatalogue(t *testing.T) {
 // release before the removal, so a config the user never edited must still start. It is dropped
 // whichever value it carries, it never reaches Config.EnableMechanisms, and the resolver itself says
 // nothing — several of its call paths run with the alt screen up, where stderr paints over the TUI.
-// Everything alongside it in the block still arms, and so does the off-ramp floor: a retired row is
-// not in the catalogue, so it can neither join the floor nor take anything off it (ADR 0070).
+// Everything alongside it in the block still arms: a retired row is not in the catalogue, so it can
+// neither arm anything nor take anything away.
 func TestResolveEnabledRetiredIDIsDropped(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		enabled map[string]bool
 		want    []domain.MechanismID
 	}{
-		{"retired and asked for", map[string]bool{"grammar": true}, OffRampFloor(nil)},
-		{"retired and switched off", map[string]bool{"grammar": false}, OffRampFloor(nil)},
-		{"retired beside a live row", map[string]bool{"grammar": true, string(liveExemplarID): true}, floorPlus(liveExemplarID)},
+		{"retired and asked for", map[string]bool{"grammar": true}, nil},
+		{"retired and switched off", map[string]bool{"grammar": false}, nil},
+		{"retired beside a live row", map[string]bool{"grammar": true, string(liveExemplarID): true}, []domain.MechanismID{liveExemplarID}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var ids []domain.MechanismID

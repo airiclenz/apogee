@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -146,16 +145,15 @@ func TestEnableMechanisms_MergesWithProvidedExperimentalHook(t *testing.T) {
 	}
 }
 
-// TestEnableMechanisms_NilAndEmptyBuildTheOffRampFloor: neither a nil nor an empty list arms
-// NOTHING any more — both build the off-ramp floor (ADR 0070), so an embedder that hands New a
-// Config with no `EnableMechanisms` gets the same recovery guarantees a Driver's own resolver
-// computes instead of a quieter agent nobody asked for. Every other Capability stays default-off
-// (D1): the arm is exactly the two off-ramps, nothing beside them.
+// TestEnableMechanisms_NilAndEmptyBuildNothing: a nil and an empty list both arm NOTHING. Every
+// Capability is default-off (D1) with no exception left — the two recoveries that used to be floored
+// in are Floor guards now (ADR 0071) — so an embedder that hands New a Config with no
+// `EnableMechanisms` gets an unarmed catalogue, and its recovery guarantees from Config.Floor.
 //
-// It is read off the registry rather than off fired events: what the list BUILDS is the claim, and
-// an off-ramp that never triggers on a well-behaved reply would make an event-based assertion say
+// It is read off the registry rather than off fired events: what the list BUILDS is the claim, and a
+// Mechanism that never triggers on a well-behaved reply would make an event-based assertion say
 // nothing at all.
-func TestEnableMechanisms_NilAndEmptyBuildTheOffRampFloor(t *testing.T) {
+func TestEnableMechanisms_NilAndEmptyBuildNothing(t *testing.T) {
 	cases := map[string][]domain.MechanismID{
 		"nil":   nil,
 		"empty": {},
@@ -171,9 +169,8 @@ func TestEnableMechanisms_NilAndEmptyBuildTheOffRampFloor(t *testing.T) {
 				t.Fatalf("newAgent: %v", err)
 			}
 
-			want := mechanisms.OffRampFloor(nil)
-			if got := armedIDs(a, domain.HookPostResponse); !slices.Equal(got, want) {
-				t.Errorf("armed post-response Mechanisms = %v, want the off-ramp floor %v", got, want)
+			if got := armedIDs(a, domain.HookPostResponse); len(got) != 0 {
+				t.Errorf("armed post-response Mechanisms = %v, want nothing armed", got)
 			}
 		})
 	}

@@ -16,7 +16,7 @@ import (
 // comment or joined the wrong block shows up as a changed line rather than as a passing test.
 const mechanismsExampleConfig = "server: testbox\n" +
 	"\n" +
-	"# Mechanisms keep a small model on track; the two off-ramps default on, the rest default off.\n" +
+	"# Mechanisms keep a small model on track; every one defaults off until this block names it.\n" +
 	"# mechanisms:\n" +
 	"#   validate: true              # tool-call validation + auto-retry\n" +
 	"#   syntax: true                # write-content syntax check\n" +

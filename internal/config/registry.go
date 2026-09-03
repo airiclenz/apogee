@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
@@ -602,7 +601,7 @@ var KeyRegistry = []Key{
 	},
 	{
 		Path: "mechanisms", Kind: KindStructured,
-		Desc:      "Catalogued small-model Mechanisms by canonical ID; the two off-ramps default on, every other one defaults off.",
+		Desc:      "Catalogued small-model Mechanisms by canonical ID; every one defaults off and is armed only by being named.",
 		Read:      func(o Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
 		Structure: func(o Options) any { return o.Mechanisms },
 	},
@@ -942,19 +941,13 @@ func countSummary(n int, noun string) string {
 // `false` entries — that is how a user records a decision to leave one off — and those are not
 // enabled Mechanisms, so counting map keys would overstate what the session is running.
 //
-// The OFF-RAMP FLOOR is counted too (ADR 0070): the catalogued off-ramps are on unless the block
-// names one `false`, so counting only the `true` keys would understate a session by two whenever the
-// block is absent — and the summary this feeds is read as "what is this run arming". The floor is
-// asked of the catalogue rather than assumed, so a row joining or leaving it moves the count with it.
+// No catalogued row is on by default, so the `true` keys are the whole count: the Floor guards this
+// session also runs are Config.Floor's own top-level keys (ADR 0071), each with its own registry row
+// and its own summary line, and folding them in here would count them twice.
 func enabledCount(block map[string]bool) int {
 	n := 0
 	for _, on := range block {
 		if on {
-			n++
-		}
-	}
-	for _, id := range mechanisms.OffRampFloor(block) {
-		if !block[string(id)] {
 			n++
 		}
 	}

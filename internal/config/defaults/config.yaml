@@ -829,18 +829,17 @@ ui:
 
 # =============================================================================
 # Catalogued small-model Mechanisms to enable, by canonical ID (Phase 4). Config-file only (no
-# flag or env). Each Mechanism bar the two off-ramps ships OFF by default — enabled only once its
-# A/B bench run has proven it a win — so this block is how you opt one in. Map each ID to true to
-# enable it; an unknown ID is a startup error that lists the IDs this build knows. Bypass still
-# wins: an enabled non-off-ramp Mechanism does not fire under --bypass. The catalogue fills in as
-# the port waves land (see docs/design/mechanism-catalogue.md); until a Mechanism's wave ships,
-# enabling its ID errors.
+# flag or env). EVERY Mechanism ships OFF by default — enabled only once its A/B bench run has
+# proven it a win — so this block is how you opt one in, and a block that is absent or empty arms
+# nothing at all. Map each ID to true to enable it; an unknown ID is a startup error that lists the
+# IDs this build knows. Bypass still wins: an enabled Mechanism does not fire under --bypass. The
+# catalogue fills in as the port waves land (see docs/design/mechanism-catalogue.md); until a
+# Mechanism's wave ships, enabling its ID errors.
 #
-# THE TWO OFF-RAMPS ARE THE EXCEPTION (ADR 0070): empty_response_recovery and tool_use_enforcer
-# ship ON. They are recovery guarantees — each fires only after a Turn has already failed, and
-# both survive --bypass — so the bench gate the others wait on does not apply to them. They are
-# armed whether or not this block names them, and whether or not the block exists at all; to turn
-# one off, name it explicitly false (`tool_use_enforcer: false`).
+# THE RECOVERY GUARANTEES ARE NOT IN HERE (ADR 0071). The guards every model benefits from — the
+# empty-reply recovery, the narrated-instead-of-acted recovery and their four siblings — are Floor
+# guards: plain engine behaviour, on in every arm including --bypass, each switched by its own
+# top-level key rather than by a row of this block.
 #
 # RECOMMENDED on a small context window (~32k): tool_result_cap. The automatic Compaction above
 # folds only BETWEEN Exchanges — its emergency twin does fold mid-Exchange, but only once a request

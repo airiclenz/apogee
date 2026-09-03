@@ -5,7 +5,7 @@ package agent
 // HTTP 200, a stream that ended before its first token). It must fail the Turn loudly rather than
 // commit a blank assistant message that leaves the Turn looking answered. These tests pin the two
 // halves of that contract: what the guard faults, and what it must let past — a post-response hook
-// that retried and recovered real content keeps first claim, so the off-ramp still owns the Turn.
+// that retried and recovered real content keeps first claim, so that hook still owns the Turn.
 // A third set pins what the guard SAYS: a reply cut off at the engine's own output cap (ADR 0046)
 // is told apart from an upstream that answered with nothing, because calling a 20k-token reasoning
 // run "empty" names neither the cap nor what was burned reaching it — at every depth, so a child's

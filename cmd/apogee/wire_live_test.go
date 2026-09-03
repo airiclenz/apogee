@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -306,19 +305,18 @@ func TestWireSessionReportsARetiredMechanismOnStderr(t *testing.T) {
 		t.Errorf("the retired-mechanism notice appeared %d times on stderr; want exactly 1 line\n"+
 			"want: %q\nstderr: %q", got, want, stderr)
 	}
-	if want := mechanisms.OffRampFloor(nil); !slices.Equal(w.cfg.EnableMechanisms, want) {
-		t.Errorf("EnableMechanisms = %v, want the off-ramp floor %v; a retired id is dropped from what "+
-			"the engine arms — leaving only what always arms — which is exactly why the line above has "+
-			"to be printed", w.cfg.EnableMechanisms, want)
+	if got := w.cfg.EnableMechanisms; len(got) != 0 {
+		t.Errorf("EnableMechanisms = %v, want nothing armed; a retired id is dropped from what the "+
+			"engine arms and no catalogued row is on by default — which is exactly why the line above "+
+			"has to be printed", got)
 	}
 }
 
-// The floor a validated set is folded onto is a DEDUPLICATED union, and that is not tidiness: the
-// shipped gemma-4 set already names both off-ramps, so an appending union would hand the engine the
-// same ID twice and MechanismRegistry.Add would refuse it as already registered — turning every
-// startup that matches that set into a failure. The proof runs the union's output through the
-// engine's own build, which is the code that would refuse.
-func TestWithOffRampFloorDeduplicatesAShippedSet(t *testing.T) {
+// A shipped validated set becomes the enable list VERBATIM once its retired members are shed: no
+// catalogued row is floored in beside it any more (ADR 0071), so what a set names is exactly what
+// the engine is asked to build. The proof runs the shed set through the engine's own build, which
+// is the code a stale or duplicated member would fail in.
+func TestAShippedValidatedSetBuildsAsTheEnableList(t *testing.T) {
 	t.Parallel()
 
 	entries, err := validated.Shipped()
@@ -326,9 +324,8 @@ func TestWithOffRampFloorDeduplicatesAShippedSet(t *testing.T) {
 		t.Fatalf("validated.Shipped: %v", err)
 	}
 	if len(entries) == 0 {
-		t.Skip("no shipped validated set to fold a floor onto")
+		t.Skip("no shipped validated set to build")
 	}
-	floor := mechanisms.OffRampFloor(nil)
 
 	for _, e := range entries {
 		t.Run(e.Key, func(t *testing.T) {
@@ -336,33 +333,9 @@ func TestWithOffRampFloorDeduplicatesAShippedSet(t *testing.T) {
 			// shipped record is a historical curation, and BuildMechanisms only ever sees the
 			// live half of one.
 			live, _ := validated.DropRetired(e, mechanisms.RetiredIDs())
-			e := live
-			got := withOffRampFloor(e.Set, nil)
-
-			for _, id := range floor {
-				if n := countID(got, id); n != 1 {
-					t.Errorf("%q appears %d times in the folded set %v; want exactly 1", id, n, got)
-				}
-			}
-			for _, id := range e.Set {
-				if !slices.Contains(got, id) {
-					t.Errorf("the fold dropped %q from the set: %v", id, got)
-				}
-			}
-			if _, err := apogee.BuildMechanisms(validCfg(t), got); err != nil {
-				t.Errorf("BuildMechanisms over the folded set: %v", err)
+			if _, err := apogee.BuildMechanisms(validCfg(t), live.Set); err != nil {
+				t.Errorf("BuildMechanisms over the shed set %v: %v", live.Set, err)
 			}
 		})
 	}
-}
-
-// countID is how many times id appears in ids — the duplicate check the test above is entirely about.
-func countID(ids []apogee.MechanismID, id apogee.MechanismID) int {
-	n := 0
-	for _, got := range ids {
-		if got == id {
-			n++
-		}
-	}
-	return n
 }

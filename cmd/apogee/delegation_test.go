@@ -14,7 +14,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
 )
@@ -467,31 +466,30 @@ func TestSubAgentCatalogueBuildsTheEntrysOwnMechanisms(t *testing.T) {
 	if first, second := catalogue(), catalogue(); first == nil || first == second {
 		t.Error("the factory must hand each child its own registry")
 	}
-	// A block naming one row still arms the off-ramp floor beside it (ADR 0070): replace-whole
-	// replaces what the parent armed, never the floor every build stands on.
-	wantArmed := append(mechanisms.OffRampFloor(nil), "library")
-	slices.Sort(wantArmed)
+	// A block naming one row arms exactly that row: replace-whole replaces what the parent armed,
+	// and nothing is on by default to stand beside it (ADR 0071 — the guards are Config.Floor's).
+	wantArmed := []apogee.MechanismID{"library"}
 	if armed := postResponseIDs(catalogue()); !slices.Equal(armed, wantArmed) {
-		t.Errorf("a `library: true` block armed post-response %v; want %v (the floor beside it)", armed, wantArmed)
+		t.Errorf("a `library: true` block armed post-response %v; want %v", armed, wantArmed)
 	}
 
-	// A map that enables nothing is still a map: replace-whole means the child runs on the off-ramp
-	// floor alone (ADR 0070) — a catalogue of its own rather than an inheritance — and only an
-	// explicit `<off-ramp>: false` would take one of those two away as well.
+	// A map that enables nothing is still a map: replace-whole means the child runs on NOTHING — a
+	// catalogue of its own rather than an inheritance — its recovery guarantees coming from the
+	// Floor guards the engine runs whatever any block says.
 	off, err := subAgentCatalogue(config.ServerEntry{Name: "grunt", Mechanisms: map[string]bool{"library": false}}, base)
 	if err != nil {
 		t.Fatalf("subAgentCatalogue with an all-false map: %v", err)
 	}
 	if off == nil {
-		t.Fatal("an all-false map inherited the parent's catalogue; want a floor-only one of its own")
+		t.Fatal("an all-false map inherited the parent's catalogue; want an empty one of its own")
 	}
-	if armed, want := postResponseIDs(off()), mechanisms.OffRampFloor(nil); !slices.Equal(armed, want) {
-		t.Errorf("an all-false map armed %v; want the off-ramp floor %v", armed, want)
+	if armed := postResponseIDs(off()); len(armed) != 0 {
+		t.Errorf("an all-false map armed %v; want nothing armed", armed)
 	}
 }
 
 // postResponseIDs is the canonical IDs a child's registry holds at the post-response hook, sorted —
-// where both off-ramps live, so it is the direct read of whether the floor reached the child.
+// the hook the replace-whole rule is read at, so it is the direct read of what reached the child.
 func postResponseIDs(r *apogee.MechanismRegistry) []apogee.MechanismID {
 	var out []apogee.MechanismID
 	for _, m := range r.Ordered(apogee.HookPostResponse) {

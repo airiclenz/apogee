@@ -137,9 +137,10 @@ type Config struct {
 	// An unknown ID (ErrUnknownMechanism), an ID listed twice or already pre-built into Mechanisms
 	// (the registry's already-registered rejection), a hook-less Mechanism, or a half-armed Requires
 	// stack fails construction — a typo or a half-built stack never silently disables a Mechanism.
-	// Empty/nil arms the OFF-RAMP FLOOR and nothing else (ADR 0070): every Capability but off-ramp
-	// keeps the default-off posture, and the two off-ramps are recovery guarantees the engine floors
-	// in for a registry it made itself (agent.buildEnabledMechanisms). The catalogue's CONTENTS are data, not v1
+	// Empty/nil arms NOTHING (agent.buildEnabledMechanisms): every Capability keeps the default-off
+	// posture, and the recovery guarantees an embedder gets whatever this list says are the Floor
+	// guards of Config.Floor — engine behaviour rather than catalogue rows (ADR 0071). The
+	// catalogue's CONTENTS are data, not v1
 	// contract — an ID may change in a minor with a CHANGELOG notice; the field and its build
 	// semantics are the stable surface (locked decisions 1–2, 6).
 	EnableMechanisms []MechanismID

@@ -18,9 +18,9 @@ import (
 type setDecisionKind int
 
 const (
-	// setNoMatch — an identity resolved but no entry carries its label: the model runs the
-	// D1 floor — structure plus the default-on off-ramps (ADR 0070) — silently (an unknown
-	// model needs no banner).
+	// setNoMatch — an identity resolved but no entry carries its label: the model runs on the
+	// structural reducers and the Floor guards alone, with no catalogued row, silently (an
+	// unknown model needs no banner).
 	setNoMatch setDecisionKind = iota
 	// setSurfaceOff — Bypass or `validated-sets: enable: false`: the surface is fully off
 	// before any identity is even resolved (Bypass is the stronger explicit
@@ -154,10 +154,10 @@ func startupSetDecision(opts config.Options, userDir, probeDir string) setDecisi
 // resolveValidatedSet is the Validated-set runtime surface's whole decision for this
 // session (ADR 0016 + its 2026-07-19 realisation), placed HERE at product wire time so
 // no MEASURED set is ever auto-enabled by the engine — ADR 0015's "EnableMechanisms is the
-// one enable path" stands for every catalogued row bar one stated exception, the off-ramp
-// floor the engine restores for an empty list it was handed with no registry (ADR 0070,
-// agent.buildEnabledMechanisms) — and a bench arm can never be contaminated by a matching
-// set: the floor is Capability-derived and identical in every arm, Bypass included.
+// one enable path" now stands for every catalogued row with no exception left, the recovery
+// guarantees the engine used to floor in having become Floor guards off Config.Floor
+// (ADR 0071) — and a bench arm can never be contaminated by a matching set: the guards are
+// identical in every arm, Bypass included.
 //
 // It returns the enable set to fold into Config.EnableMechanisms (nil when nothing
 // applies), the per-session stderr notices to print, and an error ONLY for the one loud
@@ -191,8 +191,8 @@ func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []a
 		}
 		notices = append(notices, appliedNotice(d.match))
 	default:
-		// setSurfaceOff, setNoIdentity, setNoMatch: the D1 floor (structure + off-ramps) needs
-		// no banner.
+		// setSurfaceOff, setNoIdentity, setNoMatch: the structural reducers and the Floor guards
+		// need no banner.
 	}
 	return set, notices, nil
 }

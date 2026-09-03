@@ -105,35 +105,6 @@ func rowFor(id domain.MechanismID) *retiredRow {
 	return nil
 }
 
-// OffRampFloor returns the catalogued off-ramp IDs a `mechanisms:` block leaves standing — every
-// registered row whose Capability is domain.CapOffRamp and whose key is not explicitly false in
-// block — sorted canonically, as a fresh slice the caller may keep.
-//
-// It is the machinery behind the one exception to D1 (ADR 0070): every other Capability defaults
-// OFF and is armed only by being named, but the two off-ramps — the empty-reply and the
-// narrated-instead-of-acted recoveries — are recovery guarantees rather than small-model tuning.
-// They survive Bypass already (ADR 0006), so a run that had them off was the one posture where the
-// floor and Bypass disagreed; defaulting them on closes that gap. An absent key means ON, which is
-// why the block is read for an explicit false rather than for a true.
-//
-// The floor is harvested from the production catalogue's Capability column rather than from a
-// hand-kept ID list, so a row that later joins (or leaves) CapOffRamp moves the floor with it and
-// no second list can drift from the first. A block naming a RETIRED id is irrelevant here: a
-// retired row is not in the catalogue, so it can neither be floored nor un-floor anything.
-func OffRampFloor(block map[string]bool) []domain.MechanismID {
-	var out []domain.MechanismID
-	for _, d := range Descriptors() { // already sorted by canonical ID
-		if d.Capability != domain.CapOffRamp {
-			continue
-		}
-		if on, named := block[string(d.ID)]; named && !on {
-			continue
-		}
-		out = append(out, d.ID)
-	}
-	return out
-}
-
 // ResolveEnabled validates every `mechanisms:` configuration key against the known catalogue and
 // returns the enabled IDs in sorted canonical order for Config.EnableMechanisms — the engine
 // (apogee.New/Resume) builds them, derives their Deps, and runs the stacking gates (ADR 0015 §1: a
@@ -145,15 +116,9 @@ func OffRampFloor(block map[string]bool) []domain.MechanismID {
 // deterministic; the dispatch order is the registry's own topo-sort (ADR 0003), independent of this
 // order.
 //
-// The OFF-RAMP FLOOR (OffRampFloor, ADR 0070) is unioned into the answer: a catalogued row whose
-// Capability is CapOffRamp is enabled unless the block names it explicitly `false`. NO SHIPPED ROW
-// DECLARES IT any more — the two recoveries that did are Floor guards now (ADR 0071), on for every
-// model and switched by their own top-level keys — so the union contributes nothing and every row is
-// armed only by being named (D1). The union is deduplicated and re-sorted, so a block that spells a
-// floored row out as `true` would yield it once, in canonical position. The floor is read from the
-// production catalogue rather than from the `known` argument: `known` is the list a caller validates
-// spelling against (a test may hand a fake one), while the floor is about which rows this build
-// actually ships.
+// NO CATALOGUED ROW IS ON BY DEFAULT: what the block names is exactly what is armed (D1). The two
+// recoveries that once defaulted on are Floor guards now (ADR 0071) — engine behaviour for every
+// model, switched by their own top-level keys in Config.Floor rather than from this block.
 //
 // A RETIRED ID (RetiredIDs — a row this build removed) is DROPPED from ids, silently and whatever
 // its value: the key was valid at the release before the removal, so refusing it would break a
@@ -213,11 +178,6 @@ func ResolveEnabled(
 		}
 		if enabled[key] {
 			resolved = append(resolved, domain.MechanismID(key))
-		}
-	}
-	for _, id := range OffRampFloor(enabled) {
-		if !slices.Contains(resolved, id) {
-			resolved = append(resolved, id)
 		}
 	}
 	slices.Sort(resolved)

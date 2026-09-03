@@ -3,12 +3,10 @@ package agent
 // Loop-level delivery tests for the Wave-1 Mechanisms riding the retry-in-place seam (R1,
 // phase-4-review-fixes item 2). The Mechanisms are built through the production catalogue
 // (mechanisms.Build — the same seam the config surface drives) and registered on a real
-// MechanismRegistry, so these tests prove the registry-built dispatch path end-to-end through
-// scripted responders: a validate correction rides the retried request and the fixed second
-// response dispatches; a validate fail short-circuits the syntax/autofix cascade; the enforcer's
-// retry carries the superseded narration plus the correction; an empty reply retries with the
-// sim's completion-check nudge; an always-empty responder terminates at the loop cap; and both
-// off-ramps still fire at dispatch under Bypass AND through a tripped Turn Budget.
+// MechanismRegistry, so this test proves the registry-built dispatch path end-to-end through a
+// scripted responder: a response the tool-call repair guard rejects short-circuits the
+// syntax/autofix cascade. The delivery cases whose subjects became Floor guards live in
+// floorguards_test.go beside the guards themselves (ADR 0071).
 
 import (
 	"context"

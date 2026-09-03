@@ -320,7 +320,25 @@ still passes (lab rows keep the Capability).
 
 **Commit:** `feat(floor): tool-use enforcer and empty-response recovery are floor guards`
 
-## 6. The off-ramp floor plumbing goes
+## 6. The off-ramp floor plumbing goes — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the item's literal `grep -rn "off-ramp\|OffRamp" internal/ cmd/ --include=*.go` outside `internal/domain/mechanism.go` CANNOT read zero — `domain.CapOffRamp` stays for lab rows, as the item itself says, and is referenced from `internal/agent/hookrun.go:55` (the Bypass gate) plus a dozen lab-row tests (`mechanism_dispatch_test.go`, `setlive_test.go`, `hookrun_test.go`, `selfreg*.go`). What was applied instead is the regression guard's own operative symbol rule — `grep -rn 'OffRampFloor' internal/ cmd/ --include=*.go` reads zero, met — plus every sentence claiming a live off-ramp FLOOR or default-on off-ramps, wherever it sits; the Capability-semantics sentences (Bypass exemption, `SuppressExempt`) describe machinery that stays and were left alone.
+
+NOTES (2026-09-03): consequential edit — internal/domain/config.go: made necessary by construct.go's empty list building nothing; the `EnableMechanisms` doc said "Empty/nil arms the OFF-RAMP FLOOR and nothing else".
+
+NOTES (2026-09-03): consequential edit — cmd/apogee/delegation.go: made necessary by the same change; `subAgentCatalogue`'s replace-whole doc said an all-false map "replaces whatever the parent arms with the OFF-RAMP FLOOR alone".
+
+NOTES (2026-09-03): consequential edit — cmd/apogee/validatedsets.go: made necessary by dropping the union; three comments (`:22`, `:157`, `:194`) named "the D1 floor — structure plus the default-on off-ramps" as the posture a non-matching model runs.
+
+NOTES (2026-09-03): consequential edit — internal/config/defaults/config.yaml: made necessary by the same; the shipped first-run template's `mechanisms:` header said "Each Mechanism bar the two off-ramps ships OFF by default" and carried a THE TWO OFF-RAMPS ARE THE EXCEPTION paragraph. Only that block was rewritten — the `:856-863` example is item 10's.
+
+NOTES (2026-09-03): consequential edit — internal/config/configwrite_mechanism_test.go, cmd/apogee/settingsrows_test.go, internal/agent/emptyreply_test.go: made necessary by the same; each carried one sentence stating the floor or the default-on off-ramps as live.
+
+NOTES (2026-09-03): `internal/config/registry_test.go` is in the item's Files but needed no edit — the package has no test that names `enabledCount`, and `go test ./internal/config/` is green with the floor term gone.
+
+NOTES (2026-09-03): tests whose SUBJECT was the removed machinery were recast rather than edited in place. `TestBuildEnabledMechanismsFloorsAFreshRegistry` → `TestBuildEnabledMechanismsEmptyListBuildsNothing` (the name the item's Tests line gives it); `TestEnableMechanisms_NilAndEmptyBuildTheOffRampFloor` → `…BuildNothing`; `TestListMechanismsAppliesTheOffRampFloor` → `TestListMechanismsReadsTheBlock`; `TestWithOffRampFloorDeduplicatesAShippedSet` → `TestAShippedValidatedSetBuildsAsTheEnableList` (its function is deleted, but its live claim — a shipped set, retired members shed, builds through the engine's own `BuildMechanisms` — survives at the seam and is what the recast pins). `TestOffRampFloorIsEmptyWithNoCapOffRampRow` was DELETED with the machinery it asserted over, along with the `floorPlus` and `countID` helpers left with no caller.
+
+NOTES (2026-09-03): `internal/agent/wave1delivery_test.go`'s package header enumerated six delivery cases; items 4 and 5 moved five of them into `floorguards_test.go` and left the header describing tests the file no longer holds. Removing the off-ramp clause my own change falsified would have left the comment half-corrected, so the whole header was made honest in the same edit.
 
 **What.** Depends on 5. With no `CapOffRamp` row, remove `mechanisms.OffRampFloor` (`retired.go:45-72`)
 and the union in `ResolveEnabled` (`:144-148`); the empty-list floor in `agent.buildEnabledMechanisms`

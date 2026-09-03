@@ -264,15 +264,10 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 // every ID and names no Mechanism. An unknown ID (Build wraps domain.ErrUnknownMechanism), an ID
 // listed twice or already pre-built into the registry (the already-registered rejection), and a
 // hook-less Mechanism all propagate as construction failures.
-// An empty list builds the OFF-RAMP FLOOR (mechanisms.OffRampFloor, ADR 0070) rather than nothing —
-// but only when the engine made the registry itself (cfg.Mechanisms == nil). No shipped row declares
-// CapOffRamp any more, the two recoveries that did being Floor guards since ADR 0071, so that floor
-// is empty today and an embedder handing New a Config with no EnableMechanisms gets its recovery
-// guarantees from Config.Floor instead. A HANDED-IN registry is never floored: it is a caller who
-// assembled the arm itself — both sub-agent spawn paths and Rebind pass one — and flooring it would
-// re-add rows that registry may already hold, failing construction with "already registered". A
-// NON-EMPTY list is built exactly as given, floor included or not: the Drivers union the floor in
-// before they get here, so a resolved block arrives as the list it resolved to and stays that list.
+// An EMPTY list builds nothing: no catalogued row is on by default, and an embedder handing New a
+// Config with no EnableMechanisms gets its recovery guarantees from Config.Floor — the Floor guards
+// are engine behaviour rather than a catalogue arm (ADR 0071). A NON-EMPTY list is built exactly as
+// given: a resolved `mechanisms:` block arrives as the list it resolved to and stays that list.
 // Every Capability defaults off (D1). The ordering, incompatibility, and requirements gates then run
 // over the merged registry unchanged.
 //
@@ -283,13 +278,7 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) (mechanisms.Deps, error) {
 	ids := slices.Clone(cfg.EnableMechanisms)
 	if len(ids) == 0 {
-		if cfg.Mechanisms != nil {
-			return mechanisms.Deps{}, nil
-		}
-		ids = mechanisms.OffRampFloor(nil)
-		if len(ids) == 0 {
-			return mechanisms.Deps{}, nil
-		}
+		return mechanisms.Deps{}, nil
 	}
 	slices.Sort(ids)
 

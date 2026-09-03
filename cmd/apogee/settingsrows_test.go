@@ -412,8 +412,8 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"cursor-shape":       "block", // unset, so the declared default is what is in force
 		"editor":             "code -w",
 		"bypass":             "true",
-		// The explicit `false` entry is not an enabled one, and the off-ramp floor adds nothing now
-		// that the two recoveries it carried are Floor guards (ADR 0071): the count is the block's.
+		// The explicit `false` entry is not an enabled one, and nothing is added beside the block:
+		// no catalogued row is on by default (ADR 0071), so the count is the block's alone.
 		"mechanisms":            "2 mechanisms",
 		"validated-sets.enable": "true",
 		"validated-sets.alias":  "1 alias",

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 )
 
@@ -101,11 +100,10 @@ func TestWriteMechanismReportsWhichHalfFailed(t *testing.T) {
 
 // The read half of the same seam: what the `/settings` Mechanism list SAYS about the rows a
 // `mechanisms:` block names and the rows it leaves out. The list has to show the posture the run is
-// actually in — the floor unioned in on top of the block (ADR 0070). No catalogued row declares
-// CapOffRamp any more, the two recoveries that did being Floor guards since ADR 0071, so the floor
-// contributes nothing today and the list is exactly what the block says: the named row ON, every
-// other row listed and OFF.
-func TestListMechanismsAppliesTheOffRampFloor(t *testing.T) {
+// actually in, and no catalogued row is on by default any more (ADR 0071 — the recovery guarantees
+// are Floor guards with their own keys), so the list is exactly what the block says: the named row
+// ON, every other row listed and OFF.
+func TestListMechanismsReadsTheBlock(t *testing.T) {
 	t.Parallel()
 
 	w := urlGuardWiring(t, config.Options{})
@@ -119,11 +117,11 @@ func TestListMechanismsAppliesTheOffRampFloor(t *testing.T) {
 	if err := os.WriteFile(path, []byte("mechanisms:\n  "+named+": true\n"), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
-	// The OFF half's id is taken from the catalogue rather than hard-coded: a row that later joined the
-	// off-ramp Capability would otherwise turn this half into a silent contradiction of the one above.
+	// The OFF half's id is taken from the catalogue rather than hard-coded, so the case keeps
+	// asserting over a real row as the roster shrinks.
 	var ordinary string
 	for _, d := range mechanisms.Descriptors() {
-		if d.Capability != domain.CapOffRamp && string(d.ID) != named {
+		if string(d.ID) != named {
 			ordinary = string(d.ID)
 			break
 		}
@@ -137,17 +135,11 @@ func TestListMechanismsAppliesTheOffRampFloor(t *testing.T) {
 		enabled[toggle.ID] = toggle.Enabled
 	}
 
-	for _, id := range mechanisms.OffRampFloor(nil) {
-		if on, listed := enabled[string(id)]; !listed || !on {
-			t.Errorf("%s = (enabled %v, listed %v), want an armed row: a floored row the block never "+
-				"names is ON (ADR 0070), and the pane must not say it is off", id, on, listed)
-		}
-	}
 	if !enabled[named] {
 		t.Errorf("%s reads OFF; the block names it true and the list is answered from the file", named)
 	}
 	if on, listed := enabled[ordinary]; !listed || on {
-		t.Errorf("%s = (enabled %v, listed %v), want a listed row reading OFF: the floor arms only "+
-			"what declares CapOffRamp, not every Mechanism the block leaves out", ordinary, on, listed)
+		t.Errorf("%s = (enabled %v, listed %v), want a listed row reading OFF: a row the block leaves "+
+			"out is off, nothing being armed by default", ordinary, on, listed)
 	}
 }

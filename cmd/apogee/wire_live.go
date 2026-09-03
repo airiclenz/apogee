@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"slices"
 	"time"
 
 	"github.com/airiclenz/apogee"
@@ -157,10 +156,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// under LibraryDir, the resolved model fingerprint), merge them into
 	// Config.Mechanisms, and run the ordering / incompatibility / requirements gates. The disabled-key
 	// validation must stay here because the engine only ever sees the enabled IDs, so a typo'd DISABLED
-	// key — never constructed — must still fail loudly at this startup boundary. With nothing enabled
-	// the resolver still returns the OFF-RAMP FLOOR (ADR 0070), so a config without a mechanisms
-	// block arms the two recovery guarantees and nothing else; every other Capability stays off
-	// until it is named.
+	// key — never constructed — must still fail loudly at this startup boundary. No catalogued row is
+	// on by default: a config without a mechanisms block arms nothing, every Capability staying off
+	// until it is named, and the Floor guards it still runs are Config.Floor's, not this list's.
 	//
 	// The list is hoisted into a local because it outlives this assignment: it is the MANUAL
 	// choice, model-independent by construction, and the rebind seam re-runs the
@@ -196,7 +194,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		fmt.Fprintln(os.Stderr, n)
 	}
 	if len(vset) > 0 {
-		w.cfg.EnableMechanisms = withOffRampFloor(vset, w.opts.Mechanisms)
+		w.cfg.EnableMechanisms = vset
 	}
 
 	// The id-addressed session store under this run's sessions root, and the record a --resume or
@@ -433,32 +431,6 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	w.colorScheme, w.colorSchemeWarnings = resolveColorScheme(w.opts.UI.ColorScheme, w.roots.schemes)
 
 	return nil
-}
-
-// withOffRampFloor returns set with the catalogued off-ramp floor (mechanisms.OffRampFloor, ADR
-// 0070) folded in — a DEDUPLICATED union, in canonical order, so a set that already names an
-// off-ramp still names it exactly once.
-//
-// It is applied ONLY where a VALIDATED SET replaces the enable list (here at startup and at the
-// per-model rebind): a set is a whole-arm record whose author never had to think about a floor, so a
-// set that omits an off-ramp must not be read as turning that off-ramp off. The manual `mechanisms:`
-// path needs no call — mechanisms.ResolveEnabled already floors what it resolves — and an explicit
-// `<off-ramp>: false` in the block suppresses the set entirely (ADR 0016's whole-set-or-nothing), so
-// the block is still passed here rather than assumed empty.
-//
-// The deduplication is load-bearing rather than tidiness: the shipped set already names both
-// off-ramps (internal/validated/shipped.json), and an appending union would hand the engine an ID
-// twice, whose registry Add refuses as "already registered" — turning every matching model's startup
-// into a failure.
-func withOffRampFloor(set []apogee.MechanismID, block map[string]bool) []apogee.MechanismID {
-	out := slices.Clone(set)
-	for _, id := range mechanisms.OffRampFloor(block) {
-		if !slices.Contains(out, id) {
-			out = append(out, id)
-		}
-	}
-	slices.Sort(out)
-	return out
 }
 
 // mcpGuard builds the url-safety guard an MCP connect is made under, from the host lists whichever
