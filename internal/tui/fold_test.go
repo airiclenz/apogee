@@ -225,10 +225,11 @@ func foldCases() []foldCase {
 			event: domain.MechanismFiredEvent{Mechanism: "m", Hook: "h", Action: "a"},
 		},
 		{
-			name: "FloorGuardEvent is inert in the transcript",
-			// Nothing, and deliberately: a Floor guard firing is engine behaviour correcting the
-			// model's own failure, not user news the way a prune pass is (ADR 0071). It belongs in
-			// the hidden debug view beside a Mechanism firing and nowhere else.
+			name: "FloorGuardEvent is inert outside the debug view",
+			// Nothing here, and deliberately: a Floor guard firing is engine behaviour correcting
+			// the model's own failure, not user news the way a prune pass is (ADR 0071). It is
+			// recorded beside a Mechanism firing in the hidden debug view (transcript.addFloorGuard,
+			// pinned in transcript_test.go) and nowhere else, so a default fold shows nothing.
 			event: domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
 		},
 		{

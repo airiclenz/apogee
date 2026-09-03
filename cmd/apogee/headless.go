@@ -104,6 +104,12 @@ var runOnce = run.Once
 // stderr on every Firing, for a human who is not watching. The record keeps the same fact either
 // way — transcriptFold folds a Note entry for it — so this sink is the live view alone.
 //
+// It prints for a prune and for NOTHING else — a [domain.FloorGuardEvent] included, and
+// deliberately: a Floor guard repairing the model's own failure is engine behaviour rather than
+// news for the human who is not watching, so it stays in the TUI's hidden debug view and off this
+// stderr, exactly as a Mechanism firing already does (ADR 0071). It is still forwarded, like every
+// other Event.
+//
 // Emit is never called concurrently: the engine serializes emission on its side ([domain.EventSink]).
 type pruneNoticeSink struct {
 	inner domain.EventSink

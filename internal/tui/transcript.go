@@ -44,7 +44,7 @@ type transcript struct {
 	// session never displaces anything — and it is written copy-on-write, so a Model copy that is
 	// discarded rather than returned cannot leave its edit behind (ADR 0011).
 	parked []parkedText
-	debug  bool // when set, MechanismFiredEvents are recorded (a hidden debug view)
+	debug  bool // when set, MechanismFired and FloorGuard events are recorded (a hidden debug view)
 	// ws is the project root a tool card's paths are printed relative to (workspacepath.go), resolved
 	// once at construction from Options.Workspace. It lives here because addToolCall and
 	// addToolResult are reached through apply, which folds an Event with no Model in sight; it is a
@@ -913,7 +913,9 @@ func presentedStatus(v presentedView) string {
 // delegation was just given lands ON that same block, renaming the run every surface reads off it
 // (addSubAgentName); a ChildInterjection commits the message it reports INSIDE the child's run
 // when it landed and a note saying it never did when it did not (addChildInterjection); a
-// MechanismFired is surfaced only in the debug view; a Prune says, in one host note, that the
+// MechanismFired is surfaced only in the debug view, and a FloorGuardFired with it — a guard
+// correcting the model's own failure is engine behaviour rather than user news (addFloorGuard);
+// a Prune says, in one host note, that the
 // engine dropped stale tool results from the conversation it keeps (addPrune). It renders only —
 // no agent logic (C5).
 func (t *transcript) apply(e domain.Event) {
@@ -940,6 +942,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
 	case domain.MechanismFiredEvent:
 		t.addMechanism(e)
+	case domain.FloorGuardEvent:
+		t.addFloorGuard(e)
 	case domain.ErrorEvent:
 		t.addError(e.Source, e.Err, runOf(e.EventBase))
 	case domain.PruneEvent:
@@ -1811,6 +1815,27 @@ func (t *transcript) addMechanism(e domain.MechanismFiredEvent) {
 	text := fmt.Sprintf("mechanism %s @ %s: %s", e.Mechanism, e.Hook, e.Action)
 	run := runOf(e.EventBase)
 	t.place(entry{kind: entryNote, text: text, depth: run.depth, spawnCallID: run.spawn})
+}
+
+// addFloorGuard records a fired Floor guard, and — like addMechanism — only in the debug view.
+// A guard firing is the engine repairing the model's own failure or shaping the request without
+// steering it (ADR 0071): it is observability, not the conversation, so it stays out of the
+// product UI even though a PruneEvent (which changes what the conversation still holds) does not.
+//
+// The wording carries no hook point, because the event carries none: a guard is not registered at
+// a hook, and its config key already names the seam it runs at. Guard and Action are engine
+// constants, but Detail is free text a guard may fill from what it acted on, so the whole note is
+// escape-stripped as addApproval strips the tool name it prints.
+func (t *transcript) addFloorGuard(e domain.FloorGuardEvent) {
+	if !t.debug {
+		return
+	}
+	text := fmt.Sprintf("guard %s: %s", e.Guard, e.Action)
+	if e.Detail != "" {
+		text += " (" + e.Detail + ")"
+	}
+	run := runOf(e.EventBase)
+	t.place(entry{kind: entryNote, text: stripEscapes(text), depth: run.depth, spawnCallID: run.spawn})
 }
 
 // addError appends a recovered-fault notice (ADR 0007 — an ErrorEvent does not stop the

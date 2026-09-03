@@ -257,6 +257,15 @@ type MechanismFiredEvent struct {
 // back to the switch that turns the behaviour off. Action names what the guard did ("retry",
 // "intercept", "cap"), and Detail is optional supporting text a renderer may show verbatim or
 // ignore.
+//
+// It carries no HookPoint, unlike MechanismFiredEvent: a guard is not registered at a hook, it is
+// the engine's own behaviour at a seam, and the Guard key already names which seam it runs at.
+//
+// A Driver renders it where it renders a Mechanism firing and nowhere else — the TUI's hidden debug
+// view (internal/tui's transcript.addFloorGuard) — and NOT where it renders a PruneEvent: a guard
+// firing is the engine correcting the model's own failure, which is not news the human asked for,
+// while a prune changes what the conversation still holds and is. So headless prints no line for it
+// and a session record folds no entry (ADR 0071).
 type FloorGuardEvent struct {
 	EventBase
 	Guard  string // the guard's config key, e.g. "tool-call-repair"

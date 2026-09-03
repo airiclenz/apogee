@@ -1083,6 +1083,46 @@ func TestTranscriptMechanismGatedByDebug(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// A Floor-guard firing is gated behind the same debug view
+// ----------------------------------------------------------------------------
+
+// TestTranscriptFloorGuardGatedByDebug pins the Driver contract for domain.FloorGuardEvent: a guard
+// firing is rendered where a Mechanism firing is — the hidden debug view — and nowhere else. A
+// guard repairs the model's own failure or shapes the request without steering it (ADR 0071), which
+// is observability rather than news the human asked for, unlike a prune pass (addPrune) that says
+// out loud what the conversation no longer holds.
+//
+// The wording is asserted literally: it names the guard's CONFIG KEY, so a human reading the debug
+// view already knows the switch that turns the behaviour off, and it carries no hook point because
+// the event carries none.
+func TestTranscriptFloorGuardGatedByDebug(t *testing.T) {
+	fired := domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"}
+
+	t.Run("off by default", func(t *testing.T) {
+		tr := feed(fired)
+		if n := len(tr.entries); n != 0 {
+			t.Errorf("guard rendered without debug: entries = %d, want 0", n)
+		}
+	})
+
+	t.Run("recorded under debug", func(t *testing.T) {
+		tr := &transcript{debug: true}
+		tr.apply(fired)
+		if got, want := plainRender(tr), "guard tool-call-repair: retry"; !strings.Contains(got, want) {
+			t.Errorf("guard not recorded under debug as %q:\n%s", want, got)
+		}
+	})
+
+	t.Run("a detail is shown when the guard filled one", func(t *testing.T) {
+		tr := &transcript{debug: true}
+		tr.apply(domain.FloorGuardEvent{Guard: "tool-result-cap", Action: "cap", Detail: "2 results"})
+		if got, want := plainRender(tr), "guard tool-result-cap: cap (2 results)"; !strings.Contains(got, want) {
+			t.Errorf("guard detail not rendered as %q:\n%s", want, got)
+		}
+	})
+}
+
+// ----------------------------------------------------------------------------
 // Rendering sub-agent depth (Phase 3, P3.14 — "tolerate" → "render")
 // ----------------------------------------------------------------------------
 

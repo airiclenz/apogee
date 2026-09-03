@@ -223,6 +223,7 @@ type (
 	ToolResultEvent     = domain.ToolResultEvent
 	ApprovalEvent       = domain.ApprovalEvent
 	MechanismFiredEvent = domain.MechanismFiredEvent
+	FloorGuardEvent     = domain.FloorGuardEvent
 	ErrorEvent          = domain.ErrorEvent
 	PruneEvent          = domain.PruneEvent
 	UsageEvent          = domain.UsageEvent

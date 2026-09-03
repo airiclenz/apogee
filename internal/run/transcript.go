@@ -74,8 +74,14 @@ func newTranscriptFold(prompt string) *transcriptFold {
 
 // fold appends what one Event contributes to the scrollback, or nothing at all. Every variant the
 // stream carries that this fold does not name — readings, phases, approvals, mechanism firings,
-// the token stream behind a committed message — contributes nothing on purpose: a reading is not a
-// block, and the streamed tokens are the message that MessageEvent then commits in full.
+// Floor-guard firings, the token stream behind a committed message — contributes nothing on
+// purpose: a reading is not a block, and the streamed tokens are the message that MessageEvent then
+// commits in full.
+//
+// A domain.FloorGuardEvent is named here to say it is left out deliberately, not overlooked: a
+// guard repairing the model's own failure is engine behaviour the reader of a record is owed
+// nothing about, exactly as a Mechanism firing is, while the PruneEvent below changes what the
+// conversation still holds and earns its note (ADR 0071).
 func (f *transcriptFold) fold(e domain.Event) {
 	switch ev := e.(type) {
 	case domain.MessageEvent:

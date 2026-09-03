@@ -479,7 +479,17 @@ Bypass while the conversation keeps the full text; the freshest result is never 
 
 **Commit:** `feat(floor): the tool-result cap is a floor guard on the request projection`
 
-## 9. `FloorGuardEvent` reaches every Driver
+## 9. `FloorGuardEvent` reaches every Driver — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the item's What words the debug line `guard <key> @ <hook>: <action>`; its regression guard offers the hookless `guard <key>: <action>` as the alternative to adding a `Hook HookPoint` field, and that is what landed. A Hook field would have had to be filled at the three seams in `internal/agent/floorguards.go` — a file this item's Files list deliberately omits — and the event's own doc now says why it carries none: a guard is not registered at a hook, and the Guard key already names the seam. A non-empty `Detail` renders as a trailing ` (<detail>)`; no guard fills one today.
+
+NOTES (2026-09-03): consequential edit — internal/tui/fold_test.go: made necessary by the new debug-view render; item 4's row read "FloorGuardEvent is inert in the transcript", which my own change made false — it is inert OUTSIDE the debug view, exactly as the MechanismFiredEvent row beside it says of itself. The assertion (a default fold contributes nothing) is unchanged and still passes.
+
+NOTES (2026-09-03): `internal/run/transcript_test.go` and `cmd/apogee/headless_test.go` join Files — the item's Tests line and Binding claim a SILENCE at both surfaces, and neither had a test pinning it (`internal/run` had no Mechanism-firing case at all). `internal/run` gains `TestTranscriptFoldIgnoresAGuardFiring` (a guard firing and a Mechanism firing fold zero entries); `TestPruneNoticeSinkForwardsEveryEvent` gains a `FloorGuardEvent` that is forwarded and prints no stderr line.
+
+NOTES (2026-09-03): `cmd/apogee/daemon*.go` and `internal/tui/inspector*.go` were re-checked against the item's own grep and carry no `MechanismFiredEvent`/`PruneEvent` switch, so they stay out of Files as the regression guard says.
+
+NOTES (2026-09-03): `ISSUES.md`, `README.md`, `docs/manual/{commands,configuration,probe}.md` and the untracked `docs/plans/2026-09-03 - 01 - …` are dirty from a CONCURRENT pass, not this item — deliberately absent from FILES and left untouched.
 
 **What.** Depends on 4. `domain.FloorGuardEvent{EventBase; Guard, Action, Detail string}` (added in
 item 4) is rendered wherever `MechanismFiredEvent` is today and wherever `PruneEvent` is: rule —

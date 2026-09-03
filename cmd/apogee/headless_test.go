@@ -1720,6 +1720,10 @@ func TestHeadlessPrintsThePruneNotice(t *testing.T) {
 // hands EVERY Event on to the sink it wraps, its own included. run.Once puts its tap around this
 // one (run.Spec), so a sink that swallowed what it rendered would cost the Firing's record the very
 // entry the notice is about.
+//
+// The FloorGuardEvent is here to pin the silence: a Floor guard firing is forwarded like anything
+// else and prints NO stderr line, since a guard repairing the model's own failure is engine
+// behaviour rather than news for an unattended run (ADR 0071).
 func TestPruneNoticeSinkForwardsEveryEvent(t *testing.T) {
 	t.Parallel()
 
@@ -1728,13 +1732,14 @@ func TestPruneNoticeSinkForwardsEveryEvent(t *testing.T) {
 	sink := pruneNoticeSink{inner: inner, out: &errOut}
 
 	sink.Emit(domain.PruneEvent{Results: 2, Tokens: 800})
+	sink.Emit(domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"})
 	sink.Emit(domain.MessageEvent{Text: "done"})
 
-	if len(inner.events) != 2 {
-		t.Errorf("the wrapped sink saw %d events, want both: %+v", len(inner.events), inner.events)
+	if len(inner.events) != 3 {
+		t.Errorf("the wrapped sink saw %d events, want all three: %+v", len(inner.events), inner.events)
 	}
 	if got, want := errOut.String(), "pruned 2 tool results (~800 tokens)\n"; got != want {
-		t.Errorf("printed %q, want %q — the prune alone, and nothing for the message", got, want)
+		t.Errorf("printed %q, want %q — the prune alone, nothing for the guard or the message", got, want)
 	}
 }
 
