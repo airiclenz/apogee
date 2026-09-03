@@ -282,7 +282,7 @@ func TestDecomposeStillSteersAfterARead(t *testing.T) {
 // workspaceWritingBuiltins names the registered built-ins whose EXECUTION mutates a named workspace
 // file — internal/tools' workspaceScopedWriter set, mirrored here because that marker is unexported.
 // Every one of them must appear in wave4WriteTools, or the whole history family (read_repeat,
-// read_loop, cached_content_intercept, error_enrichment, the off-ramps, greenfield detection) treats
+// read_loop, error_enrichment, greenfield detection) treats
 // a real write as a non-write, which is exactly how copy_file, move_file and delete_file went
 // unnoticed from 2026-08-10 until this pin.
 var workspaceWritingBuiltins = map[string]bool{

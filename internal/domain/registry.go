@@ -237,7 +237,7 @@ func descriptorsOf(mechanisms []RegisteredMechanism) []MechanismDescriptor {
 // detectIncompatibility reports ErrIncompatibleMechanisms if two registered Mechanisms
 // declare each other incompatible (MechanismDescriptor.IncompatibleWith). Incompatibility is
 // GLOBAL, not per-hook-point: two Mechanisms that must never co-fire — e.g. read_loop and
-// cached_content_intercept, which sit at different hook points — cannot both be enabled. A
+// read_repeat, which sit at different hook points — cannot both be enabled. A
 // declaration is directional in the data but symmetric in effect (either side naming the other
 // trips it), so it fails loudly at startup the same way an ordering cycle does (ADR 0003).
 // The rule is CheckStack's; this is the registry's post-build rendering of the first

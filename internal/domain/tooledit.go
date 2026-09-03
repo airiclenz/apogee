@@ -79,7 +79,7 @@ func (e *ToolCallEdit) SetTool(name string) {
 }
 
 // SetArguments replaces the call's argument object — the shaping operation the re-read
-// family uses (cached_content_intercept caps a redundant re-read by adding max_lines). The
+// family uses (the read-cache Floor guard caps a redundant re-read by adding max_lines). The
 // slice is copied so the caller cannot reach back into the pending call afterwards.
 func (e *ToolCallEdit) SetArguments(args json.RawMessage) {
 	e.call.Arguments = append(json.RawMessage(nil), args...)

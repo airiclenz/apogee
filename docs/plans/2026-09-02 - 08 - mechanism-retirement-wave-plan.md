@@ -372,7 +372,25 @@ the `mechanisms` row's Desc is re-pinned in `internal/tui/settings_test.go`.
 
 **Commit:** `refactor: remove the off-ramp floor plumbing now that the guards are engine behaviour`
 
-## 7. Pre-tool-exec guard: read cache
+## 7. Pre-tool-exec guard: read cache — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): the guard is spelled `CacheRead(view, edit) (ok bool)` exactly as the item asks, and the seam wraps the pending `*domain.ToolCall` in a `domain.NewToolCallEdit` — the same wrapper the hooks mutate through — so the guard's write reaches the call the loop owns. The item's `:362` call is kept for seam parity with a comment saying it is a no-op for reads, as the regression guard directs.
+
+NOTES (2026-09-03): the three helpers `priorSuccessfulReadUnchanged`, `capReadArguments` and `toolDeclaresMaxLines` were private to `cachedcontent.go` — the symbol grep found no surviving caller for any of them, so they moved wholesale rather than being rehomed. `cachedContentReadCap` became `readCacheLines`; every other line of decision logic is verbatim.
+
+NOTES (2026-09-03): the four scripted-responder tests insert an intervening read of ANOTHER file between the two reads of the same one. Two identical consecutive read Turns would trip the tool-loop breaker, which runs first at the post-response seam and would end the Turn before the pre-tool-exec seam is ever reached — so the read cache is exercised over a realistic three-read sequence rather than by switching a sibling guard off.
+
+NOTES (2026-09-03): `TestCachedContentLeavesEditedSinceUntouched` moved from `writedetection_test.go` into `internal/floor/readcache_test.go` recast over `CacheRead`, its subject having moved (item 5's precedent for `TestEmptyResponseRecoveryTreatsRecentEditAsProgress`); the pin it carries — `isFileMutatingTool` counting `edit_existing_file` as a write-since — survives intact.
+
+NOTES (2026-09-03): consequential edit — internal/floor/doc.go: made necessary by the new readcache.go, which docmap_test.go requires the package map to name.
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/doc.go: made necessary by deleting cachedcontent.go, which the package map enumerates. The map's count line still read "Eighteen files carrying twenty catalogue rows" — stale since items 4 and 5 deleted four row files without touching it — so it was corrected to the true count (thirteen files, fifteen rows) rather than left half-corrected at a number my own deletion made further wrong.
+
+NOTES (2026-09-03): consequential edits — internal/mechanisms/{historyhints.go,robustness.go,decompose_test.go,catalogue_test.go}, internal/domain/{tooledit.go,registry.go}: made necessary by the retirement; each named `cached_content_intercept` as a live catalogue row (the history family's header, the `isFileMutatingTool` users list, the write-detection pin's rationale, the ported-waves comment, `SetArguments`'s worked example, and `detectIncompatibility`'s two-rows-at-different-hook-points example, whose pair became read_loop/read_repeat).
+
+NOTES (2026-09-03): consequential edit — internal/mechanisms/retired_test.go: `TestPromotedRowsCarryTheirFloorGuardKey` enumerates the promoted rows on the real roll, so the new one joins it. Item 5's two promoted rows (`tool_use_enforcer`, `empty_response_recovery`) are still absent from that table — missing coverage on already-shipped work, not a defect of this item.
+
+NOTES (2026-09-03): `internal/agent/mechanism_dispatch_test.go:294-295` and `internal/domain/registry_ordered_test.go:216-237` still spell `cached_content_intercept`, but as SYNTHETIC ids registered into test-private tables that never touch the catalogue — no edit needed. `internal/validated/shipped_test.go:95` pins the shipped gemma JSON verbatim (item 18's), and item 2's `DropRetired` relaxation absorbs the new roll entry, so it needed none either.
 
 **What.** Depends on 3. Move `cachedcontent.go:77-177` → `internal/floor/readcache.go` as
 `CacheRead(view domain.LoopView, edit *domain.ToolCallEdit) (ok bool)` (same signature shape the hook

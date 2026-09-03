@@ -117,6 +117,7 @@ func TestPromotedRowsCarryTheirFloorGuardKey(t *testing.T) {
 	}{
 		{"validate", "tool-call-repair"},
 		{"tool_loop_interceptor", "tool-loop-breaker"},
+		{"cached_content_intercept", "read-cache"},
 	} {
 		t.Run(string(tc.id), func(t *testing.T) {
 			t.Parallel()

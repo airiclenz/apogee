@@ -50,9 +50,11 @@ var readLoopDescriptor = domain.MechanismDescriptor{
 	Capability:  domain.CapProactiveNudge,
 	Suppression: domain.SuppressStrikesThree,
 	// The re-read family is pairwise-exclusive on the same wasted-read symptom (catalogue
-	// Table A / C2): in apogee IncompatibleWith is a startup gate, so at most one of the three
-	// may be enabled at a time (the sim's per-request exclusivity becomes per-config).
-	IncompatibleWith: []domain.MechanismID{cachedContentInterceptID, readRepeatID},
+	// Table A / C2): in apogee IncompatibleWith is a startup gate, so at most one of the pair
+	// may be enabled at a time (the sim's per-request exclusivity becomes per-config). Its third
+	// member, the redundant-re-read interceptor, left the catalogue when it was promoted to the
+	// read-cache Floor guard (ADR 0071).
+	IncompatibleWith: []domain.MechanismID{readRepeatID},
 }
 
 // PreRequest injects the appropriate read-loop hint, role-safe and idempotent, when the model is

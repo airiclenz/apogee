@@ -84,25 +84,6 @@ func TestReadRepeatFiresOnOpenFileReRead(t *testing.T) {
 	}
 }
 
-// cached_content_intercept must NOT cap a re-read of a file EDITED after its last read — the edit may
-// have changed the file, so its cached copy is stale. This holds only because isFileMutatingTool
-// counts edit_existing_file as a write-since.
-func TestCachedContentLeavesEditedSinceUntouched(t *testing.T) {
-	t.Parallel()
-	history := []domain.Message{
-		userMsg("edit a.go"),
-		assistantCall(readCall("r1", "a.go")),
-		toolResult("r1", "package a"),
-		assistantCall(editCall("e1", "a.go")),
-		toolResult("e1", "edited a.go"),
-		assistantCall(readCall("r2", "a.go")),
-	}
-	got := fireCached(t, history, readCall("r2", "a.go"))
-	if hasMaxLines(got.Arguments) {
-		t.Errorf("a re-read after an edit was capped; the file may have changed. args = %s", got.Arguments)
-	}
-}
-
 // A second edit_existing_file to the same file failing the same way earns the enrichment hint — the
 // edit tool is a write action, so error_enrichment acts on it (the sim-only isWriteTool would have
 // skipped it entirely).

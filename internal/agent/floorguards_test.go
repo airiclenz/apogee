@@ -5,6 +5,7 @@ package agent
 // with Bypass ON, and each is taken away only by its own domain.FloorConfig opt-out.
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -501,4 +502,163 @@ func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 			t.Errorf("syntax fired %d times; a catalogued row must be withdrawn under Bypass + a tripped Turn Budget", n)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// The read cache (pre-tool-exec)
+// ---------------------------------------------------------------------------
+
+// readFileSchemaWithMaxLines mirrors apogee's real read_file schema: it DECLARES max_lines, so the
+// read cache has a field to attach its cap to. readFileSchemaWithoutMaxLines is the strict-MCP
+// shape — no max_lines property and additionalProperties:false — which the guard must never hand an
+// argument the server would reject.
+const (
+	readFileSchemaWithMaxLines    = `{"type":"object","properties":{"path":{"type":"string"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"max_lines":{"type":"integer"}}}`
+	readFileSchemaWithoutMaxLines = `{"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"}}}`
+)
+
+// readFileRecorder is a read_file tool that records the arguments each call was DISPATCHED with.
+// The guard mutates the pending call after the ToolCallEvent is emitted, so what the tool actually
+// received is the only honest record of what the guard did.
+func readFileRecorder(schema string, seen *[]string) schemaTool {
+	return schemaTool{
+		fakeTool: fakeTool{
+			name:     "read_file",
+			readOnly: true,
+			execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+				*seen = append(*seen, string(call.Arguments))
+				return domain.ToolResult{CallID: call.ID, Content: "package a\nfunc F() {}"}, nil
+			},
+		},
+		schema: schema,
+	}
+}
+
+// A second read of a file already read successfully — and not written since — is capped to a
+// header-only slice before it is dispatched, with NO catalogued Mechanism enabled and Bypass ON.
+// The intervening read of another file keeps this out of the loop breaker's hands: the guard under
+// test is the read cache, not the identical-repeat detector ahead of it.
+//
+// The opt-out is the same case run with Floor.DisableReadCache set: the re-read is dispatched with
+// the arguments the model wrote, byte for byte, and nothing is booked.
+func TestFloorGuard_ReadCacheCapsAnUnchangedReRead(t *testing.T) {
+	cases := []struct {
+		name      string
+		disabled  bool
+		wantFires int
+	}{
+		{name: "on by default", wantFires: 1},
+		{name: "DisableReadCache", disabled: true, wantFires: 0},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			var seen []string
+			cfg := configWithTools(sink, readFileRecorder(readFileSchemaWithMaxLines, &seen))
+			cfg.Bypass = true
+			cfg.Floor.DisableReadCache = tc.disabled
+			responder := &captureAllResponder{scripts: [][]provider.Delta{
+				toolCallScript("r1", "read_file", `{"path":"a.go"}`),
+				toolCallScript("r2", "read_file", `{"path":"b.go"}`),
+				toolCallScript("r3", "read_file", `{"path":"a.go"}`),
+				contentScript("done"),
+			}}
+
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			runExchange(t, a, "read the files")
+
+			if len(seen) != 3 {
+				t.Fatalf("read_file ran %d times, want 3: %v", len(seen), seen)
+			}
+			if strings.Contains(seen[0], "max_lines") {
+				t.Errorf("the first, novel read was capped: %s", seen[0])
+			}
+			if strings.Contains(seen[1], "max_lines") {
+				t.Errorf("the novel read of b.go was capped: %s", seen[1])
+			}
+			if tc.disabled {
+				if seen[2] != `{"path":"a.go"}` {
+					t.Errorf("with the guard off the re-read was reshaped: %s", seen[2])
+				}
+			} else if !strings.Contains(seen[2], `"max_lines":1`) {
+				t.Errorf("the unchanged re-read was not capped: %s", seen[2])
+			}
+			if n := guardFireCountFor(sink.events, guardReadCache); n != tc.wantFires {
+				t.Fatalf("the read cache fired %d times, want %d", n, tc.wantFires)
+			}
+			if tc.wantFires > 0 && !hasGuardFire(sink.events, guardReadCache, guardActionIntercept) {
+				t.Errorf("no FloorGuardEvent{Guard: %q, Action: %q}", guardReadCache, guardActionIntercept)
+			}
+		})
+	}
+}
+
+// A file WRITTEN after its last successful read may have changed, so re-reading it is not
+// redundant: the guard stands down and the model gets the whole file again.
+func TestFloorGuard_ReadCacheLeavesAReadAfterAWriteUntouched(t *testing.T) {
+	sink := &recordingSink{}
+	var seen []string
+	cfg := configWithTools(sink,
+		readFileRecorder(readFileSchemaWithMaxLines, &seen),
+		fakeTool{name: "write_file", result: "ok"},
+	)
+	cfg.Bypass = true
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		toolCallScript("r1", "read_file", `{"path":"a.go"}`),
+		toolCallScript("w1", "write_file", `{"path":"a.go","content":"package a"}`),
+		toolCallScript("r2", "read_file", `{"path":"a.go"}`),
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "read a.go, write it, read it again")
+
+	if len(seen) != 2 {
+		t.Fatalf("read_file ran %d times, want 2: %v", len(seen), seen)
+	}
+	if seen[1] != `{"path":"a.go"}` {
+		t.Errorf("a re-read after a write was capped; the file may have changed: %s", seen[1])
+	}
+	if n := guardFireCountFor(sink.events, guardReadCache); n != 0 {
+		t.Errorf("the read cache fired %d times on a read after a write, want 0", n)
+	}
+}
+
+// A read tool whose schema does not declare max_lines (a strict MCP server with
+// additionalProperties:false) is inspected but never mutated: appending an undeclared argument
+// would earn a rejection, so the redundant re-read simply proceeds uncapped.
+func TestFloorGuard_ReadCacheSkipsAToolWithoutAMaxLinesSchema(t *testing.T) {
+	sink := &recordingSink{}
+	var seen []string
+	cfg := configWithTools(sink, readFileRecorder(readFileSchemaWithoutMaxLines, &seen))
+	cfg.Bypass = true
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		toolCallScript("r1", "read_file", `{"path":"a.go"}`),
+		toolCallScript("r2", "read_file", `{"path":"b.go"}`),
+		toolCallScript("r3", "read_file", `{"path":"a.go"}`),
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "read the files")
+
+	if len(seen) != 3 {
+		t.Fatalf("read_file ran %d times, want 3: %v", len(seen), seen)
+	}
+	if seen[2] != `{"path":"a.go"}` {
+		t.Errorf("a read tool without a max_lines schema was capped: %s", seen[2])
+	}
+	if n := guardFireCountFor(sink.events, guardReadCache); n != 0 {
+		t.Errorf("the read cache fired %d times against an undeclared schema, want 0", n)
+	}
 }

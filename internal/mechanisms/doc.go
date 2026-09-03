@@ -17,14 +17,12 @@
 //
 // # The Mechanism files, one line each
 //
-// Eighteen files carrying twenty catalogue rows — one row per file, except cot.go, which
+// Thirteen files carrying fifteen catalogue rows — one row per file, except cot.go, which
 // carries three. Each holds its Mechanism's init() registration, descriptor, constructor, hook
 // implementation, and the logic only that Mechanism uses.
 //
 // autofix.go is formatter repair: a written file is handed to the language's real formatter in a
-// gated sub-process and the repaired content is spliced back into the call. cachedcontent.go is
-// cached_content_intercept, the pre-tool-exec interceptor that answers a redundant successful
-// re-read from the conversation instead of the filesystem. cot.go is the Wave-4 completion-nudge
+// gated sub-process and the repaired content is spliced back into the call. cot.go is the Wave-4 completion-nudge
 // trio — tool_use_directive, stall_nudge, list_nudge — apogee-sim's `cot` Transform split into
 // three independently firing pre-request nudges (catalogue C4/Table C), of which at most one of
 // stall_nudge / list_nudge may be armed. decompose.go is the task-decomposition steer, and the home of

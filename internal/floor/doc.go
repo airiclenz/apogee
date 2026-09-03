@@ -38,7 +38,8 @@
 // enforcer — a second narration where an action was asked for answered with the correction that
 // lists the menu and tells the model to call one of it. emptyreply.go is the empty-response
 // recovery — a reply carrying neither text nor a tool call answered with the completion-check
-// nudge.
+// nudge. readcache.go is the read cache — a re-read of a file already read successfully and not
+// written since, capped to a header-only slice so the copy already in the conversation stands.
 //
 // And doc.go this map.
 package floor

@@ -10,9 +10,9 @@ import (
 )
 
 // The Wave-3 history-aware hint family (Phase-4 item 11): error_enrichment (post-tool-result),
-// read_loop (pre-request), read_repeat (post-response) and cached_content_intercept
-// (pre-tool-exec) — the family's fifth member, the identical-repeat detector, left the catalogue
-// when it was promoted to the tool-loop-breaker Floor guard (ADR 0071) — the cross-turn aggregators ported from the pinned
+// read_loop (pre-request) and read_repeat (post-response) — the family's other two members, the
+// identical-repeat detector and the redundant-re-read interceptor, left the catalogue when they were
+// promoted to the tool-loop-breaker and read-cache Floor guards (ADR 0071) — the cross-turn aggregators ported from the pinned
 // apogee-sim source per the catalogue (docs/design/mechanism-catalogue.md Table A/B). Every one
 // decides by scanning the conversation across Turns, so it reads the loop's history through the
 // LoopView / ConversationView the hook is handed rather than its single mutable value. All ship

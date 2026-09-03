@@ -254,6 +254,7 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 	for _, call := range calls {
 		a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
 
+		a.runPreToolExecGuards(turn, &call)
 		if err := a.runPreToolExecHooks(ctx, turn, &call); err != nil {
 			// A pre-tool-exec hook panicked (recovered into an ErrorEvent): skip the call
 			// with an error result rather than running it against a half-applied decision.
@@ -359,6 +360,11 @@ func (a *Agent) dispatchFanOut(ctx context.Context, turn, width int, calls []dom
 func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.ToolCall) fanOutSlot {
 	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
 
+	// Seam parity: the guards run at BOTH pre-tool-exec seams so neither path can drift from the
+	// other. This one is a no-op for the read cache in practice — dispatch routes leaf calls to
+	// dispatchSerially and only DELEGATIONS here (dispatchFanOut), and a delegation is not a read —
+	// but a guard's reach must be the seam's, not the routing of today's guard set.
+	a.runPreToolExecGuards(turn, &call)
 	if err := a.runPreToolExecHooks(ctx, turn, &call); err != nil {
 		// Same disposition as the serial path: an error result, no child, and no postlude.
 		return fanOutSlot{

@@ -48,12 +48,16 @@ type retiredRow struct {
 //     who gets it, not what it does.
 //   - tool_use_enforcer (retired v0.20.0) — PROMOTED. The narration off-ramp became the
 //     `tool-use-enforcer` Floor guard, on the same reasoning.
+//   - cached_content_intercept (retired v0.20.0) — PROMOTED. The redundant-re-read interceptor
+//     became the `read-cache` Floor guard: it shapes the pending read without steering the model,
+//     so it needs no per-model proof and runs for every model (ADR 0071).
 var retired = []retiredRow{
 	{ID: "grammar", Release: "v0.18.7"},
 	{ID: "tool_loop_interceptor", Release: "v0.20.0", Successor: "tool-loop-breaker"},
 	{ID: "validate", Release: "v0.20.0", Successor: "tool-call-repair"},
 	{ID: "empty_response_recovery", Release: "v0.20.0", Successor: "empty-response-recovery"},
 	{ID: "tool_use_enforcer", Release: "v0.20.0", Successor: "tool-use-enforcer"},
+	{ID: "cached_content_intercept", Release: "v0.20.0", Successor: "read-cache"},
 }
 
 // RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is

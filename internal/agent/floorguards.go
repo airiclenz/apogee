@@ -14,11 +14,16 @@ const (
 	guardToolLoopBreaker       = "tool-loop-breaker"
 	guardEmptyResponseRecovery = "empty-response-recovery"
 	guardToolUseEnforcer       = "tool-use-enforcer"
+	guardReadCache             = "read-cache"
 )
 
 // The actions a Floor guard books on its event: a guard that re-streams the Turn with a correction
-// took guardActionRetry.
-const guardActionRetry = "retry"
+// took guardActionRetry, and one that reshaped a pending tool call before it ran took
+// guardActionIntercept.
+const (
+	guardActionRetry     = "retry"
+	guardActionIntercept = "intercept"
+)
 
 // SetFloor replaces the live Floor-guard gates for the rest of the session, mirroring
 // SetPruneToolResults. Each guard is consulted once per firing seam, so a guard switched off stops
@@ -87,6 +92,26 @@ func (a *Agent) runPostResponseGuards(turn int, resp *domain.Response) (retry bo
 		}
 	}
 	return false, ""
+}
+
+// runPreToolExecGuards runs the pre-tool-exec Floor guards against the call the loop is about to
+// dispatch, reshaping it in place. Like the post-response guards it runs BEFORE the lab hooks at
+// this seam (runPreToolExecHooks), so a catalogued Mechanism sees the call the floor left behind.
+//
+// There is one guard here today — the read cache — so there is no order to ratify; a second would
+// join the same chain, each consulted independently because a shaping guard has nothing to
+// short-circuit. A guard that changed nothing is silent, exactly as a hook that did not intervene
+// books no fire.
+//
+// The call is passed through a domain.ToolCallEdit, the same wrapper the hooks mutate through, so a
+// guard's write reaches the pending call the loop owns and the loop commits what the guard left.
+func (a *Agent) runPreToolExecGuards(turn int, call *domain.ToolCall) {
+	if a.floorConfig().DisableReadCache {
+		return
+	}
+	if floor.CacheRead(a.loopView(turn), domain.NewToolCallEdit(call)) {
+		a.emitFloorGuard(turn, guardReadCache, guardActionIntercept)
+	}
 }
 
 // emitFloorGuard books one guard firing as a FloorGuardEvent, the guards' counterpart to the

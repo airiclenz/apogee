@@ -40,13 +40,13 @@ type readRepeatMechanism struct{}
 func newReadRepeat(Deps) (any, error) { return readRepeatMechanism{}, nil }
 
 // readRepeatDescriptor identifies read_repeat as a strikes-3 response-repair Mechanism (catalogue
-// Table A), incompatible with cached_content_intercept (the re-read family is pairwise-exclusive,
-// C2) — disabled under Bypass (D5), withdrawn after repeated non-help.
+// Table A), incompatible with read_loop (the re-read family is pairwise-exclusive, C2 — the family's
+// third member, the redundant-re-read interceptor, is the read-cache Floor guard now, ADR 0071) —
+// disabled under Bypass (D5), withdrawn after repeated non-help.
 var readRepeatDescriptor = domain.MechanismDescriptor{
-	ID:               readRepeatID,
-	Capability:       domain.CapResponseRepair,
-	Suppression:      domain.SuppressStrikesThree,
-	IncompatibleWith: []domain.MechanismID{cachedContentInterceptID},
+	ID:          readRepeatID,
+	Capability:  domain.CapResponseRepair,
+	Suppression: domain.SuppressStrikesThree,
 }
 
 // PostResponse retries in place with a "you already read these" hint when every requested tool call

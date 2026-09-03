@@ -29,7 +29,6 @@ func TestHistoryFamilyDescriptorsNonExempt(t *testing.T) {
 		{errorEnrichmentID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostToolResultHook); return ok }},
 		{readLoopID, domain.CapProactiveNudge, func(h any) bool { _, ok := h.(domain.PreRequestHook); return ok }},
 		{readRepeatID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostResponseHook); return ok }},
-		{cachedContentInterceptID, domain.CapProactiveNudge, func(h any) bool { _, ok := h.(domain.PreToolExecHook); return ok }},
 	}
 	for _, c := range cases {
 		m := mustBuild(t, c.id)
@@ -49,15 +48,14 @@ func TestHistoryFamilyDescriptorsNonExempt(t *testing.T) {
 	}
 }
 
-// The re-read family (read_loop, read_repeat, cached_content_intercept) is pairwise-exclusive on the
-// same wasted-read symptom (catalogue Table A / C2). In apogee IncompatibleWith is a startup gate, so
-// any two co-registered fail ValidateIncompatibilities — at most one is enabled at a time.
+// The re-read family (read_loop, read_repeat) is pairwise-exclusive on the same wasted-read symptom
+// (catalogue Table A / C2); its third member is the read-cache Floor guard now (ADR 0071), which
+// carries no descriptor and so no edge. In apogee IncompatibleWith is a startup gate, so the two
+// co-registered fail ValidateIncompatibilities — at most one is enabled at a time.
 func TestReReadFamilyPairwiseIncompatible(t *testing.T) {
 	t.Parallel()
 	pairs := [][2]domain.MechanismID{
 		{readLoopID, readRepeatID},
-		{readLoopID, cachedContentInterceptID},
-		{readRepeatID, cachedContentInterceptID},
 	}
 	for _, p := range pairs {
 		reg := domain.NewMechanismRegistry()

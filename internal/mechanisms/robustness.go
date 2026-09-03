@@ -95,8 +95,8 @@ func isWriteTool(name string) bool { return writeToolNames[name] }
 // single_find_and_replace, multi_find_and_replace, copy_file, move_file, delete_file; names
 // verified against internal/tools, and pinned to its registered menu there), reusing
 // wave4WriteTools (decompose.go) as the single source of that superset. The history-family
-// Mechanisms — read_repeat, read_loop, cached_content_intercept, error_enrichment,
-// library's narration check, and deriveWriteTarget — use it so their write-since /
+// Mechanisms — read_repeat, read_loop, error_enrichment, library's narration check, and
+// deriveWriteTarget — use it so their write-since /
 // read-then-write / progress detection sees apogee's real edit menu, not just the sim spellings.
 func isFileMutatingTool(name string) bool { return wave4WriteTools[name] }
 
