@@ -300,6 +300,8 @@ func wantDefaults() Options {
 	return Options{
 		Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
 		PruneToolResults: true,
+		ToolUseEnforcer:  true, EmptyResponseRecovery: true, ToolCallRepair: true,
+		ToolLoopBreaker: true, ToolResultCap: true, ReadCache: true,
 		SubAgentsChoice:  SubAgentsChoiceFixed,
 		UseShippedSkills: true,
 		UseDefaultPrompt: true,
@@ -520,6 +522,8 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"SubAgentsChoice":    true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
 		"UseProjectSkills": true, "AutoCompact": true, "PruneToolResults": true,
+		"ToolUseEnforcer": true, "EmptyResponseRecovery": true, "ToolCallRepair": true,
+		"ToolLoopBreaker": true, "ToolResultCap": true, "ReadCache": true,
 		"DelegateMaxSteps": true,
 		"UseShippedSkills": true,
 		"UseDefaultPrompt": true,
@@ -567,6 +571,9 @@ func everyKeyFileConfig() fileConfig {
 		WebSearch:          "https://search.example.com",
 		UseProjectSkills:   boolptr(false), AutoCompact: boolptr(false), AutoTitle: boolptr(false),
 		PruneToolResults: boolptr(false),
+		ToolUseEnforcer:  boolptr(false), EmptyResponseRecovery: boolptr(false),
+		ToolCallRepair: boolptr(false), ToolLoopBreaker: boolptr(false),
+		ToolResultCap: boolptr(false), ReadCache: boolptr(false),
 		UseShippedSkills: boolptr(false),
 		UseDefaultPrompt: boolptr(false),
 		DelegateMaxSteps: intptr(12),
@@ -1576,6 +1583,75 @@ func TestApplyConfigAutoCompactOptOut(t *testing.T) {
 	}
 	if opts.AutoCompact {
 		t.Error("opts.autoCompact = true; want the file's explicit false to opt out")
+	}
+}
+
+// The six FLOOR-GUARD keys (ADR 0071), end to end and one case each: absent resolves TRUE — the
+// floor is what a config that says nothing gets — and an explicit `<key>: false` is the only way to
+// take a guard away, there being no flag and no environment variable for any of them. The seeded
+// template is read as its own case because it ships the six ACTIVE rather than commented, so a
+// first run has to land on the same value an empty file does.
+//
+// The table names each key beside the Options field it owns, which is what catches an accessor
+// writing its neighbour's field: five guards left at the default while the sixth moves is a claim
+// no single-key case could make on its own.
+func TestApplyConfigFloorGuardKeys(t *testing.T) {
+	t.Parallel()
+	guards := []struct {
+		key  string
+		read func(Options) bool
+	}{
+		{"tool-use-enforcer", func(o Options) bool { return o.ToolUseEnforcer }},
+		{"empty-response-recovery", func(o Options) bool { return o.EmptyResponseRecovery }},
+		{"tool-call-repair", func(o Options) bool { return o.ToolCallRepair }},
+		{"tool-loop-breaker", func(o Options) bool { return o.ToolLoopBreaker }},
+		{"tool-result-cap", func(o Options) bool { return o.ToolResultCap }},
+		{"read-cache", func(o Options) bool { return o.ReadCache }},
+	}
+
+	resolve := func(t *testing.T, fileYAML string) Options {
+		t.Helper()
+		home := testConfigHome(t, "")
+		writeConfigHome(t, home, fileYAML)
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false },
+			func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+		return opts
+	}
+
+	t.Run("a config that states nothing keeps the whole floor", func(t *testing.T) {
+		t.Parallel()
+		opts := resolve(t, "")
+		for _, g := range guards {
+			if !g.read(opts) {
+				t.Errorf("%s resolved false with no key stated; want the floor's default true", g.key)
+			}
+		}
+	})
+
+	t.Run("the seeded template keeps the whole floor", func(t *testing.T) {
+		t.Parallel()
+		opts := resolve(t, string(defaultConfigYAML))
+		for _, g := range guards {
+			if !g.read(opts) {
+				t.Errorf("%s resolved false from the shipped template; a first run must get the floor", g.key)
+			}
+		}
+	})
+
+	for _, off := range guards {
+		t.Run("an explicit false takes away "+off.key, func(t *testing.T) {
+			t.Parallel()
+			opts := resolve(t, off.key+": false\n")
+			for _, g := range guards {
+				want := g.key != off.key
+				if got := g.read(opts); got != want {
+					t.Errorf("with %s: false stated, %s = %v; want %v", off.key, g.key, got, want)
+				}
+			}
+		})
 	}
 }
 

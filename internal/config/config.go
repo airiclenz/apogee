@@ -682,6 +682,42 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		row: mustKey("tool-use-enforcer"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ToolUseEnforcer = fc.ToolUseEnforcer == nil || *fc.ToolUseEnforcer
+		},
+	},
+	{
+		row: mustKey("empty-response-recovery"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.EmptyResponseRecovery = fc.EmptyResponseRecovery == nil || *fc.EmptyResponseRecovery
+		},
+	},
+	{
+		row: mustKey("tool-call-repair"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ToolCallRepair = fc.ToolCallRepair == nil || *fc.ToolCallRepair
+		},
+	},
+	{
+		row: mustKey("tool-loop-breaker"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ToolLoopBreaker = fc.ToolLoopBreaker == nil || *fc.ToolLoopBreaker
+		},
+	},
+	{
+		row: mustKey("tool-result-cap"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ToolResultCap = fc.ToolResultCap == nil || *fc.ToolResultCap
+		},
+	},
+	{
+		row: mustKey("read-cache"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ReadCache = fc.ReadCache == nil || *fc.ReadCache
+		},
+	},
+	{
 		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
 		// absence of one, so presence cannot stand in for the positive value the way it does there.
 		row: mustKey("delegate-max-steps"),
@@ -1254,6 +1290,26 @@ type fileConfig struct {
 	// is distinguishable from an absent key (default true). Pruning is structural like Compaction
 	// (it stays on under Bypass), so this key is the only way to turn it off.
 	PruneToolResults *bool `yaml:"prune-tool-results"`
+	// The six FLOOR GUARDS (ADR 0071), each a file-only pointer for auto-compact's reason: an
+	// explicit `<key>: false` is distinguishable from an absent key, and absent is the default
+	// true. They are the engine's own behaviour rather than Mechanisms — they stay on under
+	// Bypass and a `mechanisms:` entry can no longer turn one off — so these keys are the only
+	// way to take a guard away. They stay POSITIVE here; the composition root negates them into
+	// domain.FloorConfig's Disable… fields at the one seam that builds it.
+	//
+	// ToolUseEnforcer gates the retry of a turn that narrated where the user asked for an action.
+	ToolUseEnforcer *bool `yaml:"tool-use-enforcer"`
+	// EmptyResponseRecovery gates the retry of a reply carrying neither text nor a tool call.
+	EmptyResponseRecovery *bool `yaml:"empty-response-recovery"`
+	// ToolCallRepair gates the correction and retry of an unknown or malformed tool call.
+	ToolCallRepair *bool `yaml:"tool-call-repair"`
+	// ToolLoopBreaker gates the directive that answers a turn repeating the previous turn's calls.
+	ToolLoopBreaker *bool `yaml:"tool-loop-breaker"`
+	// ToolResultCap gates trimming older oversized tool results in the PROJECTED request; the
+	// conversation itself is never rewritten.
+	ToolResultCap *bool `yaml:"tool-result-cap"`
+	// ReadCache gates capping a re-read of a file already read successfully and not written since.
+	ReadCache *bool `yaml:"read-cache"`
 	// DelegateMaxSteps bounds a CHILD agent's one Exchange, in Turns: the engine ends the
 	// delegation when it reaches this many Turns and hands the parent what the child has.
 	// File-only (no flag/env), like auto-compact above it, and a POINTER for auto-compact's

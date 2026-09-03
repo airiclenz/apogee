@@ -521,7 +521,17 @@ above; `internal/run`'s fold contributes nothing for it, as it already does for 
 
 **Commit:** `feat(events): floor-guard firings reach every Driver as FloorGuardEvent`
 
-## 10. The six config keys through `internal/config`
+## 10. The six config keys through `internal/config` — ✅ DONE (2026-09-03)
+
+NOTES (2026-09-03): consequential edit — cmd/apogee/testdata/frames/t16-settings-rows.txt: made necessary by the six new registry rows; `empty-response-recovery` is now the longest key path, so the /settings pane's name column widens by one character in every row of the recorded frame (regenerated with `go test ./cmd/apogee -run TestE2ELiveStateFollowsTheRunningSession -update`).
+
+NOTES (2026-09-03): the item's Files list `internal/config/registry_test.go`, `configwrite_scalar_test.go` and `defaults_test.go`, but none needed an edit and none was touched — all three are registry sweeps or default-mirrors rather than golden lists: `TestRegistryRowInvariants`/`TestRegistryRowsProjectEveryValue` walk `KeyRegistry`, `TestSpliceScalarSettingRoundTripsEveryEditableKey` walks the editable rows (it now covers all six, verified by name), and `TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt` compares against `wantDefaults()`, which the six live `<key>: true` template lines already agree with.
+
+NOTES (2026-09-03): the item's yaml scope was `defaults/config.yaml:856-863` (the `mechanisms:` example naming retired IDs); the same block's RECOMMENDED paragraph three paragraphs above recommended `tool_result_cap` — retired by item 8, so the shipped first-run template was telling a reader to write an ID that is now a startup error. Folded in on the "enumeration is a floor, not a ceiling" rule and rewritten to point at the `tool-result-cap` guard key instead. `config.yaml:836`'s catalogue-path pointer was left alone (item 20's).
+
+NOTES (2026-09-03): the new floor-guard comment block could not word the sentence "see the mechanisms: block further down" as written — a comment line beginning `# mechanisms:` is a second commented spelling of that key and trips `TestSaveMechanismSettingSeedsAnAbsentConfigAndLandsBelowTheExample` ("it comments mechanisms: out in two places"). Reworded to "the catalogue block further down".
+
+NOTES (2026-09-03): the item's stated 10/11 split holds — `go test ./internal/config/` is green and `TestEveryEditableSettingKeyHasAnApply` (six new subtests) and `TestSettingsRowsFormatEffectiveValues`'s length pin are red in `cmd/apogee` until item 11 lands the applies.
 
 **What.** Depends on 3. Add six `KindBool` registry rows (`internal/config/registry.go`, after
 `prune-tool-results` at `:404-409`, `Default: "true"`, `Editable: true`, each `Desc` one sentence

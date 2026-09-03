@@ -407,6 +407,42 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return boolValue(o.PruneToolResults) },
 	},
 	{
+		Path: "tool-use-enforcer", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Floor guard: retry a turn that narrated where the model was asked to act.",
+		Read:     func(o Options) string { return boolValue(o.ToolUseEnforcer) },
+	},
+	{
+		Path: "empty-response-recovery", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Floor guard: retry an empty reply with a completion-check nudge.",
+		Read:     func(o Options) string { return boolValue(o.EmptyResponseRecovery) },
+	},
+	{
+		Path: "tool-call-repair", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Floor guard: correct an unknown or malformed tool call and retry it.",
+		Read:     func(o Options) string { return boolValue(o.ToolCallRepair) },
+	},
+	{
+		Path: "tool-loop-breaker", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Floor guard: break an identical repeated tool call with a directive naming the repeat.",
+		Read:     func(o Options) string { return boolValue(o.ToolLoopBreaker) },
+	},
+	{
+		Path: "tool-result-cap", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Floor guard: trim an older oversized tool result to its budget share in the request.",
+		Read:     func(o Options) string { return boolValue(o.ToolResultCap) },
+	},
+	{
+		Path: "read-cache", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Floor guard: cap a re-read of a file unchanged since apogee last read it.",
+		Read:     func(o Options) string { return boolValue(o.ReadCache) },
+	},
+	{
 		Path: "delegate-max-steps", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxSteps),
 		Editable: true,
 		Validate: validateDelegateMaxSteps,

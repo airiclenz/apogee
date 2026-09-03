@@ -538,6 +538,47 @@ auto-compact: true
 prune-tool-results: true
 
 # =============================================================================
+# Floor guards. Six pieces of engine behaviour that catch a model's own stumbles: a reply that
+# narrates where you asked for an action, a reply that carries nothing at all, a tool call apogee
+# cannot dispatch, the same call made twice in a row, a tool result too big to afford, and a file
+# read again unchanged. None of them steers your model — each one either changes what the model
+# sees AFTER a failure of its own, or shapes the request without telling the model what to think —
+# so they are on for every model and stay on under --bypass. They are NOT Mechanisms: a row of the
+# catalogue block further down can no longer turn one off, and the six keys below are the only way
+# to take one away. Config-file only (no flag or env). Default: true.
+
+# Retry a turn that narrated where you asked for an action: when the model answers "fix this" or
+# "run that" with another paragraph of prose and no tool call, apogee hands it the tool menu back
+# and asks again. Set this to false to let the prose stand as the reply.
+tool-use-enforcer: true
+
+# Retry a reply that carried nothing — no text, no tool call. apogee sends one completion-check
+# nudge asking whether the work is done. Set this to false to let the empty turn end the exchange.
+empty-response-recovery: true
+
+# Correct a tool call apogee cannot dispatch — an unknown tool name, arguments that are not valid
+# JSON, a required parameter missing — and retry the turn with the correction in hand. Set this to
+# false to let the bad call reach the tool path and fail there.
+tool-call-repair: true
+
+# Break a loop: when a turn repeats the previous turn's calls exactly, apogee answers with a
+# directive that names the repeat and points at the work still left. Set this to false to let the
+# repeat run on until the turn budget stops it.
+tool-loop-breaker: true
+
+# Cap a single oversized tool result. An older result that has outgrown its share of the context
+# budget is trimmed to its head and tail IN THE REQUEST ONLY — the conversation keeps the full
+# text, so nothing goes missing from the transcript and no later turn loses it. This is the one
+# reducer that shapes a request mid-exchange, which is what keeps a doc-heavy task affordable on a
+# small context window. Set this to false to send every result whole.
+tool-result-cap: true
+
+# Cap a re-read. When the model reads a file it has already read successfully and nothing has
+# written to it since, apogee returns a short marker pointing at the copy already in the
+# conversation instead of the whole file a second time. Set this to false to send it every time.
+read-cache: true
+
+# =============================================================================
 # How far a delegated sub-agent may run. A sub-agent works its task in one exchange of its own, and
 # nothing about that exchange is yours to watch: it reads, greps and edits until it decides it is
 # done, and a model that keeps deciding otherwise can spend an unbounded number of tokens on one
@@ -841,25 +882,15 @@ ui:
 # guards: plain engine behaviour, on in every arm including --bypass, each switched by its own
 # top-level key rather than by a row of this block.
 #
-# RECOMMENDED on a small context window (~32k): tool_result_cap. The automatic Compaction above
-# folds only BETWEEN Exchanges — its emergency twin does fold mid-Exchange, but only once a request
-# has already overflowed, which is a rescue rather than a plan (it costs a summary call and rewrites
-# your history into a summary). tool_result_cap is the one reducer that SHAPES a request
-# mid-Exchange, capping any single oversized tool result to its Budget share, so a doc-heavy task's
-# whole-file reads stay affordable instead of leaning on that rescue.
+# NOTHING IN HERE IS RECOMMENDED for a small context window: the reducer that used to be, the
+# oversized-tool-result cap, is now the tool-result-cap Floor guard above and is already on.
 #
 # CAVEAT (ADR 0016): a non-empty mechanisms: block means manual control — a Validated set
 # matching your model (see below) is then NOT auto-applied; apogee prints a one-line notice
 # naming it instead. Leave this block commented out to let Validated sets apply automatically.
 #
 # mechanisms:
-#   tool_result_cap: true       # cap any single oversized tool result — the mid-Exchange tuning valve
-#   validate: true              # tool-call validation + auto-retry
-#   syntax: true                # write-content syntax check
-#   autofix: true               # formatter pass on tool-call payloads
-#   truncate_history: false     # explicitly off (the default) — shown for reference
-#   tool_use_enforcer: false    # explicitly off — the only way to disable an off-ramp (ADR 0070)
-#   guided_decomposition: true  # oversized task → serialized sub_agent fan-out (needs tool_result_cap)
+#   <id>: true    # a lab surface: the IDs a build knows are what `--bypass` switches off
 
 # =============================================================================
 # Validated sets (ADR 0016): per-model Mechanism sets bench-proven SAFE (non-inferior to

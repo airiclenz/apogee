@@ -269,6 +269,29 @@ type Options struct {
 	// Firings alike.
 	PruneToolResults bool
 
+	// The six FLOOR GUARDS (ADR 0071), each default true and loaded from the config file only.
+	// ApplyConfig sets them from the resolved settings; the composition root negates them into
+	// apogee.Config.Floor's Disable… fields — this package states a guard POSITIVELY, the domain
+	// states its absence, and that one negation is the whole of the translation.
+	//
+	// ToolUseEnforcer keeps the retry of a turn that narrated where the user asked for an action.
+	ToolUseEnforcer bool
+
+	// EmptyResponseRecovery keeps the retry of a reply carrying neither text nor a tool call.
+	EmptyResponseRecovery bool
+
+	// ToolCallRepair keeps the correction and retry of an unknown or malformed tool call.
+	ToolCallRepair bool
+
+	// ToolLoopBreaker keeps the directive that answers a turn repeating the previous turn's calls.
+	ToolLoopBreaker bool
+
+	// ToolResultCap keeps the trimming of older oversized tool results in the projected request.
+	ToolResultCap bool
+
+	// ReadCache keeps the cap on a re-read of a file unchanged since apogee last read it.
+	ReadCache bool
+
 	// delegateMaxSteps bounds a CHILD agent's one Exchange, in Turns (default 80; 0 = unbounded),
 	// loaded from the config file only. ApplyConfig sets it from settings; the composition root
 	// folds it into apogee.Config.Delegation.MaxSteps. It never bounds the main loop, which is the

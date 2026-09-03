@@ -5,20 +5,20 @@
 │                                                                                                                                          │
 │                                                                                                                                          │
 │   Upstream                                                                                                                             ┃ │
-│   servers                 1 server               · ⏎ opens $EDITOR                                                                     ┃ │
-│   server                  probe-target                                                                                                 ┃ │
-│   sub-agents-server       auto (session server)  · ⏎ opens $EDITOR                                                                     │ │
-│   sub-agents-choice       fixed                                                                                                        │ │
+│   servers                  1 server               · ⏎ opens $EDITOR                                                                    ┃ │
+│   server                   probe-target                                                                                                ┃ │
+│   sub-agents-server        auto (session server)  · ⏎ opens $EDITOR                                                                    │ │
+│   sub-agents-choice        fixed                                                                                                       │ │
 │                                                                                                                                        │ │
 │   Autonomy                                                                                                                             │ │
-│ ❯ mode                    plan                                                                                                         │ │
+│ ❯ mode                     plan                                                                                                        │ │
 │                                                                                                                                        │ │
 │   System prompt                                                                                                                        │ │
 │   system-prompt-text                                                                                                                   │ │
 │   system-prompt-file                                                                                                                   │ │
-│   system-prompt-models    none                   · ⏎ opens $EDITOR                                                                     │ │
-│   system-prompt-layers    none                   · ⏎ opens $EDITOR                                                                     │ │
-│   use-default-prompt      true                                                                                                         │ │
+│   system-prompt-models     none                   · ⏎ opens $EDITOR                                                                    │ │
+│   system-prompt-layers     none                   · ⏎ opens $EDITOR                                                                    │ │
+│   use-default-prompt       true                                                                                                        │ │
 │ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
