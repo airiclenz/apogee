@@ -2,13 +2,13 @@
 
 > **ARCHIVED (2026-08-10) — history, not ground truth.** Superseded by
 > `CONTEXT.md` (the concept map), `docs/adr/` (its §3 dependency policy now lives in
-> ADR 0042), and `docs/design/mechanism-catalogue.md` (the per-Mechanism map). Its §5
+> ADR 0042), and `docs/design/archived/mechanism-catalogue.md` (the per-Mechanism map). Its §5
 > component rows are no longer amended — component narration stops here.
 
 > **Staleness notice (2026-07-19):** this document is frozen at its Phase-1 vintage
 > (2026-06-23) and was never densified; the project has since shipped Phases 2–4 and
 > v1.0.0–v1.3.0. For current ground truth follow `CONTEXT.md`, the ADRs, and
-> `docs/design/mechanism-catalogue.md`; this scaffold is kept as the densification
+> `docs/design/archived/mechanism-catalogue.md`; this scaffold is kept as the densification
 > worklist (§8 — note its checkmarks also lag).
 
 **Status:** 🌱 v0.1 — sparse scaffold, to be densified. This is the consolidated

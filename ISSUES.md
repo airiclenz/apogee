@@ -224,7 +224,7 @@ ladder:
 
 with no user message present at all, it appends at the end. Sibling for contrast: `AppendToSystem`
 (same file, `:481`) is the marker-idempotent system-prompt inject; `InjectContext` carries **no**
-marker of its own (noted at `internal/mechanisms/filehint.go:44`).
+marker of its own.
 
 **The tension.** Strict-template alternation is otherwise the engine/context layer's business:
 `internal/context/compact.go` (`:52`, `:105`, `:113`) shapes the folded history and the summarizer
