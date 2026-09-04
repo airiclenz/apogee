@@ -999,3 +999,40 @@ func TestPruneIgnoresFileWhoseStemIsNotItsID(t *testing.T) {
 		t.Errorf("backup.json: %v — a file the sweep skips must stay put", err)
 	}
 }
+
+// One failed delete does not abort the sweep: the first error comes back beside the count of
+// what did go. The injected clock is the seam — Prune reads it between the scan and the delete
+// loop, so a clock that unlinks ONE candidate makes exactly that Delete fail while the rest
+// succeed. Asserting BOTH halves is the point: a test that only checked the error would pass
+// against a loop that gave up on the first failure.
+func TestPruneReportsFirstErrorAndKeepsSweeping(t *testing.T) {
+	t.Parallel()
+	st := pruneStore(t, pruneAges)
+
+	// Every record is past the cut, so all three are candidates; the clock removes the middle
+	// one's file from under the sweep, leaving its Delete to fail with ENOENT.
+	vanished := filepath.Join(st.dir, pruneMidID+".json")
+	st.now = func() time.Time {
+		if err := os.Remove(vanished); err != nil {
+			t.Errorf("unlink %s from under the sweep: %v", pruneMidID, err)
+		}
+		return pruneNow
+	}
+
+	removed, err := st.Prune(Retention{MaxAge: time.Minute})
+	if err == nil {
+		t.Fatal("Prune returned no error, want the first failed delete")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Prune error = %v, want the ENOENT from the vanished record", err)
+	}
+	if !strings.Contains(err.Error(), pruneMidID) {
+		t.Errorf("Prune error = %v, want it to name %s", err, pruneMidID)
+	}
+	if removed != 2 {
+		t.Errorf("removed = %d, want 2 — the sweep continues past the failure", removed)
+	}
+	if got := storedIDs(t, st); len(got) != 0 {
+		t.Errorf("survivors = %v, want none — every expired record must be gone", got)
+	}
+}

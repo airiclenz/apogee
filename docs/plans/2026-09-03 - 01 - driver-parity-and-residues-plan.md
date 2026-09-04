@@ -735,7 +735,7 @@ same block for the same result.
 
 ---
 
-## 15. `Store.Prune`'s partial-failure contract gets a test
+## 15. `Store.Prune`'s partial-failure contract gets a test — ✅ DONE (2026-09-04)
 
 **What.** `internal/session/store.go:334-341` promises that one failed delete does not abort the
 sweep — the first error comes back beside the count of what did go — and the loop (`:370-393`)
