@@ -94,6 +94,14 @@ func exitCodeFor(err error) int {
 // codes are all provable without a live model. Production never reassigns it.
 var runOnce = run.Once
 
+// prewarmLabelWalk is the seam onto the Windows label-walk pre-warm, for the same reason runOnce
+// and newConfiner are seams: platform.PrewarmLabelWalk is an empty function off Windows
+// (internal/platform/prewarm_other.go), so a test that only asserted "the run made no noise" would
+// pass identically against a tree that never calls it at all. Replacing this variable is how the
+// suite proves the confined-Auto headless path reaches the pre-warm on the one host where it does
+// work. Production never reassigns it.
+var prewarmLabelWalk = platform.PrewarmLabelWalk
+
 // pruneNoticeSink is the headless Driver's own EventSink: it prints one stderr line per
 // [domain.PruneEvent] and forwards every Event, its own included, to whatever sink it wraps
 // (nil ⇒ nothing to forward to). A zero-value inner is the normal case — a bare headless run
@@ -397,6 +405,22 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		if notice := probe.ResidualNotice(
 			probe.BackendName(confiner), confiner.Capabilities(), mode, opts.ConfineToWorkspace); notice != "" {
 			cmd.PrintErrln(notice)
+		}
+
+		// Eager pre-warm of the confinement label walk, behind the SAME gate and in the same place
+		// the launch path uses (announceConfinement, wire_boot.go) — one gate function, never a
+		// second copy, because a second copy is how the two boot paths drift apart. On the Windows
+		// token backend a confined command labels the workspace tree at ~1 ms/object, and an
+		// unattended run is exactly where a first command stalling on a large .git goes unexplained;
+		// under Auto+confine a confined command is effectively certain, so the walk is hoisted here.
+		// Off Windows PrewarmLabelWalk is an empty no-op (internal/platform/prewarm_other.go), so
+		// this changes no byte of this command's output on any other host.
+		//
+		// The one deliberate difference from the launch path: the progress notice goes to the
+		// command's own stderr writer rather than raw os.Stderr, because everything this command
+		// narrates travels through the cobra writers.
+		if shouldPrewarmLabelWalk(mode, opts.ConfineToWorkspace, confiner.Capabilities().FSWrite) {
+			prewarmLabelWalk(confiner, roots.workspace, cmd.ErrOrStderr())
 		}
 	}
 

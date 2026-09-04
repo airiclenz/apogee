@@ -225,7 +225,13 @@ submit-failure exit item 3 populates — still prints its context notices ahead 
 
 ---
 
-## 5. Headless pre-warms the Windows label walk
+## 5. Headless pre-warms the Windows label walk — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): took the item's FIRST offered option — a package-level `prewarmLabelWalk` seam beside `runOnce`, swapped by the test — rather than dropping the claim to the grep acceptance, because the item's own Tests line prescribes the swapped seam.
+
+NOTES (2026-09-04): the "no extra stderr line off Windows" half is asserted as an EQUALITY between the same invocation run with the real seam and with a do-nothing seam, not as an empty stderr — a clean confined-Auto stub run already prints its own `turns: 1 · denied: 0` summary line. The subtest skips on Windows, where the walk is real work.
+
+NOTES (2026-09-04): pre-existing, not caused by this item — `TestRegistryWithMCPThreadsExtraReadRoots` (`cmd/apogee/wire_tools_test.go:59`) fails on this macOS host at the plan's own base commit `0309e144` as well as at HEAD: the test's `t.TempDir()` mount root is `/var/folders/...`, which resolves through the `/var` → `/private/var` symlink and is refused as outside the workspace root. Verified in a throwaway worktree at `0309e144`; the whole `go test ./cmd/apogee/` package is red for that one reason both before and after this item.
 
 **What.** `cmd/apogee/headless.go`, inside the `mode == domain.ModeAuto` branch and immediately
 after the `probe.ResidualNotice` block (`:390-393`): call `platform.PrewarmLabelWalk(confiner,

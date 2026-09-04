@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -451,6 +452,93 @@ func TestHeadlessAutoDisclosesTheFenceResidual(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The confined Auto headless run pre-warms the Windows label walk, behind the launch path's own
+// gate — the two boot paths label the same tree at the same moment in their startup, so an
+// unattended run does not stall on its first confined command the way a session no longer does.
+//
+// The claim needs the seam. platform.PrewarmLabelWalk is an empty function off Windows
+// (internal/platform/prewarm_other.go), so a test that only watched the output would pass
+// byte-for-byte against a tree that never calls it at all. Swapping prewarmLabelWalk is what turns
+// "reached it" into an observable fact; the seam also carries the one deliberate difference from
+// the launch path, which writes its progress notice to raw os.Stderr while this command writes to
+// its own cobra stream, where the suite can see it.
+//
+// The gate's own truth table is not re-tested here: TestShouldPrewarmLabelWalk owns it, and the
+// FSWrite-false cell is unreachable through this command — probe.AutoUnattendedBlocked refuses
+// `--mode auto` under a confining config before the gate is ever consulted.
+func TestHeadlessConfinedAutoPrewarmsTheLabelWalk(t *testing.T) {
+	// A line the real off-Windows implementation would never print, so its presence on stderr can
+	// only mean the writer this command handed the pre-warm was the command's own.
+	const progressLine = "prewarm: walking the workspace"
+
+	type prewarmCall struct {
+		confiner  apogee.Confiner
+		workspace string
+	}
+
+	t.Run("the run reaches the pre-warm with its own confiner and workspace", func(t *testing.T) {
+		var calls []prewarmCall
+		prev := prewarmLabelWalk
+		prewarmLabelWalk = func(c apogee.Confiner, workspaceRoot string, out io.Writer) {
+			calls = append(calls, prewarmCall{confiner: c, workspace: workspaceRoot})
+			_, _ = io.WriteString(out, progressLine+"\n")
+		}
+		t.Cleanup(func() { prewarmLabelWalk = prev })
+
+		stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+		_, errOut, err := headlessRunOn(
+			t, stub, fenceableHost, testConfigHome(t, ""), "--mode", "auto", "a prompt")
+
+		if err != nil {
+			t.Fatalf("headless: %v (stderr: %q)", err, errOut)
+		}
+		if len(calls) != 1 {
+			t.Fatalf("the confined auto run pre-warmed %d times; want exactly 1", len(calls))
+		}
+		if calls[0].confiner != apogee.Confiner(fenceableHost) {
+			t.Errorf("the pre-warm walked for %#v, not the confiner the run was given", calls[0].confiner)
+		}
+		if calls[0].workspace == "" {
+			t.Error("the pre-warm was handed no workspace root, so it would label nothing")
+		}
+		if !strings.Contains(errOut, progressLine) {
+			t.Errorf("the pre-warm's notice did not reach the command's stderr: %q", errOut)
+		}
+	})
+
+	// And off Windows it costs the output nothing, because the real function is empty there: the
+	// same invocation says exactly what it says with the branch replaced by a seam that does
+	// nothing at all. This is the half that keeps every other test in this file honest — a
+	// pre-warm that printed here would rewrite the expected stderr of the whole suite.
+	t.Run("the real pre-warm adds no line off windows", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("on Windows the label walk is real work and reports its own progress")
+		}
+		silentRun := func(t *testing.T) string {
+			t.Helper()
+			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+			_, errOut, err := headlessRunOn(
+				t, stub, fenceableHost, testConfigHome(t, ""), "--mode", "auto", "a prompt")
+			if err != nil {
+				t.Fatalf("headless: %v (stderr: %q)", err, errOut)
+			}
+			return errOut
+		}
+
+		prev := prewarmLabelWalk
+		t.Cleanup(func() { prewarmLabelWalk = prev })
+
+		prewarmLabelWalk = func(apogee.Confiner, string, io.Writer) {}
+		withoutPrewarm := silentRun(t)
+		prewarmLabelWalk = prev
+		withPrewarm := silentRun(t)
+
+		if withPrewarm != withoutPrewarm {
+			t.Errorf("the real pre-warm changed this run's stderr: %q, want %q", withPrewarm, withoutPrewarm)
+		}
+	})
 }
 
 // A `mechanisms:` key naming a Mechanism this release retired is tolerated, not refused — and the
