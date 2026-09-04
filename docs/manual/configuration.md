@@ -473,7 +473,9 @@ other built-in, and any `~/.apogee/schemes/<name>.yaml` joins them under its own
 shadowing a built-in that shares that name, which is how you re-cut `dark` without renaming it. A
 scheme apogee cannot find warns and falls back to the default rather than refusing to start, so a
 config you carried to another machine still opens. What it will not take is a **path**: the key names
-a scheme, and a value spelled as a file location is refused outright.
+a scheme, not a file location. `/settings` refuses a path-spelled value at the keystroke, before it
+can reach the file; one already written into `config.yaml` is treated like any name apogee cannot
+resolve — it warns and falls back to the default palette rather than refusing to start.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -974,6 +976,10 @@ one this build's catalogue does not carry is a **start-up error**, and it names 
 came from:
 
     apogee: unknown mechanism "some_bench_rwo"; known: … — in the `sub-agents:` server "rented-box"
+
+That refusal is a *session's*. A daemon **Firing** routed at the entry has no start-up to refuse:
+it reports the same message as a notice on that run and delegates to the session's own server
+instead.
 
 Both keys are legal on **any** entry by design, the way `context-window:` is — which entry takes the
 delegations is the root `sub-agents-server:` key's answer, and that answer moves inside a running
@@ -1546,7 +1552,10 @@ route — where to go instead.
 
 **Tier 2 forces the approval prompt**, even on the auto rung where nothing else would ask.
 These are the idioms that are usually legitimate and occasionally catastrophic: `curl … |
-sh`, `sudo`, and a terminal command writing under apogee's own `~/.apogee` control plane.
+sh`, `sudo`, and a terminal command naming apogee's own `~/.apogee` control plane — where a
+mere read trips the rule as readily as a write, because the terminal declares no read sources for
+the guard to spare (the hint it carries names `list_dir`, `read_file`, `grep`, `find_files` and
+`copy_file` as the route that does not ask).
 A forced prompt is a speed-bump, not a block — you can say yes to it. But it carries no
 cache key, so **"Always allow this session" cannot remember it**: the yes authorises that
 one call, and the next call that trips the same rule asks again.

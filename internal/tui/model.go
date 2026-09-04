@@ -3247,8 +3247,9 @@ func (m Model) throughputSuffix() string {
 
 // statusLine renders what is happening on the left and the live context gauge (or a key hint)
 // on the right, justified across the window. While a worker runs the left slot is the live
-// activity phrase plus an elapsed clock ("⣻ reading · main.go · 3s") — what the human is
-// actually asking, in place of the turn index, which answered none of it. Idle renders nothing
+// activity phrase plus an elapsed clock ("⣻ reading · 3s" — the verb carries no target of its
+// own, toolActivityVerb) — what the human is actually asking, in place of the turn index, which
+// answered none of it. Idle renders nothing
 // there (the input box below already invites a message) beyond what is queued; the blocked and
 // errored states keep their own words, with no spinner and no clock (nothing is ticking). Any
 // staged interjections add their count to whatever the slot holds. The left slot hangs off

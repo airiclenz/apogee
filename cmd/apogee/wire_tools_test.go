@@ -331,6 +331,11 @@ func TestMechanismIDsConstructsUnderBypass(t *testing.T) {
 // what it actually proves: a retired id resolves to NOTHING and earns its floor-guard notice. So
 // the vacuous version of the construct check cannot come back unnoticed; it would be building an
 // empty enable list, which is this test's subject rather than that one's.
+//
+// It KEEPS t.Parallel() while the construct check above drops it, and that pair is safe only
+// because of Go's ordering: a parallel test pauses at t.Parallel() and resumes after every
+// sequential test in the package has finished, so this one never observes the swapped catalogue.
+// If the construct check above ever gains t.Parallel(), this one has to lose it.
 func TestMechanismIDsRetiredResolvesToNothing(t *testing.T) {
 	t.Parallel()
 	const retired = "validate"

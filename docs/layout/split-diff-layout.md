@@ -7,9 +7,11 @@ grammar — headers, slots, fold states — and its per-tool table's diff rows p
 here for what the expanded body paints. Terms (Split diff, Stacked diff, Edit
 regions) are `CONTEXT.md`'s.
 
-Scope: the expanded body of the five diff-bodied blocks — `edit_existing_file`,
-`single_find_and_replace`, `multi_find_and_replace`, `view_diff`,
-`git_diff_range`. Collapsed blocks paint no body (`collapsedBodyRows = 0`) and
+Scope: the expanded body of the six diff-bodied blocks — `write_file`,
+`edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`,
+`view_diff`, `git_diff_range`. `write_file` belongs here on the same rule as the
+other three writing tools: it attaches Edit regions as it applies the change
+(ADR 0052), so an overwrite or a fresh create reads exactly the way an edit does. Collapsed blocks paint no body (`collapsedBodyRows = 0`) and
 are untouched.
 
 ## Rules
