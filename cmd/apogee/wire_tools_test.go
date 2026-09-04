@@ -276,16 +276,45 @@ func assertRegistryOffers(t *testing.T, registry *apogee.ToolRegistry, name stri
 	}
 }
 
-// The enabled IDs thread through New as Config.EnableMechanisms and the engine arms them — even under
-// Bypass, enabling a real catalogued Mechanism (validate) constructs cleanly (the dispatch gate that
+// labMechanism is a minimal Mechanism HOOK for the swapped catalogue row below. It implements one
+// hook interface (pre-request), which is all domain.MechanismRegistry.Add asks of a hook, and does
+// nothing when it fires: what this file exercises is the wiring a row travels through, never a
+// Mechanism's behaviour.
+type labMechanism struct{}
+
+func (labMechanism) PreRequest(context.Context, *domain.Request) error { return nil }
+
+// The enabled IDs thread through New as Config.EnableMechanisms and the engine arms them — even
+// under Bypass, enabling a real catalogued Mechanism constructs cleanly (the dispatch gate that
 // skips it under Bypass is the engine's, exercised in internal/agent). This proves the config →
 // EnableMechanisms → engine-build path is coherent end-to-end.
+//
+// The row has to be stood up: the SHIPPED catalogue is empty since v0.20.0 (ADR 0071), so naming
+// any id here would resolve to an EMPTY enable list and the check would prove only that an empty
+// list constructs. mechanisms.SwapCatalogue — the test-only seam that stands a temporary table in
+// the curated one's place — is what gives the resolve a live row to keep.
+//
+// No t.Parallel(): SwapCatalogue assigns a package-level variable and is deliberately not
+// concurrency-safe, so this test must stay sequential.
 func TestMechanismIDsConstructsUnderBypass(t *testing.T) {
-	t.Parallel()
-	ids, _, err := mechanisms.ResolveEnabled(map[string]bool{"validate": true}, mechanisms.KnownIDs())
+	const id domain.MechanismID = "lab_row"
+	restore := mechanisms.SwapCatalogue([]mechanisms.Row{{
+		Descriptor: domain.MechanismDescriptor{ID: id, Capability: domain.CapProactiveNudge},
+		Construct:  func(mechanisms.Deps) (any, error) { return labMechanism{}, nil },
+	}})
+	defer restore()
+
+	ids, notices, err := mechanisms.ResolveEnabled(map[string]bool{string(id): true}, mechanisms.KnownIDs())
 	if err != nil {
-		t.Fatalf("ResolveEnabled: %v", err)
+		t.Fatalf("ResolveEnabled(%q): %v", id, err)
 	}
+	if len(ids) == 0 {
+		t.Fatalf("ResolveEnabled(%q) resolved to no IDs; a live catalogued id must survive the resolve", id)
+	}
+	if len(notices) != 0 {
+		t.Errorf("ResolveEnabled(%q) returned notices %q; a live id earns none", id, notices)
+	}
+
 	cfg := validCfg(t)
 	cfg.Bypass = true
 	cfg.EnableMechanisms = ids
@@ -295,6 +324,30 @@ func TestMechanismIDsConstructsUnderBypass(t *testing.T) {
 		t.Fatalf("New with an enabled Mechanism under Bypass: %v", err)
 	}
 	t.Cleanup(func() { _ = agent.Close() })
+}
+
+// The shape the check above had before its row was real — an enable map naming an id that had
+// RETIRED, which ResolveEnabled drops on the way to Config.EnableMechanisms — is pinned here as
+// what it actually proves: a retired id resolves to NOTHING and earns its floor-guard notice. So
+// the vacuous version of the construct check cannot come back unnoticed; it would be building an
+// empty enable list, which is this test's subject rather than that one's.
+func TestMechanismIDsRetiredResolvesToNothing(t *testing.T) {
+	t.Parallel()
+	const retired = "validate"
+
+	ids, notices, err := mechanisms.ResolveEnabled(map[string]bool{retired: true}, mechanisms.KnownIDs())
+	if err != nil {
+		t.Fatalf("ResolveEnabled(%q): %v", retired, err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("ResolveEnabled(%q) resolved to %v; a retired id reaches EnableMechanisms as nothing", retired, ids)
+	}
+	if len(notices) != 1 {
+		t.Fatalf("ResolveEnabled(%q) returned %d notices; a retired id earns exactly one", retired, len(notices))
+	}
+	if !strings.Contains(notices[0], "floor guard") {
+		t.Errorf("the notice for %q reads %q; it must name the floor guard that governs it now", retired, notices[0])
+	}
 }
 
 // The `sub-agents-choice:` gate reaches this hand-assembly through the tool SET's own spec rather

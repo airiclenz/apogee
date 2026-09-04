@@ -170,7 +170,11 @@ floor-guard phrasing appear, and that the retired-outright sentence does NOT.
 
 ---
 
-## 4. The Bypass construct test builds a real catalogued row
+## 4. The Bypass construct test builds a real catalogued row — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the swapped row's hook is a new `labMechanism` (a bare `PreRequestHook`)
+declared in the same test file — `internal/mechanisms`' own `fakeMechanism` is package-private, so
+`cmd/apogee` needs its own minimal hook for the row to pass `MechanismRegistry.Add`.
 
 **What.** Closes `apogee-i5h.2`. Depends on item 2.
 `TestMechanismIDsConstructsUnderBypass` (`cmd/apogee/wire_tools_test.go:281-296`) enables `"validate"`,
