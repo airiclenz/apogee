@@ -51,7 +51,15 @@ register holds only work that is genuinely parked. No new config key, no new ver
 
 ---
 
-## 1. The repo's hook path is reproduced and recorded
+## 1. The repo's hook path is reproduced and recorded — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): reproduction transcript — clone of this repo hydrated with `bd init --prefix apogee` (bootstrapped the Dolt DB from the beads remote; `.beads/embeddeddolt` created) plus `bd import .beads/issues.jsonl` for the 11 JSONL-only records, then the hook was observed rewriting `.beads/issues.jsonl` (76 issues exported) before any verdict was taken. Three commits through `.beads/hooks/pre-commit` (`core.hooksPath=.beads/hooks`, bd shim 1.2.2) — staged deletion + staged edit with no `.beads/` path staged; a staged `.beads/config.yaml` + edit; staged `.beads/issues.jsonl` + edit + deletion — each carried exactly the index in `git show --stat HEAD`, leaving an unstaged edit and an untracked file untouched. Verdict: CLEAN, no sweep, so no fix was landed and `.beads/config.yaml` is untouched; the `--no-verify` convention is therefore not written into the bullet.
+
+NOTES (2026-09-04): the reported 22-deletion incident WAS reproduced, from a different cause: in a second clone with a deletion and an edit already staged, `bd init`'s own auto-commit ("bd init: initialize beads issue tracking") swallowed both. Recorded in the bullet as "never run `bd init` with a dirty index".
+
+NOTES (2026-09-04): two further observations recorded in the bullet — `bd hooks run pre-commit` exports only when a `.beads/` path is already staged (it prints `pre-commit: skipping JSONL export — no staged .beads paths` otherwise), and because it re-exports after git snapshots the index, committing a staged `.beads/issues.jsonl` commits the pre-hook content while the fresh export stays unstaged.
+
+NOTES (2026-09-04): AGENTS.md carried no `--no-verify` convention at BASE, so nothing had to be removed; the item's "drop it" clause applied to the new bullet's own wording.
 
 **What.** Closes `apogee-5qe.1` and `apogee-5qe.2`. Two facts are already true at this base and the item
 starts by confirming them, not assuming them: `bd config show` reports `export.git-add = false` (bd's
