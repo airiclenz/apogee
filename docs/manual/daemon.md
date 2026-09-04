@@ -75,6 +75,11 @@ what the run found *wrong* with the workspace's context files: a file that is pr
 unreadable, or standing content that has outgrown its share of the window. The plain list of
 what loaded stays off the log; it is in the record.
 
+An `auto` firing running with `confine-to-workspace: false` says so too, in the same words an
+unconfined interactive launch prints: switching confinement off is the one blanket loosen in the
+system, so it is stated rather than assumed remembered. It is said once per daemon start, however
+many `auto` schedules fire afterwards — the posture is the host's, and no firing changes it.
+
 A firing whose server does not answer at all — a refused connection, a timeout, a name
 that does not resolve — leaves nothing behind: it is refused before the prompt is sent,
 so no tokens are spent and no record is written, and the log reports it as a failed

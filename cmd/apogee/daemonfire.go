@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -80,13 +82,21 @@ type daemonWiring struct {
 	// interleave halfway through a line, which is exactly what daemonLog's mutex exists to stop.
 	log *daemonLog
 
-	// mu guards adopted, which the daemon's reload replaces wholesale while Firings read it.
+	// mu guards adopted, which the daemon's reload replaces wholesale while Firings read it, and
+	// the two per-process latches below. Firings on different Schedules run on their own
+	// goroutines and overlap, so a check-and-set left outside the lock is how the same warning
+	// gets said twice and the same workspace gets walked twice.
 	mu sync.RWMutex
 	// adopted is the daemon's name→Entry map: the daemon-only half of `run:` — workspace, server,
 	// model — which deliberately does not travel through [schedule.Spec] because the scheduler
 	// library is runner-agnostic (ADR 0033). A Firing carries the name; this is what turns it back
 	// into the instruction the file states.
 	adopted map[string]daemon.Entry
+	// warnedUnconfined latches the unconfined-Auto warning (see [daemonWiring.latchUnconfinedWarning]).
+	warnedUnconfined bool
+	// prewarmed is the set of workspace roots whose label walk this daemon has already pre-warmed
+	// (see [daemonWiring.latchPrewarm]).
+	prewarmed map[string]struct{}
 }
 
 // newDaemonWiring resolves everything about the HOST that every Firing of this daemon shares, and
@@ -133,11 +143,12 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, []stri
 		// fence refuses nothing: the daemon's workspace is the SCHEDULE ENTRY's, minted per
 		// Firing (wire_firing.go passes its own roots.workspace), so there is no one root the
 		// daemon itself could measure an api-key command against.
-		keys:     config.NewKeyResolver(""),
-		confiner: newConfiner(),
-		store:    store,
-		log:      log,
-		adopted:  make(map[string]daemon.Entry),
+		keys:      config.NewKeyResolver(""),
+		confiner:  newConfiner(),
+		store:     store,
+		log:       log,
+		adopted:   make(map[string]daemon.Entry),
+		prewarmed: make(map[string]struct{}),
 	}, retiredNotices, nil
 }
 
@@ -183,6 +194,39 @@ func (w *daemonWiring) entryFor(name string) (daemon.Entry, bool) {
 	return entry, adopted
 }
 
+// latchUnconfinedWarning reports whether THIS Firing is the one that says the unconfined-Auto
+// warning, and marks it said. A launch says that sentence once because a launch happens once; a
+// daemon fires forever, so the same latch has to be expressed explicitly or a nightly Auto schedule
+// repeats the same paragraph in the supervisor's journal every tick until the disclosure is noise.
+//
+// It is a field on the wiring rather than a package-level sync.Once because two daemons in one test
+// process are two daemons: the second one has its own user, its own log, and owes them the warning
+// its own first Auto Firing triggers.
+func (w *daemonWiring) latchUnconfinedWarning() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.warnedUnconfined {
+		return false
+	}
+	w.warnedUnconfined = true
+	return true
+}
+
+// latchPrewarm reports whether workspace still owes its label walk a pre-warm, and marks it walked.
+// Per WORKSPACE rather than per process, because the walk is of one tree: two schedules bound to
+// two different workspaces each have a first confined command that would otherwise stall on it,
+// while a second Firing of the same tree hits the backend's own once-per-root memo and would pay
+// only for a second progress notice nobody needs (ADR 0020 §2).
+func (w *daemonWiring) latchPrewarm(workspace string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, walked := w.prewarmed[workspace]; walked {
+		return false
+	}
+	w.prewarmed[workspace] = struct{}{}
+	return true
+}
+
 // fire performs one Firing and reports the record it left behind. It is [schedule.Config.Fire] for
 // the daemon's single Scheduler, and it runs on that Scheduler's goroutine — never the reload's —
 // which is why everything it touches is its own copy or explicitly goroutine-safe (the adopted map,
@@ -209,6 +253,39 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	roots, err := resolveRoots(w.opts.ConfigDir, entry.Run.Workspace)
 	if err != nil {
 		return schedule.Outcome{}, err
+	}
+
+	// The confinement posture THIS Firing runs under, said now that its mode and its workspace are
+	// both known — the two facts the launch path has at startup and a daemon does not, because a
+	// schedule entry carries its own mode and its own tree (ADR 0034).
+	//
+	// The unconfined-Auto warning first: `confine-to-workspace: false` is the one blanket loosen in
+	// the system (ADR 0012), so it is stated wherever Auto runs under it, in the launch's own words
+	// (unconfinedAutoWarning, wire_boot.go) rather than a second spelling a reader would have to
+	// reconcile with the one they already met. It goes on the daemon log, which is this Driver's
+	// whole user interface (ADR 0034 decision 10). Latched to once per daemon process: the sentence
+	// is about the HOST's posture, which no tick changes.
+	//
+	// The daemon's OTHER confinement sentence — probe.ResidualNotice — is said at boot instead
+	// (daemon.go), and stays there: its cell is the backend's own residual write class, a fact of
+	// this host that every Firing shares, whereas this one is a fact of this ENTRY.
+	if f.Mode == domain.ModeAuto && !w.opts.ConfineToWorkspace && w.latchUnconfinedWarning() {
+		w.log.line("%s", unconfinedAutoWarning)
+	}
+
+	// Then the eager label walk, behind the SAME gate the launch and headless paths use
+	// (shouldPrewarmLabelWalk, wire_boot.go) — one gate function, never a second copy, because a
+	// second copy is how the boot paths drift apart. On the Windows token backend a confined
+	// command labels the workspace tree at ~1 ms/object, and an unattended run is exactly where
+	// that stall goes unexplained; off Windows PrewarmLabelWalk is an empty no-op
+	// (internal/platform/prewarm_other.go), so this changes no byte of any other host's log.
+	//
+	// Latched per workspace path rather than per process, because what is warmed is one tree.
+	// The progress notice leaves through the daemon log like every other thing a Firing narrates:
+	// one seam, so the journal stays one timestamped line per event.
+	if shouldPrewarmLabelWalk(f.Mode, w.opts.ConfineToWorkspace, w.confiner.Capabilities().FSWrite) &&
+		w.latchPrewarm(roots.workspace) {
+		platform.PrewarmLabelWalk(w.confiner, roots.workspace, daemonLogWriter{log: w.log})
 	}
 
 	// This Firing's own record id, minted here because the runner is handed it beside the Config
@@ -365,4 +442,27 @@ func (w *daemonWiring) serverFor(entry daemon.Entry) (config.ServerEntry, error)
 	return config.ServerEntry{}, fmt.Errorf("apogee: daemon: the %q schedule binds to server %q, which no servers: "+
 		"entry in config.yaml answers to — the daemon reads config.yaml once at startup, so restart it after "+
 		"editing that list", entry.Name, named)
+}
+
+// daemonLogWriter is the daemon log seen as an [io.Writer], for the one caller that narrates
+// through a writer rather than through this Driver: [platform.PrewarmLabelWalk] prints its progress
+// notice to an io.Writer because the launch path hands it raw stderr. Routing that through the log
+// rather than opening a second stream is what keeps the daemon's journal one timestamped line per
+// event — two writers over one stream interleave halfway through a line, which is the whole reason
+// daemonLog holds a mutex.
+//
+// Escape-stripped to a single line for the reason a Firing's context-file anomalies are: this
+// journal is line-oriented, and a notice that carried a newline would forge a second timestamp-less
+// entry.
+type daemonLogWriter struct{ log *daemonLog }
+
+var _ io.Writer = daemonLogWriter{}
+
+// Write logs one notice. A blank write is dropped rather than logged as an empty line — an
+// Fprintln of nothing is not an event.
+func (w daemonLogWriter) Write(p []byte) (int, error) {
+	if line := strings.TrimSpace(sanitize.StripEscapesToLine(string(p))); line != "" {
+		w.log.line("%s", line)
+	}
+	return len(p), nil
 }

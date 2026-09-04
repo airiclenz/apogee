@@ -633,3 +633,77 @@ func TestDaemonFireLogsContextFileAnomaliesAlone(t *testing.T) {
 		}
 	})
 }
+
+// `confine-to-workspace: false` is the one blanket loosen in the system (ADR 0012), so an Auto
+// Firing running under it says so on the daemon's log — in the launch path's own words, because a
+// user who met that wording at a launch must not meet a softer one here. It is said ONCE per daemon
+// process: the sentence is about the host's posture, which no tick changes, and a nightly Auto
+// schedule that repeated it every tick would bury the ticks a supervisor reads this journal for.
+func TestDaemonFireWarnsOnceOnUnconfinedAuto(t *testing.T) {
+	t.Run("two auto firings warn exactly once", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			ConfineToWorkspace: false,
+			Servers:            []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		entry := entryFor(t, "nightly", daemon.Action{Server: "box", Mode: domain.ModeAuto})
+
+		harness.fire(t, entry)
+		harness.fire(t, entry)
+
+		if got := strings.Count(harness.logged.String(), unconfinedAutoWarning); got != 1 {
+			t.Errorf("the unconfined-auto warning was logged %d times over two firings, want exactly 1; "+
+				"the log holds:\n%s", got, harness.logged.String())
+		}
+	})
+
+	t.Run("a plan firing never warns", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			ConfineToWorkspace: false,
+			Servers:            []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+
+		harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box", Mode: domain.ModePlan}))
+
+		if strings.Contains(harness.logged.String(), unconfinedAutoWarning) {
+			t.Errorf("a plan firing said Auto's unconfined warning; the log holds:\n%s", harness.logged.String())
+		}
+	})
+}
+
+// The label-walk pre-warm is latched per WORKSPACE, not per process: two schedules bound to two
+// trees each have a first confined command that would otherwise stall on the walk, while a second
+// Firing of the same tree has nothing left to warm.
+//
+// What is asserted is the LATCH, never "the pre-warm ran": platform.PrewarmLabelWalk is an empty
+// function off Windows (internal/platform/prewarm_other.go), so on this suite's hosts the call
+// emits nothing to read back. The gate's own truth table is TestShouldPrewarmLabelWalk's
+// (wire_boot_test.go); the verdict is re-read here only to prove the fixture still reaches the
+// latch at all.
+func TestDaemonFirePrewarmsEachWorkspaceOnce(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		ConfineToWorkspace: true,
+		Servers:            []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+	})
+	if !shouldPrewarmLabelWalk(domain.ModeAuto, true, harness.wiring.confiner.Capabilities().FSWrite) {
+		t.Fatal("the fixture's confined auto firing does not open the pre-warm gate at all; " +
+			"the fake confiner no longer reports FSWrite")
+	}
+
+	first := entryFor(t, "nightly", daemon.Action{Server: "box", Mode: domain.ModeAuto})
+	harness.fire(t, first)
+	harness.fire(t, first)
+
+	if got := len(harness.wiring.prewarmed); got != 1 {
+		t.Errorf("two firings of one workspace latched %d pre-warms, want 1", got)
+	}
+
+	second := entryFor(t, "weekly", daemon.Action{Server: "box", Mode: domain.ModeAuto})
+	if second.Run.Workspace == first.Run.Workspace {
+		t.Fatal("the two entries share a workspace; the second-tree half of this test proves nothing")
+	}
+	harness.fire(t, second)
+
+	if got := len(harness.wiring.prewarmed); got != 2 {
+		t.Errorf("a firing of a second workspace left %d pre-warms latched, want 2", got)
+	}
+}

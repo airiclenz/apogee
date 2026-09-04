@@ -607,7 +607,9 @@ line; a clean run logs neither.
 
 ---
 
-## 12. The daemon warns on unconfined Auto and pre-warms, latched per process
+## 12. The daemon warns on unconfined Auto and pre-warms, latched per process — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): consequential edit — docs/manual/daemon.md: made necessary by the new unconfined-Auto log line, which the manual's per-firing narration paragraph did not cover.
 
 **What.** Depends on item 11. In `cmd/apogee/daemonfire.go`, at the top of a Firing once its mode and
 roots are known (`:194` resolves roots, `:232` reads `f.Mode`): when `f.Mode == domain.ModeAuto &&
