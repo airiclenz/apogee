@@ -53,7 +53,11 @@ already does. No new config key, no new persistence format, no new cobra verb.
 
 ---
 
-## 1. Verify plan `2026-09-02 - 08` is archived
+## 1. Verify plan `2026-09-02 - 08` is archived — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): gate passed — `docs/plans/archived/2026-09-02 - 08 - mechanism-retirement-wave-plan.md` exists; the scoped `git status --short` over `cmd/apogee/ internal/run/ internal/mechanisms/ internal/floor/ docs/manual/ CONTEXT.md internal/agent/ internal/tui/ internal/config/ internal/domain/ internal/validated/ apogee.go` printed nothing (the whole tree is clean, `git status --porcelain` empty); `go build ./...` exit 0.
+
+NOTES (2026-09-04): HEAD is `0309e144`, three commits past the plan's stated base `25611103` (`200434ea` version bump, `de022767` this plan's document, `0309e144` an AGENTS.md convention). None of them touch the files plan `2026-09-02 - 08` owns, so the gate's premise holds; this plan's own document is now tracked, so the pathspec scoping the item describes is no longer load-bearing.
 
 **What.** Plan `docs/plans/2026-09-02 - 08 - mechanism-retirement-wave-plan.md` was in flight at
 this plan's base and owns `cmd/apogee/{wire_boot,wire,wire_firing,root,headless}.go`,
