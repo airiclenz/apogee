@@ -1,5 +1,7 @@
 package floor
 
+import "sort"
+
 // The tool-name families every Floor guard shares. A guard decides by asking what a tool call
 // DID — was it a read, did it mutate a file — and a model spells the same concept several ways,
 // so the spellings live in one place and each set composes from a family rather than copying it
@@ -50,3 +52,20 @@ func isReadTool(name string) bool { return readToolNames[name] }
 // payload to syntax-check": a fragment edit and a move mutate the workspace while carrying no file
 // body, and only the content-repair rows (which stay lab Mechanisms) need the narrower question.
 func isFileMutatingTool(name string) bool { return wave4WriteTools[name] }
+
+// IsFileMutatingTool is isFileMutatingTool's exported face, for the ONE cross-package question this
+// package cannot answer itself: whether the superset still covers apogee's registered write tools.
+// floor never imports internal/tools (doc.go), so the coverage test lives in internal/agent — the
+// one package that imports both — and reaches the predicate through here.
+func IsFileMutatingTool(name string) bool { return isFileMutatingTool(name) }
+
+// FileMutatingToolNames returns the superset's members, sorted, as a fresh slice — never the map, so
+// no caller outside this package can add a spelling to the guards' write detection by writing to it.
+func FileMutatingToolNames() []string {
+	names := make([]string, 0, len(wave4WriteTools))
+	for name := range wave4WriteTools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}

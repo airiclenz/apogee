@@ -200,7 +200,29 @@ empty list and earns its floor-guard notice, so the vacuous shape cannot come ba
 
 ---
 
-## 5. `internal/floor`'s write-tool superset is pinned against the real roster again
+## 5. `internal/floor`'s write-tool superset is pinned against the real roster again — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the private `isFileMutatingTool` stays under its own name and
+`IsFileMutatingTool` wraps it, per the item's regression guard; the two classification tables came
+over verbatim from the deleted `internal/mechanisms/writedetection_test.go` and the re-homed test
+fills `tools.HostTools` from package `agent`'s existing
+`stubAsker`/`stubPresenter`/`stubSkillLookup` rather than redeclaring them.
+
+NOTES (2026-09-04): the re-homed pin's test name is
+`TestFloorWriteSupersetCoversEveryWorkspaceWritingBuiltin` — the deleted file's
+`TestWave4WriteToolsCovers…` named an unexported floor identifier that package `agent` cannot see.
+
+NOTES (2026-09-04): `task_list` (added at `805fda78`, after this plan's base) is
+`domain.IsReadOnly`, so the live roster walk skips it and neither table needed a new row; a
+non-read-only tool added later still fails the pin until it is classified.
+
+NOTES (2026-09-04): beyond extending floor's table to all 13 members, the item added a count
+assertion tying the table's length to `len(FileMutatingToolNames())`, so a member added to the map
+later cannot go unnamed there either.
+
+NOTES (2026-09-04): consequential edit — internal/floor/doc.go: made necessary by the two new
+exported symbols in toolnames.go, whose one-line file map claimed the package's tool-name predicates
+were unexported-only.
 
 **What.** Closes `apogee-i5h.3`. `wave4WriteTools` (`internal/floor/toolnames.go:14-19`) decides whether a
 call invalidates the read cache and whether an empty reply followed a write, but the test that

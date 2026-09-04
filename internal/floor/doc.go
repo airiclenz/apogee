@@ -21,7 +21,10 @@
 // # The files, one line each
 //
 // The substrate. toolnames.go is the tool-name spelling families — the read family and the
-// apogee-complete file-mutation superset — and the two predicates composed from them.
+// apogee-complete file-mutation superset — and the two predicates composed from them. The write
+// predicate and the superset's member names also have exported faces (IsFileMutatingTool,
+// FileMutatingToolNames), the seam the cross-package coverage test in internal/agent reads them
+// through so this package can keep its no-internal/tools rule above.
 // conversation.go is the read-only history scans a guard asks its question with: the path a call
 // targets, how many assistant messages there are, whether the model wrote recently, narrated last,
 // ever used a tool at all, or is making progress. readerror.go answers whether a committed result
