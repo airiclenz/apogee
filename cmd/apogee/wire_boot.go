@@ -28,9 +28,10 @@ import (
 
 // unconfinedAutoWarning is what Auto says for itself when confinement is switched off
 // (`confine-to-workspace: false`) — the only blanket loosen in the system (ADR 0012), so it is
-// stated every time it is used rather than assumed remembered. It is a const because two surfaces
-// now print it — the interactive launch below and an `apogee headless --mode auto` run — and a
-// user who has read it at one of them must not meet a softer wording at the other.
+// stated every time it is used rather than assumed remembered. It is a const because three surfaces
+// now print it — the interactive launch below, an `apogee headless --mode auto` run and the daemon's
+// Auto Firing (daemonfire.go) — and a user who has read it at one of them must not meet a softer
+// wording at the others.
 const unconfinedAutoWarning = "apogee: WARNING — auto mode is running UNCONFINED " +
 	"(confine-to-workspace: false). This is safe only inside a VM/container; " +
 	"the dangerous-action guard is a footgun-net, not a security boundary."
