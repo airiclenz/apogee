@@ -47,7 +47,7 @@ Sleep 500ms
 Enter
 
 # KNOB 3 — when the fix's edit card is opened. Tool blocks paint COLLAPSED, always (layout.md,
-# "Collapsed and expanded blocks"), so the fix lands as one row — `Replace ↳ task.go … +1 -1 ·
+# "Collapsed and expanded blocks"), so the fix lands as one row — `Replace ↳ task.go … +1 −1 ·
 # +N more lines ▶` — and the split diff (two panes, tinted add/del bands) paints only once
 # something opens it. Nothing opens itself, so the tape does.
 #
@@ -57,10 +57,10 @@ Enter
 # TypingSpeed 0ms, which reaches apogee as one CSI and is read as ⌥↑. The 0ms is load-bearing:
 # split by a typing delay the ESC is read alone, which mid-run means "stop the run".
 #
-# The value is how long the fix takes to LAND, because the target is only right while the edit
-# is the most recent block — once the next tool call starts, ⌥↑ stands on that one instead. A
-# block opened mid-flight stays open, so the split diff holds for the rest of the clip. Failure
-# looks like a stopped run, "[1;3A" sent as a message, or the wrong card opening.
+# The target is only right while the edit is the MOST RECENT block — once the next tool call
+# starts, ⌥↑ stands on that one instead. A block opened mid-flight stays open, so the split diff
+# holds for the rest of the clip. Failure looks like a stopped run, "[1;3A" sent as a message,
+# or the wrong card opening.
 #
 # The PageDowns after the hold are not optional: a toggle keeps the toggled row where it is on
 # screen (layout.md), which detaches the viewport from the tail — leave it detached and the
@@ -78,21 +78,34 @@ Enter
 # claims its keys "ahead of the switches in handleKey"), and ⏎ did not end the mode. The sleep
 # before it is what keeps it a lone ESC rather than the head of another CSI.
 #
-# 10s from the interjection's Enter, and this value is a coin toss rather than a setting — read
-# the measurement before you touch it. The window it has to hit is the gap between the fix's
-# Replace card painting and the queued interjection being DELIVERED, and delivery happens at the
-# very next tool boundary, so that gap is UNDER A SECOND. Against OpenRouter deepseek-v4-flash
-# the run varies ~19s to ~29s end to end, which slides that sub-second window by ~8s. A fixed
-# Sleep cannot track it: 10s hit on a ~29s run (the take that shipped) and missed on ~19s ones.
+# WHAT IT WAITS ON. This used to be a fixed ten-second `Sleep` from the interjection's Enter, and
+# a clock cannot track this beat. The window is the gap between the fix's Replace card painting
+# and the queued interjection being DELIVERED; delivery happens at the very next tool boundary, so
+# the gap is UNDER A SECOND, while against OpenRouter deepseek-v4-flash the run varies ~19s to
+# ~29s end to end and slides that sub-second window by ~8s. Measured hit rate: about one take in
+# seven. Both misses cost the take and one is worse: too LATE opens the CHANGELOG card instead
+# (`+3 −0 ▼` while task.go stays `+1 −1 · +8 more lines ▶`, and beat 5 has no split diff), while
+# too EARLY (measured at 3s) leaves the block cursor nothing settled to stand on, the leading ESC
+# of the CSI is read alone, and the run is CANCELLED — the session JSON ends `note: cancelled`
+# with the stage tree clean. So the tape waits on the SCREEN instead: `Wait+Screen` blocks until
+# the fix card's own diffstat is painted, which is exactly what tells that card from the
+# CHANGELOG one.
 #
-# Two distinct failures, both costing the take, both worth checking a frame for:
-#   - too LATE  → the CHANGELOG edit card opens instead: `+3 -0 ▼` while task.go stays
-#                 `+1 -1 · +8 more lines ▶`, and beat 5 has no split diff.
-#   - too EARLY → measured at 3s: the block cursor has nothing settled to stand on, the leading
-#                 ESC of the CSI is read on its own, and the run is CANCELLED — the session
-#                 JSON ends `note: cancelled` with the stage tree clean. Do not tune downward
-#                 hoping to catch the fast run; that is the direction that kills the take.
-Sleep 10s
+# WHY +Screen. `Wait`'s default scope is `Line`, which watches only the line the cursor is on;
+# the card row is not the last line on screen once the run moves on, so a `Line` wait would never
+# see the diffstat.
+#
+# WHY 40s. A `Wait` timeout is a LOUD failure — vhs exits non-zero and the take dies — where the
+# old miss was silent, shipping a clip with the wrong card open. The budget is set well past the
+# ~29s worst case so it never fires on a slow run; vhs's own default, 15s, sits inside the
+# observed spread. Requires vhs 0.11.0 or newer, which is where `Wait[+Screen][@timeout]` landed.
+#
+# A CHANGED EDIT SIZE MEANS A CHANGED PATTERN. `\+1 −1` is this fix's diffstat spelled the way
+# the TUI spells it — with the table's typographic minus U+2212, not an ASCII hyphen (diffCounts,
+# internal/tui/toolview.go). Reseed the bug, or let the model fix it differently, and the pattern
+# must be re-derived from the new card; a stale count or an ASCII `-` matches nothing on screen
+# and every take then times out.
+Wait+Screen@40s /\+1 −1/
 Set TypingSpeed 0ms
 Escape
 Type "[1;3A"

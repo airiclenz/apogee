@@ -10,6 +10,7 @@ careful hand performance.
 ## Quick start
 
 ```sh
+# vhs 0.11.0 or newer — hero.tape's knob 3 needs Wait+Screen
 brew install vhs gifsicle        # vhs pulls ttyd + ffmpeg and fetches its own headless Chromium
 export OPENROUTER_API_KEY=…      # the rig's default server is OpenRouter; the key is read from here
 ./setup.sh                       # build the rig (idempotent)
@@ -109,23 +110,28 @@ message instead of a queued one; the session JSON is the tell, where the entry r
 `interjected` on a hit and `user` on a miss. Knob 2 must outlast the run's tail, but
 overshooting is **not** free the way this file used to claim: `render.sh` trims only the HEAD
 (`-ss`), so every idle second between the last beat and `/undo` ships as dead air in the middle
-of the clip. Give it margin for a slow run, not an unbounded cushion. Knob 3 is how long the fix
-takes to land: the tape opens that card, and the gesture only reaches the right one while the
+of the clip. Give it margin for a slow run, not an unbounded cushion. Knob 3 is when the fix's
+card is opened: the tape opens that card, and the gesture only reaches the right one while the
 edit is still the most recent block.
 
-**Knob 3 is a coin toss, not a setting.** Measured against OpenRouter `deepseek-v4-flash`: the
-window it must hit is the gap between the fix's `Replace` card painting and the queued
-interjection being *delivered*, and delivery lands at the very next tool boundary — so the
-window is under a second, while the run itself varies ~19 s to ~29 s end to end and slides that
-window by ~8 s. A fixed `Sleep` cannot track it. Both directions of miss cost the take, and one
-of them is worse than the other: too late merely opens the CHANGELOG card instead (`+3 -0 ▼`
-while `task.go` stays `+1 -1 · +8 more lines ▶`), but too early leaves the block cursor nothing
-settled to stand on, the leading ESC of the CSI is read alone, and the run is **cancelled** —
-the session JSON ends `note: cancelled` with the stage tree clean. Never tune this knob downward
-hoping to catch a fast run.
+**Knob 3 waits for the fix's card, and the measurement is why.** Against OpenRouter
+`deepseek-v4-flash` the window it has to hit is the gap between the fix's `Replace` card painting
+and the queued interjection being *delivered*, and delivery lands at the very next tool boundary —
+so the window is under a second, while the run itself varies ~19 s to ~29 s end to end and slides
+that window by ~8 s. A fixed `Sleep` cannot track that: the `Sleep 10s` this knob used to be landed
+about one take in seven, and both directions of miss cost the take. Too late merely opened the
+CHANGELOG card instead (`+3 −0 ▼` while `task.go` stayed `+1 −1 · +8 more lines ▶`); too early left
+the block cursor nothing settled to stand on, the leading ESC of the CSI was read alone, and the run
+was **cancelled** — the session JSON ends `note: cancelled` with the stage tree clean. The knob is
+now a screen wait, `Wait+Screen@40s /\+1 −1/`, which blocks on the fix card's own diffstat rather
+than on a clock — the same stat the comment uses to tell that card from the CHANGELOG one. Two
+things to know before touching it: the pattern is the *current* edit's diffstat, spelled with the
+table's typographic minus (U+2212), so a reseeded bug or a differently-shaped fix needs it
+re-derived; and the 40 s timeout is deliberately generous, because a timeout is a loud failure (vhs
+exits non-zero and the take dies) where the old miss was silent.
 
 **Nothing on camera opens itself.** Tool blocks paint collapsed, always (`layout.md`, "Collapsed
-and expanded blocks"), so the fix arrives as a single `Replace ↳ task.go … +1 -1 · +N more lines
+and expanded blocks"), so the fix arrives as a single `Replace ↳ task.go … +1 −1 · +N more lines
 ▶` row and the split diff — two panes, tinted add/del bands — is not on camera unless the tape
 opens it. `hero.tape` opens it with the keyboard block cursor at knob 3 and then pages back to
 the bottom: a toggle keeps the toggled row at its screen position, which detaches the viewport

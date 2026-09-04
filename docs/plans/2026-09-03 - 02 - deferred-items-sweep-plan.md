@@ -393,7 +393,15 @@ faulted-delegation row and `assertErrorTone` (`cmd/apogee/e2e_outcome_test.go:76
 
 ---
 
-## 8. Knob 3 waits for the fix's card instead of the clock
+## 8. Knob 3 waits for the fix's card instead of the clock — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the ASCII-diffstat rule grep (`grep -rn '+1 -1'`, `'+3 -0'`) also hits `docs/plans/2026-09-03 - 02 - deferred-items-sweep-plan.md` and `docs/plans/archived/2026-08-24 - 00 - hero-gif-refresh-plan.md`; neither was changed — the live plan document is never edited by an implementer, and the archived plan is a historical record of a past run.
+
+NOTES (2026-09-04): the version pin went in as its own comment line above `brew install vhs gifsicle` rather than appended to it — the existing trailing comment on that line already runs to 95 columns.
+
+NOTES (2026-09-04): `graphics/demo/README.md:112-114` ("Knob 3 is how long the fix takes to land") was made false by this item's change and was reworded with it, inside the item's own listed file.
+
+NOTES (2026-09-04): owner-run check still outstanding — `vhs validate hero.tape` exits 0 on the recording machine; vhs is not installed in this environment, so the tape was validated structurally instead (every non-comment line is a known VHS verb).
 
 **What.** Recast at the regression check (2026-09-03). Closes `apogee-h64`. `graphics/demo/tapes/hero.tape:95` is a fixed `Sleep 10s` that must land in
 the sub-second gap between the fix's `Replace` card painting and the queued interjection being delivered,
