@@ -491,7 +491,19 @@ stay above it.
 
 ---
 
-## 10. The `ui:` block's four undocumented keys
+## 10. The `ui:` block's four undocumented keys — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): consequential edit — docs/manual/commands.md: made necessary by the heading rename; its two `configuration.md#skill-suggestions--uiskill-suggestions` anchors (lines 144, 159) would have dangled and now point at `#the-terminal-ui--ui`.
+
+NOTES (2026-09-04): the four keys were added after the ADR 0061 paragraph exactly as the item's regression guard directs, so the skill-suggestions `triggers:` prose follows them; no new heading was carved into the unheaded run below, per item 9's plan-wide guard.
+
+NOTES (2026-09-04): the plan's line numbers had drifted (the heading sits at 433, not 428, after item 9), so the rename and the insertion were both located by heading and paragraph text.
+
+NOTES (2026-09-04): the `ui.stall-after` cross-reference points further down THIS section rather than at another heading — the paragraph at :625 is inside the same run, which the renamed heading now covers accurately.
+
+NOTES (2026-09-04): serial re-run — item 10's hunks were restored into the current file (item 9 already committed); `docs/manual/commands.md` arrived dirty carrying this item's two anchor fixes and was kept as found.
+
+NOTES (2026-09-04): items 9-12 all edit `docs/manual/configuration.md`; per-item commits cannot separate their hunks.
 
 **What.** Closes `apogee-t57.2`. Four keys parse, carry `/settings` rows and are documented nowhere:
 `ui.spinner` (enum `snake` | `glitter` | `classic`, default `snake`; an unknown name is a startup error),

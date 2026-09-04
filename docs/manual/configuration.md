@@ -430,7 +430,7 @@ It is file-only — no flag, no environment variable — and it reads the same i
 `/skill` token in a [headless](headless.md) prompt or a [daemon](daemon.md) Firing resolves to the
 same body your session resolves.
 
-## Skill suggestions — `ui.skill-suggestions:`
+## The terminal UI — `ui:`
 
 A library grows past what anyone can recall, which is exactly where a menu you have to open stops
 helping. While you type, apogee ranks the skill catalog against your draft and names the closest
@@ -451,6 +451,42 @@ body. That is what keeps ranking a large library cheap, and it is also the whole
 touches: the catalog stays on this side of the wire, and a skill reaches the model only when you
 invoke it with `/id`
 ([ADR 0061](../adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)).
+
+Four more keys live under `ui:`, and they change how the screen looks rather than what it says.
+`ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
+default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
+fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
+`ui.spinner-color` is a separate bool, on by default, that runs a slow colour loop over whichever
+glyph the spinner draws; it is deliberately independent of `ui.spinner`, so all six combinations are
+yours to pick.
+
+`ui.show-scrollbar` — on by default — paints the scroll bar on the transcript and on any popup that
+overflows, and reserves the column it hangs in; off, that column goes back to the text. The flip is
+live, like `ui.skill-suggestions` above it: commit the row in `/settings` and the screen re-lays
+itself in the session you are already in.
+
+`ui.color-scheme` names the palette the screen is drawn in. It defaults to `dark`, `light` is the
+other built-in, and any `~/.apogee/schemes/<name>.yaml` joins them under its own file name —
+shadowing a built-in that shares that name, which is how you re-cut `dark` without renaming it. A
+scheme apogee cannot find warns and falls back to the default rather than refusing to start, so a
+config you carried to another machine still opens. What it will not take is a **path**: the key names
+a scheme, and a value spelled as a file location is refused outright.
+
+```yaml
+# ~/.apogee/config.yaml
+ui:
+  spinner: glitter
+  spinner-color: false
+  show-scrollbar: false
+  color-scheme: light
+```
+
+`ui.inspector` sits beside them, off by default: on, it captures the raw request and response traffic
+that `/inspect` then shows you. The observer is installed while the engine is built, so an edit here
+is honoured at the **next start** — until then the row goes on reporting what this run is actually
+capturing, which is the key's contract rather than a write that failed. The quiet-turn threshold,
+`ui.stall-after`, is a `ui:` key too; it is described further down this section, with the effort dial
+whose long silences it is there to report.
 
 `triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter
 key — a YAML list, or one comma-separated string — naming the phrases somebody would actually type

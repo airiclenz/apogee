@@ -141,7 +141,7 @@ character. With nothing suggested, Tab keeps whatever meaning it has today.
 message staged while the model works — are spent for the rest of the session and are not suggested
 again; one the draft already invokes is never suggested at all. `/clear` (or `/new`) starts a new
 session and a clean slate. The band is `ui.skill-suggestions:`, on by default and switchable live
-from `/settings` — see [Skill suggestions](configuration.md#skill-suggestions--uiskill-suggestions).
+from `/settings` — see [Skill suggestions](configuration.md#the-terminal-ui--ui).
 Off, the row never paints and Tab stays inert.
 
 **What a skill author can steer.** The ranking reads a skill's id, display name, summary and its
@@ -156,7 +156,7 @@ triggers:
 
 A comma-separated string does the same (`triggers: cut a release, publish to homebrew`), and
 `/skills` lists back what each skill declared under its row. Authoring advice is in
-[configuration](configuration.md#skill-suggestions--uiskill-suggestions).
+[configuration](configuration.md#the-terminal-ui--ui).
 
 ## `{{SKILL_DIR}}` in skill bodies
 
