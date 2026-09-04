@@ -829,7 +829,17 @@ the allowlist (a fabricated path fed to the same predicate, never a mutation of 
 
 ---
 
-## 18. The closed entries leave the issue register
+## 18. The closed entries leave the issue register — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the plan's Acceptance names "all 22 ids"; the enumerated list holds **21** (`apogee-5qe` ×3, `apogee-i5h` ×5, `apogee-t57` ×11, plus `apogee-b3u` and `apogee-h64`). All 21 named ids were `bd show`-confirmed against the plan's claimed titles, then closed and verified `closed` in both the Dolt DB and the flushed export. No 22nd id exists to close.
+
+NOTES (2026-09-04): the local Dolt DB was STALE against the committed `.beads/issues.jsonl` before this item — it was missing 10 records outright (`apogee-m67`, `apogee-v00` + `.1`–`.7`, `apogee-y9g`), showed 12 of plan `2026-09-03 - 01`'s beads still `open` that the export had `closed`, and had lost all 34 `planned` labels and every `spec_id`. A bare `bd export` would therefore have deleted 10 beads from the tracked register and reverted 12 closures. The DB was hydrated first with `bd import .beads/issues.jsonl` (no DB record carried a newer `updated_at` than its export counterpart, so the import could only move state forward). The import restored the records, the closures and the labels but NOT `spec_id`, so all 35 `spec_id` values were replayed verbatim from `git show HEAD:.beads/issues.jsonl` with `bd update <id> --spec-id "<value>"` before the flush — `bd list --spec 'docs/plans/2026-09-03 - 01'` and `--spec '… - 02'` keep working, and the export's diff against HEAD carries no `spec_id` line.
+
+NOTES (2026-09-04): the flushed export was diffed field-by-field against `HEAD:.beads/issues.jsonl`: same 76 ids, none added or removed; `status`/`closed_at`/`close_reason` flip on exactly the 21 named ids; `updated_at` moves on those 21 plus the 14 whose `spec_id` was replayed; and one further row differs — `apogee-kk0.7` gains its `parent-child` dependency edge on `apogee-kk0` (created 2026-09-03, i.e. before HEAD). It was the ONLY child row in the committed export with a null `dependencies` list; every other `.N` bead already carried its edge. This is the export-lag failure `AGENTS.md` documents, and the flush repairs it rather than changing register state. No other field differs on any row.
+
+NOTES (2026-09-04): consequential edit — .beads/interactions.jsonl: made necessary by the 21 `bd close` calls — bd appends one tracked `field_change` record per close, so the item's own register writes dirty a second tracked file the plan's **Files:** line does not name. (The 35 `bd update --spec-id` calls append nothing to it.)
+
+NOTES (2026-09-04): `bd init` was never run (the plan and the DECISION both forbid it against a dirty index); `.beads/config.yaml` is untouched and `export.auto` stays on.
 
 **What.** Depends on every item above. The register (`bd`) holds OPEN work: a resolved item is CLOSED
 there, and its record lives in `CHANGELOG.md` under `[Unreleased]` — closing a bead writes no changelog
