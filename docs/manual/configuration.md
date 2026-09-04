@@ -691,6 +691,68 @@ because the rungs below this key are not this key's to record. If nothing on the
 program this machine has, the `⏎` jump refuses on the row and names all three ways to set one
 rather than repeating a "not found in `$PATH`" you cannot act on.
 
+## Model profiles — `model-profiles:`
+
+A `model-profiles:` key is a **pattern, not a name**: it matches when the model apogee resolved
+*contains* it, ignoring case, which is what survives quants, provider prefixes and `:tag` suffixes —
+`minimax-m3` covers `minimax/minimax-m3:exacto` and `minimax-m3-Q4_K_M` alike. Apogee ships a
+built-in table of known families and announces a built-in match at startup and at every model
+switch; your own entries beat every built-in and apply silently, because you wrote them. A matching
+entry is read **axis by axis**, not as a whole: an axis you spell is the last word on it, an axis
+you leave out falls through to the built-in table and then to the default — native tool calls,
+nothing stripped. The `thinking:` block goes one step further and resolves its `style:` and its
+`effort:` independently, so an entry spelling only `effort:` keeps whatever channel style the
+built-in carries. Turning a built-in axis off is therefore a matter of *spelling* its off value —
+`tool-call-format: native`, a thinking `style: none` — rather than leaving the key out. Every axis
+below is a startup error when it is malformed, naming the entry and the key: each of them otherwise
+fails invisibly, as a model that has quietly stopped calling tools or stopped hiding its reasoning.
+
+**`tool-call-format:`** says how this model's tool calls reach apogee, and takes exactly three
+values. `native` — the default, and what an omitted key means — is the structured path: calls arrive
+out of band in the wire's own tool-call field, and the visible content is left to be prose.
+`markdown-fenced` and `custom-regex` are the **text** formats, for a model that emits its calls in
+the reply itself: apogee parses the call out of the model's *visible content*, the same text the
+answer is made of, rather than out of the wire. `markdown-fenced` reads a call back out of a fenced
+code block; `custom-regex` reads whatever `tool-call-pattern:` describes. Any other word is a
+startup error.
+
+**`tool-call-pattern:`** is that regular expression, written in Go's syntax. It is **mandatory**
+under `custom-regex` — that format parses every tool call with it, so a profile without one finds no
+call at all — and **refused** under `native` and `markdown-fenced`, which never read it: a pattern
+that could never fire is almost always a typo or a half-finished edit, so apogee reports it rather
+than ignoring it. The pattern needs two **named capture groups**: `name`, holding the tool's name,
+and `args`, holding its JSON arguments. Write them in Go's `(?P<name>…)` spelling or JavaScript's
+`(?<name>…)` — both are accepted, and the JavaScript form is rewritten for you. Dot-matches-newline
+is applied for you as well, so `.` spans the line breaks inside a call without a `(?s)` of your own.
+A pattern that does not compile is a startup error.
+
+**`thinking:`'s `style:`** says how this model's private reasoning arrives, so apogee can strip it
+out of what you are shown and keep it as reasoning in the history. `none` — the default — means
+there is no inline channel and content passes through untouched, which is the right answer when the
+server already splits reasoning into a wire field of its own. `delimited` means the model brackets
+its reasoning with a literal token pair, and needs BOTH `start:` and `end:` set to the tokens that
+model actually emits — they vary per build, not just per family, and a profile missing either half
+strips nothing, so the thinking lands in the visible reply. `harmony` is the gpt-oss channel form,
+which needs no tokens at all. `style:` is orthogonal to the `effort:` key beside it, described above:
+`style:` only says how reasoning *arrives*, `effort:` says how much of it to ask for.
+
+```yaml
+# ~/.apogee/config.yaml
+model-profiles:
+  minimax-m3:                    # matches minimax/minimax-m3:exacto, minimax-m3-Q4_K_M, …
+    thinking:
+      style: delimited
+      start: "<mm:think>"
+      end: "</mm:think>"
+  my-xml-model:
+    tool-call-format: custom-regex
+    tool-call-pattern: '<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>'
+```
+
+`apogee probe model` prints the entry its findings suggest, keyed by the model it probed and ready
+to paste here. Editing this block while a session runs swaps the parser on the spot, like every
+other key in this file.
+
 ## Per-model Mechanism sets — `validated-sets:`
 
 A **Validated set** is a per-model list of catalogued Mechanisms that has been measured on *that

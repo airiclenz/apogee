@@ -575,7 +575,13 @@ the entry inventory names `bypass` and `mechanisms`; `go test ./cmd/apogee/ -run
 
 ---
 
-## 12. The `model-profiles:` tool-call and thinking axes
+## 12. The `model-profiles:` tool-call and thinking axes — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the guard's "immediately before `## Keeping the session store bounded`" clause could not hold — item 9's `## Per-model Mechanism sets — `validated-sets:`` section is already committed in exactly that position, and only one section can be immediately before it. Placed by this item's own **What** locator instead ("a `##` section after the effort prose"): at the end of the `## The terminal UI — `ui:`` section, immediately before item 9's heading — the same content boundary the guard was protecting, since placing the heading at BASE 582 or 620 would have swallowed the `ui.stall-after`, `cursor-shape:` and `editor:` paragraphs it names.
+
+NOTES (2026-09-04): the `delimited` half of the yaml fence is drawn from `internal/config/defaults/config.yaml` (the `minimax-m3` entry); the `custom-regex` half is written fresh against `validateToolCallPattern` and `CustomRegexConfig`, since the template carries no `custom-regex` profile — the guard authorizes this.
+
+NOTES (2026-09-04): the prose was first written during an earlier batched attempt and reverted so item 9 could commit alone; this run restores it, re-located by heading text against the current file.
 
 **What.** Closes `apogee-t57.5`. `tool-call-format:` and `tool-call-pattern:` are undocumented, and
 `thinking:`'s `style:` / `start:` / `end:` are alluded to at `configuration.md:579` ("orthogonal to
