@@ -63,6 +63,19 @@ type Beat struct {
 	// server (cmd/apogee's Sub-agent routing). Nothing else reads it, and false is the safe default:
 	// an observer that ignores the field behaves exactly as it did before the field existed.
 	Throttled bool
+	// Answered reports that the server returned an HTTP response of ANY kind — a 200 whose body
+	// would not decode, a 401, a 404, a 500, a 429 — and is false only when nothing answered at
+	// all: a refused dial, a timeout, a DNS or TLS failure, an address that could not even be
+	// formed (provider.TransportError). It is the LIVENESS half of an observation, which Reachable
+	// deliberately is not: Reachable says "this server handed me a usable model list", and a box
+	// that is up but answering 401 fails that while being perfectly present.
+	//
+	// It exists because the unattended Drivers must refuse a Firing before spending a prompt on a
+	// server that is not there, and must NOT refuse one over an auth or rate-limit answer they
+	// cannot judge — a 429 is the server saying "not now", not "not here". Nothing else reads it,
+	// and false is the safe default for the zero Beat: an observer that ignores the field behaves
+	// exactly as it did before the field existed.
+	Answered bool
 	// ActiveModel is the model the Upstream resolves to — the monitor's hint whenever one is
 	// configured, trusted verbatim even when the server does not advertise it (provider.Discover's
 	// rule), and the first model advertised only when no hint is configured.
@@ -159,11 +172,20 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 		// out of a sentence is the sort of thing that breaks the day the sentence is reworded.
 		var status *provider.StatusError
 		throttled := errors.As(err, &status) && status.Code == http.StatusTooManyRequests
-		return Beat{Failure: err.Error(), Throttled: throttled}
+		// Answered is the negation of ONE named class rather than a list of the failures that count
+		// as a reply: discovery labels the failures that never reached the server, so everything
+		// else — every status code, and a reply whose body would not decode — is a box that spoke.
+		var transport *provider.TransportError
+		return Beat{
+			Failure:   err.Error(),
+			Throttled: throttled,
+			Answered:  !errors.As(err, &transport),
+		}
 	}
 
 	beat := Beat{
 		Reachable:       true,
+		Answered:        true,
 		ActiveModel:     info.ActiveModel,
 		ContextWindow:   info.ContextWindow,
 		TotalSlots:      info.TotalSlots,

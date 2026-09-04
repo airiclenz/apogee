@@ -320,7 +320,17 @@ true (assert on the `run.Spec` the `stubRunner` captured).
 
 ---
 
-## 7. One beat per Firing, carried on `firingRouting`
+## 7. One beat per Firing, carried on `firingRouting` — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the pinned-entry rows of `TestHeadlessInstallsTheParallelAgentsCap` and `TestHeadlessSendsTheServersEffortDialect`, and the two `probed`/`dialects.called` assertions in `TestFiringConfigSetsEveryUnattendedField`, asserted the OLD mechanism ("a pin skips the round trip"). They are inverted: the beat is now asserted to be taken on every row, exactly once, with the pinned values still winning.
+
+NOTES (2026-09-04): `firingInputs.width` and `.dialect` are replaced by the single `beat` seam rather than re-signed — the two answers come off one observation, and keeping two seams would have let a Driver hand over a width and a dialect that describe different moments. `scheduleWiring.fire` accordingly hands over one `heartbeat.Beat` carrying `w.width()` and `w.live.observedDialect()` with an empty `Failure` (and `Reachable`/`Answered` true: this session is talking to that server).
+
+NOTES (2026-09-04): `stubSlots` and `stubDialect` are deleted and the existing `stubBeat` serves both beat seams; it gains `calls` and `endpoints` so "exactly one beat" and "the Sub-agent seam saw the SUB-AGENT endpoint" are assertable. `wire_firing_test.go` gains a `firingBeat` helper and passes it on the composition tests that are about something else, because an unconditional beat would otherwise dial `box.example` for real.
+
+NOTES (2026-09-04): `wire_firing_test.go` imports `internal/provider` under the alias `apiprovider` — two tests in that file hold a `skills.Provider` in a variable named `provider`, which shadows the package name inside them.
+
+NOTES (2026-09-04): pre-existing, unrelated to this item — `TestFiringConfigDefaultsItsSeams`, `TestE2EPresentOpensOnlyTheAllowedFormats`, `TestE2ESmokeInProcess`, `TestRegistryWithMCPThreadsExtraReadRoots` and eight `ExtraReadRoots` tests in `internal/agent` and `internal/tools` fail identically on this machine at HEAD (macOS resolves `t.TempDir()`'s `/var/...` to `/private/var/...`; the fixtures compare unresolved paths). Verified by running the full suite in a clean worktree at HEAD before this item's changes.
 
 **What.** Recast at the regression check (2026-09-03). `cmd/apogee/wire_firing.go`: `firingConfig`
 (`:97`) takes exactly ONE beat through a NAMED, swappable seam — `var discoverBeat = func(ctx,

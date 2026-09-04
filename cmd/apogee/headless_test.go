@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -612,33 +613,6 @@ func TestHeadlessComposesTheRunnerSpec(t *testing.T) {
 	}
 }
 
-// stubSlots stands in for the one-shot discovery probe: it reports the slot count the test dictates
-// and records whether it was consulted at all — the second half of the pin assertion, since a pinned
-// entry has to be answered without spending a round trip on a question already settled.
-type stubSlots struct {
-	called bool
-	slots  int
-}
-
-func (s *stubSlots) discover(context.Context, string, string, string) int {
-	s.called = true
-	return s.slots
-}
-
-// stubDialect is the effort half of stubSlots: the discovery seam a test dictates the server's
-// answer through (ADR 0060), plus the record of whether it was consulted at all — a bound entry
-// that FORCES an `effort-dialect:` must skip the round trip, exactly as a `parallel-agents:` pin
-// skips the width probe.
-type stubDialect struct {
-	called  bool
-	dialect provider.EffortDialect
-}
-
-func (s *stubDialect) discover(context.Context, string, string, string) provider.EffortDialect {
-	s.called = true
-	return s.dialect
-}
-
 // The Parallel agents cap reaches this Driver too, resolved exactly as a session resolves it (ADR
 // 0039 decision 2, ADR 0031's benchable-all-the-way-up): the bound entry's pin, else what the server
 // advertises, else one delegation at a time.
@@ -651,18 +625,17 @@ func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
 		configYAML string
 		slots      int
 		want       int
-		wantProbe  bool
 	}{
-		{name: "a pin decides, and nothing is probed", configYAML: pinnedServer, slots: 9, want: 3},
-		{name: "no pin takes what the server advertises", slots: 4, want: 4, wantProbe: true},
-		{name: "no pin and a silent server is serial", slots: 0, want: 1, wantProbe: true},
+		{name: "a pin decides, and the beat is taken anyway", configYAML: pinnedServer, slots: 9, want: 3},
+		{name: "no pin takes what the server advertises", slots: 4, want: 4},
+		{name: "no pin and a silent server is serial", slots: 0, want: 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			slots := &stubSlots{slots: tc.slots}
-			prev := discoverSlots
-			discoverSlots = slots.discover
-			t.Cleanup(func() { discoverSlots = prev })
+			beats := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: tc.slots}}
+			prev := discoverBeat
+			discoverBeat = beats.discover
+			t.Cleanup(func() { discoverBeat = prev })
 
 			stub := &stubRunner{}
 			home := testConfigHome(t, tc.configYAML)
@@ -672,8 +645,10 @@ func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
 			if got := stub.spec.Config.ParallelAgents; got != tc.want {
 				t.Errorf("Config.ParallelAgents = %d; want %d", got, tc.want)
 			}
-			if slots.called != tc.wantProbe {
-				t.Errorf("the discovery probe ran = %v; want %v", slots.called, tc.wantProbe)
+			if !beats.called {
+				t.Error("the composer took no beat; the round trip is unconditional because it IS the " +
+					"liveness gate the unattended Drivers refuse a Firing on — a pin decides the VALUE, " +
+					"it does not buy the run out of observing its server")
 			}
 		})
 	}
@@ -697,32 +672,33 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 		configYAML string
 		observed   provider.EffortDialect
 		want       domain.EffortDialect
-		wantProbe  bool
 	}{
 		{
-			name:       "a forced effort-dialect: decides, and nothing is probed",
+			name:       "a forced effort-dialect: decides, whatever the beat saw",
 			configYAML: forcedServer,
 			observed:   provider.EffortDialectReasoning,
 			want:       domain.EffortDialectOff,
 		},
 		{
-			name:      "nothing forced takes the shape discovery saw",
-			observed:  provider.EffortDialectReasoning,
-			want:      domain.EffortDialectReasoning,
-			wantProbe: true,
+			name:     "nothing forced takes the shape discovery saw",
+			observed: provider.EffortDialectReasoning,
+			want:     domain.EffortDialectReasoning,
 		},
 		{
-			name:      "nothing forced and a server with no tell keeps the historical shape",
-			want:      domain.EffortDialectNone,
-			wantProbe: true,
+			name: "nothing forced and a server with no tell keeps the historical shape",
+			want: domain.EffortDialectNone,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dialects := &stubDialect{dialect: tc.observed}
-			prev := discoverDialect
-			discoverDialect = dialects.discover
-			t.Cleanup(func() { discoverDialect = prev })
+			beats := &stubBeat{beat: heartbeat.Beat{
+				Reachable:     true,
+				Answered:      true,
+				EffortSupport: provider.EffortSupport{Dialect: tc.observed},
+			}}
+			prev := discoverBeat
+			discoverBeat = beats.discover
+			t.Cleanup(func() { discoverBeat = prev })
 
 			stub := &stubRunner{}
 			home := testConfigHome(t, tc.configYAML)
@@ -732,8 +708,9 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 			if got := stub.spec.Config.EffortDialect; got != tc.want {
 				t.Errorf("Config.EffortDialect = %q; want %q", got, tc.want)
 			}
-			if dialects.called != tc.wantProbe {
-				t.Errorf("the dialect probe ran = %v; want %v", dialects.called, tc.wantProbe)
+			if !beats.called {
+				t.Error("the composer took no beat; one observation is taken per Firing whatever the " +
+					"bound entry pins, because that round trip is the liveness gate")
 			}
 		})
 	}

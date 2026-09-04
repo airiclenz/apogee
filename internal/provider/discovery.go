@@ -254,17 +254,41 @@ func (e *discoveryStatusError) Error() string {
 // Unwrap exposes the *StatusError so errors.As reaches the HTTP code the server answered with.
 func (e *discoveryStatusError) Unwrap() error { return e.status }
 
+// TransportError is a discovery failure the SERVER never saw: a refused dial, a timeout, a DNS or
+// TLS failure — or a request that could not even be built. It exists so a caller can tell "nothing
+// is listening there" from "something answered, and the answer was unusable": a 404, a 401, a 429
+// and a body that would not decode are all replies from a box that IS up, while these are not.
+// heartbeat.Beat.Answered is that distinction on the observation, and the unattended Drivers refuse
+// a Firing on it rather than on any status code (ADR 0031's Driver parity).
+//
+// It carries the already-rendered failure rather than re-wording it, so the text every surface
+// prints — the TUI's offline note, the probe report — is byte-identical to the text this branch
+// produced before the type existed.
+type TransportError struct {
+	// err is the formatted failure, and the chain errors.Is reaches a context.DeadlineExceeded or a
+	// net.OpError through.
+	err error
+}
+
+// Error renders the wrapped failure verbatim.
+func (e *TransportError) Error() string { return e.err.Error() }
+
+// Unwrap keeps the underlying transport failure reachable by errors.Is and errors.As.
+func (e *TransportError) Unwrap() error { return e.err }
+
 // discoverModels probes GET /v1/models and resolves the model list plus the active model.
 func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+modelsPath, nil)
 	if err != nil {
-		return ModelInfo{}, fmt.Errorf("apogee: build discovery request: %w", err)
+		// A malformed base URL never reaches the wire either, so it is the same finding as a refused
+		// dial: nothing answered.
+		return ModelInfo{}, &TransportError{err: fmt.Errorf("apogee: build discovery request: %w", err)}
 	}
 	c.setAuth(req.Header)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return ModelInfo{}, fmt.Errorf("apogee: model discovery: %w", err)
+		return ModelInfo{}, &TransportError{err: fmt.Errorf("apogee: model discovery: %w", err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 

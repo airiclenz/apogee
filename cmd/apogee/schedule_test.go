@@ -25,8 +25,10 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -227,8 +229,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		roots:     roots,
 		manualIDs: manualIDs,
 		mode:      domain.ModePlan,
-		width:     func(context.Context, string, string, string) int { return 1 },
-		dialect:   (&stubDialect{}).discover,
+		beat:      (&stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}).discover,
 		recordID:  "sch-1-abcd-resolution",
 	})
 	if err != nil {
@@ -1227,4 +1228,48 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 		for range sender.msgs {
 		}
 	}()
+}
+
+// A Firing raised inside a live session spends NO round trip of its own (design call 4): the session
+// is already talking to that server, so it hands the composer its own observation — the width it
+// resolves and the effort wire shape its heartbeat saw — with an empty failure. That is the one
+// Driver where the shared beat is a hand-over rather than a probe, and the assertion is both halves:
+// the seam is never reached, and the values that reach the Config are the session's.
+//
+// Composed against the package's runner seam rather than a live model, which is why this test does
+// not call t.Parallel: it replaces package-level vars, exactly as the width test above does.
+func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stub := &stubRunner{}
+	beats := &stubBeat{}
+	prevRunner, prevBeat := runOnce, discoverBeat
+	runOnce, discoverBeat = stub.once, beats.discover
+	t.Cleanup(func() { runOnce, discoverBeat = prevRunner, prevBeat })
+
+	live := newLiveSettings(config.Options{}, nil)
+	live.observe(32768, provider.EffortDialectOpenAI)
+	w := scheduleWiring{
+		roots:   roots,
+		live:    live,
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 6 },
+	}
+
+	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	if beats.called {
+		t.Error("the session's Firing took a beat of its own; it must hand over the observation this " +
+			"session is already holding rather than spend a round trip on the Scheduler's goroutine")
+	}
+	if got := stub.spec.Config.ParallelAgents; got != 6 {
+		t.Errorf("the firing runs at ParallelAgents = %d, want the session's wired width 6", got)
+	}
+	if got := stub.spec.Config.EffortDialect; got != domain.EffortDialectOpenAI {
+		t.Errorf("the firing speaks EffortDialect %q, want the %q this session's own beat observed",
+			got, domain.EffortDialectOpenAI)
+	}
 }

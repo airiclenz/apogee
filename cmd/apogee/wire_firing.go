@@ -6,6 +6,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -59,17 +60,19 @@ type firingInputs struct {
 	// `use-project-skills` flip keeps following its Firings (design call 5); headless and the
 	// daemon pass nil, each having no longer-lived catalog to share.
 	skills *skills.Provider
-	// width is the discovery half of the parallel-agents cap; nil takes discoverSlots, the one-shot
-	// probe standing in for the beat an unattended run has no heartbeat to take. A session passes
-	// its own width source instead, because it already knows what the server advertises and must
-	// not spend a Firing's latency re-asking (design call 4).
-	width func(ctx context.Context, endpoint, model, apiKey string) int
-	// dialect is the discovery half of the effort wire shape (ADR 0060), asked ONLY when the bound
-	// entry forces no `effort-dialect:` of its own; nil takes discoverDialect, the one-shot beat
-	// standing in for the heartbeat an unattended run has none of. A session passes its own
-	// observation for width's reason: it is already holding the answer, and a Firing must not spend
-	// a round trip re-asking the server the session is talking to.
-	dialect func(ctx context.Context, endpoint, model, apiKey string) provider.EffortDialect
+	// beat is this run's ONE observation of the server it is bound to; nil takes discoverBeat, the
+	// one-shot beat standing in for the heartbeat an unattended run has none of. It is one seam
+	// rather than the two probes it replaced — a width and a dialect asked separately — because
+	// both answers come off the SAME observation of the SAME endpoint, model and key: two probes
+	// were two round trips that could straddle a restart and report a server that never existed in
+	// one state. It also carries the liveness the unattended Drivers refuse a Firing on, which is
+	// why it is taken even when the entry pins both values away: the round trip IS the gate.
+	//
+	// A session passes its own beat instead — the width it already resolves and the dialect its
+	// heartbeat already observed, with an empty Failure — because it is holding the answer, and a
+	// Firing must not spend a round trip re-asking the server the session is talking to (design
+	// call 4).
+	beat func(ctx context.Context, endpoint, model, apiKey string) heartbeat.Beat
 	// recordID is the id this run's record is filed under, minted by the Driver because the Driver
 	// is what hands it to the runner. The run's scratch dir is created under it, so a saved run and
 	// the working files its model left behind are one thing to find and one thing to sweep.
@@ -180,20 +183,27 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		})
 	}
 
+	// The ONE observation this run takes of the server it is bound to, standing in for the heartbeat
+	// an unattended run has none of. Everything discovery can tell this composition comes off it:
+	// how wide the run may fan out (below), which wire shape a thinking-effort intent travels in
+	// (further below), and whether anything answered at all — which rides out on the routing for the
+	// Drivers that refuse a Firing before spending a prompt on a server that is not there.
+	//
+	// It is unconditional, and that is the change from the two probes it replaced: those were each
+	// skipped when the bound entry pinned their answer away, which left a fully pinned entry taking
+	// no round trip and therefore observing nothing. The pins still win over the values below — a
+	// beat never overrules one — but the call happens, because the call IS the liveness gate.
+	observe := in.beat
+	if observe == nil {
+		observe = discoverBeat
+	}
+	beat := observe(ctx, in.entry.Endpoint, spec.Model, apiKey)
+
 	// How wide this run may fan its delegations out — the same cap a session resolves, so every
 	// Driver reaches the same engine behaviour (ADR 0031; the resolution itself is ADR 0039 decision
-	// 2). The pin is the BOUND entry's own `parallel-agents:`; the discovery half stands in for the
-	// beat an unattended run has no heartbeat to take. A pin skips discovery outright —
-	// ResolveParallelAgents never lets discovery overrule a pin, so the round trip could only spend
-	// the run's latency on a question already settled.
-	width := in.width
-	if width == nil {
-		width = discoverSlots
-	}
-	slots := 0
-	if in.entry.ParallelAgents < 1 {
-		slots = width(ctx, in.entry.Endpoint, spec.Model, apiKey)
-	}
+	// 2). The pin is the BOUND entry's own `parallel-agents:`, and ResolveParallelAgents never lets
+	// what the beat saw overrule it.
+	slots := beat.TotalSlots
 
 	// The wire shape this run expresses a thinking-effort intent in (ADR 0060). A session takes it
 	// off the beat that lands every Interval and commits it through Rebind; an unattended run never
@@ -201,17 +211,13 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// zero dialect — the historical `chat_template_kwargs` shape — whatever the bound server
 	// actually reads. That was the Driver-parity break ADR 0031 rules out (2026-08-25 audit C-03).
 	//
-	// The bound entry's forced `effort-dialect:` ranks first and skips the round trip, exactly as a
-	// `parallel-agents:` pin skips discovery above: a forced dialect is already the answer. With
-	// nothing forced, one beat of the same discovery a session's heartbeat drives stands in, and a
-	// server with no tell answers the zero, which is what an unattended run has always sent.
+	// The bound entry's forced `effort-dialect:` ranks first: a forced dialect is already the
+	// answer, and the beat above is not consulted for it. With nothing forced, what that one beat
+	// saw stands in, and a server with no tell answers the zero, which is what an unattended run
+	// has always sent.
 	effortDialect := provider.EffortDialectFor(in.entry.EffortDialect)
 	if effortDialect == provider.EffortDialectNone {
-		observe := in.dialect
-		if observe == nil {
-			observe = discoverDialect
-		}
-		effortDialect = observe(ctx, in.entry.Endpoint, spec.Model, apiKey)
+		effortDialect = beat.EffortSupport.Dialect
 	}
 
 	cfg := apogee.Config{
@@ -322,6 +328,13 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	if routingNotice != "" {
 		notices = append(notices, routingNotice)
 	}
+	// And this run's own observation of its PRIMARY server, latched onto the routing AFTER it comes
+	// back rather than written inside resolveFiringRouting: that function returns a bare
+	// firingRouting{} on the default no-`sub-agents-server:` path and on every failure path, so a
+	// field set inside it would read false for every ordinary Firing and a Driver gating on it would
+	// refuse every run.
+	routing.Beat = beat
+	routing.Reachable = beat.Failure == ""
 
 	// And the namer an unnamed delegation is named by (ADR 0068), so a Firing's saved record reads
 	// the same way a session's transcript does rather than carrying a wall of task first lines
@@ -351,11 +364,18 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	return cfg, routing, notices, nil
 }
 
-// firingRouting is where ONE unattended run's delegations go, and what its model is told about that
-// far seat. The two travel together for delegationSetter's reason (delegation.go): one thing decides
-// both — which `servers:` entry this run delegates to — and a caller that carried one without the
-// other could route children to a box the orientation block never named, or name a box nothing
-// routes to.
+// firingRouting is where ONE unattended run's delegations go, what its model is told about that far
+// seat, and what the run observed of its OWN server on the way there. The first two travel together
+// for delegationSetter's reason (delegation.go): one thing decides both — which `servers:` entry this
+// run delegates to — and a caller that carried one without the other could route children to a box
+// the orientation block never named, or name a box nothing routes to.
+//
+// The observation rides along because it is the other thing firingConfig learns that no Driver can
+// re-derive without spending a second round trip: the composition takes exactly one beat of the
+// primary server, and a Driver that must refuse a Firing rather than send a prompt into a dead
+// endpoint reads it off here. It is the PRIMARY server's — never the Sub-agent server's, which
+// resolveFiringRouting observes separately through discoverDelegationBeat, because the two are
+// different boxes with different keys.
 //
 // Both zero is the DEFAULT and the floor: no `sub-agents-server:` key, or a key that resolved to
 // nothing, leaves the run exactly as every Firing was before it could route at all — children on the
@@ -373,6 +393,17 @@ type firingRouting struct {
 	// the seat is display text a human wrote down, while reachability is a fact about right now that
 	// a delegation's own result note reports (delegationSeatOf).
 	seat *apogee.DelegationSeat
+	// Beat is the ONE observation this run took of its own bound server — the whole Beat rather
+	// than the two fields the composition read off it, so a Driver acting on it can say WHY
+	// (Beat.Failure) and tell a box that is merely rate-limited (Beat.Throttled, Beat.Answered)
+	// from one that is not there. The zero value is "nothing observed", which is what a Driver that
+	// handed over its own beat with an empty Failure gets back unchanged.
+	Beat heartbeat.Beat
+	// Reachable is Beat.Failure == "", spelled once here so the Drivers that gate on it cannot
+	// each re-derive it from a different field. It says the server handed back a usable model list;
+	// Beat.Answered is the weaker, and for a refusal the more honest, question of whether anything
+	// answered at all.
+	Reachable bool
 }
 
 // resolveFiringRouting answers where an unattended run's delegations go, taking ONE beat against the
@@ -433,7 +464,7 @@ func resolveFiringRouting(
 	}
 
 	// One beat, no retry: the composition happens once and there is no later beat to widen on, which
-	// is the contract discoverSlots and discoverDialect already set for an unattended run.
+	// is the contract discoverBeat already set for an unattended run's own server.
 	observed := discoverDelegationBeat(ctx, entry.Endpoint, entry.Model, apiKey)
 	// And the one resolution the session's own beat lands, reused whole rather than re-derived: the
 	// pin-else-observe ladder is ADR 0045 decision 4, and a second copy of it is how one Driver ends

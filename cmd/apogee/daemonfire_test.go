@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
@@ -42,14 +43,14 @@ func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness 
 	}
 	harness := &daemonFireHarness{runner: &stubRunner{}}
 
-	prevRunner, prevSlots, prevConfiner := runOnce, discoverSlots, newConfiner
+	prevRunner, prevBeat, prevConfiner := runOnce, discoverBeat, newConfiner
 	runOnce = harness.runner.once
-	discoverSlots = func(_ context.Context, endpoint, _, _ string) int {
+	discoverBeat = func(_ context.Context, endpoint, _, _ string) heartbeat.Beat {
 		harness.probed = endpoint
-		return 0
+		return heartbeat.Beat{}
 	}
 	newConfiner = func() apogee.Confiner { return fenceableHost }
-	t.Cleanup(func() { runOnce, discoverSlots, newConfiner = prevRunner, prevSlots, prevConfiner })
+	t.Cleanup(func() { runOnce, discoverBeat, newConfiner = prevRunner, prevBeat, prevConfiner })
 
 	wiring, _, err := newDaemonWiring(opts)
 	if err != nil {

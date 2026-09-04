@@ -428,9 +428,11 @@ func TestFiringConfigCarriesTheDelegationNamer(t *testing.T) {
 				manualIDs: nil, // the shipped catalogue is empty (v0.20.0, ADR 0071): no key to spell out
 				confiner:  fenceableHost,
 				mode:      domain.ModePlan,
-				width:     func(context.Context, string, string, string) int { return 0 },
-				dialect: func(context.Context, string, string, string) provider.EffortDialect {
-					return provider.EffortDialectNone
+				// This Firing's own beat, handed over so the composition spends no round trip on a
+				// question this test does not ask: the fixture's server answers naming calls, not
+				// discovery.
+				beat: func(context.Context, string, string, string) heartbeat.Beat {
+					return heartbeat.Beat{Reachable: true, Answered: true}
 				},
 				recordID: "2026-09-01T09-00-00-firing",
 			})
@@ -503,9 +505,10 @@ func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 		manualIDs: nil, // the shipped catalogue is empty (v0.20.0, ADR 0071): no key to spell out
 		confiner:  fenceableHost,
 		mode:      domain.ModePlan,
-		width:     func(context.Context, string, string, string) int { return 0 },
-		dialect: func(context.Context, string, string, string) provider.EffortDialect {
-			return provider.EffortDialectNone
+		// The run's own beat, handed over for the reason above: this fixture's servers answer naming
+		// calls, and the Sub-agent server's separate observation is the stub below.
+		beat: func(context.Context, string, string, string) heartbeat.Beat {
+			return heartbeat.Beat{Reachable: true, Answered: true}
 		},
 		recordID: "2026-09-02T10-00-00-firing",
 	})

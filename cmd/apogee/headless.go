@@ -22,7 +22,6 @@ import (
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -138,48 +137,37 @@ func (s pruneNoticeSink) Emit(e domain.Event) {
 	}
 }
 
-// discoverSlots is the seam onto the discovery half of the Parallel agents cap (ADR 0039 decision
-// 2): how many generation slots the bound server reports it was launched with, and 0 when it cannot
-// say. Like runOnce it exists so the composition below is provable without a live server; production
-// never reassigns it.
+// discoverBeat is the seam onto the ONE observation an unattended run takes of the server it is
+// bound to: the whole Beat, because everything the composition needs from discovery comes off it —
+// how many generation slots the server reports it was launched with (ADR 0039 decision 2), which
+// wire shape it reads a thinking-effort intent in (ADR 0060), and whether it answered at all. Like
+// runOnce it exists so the composition is provable without a live server; production never
+// reassigns it.
 //
 // It is ONE beat of the very Monitor the TUI's heartbeat drives, so an unattended run and a session
-// read the same number out of the same `/props` probe rather than growing a second, subtly different
+// read the same numbers out of the same probes rather than growing a second, subtly different
 // discovery. One beat and no retry is the whole contract: a headless run composes once and has no
 // later beat to widen on, so it asks once and takes what comes.
 //
-// It never reports an error. A server without /props, an unreachable one, a cancelled context — all
-// of them are "nothing observed", which is 0, which ResolveParallelAgents turns into the serial floor
-// a run with no signal has always had. Failing a prompt over a number nobody configured would be a
-// worse answer than running it one delegation at a time.
-var discoverSlots = func(ctx context.Context, endpoint, model, apiKey string) int {
-	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx).TotalSlots
-}
-
-// discoverDialect is the seam onto the effort half of the same discovery (ADR 0060): which wire
-// shape the bound server reads a thinking-effort intent in, and the zero EffortDialectNone when it
-// advertises no tell — which keeps the historical `chat_template_kwargs` shape a request has always
-// carried. Like discoverSlots it stands in for the beat an unattended run has no heartbeat to take,
-// it is one beat with no retry, and it exists as a variable so the composition is provable without
-// a live server; production never reassigns it.
-//
-// It never reports an error, for discoverSlots' reason: an unreachable server, a server without the
-// tell, a cancelled context are all "nothing observed", which is the zero, which is the wire every
-// unattended run spoke before this seam existed. It is asked ONLY when the bound entry forces no
-// `effort-dialect:` of its own — a forced dialect is an answer, and a round trip to re-ask a
-// settled question would spend a run's latency on nothing.
-var discoverDialect = func(ctx context.Context, endpoint, model, apiKey string) provider.EffortDialect {
-	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx).EffortSupport.Dialect
+// It never reports an error, and it replaced two probes that each asked the same server the same
+// question at the same moment: a server without /props, an unreachable one, a cancelled context all
+// answer the zero Beat, whose slot count ResolveParallelAgents turns into the serial floor a run
+// with no signal has always had and whose dialect is the historical `chat_template_kwargs` shape
+// every unattended run spoke before the seam existed. What the failure MEANS is on the Beat itself
+// (Failure, Answered, Throttled) for the Driver that gates on it.
+var discoverBeat = func(ctx context.Context, endpoint, model, apiKey string) heartbeat.Beat {
+	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx)
 }
 
 // discoverDelegationBeat is the seam onto the ONE observation an unattended run takes of its
-// Sub-agent server: the whole Beat this time rather than a field of it, because the routing
-// resolution reads several — reachability, the model actually bound, the window and the slot count
-// (resolveDelegationTarget). Like the two probes above it stands in for the beat an unattended run
-// has no heartbeat to take, it is one beat with no retry, and it is a variable so the composition is
-// provable without a live server; production never reassigns it.
+// Sub-agent server, kept separate from discoverBeat above because it beats a DIFFERENT box: the
+// Sub-agent server's own endpoint, model and key, which is why the primary's beat can never be
+// shared with it (resolveDelegationTarget would then resolve a target against the wrong server and
+// route delegations to a box nobody observed). Like the beat above it stands in for the heartbeat an
+// unattended run has none of, it is one beat with no retry, and it is a variable so the composition
+// is provable without a live server; production never reassigns it.
 //
-// It never reports an error, for discoverSlots' reason: an unreachable server, a cancelled context
+// It never reports an error, for discoverBeat's reason: an unreachable server, a cancelled context
 // and a server with nothing bound are all "no target", which leaves the run unrouted — the fallback
 // every Firing took before this seam existed (ADR 0045 §4's floor).
 //

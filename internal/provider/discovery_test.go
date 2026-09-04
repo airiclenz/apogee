@@ -915,3 +915,81 @@ func TestDiscoverNon200IsAStatusError(t *testing.T) {
 		t.Errorf("Error() = %q, want %q", err.Error(), want)
 	}
 }
+
+// A failure the SERVER never saw is labelled at the source rather than left for every caller to
+// re-derive by string-matching a sentence: a refused dial is a *TransportError, while every reply
+// with a status line — including the ones that fail discovery — is not. That is the distinction
+// heartbeat.Beat.Answered carries, and the one the unattended Drivers refuse a Firing on: a 404 or
+// a 429 is a box that is up and declining, which is not the same finding as nothing listening.
+//
+// The rendered text is asserted alongside because the type wraps a message every surface already
+// prints verbatim (the TUI's offline note, the probe report); a prefix gained here would surface
+// everywhere at once.
+func TestDiscoverTransportFailureIsLabelled(t *testing.T) {
+	t.Parallel()
+
+	closed := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	endpoint := closed.URL
+	closed.Close() // nothing listens on that port any more
+
+	_, err := NewClient(endpoint, "").Discover(context.Background())
+	if err == nil {
+		t.Fatal("Discover succeeded against a closed listener, want error")
+	}
+	var transport *TransportError
+	if !errors.As(err, &transport) {
+		t.Fatalf("error %v is not a *TransportError; a refused dial is the one class that never reached the server", err)
+	}
+	if got, want := err.Error(), "apogee: model discovery: "; len(got) < len(want) || got[:len(want)] != want {
+		t.Errorf("Error() = %q, want the unchanged %q opening", got, want)
+	}
+
+	// And the other half of the claim: a server that ANSWERED is never labelled a transport
+	// failure, however unusable its answer was.
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{
+			name: "not found",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			},
+		},
+		{
+			name: "rate limited",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusTooManyRequests)
+			},
+		},
+		{
+			name: "a body that will not decode",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("not json at all"))
+			},
+		},
+		{
+			name: "an empty model list",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"data":[]}`))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(tc.handler)
+			t.Cleanup(srv.Close)
+
+			_, err := NewClient(srv.URL, "").Discover(context.Background())
+			if err == nil {
+				t.Fatalf("Discover succeeded on %s, want error", tc.name)
+			}
+			var transport *TransportError
+			if errors.As(err, &transport) {
+				t.Errorf("error %v is a *TransportError; the server answered, so the finding is an "+
+					"unusable reply rather than an absent box", err)
+			}
+		})
+	}
+}

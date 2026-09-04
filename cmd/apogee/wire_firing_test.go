@@ -14,6 +14,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	// Aliased because the tests below hold a skills.Provider in a variable called `provider`,
+	// which shadows the package name inside those functions.
+	apiprovider "github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -35,6 +38,14 @@ func firingRoots(t *testing.T) stateRoots {
 		scratch:   t.TempDir(),
 		workspace: t.TempDir(),
 	}
+}
+
+// firingBeat is a dictated observation of a Firing's OWN server: a reachable box that advertises
+// nothing. It exists because one beat per Firing is unconditional — the round trip is the liveness
+// gate, not an optimisable probe — so a composition test about anything else would otherwise dial
+// `box.example` for real and wait out the discovery timeout.
+func firingBeat(context.Context, string, string, string) heartbeat.Beat {
+	return heartbeat.Beat{Reachable: true, Answered: true}
 }
 
 // Every field an unattended run's Config carries, asserted in one place — which is the whole point
@@ -78,9 +89,13 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		ResponseReserve: 0.35,
 		EffortDialect:   "reasoning",
 	}
-	dialects := &stubDialect{dialect: "openai"}
 	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
-	probed := false
+	beats := &stubBeat{beat: heartbeat.Beat{
+		Reachable:     true,
+		Answered:      true,
+		TotalSlots:    9,
+		EffortSupport: apiprovider.EffortSupport{Dialect: apiprovider.EffortDialectOpenAI},
+	}}
 	// The shipped catalogue is empty since v0.20.0 (ADR 0071), so the manual `mechanisms:` list a
 	// host can validate and hand over is the empty one.
 	var manual []apogee.MechanismID
@@ -95,12 +110,8 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		model:     "overlay-model",
 		mode:      domain.ModeAuto,
 		skills:    provider,
-		width: func(context.Context, string, string, string) int {
-			probed = true
-			return 9
-		},
-		dialect:  dialects.discover,
-		recordID: "2026-08-24T09-00-00-firing",
+		beat:      beats.discover,
+		recordID:  "2026-08-24T09-00-00-firing",
 	})
 	if err != nil {
 		t.Fatalf("firingConfig: %v", err)
@@ -213,19 +224,21 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if cfg.ParallelAgents != entry.ParallelAgents {
 		t.Errorf("Config.ParallelAgents = %d; want the entry's pin %d", cfg.ParallelAgents, entry.ParallelAgents)
 	}
-	if probed {
-		t.Error("the width source was consulted behind a pin; ResolveParallelAgents could never have used the answer")
+	if beats.calls != 1 {
+		t.Errorf("the composer took %d beats; want exactly one. The observation is unconditional — the "+
+			"round trip is the liveness gate an unattended Driver refuses a Firing on, so the pins "+
+			"decide the VALUES rather than whether the server is looked at — and it is ONE, because "+
+			"two probes of one server at one moment can report a state it was never in", beats.calls)
 	}
 
 	// And the effort wire shape, which reaches the run the same way the bounds do: a Driver that
 	// never rebinds would otherwise send the zero dialect — the historical chat_template_kwargs
 	// shape — whatever the bound server actually reads (2026-08-25 audit C-03, ADR 0031 parity).
-	// The entry FORCES one here, so it is the answer and the beat is never taken.
+	// The entry FORCES one here, so it is the answer whatever the beat above saw.
 	if cfg.EffortDialect != domain.EffortDialectReasoning {
-		t.Errorf("Config.EffortDialect = %q; want the entry's forced %q", cfg.EffortDialect, domain.EffortDialectReasoning)
-	}
-	if dialects.called {
-		t.Error("the dialect source was consulted behind a forced effort-dialect:; the round trip could only re-ask a settled question")
+		t.Errorf("Config.EffortDialect = %q; want the entry's forced %q — the beat observed %q and a "+
+			"forced dialect outranks it", cfg.EffortDialect, domain.EffortDialectReasoning,
+			apiprovider.EffortDialectOpenAI)
 	}
 }
 
@@ -262,6 +275,7 @@ func TestFiringConfigCarriesTheFloorGuardKeys(t *testing.T) {
 		confiner: fenceableHost,
 		mode:     domain.ModeAuto,
 		skills:   provider,
+		beat:     firingBeat,
 		recordID: "2026-09-03T09-00-00-firing",
 	})
 	if err != nil {
@@ -306,6 +320,7 @@ func TestFiringConfigMountsNoEscapingSkillRoot(t *testing.T) {
 		confiner: fenceableHost,
 		mode:     domain.ModePlan,
 		skills:   provider,
+		beat:     firingBeat,
 		recordID: "2026-08-24T13-00-00-firing",
 	})
 	if err != nil {
@@ -327,19 +342,23 @@ func TestFiringConfigMountsNoEscapingSkillRoot(t *testing.T) {
 	}
 }
 
-// The four optional seams, each nil, each taking the documented default: a fresh key resolver asks
+// The three optional seams, each nil, each taking the documented default: a fresh key resolver asks
 // the entry's own source, a fresh catalog is built from the roots, and the width and the effort
-// dialect both come from the one-shot discovery probe. Those defaults are what headless and the
-// daemon rely on — they have no longer-lived facility to share — so a change of default is a change
-// to two Drivers at once.
+// dialect both come off the one-shot beat discoverBeat takes. Those defaults are what headless and
+// the daemon rely on — they have no longer-lived facility to share — so a change of default is a
+// change to two Drivers at once.
 func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	roots := firingRoots(t)
 
-	slots := &stubSlots{slots: 4}
-	dialects := &stubDialect{dialect: "openai"}
-	prevSlots, prevDialect := discoverSlots, discoverDialect
-	discoverSlots, discoverDialect = slots.discover, dialects.discover
-	t.Cleanup(func() { discoverSlots, discoverDialect = prevSlots, prevDialect })
+	beats := &stubBeat{beat: heartbeat.Beat{
+		Reachable:     true,
+		Answered:      true,
+		TotalSlots:    4,
+		EffortSupport: apiprovider.EffortSupport{Dialect: apiprovider.EffortDialectOpenAI},
+	}}
+	prev := discoverBeat
+	discoverBeat = beats.discover
+	t.Cleanup(func() { discoverBeat = prev })
 
 	entry := config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", APIKey: "sk-from-the-entry", Model: "entry-model"}
 	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
@@ -369,17 +388,15 @@ func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	if want := filepath.Join(roots.config, "skills"); !slices.Contains(cfg.ExtraReadRoots(), want) {
 		t.Errorf("Config.ExtraReadRoots() = %v; want the home library %q among them", cfg.ExtraReadRoots(), want)
 	}
-	if !slots.called {
-		t.Error("the discovery probe never ran; an unpinned entry has no other way to learn how wide it may fan out")
+	if !beats.called {
+		t.Error("the discovery beat never ran; a nil beat seam must take discoverBeat, and an unpinned " +
+			"entry has no other way to learn how wide it may fan out or which wire its server reads")
 	}
 	if cfg.ParallelAgents != 4 {
-		t.Errorf("Config.ParallelAgents = %d; want the 4 the probe reported", cfg.ParallelAgents)
-	}
-	if !dialects.called {
-		t.Error("the dialect probe never ran; an entry that forces no effort-dialect: has no other way to learn the server's shape")
+		t.Errorf("Config.ParallelAgents = %d; want the 4 the beat reported", cfg.ParallelAgents)
 	}
 	if cfg.EffortDialect != domain.EffortDialectOpenAI {
-		t.Errorf("Config.EffortDialect = %q; want the %q the probe observed — an unattended run must reach the wire a session reaches",
+		t.Errorf("Config.EffortDialect = %q; want the %q the beat observed — an unattended run must reach the wire a session reaches",
 			cfg.EffortDialect, domain.EffortDialectOpenAI)
 	}
 }
@@ -412,6 +429,7 @@ func TestFiringConfigCarriesTheShippedSkillGate(t *testing.T) {
 				roots:    firingRoots(t),
 				confiner: fenceableHost,
 				mode:     domain.ModePlan,
+				beat:     firingBeat,
 				recordID: "2026-08-24T14-00-00-firing",
 			})
 			if err != nil {
@@ -464,6 +482,7 @@ func TestFiringConfigLeavesTheDriverSeamsNil(t *testing.T) {
 				roots:    firingRoots(t),
 				confiner: fenceableHost,
 				mode:     domain.ModePlan,
+				beat:     firingBeat,
 				recordID: "2026-08-24T11-00-00-firing",
 			})
 			if err != nil {
@@ -538,6 +557,7 @@ func TestFiringOrientationNamesBothSeatsUnderSeatChoice(t *testing.T) {
 		roots:    firingRoots(t),
 		confiner: fenceableHost,
 		mode:     domain.ModePlan,
+		beat:     firingBeat,
 		recordID: "2026-09-02T10-00-00-firing",
 	})
 	if err != nil {
@@ -586,6 +606,7 @@ func TestFiringConfigNamesNoScratchDirWithoutARoot(t *testing.T) {
 		roots:    roots,
 		confiner: fenceableHost,
 		mode:     domain.ModePlan,
+		beat:     firingBeat,
 		recordID: "2026-08-24T12-00-00-firing",
 	})
 	if err != nil {
@@ -597,16 +618,24 @@ func TestFiringConfigNamesNoScratchDirWithoutARoot(t *testing.T) {
 	}
 }
 
-// stubBeat is the Sub-agent server's observation a test dictates, plus the record of whether it was
-// taken at all — a run that names no `sub-agents-server:` must ask nothing, since a third round trip
-// per Firing for a question nobody posed is exactly what the gate exists to avoid.
+// stubBeat is an observation a test dictates, plus the record of whether it was taken at all. It
+// serves both of the composer's beat seams — the Firing's own server (discoverBeat) and the
+// Sub-agent server (discoverDelegationBeat) — because they have one signature and one contract; a
+// test says which by the seam it swaps. The `called` half carries the two opposite claims: the
+// primary beat is taken on EVERY Firing, whatever the entry pins, while a run that names no
+// `sub-agents-server:` must ask nothing, since a round trip for a question nobody posed is exactly
+// what that gate exists to avoid.
 type stubBeat struct {
-	called bool
-	beat   heartbeat.Beat
+	called    bool
+	calls     int
+	endpoints []string
+	beat      heartbeat.Beat
 }
 
-func (s *stubBeat) discover(context.Context, string, string, string) heartbeat.Beat {
+func (s *stubBeat) discover(_ context.Context, endpoint, _, _ string) heartbeat.Beat {
 	s.called = true
+	s.calls++
+	s.endpoints = append(s.endpoints, endpoint)
 	return s.beat
 }
 
@@ -712,6 +741,7 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 				roots:    firingRoots(t),
 				confiner: fenceableHost,
 				mode:     domain.ModePlan,
+				beat:     firingBeat,
 				recordID: "2026-09-02T09-00-00-firing",
 			})
 			if err != nil {
@@ -766,5 +796,126 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 					"map must not leave its children inheriting the parent's catalogue", got, tc.wantArmed)
 			}
 		})
+	}
+}
+
+// What the composition observed of the run's OWN server rides out on the routing, which is the only
+// way an unattended Driver can learn it without spending a second round trip: the Firing takes one
+// beat, and the Driver that must refuse a run rather than send a prompt into a dead endpoint reads
+// the verdict off the value it was handed anyway.
+//
+// The failure text travels whole rather than being reduced to the flag, because a Driver's refusal
+// has to SAY why — "the server is unreachable" with nothing after it is the report a human cannot
+// act on. Reachable is `Failure == ""` and nothing else, so an answered-but-unusable server (a 401,
+// a 404) reads false here while Beat.Answered still says a box replied.
+func TestFiringConfigCarriesItsPrimaryObservation(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		beat          heartbeat.Beat
+		wantReachable bool
+	}{
+		{
+			name:          "a server that answered its model list",
+			beat:          heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 3},
+			wantReachable: true,
+		},
+		{
+			name: "a server nothing is listening on",
+			beat: heartbeat.Beat{Failure: "apogee: model discovery: dial tcp: connection refused"},
+		},
+		{
+			name: "a server that answered, unusably",
+			beat: heartbeat.Beat{Failure: "apogee: model discovery: upstream HTTP 401", Answered: true},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			beats := &stubBeat{beat: tc.beat}
+			_, routing, _, err := firingConfig(context.Background(), firingInputs{
+				opts:     config.Options{Bypass: true},
+				entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+				apiKey:   "sk-test",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
+				beat:     beats.discover,
+				recordID: "2026-09-04T09-00-00-firing",
+			})
+			if err != nil {
+				t.Fatalf("firingConfig: %v", err)
+			}
+
+			if routing.Reachable != tc.wantReachable {
+				t.Errorf("routing.Reachable = %v, want %v — it is Beat.Failure == \"\" and nothing else",
+					routing.Reachable, tc.wantReachable)
+			}
+			if routing.Beat.Failure != tc.beat.Failure {
+				t.Errorf("routing.Beat.Failure = %q, want the observation's own %q; a Driver refusing a "+
+					"Firing has to say why, and the sentence is the only thing that can",
+					routing.Beat.Failure, tc.beat.Failure)
+			}
+			if routing.Beat.Answered != tc.beat.Answered {
+				t.Errorf("routing.Beat.Answered = %v, want %v — the weaker liveness question travels "+
+					"whole, so a Driver can tell a declining box from an absent one",
+					routing.Beat.Answered, tc.beat.Answered)
+			}
+		})
+	}
+}
+
+// The two beat seams observe two different BOXES and must never be collapsed into one. A Firing's
+// own beat asks the server it runs on; discoverDelegationBeat asks the `sub-agents-server:` entry,
+// which has its own endpoint, model and key. Sharing the primary's beat would have
+// resolveDelegationTarget resolve a target's window, width and bound model against the wrong
+// machine — routing every delegation to a grunt server nobody observed instead of degrading to the
+// run's own Upstream with a notice.
+func TestFiringConfigBeatsTheSubAgentServerOnItsOwnEndpoint(t *testing.T) {
+	grunt := config.ServerEntry{
+		Name:     "grunt",
+		Endpoint: "http://grunt.example/v1",
+		Model:    "grunt-model",
+		APIKey:   "sk-grunt",
+	}
+	primary := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}
+	delegation := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 2}}
+
+	prev := discoverDelegationBeat
+	discoverDelegationBeat = delegation.discover
+	t.Cleanup(func() { discoverDelegationBeat = prev })
+
+	_, routing, _, err := firingConfig(context.Background(), firingInputs{
+		opts: config.Options{
+			Bypass:          true,
+			Servers:         []config.ServerEntry{grunt},
+			SubAgentsServer: "grunt",
+		},
+		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+		apiKey:   "sk-test",
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		beat:     primary.discover,
+		recordID: "2026-09-04T10-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+
+	if got := primary.endpoints; !slices.Equal(got, []string{"http://box.example/v1"}) {
+		t.Errorf("the primary seam saw %v; want exactly the run's own endpoint", got)
+	}
+	if got := delegation.endpoints; !slices.Equal(got, []string{grunt.Endpoint}) {
+		t.Errorf("the Sub-agent seam saw %v; want exactly the named entry's own %q — a shared beat "+
+			"would resolve the target against the wrong box", got, grunt.Endpoint)
+	}
+	if routing.target == nil {
+		t.Fatal("the composer resolved no target; the fixture no longer sets up a routed run")
+	}
+	// And the observation on the routing is the PRIMARY's, never the one the target was resolved from.
+	if routing.Beat.TotalSlots != 1 {
+		t.Errorf("routing.Beat reports %d slots; want the primary's 1 — the Sub-agent server's beat "+
+			"answered %d and must not be what a Driver gates the run on",
+			routing.Beat.TotalSlots, delegation.beat.TotalSlots)
 	}
 }

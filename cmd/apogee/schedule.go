@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
@@ -133,16 +134,24 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		confiner:  w.confiner,
 		mode:      f.Mode,
 		skills:    w.skills,
-		// The width the session's bound server already resolves to, handed over as the seam the
-		// composer probes through, so no Firing spends a round trip on a number this session is
-		// holding (design call 4). The endpoint, model and key it is offered are this Firing's own
-		// and go unread: the answer is about the server the SESSION is on, which is the same one.
-		width: func(context.Context, string, string, string) int { return w.width() },
-		// And the effort wire shape it already observes on its own beat, handed over for the same
-		// reason and read the same way: the session and its Firing are on one server, so the
-		// dialect it saw is the dialect this run must speak (ADR 0060).
-		dialect: func(context.Context, string, string, string) provider.EffortDialect {
-			return w.live.observedDialect()
+		// The session's OWN observation of the server it is bound to, handed over as the seam the
+		// composer would otherwise probe through, so no Firing raised here spends a round trip on
+		// facts this session is already holding (design call 4). The endpoint, model and key it is
+		// offered are this Firing's own and go unread: the answers are about the server the SESSION
+		// is on, which is the same one.
+		//
+		// It carries the width this session resolves and the effort wire shape its own heartbeat
+		// observed (ADR 0060) — the session and its Firing are on one server, so the dialect it saw
+		// is the dialect this run must speak. The failure text is empty and the two liveness flags
+		// are set for the same reason the values are trusted at all: this session is talking to that
+		// server, which is a stronger observation than a fresh probe would be.
+		beat: func(context.Context, string, string, string) heartbeat.Beat {
+			return heartbeat.Beat{
+				Reachable:     true,
+				Answered:      true,
+				TotalSlots:    w.width(),
+				EffortSupport: provider.EffortSupport{Dialect: w.live.observedDialect()},
+			}
 		},
 		recordID: recordID,
 	})

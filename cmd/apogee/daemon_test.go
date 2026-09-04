@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -75,10 +76,10 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 		changes:   make(chan struct{}, 1),
 	}
 
-	prevRunner, prevSlots, prevConfiner := runOnce, discoverSlots, newConfiner
+	prevRunner, prevBeat, prevConfiner := runOnce, discoverBeat, newConfiner
 	prevLock, prevClock, prevWatch := acquireDaemonLock, daemonClock, watchSchedules
 	runOnce = h.runner.once
-	discoverSlots = func(context.Context, string, string, string) int { return 0 }
+	discoverBeat = func(context.Context, string, string, string) heartbeat.Beat { return heartbeat.Beat{} }
 	newConfiner = func() apogee.Confiner { return fenceableHost }
 	acquireDaemonLock = func(path string) (func(), error) {
 		h.locked = path
@@ -90,7 +91,7 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 		return h.changes, func() { h.stopped = true }
 	}
 	t.Cleanup(func() {
-		runOnce, discoverSlots, newConfiner = prevRunner, prevSlots, prevConfiner
+		runOnce, discoverBeat, newConfiner = prevRunner, prevBeat, prevConfiner
 		acquireDaemonLock, daemonClock, watchSchedules = prevLock, prevClock, prevWatch
 	})
 	return h

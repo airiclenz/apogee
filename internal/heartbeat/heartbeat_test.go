@@ -363,3 +363,74 @@ func TestBeatMarksA429Throttled(t *testing.T) {
 		})
 	}
 }
+
+// Answered is the liveness half of an observation, and it is deliberately NOT Reachable: a box that
+// answers 404 on its model list, or 429, is present and declining, while a refused dial is nothing
+// at all. The unattended Drivers refuse a Firing on this field rather than on a status code, which
+// is why a rate-limited or unauthenticated server must still read as answered — refusing a scheduled
+// run over a 429 would turn a busy minute into a silent gap in the record.
+func TestBeatAnsweredSeparatesADeadBoxFromAnUnusableReply(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a refused dial answered nothing", func(t *testing.T) {
+		t.Parallel()
+
+		srv := discoveryServer(t, `{"data":[{"id":"model-a"}]}`, "")
+		endpoint := srv.URL
+		srv.Close() // nothing listens on that port any more
+
+		beat := NewMonitor(endpoint, "", "").Beat(context.Background())
+
+		if beat.Answered {
+			t.Error("Answered = true against a closed listener; nothing replied, so the Driver that " +
+				"gates on this would send a prompt into a dead endpoint")
+		}
+		if beat.Reachable {
+			t.Error("Reachable = true against a closed listener")
+		}
+	})
+
+	for _, tc := range []struct {
+		name   string
+		status int
+	}{
+		{name: "rate limited", status: http.StatusTooManyRequests},
+		{name: "not found", status: http.StatusNotFound},
+		{name: "unauthorized", status: http.StatusUnauthorized},
+		{name: "server error", status: http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			t.Cleanup(srv.Close)
+
+			beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
+
+			if !beat.Answered {
+				t.Errorf("Answered = false on HTTP %d; the server replied, which is the whole "+
+					"distinction this field carries", tc.status)
+			}
+			if beat.Reachable {
+				t.Errorf("Reachable = true on HTTP %d; no usable model list came back", tc.status)
+			}
+			if beat.Failure == "" {
+				t.Errorf("Failure is empty on HTTP %d; an answered-but-unusable beat still explains itself", tc.status)
+			}
+		})
+	}
+
+	t.Run("a usable model list answered", func(t *testing.T) {
+		t.Parallel()
+
+		srv := discoveryServer(t, `{"data":[{"id":"model-a"}]}`, "")
+
+		beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
+
+		if !beat.Answered || !beat.Reachable {
+			t.Errorf("beat = %+v; a server that served its model list is both answered and reachable", beat)
+		}
+	})
+}
