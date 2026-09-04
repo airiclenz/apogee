@@ -275,6 +275,117 @@ point is a **minor** bump, not a breaking change.
   `CHANGELOG.md`, `docs/adr/`, `docs/reviews/` and archived plans are historical and stay — the same
   precedent the 2026-08-13 `TODO.md` rename set.
 
+- The context-files session notice is composed once, in a new leaf package `internal/notice`, so
+  every Driver words one event one way: `ContextFileNotices` returns the loaded line, one notice
+  per unreadable file and the standing-content warning, each flagged `Anomaly` where it reports
+  trouble, and nothing at all when a workspace has no context files. The TUI's `formatBytes` moved
+  to `internal/format` as exported `Bytes` beside the token ladder, and the TUI now escape-strips
+  every composed notice rather than the file name and error text alone.
+
+- **`run.Result` carries the context-files report.** A Firing's `Result` gains
+  `ContextFiles domain.ContextFilesReport` — the notes for every workspace context file the
+  session loaded or could not read, plus what the standing system content costs against its
+  Budget share. It is measured once, at session construction (the boundary an interactive
+  session measures at, and the only point the Agent is guaranteed idle), and rides out on
+  every `Result` a constructed session produced — the submit-refusal exit included, so a run
+  that never sent a byte still reports what it loaded. The two exits with no Agent to ask (a
+  mode a Firing may not run, an Agent that would not construct) still return the zero
+  `Result`. The field is additive and renders nothing: an unattended Driver now has the same
+  facts an interactive session shows, and `schedule.Outcome` is deliberately unchanged.
+  Headless's exit-2 gate reads `Turns == 0`, and its comment now says so rather than naming
+  a zero `Result` that is no longer the marker.
+
+- **Headless reports its context files.** An `apogee headless` run now prints on stderr the same
+  three sentences a session shows in its transcript: the line naming every workspace context file
+  that loaded and its size, one line per file that is present but unreadable, and the advisory
+  warning when the standing system content has outgrown its share of the Budget. All of them
+  print, anomaly or not — an unattended run has no transcript to scroll back through. They are
+  composed by the shared `internal/notice` composer, so the two Drivers cannot drift, and they
+  print even for a run refused before submit, whose context files were already read. Stdout still
+  carries the answer and nothing else.
+
+- `apogee headless` now pre-warms the Windows confinement label walk on a confined Auto run, behind the same gate the interactive launch uses, so an unattended run's first confined command no longer stalls while the workspace tree is labelled. Off Windows the pre-warm is an empty no-op and the command's output is unchanged.
+
+- `apogee headless` now registers `--server` and `--bypass`, resolved exactly as the interactive
+  command resolves them, so an unattended run can name the `servers:` entry it starts on and run
+  with the lab Mechanisms off. The startup refusal on an unresolvable choice now offers
+  `--server <name>` instead of `APOGEE_SERVER=<name>`.
+
+- **One observation per Firing, carried on the routing.** An unattended run used to probe the server
+  it is bound to twice — once for the fan-out width, once for the thinking-effort wire dialect — and
+  to skip either probe when the bound `servers:` entry pinned that value. Both are now ONE beat
+  (`discoverBeat`), taken unconditionally: the pins still decide the values, but the round trip
+  happens, because it is the liveness observation the headless and daemon Drivers will refuse a
+  Firing on rather than send a prompt into an endpoint nothing is listening on. The observation
+  rides out of the composer on `firingRouting` (`Beat`, `Reachable`), so no Driver spends a second
+  round trip to learn it, and the Sub-agent server keeps its own separate beat — it is a different
+  box with a different key. A Firing raised inside a live session still spends nothing: the session
+  hands over the width and dialect it is already holding. `heartbeat.Beat` gains `Answered`, true
+  whenever the server returned any HTTP response (a 401, a 404, a 429 included) and false only when
+  nothing answered at all — a transport-level failure, which `internal/provider` now labels
+  (`provider.TransportError`) instead of leaving callers to string-match a sentence.
+
+- **Headless refuses a server that is not there.** `apogee headless` now reads the one beat its
+  composition already takes (`firingRouting.Beat`) and refuses the run BEFORE the prompt is
+  submitted when that beat answered nothing at all — a refused dial, a timeout, a DNS or TLS
+  failure. The refusal is the TUI's own wording, `cannot send — server offline (<endpoint>)` with
+  `: <failure>` appended when the beat reported one, and the existing never-started exit code
+  (`2`), so no session record is written and no tokens are spent on an endpoint that is not
+  listening. A server that answered ANYTHING keeps today's proceed-and-degrade: a 401, a 404, a
+  429 on the model list and a completions-only endpoint that advertises no list at all all still
+  run, because those are answers this Driver cannot judge and a throttled probe is silence rather
+  than a verdict.
+
+- The daemon refuses a firing whose bound server did not answer at all — a refused connection, a timeout, a DNS or TLS failure — before the prompt is sent, so no tokens are spent and no session record is written. It is reported as a failed firing on the daemon log, naming the endpoint and the failure, in the TUI's own wording. A server that answered anything, including a 429 or a rejected key, still runs and degrades as before.
+
+- **The "model not advertised" line reaches the unattended Drivers.** A Firing's composition now
+  composes `hintNotice` out of the one beat it already takes — the grade discovery reached the
+  configured id by, and the window that beat observed — and appends it to the notices it returns, so
+  a headless run puts it on stderr and the daemon logs it exactly as a session prints it at its
+  rebind seam (ADR 0031's Driver parity). The window clause is the pin or nothing: the rebind is
+  still handed an observed window of `0`, so an unpinned Firing says `(context window unknown —
+  Budget and auto-compaction inactive)` and one pinning `context-window:` names the pin, while
+  nothing changes about what a Firing actually binds.
+
+- The daemon log now narrates each firing: the notices its configuration resolution produced (a model the bound server does not advertise, a degraded rebind) as the firing starts, and afterwards only what the run found wrong with the workspace's context files — a file present but unreadable, or standing content past its Budget share. The plain list of what loaded stays off the log; the session record still carries the run.
+
+- **The daemon says what an `auto` firing runs under, once.** A Firing whose mode is `auto` under
+  `confine-to-workspace: false` now logs the launch path's own unconfined-Auto warning — the one
+  blanket loosen in the system (ADR 0012) — through the daemon log, latched to once per daemon
+  process however many `auto` Firings follow: the sentence is about the host's posture, which no
+  tick changes. A confined `auto` Firing on a backend that can fence now also pre-warms the Windows
+  label walk for its workspace behind the same gate the launch and headless paths use, latched per
+  workspace path so two schedules on two trees each warm theirs and a second Firing of one tree
+  warms nothing. Off Windows the pre-warm is an empty no-op, so no other host's log changes.
+
+- **A Firing reports the files it wrote.** `run.Result` gains `Wrote []string`: every path the run's
+  writes touched, across the whole run and in the order each path was first written, with no path
+  repeated — deletes and move sources included, since the write funnel journals those too. It is
+  taken after the loop returns, faulted runs included, because a faulted Auto run is exactly the one
+  whose writes a human needs to see. Behind it sit two new paths-only reads, `undo.Journal.Wrote()`
+  and `Agent.WroteFiles()`: a REPORT, never a handle — no generation and no `undo.Change`, so nothing
+  can revert from it — and unlike `/undo`'s preview it reads no file and hashes nothing, so an
+  unattended run pays no filesystem cost for it. The journal stays memory-only; no verb is added, and
+  `Journal.Preview` is untouched.
+
+- Headless and the daemon now report what a run **changed on disk**: a `changed — <n> file(s) this run:` header followed by one indented path per file, in the order the run first touched each. Headless prints the block on stderr (the stdout contract is still the answer alone); the daemon logs the same block after the firing's outcome. Deletions and the source side of a move ride in the list, which is why the header says *changed* rather than *wrote*. It is a record and never an offer — no revert is available on either Driver, since the undo journal lives only as long as the process.
+
+- Tests: `Store.Prune`'s partial-failure contract is now covered — a delete that fails mid-sweep returns the first error while the remaining expired records are still removed.
+
+- Fixed: `apogee headless --no-save` now applies the `sessions:` retention policy. The startup sweep is handed the sessions store unconditionally, so a host driven only headlessly — the case the sweep was placed on this path to cover — keeps its store within `max-age` / `max-count`; `--no-save` still writes no record of its own, and a run against a machine with no sessions directory still creates none.
+
+- An `env-allowlist:` set on an `sse` or `streamable-http` MCP server now produces a startup notice naming that entry: the key is read by the stdio launch alone, so on a remote transport it does nothing. It is a notice, never a refusal — the server still connects. `env-allowlist: []` counts as a set key; an entry that omits the key is silent as before.
+
+- The issue register drops the entries this plan delivered. The `Driver-parity gaps` epic
+  (`apogee-kk0`) closes with its children `apogee-kk0.1`–`apogee-kk0.6` and `apogee-kk0.8`, the
+  `Issues-register sweep — residue (2026-09-02)` epic (`apogee-1ov`) closes with
+  `apogee-1ov.1`–`apogee-1ov.3`, and `apogee-4w7` (`TestReportKindsResolveDistinctly` does not walk
+  `reportKind.follows`) closes — each with a `--reason` naming the plan and the items that delivered
+  it. **An Auto Firing has no undo surface** (`apogee-kk0.7`) is the one entry that stays open: its
+  visibility half shipped with the written-files report, but neither Driver offers to revert and the
+  journal stays memory-only, so the bead is rewritten to the revert half alone, detached from the
+  closing epic and parked at P3 as top-level work.
+
 ### Fixed
 
 - **A restore from an empty session payload no longer half-swaps a live session.** `restoreState`
