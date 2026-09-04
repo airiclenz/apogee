@@ -756,6 +756,17 @@ kept whatever the rules say about it. An edit through `/settings` therefore take
 start rather than in the session you are in. Config-file only (no flag or environment variable);
 what a session record holds and how one is resumed is on the [sessions page](sessions.md).
 
+**Naming a session, and naming a delegation — `auto-title:`.** A root key of its own, beside the
+block rather than inside it: `auto-title:` is a bool that defaults to **true** and is config-file
+only (no flag, no environment variable). It does two jobs. A **new session** names itself from its
+first prompt — apogee asks the model for a short title in one call off to the side of the
+conversation — and a **delegation the model spawned without naming** gets a short name the same way,
+asked of the server that child is itself running on while it works. Set `auto-title: false` and both
+go quiet: the session is titled from its first user message and an unnamed delegation keeps reading
+as the first line of its task, which is what apogee did before the key existed. The whole fallback
+ladder — what a failed or unusable answer falls back to, what `/rename` does later, and where a
+generated delegation name is shown — is on the [sessions page](sessions.md).
+
 ## The servers you run models on
 
 The `servers:` list is the **single definition** of what apogee can talk to — one
@@ -787,6 +798,9 @@ text saying what that server is **for**, which the `/sub-agents-server` picker
 shows and which the model reads when you let it pick the seat
 ([below](#letting-the-model-pick-the-seat)) — and `llama-launcher`,
 which lets apogee start, switch and stop that server itself — [below](#local-servers--llama-launcher).
+`bypass` and `mechanisms` are optional too, and say what *delegations to* that
+entry run as rather than how the server itself behaves — further down this
+section.
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
 runs them concurrently — as many at a time as that server's cap allows. Unset, the cap
@@ -864,6 +878,41 @@ there:
 
 Adding `effort-dialect:` to that entry — the same key, the same
 values as above — is the fix.
+
+**And an entry can say what delegations to it run as.** Two more keys are legal on any
+`servers:` entry — `bypass:` and `mechanisms:`, in the root keys' shapes verbatim — and
+together they are that entry's **delegation posture**: not how the server behaves, but what a
+sub-agent routed there runs with. They apply while that entry is the `sub-agents-server:` target
+and never to the session itself, so where the parent happens to be running has no bearing on what
+its children run as. Each one **replaces whole** what the child would otherwise have inherited;
+neither merges.
+
+```yaml
+# ~/.apogee/config.yaml
+servers:
+  - name: rented-box
+    endpoint: https://llm.example.com
+    bypass: false      # delegations there run with the lab surface live …
+    mechanisms:        # … and this map is their entire catalogue
+      some_bench_row: true
+```
+
+An **absent** `bypass:` leaves the child inheriting the parent's *live* flag at spawn — the rule
+delegations have always followed, and the reason the key is written as it is: an explicit
+`bypass: false` is a posture in its own right, not the same thing as leaving the key out. A
+**present** `mechanisms:` map is the child's **entire catalogue**, with no per-ID merge, so a map of
+nothing but `false` values arms nothing at all while leaving the key out is what inherits the
+parent's set. Either way the child keeps its Floor guards: those are engine behaviour rather than
+catalogue rows. The map's IDs get the same validation the session's own `mechanisms:` block gets, so
+one this build's catalogue does not carry is a **start-up error**, and it names the entry the map
+came from:
+
+    apogee: unknown mechanism "some_bench_rwo"; known: … — in the `sub-agents:` server "rented-box"
+
+Both keys are legal on **any** entry by design, the way `context-window:` is — which entry takes the
+delegations is the root `sub-agents-server:` key's answer, and that answer moves inside a running
+session. A posture written on an entry nothing currently delegates to is therefore a description of
+what would happen there, not a defect.
 
 **A config that still flags an entry is offered the move.** Earlier builds marked
 the delegation target with a `sub-agents:` flag on the entry itself. Nothing reads

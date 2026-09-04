@@ -541,7 +541,11 @@ paragraph (448)", re-located by heading text after item 9 lands.
 
 ---
 
-## 11. `auto-title:` and the two delegation-posture entry keys
+## 11. `auto-title:` and the two delegation-posture entry keys — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the `bypass:`/`mechanisms:` prose was added as a bolded lead paragraph in the run of them, immediately after the `sub-agents-server:` effort-dialect paragraph (the plan's BASE line 786).
+
+NOTES (2026-09-04): unlike the earlier reverted attempt, the entry-key inventory paragraph now also names `bypass` and `mechanisms` with a pointer down the section — the item's Acceptance requires the inventory to name them, so leaving that list untouched was reverted along with the rest.
 
 **What.** Closes `apogee-t57.3` and `apogee-t57.4`. (a) `auto-title:` (bool, default true, file-only,
 `config.go:732-735`) is described in `sessions.md:20-42` and `headless.md:50-52` but absent from the
