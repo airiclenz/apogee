@@ -697,7 +697,11 @@ already 1 at BASE so the new section must take it to ≥ 2 — or scope each cou
 
 ---
 
-## 15. How a diff and a near-miss suggestion read
+## 15. How a diff and a near-miss suggestion read — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the new section is headed `## Reading a tool's answer — diffs and near misses` and lands immediately after `## Approving a call — how far an approval reaches`, before `## Suggested skills`; the plan's acceptance pins only the `^## Reading a tool` prefix.
+NOTES (2026-09-04): the block list is written as the RULE the regression guard prescribes (every block whose tool recorded or printed regions) with the six tools named as its instances, rather than as a closed list.
+NOTES (2026-09-04): `docs/layout/split-diff-layout.md`'s own "Scope:" line still says "the five diff-bodied blocks" and omits `write_file`, which has attached Edit regions at apply time since ADR 0052 — a pre-existing inaccuracy in the canon this section links, untouched here because the item's Files list is `docs/manual/commands.md` alone.
 
 **What.** Closes `apogee-t57.8` and `apogee-t57.9`. (a) `docs/manual/commands.md` contains no occurrence of
 "diff", though five blocks render one — `edit_existing_file`, `single_find_and_replace`,

@@ -142,6 +142,50 @@ it applies:
 Note: "Always allow" covers every tool of MCP server "github" for this session
 ```
 
+## Reading a tool's answer — diffs and near misses
+
+Some tool blocks answer with a **diff**, and which ones do is a rule rather than a list: every block
+whose tool recorded or printed the regions it changed paints one. That is the four writing tools —
+`write_file`, `edit_existing_file`, `single_find_and_replace` and `multi_find_and_replace`, which
+attach those regions as they apply the change — plus `view_diff` and `git_diff_range`, which cut
+them out of the diff they printed. An overwrite or a fresh create through `write_file` therefore
+reads exactly the way an edit does.
+
+The same regions paint **two ways**. Given room they go side by side: before on the left with its
+own line numbers, after on the right with its own. Below that room they stack instead, each region's
+removed lines above its added ones in a single column. The information is identical — the same
+lines, the same numbers, the same markers — and only the arrangement differs. The room is measured
+per pane: the two panes appear when each one can still give the code about 40 columns after its
+number gutter and its marker, which in practice means a terminal around 100 columns wide. The
+question is asked again at every paint, of *this* body at *this* width — a diff deep in a long file
+spends more of the row on its line numbers than a diff near the top of a short one — so two diffs on
+the same screen can genuinely read differently, and widening or narrowing the terminal can flip a
+block from one reading to the other under you. What never happens is a mixture: a body paints whole
+in one reading or whole in the other, never half of each.
+
+Removed rows wear `-` on a red band, added rows `+` on a turquoise band. Turquoise rather than green
+is deliberate — paired with red it survives red-green-weak vision — and in any case the **marker is
+what says which way a line went**, never the colour alone; the bands are there to find the change
+quickly, not to carry it. A line wider than its pane wraps onto further rows rather than being
+clipped, so nothing is hidden off the right edge, and a continuation row carries no number and no
+marker, which is how you tell it from a line of its own. The full layout — the alignment of the two
+sides, the `⋯` rule between regions that do not touch, the per-file headers a multi-file diff paints
+— is specified in [`docs/layout/split-diff-layout.md`](../layout/split-diff-layout.md).
+
+**A near miss gets a suggestion.** When `read_file`, `list_dir`, `grep` or `find_files` is handed a
+path that is not there, the refusal does not stop at saying so: it adds a `did you mean:` clause
+naming up to five entries of the named parent directory whose names begin with the name that is
+missing. Matching ignores case, the suggestions come back sorted, and each is spelled the way the
+call spelled the path, so one can be handed straight back as the next call:
+
+```
+file not found: docs/adr/0025 — did you mean: docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md
+```
+
+A refusal from the workspace fence — a path outside the roots apogee may read — never gains that
+clause. A suggestion there would read as absence, as though the file were simply not present, and
+hide the fact that the answer was *not allowed* rather than *not found*.
+
 ## Suggested skills
 
 A library you cannot recall is a library you do not use, so apogee ranks your skills against the
