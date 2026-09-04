@@ -516,7 +516,10 @@ func e2eHome(t *testing.T, stub *stubllm.Server) string {
 func e2eWorkspace(t *testing.T) string {
 	t.Helper()
 
-	ws := t.TempDir()
+	// Symlink-RESOLVED: the run announces the workspace by the path it resolved to, so a driven
+	// test that asserts on the announced spelling must hold the same one. On macOS t.TempDir()
+	// sits under /var, a symlink to /private/var, and the two differ.
+	ws := readFenceRealDir(t)
 	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("hello\n"), 0o600); err != nil {
 		t.Fatalf("seed the e2e workspace: %v", err)
 	}

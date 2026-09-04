@@ -36,7 +36,9 @@ func TestRegistryWithMCPThreadsPresenter(t *testing.T) {
 // skill's bundled files in one session and not in another, for a reason nothing on screen explains.
 func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
 	t.Parallel()
-	extra := t.TempDir()
+	// Resolved: a root that is not its own real path is skipped at the mount, so an
+	// unresolved TMPDIR would fail this for the fence's reason rather than the MCP build's.
+	extra := readFenceRealDir(t)
 	if err := os.WriteFile(filepath.Join(extra, "SKILL.md"), []byte("bundled bytes"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}

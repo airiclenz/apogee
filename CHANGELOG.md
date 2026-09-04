@@ -388,6 +388,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The extra-read-root tests no longer hand the mount an unresolved temp path, so they pass on
+  macOS.** `domain.Config.ExtraReadRoots`' contract is that every root is already the host's
+  symlink-resolved real path — `internal/tools` `matchRoot` skips any root that is not its own real
+  path, and `internal/skills` `readRoots` resolves before mounting, so production was always
+  correct. Eleven tests across `internal/tools`, `internal/agent` and `cmd/apogee` were handing in
+  a raw `t.TempDir()`, which on macOS sits under `/var`, a symlink to `/private/var`: the root
+  mounted, matched nothing, and the test measured the wrong refusal. On Linux the two spellings
+  coincide, which is why CI never saw it. Each package already carried a resolving helper
+  (`tempRoot`, `readFenceRealDir`); the fix is to use them, plus one new `realTempDir` in
+  `internal/agent`. Test-only — no production behaviour changes.
+
 - **A restore from an empty session payload no longer half-swaps a live session.** `restoreState`
   returned early on a zero-length `Session.State`, which is right on the `Resume` path — a fresh
   Agent is already the zero state — but wrong on the live `RestoreSession` one, where the Agent

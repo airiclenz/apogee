@@ -24,10 +24,15 @@ import (
 
 // firingRoots is one throwaway set of state roots, each a real directory so the scratch dir the
 // composer creates under them can be stat'd.
+// firingRoots builds the state roots a Firing composes against. Every dir is symlink-RESOLVED:
+// the skill provider mounts its anchors by their real paths (internal/skills readRoots), so a
+// test that named them through a symlink would compare the provider's resolved answer against
+// its own unresolved spelling. On Linux the two coincide; on macOS t.TempDir() sits under /var,
+// a symlink to /private/var, and they do not.
 func firingRoots(t *testing.T) stateRoots {
 	t.Helper()
 
-	home := t.TempDir()
+	home := readFenceRealDir(t)
 	return stateRoots{
 		config:    home,
 		sessions:  filepath.Join(home, "sessions"),
@@ -35,8 +40,8 @@ func firingRoots(t *testing.T) stateRoots {
 		probe:     filepath.Join(home, "probe"),
 		prompts:   filepath.Join(home, "prompts"),
 		schemes:   filepath.Join(home, "schemes"),
-		scratch:   t.TempDir(),
-		workspace: t.TempDir(),
+		scratch:   readFenceRealDir(t),
+		workspace: readFenceRealDir(t),
 	}
 }
 

@@ -285,7 +285,7 @@ func TestFindFiles_Execute_SkipsSymlinkOutOfWorkspace(t *testing.T) {
 func TestFindFiles_Execute_FindsUnderAnExtraReadRoot(t *testing.T) {
 	t.Parallel()
 
-	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	root, extra, outside := tempRoot(t), tempRoot(t), tempRoot(t)
 	seedFindTree(t, root)
 	seedFindTree(t, extra)
 
@@ -331,7 +331,7 @@ func TestFindFiles_Execute_FindsUnderAnExtraReadRoot(t *testing.T) {
 func TestFindFiles_Execute_SkipsSymlinkOutOfAnExtraReadRoot(t *testing.T) {
 	t.Parallel()
 
-	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	root, extra, outside := tempRoot(t), tempRoot(t), tempRoot(t)
 	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(outsideMarker), 0o600); err != nil {
 		t.Fatalf("setup write: %v", err)
 	}

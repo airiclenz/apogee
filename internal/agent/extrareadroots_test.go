@@ -11,6 +11,20 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
+// realTempDir returns a fresh t.TempDir() resolved through symlinks — the spelling every path
+// mounted as an extra read root must carry. filepath.EvalSymlinks rather than the security
+// package's resolver on purpose: the fixture must fail loudly if the dir it just created cannot
+// be resolved, where the production helper falls back to the unresolved path.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	return real
+}
+
 // readCallFor builds a read_file call for the absolute path — the one argument these tests vary.
 func readCallFor(t *testing.T, path string) domain.ToolCall {
 	t.Helper()
@@ -24,10 +38,16 @@ func readCallFor(t *testing.T, path string) domain.ToolCall {
 
 // mountFixture lays out the two dirs every case here needs — a workspace and a directory outside
 // it holding one file — and returns the workspace, the outside dir, and that file's absolute path.
+//
+// Both are symlink-RESOLVED, because ExtraReadRoots' contract is that every mounted root is
+// already the host's real path (domain.Config.ExtraReadRoots) — a root that is not its own real
+// path is skipped at the mount and simply never matches. On Linux t.TempDir() already satisfies
+// that; on macOS it sits under /var, a symlink to /private/var, so an unresolved root would mount
+// nothing and the test would be measuring the wrong refusal.
 func mountFixture(t *testing.T) (workspace, outside, file string) {
 	t.Helper()
 
-	workspace, outside = t.TempDir(), t.TempDir()
+	workspace, outside = realTempDir(t), realTempDir(t)
 	file = filepath.Join(outside, "skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)

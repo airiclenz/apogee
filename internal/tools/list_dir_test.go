@@ -226,7 +226,7 @@ func TestListDir_RefusesEscapingSymlink(t *testing.T) {
 func TestListDir_Execute_ListsUnderAnExtraReadRoot(t *testing.T) {
 	t.Parallel()
 
-	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	root, extra, outside := tempRoot(t), tempRoot(t), tempRoot(t)
 	seedTree(t, root)
 	seedTree(t, extra)
 

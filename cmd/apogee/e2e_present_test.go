@@ -168,10 +168,14 @@ func TestE2EPresentServesWithoutLeakingTheToken(t *testing.T) {
 // presentWorkspace is T-19's workspace: the eight documents of the checklist's precondition, each a
 // real file of its type as far as the ladder is concerned — the ladder judges the EXTENSION, so the
 // bytes behind it are deliberately unimportant and the fixtures cost nothing to make.
+//
+// The workspace is symlink-RESOLVED because the fence hands the opener the path it actually
+// examined (security.ResolveInRoot returns real paths), so a workspace named through a symlink
+// would have this compare the launch's resolved path against the test's unresolved spelling.
 func presentWorkspace(t *testing.T) string {
 	t.Helper()
 
-	ws := t.TempDir()
+	ws := readFenceRealDir(t)
 	for _, name := range append(append([]string{}, presentInert...), presentRefused...) {
 		if err := os.WriteFile(filepath.Join(ws, name), []byte("fixture: "+name+"\n"), 0o600); err != nil {
 			t.Fatalf("seed the presentation workspace: %v", err)

@@ -295,7 +295,7 @@ func TestGrep_RefusesEscapingSymlink(t *testing.T) {
 func TestGrep_Execute_SearchesUnderAnExtraReadRoot(t *testing.T) {
 	t.Parallel()
 
-	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	root, extra, outside := tempRoot(t), tempRoot(t), tempRoot(t)
 	seedTree(t, root)
 	seedTree(t, extra)
 	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(grepOutsideMarker), 0o600); err != nil {
@@ -346,7 +346,7 @@ func TestGrep_Execute_SearchesUnderAnExtraReadRoot(t *testing.T) {
 func TestGrep_Execute_RefusesSymlinkEscapingAnExtraReadRoot(t *testing.T) {
 	t.Parallel()
 
-	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	root, extra, outside := tempRoot(t), tempRoot(t), tempRoot(t)
 	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(grepOutsideMarker), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
