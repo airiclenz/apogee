@@ -75,6 +75,12 @@ what the run found *wrong* with the workspace's context files: a file that is pr
 unreadable, or standing content that has outgrown its share of the window. The plain list of
 what loaded stays off the log; it is in the record.
 
+Afterwards the log names what the firing **changed**: a `changed — 2 file(s) this run:` header and
+one indented path per file, in the order the run first touched each — everything its writes touched,
+deletions and the source side of a move included, which is why the header says *changed*. It is a
+record and never an offer: nothing can be reverted from it, since the undo journal lives only as
+long as the run. A `plan` firing changes nothing and logs no such block.
+
 An `auto` firing running with `confine-to-workspace: false` says so too, in the same words an
 unconfined interactive launch prints: switching confinement off is the one blanket loosen in the
 system, so it is stated rather than assumed remembered. It is said once per daemon start, however

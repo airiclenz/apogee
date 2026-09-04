@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -589,6 +590,21 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	if text := sanitize.StripEscapes(res.FinalText); text != "" {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), text)
 	}
+	// What the run CHANGED on disk, ahead of the readings: a header naming the count and one
+	// indented path per entry (writtenFilesLines composes; the daemon logs the same block). A run
+	// that recorded no write prints nothing at all — silence is the honest report, and a "0 files"
+	// header on every read-only run would be noise on the Driver whose whole output is grepped.
+	//
+	// It sits below the answer and above the fill lines because it is the run's OUTCOME rather than
+	// its narration: a human reading an unattended Auto run wants what moved in the workspace
+	// before what the window cost. Faulted and failed runs reach here too, and those are exactly
+	// the runs whose half-finished writes have to be visible.
+	//
+	// stderr, like every other narration on this Driver: the stdout contract is the answer alone
+	// (TestHeadlessAnswerLandsOnTheProcessStdout), so no part of this block may take OutOrStdout.
+	for _, line := range writtenFilesLines(res.Wrote) {
+		cmd.PrintErrln(line)
+	}
 	// Each delegated run's own context fill, one line apiece and ahead of the summary: the summary
 	// speaks for the Firing as a whole, and a sub-agent fills a window of its OWN, which no
 	// top-level figure stands in for. A run that delegated nothing prints none of these lines.
@@ -666,6 +682,35 @@ func headlessSummary(res run.Result) string {
 		return stats
 	}
 	return "session: " + res.SessionID + " · " + stats
+}
+
+// writtenFilesLines renders what a Firing CHANGED on disk: a header naming the count, then one
+// indented path per entry, in the order the run first wrote each. It is the shared composer behind
+// both unattended Drivers — runHeadless prints the block on stderr, daemonWiring.fire logs it — so
+// the two narrate one event in one wording, and a run that recorded no write composes nothing at
+// all (a nil slice, not an empty header).
+//
+// The header says "changed", not "wrote", because the list is exactly run.Result.Wrote: the write
+// funnel journals a delete_file target and a move_file SOURCE as well as a creation, so paths the
+// run REMOVED ride in it and a "wrote —" header over them would be a lie.
+//
+// Paths only, and no verb column: the TUI's undo lines (internal/tui/undo.go) describe UNDOING a
+// change — a created file reads `delete`, a modified one `restore`, and a file touched since reads
+// `skip` — which is the opposite account of the one this block gives, and neither Driver here can
+// offer a revert anyway: the journal died with the process. These lines say what happened.
+//
+// Escape-stripped to a single line apiece: a path traces to a model-chosen tool argument, and both
+// sinks are one-line-per-entry — the daemon log by contract (daemon.go), a stderr list by shape.
+func writtenFilesLines(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, 1+len(paths))
+	lines = append(lines, "changed — "+strconv.Itoa(len(paths))+" file(s) this run:")
+	for _, path := range paths {
+		lines = append(lines, "  "+sanitize.StripEscapesToLine(path))
+	}
+	return lines
 }
 
 // headlessSubAgentLines renders what each delegated run did to its own context: one line per

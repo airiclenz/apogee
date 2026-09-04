@@ -1482,6 +1482,77 @@ func TestHeadlessPrintsTheContextFileNotices(t *testing.T) {
 	})
 }
 
+// TestHeadlessReportsTheFilesTheRunWrote pins the end-of-run account of what a Firing CHANGED on
+// disk: the header, one indented path per entry, on stderr and nowhere else. The block is what
+// replaces the interactive /undo pane on a Driver that has nobody to offer a revert to — the
+// journal behind run.Result.Wrote died with the process — so it reads as a record of what happened
+// and carries no verb column.
+func TestHeadlessReportsTheFilesTheRunWrote(t *testing.T) {
+	t.Run("the header and one indented path per entry reach stderr, and none of it stdout", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			SessionID: "s-9", FinalText: "the answer", Turns: 2,
+			Wrote: []string{"/ws/new.go", "/ws/old.go"},
+		}}
+
+		out, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+
+		header := strings.Index(errOut, "changed — 2 file(s) this run:\n")
+		if header < 0 {
+			t.Fatalf("stderr carries no written-files header: %q", errOut)
+		}
+		if !strings.Contains(errOut, "changed — 2 file(s) this run:\n  /ws/new.go\n  /ws/old.go\n") {
+			t.Errorf("the paths are missing, unindented or out of write order: %q", errOut)
+		}
+		if summary := strings.Index(errOut, "turns: 2"); header > summary {
+			t.Errorf("the written-files block printed after the summary: %q", errOut)
+		}
+		if strings.Contains(out, "changed — ") || strings.Contains(out, "/ws/new.go") {
+			t.Errorf("part of the written-files block leaked onto stdout: %q", out)
+		}
+		if strings.TrimRight(out, "\n") != "the answer" {
+			t.Errorf("stdout = %q; want the answer alone", out)
+		}
+	})
+
+	// Silence is the honest report: a read-only run changed nothing, and a "0 files" header on
+	// every plan-mode Firing would be noise on the Driver whose whole output gets grepped.
+	t.Run("a run that recorded no write adds no line", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+
+		if strings.Contains(errOut, "changed — ") {
+			t.Errorf("a run that wrote nothing still announced a change: %q", errOut)
+		}
+	})
+
+	// The undo pane's verbs describe UNDOING a change — a created file reads `delete`, a modified
+	// one `restore`, a file touched since `skip` — which is the opposite account of this block's.
+	// Borrowing that column would print `delete /ws/new.go` under a header saying the run wrote it.
+	t.Run("no revert verb rides on any line", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 1, Wrote: []string{"/ws/new.go"},
+		}}
+
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+
+		for _, verb := range []string{"delete ", "restore ", "skip "} {
+			if strings.Contains(errOut, verb) {
+				t.Errorf("the revert verb %q reached the written-files block: %q", verb, errOut)
+			}
+		}
+	})
+}
+
 // TestHeadlessSubAgentLineUsesTheGeneratedName pins this Driver's half of the naming journey (ADR
 // 0068): a delegation the model left unnamed, named out of band while it ran, reaches headless as a
 // run.SubAgentUsage whose Name is the generated one — and the line prints it exactly as it prints a

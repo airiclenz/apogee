@@ -412,6 +412,19 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		TotalTokens: firingSpend(res),
 		SubAgents:   len(res.SubAgents),
 	}
+	// What the Firing CHANGED on disk, after the Outcome is recorded and in the same block the
+	// headless Driver prints (writtenFilesLines, headless.go): a header naming the count, then one
+	// indented path per entry. This is the account an `auto:` schedule's deliverable IS — the state
+	// of the workspace afterwards — and the daemon's log is the only place a supervisor sees it,
+	// since the journal behind the list died with the run and no revert is offered here or anywhere.
+	//
+	// Reported whether the run answered or failed: a Firing that stopped halfway is exactly the one
+	// whose partial writes a human has to know about. A `plan:` Firing writes nothing and so logs
+	// nothing — the composer returns no lines for an empty list.
+	for _, line := range writtenFilesLines(res.Wrote) {
+		w.log.line("%s", line)
+	}
+
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once saves whatever completed before
 		// it stopped, and naming that record is what lets a human open the interrupted run rather

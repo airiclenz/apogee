@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -630,6 +631,65 @@ func TestDaemonFireLogsContextFileAnomaliesAlone(t *testing.T) {
 
 		if logged := harness.logged.String(); logged != "" {
 			t.Errorf("a firing with no notices and no context files still wrote to the daemon log:\n%s", logged)
+		}
+	})
+}
+
+// An `auto:` schedule's deliverable IS the state of the workspace afterwards, and the daemon's log
+// is the only place a supervisor sees what moved: the same block runHeadless prints on stderr, in
+// the same wording, because both Drivers compose it once (writtenFilesLines, headless.go). No
+// revert is offered here either — the journal behind the list died with the run.
+func TestDaemonFireLogsTheFilesTheFiringWrote(t *testing.T) {
+	t.Run("the header and one indented path per entry reach the log", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		harness.runner.res = run.Result{
+			SessionID: "s-1", Turns: 1, Wrote: []string{"/ws/new.go", "/ws/old.go"},
+		}
+
+		harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
+
+		logged := harness.logged.String()
+		for _, want := range writtenFilesLines(harness.runner.res.Wrote) {
+			if !strings.Contains(logged, want+"\n") {
+				t.Errorf("the daemon log is missing the line %q; it holds:\n%s", want, logged)
+			}
+		}
+		if !strings.Contains(logged, "changed — 2 file(s) this run:") {
+			t.Errorf("the composed header is not the one the log carries:\n%s", logged)
+		}
+	})
+
+	t.Run("a firing that recorded no write logs nothing", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		harness.runner.res = run.Result{SessionID: "s-2", Turns: 1}
+
+		harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
+
+		if logged := harness.logged.String(); strings.Contains(logged, "changed — ") {
+			t.Errorf("a firing that wrote nothing still announced a change:\n%s", logged)
+		}
+	})
+
+	// A Firing that stopped halfway is exactly the one whose partial writes a supervisor has to
+	// know about, so the block is logged on the failure path too — beside the Outcome, not instead
+	// of it.
+	t.Run("a failed firing still reports what it changed", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		harness.runner.res = run.Result{SessionID: "s-3", Turns: 2, Wrote: []string{"/ws/half.go"}}
+		harness.runner.err = errors.New("the model stopped mid-edit")
+
+		if _, err := harness.raise(entryFor(t, "nightly", daemon.Action{Server: "box"})); err == nil {
+			t.Fatal("the failed firing reported no error")
+		}
+
+		if logged := harness.logged.String(); !strings.Contains(logged, "  /ws/half.go\n") {
+			t.Errorf("the failed firing's write went unreported:\n%s", logged)
 		}
 	})
 }

@@ -72,6 +72,13 @@ A server that reports how much of a prompt it answered from its own prefix cache
 `· cached 12k` column to that agent's line — a subset of the prompt count, never a
 replacement for it; a server that says nothing about caching leaves the column off rather
 than printing a zero that would read as a cache miss.
+A run that **changed files** says which, just below the answer: a
+`changed — 2 file(s) this run:` header and one indented path per file, in the order the run
+first touched each. The list names everything the run's writes touched — files it deleted and
+the source side of a move as much as files it created — which is why the header says *changed*
+rather than *wrote*. It is a record, not an offer: nothing can be reverted from it, because the
+undo journal lives only as long as the process. A run that changed nothing prints no such line.
+
 A run whose final turn was **abandoned** says so on that same summary line — the stats
 segment ends `· faulted` — so the one line a script greps reports it even where the exit
 status is not read.

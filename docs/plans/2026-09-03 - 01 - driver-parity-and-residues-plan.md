@@ -687,7 +687,11 @@ run reports an empty `Wrote`; a faulted run that wrote one file still reports it
 
 ---
 
-## 14. Headless and the daemon report the files a Firing wrote
+## 14. Headless and the daemon report the files a Firing wrote — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the shared composer `writtenFilesLines` lives in `cmd/apogee/headless.go` beside `headlessSubAgentLines` and is called by both Drivers (same package `main`), so the header wording and the indent cannot drift; no new file and no package outside the item's Files list.
+NOTES (2026-09-04): the headless block is placed by anchor text immediately above item 4's sub-agent loop — after the context-file notices and after the never-started exit, which is harmless because a run that never started carries an empty `Wrote`. Paths are escape-stripped with `sanitize.StripEscapesToLine` so one path stays one line on both sinks.
+NOTES (2026-09-04): pre-existing failures at HEAD, unrelated to this item and reproduced with the item's changes stashed — `TestFiringConfigDefaultsItsSeams` and `TestRegistryWithMCPThreadsExtraReadRoots` in `cmd/apogee` both fail on macOS because `t.TempDir()` hands back `/var/...` while the path-safety resolve returns `/private/var/...`. Reported as pre-existing debt only.
 
 **What.** Recast at the regression check (2026-09-03). Depends on items 11 and 13. Headless
 (`cmd/apogee/headless.go`), after the context-file notices of item 4 and before the sub-agent lines:
