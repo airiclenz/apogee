@@ -451,9 +451,10 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// What comes back beside the Config is the per-model rebind's narration: a validated set
 	// applying, being offered or being suppressed, and a built-in Model profile announcing itself.
 	// It goes to stderr, where it cannot contaminate the answer.
+	entry := startupEntry(*opts)
 	cfg, routing, notices, err := firingConfig(cmd.Context(), firingInputs{
 		opts:      *opts,
-		entry:     startupEntry(*opts),
+		entry:     entry,
 		roots:     roots,
 		manualIDs: manualIDs,
 		confiner:  confiner,
@@ -465,6 +466,36 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	}
 	for _, n := range notices {
 		cmd.PrintErrln(n)
+	}
+
+	// The offline gate: a server that answered NOTHING refuses this run before a prompt is spent on
+	// it. The composition above already took the one beat an unattended run gets (firingConfig's
+	// unconditional observation, carried out on firingRouting), so the question costs no round trip
+	// of its own — it is read off what the composer already learned.
+	//
+	// The condition is Answered and nothing else: false ONLY for a transport-level failure — a
+	// refused dial, a timeout, a DNS or TLS failure, an address that could not be formed. Every
+	// server that returned ANY HTTP response — a 401, a 404, a 429, a body that would not decode —
+	// keeps today's proceed-and-degrade, because those are answers this Driver cannot judge and a
+	// throttled probe is silence rather than a verdict (internal/heartbeat's Beat.Answered). That is
+	// deliberately WEAKER than routing.Reachable, which is "handed me a usable model list": a
+	// completions-only endpoint that serves no list at all still runs, exactly as it does today.
+	//
+	// It refuses BEFORE runOnce, which is the whole point: no session record is written, no token is
+	// spent, and the exit is the existing never-started code (2), so a script can tell "the model
+	// never got the chance" from "the model ran and it went wrong".
+	//
+	// The wording is the TUI's own, from Model.upstreamBlockNote (internal/tui/heartbeat.go), so a
+	// human who has seen a session refuse a send reads the same sentence from an unattended run.
+	// The two are composed SEPARATELY — the TUI's is a Model method over its live heartbeat state,
+	// and hoisting it is a bigger change than this gate — so each site names the other and the test
+	// below pins the exact sentence; an edit to one wording must visit both.
+	if !routing.Beat.Answered {
+		note := "cannot send — server offline (" + entry.Endpoint + ")"
+		if routing.Beat.Failure != "" {
+			note += ": " + routing.Beat.Failure
+		}
+		return notStarted(errors.New(note))
 	}
 
 	// The store the record lands in: the shared sessions store, so a headless run is browsable in

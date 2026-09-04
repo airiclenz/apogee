@@ -91,6 +91,14 @@ func headlessRunOn(t *testing.T, stub *stubRunner, confiner apogee.Confiner, con
 	runOnce = stub.once
 	newConfiner = func() apogee.Confiner { return confiner }
 	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
+	// A test that dictated no observation of its own gets one that ANSWERED. Two reasons, and both
+	// are about what these tests are for: the offline gate refuses a run whose beat answered
+	// nothing (runHeadless), so an unswapped seam would turn every assertion below into an
+	// assertion about a refusal; and the real seam would dial a real address, which would make the
+	// suite depend on whether the developer happens to have a server on that port.
+	if !beatDictated {
+		swapAnsweringBeat(t)
+	}
 	// The environment must not decide what the mode assertions measure.
 	t.Setenv(config.EnvMode, "")
 
@@ -103,6 +111,33 @@ func headlessRunOn(t *testing.T, stub *stubRunner, confiner apogee.Confiner, con
 
 	err = cmd.ExecuteContext(context.Background())
 	return outBuf.String(), errBuf.String(), err
+}
+
+// beatDictated says a test has installed its OWN observation through swapBeat, so headlessRunOn
+// must not overwrite it with the answering default above. It is package state guarded by swapBeat's
+// own cleanup rather than a parameter because headlessRunOn is called from four files and most of
+// its callers have no opinion about the beat at all.
+var beatDictated bool
+
+// swapBeat installs one observation of the bound server for the duration of the test and restores
+// the production seam afterwards. Every test that has an opinion about the beat — the width, the
+// effort dialect, the offline gate — goes through here rather than assigning discoverBeat directly,
+// so the harness above can tell a dictated observation from an absent one.
+func swapBeat(t *testing.T, discover func(context.Context, string, string, string) heartbeat.Beat) {
+	t.Helper()
+	prev := discoverBeat
+	discoverBeat, beatDictated = discover, true
+	t.Cleanup(func() { discoverBeat, beatDictated = prev, false })
+}
+
+// swapAnsweringBeat installs the observation a test with no opinion about the server wants: one that
+// ANSWERED, so the offline gate has nothing to refuse and the assertion is about whatever the test
+// was written for. Every test that drives the headless command WITHOUT headlessRunOn — the ones that
+// build the cobra command themselves to reach a process stream or a stdin pipe — needs it too, since
+// the production seam would otherwise dial a real address.
+func swapAnsweringBeat(t *testing.T) {
+	t.Helper()
+	swapBeat(t, (&stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true}}).discover)
 }
 
 // unconfinedHome writes an apogee home whose config switches confinement off — the user's own
@@ -633,9 +668,7 @@ func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			beats := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: tc.slots}}
-			prev := discoverBeat
-			discoverBeat = beats.discover
-			t.Cleanup(func() { discoverBeat = prev })
+			swapBeat(t, beats.discover)
 
 			stub := &stubRunner{}
 			home := testConfigHome(t, tc.configYAML)
@@ -696,9 +729,7 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 				Answered:      true,
 				EffortSupport: provider.EffortSupport{Dialect: tc.observed},
 			}}
-			prev := discoverBeat
-			discoverBeat = beats.discover
-			t.Cleanup(func() { discoverBeat = prev })
+			swapBeat(t, beats.discover)
 
 			stub := &stubRunner{}
 			home := testConfigHome(t, tc.configYAML)
@@ -711,6 +742,114 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 			if !beats.called {
 				t.Error("the composer took no beat; one observation is taken per Firing whatever the " +
 					"bound entry pins, because that round trip is the liveness gate")
+			}
+		})
+	}
+}
+
+// The offline gate: a server that answered NOTHING refuses the run before a prompt is spent on it.
+// An unattended run has nobody watching it fail, so sending into a dead endpoint costs a session
+// record, a token budget and — on a schedule — a silent gap in the record where an answer was
+// expected. The refusal is the never-started exit (2), the TUI's own wording, and no call to the
+// runner at all.
+//
+// The condition is Beat.Answered and nothing weaker: false ONLY for a transport-level failure. Every
+// server that returned ANY HTTP response keeps today's proceed-and-degrade, which the two rows below
+// pin from the other side — a 429 on the model list, and a completions-only endpoint that serves no
+// list at all, both of which answer completions perfectly well today.
+//
+// The sentence is asserted verbatim because it is composed twice: this Driver's copy here, and the
+// TUI's Model.upstreamBlockNote (internal/tui/heartbeat.go). Neither is derived from the other, so
+// this assertion is what tells a future edit of one that the other exists.
+func TestHeadlessRefusesAServerThatAnsweredNothing(t *testing.T) {
+	const boundServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
+		"\nserver: testbox\n"
+
+	tests := []struct {
+		name    string
+		beat    heartbeat.Beat
+		wantSay string
+	}{
+		{
+			name:    "nothing answered, and the beat says why",
+			beat:    heartbeat.Beat{Failure: "connection refused"},
+			wantSay: "cannot send — server offline (" + testServerEndpoint + "): connection refused",
+		},
+		{
+			name:    "nothing answered and nothing to say about it",
+			beat:    heartbeat.Beat{},
+			wantSay: "cannot send — server offline (" + testServerEndpoint + ")",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			beats := &stubBeat{beat: tc.beat}
+			swapBeat(t, beats.discover)
+
+			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+			out, _, err := headlessRunOn(t, stub, fenceableHost, testConfigHome(t, boundServer), "a prompt")
+			if err == nil {
+				t.Fatal("a run whose server answered nothing was allowed to start")
+			}
+			// The refusal travels as the returned error: the command silences cobra's own error
+			// printing (SilenceErrors) and main writes it to stderr, so the error's message IS the
+			// stderr line and asserting on it is asserting on what the operator reads.
+			if got := err.Error(); got != tc.wantSay {
+				t.Errorf("the refusal reads %q; want %q — the wording is the TUI's own "+
+					"(upstreamBlockNote, internal/tui/heartbeat.go) and the two must not drift", got, tc.wantSay)
+			}
+			if code := exitCodeFor(err); code != exitNotStarted {
+				t.Errorf("exit code = %d; want %d — a run that never began is an invocation to fix, "+
+					"not an outcome to read", code, exitNotStarted)
+			}
+			if stub.called {
+				t.Error("the refused run still reached the runner; the whole point of the gate is that " +
+					"no prompt is submitted and no record is written")
+			}
+			if out != "" {
+				t.Errorf("stdout carried %q; a refused run answers nothing", out)
+			}
+		})
+	}
+}
+
+// The other side of the gate: a server that ANSWERED runs, whatever it answered. A 429 on the model
+// list is the server saying "not now" rather than "not here" (internal/heartbeat's Throttled), and a
+// completions-only endpoint that advertises no list at all was never unreachable — both served
+// completions before this gate existed and both must go on serving them.
+func TestHeadlessRunsAgainstAServerThatAnsweredAtAll(t *testing.T) {
+	tests := []struct {
+		name string
+		beat heartbeat.Beat
+	}{
+		{
+			name: "a throttled model list still answered",
+			beat: heartbeat.Beat{Answered: true, Throttled: true, Failure: "model list: HTTP 429"},
+		},
+		{
+			name: "a server that serves no model list still answered",
+			beat: heartbeat.Beat{Answered: true, Failure: "model list: HTTP 404"},
+		},
+		{
+			name: "a healthy server, for the floor",
+			beat: heartbeat.Beat{Answered: true, Reachable: true, TotalSlots: 2},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			beats := &stubBeat{beat: tc.beat}
+			swapBeat(t, beats.discover)
+
+			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+			out, _, err := headlessRunOn(t, stub, fenceableHost, testConfigHome(t, ""), "a prompt")
+			if err != nil {
+				t.Fatalf("headless refused a server that answered: %v", err)
+			}
+			if !stub.called {
+				t.Error("the run never reached the runner; only a beat that answered NOTHING refuses")
+			}
+			if !strings.Contains(out, "the answer") {
+				t.Errorf("stdout = %q; the run should have answered", out)
 			}
 		})
 	}
@@ -1510,6 +1649,7 @@ func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
+	swapAnsweringBeat(t)
 
 	configDir, workspace := testConfigHome(t, ""), t.TempDir()
 	var runErr error
@@ -1875,6 +2015,7 @@ func TestHeadlessReadsThePromptFromStdin(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
+	swapAnsweringBeat(t)
 
 	cmd := newHeadlessCommand()
 	var out, errOut bytes.Buffer

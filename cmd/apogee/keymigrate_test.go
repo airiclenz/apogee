@@ -388,6 +388,7 @@ func TestHeadlessNoticesPlaintextKeysAndNeverPrompts(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
+	swapAnsweringBeat(t)
 
 	home, path := plaintextConfig(t, onePlaintextServer)
 
@@ -439,6 +440,7 @@ func TestHeadlessNoticesTheRetiredSubAgentsFlagAndNeverPrompts(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
+	swapAnsweringBeat(t)
 
 	home := testConfigHome(t, subAgentsFlagYAML)
 	path := filepath.Join(home, "config.yaml")

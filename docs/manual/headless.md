@@ -27,7 +27,13 @@ shape a session on this host would have; which listed entry it starts on comes f
 `--server`, `APOGEE_SERVER` or the `server:` key, in that order, with `--endpoint`
 overriding all three.
 Nobody is there to answer a picker, so a run those sources leave with no server to start
-on is refused before anything is composed — the config file and the fix named, exit `2`. It is saved to
+on is refused before anything is composed — the config file and the fix named, exit `2`.
+A run whose server is **not there at all** — the dial refused, the name unresolvable, the
+connection timed out — is refused the same way, before the prompt is sent: `cannot send —
+server offline (<endpoint>)`, exit `2`, no record written and no tokens spent. A server that
+answers anything at all still runs: a rate-limited or unreadable model list is not a dead
+server, and an endpoint that serves completions without advertising a list never was one.
+The run is saved to
 `~/.apogee/sessions` and shows up in `/sessions` like any other; `--no-save` runs it and
 records nothing.
 
@@ -76,6 +82,6 @@ thing happened:
 |---|---|
 | `0` | the run completed |
 | `1` | the run started and failed — model or tool error, cancellation, a record that would not save |
-| `2` | the run never started — usage, configuration, a refused mode |
+| `2` | the run never started — usage, configuration, a refused mode, a server that did not answer |
 | `3` | the run started and reached its boundary, but its final turn was abandoned (a model or upstream fault the loop could not recover) — stdout holds the run's last text, not an answer; the record is saved |
 

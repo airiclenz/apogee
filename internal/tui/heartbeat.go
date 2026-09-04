@@ -669,6 +669,12 @@ func (m Model) blockedUpstream() bool {
 // upstreamBlockNote words the refusal blockedUpstream produced: offline names the endpoint and,
 // when the monitor has them, the failure's own words; the pre-bind case says the truth instead —
 // the server has not answered YET, which on a cold start is a matter of seconds.
+//
+// The offline sentence is SHARED with the unattended Drivers, which refuse a Firing on the same
+// finding (cmd/apogee/headless.go's offline gate, off firingRouting.Beat.Answered). The two compose
+// it separately — this one is a Model method over live heartbeat state, that one a one-shot beat —
+// so an edit to the wording here must visit that site too; each names the other for exactly that
+// reason, and both are pinned by tests that spell the sentence out.
 func (m Model) upstreamBlockNote() string {
 	if m.prebound() {
 		// The blocked-upstream ladder reads a session with no server as one whose first beat has not

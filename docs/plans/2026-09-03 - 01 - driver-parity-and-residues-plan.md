@@ -393,7 +393,37 @@ with an empty `Failure`.
 
 ---
 
-## 8. Headless refuses an unreachable server before submit
+## 8. Headless refuses an unreachable server before submit — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the refusal travels as the returned `notStarted` error rather than a direct
+write to the command's stderr writer — `newHeadlessCommand` sets `SilenceErrors`, so `main` is what
+prints the error on stderr, and a second write here would print the sentence twice. The test
+therefore asserts the exact sentence on the returned error (and stdout empty, the stub uncalled,
+exit 2), which is the same text the operator reads.
+
+NOTES (2026-09-04): consequential edit — internal/tui/heartbeat.go: made necessary by the new
+headless offline gate — the item requires a comment at each site naming the other, so
+`upstreamBlockNote`'s doc comment now names `cmd/apogee/headless.go`. Comment text only.
+
+NOTES (2026-09-04): consequential edit — cmd/apogee/keymigrate_test.go: made necessary by the new
+gate — two headless tests there build the cobra command directly (not through `headlessRunOn`) and
+so took the production beat against an address nothing listens on, which the gate now refuses.
+They call the new `swapAnsweringBeat(t)` helper; no assertion changed.
+
+NOTES (2026-09-04): the test harness in `headless_test.go` gained `swapBeat`/`swapAnsweringBeat` and
+`headlessRunOn` now installs an ANSWERED beat when a test dictated none. Without it every headless
+test would assert against a refusal, and the suite would depend on whether the developer happens to
+have a server on the test endpoint. The two tests in that file that dictated their own beat were
+moved onto `swapBeat` so the harness cannot clobber them.
+
+NOTES (2026-09-04): docs/manual/headless.md gained the refusal and its exit-2 row — the item changed
+user-facing behaviour and the manual's exit table said only "usage, configuration, a refused mode".
+
+NOTES (2026-09-04): three failures in `go test ./cmd/apogee/` are PRE-EXISTING at the base commit
+(`TestE2ESmokeInProcess`, `TestFiringConfigDefaultsItsSeams`,
+`TestRegistryWithMCPThreadsExtraReadRoots`) and one
+(`TestFiringConfigSaysWhenTheModelIsNotAdvertised/a_variant_slug_...`) comes from another item's
+in-flight changes to `cmd/apogee/wire_firing.go` present in the working tree. None is this item's.
 
 **What.** Recast at the regression check (2026-09-03). Depends on item 7. In `runHeadless`, after
 `firingConfig` returns (`headless.go:428`) and its notices are printed (`:440-442`), refuse when the
