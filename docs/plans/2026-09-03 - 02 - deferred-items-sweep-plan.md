@@ -446,7 +446,11 @@ exits 0 on the recording machine.
 
 ---
 
-## 9. `validated-sets:` gets a section that says what a Validated set is
+## 9. `validated-sets:` gets a section that says what a Validated set is — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the section was inserted immediately before `## Keeping the session store bounded — `sessions:`` as the item's regression guard requires; the plan's BASE line numbers had drifted by five lines, so the insertion was located by heading text.
+
+NOTES (2026-09-04): serial re-run — the working tree arrived carrying items 9, 10, 11 and 12's prose together in `docs/manual/configuration.md`. Per the dispatch's DECISION the file was reduced to item 9's hunk alone (restored from HEAD, then the `## Per-model Mechanism sets — `validated-sets:`` section re-inserted verbatim); items 10, 11 and 12's prose was removed for their own implementers to restore from their sidecars. `docs/manual/commands.md` is item 10's and was left dirty exactly as found.
 
 **What.** Recast at the regression check (2026-09-03). Closes `apogee-t57.1`. The key parses `enable:` (bool, default true) and `alias:` (map, runtime
 fingerprint label → entry key) at `internal/config/config.go:877-894`, carries two `/settings` rows

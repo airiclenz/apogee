@@ -655,6 +655,45 @@ because the rungs below this key are not this key's to record. If nothing on the
 program this machine has, the `⏎` jump refuses on the row and names all three ways to set one
 rather than repeating a "not found in `$PATH`" you cannot act on.
 
+## Per-model Mechanism sets — `validated-sets:`
+
+A **Validated set** is a per-model list of catalogued Mechanisms that has been measured on *that
+model* and shown to be no worse than running with none of them at all — the same floor `--bypass`
+gives you. Benefit is deliberately not part of the claim: what a set says is "this stack is safe on
+this model", never "this stack is better". So there is nothing to tune in this block and nothing to
+pick from — it is the switch over machinery that either has an entry for the model you bound or has
+none ([ADR 0016](../adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md)).
+
+```yaml
+# ~/.apogee/config.yaml
+validated-sets:
+  enable: true
+  alias:
+    gpt-oss-20b-Q8_0: gpt-oss-20b    # run this label on the entry measured for that one
+```
+
+`enable:` (default `true`) is the whole off-switch, and it has a `/settings` row of its own.
+`alias:` carries an entry over by hand: it maps a runtime model label onto the entry key whose
+evidence you are willing to apply to it — a sibling quant, say — which apogee will never do for
+you, because the measurement attaches to the precise model that was measured. An alias whose target
+no entry carries is a **startup error**: a config naming a set apogee cannot find is a mistake
+worth stopping on, not a line to skip quietly.
+
+A set applies **whole or not at all** — a subset of it, or a merge of it with Mechanisms you picked
+yourself, is a different and unmeasured stack — and it applies *automatically* only when the bound
+model is identified with at least **medium** confidence. Below that the match is **offered**
+instead: apogee names the entry it found and leaves applying it to you. An alias you wrote applies
+at any confidence, because naming it was already your decision. Writing a non-empty `mechanisms:`
+block is the other way to stop it: an explicit block is manual control, so whatever matched is not
+applied over the top of what you asked for. `--bypass` turns the surface off outright.
+
+**The roster apogee ships is empty**, and has been since v0.20.0: the one curated entry retired
+with the fourteen catalogue rows it had been measured over, so a stock install matches nothing and
+runs the six Floor guards at the top of this page and nothing above them. The surface itself is
+untouched, and it is yours to fill — an entry of your own under `~/.apogee/validated/` still
+resolves and still applies, and a member id this build has since retired is **shed** from the set
+rather than disqualifying the entry whole.
+
 ## Keeping the session store bounded — `sessions:`
 
 Every session apogee runs is saved under `~/.apogee/sessions/`, and nothing has ever removed one —
