@@ -243,8 +243,23 @@ func retiredSetNotice(d validated.Decision) string {
 // retiredSetMemberNotice is the line an applying set earns for each RETIRED member it shed. It names
 // the entry, so a user with several records knows which file to edit, and states that the rest of the
 // set still applies — the whole point of the ADR 0016 amendment being that a curation change of ours
-// must not cost the user their measured stack. Pure, so the wording is table-testable.
+// must not cost the user their measured stack. It has two readings of the same shed, told apart by
+// mechanisms.Successor(id):
+//
+//   - retired OUTRIGHT (no successor): the row went, and the behaviour with it. Today's sentence.
+//   - promoted to a FLOOR GUARD (a successor key): the row went from the catalogue but the
+//     behaviour did not — six of the twenty-one shed rows are these. Saying only "retired" would
+//     tell the reader their measured stack lost a member it in fact still has, so the line names
+//     the key that governs it now, in the phrasing mechanisms.ResolveEnabled already uses for the
+//     same IDs, and says the behaviour is on by default.
+//
+// Pure, so both wordings are table-testable.
 func retiredSetMemberNotice(e validated.Entry, id domain.MechanismID) string {
+	if successor := mechanisms.Successor(id); successor != "" {
+		return fmt.Sprintf(
+			"apogee: validated-set entry %q names mechanism %q, the %q floor guard since %s — it is dropped from the set and the rest applies; the behaviour is on by default.",
+			e.Key, id, successor, mechanisms.RetiredRelease(id))
+	}
 	return fmt.Sprintf(
 		"apogee: validated-set entry %q names mechanism %q, retired in %s — it is dropped and the rest of the set applies.",
 		e.Key, id, mechanisms.RetiredRelease(id))

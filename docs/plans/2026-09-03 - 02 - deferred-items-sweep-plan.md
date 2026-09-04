@@ -138,7 +138,12 @@ closure puts the empty shipped catalogue back; a nested swap restores in order.
 
 ---
 
-## 3. A shed Validated-set member names the guard that governs it now
+## 3. A shed Validated-set member names the guard that governs it now — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the test's two wordings are asserted as two blocks inside the existing
+`TestResolveValidatedSetDropsARetiredIDWithANotice` rather than by converting it to a table — the
+`grammar` assertions are untouched byte-for-byte, and the promoted case reuses the same decision
+because `retiredSetMemberNotice` is pure.
 
 **What.** Closes `apogee-i5h.1`. `retiredSetMemberNotice` (`cmd/apogee/validatedsets.go:247-251`) names the
 entry, the ID and `mechanisms.RetiredRelease(id)`, but never `mechanisms.Successor(id)`

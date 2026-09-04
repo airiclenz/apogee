@@ -297,6 +297,19 @@ func TestResolveValidatedSetDropsARetiredIDWithANotice(t *testing.T) {
 			t.Errorf("shed notice = %q, want it to name %q", notice, w)
 		}
 	}
+
+	// A member shed because it was PROMOTED to a Floor guard reads the other way: the catalogue row
+	// is gone but the behaviour is engine default now, so the line names the successor key — telling
+	// this user only "retired" would report a loss their measured stack did not take.
+	promoted := retiredSetMemberNotice(d.match.Entry, "tool_loop_interceptor")
+	for _, w := range []string{labKey, "tool_loop_interceptor", `"tool-loop-breaker" floor guard since v0.20.0`, "on by default"} {
+		if !strings.Contains(promoted, w) {
+			t.Errorf("promoted-member notice = %q, want it to name %q", promoted, w)
+		}
+	}
+	if strings.Contains(promoted, "retired in") {
+		t.Errorf("promoted-member notice = %q, want the retired-outright sentence gone", promoted)
+	}
 }
 
 // writeLabEntry drops one synthetic entry into a user-local validated-sets directory, the way a
