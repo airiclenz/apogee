@@ -368,3 +368,38 @@ func TestRestore_RejectsAnOverCapTaskList(t *testing.T) {
 	}
 	assertTaskTexts(t, a.tasks, "the list that must survive the refusal")
 }
+
+// TestRestore_AnEmptyPayloadClearsTheLiveSession pins the seam restoreState's empty-payload branch
+// exists for. apogee's own Snapshot never writes an empty payload — encodeState always emits a
+// conversation — but a truncated, hand-edited or foreign session file can, and RestoreSession
+// reads it against a LIVE Agent that still holds the OUTGOING session. Returning early there would
+// leave that session's conversation, Turn counters, pending input and task list standing
+// underneath the incoming session's file, with no error for the host to see and the /sessions flow
+// already redirecting saves into it. An empty payload MEANS a never-stepped Agent, so that is what
+// gets restored — the same place the fresh-Agent Resume path lands.
+func TestRestore_AnEmptyPayloadClearsTheLiveSession(t *testing.T) {
+	a := newSnapshotAgent(t)
+	if err := a.tasks.Replace([]tasklist.Item{{Text: "the outgoing session's work"}}); err != nil {
+		t.Fatalf("seed the list: %v", err)
+	}
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "the outgoing session's history"})
+	a.turns.index = 7
+	a.pendingInput = &domain.UserInput{Text: "the outgoing session's queued input"}
+
+	if err := a.RestoreSession(domain.Session{Version: domain.SessionVersion}); err != nil {
+		t.Fatalf("RestoreSession of an empty payload: %v", err)
+	}
+
+	if items := a.tasks.Items(); len(items) != 0 {
+		t.Errorf("the task list after restoring an empty payload = %v, want empty", items)
+	}
+	if msgs := a.conv.Messages(); len(msgs) != 0 {
+		t.Errorf("the conversation after restoring an empty payload = %d messages, want 0", len(msgs))
+	}
+	if a.turns.index != 0 {
+		t.Errorf("the Turn index after restoring an empty payload = %d, want 0", a.turns.index)
+	}
+	if a.pendingInput != nil {
+		t.Errorf("the pending input after restoring an empty payload = %v, want nil", a.pendingInput)
+	}
+}

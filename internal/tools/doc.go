@@ -263,7 +263,7 @@
 //
 // # The package spine, one line each
 //
-// Eight files register no tool. tools.go is the shared toolSpec (name, description, JSON
+// Twelve files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
 // including okSummary, which attaches the structured half. registry.go is HostTools, the
 // two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins

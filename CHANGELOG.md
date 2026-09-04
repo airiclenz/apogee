@@ -275,6 +275,27 @@ point is a **minor** bump, not a breaking change.
   `CHANGELOG.md`, `docs/adr/`, `docs/reviews/` and archived plans are historical and stay — the same
   precedent the 2026-08-13 `TODO.md` rename set.
 
+### Fixed
+
+- **A restore from an empty session payload no longer half-swaps a live session.** `restoreState`
+  returned early on a zero-length `Session.State`, which is right on the `Resume` path — a fresh
+  Agent is already the zero state — but wrong on the live `RestoreSession` one, where the Agent
+  still holds the OUTGOING session: its conversation, Turn counters, pending input and task list
+  were left standing underneath the incoming session's file, with no error for the host to see and
+  the `/sessions` flow already redirecting saves into it. An empty payload now restores the zero
+  state, so both paths land in the same place. apogee's own `Snapshot` never writes one
+  (`encodeState` always emits a conversation), so this reaches only a truncated, hand-edited or
+  foreign session file — which is exactly the input the restore seam exists to read safely.
+
+- The package file maps in `internal/tools/doc.go` and `internal/agent/doc.go` count the files they
+  enumerate again: the built-ins are thirty-three and the package spine twelve (forty-five together,
+  the package's actual size), and `internal/agent` is twenty-eight.
+
+- The unexecuted plan `docs/plans/2026-09-03 - 01 - driver-parity-and-residues-plan.md` quoted the
+  standing-content oversize warning's pre-`task_list` wording as a verbatim move; executing it
+  literally would have reverted the widened literal. Its quoted string now matches what the TUI
+  actually emits.
+
 ## [0.20.0] — 2026-09-03
 
 ### Added

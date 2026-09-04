@@ -112,9 +112,11 @@ func (a *Agent) restoreSnapshot(snap domain.Session) error {
 }
 
 // restoreState rebuilds the Agent's loop state from a Session.State payload. An empty payload
-// leaves the zero state (a freshly-snapshotted, never-stepped Agent). It decodes into a
-// temporary agentState and mutates the Agent only after a clean unmarshal, so a malformed
-// payload returns an error with no partial swap — the atomicity restoreSnapshot relies on.
+// RESTORES the zero state (a freshly-snapshotted, never-stepped Agent) rather than returning
+// early, so both restore paths end in the same place — see the branch below for why the
+// difference is load-bearing on the live one. It decodes into a temporary agentState and
+// mutates the Agent only after a clean unmarshal, so a malformed payload returns an error with
+// no partial swap — the atomicity restoreSnapshot relies on.
 //
 // The restored conversation is normalized to zero leading system messages first
 // (dropLeadingSystem): per ADR 0023 the configured system prompt is a request projection and no
@@ -125,11 +127,18 @@ func (a *Agent) restoreSnapshot(snap domain.Session) error {
 // message only. Enforcing the invariant here — the one seam where outside bytes become history —
 // keeps every later reader (the request projection, the next snapshot) clean.
 func (a *Agent) restoreState(state json.RawMessage) error {
-	if len(state) == 0 {
-		return nil
-	}
 	var st agentState
-	if err := json.Unmarshal(state, &st); err != nil {
+	if len(state) == 0 {
+		// An empty payload is not "nothing to restore". On the LIVE path (RestoreSession) the
+		// Agent still holds the OUTGOING session, so returning early would leave that session's
+		// conversation, Turn counters, pending input and task list standing underneath the
+		// incoming session's file — a half-restore with no error for the caller to see, and one
+		// the /sessions flow would then redirect saves into. What an empty payload MEANS is a
+		// never-stepped Agent, so the zero agentState is what gets applied. apogee's own
+		// Snapshot never writes one (encodeState always emits a conversation); a hand-edited,
+		// truncated or foreign session file can, and this is the seam that reads it.
+		st.Conversation = domain.NewConversation(nil)
+	} else if err := json.Unmarshal(state, &st); err != nil {
 		return fmt.Errorf("apogee: decode session state: %w", err)
 	}
 	// The task list is restored FIRST and through its own validator, so a snapshot carrying more

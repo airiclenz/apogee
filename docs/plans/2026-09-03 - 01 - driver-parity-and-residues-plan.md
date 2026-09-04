@@ -96,7 +96,7 @@ notices at all when `len(r.Files) == 0`. The strings are the TUI's CURRENT wordi
 not rephrased — `"context: " + name + " unreadable — " + err`, `"context: " + strings.Join(loaded,
 ", ")` with each entry `name + " (" + format.Bytes(f.Bytes) + ")"`, and `"standing system content ~"
 + TokensFine(StandingTokens) + " tokens exceeds its Budget share (~" + TokensFine(SystemShare) + ")
-— trim context files or the system prompt"`. Escape stripping stays at the call sites.
+— trim context files, the task list or the system prompt"`. Escape stripping stays at the call sites.
 `noteContextFiles` (`internal/tui/model.go:768`) becomes a loop over the notices, each still
 `m.transcript.addEphemeralNote(...)`, keeping its `len(report.Files) == 0` early return and applying
 `stripEscapes` to EVERY composed notice text. One deep module: no other file re-spells these
