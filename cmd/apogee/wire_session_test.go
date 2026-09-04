@@ -678,7 +678,7 @@ func TestGCSessionsAppliesTheConfiguredPolicy(t *testing.T) {
 		if _, err := os.Stat(root); !os.IsNotExist(err) {
 			t.Errorf("the sweep touched a missing sessions root (stat err = %v)", err)
 		}
-		gcSessions(nil, config.SessionSettings{MaxCount: 1}) // --no-save headless: no store, no panic
+		gcSessions(nil, config.SessionSettings{MaxCount: 1}) // a Driver with no store: no panic
 	})
 }
 

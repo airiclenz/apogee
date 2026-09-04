@@ -498,7 +498,7 @@ func ensureScratchDir(root, id string) string {
 // neither knob (it walks no directory), which is what makes the unconfigured default free.
 func gcSessions(store *session.Store, policy config.SessionSettings, keep ...string) {
 	if store == nil {
-		return // headless --no-save: no store, nothing to sweep
+		return // a Driver with no store: nothing to sweep
 	}
 	_, _ = store.Prune(session.Retention{MaxAge: policy.MaxAge, MaxCount: policy.MaxCount}, keep...)
 }

@@ -35,7 +35,9 @@ answers anything at all still runs: a rate-limited or unreadable model list is n
 server, and an endpoint that serves completions without advertising a list never was one.
 The run is saved to
 `~/.apogee/sessions` and shows up in `/sessions` like any other; `--no-save` runs it and
-records nothing.
+records nothing. Either way the startup sweep still applies whatever bound the `sessions:`
+block names — `--no-save` drops this run's own record, not the retention policy, so a host
+driven only headlessly still keeps its store within `max-age` / `max-count`.
 
 `--mode` takes `plan` (the default, read-only) or `auto` — the two modes that never need
 a human. `ask-before` and `allow-edits` are refused, and so is `auto` on a host whose

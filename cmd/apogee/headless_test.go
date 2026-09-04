@@ -27,6 +27,7 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // stubRunner stands in for internal/run.Once: it records the Spec the command composed and
@@ -995,6 +996,103 @@ func TestHeadlessNoSaveDropsTheStore(t *testing.T) {
 		}
 		if stub.spec.Store != nil {
 			t.Error("Spec.Store is set under --no-save; the run would be recorded")
+		}
+	})
+}
+
+// --no-save says "record nothing of THIS run"; it never said "leave the store unswept". The host
+// that only ever runs `apogee headless --no-save` is exactly the host that never passes the TUI's
+// boot, so this command is the only beat on which its sessions.max-age / max-count is ever applied
+// — and handing the sweep the nil record-writing store made that host the one host retention could
+// not reach.
+func TestHeadlessNoSaveStillAppliesTheRetentionPolicy(t *testing.T) {
+	now := time.Now().UTC()
+
+	// A home whose sessions store already holds one stale and one recent record, plus whatever
+	// retention the caller configures. The store is built on the same <home>/sessions root the
+	// command derives, so the sweep under test is walking these very files.
+	seed := func(t *testing.T, retention string) (home string, store *session.Store) {
+		t.Helper()
+		home = testConfigHome(t, retention)
+		store = session.NewStore(filepath.Join(home, "sessions"))
+		saveAt(t, store, "/ws", now.Add(-100*time.Hour), "stale")
+		saveAt(t, store, "/ws", now.Add(-time.Hour), "recent")
+		return home, store
+	}
+
+	remaining := func(t *testing.T, store *session.Store) []string {
+		t.Helper()
+		metas, err := store.List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		var titles []string
+		for _, m := range metas {
+			titles = append(titles, m.Title)
+		}
+		return titles
+	}
+
+	t.Run("--no-save sweeps and records nothing", func(t *testing.T) {
+		home, store := seed(t, "sessions:\n  max-age: 48h\n")
+
+		stub := &stubRunner{}
+		if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "--no-save", "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+
+		if stub.spec.Store != nil {
+			t.Error("Spec.Store is set under --no-save; the run would be recorded")
+		}
+		if got := remaining(t, store); !slices.Equal(got, []string{"recent"}) {
+			t.Errorf("after a --no-save run the store holds %v; want only the recent record — "+
+				"--no-save drops this run's record, not the retention policy", got)
+		}
+	})
+
+	t.Run("retention unset removes nothing", func(t *testing.T) {
+		home, store := seed(t, "")
+
+		stub := &stubRunner{}
+		if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "--no-save", "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+
+		if got := remaining(t, store); len(got) != 2 {
+			t.Errorf("an unconfigured sweep left %v; want every record kept — retention is opt-in", got)
+		}
+	})
+
+	t.Run("a saving run is unchanged", func(t *testing.T) {
+		home, store := seed(t, "sessions:\n  max-age: 48h\n")
+
+		stub := &stubRunner{}
+		if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+
+		if stub.spec.Store == nil {
+			t.Error("Spec.Store is nil; a headless run is saved unless --no-save says otherwise")
+		}
+		if got := remaining(t, store); !slices.Equal(got, []string{"recent"}) {
+			t.Errorf("after a saving run the store holds %v; want only the recent record", got)
+		}
+	})
+
+	// The regression guard: building the sweep store unconditionally must not make a --no-save run
+	// materialise a sessions tree that was never there. --no-save promises no RECORD, and a first
+	// run that leaves an empty <home>/sessions behind would be a new fact on disk.
+	t.Run("no sessions directory is created", func(t *testing.T) {
+		home := testConfigHome(t, "sessions:\n  max-age: 48h\n")
+
+		stub := &stubRunner{}
+		if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "--no-save", "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+
+		if _, err := os.Stat(filepath.Join(home, "sessions")); !os.IsNotExist(err) {
+			t.Errorf("a --no-save run created the sessions root (stat err = %v); the sweep reads a "+
+				"store, it does not establish one", err)
 		}
 	})
 }

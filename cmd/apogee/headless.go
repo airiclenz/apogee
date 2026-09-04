@@ -499,20 +499,27 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		return notStarted(errors.New(note))
 	}
 
+	// The shared sessions store, built whatever --no-save says: the sweep below is about the
+	// records ALREADY on disk, not about the one this run may add, so the flag must not switch it
+	// off. Building it costs nothing on its own — the store is a directory path and a clock until
+	// something reads or writes.
+	sessions := session.NewStore(roots.sessions)
+
 	// The store the record lands in: the shared sessions store, so a headless run is browsable in
 	// /sessions beside the conversations it ran beside. --no-save leaves it nil, which is
 	// internal/run's own "persist nothing" and leaves Result.SessionID empty.
 	var store *session.Store
 	if !noSave {
-		store = session.NewStore(roots.sessions)
+		store = sessions
 	}
 
 	// The startup session sweep (wire.go), run here for the reason the daemon runs it: a host that
 	// only ever runs `apogee headless` never passes the TUI's boot, so this is the only beat on
-	// which its retention policy is ever applied. No id is kept — a headless run resumes nothing,
-	// and the record it is about to mint is not in the store yet. A --no-save run leaves store nil
-	// and the sweep is inert.
-	gcSessions(store, opts.Sessions)
+	// which its retention policy is ever applied. That host is exactly the one most likely to pass
+	// --no-save, which is why the sweep is handed the store above rather than the record-writing
+	// one: --no-save promises no RECORD of this run, never an unswept store. No id is kept — a
+	// headless run resumes nothing, and the record it is about to mint is not in the store yet.
+	gcSessions(sessions, opts.Sessions)
 
 	// Ctrl-C and SIGTERM end the run rather than the process: the cancellation flows out of Once
 	// as a run failure carrying whatever the run had reached, so an interrupted run still prints

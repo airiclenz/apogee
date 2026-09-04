@@ -766,7 +766,9 @@ skip guard — nothing here depends on the process's privileges.
 
 ---
 
-## 16. `--no-save` still applies the retention policy
+## 16. `--no-save` still applies the retention policy — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): consequential edit — docs/manual/headless.md: made necessary by the sweep now running under `--no-save`; the `--no-save` sentence gained a clause saying the retention policy still applies.
 
 **What.** `apogee headless --no-save` leaves `store` nil (`cmd/apogee/headless.go:444-450`) and
 `gcSessions` returns immediately on a nil store (`cmd/apogee/wire.go:500-505`), so the host that
