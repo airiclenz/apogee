@@ -308,8 +308,11 @@ mcp-servers:
 
 An MCP server is an **external process apogee cannot confine**, so its tools always ask for approval
 in auto mode, exactly as any other unfenceable reach does (see [Auto mode's blast
-radius](#auto-modes-blast-radius)). Its tool descriptions, schemas and results are untrusted input:
-they are shown to the model and rendered, never executed. An http(s) endpoint is one *you* wrote
+radius](#auto-modes-blast-radius)). An "Always allow this session" on one of its tools is
+**server-grain** — it clears every tool of that same server for the session, and nothing beyond it
+(see [how far an approval reaches](commands.md#approving-a-call--how-far-an-approval-reaches)). Its
+tool descriptions, schemas and results are untrusted input: they are shown to the model and
+rendered, never executed. An http(s) endpoint is one *you* wrote
 here rather than one a model chose, so it is exempt from the SSRF floor and the connection is pinned
 to that endpoint's own addresses — your [`url-safety:`](#what-the-network-tools-may-reach--url-safety)
 lists still judge it, and redirects are not followed. A `stdio` command is resolved on `PATH` through

@@ -112,6 +112,36 @@ has smeared or eaten part of the frame. It sends nothing, edits nothing and inte
 nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
 every keypress drops.
 
+## Approving a call — how far an approval reaches
+
+Every gated call offers the same four rows — `Allow`, `Always allow this session`, `Deny` and
+`Cancel` — and the decision keys behind them arm a moment after the prompt appears, exactly as the
+keys above describe. What that second row actually remembers is worth knowing before you press `s`.
+
+**It is scoped to the call, not the tool.** apogee remembers the answer under the tool's name *plus a
+digest of that call's arguments*, so it authorises the call you actually read and nothing wider:
+allowing `npm test` leaves `npm run build` still asking. That is deliberate. Keying on the tool name
+alone let one answer stand for every later call of the same tool — an "always allow" on `terminal`
+pre-cleared every shell command for the rest of the session — so the arguments are part of the
+identity now, and the price is a prompt you will sometimes answer twice for what looks like one tool.
+
+**It is honoured across the whole sub-agent tree.** There is one such memory per agent tree, hanging
+off the approver a parent and all its delegates share, so an allow granted inside a sub-agent clears
+that same call for its parent and its siblings, and outlives the child that earned it. The memory
+lives in the process and is never written to disk — it survives a `/clear`, but a session you resume
+from the store starts with an empty one. The direction that costs you is always the safe one: a
+prompt too many, never an unapproved call.
+
+**An MCP grant is server-grain.** Approving one tool of an [MCP
+server](configuration.md#external-mcp-servers--mcp-servers) clears its siblings on that same server
+for the rest of the session — the server, not the tool and not the arguments, is the grain an
+external tool surface is granted at. The pane discloses that on the frame, in its own words, wherever
+it applies:
+
+```
+Note: "Always allow" covers every tool of MCP server "github" for this session
+```
+
 ## Suggested skills
 
 A library you cannot recall is a library you do not use, so apogee ranks your skills against the

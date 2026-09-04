@@ -661,7 +661,9 @@ it.
 
 ---
 
-## 14. What an approval actually covers
+## 14. What an approval actually covers — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the new section is headed `## Approving a call — how far an approval reaches` — the plan's acceptance pins only the `^## Approving a call` prefix, and the em-dash suffix matches the page's other `##` headings.
 
 **What.** Closes `apogee-t57.7`. `commands.md:87-93` documents only the arming delay; three facts a user
 must know to use the pane are stated nowhere. Add a `##` section to `commands.md` after the fold prose
