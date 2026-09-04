@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -234,6 +235,33 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	})
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)
+	}
+
+	// A Firing whose bound server did not answer AT ALL does not run. The composition above already
+	// took its one beat of that server (wire_firing.go), and Beat.Answered is false only for a
+	// transport-level failure — a refused dial, a timeout, a DNS or TLS failure — never for a
+	// server that answered something this Driver has no standing to judge: a 401, a 500 and a 429
+	// all ANSWER, and all of them keep today's proceed-and-degrade, because a throttled probe is
+	// silence rather than a verdict about the box (internal/heartbeat).
+	//
+	// The refusal is this function's ERROR rather than an Outcome, which is what "a refused Firing
+	// is a failed Firing" means concretely: the library lands it as schedule.EventFailed and the
+	// daemon log renders it through the existing `failed <name> after <elapsed> — <err>` line
+	// (daemon.go). It is never Faulted — internal/schedule reserves that for a run that RETURNED
+	// with its Exchange at a boundary, and a run with no Turn at all has none — and it records no
+	// Outcome, because nothing was sent and there is nothing to report. The schedule's own
+	// retry and next-fire behaviour is untouched.
+	//
+	// The sentence is the TUI's own refusal, spelled at internal/tui/heartbeat.go's
+	// upstreamBlockNote and at runHeadless' pre-send gate (headless.go). The three are deliberately
+	// identical and NOT hoisted — the TUI's is a Model method over its live monitor — so an edit to
+	// one of these wordings belongs at all three.
+	if !routing.Beat.Answered {
+		refusal := "cannot send — server offline (" + server.Endpoint + ")"
+		if routing.Beat.Failure != "" {
+			refusal += ": " + routing.Beat.Failure
+		}
+		return schedule.Outcome{}, errors.New(refusal)
 	}
 
 	// Through the package's runner seam (headless.go) rather than run.Once directly: production

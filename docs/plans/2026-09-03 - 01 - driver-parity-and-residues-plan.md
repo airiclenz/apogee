@@ -463,7 +463,15 @@ as does a healthy one.
 
 ---
 
-## 9. The daemon refuses an unreachable Firing
+## 9. The daemon refuses an unreachable Firing — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the refusal sentence is composed inline in `fire` rather than through a shared helper — item 8, which spells the same sentence in `cmd/apogee/headless.go`, had not landed when this item ran and is in flight in the same tree, so a helper here would have risked a duplicate symbol. A code comment at the site names both other spellings (the TUI's `upstreamBlockNote` and `runHeadless`' gate) so a future edit finds all three.
+
+NOTES (2026-09-04): consequential edit — cmd/apogee/daemon_test.go: made necessary by the new gate. `newDaemonHarness`' `discoverBeat` stub returned the zero `heartbeat.Beat`, which now reads as "the server answered nothing"; every daemon test that fires a schedule end to end (`TestDaemonFiresAnAdoptedScheduleOnItsTick` and the reload harness) would have been refused instead of running. The stub now observes a reachable, answered server. `newDaemonFireHarness`' stub was changed the same way, inside this item's own file, and gained a `beat` field so a test can dictate its own.
+
+NOTES (2026-09-04): no new test was added for the `EventFailed` rendering — the item states it renders through the line already pinned by `TestDaemonNotifyLinesArePinned` (`cmd/apogee/daemon_test.go`), and that test is unchanged and green. This item's test asserts `fire`'s contract instead: the error's exact sentence, no Outcome at all (so never `Faulted`), and no call to `runOnce`.
+
+NOTES (2026-09-04): pre-existing / concurrent, not caused by this item — the full `go test ./cmd/apogee/` is red on `TestE2EPresentOpensOnlyTheAllowedFormats`, `TestE2ESmokeInProcess`, `TestRegistryWithMCPThreadsExtraReadRoots` and `TestFiringConfigDefaultsItsSeams` (the macOS `/var` → `/private/var` `t.TempDir()` resolution recorded under items 5, 6 and 7), plus four `Headless*` and one `FiringConfig*` test whose files (`cmd/apogee/headless.go`, `upstream.go`, `wire_firing.go`, `internal/tui/heartbeat.go`) are dirty in the shared tree from items 8 and 10 running concurrently. This item's acceptance, `go test ./cmd/apogee/ -run 'Daemon'`, is green.
 
 **What.** Recast at the regression check (2026-09-03). Depends on item 7. In
 `cmd/apogee/daemonfire.go`, after `firingConfig` (`:224`), a Firing whose beat did not answer —

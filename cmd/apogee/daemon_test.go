@@ -79,7 +79,12 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 	prevRunner, prevBeat, prevConfiner := runOnce, discoverBeat, newConfiner
 	prevLock, prevClock, prevWatch := acquireDaemonLock, daemonClock, watchSchedules
 	runOnce = h.runner.once
-	discoverBeat = func(context.Context, string, string, string) heartbeat.Beat { return heartbeat.Beat{} }
+	// A server that is THERE: the daemon refuses a Firing whose beat answered nothing at all
+	// (daemonfire.go), so a fixture observing nothing would refuse every Firing this file drives
+	// rather than run the one each test is about.
+	discoverBeat = func(context.Context, string, string, string) heartbeat.Beat {
+		return heartbeat.Beat{Reachable: true, Answered: true}
+	}
 	newConfiner = func() apogee.Confiner { return fenceableHost }
 	acquireDaemonLock = func(path string) (func(), error) {
 		h.locked = path

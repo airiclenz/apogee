@@ -69,6 +69,13 @@ approve (see [Auto mode's blast radius](configuration.md#auto-modes-blast-radius
 for what this host reports). Because the file is all-or-nothing, one ineligible `auto`
 entry rejects the whole file, naming that entry in the log.
 
+A firing whose server does not answer at all — a refused connection, a timeout, a name
+that does not resolve — leaves nothing behind: it is refused before the prompt is sent,
+so no tokens are spent and no record is written, and the log reports it as a failed
+firing naming the endpoint. A server that answers *something* still runs, even when the
+answer is an error: a rate limit or a rejected key is the server saying "not now", not
+"not here".
+
 ## Which server a schedule talks to
 
 A schedule binds to a server **by name**, out of the `servers:` list in

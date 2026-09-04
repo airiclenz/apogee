@@ -28,8 +28,13 @@ import (
 type daemonFireHarness struct {
 	wiring *daemonWiring
 	runner *stubRunner
-	// probed records the endpoint the slot probe was asked about, empty when a pin skipped it.
+	// probed records the endpoint the Firing's one beat was taken against.
 	probed string
+	// beat is what that beat observes. It ANSWERS by default, because the daemon refuses a Firing
+	// whose server answered nothing at all (daemonfire.go): a fixture that observed nothing would
+	// refuse every test in this file rather than compose the run each one is about. A test about the
+	// refusal dictates its own before firing.
+	beat heartbeat.Beat
 }
 
 // newDaemonFireHarness builds the harness for one host configuration. The apogee home is temporary
@@ -41,13 +46,16 @@ func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness 
 	if opts.ConfigDir == "" {
 		opts.ConfigDir = t.TempDir()
 	}
-	harness := &daemonFireHarness{runner: &stubRunner{}}
+	harness := &daemonFireHarness{
+		runner: &stubRunner{},
+		beat:   heartbeat.Beat{Reachable: true, Answered: true},
+	}
 
 	prevRunner, prevBeat, prevConfiner := runOnce, discoverBeat, newConfiner
 	runOnce = harness.runner.once
 	discoverBeat = func(_ context.Context, endpoint, _, _ string) heartbeat.Beat {
 		harness.probed = endpoint
-		return heartbeat.Beat{}
+		return harness.beat
 	}
 	newConfiner = func() apogee.Confiner { return fenceableHost }
 	t.Cleanup(func() { runOnce, discoverBeat, newConfiner = prevRunner, prevBeat, prevConfiner })
@@ -64,20 +72,26 @@ func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness 
 func (h *daemonFireHarness) fire(t *testing.T, entry daemon.Entry) run.Spec {
 	t.Helper()
 
-	h.wiring.adopt([]daemon.Entry{entry})
-	firing := schedule.Firing{
-		ScheduleID:   "sched-1",
-		ScheduleName: entry.Name,
-		Prompt:       entry.Run.Prompt,
-		Mode:         entry.Run.Mode,
-	}
-	if _, err := h.wiring.fire(context.Background(), firing); err != nil {
+	if _, err := h.raise(entry); err != nil {
 		t.Fatalf("fire: %v", err)
 	}
 	if !h.runner.called {
 		t.Fatal("the firing composed no run at all")
 	}
 	return h.runner.spec
+}
+
+// raise is fire without the expectation that a run came of it: it adopts the entry, fires it, and
+// hands back exactly what the wiring answered. A Firing the daemon REFUSES answers with an error and
+// composes nothing, which is a verdict about the wiring rather than a failure of the test.
+func (h *daemonFireHarness) raise(entry daemon.Entry) (schedule.Outcome, error) {
+	h.wiring.adopt([]daemon.Entry{entry})
+	return h.wiring.fire(context.Background(), schedule.Firing{
+		ScheduleID:   "sched-1",
+		ScheduleName: entry.Name,
+		Prompt:       entry.Run.Prompt,
+		Mode:         entry.Run.Mode,
+	})
 }
 
 // entryFor is one validated schedule entry as internal/daemon's Load would hand it over: an
@@ -409,6 +423,92 @@ func TestDaemonFireRefusesAnUnadoptedSchedule(t *testing.T) {
 	}
 	if harness.runner.called {
 		t.Error("the firing reached the runner with no entry behind it")
+	}
+}
+
+// A Firing whose bound server answered NOTHING is refused before a prompt is sent — and only that
+// one: a server that answered anything at all keeps today's proceed-and-degrade, because a 401, a
+// 500 and a 429 are answers this Driver has no standing to judge while nobody is watching. The
+// sentence is the TUI's own (internal/tui/heartbeat.go's upstreamBlockNote), so the two Drivers word
+// one refusal one way.
+func TestDaemonFireRefusesOnlyAServerThatAnsweredNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		beat heartbeat.Beat
+		// want is the refusal sentence, and "" when this beat must let the Firing run.
+		want string
+	}{
+		{
+			name: "a refused dial says why",
+			beat: heartbeat.Beat{Failure: "dial tcp 127.0.0.1:9: connect: connection refused"},
+			want: "cannot send — server offline (http://nightly.invalid): " +
+				"dial tcp 127.0.0.1:9: connect: connection refused",
+		},
+		{
+			// The zero Beat: nothing observed and nothing to say about it. The sentence still names
+			// the endpoint, which is the one fact a human reading the log acts on.
+			name: "nothing observed names the endpoint alone",
+			beat: heartbeat.Beat{},
+			want: "cannot send — server offline (http://nightly.invalid)",
+		},
+		{
+			// A throttled model list ANSWERED: the box is there and merely would not answer this
+			// question now (internal/heartbeat). Refusing over it would turn a rate limit into a
+			// silent gap in the schedule's record.
+			name: "a throttled model list runs",
+			beat: heartbeat.Beat{Answered: true, Throttled: true, Failure: "the model list answered HTTP 429"},
+		},
+		{
+			// A completions-only endpoint serves no model list at all and answers the completion
+			// anyway — the beat is unreachable, not absent.
+			name: "a server with no model list runs",
+			beat: heartbeat.Beat{Answered: true, Failure: "the model list answered HTTP 404"},
+		},
+		{
+			name: "a healthy server runs",
+			beat: heartbeat.Beat{Answered: true, Reachable: true, ActiveModel: "nightly-model"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newDaemonFireHarness(t, config.Options{
+				HostAlias: "startup",
+				Endpoint:  "http://startup.invalid",
+				Servers: []config.ServerEntry{
+					{Name: "startup", Endpoint: "http://startup.invalid"},
+					{Name: "nightly", Endpoint: "http://nightly.invalid", Model: "nightly-model"},
+				},
+			})
+			harness.beat = tc.beat
+
+			out, err := harness.raise(entryFor(t, "audit", daemon.Action{Server: "nightly"}))
+
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("fire: %v; a server that ANSWERED must run the firing as before", err)
+				}
+				if !harness.runner.called {
+					t.Error("the firing composed no run at all")
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("fire returned nil for a server that answered nothing; want the refusal")
+			}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("the refusal reads %q; want the TUI's own sentence %q", got, tc.want)
+			}
+			// Nothing was sent, so nothing was spent and no record was written — the whole point of
+			// gating before the run rather than reporting after it.
+			if harness.runner.called {
+				t.Error("the refused firing still reached the runner")
+			}
+			// No Outcome at all, and so never Faulted: internal/schedule reserves Faulted for a run
+			// that RETURNED with its Exchange at a boundary, and a run with no Turn has none. The
+			// error alone is what the library renders, through its EventFailed line.
+			if out != (schedule.Outcome{}) {
+				t.Errorf("the refused firing recorded %+v; want no Outcome at all", out)
+			}
+		})
 	}
 }
 
