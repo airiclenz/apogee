@@ -10,6 +10,110 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Documented the repo's live git-hook path (`.beads/hooks/`, with `.git/hooks/commit-msg` as a dormant fallback) and what beads' `pre-commit` hook actually writes and stages, after reproducing the reported staged-file sweep in a throwaway clone: the hook does not sweep — `bd init`'s own auto-commit does.
+
+- `internal/mechanisms` exports `SwapCatalogue(rows []Row) (restore func())` and the `Row` it takes — the test-only seam that stands a temporary table in the curated (empty) catalogue's place so a test outside the package can drive the config → `EnableMechanisms` → engine-build path with a real Mechanism row, and restores the shipped catalogue. Deliberately not concurrency-safe: a swapping test does not call `t.Parallel()`.
+
+- **A shed Validated-set member names the guard that governs it now.** When an applying
+  Validated set drops a member whose Mechanism was retired, the notice now has two readings,
+  told apart by the row's successor: a row retired outright keeps today's sentence, while one
+  promoted to a **Floor guard** — `tool_loop_interceptor`, `validate`, `empty_response_recovery`,
+  `tool_use_enforcer`, `cached_content_intercept`, `tool_result_cap` — reads `apogee:
+  validated-set entry "…" names mechanism "…", the "…" floor guard since v0.20.0 — it is dropped
+  from the set and the rest applies; the behaviour is on by default.` The reader of a saved record
+  is no longer told a measured stack lost a member whose behaviour it in fact still has, and the
+  wording matches the one the `mechanisms:` block already uses for the same six IDs.
+
+- `TestMechanismIDsConstructsUnderBypass` builds a real catalogued row again: it stands one up through `mechanisms.SwapCatalogue` and drives it end-to-end through `ResolveEnabled` → `Config.EnableMechanisms` → `apogee.New` under Bypass, instead of enabling a retired id that resolved to an empty list. A second case pins that a retired id resolves to nothing and earns its floor-guard notice.
+
+- The Floor guards' file-mutation superset is cross-checked against the real tool
+  roster again: `internal/floor` exports `IsFileMutatingTool` and
+  `FileMutatingToolNames`, and a coverage test in `internal/agent` — the one
+  package importing both floor and `internal/tools` — walks every registered
+  built-in and fails when a write-capable tool has no floor verdict. The pin died
+  with `internal/mechanisms/writedetection_test.go` in the retirement wave; floor's
+  own table now names all thirteen superset members instead of seven.
+
+- The Validated-set **applying** rung is pinned end to end. `setApplied`, the canonical member sort
+  and `appliedNotice` are unreachable by any shipped configuration — the Mechanism catalogue is
+  empty by design (ADR 0071), so `validated.Validate` rejects every non-empty member set and the
+  ladder stops one rung short at `setSkipped` — and were pinned only as hand-built decisions in
+  `internal/probe`. A new `cmd/apogee` test now walks the whole user path instead: two rows stood up
+  through `mechanisms.SwapCatalogue`, a probe record that lifts the identity from LOW to MEDIUM, and
+  a user-local entry naming both members OUT of canonical order. It asserts the enable list is the
+  recorded members SORTED, that the session prints `appliedNotice`'s one line with the right count
+  and source, and that `apogee.BuildMechanisms` actually constructs the list. Its negative twin
+  pins that the same entry against the shipped catalogue still lands on `setSkipped`, so the
+  catalogue seam is provably what opened the rung.
+
+- A failed tool call's row now says the bare word `error` in its outcome slot and carries the tool's whole message in the body behind the ▶, instead of wording an unbounded first line into the slot — which reserved the row's full width before the target was given a budget and ate the tool's own name down to ` …`, or off the row entirely, with nothing behind the ▶ to expand to. The three tools that word their own short failure (`error: exit 3`) keep it, and `denied` / `cancelled` / `interrupted — the run did not finish` are unchanged. The transcript's orphan-result branch is worded the same way.
+
+- The demo rig's hero tape no longer guesses at when the fix's edit card lands: knob 3 is a VHS
+  screen wait on the card's own diffstat (`Wait+Screen@40s`) instead of a fixed `Sleep 10s` that hit
+  about one take in seven, and whose early miss silently cancelled the run. Recording now needs
+  VHS 0.11.0 or newer.
+
+- The configuration manual now defines a **Validated set** instead of only using the term: a new
+  `## Per-model Mechanism sets — validated-sets:` section covers `enable:`, `alias:`, whole-or-not-at-all
+  application, the ≥ medium-confidence auto-apply and the offer below it, the empty shipped roster, the
+  user's own `~/.apogee/validated/` entries and their retired-member shed, `mechanisms:` as manual
+  control, and the dangling-alias startup error.
+
+- The configuration manual's `## Skill suggestions — ui.skill-suggestions:` section is now
+  `## The terminal UI — ui:`, and documents the four `ui:` keys that parsed and carried `/settings` rows
+  without ever being written down — `ui.spinner`, `ui.spinner-color`, `ui.show-scrollbar` and
+  `ui.color-scheme` — plus a sentence on `ui.inspector` (off by default, honoured at the next start) and a
+  pointer to `ui.stall-after` where it lives.
+
+- The configuration manual now names `auto-title:` — its default, its file-only status and its two jobs
+  (naming a new session from its first prompt, naming an unnamed delegation) — beside the `sessions:`
+  block, and documents the `bypass:` and `mechanisms:` keys a `servers:` entry may carry: what
+  delegations to that server run as, an absent `bypass:` inheriting the parent's live flag, a present
+  `mechanisms:` map being the child's entire catalogue (replace-whole, so a map of all-false arms
+  nothing), and an unknown id being a startup error naming the entry.
+
+- The configuration manual gains a `## Model profiles — model-profiles:` section specifying the axes a
+  profile for a non-native-tool-call model needs: `tool-call-format:` (`native`, `markdown-fenced`,
+  `custom-regex`, and that a text format is parsed from the model's visible content),
+  `tool-call-pattern:` (a Go regexp with `name`/`args` named groups, dot-matches-newline applied, the
+  JavaScript `(?<name>…)` spelling accepted, mandatory under `custom-regex` and refused under the other
+  formats) and `thinking:`'s `style:` (`none`, `delimited` with both tokens, `harmony`) — each axis
+  resolving independently, and each a startup error when malformed.
+
+- The manual documents the **dangerous-action guard**: a new `### The dangerous-action guard` subsection under *Auto mode's blast radius* in `docs/manual/configuration.md` states the tighten-only, mode-independent two tiers (Tier 1 hard-refuses `rm -rf` of a root/home/system path, fork bombs and writes to `~/.ssh`, credential/persistence files and `.git/hooks`; Tier 2 forces the approval prompt even in Auto for `curl … | sh`, `sudo` and writes under `~/.apogee`), that a forced gate carries no cache key so "Always allow this session" cannot remember it, and ADR 0012's own framing — a footgun-guard, not a security boundary, never what makes `confine-to-workspace: false` safe. The ruleset is named as built into this build with no config key yet, and the add-only/no-remove merge asymmetry is attributed to ADR 0012 as a recorded decision rather than shipped wiring.
+
+- The manual now says what an approval actually covers: a new *Approving a call — how far an approval reaches* section in `docs/manual/commands.md` records that "Always allow this session" keys on the tool name plus a digest of the call's arguments (so allowing `npm test` leaves `npm run build` asking), that the memory is one per agent tree — an allow granted inside a sub-agent clears the call for its parent and siblings, survives a `/clear`, and is never persisted — and that an MCP grant is server-grain. `docs/manual/configuration.md`'s `mcp-servers:` prose cross-links it.
+
+- The manual says how a diff body and a near-miss suggestion read: `docs/manual/commands.md` gains a
+  `## Reading a tool's answer — diffs and near misses` section covering the rule for which blocks paint a
+  diff (every block whose tool recorded or printed regions — the four writing tools plus `view_diff` and
+  `git_diff_range`), the split/stacked pair and the per-pane width that chooses between them, the marker-not-colour
+  rule and the turquoise add band, wrap-don't-clip, and the `did you mean:` clause `read_file`, `list_dir`,
+  `grep` and `find_files` append to a not-found refusal — with `docs/layout/split-diff-layout.md` linked as canon.
+
+- The manual's commands reference gains a **The status line** section: the activity phrase and elapsed clock the left slot carries while a run is live (thinking, responding, the tool's own verb, retrying, compacting, stopping, working), how delegations take the row — one delegate under its own name, two or more merged into `2 sub-agents · working` off the oldest child's clock — and the `· N tok/s` readout, including why a sub-1 tok/s or unmeasurably short window shows no reading at all.
+
+- **The settings reference is pinned to the registry.** A third drift gate joins the two the repo
+  already runs over hand-maintained lists: `TestManualDocumentsEverySettingsKey` (`cmd/apogee`)
+  walks every `Path` in `config.KeyRegistry` and fails when the key is not documented on
+  `docs/manual/configuration.md` — the spelling the page actually uses counts (the dotted path or
+  its leaf, back-ticked with or without a trailing colon, or the leaf written `<leaf>:` inside a
+  fenced config example beneath its own block), with a named allowlist, empty today, reserved for a
+  key documented on another manual page. Four keys the gate caught were spelled only with their
+  value attached — `auto-compact: false`, `prune-tool-results: false`, `remember-model: true` and
+  `context-files:`' `enable: false` — so the manual now names each key in its own right beside the
+  prose that already explained it.
+
+- **The deferred register is swept.** The twenty-one beads that plan
+  `2026-09-03 - 02 - deferred-items-sweep-plan.md` owned are closed: the git-hook pair
+  (`apogee-5qe`, `.1`, `.2`), the Mechanism-retirement residue (`apogee-i5h`, `.1`–`.4`), the ten
+  manual gaps (`apogee-t57`, `.1`–`.10`), the tool-row error defect (`apogee-b3u`) and the hero
+  tape's clock (`apogee-h64`) — each with a `--reason` naming the plan item that delivered it. The
+  register now holds only work that is genuinely parked. Note: item 1's reproduction found beads'
+  `pre-commit` hook **clean** — it swept no unrelated staged file into a commit — so nothing was
+  fixed there; the 22-deletion incident it was filed for reproduced instead from `bd init`'s own
+  auto-commit against a dirty index, which `AGENTS.md` now records.
+
 - **`internal/tasklist` — the model-owned checklist.** A new pure-policy package holds the task
   list the `task_list` tool will write: an `Item` (`text`, `done`), a mutex-guarded `List` whose
   zero value is empty, a whole-list `Replace` that trims each text, drops the empty ones and
