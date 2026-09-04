@@ -939,7 +939,8 @@ func TestStartupEntryCarriesTheParallelAgentsPin(t *testing.T) {
 	}
 }
 
-// The notice a rebind adds when the model it bound is one the server never advertised. Silence is
+// The notice a rebind adds — and, through the notices firingConfig returns, an unattended run too
+// (wire_firing.go) — when the model it bound is one the server never advertised. Silence is
 // half the contract: an advertised model and a no-hint start are ordinary, and a line printed about
 // them would teach the human to ignore the one that matters.
 func TestHintNoticeSpeaksOnlyForAnUnadvertisedModel(t *testing.T) {

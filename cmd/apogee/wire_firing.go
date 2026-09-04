@@ -199,6 +199,23 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	}
 	beat := observe(ctx, in.entry.Endpoint, spec.Model, apiKey)
 
+	// The one thing only that observation can say about the binding above: whether the server this run
+	// is about to prompt advertises the model it just bound. A session says it at its rebind seam out of
+	// the same two values (wire_verbs.go — the grade discovery reached the id by, and the window it saw),
+	// and this is the unattended half of the same sentence. It joins the notices this composition already
+	// returns rather than printing itself: headless puts them on stderr and the daemon logs them, so both
+	// Drivers gain the hint by reading a channel they already read (ADR 0031's Driver parity).
+	//
+	// The bound window handed over is the spec's, which on this path is the `context-window:` pin or
+	// nothing — rebindSpecFor is passed an observed window of 0 above, deliberately, so an unpinned
+	// Firing leaves the Budget inactive rather than binding a per-slot number. An unpinned run therefore
+	// says the window is unknown and a pinned one names the pin, while a session's own clause can credit
+	// the base entry for a window it actually bound. The two sentences differ because the two Drivers
+	// bind differently; aligning them would mean changing what a Firing binds.
+	if notice := hintNotice(spec.Model, beat.Resolution, beat.ContextWindow, spec.MaxContextTokens); notice != "" {
+		notices = append(notices, notice)
+	}
+
 	// How wide this run may fan its delegations out — the same cap a session resolves, so every
 	// Driver reaches the same engine behaviour (ADR 0031; the resolution itself is ADR 0039 decision
 	// 2). The pin is the BOUND entry's own `parallel-agents:`, and ResolveParallelAgents never lets

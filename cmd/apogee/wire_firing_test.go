@@ -864,6 +864,113 @@ func TestFiringConfigCarriesItsPrimaryObservation(t *testing.T) {
 	}
 }
 
+// The "not advertised" line a session gets at its rebind seam, reaching the Drivers nobody is
+// watching: an unattended run binds the configured id verbatim exactly as a session does, so the
+// human reading the stderr of a headless run or the daemon's log has to be told the same thing —
+// the server never listed this model, and here is what that cost.
+//
+// The window clause is the pin or nothing, and that is the load-bearing half. The composition hands
+// rebindSpecFor an observed window of 0 on purpose, so an unpinned Firing binds no window and leaves
+// the Budget inactive (the honest degrade); the observed number the beat carries reaches the
+// SENTENCE alone. A change that fed it to the rebind instead would make a run on a `--parallel 8`
+// box bind the per-slot window and start pruning a prompt it sends whole today, which is why the
+// bound window is asserted here beside the notice.
+func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		beat         heartbeat.Beat
+		pinnedWindow int
+		wantContains []string
+		wantBound    int
+	}{
+		{
+			name: "an unadvertised model with no pin has no window to report",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "my-alias", ContextWindow: 131072,
+				Resolution: apiprovider.HintTrusted,
+			},
+			wantContains: []string{"my-alias", "not advertised", "context window unknown", "Budget"},
+		},
+		{
+			name: "a variant slug is not credited to its base entry either",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "vendor/model:variant", ContextWindow: 131072,
+				Resolution: apiprovider.HintBaseSlug,
+			},
+			wantContains: []string{"vendor/model:variant", "not advertised", "context window unknown"},
+		},
+		{
+			name: "an entry that pins a window states the pin",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "my-alias", ContextWindow: 131072,
+				Resolution: apiprovider.HintTrusted,
+			},
+			pinnedWindow: 32768,
+			wantContains: []string{"my-alias", "not advertised", "context window: 32k"},
+			wantBound:    32768,
+		},
+		{
+			name: "an advertised model is unremarkable",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "my-alias", ContextWindow: 131072,
+				Resolution: apiprovider.HintExact,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			beats := &stubBeat{beat: tc.beat}
+			cfg, _, notices, err := firingConfig(context.Background(), firingInputs{
+				opts: config.Options{Bypass: true},
+				entry: config.ServerEntry{
+					Name:          "box",
+					Endpoint:      "http://box.example/v1",
+					Model:         tc.beat.ActiveModel,
+					ContextWindow: config.TokenCount(tc.pinnedWindow),
+				},
+				apiKey:   "sk-test",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
+				beat:     beats.discover,
+				recordID: "2026-09-04T10-00-00-firing",
+			})
+			if err != nil {
+				t.Fatalf("firingConfig: %v", err)
+			}
+
+			hint := ""
+			for _, notice := range notices {
+				if strings.Contains(notice, "not advertised") {
+					hint = notice
+				}
+			}
+			if len(tc.wantContains) == 0 {
+				if hint != "" {
+					t.Fatalf("notices = %q; a model the server advertises is ordinary and says nothing", notices)
+				}
+				return
+			}
+			for _, want := range tc.wantContains {
+				if !strings.Contains(hint, want) {
+					t.Errorf("hint notice = %q; want it to name %q — the unattended Drivers read this "+
+						"slice and have no other channel for it", hint, want)
+				}
+			}
+			if cfg.Context.MaxContextTokens != tc.wantBound {
+				t.Errorf("Config.Context.MaxContextTokens = %d, want %d; the observed window reaches the "+
+					"NOTICE alone — binding it would prune a prompt an unpinned Firing sends whole",
+					cfg.Context.MaxContextTokens, tc.wantBound)
+			}
+		})
+	}
+}
+
 // The two beat seams observe two different BOXES and must never be collapsed into one. A Firing's
 // own beat asks the server it runs on; discoverDelegationBeat asks the `sub-agents-server:` entry,
 // which has its own endpoint, model and key. Sharing the primary's beat would have

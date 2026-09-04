@@ -558,8 +558,10 @@ func (o *hintObserver) gradeFor(model string) provider.HintResolution {
 	return o.grade
 }
 
-// hintNotice is the one line a session prints when the model it just bound is not one the server
-// advertises. Discovery no longer substitutes the first advertised model for an unmatched hint — it
+// hintNotice is the one line a Driver prints when the model it just bound is not one the server
+// advertises — a session at its rebind seam (wire_verbs.go), an unattended run through the notices
+// its composition returns (wire_firing.go), so the sentence is one thing said in one voice on every
+// Driver (ADR 0031). Discovery no longer substitutes the first advertised model for an unmatched hint — it
 // runs the id as configured — so the human has to be told that, and told what it cost: an unknown
 // context window leaves the Budget and auto-compaction inactive, exactly as an advertised model that
 // reports no window does, and a genuinely wrong id now fails loud on the next completion instead of

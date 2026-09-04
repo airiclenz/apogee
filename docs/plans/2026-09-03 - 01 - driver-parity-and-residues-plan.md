@@ -509,7 +509,13 @@ server that serves no model list — runs the Firing as before, as does a health
 
 ---
 
-## 10. The "model not advertised" hint reaches the unattended path
+## 10. The "model not advertised" hint reaches the unattended path — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the hint is composed AFTER the beat rather than at the item's literal "after `rebindSpecFor`" point — the grade and observed window are the beat's, and the beat is taken further down in `firingConfig`; the spec's bound window is read as the item specifies and `rebindSpecFor` still passes `0`.
+
+NOTES (2026-09-04): consequential edit — cmd/apogee/upstream.go: made necessary by the second caller — `hintNotice`'s doc opened "the one line a session prints", which this item made false; it now names both Drivers. `cmd/apogee/upstream_test.go`'s test comment took the same one-line amendment (it is in the item's Files list).
+
+NOTES (2026-09-04): `TestFiringConfigDefaultsItsSeams` fails on macOS at the plan's base commit `25611103` too (verified in a clean worktree) — `ExtraReadRoots` returns the `/private/var` symlink-resolved paths while the assertion wants the `/var` form. Pre-existing environment debt, untouched by this item.
 
 **What.** Recast at the regression check (2026-09-03). Depends on item 7. `hintNotice`
 (`cmd/apogee/upstream.go:574`) has exactly one production
