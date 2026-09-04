@@ -620,7 +620,9 @@ text after item 9 lands.
 
 ---
 
-## 13. The dangerous-action guard reaches the manual
+## 13. The dangerous-action guard reaches the manual — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the subsection was placed at the END of `## Auto mode's blast radius` (immediately before `## The Console family`), re-located by heading text rather than by the plan's line number 1254 — items 9-12 had already shifted the file, and the heading now sits at 1451.
 
 **What.** Recast at the regression check (2026-09-03). Closes `apogee-t57.6`. The two-tier guard runs ahead of the mode disposition in EVERY mode and
 can only tighten a call (`internal/security/dangerous.go:16-31`, `guard.go:109-130`), yet `docs/manual/`

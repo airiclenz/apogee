@@ -1527,6 +1527,37 @@ so a `/confine off` or `/confine on` shows up in the footer the moment it takes;
 lower rungs carry no word at all, because the flag is read by auto mode only. `/confine` is
 where it changes, and `/confine status` is the long form of the same fact.
 
+### The dangerous-action guard
+
+Underneath the four modes sits a check that is not a mode at all. The **dangerous-action
+guard** inspects every tool call before the mode's own disposition is applied — in Plan,
+Ask-Before, Allow-Edits and Auto alike — and it is tighten-only: it can make a call
+stricter than the mode would have made it, never looser. It has two tiers.
+
+**Tier 1 refuses the call outright**, in every mode, with no per-call override and no
+prompt to say yes on: an `rm -rf` aimed at a root, home or system path, a fork bomb, a
+write to `~/.ssh`, to a credential or persistence file, or to a repository's `.git/hooks`.
+The model gets back an error naming why, and — where the matched rule knows a sanctioned
+route — where to go instead.
+
+**Tier 2 forces the approval prompt**, even on the auto rung where nothing else would ask.
+These are the idioms that are usually legitimate and occasionally catastrophic: `curl … |
+sh`, `sudo`, and a terminal command writing under apogee's own `~/.apogee` control plane.
+A forced prompt is a speed-bump, not a block — you can say yes to it. But it carries no
+cache key, so **"Always allow this session" cannot remember it**: the yes authorises that
+one call, and the next call that trips the same rule asks again.
+
+Read the guard for what it is. In ADR 0012's own words it is a **footgun-guard, not a
+security boundary**: it catches a small model's obvious catastrophic *mistakes*, it is
+trivially bypassable by anything determined to get around it, and it is never what makes
+`confine-to-workspace: false` safe. Only a VM is.
+
+The ruleset is built into this build. There is no config key for it yet, so nothing in a
+config file adds, removes or re-tiers a rule. ADR 0012 does record the shape a merge should
+take when such keys land — the global config file may add rules *or* remove them, because
+it is your machine, while a project's config may only *add* — but that asymmetry describes
+a recorded decision, not wiring that ships today.
+
 ## The Console family
 
 Nearly every tool apogee gives a model is one shot: `terminal` runs a command, the command ends,
