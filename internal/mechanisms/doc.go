@@ -19,7 +19,12 @@
 //
 // catalogue.go is the registry: the row, the package-private register() a Mechanism file would
 // call from init(), the (now empty) injected Deps, and the Build / KnownIDs / Descriptors surface
-// the engine resolves a stack through. retired.go is the roll of IDs this build no longer
+// the engine resolves a stack through. It also carries the package's one exported TEST seam,
+// SwapCatalogue(rows []Row) (restore func()) — it stands a temporary table in the curated
+// catalogue's place so a test outside this package can drive the config -> EnableMechanisms ->
+// engine-build path with a real row, and hands back the closure that restores the shipped
+// (empty) one. Its only production use is none, and it is not concurrency-safe: a test that
+// swaps must not call t.Parallel(). retired.go is the roll of IDs this build no longer
 // catalogues, so a saved config or Validated set naming one is tolerated rather than refused — and
 // the home of ResolveEnabled, the resolver a Driver runs a `mechanisms:` block through: it
 // validates every key against the catalogue, drops the retired ones, and hands back the notices

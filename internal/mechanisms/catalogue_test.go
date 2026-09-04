@@ -361,3 +361,116 @@ func TestCatalogueHooksDeclareTheirSubAgentScope(t *testing.T) {
 		}
 	}
 }
+
+// SwapCatalogue is the one seam a caller outside this package has on the curated table, and what it
+// buys is that a swapped row is visible through the SHIPPED reading surface — KnownIDs(),
+// Descriptors() and Build() all read the package var, so a Driver's lab row reaches the config ->
+// EnableMechanisms -> engine-build path exactly as a catalogued row would. The restore closure puts
+// the empty shipped catalogue (ADR 0071) back, so the swap cannot leak into another test.
+//
+// No t.Parallel(): this test assigns a package-level variable, and the seam is deliberately not
+// concurrency-safe. Go runs the sequential tests to completion while the parallel ones are paused,
+// which is what keeps a swapped table invisible to TestProductionCatalogueIsEmpty and its peers.
+func TestSwapCatalogueExposesTheRowAndRestores(t *testing.T) {
+	const id domain.MechanismID = "lab_row"
+
+	restore := SwapCatalogue([]Row{{
+		Descriptor: domain.MechanismDescriptor{ID: id, Capability: domain.CapProactiveNudge},
+		Ordering:   domain.OrderingConstraints{After: []domain.MechanismID{"earlier"}},
+		Construct:  func(d Deps) (any, error) { return fakeMechanism{id: id, deps: d}, nil },
+	}})
+
+	if known := KnownIDs(); !slices.Equal(known, []domain.MechanismID{id}) {
+		t.Errorf("KnownIDs() = %v; want the swapped row %q", known, id)
+	}
+	descs := Descriptors()
+	if len(descs) != 1 || descs[0].ID != id {
+		t.Fatalf("Descriptors() = %+v; want the swapped row's descriptor", descs)
+	}
+	if descs[0].Capability != domain.CapProactiveNudge {
+		t.Errorf("the swapped row's descriptor Capability = %q; Descriptors() harvests the row it was given", descs[0].Capability)
+	}
+	m, err := Build(id, Deps{})
+	if err != nil {
+		t.Fatalf("Build(%q) against the swapped catalogue: %v", id, err)
+	}
+	if _, ok := m.Hook.(fakeMechanism); !ok {
+		t.Errorf("Build(%q) hook is %T; want the swapped row's fakeMechanism", id, m.Hook)
+	}
+	if !slices.Equal(m.Ordering.After, []domain.MechanismID{"earlier"}) {
+		t.Errorf("Build(%q) Ordering.After = %v; want the swapped row's edge", id, m.Ordering.After)
+	}
+
+	restore()
+
+	if known := KnownIDs(); len(known) != 0 {
+		t.Errorf("after restore KnownIDs() = %v; want the empty shipped catalogue back", known)
+	}
+	if rows := Descriptors(); len(rows) != 0 {
+		t.Errorf("after restore Descriptors() = %+v; want the empty shipped catalogue back", rows)
+	}
+	if _, err := Build(id, Deps{}); !errors.Is(err, domain.ErrUnknownMechanism) {
+		t.Errorf("after restore Build(%q) error = %v; want the unknown-ID sentinel", id, err)
+	}
+}
+
+// Nested swaps restore in order: each closure puts back the table its own call displaced, so a test
+// that swaps inside a swap (a suite-wide lab table with a per-case row on top) unwinds through
+// deferred restores to exactly the state it started from.
+func TestSwapCatalogueNestedRestoresInOrder(t *testing.T) {
+	const outer domain.MechanismID = "outer_row"
+	const inner domain.MechanismID = "inner_row"
+	build := func(id domain.MechanismID) Row {
+		return Row{
+			Descriptor: domain.MechanismDescriptor{ID: id},
+			Construct:  func(d Deps) (any, error) { return fakeMechanism{id: id, deps: d}, nil },
+		}
+	}
+
+	restoreOuter := SwapCatalogue([]Row{build(outer)})
+	restoreInner := SwapCatalogue([]Row{build(inner)})
+
+	if known := KnownIDs(); !slices.Equal(known, []domain.MechanismID{inner}) {
+		t.Errorf("inside the nested swap KnownIDs() = %v; want only %q", known, inner)
+	}
+
+	restoreInner()
+	if known := KnownIDs(); !slices.Equal(known, []domain.MechanismID{outer}) {
+		t.Errorf("after the inner restore KnownIDs() = %v; want the outer table's %q back", known, outer)
+	}
+
+	restoreOuter()
+	if known := KnownIDs(); len(known) != 0 {
+		t.Errorf("after the outer restore KnownIDs() = %v; want the empty shipped catalogue back", known)
+	}
+}
+
+// A swapped table is registered through the same door the curated one uses, so the two programming
+// errors registerIn refuses stay refused: a row with no descriptor ID, and two rows filed under the
+// same ID. Both PANIC — they are mistakes in the test's own table, not runtime conditions.
+func TestSwapCatalogueRejectsEmptyAndDuplicateIDs(t *testing.T) {
+	good := Row{
+		Descriptor: domain.MechanismDescriptor{ID: "dup_row"},
+		Construct:  func(Deps) (any, error) { return fakeMechanism{id: "dup_row"}, nil },
+	}
+	cases := []struct {
+		name string
+		rows []Row
+	}{
+		{name: "empty ID", rows: []Row{{Construct: func(Deps) (any, error) { return fakeMechanism{}, nil }}}},
+		{name: "duplicate ID", rows: []Row{good, good}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("SwapCatalogue with a %s row did not panic", tc.name)
+				}
+				if known := KnownIDs(); len(known) != 0 {
+					t.Errorf("after the panic KnownIDs() = %v; the shipped catalogue must not have been swapped", known)
+				}
+			}()
+			SwapCatalogue(tc.rows)
+		})
+	}
+}

@@ -101,7 +101,11 @@ from `prepare-commit-msg`, so only the exact form proves bd manages no stripper;
 
 ---
 
-## 2. `mechanisms.SwapCatalogue` — a seam a test can register a row in
+## 2. `mechanisms.SwapCatalogue` — a seam a test can register a row in — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the swapped row's descriptor field asserted for pass-through is `Capability` (`domain.MechanismDescriptor` has no `BypassDisables` field) — the assertion the plan's intent asks for, on the field that exists.
+
+NOTES (2026-09-04): added a fourth test beyond the three the item names — `SwapCatalogue` reaches the catalogue through `registerIn`, so its empty-ID and duplicate-ID panics now have an exported caller; the test pins that they still panic and that the shipped catalogue is left unswapped.
 
 **What.** The shipped catalogue is empty by design (`internal/mechanisms/catalogue.go:54`, ADR 0071) and
 `catalogue`, `row`, `register`, `registerIn`, `buildFrom` and `knownIDs` are all unexported, so nothing

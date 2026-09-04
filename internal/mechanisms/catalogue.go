@@ -60,7 +60,10 @@ var catalogue = map[domain.MechanismID]row{}
 // init()-time programming errors inside this package (a mis-written row), never runtime conditions
 // a caller could handle, and the first test run catches them. register is deliberately unexported:
 // the catalogue is curated (ADR 0002 / ADR 0015 §6), so there is no public way to add a Mechanism
-// to it.
+// to it. The single exception is SwapCatalogue, and it is not a way in: it is the test-only
+// swap-and-restore seam that stands a whole temporary table in the curated one's place for the
+// duration of a test and puts the shipped table back, so nothing a caller hands in ever joins the
+// curated catalogue.
 //
 // The SHIPPED catalogue is empty since v0.20.0 (ADR 0071), so nothing calls register in this
 // build; it stays as the lab surface's shape.
@@ -78,6 +81,48 @@ func registerIn(table map[domain.MechanismID]row, r row) {
 		panic(fmt.Sprintf("mechanisms: register: duplicate Mechanism ID %q", r.descriptor.ID))
 	}
 	table[r.descriptor.ID] = r
+}
+
+// Row is the exported spelling of one catalogue entry — the shape a caller describes a Mechanism
+// in when it hands rows to SwapCatalogue. It is the caller-facing twin of the package-private row
+// and exists only because that seam does: a CURATED row is written as a `row` literal in the
+// Mechanism's own file and filed by its init(), never handed in from outside the package.
+type Row struct {
+	// Descriptor is the Mechanism's static, harvestable metadata (ADR 0015 §3). Descriptor.ID is
+	// the canonical ID the row is filed under — there is no separate key, so a row cannot be filed
+	// under an ID other than the one it describes.
+	Descriptor domain.MechanismDescriptor
+	// Ordering is the row's declared position relative to its peers at the same hook point
+	// (ADR 0003). The zero value declares no edge, which is what most rows want.
+	Ordering domain.OrderingConstraints
+	// Construct builds the Mechanism's hook — its behaviour — from the injected Deps (D3), exactly
+	// as a catalogued row's constructor does.
+	Construct func(Deps) (any, error)
+}
+
+// SwapCatalogue stands a table built from rows in the package catalogue's place and returns the
+// closure that puts the previous table back; callers defer it. Build, KnownIDs and Descriptors all
+// read the package var, so they see the swapped table with no other change — which makes this the
+// one way a caller outside this package can drive the config -> EnableMechanisms -> engine-build
+// path with a real row.
+//
+// It is a TEST seam: its only production use is none. The shipped catalogue is empty by design
+// (ADR 0071) and stays curated — SwapCatalogue cannot add a row to it, only replace the whole
+// table for the duration of a test. Like register, it PANICS on a row with an empty descriptor ID
+// and on a duplicate ID within rows, because both are programming errors in the test's own table.
+//
+// It is deliberately NOT concurrency-safe: it assigns a package-level variable, so a test that
+// calls it must NOT call t.Parallel() — Go runs the sequential tests to completion while the
+// parallel ones are paused, which is what keeps a swapped table invisible to them. Nested swaps
+// restore in reverse order, so deferred restores unwind correctly.
+func SwapCatalogue(rows []Row) (restore func()) {
+	previous := catalogue
+	table := make(map[domain.MechanismID]row, len(rows))
+	for _, r := range rows {
+		registerIn(table, row{descriptor: r.Descriptor, ordering: r.Ordering, construct: r.Construct})
+	}
+	catalogue = table
+	return func() { catalogue = previous }
 }
 
 // Build constructs the catalogued Mechanism identified by id, injecting deps (D3), and returns it
