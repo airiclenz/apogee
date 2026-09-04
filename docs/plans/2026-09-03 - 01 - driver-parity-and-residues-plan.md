@@ -845,7 +845,9 @@ produces none; a `stdio` entry with the key produces none.
 
 ---
 
-## 18. `TestReportKindsResolveDistinctly` walks `follows`
+## 18. `TestReportKindsResolveDistinctly` walks `follows` — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the walk's own doc comment ("its OWN frame pane, its OWN state field and its OWN content" / "the three resolvers") was reworded alongside the assertion it describes — the item names only reportpane.go:74-76, but leaving the test's own header claiming three resolvers would have been false the moment the walk gained the fourth.
 
 **What.** The guard at `internal/tui/reportpane_test.go:44-70` walks every declared `reportKind`
 through `pane()`, `reportState()` and `reportContent()`, but not through the module's fourth

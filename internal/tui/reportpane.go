@@ -72,8 +72,8 @@ import (
 // rather than an `if` over the odd one out. Written as an `if`, a kind that missed a branch compiled
 // and painted ANOTHER pane's state or content inside its own box: a wrong pane rather than a build
 // error. The default is unreachable for every declared kind: TestReportKindsResolveDistinctly walks
-// the kinds through the first three to keep it so, while [reportKind.follows] is reached only
-// through the reports the follow tests open, one kind at a time.
+// the kinds through all four to keep it so, and because that walk runs from reportKind(0) to
+// reportKinds rather than a hand-written list, a fourth report is covered the day it is declared.
 type reportKind int
 
 const (

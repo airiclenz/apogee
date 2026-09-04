@@ -37,16 +37,18 @@ func reportCases(t *testing.T) []reportCase {
 }
 
 // TestReportKindsResolveDistinctly is the guard the module's fall-through cost: every declared
-// reportKind resolves to its OWN frame pane, its OWN state field and its OWN content. The three
-// resolvers were once `if r == inspectReport {…}` with /usage as the fall-through, so a kind that
-// missed a branch compiled and painted ANOTHER pane's state or rows inside its box — a wrong pane
-// rather than a build error. Walking the kinds is what makes a fourth report inherit this guard.
+// reportKind resolves to its OWN frame pane, its OWN state field and its OWN content, and states its
+// OWN follow answer. The four resolvers were once `if r == inspectReport {…}` with /usage as the
+// fall-through, so a kind that missed a branch compiled and painted ANOTHER pane's state or rows
+// inside its box — a wrong pane rather than a build error. Walking the kinds is what makes a fourth
+// report inherit this guard.
 func TestReportKindsResolveDistinctly(t *testing.T) {
 	m := newTestModel(t)
 
 	panes := map[framePane]reportKind{}
 	states := map[*reportPane]reportKind{}
 	titles := map[string]reportKind{}
+	follows := map[reportKind]bool{}
 	for r := reportKind(0); r < reportKinds; r++ {
 		if other, seen := panes[r.pane()]; seen {
 			t.Errorf("report %d and report %d share the frame pane %d", r, other, r.pane())
@@ -67,6 +69,11 @@ func TestReportKindsResolveDistinctly(t *testing.T) {
 			t.Errorf("report %d and report %d both call themselves %q", r, other, title)
 		}
 		titles[title] = r
+
+		// follows is a bool, so unlike the three above it cannot be checked for distinctness — two
+		// kinds legitimately share an answer. What the walk proves is that the kind HAS one: the
+		// panicking default is reached by no declared kind. The answers themselves are pinned below.
+		follows[r] = r.follows()
 	}
 
 	for want, name := range map[reportKind]string{
@@ -76,6 +83,16 @@ func TestReportKindsResolveDistinctly(t *testing.T) {
 	} {
 		if got := m.reportContent(want).title; got != name {
 			t.Errorf("report %d is titled %q, want %q — the kind resolves to another pane's content", want, got, name)
+		}
+	}
+
+	for kind, want := range map[reportKind]bool{
+		usageReport:    false,
+		inspectReport:  true,
+		thinkingReport: true,
+	} {
+		if got := follows[kind]; got != want {
+			t.Errorf("report %d follows %t, want %t — a report's follow scope flipped in silence", kind, got, want)
 		}
 	}
 }
