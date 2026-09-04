@@ -388,6 +388,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`TestE2ESmokeInProcess` no longer asserts on the length of the host's TMPDIR.** Two claims
+  about the footer named the workspace at a fixed window — the 100-column first frame, and a
+  120-column wide frame — which only ever held because Linux spells its temp dir `/tmp/…`. Under
+  macOS's `/private/var/folders/…/T` the path runs to about 85 characters, so the fit ladder
+  correctly dropped the workdir segment at both widths and the test failed on every mac. The first
+  frame no longer claims the workspace at all (it is the second segment the fit gives up, and 100
+  columns is not a promise it survives); the wide frame claims it at a width computed from the
+  path's own length. No production behaviour changes — the footer was right both times.
+
 - **The extra-read-root tests no longer hand the mount an unresolved temp path, so they pass on
   macOS.** `domain.Config.ExtraReadRoots`' contract is that every root is already the host's
   symlink-resolved real path — `internal/tools` `matchRoot` skips any root that is not its own real

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -45,7 +46,11 @@ func TestE2ESmokeInProcess(t *testing.T) {
 		t.Errorf("no header box on the first frame; row 0 = %q", first.Row(0))
 	}
 	footer := footerRow(t, first)
-	for _, want := range []string{stub.Model, "probe-target", sess.Workspace()} {
+	// The workspace is NOT asserted here: it is the segment the footer's fit gives up second
+	// (internal/tui/footerfit.go), and this frame is a fixed 100 columns while the path is a temp
+	// dir whose length is the host's business — 85 characters under macOS's /private/var/folders,
+	// half that under Linux's /tmp. Step 9 makes that claim, at a window sized for the path.
+	for _, want := range []string{stub.Model, "probe-target"} {
 		if !strings.Contains(footer, want) {
 			t.Errorf("the footer does not name %q: %q", want, footer)
 		}
@@ -149,15 +154,21 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	if left := strings.TrimSpace(strings.TrimSuffix(narrowFooter, marker)); strings.HasSuffix(left, glyphFooterSeparator) {
 		t.Errorf("the narrow footer's left run ends on a dangling %q: %q", glyphFooterSeparator, narrowFooter)
 	}
-	drv.Resize(120, 40)
+	wideW := footerRoomFor(sess.Workspace())
+	drv.Resize(wideW, 40)
 	drv.WaitQuiet(settled)
 	wide := drv.Frame()
-	if wide.Width() != 120 {
-		t.Fatalf("the frame is %d columns after a resize to 120", wide.Width())
+	if wide.Width() != wideW {
+		t.Fatalf("the frame is %d columns after a resize to %d", wide.Width(), wideW)
 	}
 	wideFooter := footerRow(t, wide)
 	if strings.Contains(wideFooter, "…") {
 		t.Errorf("the wide footer is still truncated: %q", wideFooter)
+	}
+	// Given the room, the row states every fact it knows — the workspace among them, which is the
+	// segment the narrow window gave up.
+	if !strings.Contains(wideFooter, sess.Workspace()) {
+		t.Errorf("the wide footer does not name the workspace %q: %q", sess.Workspace(), wideFooter)
 	}
 	// The window it had is what the two rows differ by: the wide one states facts the narrow one
 	// spent its columns on the marker instead of.
@@ -461,6 +472,23 @@ func promptTail(text string) string {
 		return text
 	}
 	return text[len(text)-tail:]
+}
+
+// footerRoomFor is a window wide enough for the footer to seat every segment it knows, the
+// workspace path included.
+//
+// It is computed rather than fixed because the path is a temp directory and its length belongs to
+// the host: about 85 characters under macOS's /private/var/folders/…/T, roughly half that under
+// Linux's /tmp. A fixed width therefore asserts on TMPDIR, not on the footer — which is how a 120
+// column claim here passed on Linux for a year while failing on every mac.
+//
+// The arithmetic is internal/tui's, not duplicated: footerFit seats the row when the window holds
+// both margins, the left run, one blank column and the mode marker. Everything but the path — the
+// host alias, the model, their ✦ separators and the marker — needs under 50 columns in this
+// script, so 80 is that with slack enough to absorb a longer stub model name without turning this
+// into a second copy of the fit's own sums.
+func footerRoomFor(workspace string) int {
+	return 80 + utf8.RuneCountInString(workspace)
 }
 
 // footerRow is the last non-empty row of a frame: the status bar apogee paints at the bottom.
