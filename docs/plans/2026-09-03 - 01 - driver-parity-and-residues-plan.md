@@ -187,7 +187,9 @@ submit fails still reports the loaded files. Drive them through the package's ex
 
 ---
 
-## 4. Headless prints the context-files notices
+## 4. Headless prints the context-files notices — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the manual sentence names context files in plain text rather than linking them — `docs/manual/configuration.md` has no `#context-files` anchor to link to, and adding one is another item's file.
 
 **What.** Depends on items 2 and 3. In `runHeadless` (`cmd/apogee/headless.go:274`), immediately
 after `runOnce` returns (`headless.go:482`) and BEFORE the never-started early return at

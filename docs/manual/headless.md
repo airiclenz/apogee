@@ -42,7 +42,13 @@ Only the model's answer goes to **stdout**; resolution notices — including one
 `mechanisms:` key naming a Mechanism this release retired, which is ignored rather than
 refused and, where the row became a Floor guard, names the top-level key that governs it
 now — and the one-line summary go to **stderr**, so a pipeline reads the text and
-nothing else. A run that delegated
+nothing else. Where the workspace carries context files, that
+stderr stream opens with what they contributed: one `context:` line naming every file that
+loaded and its size, one `context: <name> unreadable — <reason>` line per file that is present
+but could not be read, and — when the standing system content has outgrown its share of the
+Budget — the advisory line that says so. Those lines print even for a run that never started,
+because the files were read before the refusal; a workspace carrying none of the configured
+names prints none of them. A run that delegated
 adds one stderr line per sub-agent run just ahead of that summary —
 `sub-agent: 12k/32k · <the name it was given, else the task>`, in the order the runs
 finished — because

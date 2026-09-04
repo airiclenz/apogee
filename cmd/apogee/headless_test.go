@@ -20,6 +20,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
@@ -1180,6 +1181,99 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 		if !strings.Contains(out, "safe ") || !strings.Contains(out, " text") {
 			t.Errorf("the strip ate ordinary text: %q", out)
+		}
+	})
+}
+
+// TestHeadlessPrintsTheContextFileNotices is this Driver's half of the context-files parity call:
+// what a session narrates in its transcript, an unattended run says on stderr — every notice, the
+// plain record of what loaded as much as the two anomalies, because a script's operator has no
+// transcript to scroll back through.
+//
+// The wanted strings come from notice.ContextFileNotices itself rather than from a hand-typed copy,
+// deliberately: the point of the shared composer is that the two Drivers cannot drift, and a test
+// that re-spells the sentences here would let headless drift from the TUI while staying green.
+func TestHeadlessPrintsTheContextFileNotices(t *testing.T) {
+	// One of each kind the composer distinguishes: a file that loaded, a file present but
+	// unreadable, and standing content past its Budget share.
+	report := domain.ContextFilesReport{
+		Files: []domain.ContextFileNote{
+			{Name: "AGENTS.md", Bytes: 3174},
+			{Name: "BROKEN.md", Err: "permission denied"},
+		},
+		StandingTokens: 9000,
+		SystemShare:    4000,
+	}
+
+	t.Run("every notice reaches stderr, and none of them stdout", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			SessionID: "s-11", FinalText: "the answer", Turns: 2, ContextFiles: report,
+		}}
+		out, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		want := notice.ContextFileNotices(report)
+		if len(want) != 3 {
+			t.Fatalf("the composer yielded %d notices, want 3 — the fixture no longer covers all three kinds", len(want))
+		}
+		summary := strings.Index(errOut, "turns: 2")
+		prev := -1
+		for _, n := range want {
+			at := strings.Index(errOut, n.Text)
+			if at < 0 {
+				t.Errorf("stderr is missing the composed notice %q: %q", n.Text, errOut)
+				continue
+			}
+			if at < prev {
+				t.Errorf("the notices printed out of the composer's order: %q", errOut)
+			}
+			if at > summary {
+				t.Errorf("a context notice printed after the summary: %q", errOut)
+			}
+			prev = at
+			if strings.Contains(out, n.Text) {
+				t.Errorf("a context notice leaked onto stdout: %q", out)
+			}
+		}
+		if strings.TrimRight(out, "\n") != "the answer" {
+			t.Errorf("stdout = %q; want the answer alone", out)
+		}
+	})
+
+	t.Run("a zero-valued report adds no line at all", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.Contains(errOut, "context:") || strings.Contains(errOut, "standing system content") {
+			t.Errorf("a workspace with no context files still said something: %q", errOut)
+		}
+	})
+
+	// The placement that makes carrying the report worth anything: a Firing refused before submit
+	// had already LOADED its context files, so the notices print ahead of the exit-2 refusal
+	// rather than being swallowed by it.
+	t.Run("a run that never started still reports what it loaded", func(t *testing.T) {
+		stub := &stubRunner{
+			res: run.Result{ContextFiles: report},
+			err: errors.New("apogee: submit the firing's prompt: the endpoint refused"),
+		}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err == nil {
+			t.Fatal("a run that never started returned no error")
+		}
+		if code := exitCodeFor(err); code != exitNotStarted {
+			t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+		}
+		for _, n := range notice.ContextFileNotices(report) {
+			if !strings.Contains(errOut, n.Text) {
+				t.Errorf("the exit-2 refusal swallowed the notice %q: %q", n.Text, errOut)
+			}
+		}
+		if strings.Contains(errOut, "turns:") {
+			t.Errorf("a run that never started printed a summary: %q", errOut)
 		}
 	})
 }

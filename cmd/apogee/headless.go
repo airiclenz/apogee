@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -486,6 +487,22 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		DelegationTarget: routing.target,
 		DelegationSeat:   routing.seat,
 	})
+
+	// What the workspace context files contributed, one line apiece on stderr: the same three
+	// sentences a session shows in its transcript, composed once in internal/notice so the two
+	// Drivers narrate one event with one wording. ALL of them print, anomaly or not — an
+	// unattended run has no transcript to scroll back through, so the plain record of what loaded
+	// is worth as much here as the loud skips are.
+	//
+	// It sits ABOVE the never-started exit below deliberately: a Firing refused before submit has
+	// still LOADED its context files (run.Once populates the report on that exit), and reporting
+	// them is the whole point of carrying them out of a run that produced no answer.
+	//
+	// Escape-stripped exactly as the answer is below: the names trace to config and the errors to
+	// the filesystem, and internal/notice composes without sanitising by contract.
+	for _, n := range notice.ContextFileNotices(res.ContextFiles) {
+		cmd.PrintErrln(sanitize.StripEscapes(n.Text))
+	}
 
 	// A refusal that stopped the Firing before it began is exit 2, not exit 1 — nothing was sent
 	// and nothing was saved, so what a script must do about it is fix the invocation, not read an
