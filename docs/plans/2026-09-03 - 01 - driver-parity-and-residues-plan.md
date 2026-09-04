@@ -648,7 +648,7 @@ workspace — `len(wiring.prewarmed)` is 1 after two Firings on one workspace an
 
 ---
 
-## 13. `run.Result` carries the written-files preview
+## 13. `run.Result` carries the written-files preview — ✅ DONE (2026-09-04)
 
 **What.** Recast at the regression check (2026-09-03). `Agent.UndoPreview` is the WRONG source:
 `Journal.Preview()` returns only the TOP un-undone group — one exchange, not the run — computes its

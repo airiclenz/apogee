@@ -131,6 +131,17 @@ type Result struct {
 	// loaded; the exits that have no Agent to ask carry the zero report. Nothing here is
 	// rendered by this library: the notice's wording belongs to the Driver.
 	ContextFiles domain.ContextFilesReport
+	// Wrote is the account of what the Firing CHANGED on disk: every path the run's writes
+	// touched, in the order each was first written and with no path repeated — deletes and
+	// move sources included, since the write funnel journals those too. It is taken after the
+	// loop returns, faulted runs included: a faulted Auto run is exactly the one whose writes
+	// a human needs to see. An empty slice means the run recorded no write.
+	//
+	// It is a REPORT, never a handle: paths only, so nothing can revert from it, and taking it
+	// costs no filesystem work. The journal behind it stays memory-only — this library persists
+	// no undo state and offers no revert. Nothing here is rendered by this library: how the list
+	// reads belongs to the Driver.
+	Wrote []string
 	// Err is the run's own error — the loop's failure, or the cancellation that stopped it
 	// before an answer. It is nil on a Firing that reached its answer, even one whose
 	// record then failed to save (that failure is the returned error only).
@@ -317,6 +328,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		SubAgents:    tap.subAgentRuns(),
 		Usage:        tap.totals(),
 		ContextFiles: contextFiles,
+		Wrote:        a.WroteFiles(),
 		Err:          runErr,
 	}
 	if spec.Store == nil {

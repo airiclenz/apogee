@@ -343,6 +343,60 @@ func TestPreview_EmptyJournal_ReportsNothingToUndo(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The whole-run written-files account
+// ----------------------------------------------------------------------------
+
+func TestWrote_PathsAcrossTwoGroups_AreListedOnceInFirstWriteOrder(t *testing.T) {
+	root := t.TempDir()
+	journal := New()
+
+	journal.BeginGroup()
+	first := funnelWrite(t, journal, root, "first.txt", "a")
+	second := funnelWrite(t, journal, root, "second.txt", "b")
+	journal.BeginGroup()
+	funnelWrite(t, journal, root, "second.txt", "b again")
+	third := funnelWrite(t, journal, root, "third.txt", "c")
+
+	wrote := journal.Wrote()
+
+	want := []string{first, second, third}
+	if len(wrote) != len(want) {
+		t.Fatalf("Wrote listed %d paths (%v), want %d", len(wrote), wrote, len(want))
+	}
+	for i := range want {
+		if wrote[i] != want[i] {
+			t.Errorf("Wrote[%d] = %q, want %q; the order is first write per path", i, wrote[i], want[i])
+		}
+	}
+}
+
+func TestWrote_PathDeletedSinceItWasRecorded_IsStillReportedWithoutReadingIt(t *testing.T) {
+	root := t.TempDir()
+	journal := New()
+	journal.BeginGroup()
+	written := funnelWrite(t, journal, root, "gone.txt", "content")
+	if err := os.Remove(written); err != nil {
+		t.Fatalf("remove the file behind the record: %v", err)
+	}
+
+	wrote := journal.Wrote()
+
+	if len(wrote) != 1 || wrote[0] != written {
+		t.Errorf("Wrote = %v, want [%s]; the account reads no file, so a vanished path still counts", wrote, written)
+	}
+}
+
+func TestWrote_EmptyJournal_ReportsNothing(t *testing.T) {
+	journal := New()
+
+	wrote := journal.Wrote()
+
+	if len(wrote) != 0 {
+		t.Errorf("Wrote = %v, want empty", wrote)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The staleness stamp and concurrency
 // ----------------------------------------------------------------------------
 

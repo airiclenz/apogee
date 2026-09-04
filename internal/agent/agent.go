@@ -842,6 +842,23 @@ func (a *Agent) UndoRevert(generation uint64) (undo.Report, error) {
 	return a.journal.Revert()
 }
 
+// WroteFiles lists the files this engine's writes have touched, whole run: every path the undo
+// journal recorded across all Exchanges, in the order each was first written and with no path
+// repeated. An engine built without a journal, and one that wrote nothing, both answer empty.
+//
+// It is the account of what a Firing CHANGED — what an unattended Driver shows a human who was
+// not there to watch (headless, the daemon). Deliberately a report and not a handle: paths only,
+// no generation and no [undo.Change], so it cannot be reverted from, and it reads no file and
+// hashes nothing, unlike [Agent.UndoPreview]. That also frees it of UndoPreview's boundary rule:
+// the journal is concurrency-safe, so this is a valid read at any time — though a read taken
+// mid-Step sees only the writes already recorded.
+func (a *Agent) WroteFiles() []string {
+	if a.journal == nil {
+		return nil
+	}
+	return a.journal.Wrote()
+}
+
 // SetBypass switches Bypass — Mechanisms off, structure on (ADR 0006) — on or off for the rest
 // of the session. It takes effect at the NEXT hook fire: the gate is consulted per catalogued
 // Mechanism per hook point (skipUnderBypass, via skipMechanism), so nothing is rebuilt and a

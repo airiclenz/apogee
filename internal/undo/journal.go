@@ -303,6 +303,34 @@ func (j *Journal) Revert() (Report, error) {
 	return report, nil
 }
 
+// Wrote lists every path this journal has a record for, across ALL groups and in the order
+// each path was FIRST written, with no path repeated. It is the whole run's account of what
+// was changed on disk — deletes and move sources included, since the funnel journals those
+// too — where [Journal.Preview] describes only the top un-undone group.
+//
+// It is a REPORT, not a handle: paths only, no generation and no [Change], so nothing can
+// revert from it. It reads no file and hashes nothing — the classification Preview pays for
+// is a human's price at `/undo`, not one an unattended run may be made to pay — so the paths
+// are the journal's recorded addresses whether or not they still exist. An empty slice means
+// nothing was recorded.
+func (j *Journal) Wrote() []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	paths := make([]string, 0, len(j.groups))
+	seen := make(map[string]struct{})
+	for _, recorded := range j.groups {
+		for _, e := range recorded.entries {
+			if _, ok := seen[e.path]; ok {
+				continue
+			}
+			seen[e.path] = struct{}{}
+			paths = append(paths, e.path)
+		}
+	}
+	return paths
+}
+
 // classify decides what this entry's revert would do, from the file as it is now.
 func (e *entry) classify() Change {
 	hash, exists, err := e.currentState()

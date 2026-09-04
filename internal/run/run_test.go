@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1945,5 +1946,104 @@ func TestOnceReportsTheContextFilesWhenSubmitFails(t *testing.T) {
 	}
 	if up.calls() != 0 {
 		t.Errorf("the Upstream saw %d requests; a refused submit must never reach the wire", up.calls())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The written-files account
+// ---------------------------------------------------------------------------
+
+// TestOnceReportsTheFilesTheFiringWrote is the item's headline: a Firing carries back the
+// paths its writes touched, so an unattended Driver can tell a human who was not watching
+// what the run CHANGED. The account is the whole run's, not one exchange's, and it is paths
+// only — a report, never a handle to revert from.
+func TestOnceReportsTheFilesTheFiringWrote(t *testing.T) {
+	t.Parallel()
+
+	var turns atomic.Int32
+	up := newUpstream(t, func(w http.ResponseWriter, _ request) {
+		switch turns.Add(1) {
+		case 1:
+			writeToolCall(w, "call_1", "write_file", `{"path":"first.txt","content":"one"}`)
+		case 2:
+			writeToolCall(w, "call_2", "write_file", `{"path":"second.txt","content":"two"}`)
+		default:
+			writeFinal(w, "both files are written")
+		}
+	})
+
+	dir := t.TempDir()
+	spec := planSpec(up.url, "write the two files")
+	spec.Config.Mode = domain.ModeAuto
+	spec.Config.Confiner = stubConfiner{}
+	spec.Config.WorkspaceDir = dir
+
+	res, err := Once(context.Background(), spec)
+
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	got := make([]string, 0, len(res.Wrote))
+	for _, path := range res.Wrote {
+		if !filepath.IsAbs(path) {
+			t.Errorf("Result.Wrote carries %q, which is not absolute", path)
+		}
+		got = append(got, filepath.Base(path))
+	}
+	want := []string{"first.txt", "second.txt"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Result.Wrote = %v, want the two paths %v in first-write order", res.Wrote, want)
+	}
+}
+
+// TestOnceReportsNoWrittenFilesForAReadOnlyRun pins the common case: a Firing that changed
+// nothing reports an EMPTY account rather than a placeholder, which is what lets a Driver
+// render the report by saying nothing at all.
+func TestOnceReportsNoWrittenFilesForAReadOnlyRun(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, alwaysFinal("nothing needed changing"))
+	spec := planSpec(up.url, "look around")
+
+	res, err := Once(context.Background(), spec)
+
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if len(res.Wrote) != 0 {
+		t.Errorf("Result.Wrote = %v, want none — the run wrote nothing", res.Wrote)
+	}
+}
+
+// TestOnceReportsTheFilesAFaultedFiringWrote is the exit that matters most: a faulted Auto
+// run is exactly the one whose writes a human needs to see, so the account is taken after
+// the loop returns whatever the loop's verdict was.
+func TestOnceReportsTheFilesAFaultedFiringWrote(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		if req.lastRoleIs(domain.RoleTool) {
+			writeFinal(w, "") // an empty reply: the fault the engine raises for an abandoned turn
+			return
+		}
+		writeToolCall(w, "call_1", "write_file", `{"path":"half-done.txt","content":"partial"}`)
+	})
+
+	dir := t.TempDir()
+	spec := planSpec(up.url, "write the file")
+	spec.Config.Mode = domain.ModeAuto
+	spec.Config.Confiner = stubConfiner{}
+	spec.Config.WorkspaceDir = dir
+
+	res, err := Once(context.Background(), spec)
+
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if !res.Faulted {
+		t.Fatalf("Result.Faulted = false, want the abandoned turn this script drives")
+	}
+	if len(res.Wrote) != 1 || filepath.Base(res.Wrote[0]) != "half-done.txt" {
+		t.Errorf("Result.Wrote = %v, want the one file the faulted run wrote", res.Wrote)
 	}
 }
