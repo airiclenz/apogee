@@ -112,6 +112,35 @@ has smeared or eaten part of the frame. It sends nothing, edits nothing and inte
 nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
 every keypress drops.
 
+## The status line — what a live run reports
+
+The dark row just above the prompt box is the status line, and while the model works its left
+slot answers one question: what is happening *right now*. It reads as an activity phrase and an
+elapsed clock — `thinking · 4s`, and past a minute `thinking · 1m 12s`. Seven phrases cover
+everything a run does: **thinking** while a request is in flight or reasoning is arriving,
+**responding** while the visible reply streams, the **tool's own label** while a call is open
+(`reading`, `writing`, `searching`, `running` — the verb alone, since the tool-call block a line
+above already names what it is working on), **retrying** when the turn is being re-streamed from
+the top, **compacting** while `/compact` folds the conversation, **stopping** between the second
+`esc` and the worker actually unwinding, and **working**, which belongs to delegations.
+
+With delegations running the row is **theirs, not the parent's** — a parent sitting inside a
+delegation is doing nothing of its own to report. Exactly one live delegate keeps its own phrase
+under its own name: `repo-scout · reading`. Two or more merge into a single count,
+`2 sub-agents · working`, because the row has space for one sentence and naming whichever
+delegate spoke last only made it flicker. That merged clock counts from the **oldest** live
+child, so the number you are reading never restarts when a sibling emits. Open a delegation's
+run view and the row speaks for that one run again, as above.
+
+After the clock comes the throughput readout, `· N tok/s`: the last completion's server-reported
+token count over that turn's generation window, shown as a whole number. Below one token per
+second it is hidden entirely — which is also how an unmeasurably short window reads. Such a
+window is dominated by scheduling jitter rather than by generation, so it is shown as no reading
+at all rather than as an invented one.
+
+A run that goes silent for longer than `ui.stall-after` adds a `quiet` qualifier to whatever
+phrase the row is holding; see [the terminal UI](configuration.md#the-terminal-ui--ui).
+
 ## Approving a call — how far an approval reaches
 
 Every gated call offers the same four rows — `Allow`, `Always allow this session`, `Deny` and

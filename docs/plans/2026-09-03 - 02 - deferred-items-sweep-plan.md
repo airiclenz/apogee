@@ -739,7 +739,10 @@ regions (the four writing tools, plus `view_diff` and `git_diff_range`,
 
 ---
 
-## 16. What the status line reports while a run is live
+## 16. What the status line reports while a run is live — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the tool-label examples are the real presentation verbs (`reading`, `writing`, `searching`, `running`) and the section says the verb travels alone, per `toolActivityVerb`'s "the TARGET is deliberately absent" — the older `⣻ reading · main.go · 3s` example in `statusLine`'s own doc comment is stale, left untouched as out of scope.
+NOTES (2026-09-04): `ui.stall-after` is cross-referenced to `configuration.md#the-terminal-ui--ui` and the `quiet` qualifier is named but not restated, as the item directs.
 
 **What.** Closes `apogee-t57.10`. The manual names the status line only for the esc-stop hint
 (`commands.md:71-73`) and the `quiet` qualifier (`configuration.md:620-624`). Add a `##` section to
