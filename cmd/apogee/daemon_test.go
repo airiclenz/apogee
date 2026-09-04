@@ -631,7 +631,7 @@ func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 			{Name: "fronted", Endpoint: testServerEndpoint, LlamaLauncher: "auto"},
 		},
 	}
-	wiring, _, err := newDaemonWiring(opts)
+	wiring, _, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now})
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -671,7 +671,7 @@ func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 func TestDaemonHostRefusesAModelOnTheLauncherFrontedDefault(t *testing.T) {
 	h := newDaemonHarness(t)
 	opts := config.Options{ConfigDir: h.home, StartupLauncher: "auto"}
-	wiring, _, err := newDaemonWiring(opts)
+	wiring, _, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now})
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -690,7 +690,7 @@ func TestDaemonHostRefusesAutoOnAHostThatCannotFence(t *testing.T) {
 	h := newDaemonHarness(t)
 	newConfiner = func() apogee.Confiner { return fakeConfiner{} }
 	opts := config.Options{ConfigDir: h.home, ConfineToWorkspace: true}
-	wiring, _, err := newDaemonWiring(opts)
+	wiring, _, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now})
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -856,13 +856,13 @@ func newReloadHarness(t *testing.T, body string) *reloadHarness {
 		os.Getenv, os.ReadFile, func(string) {}); err != nil {
 		t.Fatalf("resolve the config: %v", err)
 	}
-	wiring, _, err := newDaemonWiring(opts)
+	log := &daemonLog{out: h.out, now: time.Now}
+	wiring, _, err := newDaemonWiring(opts, log)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
 	t.Cleanup(func() { wiring.closeConfiner() })
 
-	log := &daemonLog{out: h.out, now: time.Now}
 	host := daemonHost(opts, h.home, wiring)
 	file, err := loadSchedules(h.schedules, host, log)
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"go/ast"
 	"go/parser"
@@ -16,6 +17,8 @@ import (
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/notice"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
@@ -35,6 +38,9 @@ type daemonFireHarness struct {
 	// refuse every test in this file rather than compose the run each one is about. A test about the
 	// refusal dictates its own before firing.
 	beat heartbeat.Beat
+	// logged is the daemon log the wiring narrates through — the one stream this Driver speaks on
+	// (daemon.go), captured so a test can read what a Firing said as it composed and as it landed.
+	logged *bytes.Buffer
 }
 
 // newDaemonFireHarness builds the harness for one host configuration. The apogee home is temporary
@@ -49,6 +55,7 @@ func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness 
 	harness := &daemonFireHarness{
 		runner: &stubRunner{},
 		beat:   heartbeat.Beat{Reachable: true, Answered: true},
+		logged: &bytes.Buffer{},
 	}
 
 	prevRunner, prevBeat, prevConfiner := runOnce, discoverBeat, newConfiner
@@ -60,7 +67,7 @@ func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness 
 	newConfiner = func() apogee.Confiner { return fenceableHost }
 	t.Cleanup(func() { runOnce, discoverBeat, newConfiner = prevRunner, prevBeat, prevConfiner })
 
-	wiring, _, err := newDaemonWiring(opts)
+	wiring, _, err := newDaemonWiring(opts, &daemonLog{out: harness.logged, now: time.Now})
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -538,4 +545,91 @@ func TestDaemonStartupSweepsStaleScratchDirs(t *testing.T) {
 		t.Errorf("a stale scratch dir survived the daemon's startup (stat err = %v); a host driven "+
 			"only by a daemon never passes the TUI's boot sweep", err)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// What a Firing narrates
+// ----------------------------------------------------------------------------
+
+// The composition's own notices reach the daemon log. A Firing that binds a model its server never
+// advertised is the case that matters: the run proceeds, so nothing else says so, and before this
+// the line was composed and thrown away — leaving a supervisor's journal with no record that the
+// nightly job has been prompting an id the box does not list. The wanted sentence comes from
+// hintNotice itself rather than a hand-typed copy, for the reason the headless twin reads it off
+// notice.ContextFileNotices: the point of one composer is that the Drivers cannot drift.
+func TestDaemonFireLogsTheCompositionsNotices(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid", APIKey: "k", Model: "my-alias"}},
+	})
+	harness.beat = heartbeat.Beat{
+		Reachable: true, Answered: true,
+		ActiveModel: "my-alias", ContextWindow: 131072,
+		Resolution: provider.HintTrusted,
+	}
+
+	harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
+
+	// Unpinned, so the bound window is zero — rebindSpecFor keeps its hard-coded observed window
+	// and a Firing states the pin or nothing (wire_firing.go).
+	want := hintNotice("my-alias", provider.HintTrusted, 131072, 0)
+	if want == "" {
+		t.Fatal("the fixture composes no hint at all; it no longer covers the unadvertised-model case")
+	}
+	if !strings.Contains(harness.logged.String(), want) {
+		t.Errorf("the daemon log is missing the composition's notice %q; it holds:\n%s", want, harness.logged.String())
+	}
+}
+
+// A Firing logs what its run found WRONG with the workspace's context files and nothing else. The
+// plain record of what loaded stays off the daemon log by ratified call — a journal is read for
+// trouble, and one line per tick naming every file that loaded as expected buries the ticks worth
+// looking at.
+func TestDaemonFireLogsContextFileAnomaliesAlone(t *testing.T) {
+	// One of each kind the composer distinguishes: a file that loaded, a file present but
+	// unreadable, and standing content past its Budget share.
+	report := domain.ContextFilesReport{
+		Files: []domain.ContextFileNote{
+			{Name: "AGENTS.md", Bytes: 3174},
+			{Name: "BROKEN.md", Err: "permission denied"},
+		},
+		StandingTokens: 9000,
+		SystemShare:    4000,
+	}
+
+	t.Run("the anomalies are logged and the loaded line is not", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		harness.runner.res = run.Result{SessionID: "s-1", Turns: 1, ContextFiles: report}
+
+		harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
+
+		composed := notice.ContextFileNotices(report)
+		if len(composed) != 3 {
+			t.Fatalf("the composer yielded %d notices, want 3 — the fixture no longer covers all three kinds", len(composed))
+		}
+		logged := harness.logged.String()
+		for _, n := range composed {
+			switch {
+			case n.Anomaly && !strings.Contains(logged, n.Text):
+				t.Errorf("the daemon log is missing the anomaly %q; it holds:\n%s", n.Text, logged)
+			case !n.Anomaly && strings.Contains(logged, n.Text):
+				t.Errorf("the plain loaded-files line %q reached the daemon log; it is stderr's and the "+
+					"transcript's, never this journal's", n.Text)
+			}
+		}
+	})
+
+	t.Run("a clean run says nothing at all", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		harness.runner.res = run.Result{SessionID: "s-2", Turns: 1}
+
+		harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
+
+		if logged := harness.logged.String(); logged != "" {
+			t.Errorf("a firing with no notices and no context files still wrote to the daemon log:\n%s", logged)
+		}
+	})
 }

@@ -208,7 +208,7 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 
 	// The host half of every Firing — the confinement backend, the key resolver, the sessions store,
 	// the validated `mechanisms:` list — resolved once, because config.yaml is read once (ADR 0055).
-	wiring, retiredNotices, err := newDaemonWiring(*opts)
+	wiring, retiredNotices, err := newDaemonWiring(*opts, log)
 	if err != nil {
 		return err
 	}

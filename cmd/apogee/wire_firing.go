@@ -88,8 +88,8 @@ type firingInputs struct {
 // It composes; it does not decide. The mode gate, the roots, the `mechanisms:` validation, the
 // scratch sweep and every notice a Driver prints in its own voice stay with the Driver — what comes
 // back is a Config, this run's routing (firingRouting) and the per-model rebind notices, which
-// headless prints on stderr and the other two Drivers drop (their narration is the session record
-// they leave behind).
+// headless prints on stderr, the daemon logs, and the TUI's `/schedule` Driver drops (its narration
+// is the session record it leaves behind).
 //
 // Events, Approver, Asker and Presenter are deliberately left nil: run.Once pins its own, and
 // handing it any of them is how a run acquires a human it does not have. Tools is left nil too and

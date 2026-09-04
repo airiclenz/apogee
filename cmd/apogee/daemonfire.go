@@ -21,8 +21,10 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -71,6 +73,12 @@ type daemonWiring struct {
 	// store is the shared sessions store every Firing's record lands in, so a schedule's runs are
 	// browsable in /sessions beside the conversations and headless runs on this host (ADR 0034).
 	store *session.Store
+	// log is the daemon's whole user interface (daemon.go), reached from here because a Firing
+	// narrates: what its composition had to say about the binding, and what its run found wrong
+	// with the workspace's context files. One log for the daemon's lifetime, handed over by the
+	// caller that owns it rather than built a second time here — two writers over one stream would
+	// interleave halfway through a line, which is exactly what daemonLog's mutex exists to stop.
+	log *daemonLog
 
 	// mu guards adopted, which the daemon's reload replaces wholesale while Firings read it.
 	mu sync.RWMutex
@@ -93,7 +101,10 @@ type daemonWiring struct {
 //
 // The adopted set starts empty. A daemon adopts its first file immediately after this, through the
 // same [daemonWiring.adopt] call every later reload makes.
-func newDaemonWiring(opts config.Options) (*daemonWiring, []string, error) {
+//
+// The log is the caller's, not this function's: a Firing narrates through the same stream the
+// lifecycle lines land on, and the daemon owns when that stream is opened.
+func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, []string, error) {
 	roots, err := resolveRoots(opts.ConfigDir, "")
 	if err != nil {
 		return nil, nil, err
@@ -125,6 +136,7 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, []string, error) {
 		keys:     config.NewKeyResolver(""),
 		confiner: newConfiner(),
 		store:    store,
+		log:      log,
 		adopted:  make(map[string]daemon.Entry),
 	}, retiredNotices, nil
 }
@@ -135,8 +147,10 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, []string, error) {
 // mutated disk the user is otherwise never told about — which is why runRoot and runHeadless make
 // this same optional-interface assertion, through the same wording (internal/platform).
 //
-// It returns the notice rather than printing it, because where a daemon's narration goes is the
-// daemon's decision (daemon.go), not this file's.
+// It returns the notice rather than printing it, because this one is not a Firing's narration —
+// it is the daemon's own life ending, said on the stream every other lifecycle refusal is said on
+// (stderr), and that stream is daemon.go's to choose. What [daemonWiring.fire] logs is the
+// narration of one run, which is why that has a log to write to and this does not.
 func (w *daemonWiring) closeConfiner() string {
 	closer, ok := w.confiner.(interface{ Close() error })
 	if !ok {
@@ -220,9 +234,8 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	//
 	// No skills catalog and no width source: a daemon holds no longer-lived provider to share and
 	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults
-	// answer with. The rebind notices are dropped — they are a launch's narration, and a Firing's
-	// narration is the session record it leaves behind.
-	cfg, routing, _, err := firingConfig(ctx, firingInputs{
+	// answer with.
+	cfg, routing, notices, err := firingConfig(ctx, firingInputs{
 		opts:      w.opts,
 		entry:     server,
 		keys:      w.keys,
@@ -235,6 +248,16 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	})
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)
+	}
+	// What the composition had to say about this binding — a model the server never advertised, a
+	// rebind that had to degrade — reaches the daemon LOG, which is this Driver's whole user
+	// interface (ADR 0034 decision 10). The session record still carries the run; what it cannot
+	// carry is why the run was composed the way it was, and a Firing that quietly bound something
+	// other than what its entry names is exactly the fact a supervisor's journal has to hold.
+	// Printed in the composer's own voice, unstripped, as runHeadless prints the same lines
+	// (headless.go): these are apogee's sentences about apogee's own configuration.
+	for _, n := range notices {
+		w.log.line("%s", n)
 	}
 
 	// A Firing whose bound server did not answer AT ALL does not run. The composition above already
@@ -280,6 +303,23 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		DelegationTarget: routing.target,
 		DelegationSeat:   routing.seat,
 	})
+	// What the run found WRONG with the workspace's context files, and only that: a file present
+	// but unreadable, standing content that has outgrown its Budget share. The loaded-files line
+	// stays off this log by ratified call — a daemon's journal is read for trouble, and one line
+	// per Firing naming every file that loaded as expected is noise a week's worth of ticks
+	// multiplies. Reported whether the run answered or failed, because a Firing that went wrong is
+	// the one whose loading is worth suspecting (internal/notice composes; this Driver routes).
+	//
+	// Escape-stripped to a single line: the names trace to config and the errors to the
+	// filesystem, and this log is one line per event — the same reason a prompt goes through
+	// oneLine before it lands here (daemon.go).
+	for _, n := range notice.ContextFileNotices(res.ContextFiles) {
+		if !n.Anomaly {
+			continue
+		}
+		w.log.line("%s", sanitize.StripEscapesToLine(n.Text))
+	}
+
 	// Everything the run learned about itself, mapped onto the scheduler's report in one place so
 	// both ends of this function tell the daemon's log the same story. The library reads none of it
 	// — it is runner-agnostic (ADR 0033) — and the Notify line renders the Firing from these fields

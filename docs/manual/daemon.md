@@ -69,6 +69,12 @@ approve (see [Auto mode's blast radius](configuration.md#auto-modes-blast-radius
 for what this host reports). Because the file is all-or-nothing, one ineligible `auto`
 entry rejects the whole file, naming that entry in the log.
 
+The daemon's log narrates each firing as well: what resolving the schedule's binding had to
+say — a model the server does not advertise, say — as the firing starts, and afterwards only
+what the run found *wrong* with the workspace's context files: a file that is present but
+unreadable, or standing content that has outgrown its share of the window. The plain list of
+what loaded stays off the log; it is in the record.
+
 A firing whose server does not answer at all — a refused connection, a timeout, a name
 that does not resolve — leaves nothing behind: it is refused before the prompt is sent,
 so no tokens are spent and no record is written, and the log reports it as a failed

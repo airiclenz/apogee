@@ -560,7 +560,17 @@ advertised model adds nothing; an unpinned Firing's bound window is unchanged by
 
 ---
 
-## 11. The daemon narrates its Firing
+## 11. The daemon narrates its Firing — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the context-file anomalies are escape-stripped through `sanitize.StripEscapesToLine` rather than logged raw as the item's `log.line("%s", n)` shape suggests — the names trace to config and the errors to the filesystem, `internal/notice` composes without sanitising by contract, and the daemon log is strictly one line per event (a prompt goes through `oneLine` for the same reason). The composition notices ARE logged raw, exactly as `runHeadless` prints the same slice: those are apogee's own sentences about apogee's own configuration.
+
+NOTES (2026-09-04): consequential edit — cmd/apogee/wire_firing.go: made necessary by the daemon consuming the notices — `firingConfig`'s doc said the notices are what "headless prints on stderr and the other two Drivers drop"; it now names the daemon's log and leaves only `/schedule` dropping. Comment text only.
+
+NOTES (2026-09-04): `daemonWiring.closeConfiner`'s doc justified returning its notice with "where a daemon's narration goes is the daemon's decision, not this file's", which this item made false — the file now decides that a Firing's narration goes to the log. Narrowed to say the teardown notice is the daemon's own life ending, said on stderr, while `fire` narrates one run through the log it now holds.
+
+NOTES (2026-09-04): `newDaemonWiring` gained the `*daemonLog` parameter the item's guard describes, so its five test call sites (`daemonfire_test.go`, `daemon_test.go` ×4) pass one; the reload harness's own `daemonLog` was hoisted above the wiring call and reused rather than a second one built.
+
+NOTES (2026-09-04): pre-existing, not caused by this item — `go test ./cmd/apogee/` is red on `TestE2ESmokeInProcess`, `TestFiringConfigDefaultsItsSeams` and `TestRegistryWithMCPThreadsExtraReadRoots`, all on this macOS host's `/var` → `/private/var` `t.TempDir()` resolution, recorded identically under items 5, 6, 7 and 9. This item's acceptance, `go test ./cmd/apogee/ -run 'Daemon'`, is green.
 
 **What.** Depends on items 3 and 10. `cmd/apogee/daemonfire.go:224` stops blanking the notices:
 `cfg, routing, notices, err := firingConfig(...)` and each notice is emitted through the daemon log
