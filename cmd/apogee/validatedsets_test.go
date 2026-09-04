@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/validated"
 )
@@ -309,6 +312,130 @@ func TestResolveValidatedSetDropsARetiredIDWithANotice(t *testing.T) {
 	}
 	if strings.Contains(promoted, "retired in") {
 		t.Errorf("promoted-member notice = %q, want the retired-outright sentence gone", promoted)
+	}
+}
+
+// labEndpoint is the endpoint the probe record below is filed under. A record is keyed on
+// (endpoint, label), so the options that resolve it have to name the same one — an endpoint
+// mismatch is simply "never probed here" and the identity stays at LOW.
+const labEndpoint = "http://127.0.0.1:1111"
+
+// labSecondRow is the second member of the applying fixture's set. Two members, not one: the
+// canonical sort needs something to order, and the recorded set lists this one FIRST, which is
+// what makes that sort observable at all.
+const labSecondRow domain.MechanismID = "lab_row_two"
+
+// probedLabFixture stands up the whole user side of the applying path: a user-local entry naming
+// both lab rows OUT of canonical order, plus the probe record that lifts the bare label from LOW
+// to MEDIUM — the rung a real `apogee probe model` run writes, and the threshold ADR 0016 §5
+// auto-applies at. It returns the options and the two directories the resolve reads.
+func probedLabFixture(t *testing.T) (opts config.Options, userDir, probeDir string) {
+	t.Helper()
+	userDir, probeDir = t.TempDir(), t.TempDir()
+	writeLabEntry(t, userDir, labKey, []domain.MechanismID{labSecondRow, labSet[0]})
+	if _, err := library.SaveProbeRecord(probeDir, library.ProbeRecord{
+		Endpoint:   labEndpoint,
+		ModelLabel: labKey,
+		ProbedAt:   time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC),
+		Behavior:   "probe:1:tools+json+chain",
+	}); err != nil {
+		t.Fatalf("seed probe record: %v", err)
+	}
+	opts = baseOpts(labKey)
+	opts.Endpoint = labEndpoint
+	return opts, userDir, probeDir
+}
+
+// The APPLYING rung, walked end to end. setApplied, the canonical member sort and appliedNotice are
+// unreachable by any SHIPPED configuration: the catalogue is empty by design (ADR 0071), so
+// validated.Validate rejects every non-empty member set and the ladder stops one rung short at
+// setSkipped. They were pinned only as hand-built decisions in internal/probe, which is a statement
+// about a renderer rather than about the path a user's own record travels. This walks that path
+// whole — a catalogue carrying the rows, a probe record lifting the identity to medium confidence,
+// the user's entry naming them — and asserts the three things a hand-built decision cannot: the
+// order of the enable list, the sentence the session prints, and that the list actually builds.
+//
+// TWO rows, and the entry's members out of canonical order: a one-member set makes the sort at
+// resolveValidatedSet's applying branch unobservable, so this test could not fail against an
+// unsorted implementation it claims to pin.
+//
+// No t.Parallel(): mechanisms.SwapCatalogue assigns a package-level variable and is deliberately not
+// concurrency-safe. The swap and its deferred restore come FIRST, before any t.TempDir() registers a
+// cleanup, so the curated table is back before anything else unwinds.
+func TestResolveValidatedSet_AppliedRungWalksFromRecordToEnableList(t *testing.T) {
+	restore := mechanisms.SwapCatalogue([]mechanisms.Row{
+		{
+			Descriptor: domain.MechanismDescriptor{ID: labSet[0], Capability: domain.CapProactiveNudge},
+			Construct:  func(mechanisms.Deps) (any, error) { return labMechanism{}, nil },
+		},
+		{
+			Descriptor: domain.MechanismDescriptor{ID: labSecondRow, Capability: domain.CapResponseRepair},
+			Construct:  func(mechanisms.Deps) (any, error) { return labMechanism{}, nil },
+		},
+	})
+	defer restore()
+
+	opts, userDir, probeDir := probedLabFixture(t)
+
+	set, notices, err := resolveValidatedSet(opts, userDir, probeDir)
+	if err != nil {
+		t.Fatalf("resolveValidatedSet: %v", err)
+	}
+
+	// The enable list is the entry's members in CANONICAL order, not the order they were recorded
+	// in: the sort is what makes two records naming the same stack the same session.
+	want := []domain.MechanismID{labSet[0], labSecondRow}
+	if len(set) != len(want) || set[0] != want[0] || set[1] != want[1] {
+		t.Fatalf("enable set = %v, want the recorded members sorted %v", set, want)
+	}
+
+	// The session says so exactly once, in appliedNotice's own sentence, carrying the count and the
+	// source the matched entry actually has — a user-local record, not a shipped one.
+	if len(notices) != 1 {
+		t.Fatalf("notices = %v, want exactly the applied line", notices)
+	}
+	for _, w := range []string{
+		"Validated set for " + labKey + " applied",
+		"2 mechanisms on",
+		"campaign lab-run-1",
+		validated.SourceUser,
+		"validated-sets: enable: false",
+	} {
+		if !strings.Contains(notices[0], w) {
+			t.Errorf("applied notice = %q, want it to name %q", notices[0], w)
+		}
+	}
+
+	// And the list is not merely well-formed but BUILDABLE. This is the rung the whole surface
+	// exists to reach: a set apogee auto-applied and then failed to construct would be a startup
+	// failure on config the user never wrote.
+	if _, err := apogee.BuildMechanisms(validCfg(t), set); err != nil {
+		t.Fatalf("BuildMechanisms(%v): %v", set, err)
+	}
+}
+
+// The same entry and the same record against the SHIPPED catalogue: the ladder stops at setSkipped.
+// That is what makes the walk above a statement about the applying rung rather than about the
+// fixture — the catalogue seam is the one thing that differs, so it is the one thing that opened the
+// rung. It is also the state every real installation is in while the roster stays empty.
+//
+// No t.Parallel(): this reads the package catalogue its sibling above swaps, and the pair is easier
+// to keep honest when both stay sequential.
+func TestResolveValidatedSet_AppliedRungNeedsTheCatalogueRows(t *testing.T) {
+	opts, userDir, probeDir := probedLabFixture(t)
+
+	set, notices, err := resolveValidatedSet(opts, userDir, probeDir)
+	if err != nil {
+		t.Fatalf("resolveValidatedSet: %v", err)
+	}
+	if set != nil {
+		t.Fatalf("an entry the empty catalogue cannot assemble must not apply; got %v", set)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], "skipping validated-set entry") {
+		t.Fatalf("want the one skip notice, got %v", notices)
+	}
+	if !strings.Contains(notices[0], string(labSecondRow)) {
+		t.Errorf("skip notice = %q, want it to name the member the catalogue does not carry", notices[0])
 	}
 }
 

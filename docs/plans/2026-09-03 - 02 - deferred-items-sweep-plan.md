@@ -268,7 +268,13 @@ at this base and would fail before and after.
 
 ---
 
-## 6. The Validated-set applying rung gets an end-to-end test
+## 6. The Validated-set applying rung gets an end-to-end test — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the walk and its negative case are two sibling test functions rather than one — the applying test's `defer restore()` then sits before any `t.Cleanup` (the guard's requirement) with no `t.TempDir()` registered ahead of it, which a single function containing both cases could not offer.
+
+NOTES (2026-09-04): the skip notice the negative case asserts names `lab_row_two`, not `lab_row` — `validated.Validate` walks the entry's set in RECORDED order, and the recorded order is deliberately non-canonical, so the second row is the first unknown id it reaches.
+
+NOTES (2026-09-04): mutation-checked — commenting out the canonical sort at `cmd/apogee/validatedsets.go:209` fails the new test (`enable set = [lab_row_two lab_row]`); the file was restored, and `git status` shows only the test file changed.
 
 **What.** Closes `apogee-i5h.4`. Depends on item 2. With both catalogues empty (`shipped.json` is `[]`;
 the Mechanism catalogue registers nothing), `validated.Validate` (`internal/validated/validate.go:79`)
