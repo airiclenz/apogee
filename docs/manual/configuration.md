@@ -523,9 +523,9 @@ next request. The same fold is also apogee's **overflow recovery**: when a reque
 does not fit the window after all — or the estimate already says it cannot — the
 history is folded mid-task and the turn is re-sent once, so a long task survives
 instead of dying on "context window exceeded". It is structural and load-bearing —
-it stays on even under `--bypass` — so it is on by default; set `auto-compact: false`
-(a file-only key) to manage the window yourself with `/compact` instead, which opts
-out of the recovery too.
+it stays on even under `--bypass` — so it is on by default; set the file-only
+`auto-compact:` key to `false` to manage the window yourself with `/compact` instead,
+which opts out of the recovery too.
 
 Before Compaction is ever reached, **Pruning** clears the stale bulk out of the window.
 A long session fills up with the *output* of tool calls the model has already read and
@@ -538,8 +538,9 @@ needs. The four most recent tool-calling turns are never touched, so the work in
 is left alone, and nothing but tool output is ever pruned — your prompts, the replies and
 the system content all stay. Each pass prints one line in the transcript saying how many
 results went and roughly how many tokens that freed. Like Compaction it is structural — it
-stays on even under `--bypass` — so it is on by default; set `prune-tool-results: false`
-(a file-only key) to keep every result verbatim and manage the window yourself.
+stays on even under `--bypass` — so it is on by default; set the file-only
+`prune-tool-results:` key to `false` to keep every result verbatim and manage the window
+yourself.
 
 A **delegated sub-agent** runs its task in one exchange of its own, and how long that
 exchange lasts is the sub-agent's call, not yours: it reads, greps and edits until it
@@ -997,8 +998,8 @@ untouched — so your next start begins where you left off. A move onto a server
 list does not name (an `--endpoint` URL, a llama-launcher profile) has no name to
 record and writes nothing.
 
-**And it can remember the model too.** `remember-model: true` (a file-only key,
-off by default) makes an explicit `/model` pick write itself into that entry's
+**And it can remember the model too.** `remember-model:` (a file-only key, off by
+default) set to `true` makes an explicit `/model` pick write itself into that entry's
 `model:` key, so your next session on that server starts bound to it. A
 launcher-fronted entry records the Launch profile name in `launch-profile:`
 instead, and an interactive session that starts there loads that profile again —
@@ -1390,7 +1391,7 @@ that same first system message, between a header and a footer naming the file �
 repo that already keeps one for other agents is picked up with nothing to configure.
 The file-only `context-files:` block is where you change that: `names:` is the list of
 names to look for (all of the ones that exist are included, in your order) and
-`enable: false` turns the whole thing off. A name that is not there is skipped
+`enable:` (default `true`) turns the whole thing off when set to `false`. A name that is not there is skipped
 silently — one config travels across repos that carry different files, or none —
 and a file that is present but unreadable is reported in the transcript rather than
 stopping apogee. The content goes out **verbatim**: the placeholders above do not

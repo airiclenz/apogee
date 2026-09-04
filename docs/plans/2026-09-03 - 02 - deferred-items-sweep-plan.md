@@ -770,7 +770,12 @@ how an unmeasurably short window reads, deliberately shown as no reading rather 
 
 ---
 
-## 17. The manual gains a drift gate over the settings registry
+## 17. The manual gains a drift gate over the settings registry — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the allowlist ships EMPTY — after items 9–16, every key in `config.KeyRegistry` is documented on `configuration.md`.
+NOTES (2026-09-04): two of the five keys the item expected undocumented are already documented — `ui.inspector` at configuration.md:487 (a later item covered it) and `context-files.enable`, which the loose leaf arm passes off `validated-sets:`' own `` `enable:` ``; the item still spells `enable:` out in the `context-files:` paragraph as its **Regression guard** directs, so that key no longer depends on the collision.
+NOTES (2026-09-04): the other three — `auto-compact`, `prune-tool-results`, `remember-model` — turned out to be documented in prose but spelled ONLY as `` `<key>: <value>` ``, which matches no arm (the same shape the guard refused to widen the predicate for). Rather than add a redundant sentence each, the item made the bare key spelling explicit in the sentence that already documents it — doc-writing in the item's own scope, and the predicate stayed exactly as specified.
+NOTES (2026-09-04): the gate was proved red-then-green by perturbing one key's spelling on a scratch copy of the page and restoring it; the committed negative test uses fabricated paths against the real page, never a mutated registry.
 
 **What.** Recast at the regression check (2026-09-03). Depends on items 9–16. Nothing cross-checks `internal/config`'s settings registry against
 `docs/manual/configuration.md`, which is how ten keys drifted at once. Add
