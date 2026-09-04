@@ -43,7 +43,11 @@ const (
 	doomedTask = "Count the files and report the number"
 	cancelTask = "Survey every file in the workspace"
 
-	faultedSlot   = "sub-agent faulted"
+	// faultedSlot is the composed reading a faulted delegation's row carries: the run's own count of
+	// what it got through, then the bare verdict word the failure layer words the slot with. The
+	// fault LINE itself is behind the ▶ since the ratified call on failed tool rows (plan
+	// "2026-09-03 - 02", item 7) — which is why the row still shows the delegation's name at all.
+	faultedSlot   = "0 tool calls · error"
 	quotedError   = "error: 3 errors found"
 	interruptedIn = "interrupted — the run did not finish"
 )

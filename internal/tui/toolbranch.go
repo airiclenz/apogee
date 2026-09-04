@@ -23,8 +23,9 @@ import (
 //     diffstat) — painted whole when the block is expanded and not at all when it is collapsed.
 //   - a call with NO target — the only shape with no target line: the header stands alone and
 //     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
-//     line to ride (an unregistered tool's labelled arguments then its "error: …"
-//     outcome, a stray result). Collapsed, that branch LIST is what the cap falls on — the
+//     line to ride (an unregistered tool's labelled arguments, the message a failure laid in its
+//     body, then the bare `error` closing the list; a stray result). Collapsed, that branch LIST is
+//     what the cap falls on — the
 //     block has no body to cap instead — each surviving line clipped to a row of its own
 //     (clipDetails). It counts what it cut nowhere: the count rides an outcome slot, this shape has
 //     none, and the header's ▶ is what says there is more behind it.
@@ -256,8 +257,9 @@ func collapseAtCap(lines []detailLine, limit int) (shown []detailLine, remainder
 
 // branchDetails is what a targetless call hangs off its header: the body, plus the summary as
 // its last line. A targetless block has no branch line for a summary to ride, so the outcome
-// simply closes the branch list — which is where an "error: …" on an unregistered tool has
-// always sat, after the arguments that provoked it.
+// simply closes the branch list — which is where an unregistered tool's failure verdict has always
+// sat, after the arguments that provoked it and, since the ratified call on failed tool rows, after
+// the message the failure laid in the body (absorbFailure).
 //
 // It lays the summary's LINE out and drops the mark that came with it: whose words the line is
 // decided how it was spelled at the presenter's seam (branchSummary), which is long settled by the

@@ -376,15 +376,20 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	// An ANSWERED user question is the other, and it is the one no name settles: the record
 	// materialises with the answer (askUserAnswerRecord, reached from the RESULT hook), so a question
 	// still awaiting one is an ordinary pending call and groups like one. What decode matches on is
-	// the RECORD's own footprint — done beside a non-empty body. done is the wire's copy of the same
-	// fact the hook waits for (a tool call is done once its result landed, transcript.go), and the
-	// body is what only that hook can have put there: ask_user's registry entry sets neither argBody
-	// nor body, so an ask_user record carries Details if and only if askUserAnswerRecord wrote them —
-	// which is exactly when it also set Solo. An ERRORED question is what the pair keeps out, and it
-	// has to be kept out: enrichWithResult returns on IsError before the outcome hook, so live it
-	// stays body-less and groupable, and forcing solo here would paint two failed questions as one
-	// "✦ Ask User (2)" while running and as two blocks after a reload. Both halves are read off the
-	// same name the presenter uses (askUserToolName), so the two rules cannot drift apart.
+	// the RECORD's own footprint — done, a non-empty body, and no failure verdict on the slot. done
+	// is the wire's copy of the same fact the hook waits for (a tool call is done once its result
+	// landed, transcript.go), and the body is what only that hook or a FAILURE can have put there:
+	// ask_user's registry entry sets neither argBody nor body, so the two writers of an ask_user
+	// record's Details are askUserAnswerRecord — which is exactly when it also set Solo — and
+	// absorbFailure, which lays a failed call's whole message beneath the branch (the ratified call
+	// on failed tool rows, plan "2026-09-03 - 02", item 7). An ERRORED question is what the verdict
+	// half keeps out, and it has to be kept out: enrichWithResult returns on IsError before the
+	// outcome hook, so live such a question is groupable, and forcing solo here would paint two
+	// failed questions as one "✦ Ask User (2)" while running and as two blocks after a reload. The
+	// verdict is the one the slot already carries ([branchSummary.failed], settled by namedSummary on
+	// the way in), so this reads the same fact the painter does rather than re-deriving it, and all
+	// three halves are read off the same name the presenter uses (askUserToolName), so the rules
+	// cannot drift apart.
 	//
 	// A SKILL FETCH is the third, and it is settled by name exactly as a delegation head is: the
 	// presenter marks it solo the moment the call is recognised (presentToolCall), because a fetch
@@ -393,7 +398,8 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	// never-group instead of folding into its neighbour's umbrella.
 	//
 	// Nothing else is re-derived here; every other Solo is a result-time verdict decode cannot reach.
-	if tv.headsRun() || tv.name == loadSkillToolName || (tv.name == askUserToolName && done && len(w.Details) > 0) {
+	if tv.headsRun() || tv.name == loadSkillToolName ||
+		(tv.name == askUserToolName && done && len(w.Details) > 0 && !tv.Summary.failed) {
 		tv.solo = true
 	}
 	if len(w.Details) > 0 {

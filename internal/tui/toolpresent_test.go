@@ -528,20 +528,61 @@ func TestPresentSubAgentRetainsTheWholeTask(t *testing.T) {
 	})
 }
 
-// An error result is summarised as an "error: …" detail rather than the tool's normal
-// summary — a normal in-band outcome the model reacts to. It is the *summary*, not a body
-// line, which is what keeps an errored call grouping with its neighbours.
+// An error result from a tool that words no short verdict of its own is summarised as the bare
+// word `error` — a normal in-band outcome the model reacts to — and the message it actually wrote
+// lays out beneath the branch instead of being crammed into the slot (the ratified call on failed
+// tool rows, plan "2026-09-03 - 02", item 7). It is still the *summary* that carries the verdict,
+// not a body line, which is what keeps an errored call grouping with its neighbours.
+//
+// The message keeps the TOOL's own spelling under the quoted-body rule: a body is quoted text and
+// shortenPaths deliberately never touches one, so the absolute path read_file failed on stands in
+// the body absolute while the slot beside it names nothing at all.
 func TestPresentToolCallErrorResult(t *testing.T) {
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"missing"}`)}, "", workspaceRoot{})
-	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "file not found: missing", IsError: true}, workspaceRoot{})
-	if got := tv.Summary.Text; got != "error: file not found: missing" {
-		t.Errorf("error summary = %q; want the error text", got)
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"/ws/missing.go"}`)}, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "file not found: /ws/missing.go", IsError: true}, workspaceRoot{root: "/ws"})
+	if got := tv.Summary.Text; got != "error" {
+		t.Errorf("error summary = %q; want the bare verdict word", got)
 	}
-	if tv.Details.len() != 0 {
-		t.Errorf("error body = %+v; want nothing beneath the branch", tv.Details)
+	if got := detailTexts(tv.Details.all()); !slices.Equal(got, []string{"file not found: /ws/missing.go"}) {
+		t.Errorf("error body = %q; want the message whole, spelled as the tool wrote it", got)
 	}
 	if !groupable(tv) {
 		t.Error("an errored call must still group with its neighbours")
+	}
+}
+
+// TestPresentToolCallErrorBodyKeepsEveryLine is the same claim over a message of SEVERAL lines: the
+// slot is one word whatever the message is, and every line of that message reaches the body, where
+// the painter wraps it rather than clipping it. The lines are kept short on purpose — the per-line
+// flood cap (clipDetail, detailClipRunes) is a known and separate limit on one very long line, and
+// this test is about the lines that used to be dropped outright, not about that cap.
+func TestPresentToolCallErrorBodyKeepsEveryLine(t *testing.T) {
+	t.Parallel()
+
+	want := []string{"could not compile:", "  a.go:3: undefined: x", "  a.go:9: undefined: y", "3 errors found"}
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: strings.Join(want, "\n"), IsError: true}, workspaceRoot{})
+
+	if got := tv.Summary.Text; got != "error" {
+		t.Errorf("error summary = %q; want the bare verdict word whatever the message says", got)
+	}
+	if got := detailTexts(tv.Details.all()); !slices.Equal(got, want) {
+		t.Errorf("error body = %q; want every line of the message: %q", got, want)
+	}
+
+	// And on screen: the block opens onto those same lines, so "in the body" is a claim about what
+	// the reader can actually reach rather than about a field.
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "2", Content: strings.Join(want, "\n"), IsError: true}})
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the failed block to open")
+	}
+	painted := renderPlain(tr, 80)
+	for _, line := range want {
+		if !strings.Contains(painted, line) {
+			t.Errorf("the expanded block does not show %q:\n%s", line, painted)
+		}
 	}
 }
 
@@ -550,7 +591,9 @@ func TestPresentToolCallErrorResult(t *testing.T) {
 // internal/tools appends — so the slot says that over the lines the command printed, the red twin
 // of a clean run's "exit 0", instead of spending itself on whichever line the output happened to
 // open with ("total 20760" is a listing header, not a diagnostic). A result carrying no marker, and
-// every other tool, keeps the first line: for a tool that fails in prose that line IS the message.
+// every other tool, takes the fallback branch instead: the slot is the bare word `error` and the
+// whole message lays out beneath it (the ratified call on failed tool rows, plan "2026-09-03 - 02",
+// item 7, which supersedes the first-line floor this test used to pin).
 func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 	t.Parallel()
 
@@ -601,15 +644,17 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		content:     "\n[exit code 1 — fail-fast: the line stopped at the first command that failed; guard expected non-zero exits with `|| true`]",
 		wantSummary: "error: exit 1",
 	}, {
-		name:        "a subprocess result with no marker keeps the first line",
+		name:        "a subprocess result with no marker says the word and keeps its whole message",
 		call:        domain.ToolCall{ID: "6", Tool: "terminal", Arguments: []byte(`{"command":"sleep 90"}`)},
 		content:     "command timed out\npartial output",
-		wantSummary: "error: command timed out",
+		wantSummary: "error",
+		wantBody:    []string{"command timed out", "partial output"},
 	}, {
-		name:        "another tool's failure keeps the first line",
+		name:        "another tool's failure says the word and keeps its whole message",
 		call:        domain.ToolCall{ID: "7", Tool: "read_file", Arguments: []byte(`{"path":"missing"}`)},
 		content:     "file not found: missing",
-		wantSummary: "error: file not found: missing",
+		wantSummary: "error",
+		wantBody:    []string{"file not found: missing"},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

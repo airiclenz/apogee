@@ -494,15 +494,21 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 
 	t.Run("errored questions stay groupable and replay as one group", func(t *testing.T) {
 		// A question the tool could not put to anyone (its Asker was gone): the result comes back an
-		// error, enrichWithResult words the branch and returns before the outcome hook, so the record is
-		// done with NO body and never becomes a card. Live it groups; the claim here is that the file
-		// says the same thing back.
-		const errLine = "error: could not ask the user: asker closed"
+		// error, enrichWithResult words the branch with the bare verdict word and returns before the
+		// outcome hook, so the record is done, carries the message as its BODY and never becomes a
+		// card. Live it groups; the claim here is that the file says the same thing back — which is
+		// why decode's card rule reads the slot's verdict beside the body it finds (fromWireToolView):
+		// a failure lays a body of its own now, and matching on the body alone would card exactly the
+		// questions the live paint groups.
+		const errWord = "error"
+		const errBody = "could not ask the user: asker closed"
 		data := []byte(`{"version":1,"entries":[` +
 			`{"kind":"toolCall","callID":"a1","done":true,"tool":{"label":"Ask User","verb":"asking",` +
-			`"target":"Ship it?","name":"ask_user","summary":{"text":"` + errLine + `"}}},` +
+			`"target":"Ship it?","name":"ask_user","summary":{"text":"` + errWord + `"},` +
+			`"details":[{"text":"` + errBody + `"}]}},` +
 			`{"kind":"toolCall","callID":"a2","done":true,"tool":{"label":"Ask User","verb":"asking",` +
-			`"target":"Tag it?","name":"ask_user","summary":{"text":"` + errLine + `"}}}` +
+			`"target":"Tag it?","name":"ask_user","summary":{"text":"` + errWord + `"},` +
+			`"details":[{"text":"` + errBody + `"}]}}` +
 			`]}`)
 		got, err := decodeTranscript(data)
 		if err != nil {
@@ -527,8 +533,8 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 		want := strings.Join([]string{
 			"✦ Tools (2 calls)",
 			leaderEdgeRow("  ┕ Ask User (2) ⋯ 2 errors", glyphExpanded),
-			"  │ ┝ Ship it? ⋯ " + errLine,
-			"  │ ┕ Tag it? ⋯ " + errLine,
+			"  │ ┝ Ship it? ⋯ " + errWord + " " + glyphCollapsed,
+			"  │ ┕ Tag it? ⋯ " + errWord + " " + glyphCollapsed,
 		}, "\n")
 		if out := renderPlain(replayed, 80); out != want {
 			t.Errorf("replayed failed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
@@ -541,7 +547,7 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 			live.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 				ID: q.id, Tool: "ask_user", Arguments: []byte(`{"question":"` + q.question + `"}`)}})
 			live.apply(domain.ToolResultEvent{Result: domain.ToolResult{
-				CallID: q.id, Content: "could not ask the user: asker closed", IsError: true}})
+				CallID: q.id, Content: errBody, IsError: true}})
 		}
 		if !live.setTypeExpanded(0, true) {
 			t.Fatal("setTypeExpanded(0, true) = false; want the live run's type row open")

@@ -1254,9 +1254,15 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 	}
 	// The orphan branch is the one path a result takes WITHOUT passing enrichWithResult's seam, so
 	// it strips the content itself — it is raw tool output, which a malicious repo controls.
+	//
+	// A failed one is worded the way absorbFailure words the seam this branch bypasses: the verdict
+	// is the bare erroredSummary and the tool's message stands under it, whole, rather than being
+	// run together with it on one line. One failure wording reaches the screen however a result got
+	// there — the orphan's block lays every line out as a branch (renderOrphanResult), so the word
+	// heads the list and the message follows it.
 	text := stripEscapes(result.Content)
 	if result.IsError {
-		text = "error: " + text
+		text = erroredSummary + "\n" + text
 	}
 	t.place(entry{kind: entryToolResult, text: text, depth: run.depth, spawnCallID: run.spawn})
 }

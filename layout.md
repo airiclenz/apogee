@@ -605,7 +605,8 @@ number as part of a tool's name.
 
 **The outcome, in two halves.** What a finished call has to say is split in two, and everything
 below follows from that split — never from counting lines. The **summary** is the single line the
-row carries in its outcome slot: a read's `154 lines`, a diff's `+2 -2`, a red `error: …`. The
+row carries in its outcome slot: a read's `154 lines`, a diff's `+2 -2`, a red `error` (or the
+`error: …` a tool that words its own short failure carries). The
 **body** is what hangs beneath it: a command's output, a diff's own lines, an edit's changed lines,
 a write's written ones.
 A call may have either,
@@ -696,7 +697,8 @@ joins a run either (*The firing block*, below).
 **A call with no target** is the one shape the canon spec does not draw, for want of a target to
 draw it around: the header stands alone and the lines are themselves the `┝`/`┕` branches, the
 summary closing the list since it has no row of its own to ride (an unregistered tool's labelled
-arguments, then the `error: …` it earned; a stray `result`). Collapsed, that branch list is what the
+arguments, then the message a failure laid in its body, then the bare `error` it earned; a stray
+`result`). Collapsed, that branch list is what the
 cap falls on — the block has no body to cap instead — and the remainder marker hangs beneath it at
 the branch marker's own width.
 

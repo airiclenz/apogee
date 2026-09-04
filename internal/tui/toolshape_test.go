@@ -119,8 +119,10 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 }
 
 // A targetless call has no branch line for its summary to ride, so the outcome closes the branch
-// list instead of vanishing: an unregistered tool's arguments, then the "error: …" it earned. The
-// summary is part of that list, so the collapsed cap counts it like any other branch line.
+// list instead of vanishing: an unregistered tool's arguments, then the message its failure laid in
+// the body, then the bare verdict word it earned closing the list (absorbFailure, under the
+// ratified call on failed tool rows). The summary is part of that list, so the collapsed cap counts
+// it like any other branch line.
 func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
@@ -133,7 +135,8 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 		"✦ mcp_thing ▼",
 		"  ┝ a:",
 		"  ┝   1",
-		"  ┕ error: no such server",
+		"  ┝ no such server",
+		"  ┕ error",
 		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {

@@ -1038,10 +1038,19 @@ func TestTranscriptErrorEventInline(t *testing.T) {
 // ToolResult: an error result is marked but still rendered as a result
 // ----------------------------------------------------------------------------
 
+// The orphan branch words a failed result the way absorbFailure words the seam it bypasses (item 7
+// of plan "2026-09-03 - 02"): the bare verdict word heads the block's branch list and the tool's
+// message stands whole under it, rather than the two running together on one line.
 func TestTranscriptToolResultError(t *testing.T) {
 	tr := feed(domain.ToolResultEvent{Result: domain.ToolResult{Content: "no such file", IsError: true}})
-	if got := plainRender(tr); !strings.Contains(got, "error: no such file") {
-		t.Errorf("error tool result not surfaced:\n%s", got)
+	got := plainRender(tr)
+	for _, want := range []string{"┝ error\n", "┕ no such file"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("error tool result missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "error: no such file") {
+		t.Errorf("the message is still worded into the verdict line:\n%s", got)
 	}
 }
 

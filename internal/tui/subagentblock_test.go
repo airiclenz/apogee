@@ -121,7 +121,7 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 		want := strings.Join([]string{
 			"✦ Sub-Agent (2)",
 			groupMemberLine("  ┝ working ⋯ 1 tool call"),
-			groupMemberLine("  ┕ broken ⋯ 1 tool call · error: it fell over"),
+			groupMemberLine("  ┕ broken ⋯ 1 tool call · error"),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("unfinished fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -350,7 +350,7 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 			CallID: "s3", Content: "sub-agent depth limit reached", IsError: true}})
 		want := strings.Join(append(append([]string{header}, running...),
-			groupMemberLine("  ┕ check ⋯ error: sub-agent depth limit reached")), "\n")
+			groupMemberLine("  ┕ check ⋯ error")), "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("refused member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -470,7 +470,7 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 					tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 						CallID: "s1", Content: "it fell over", IsError: true}})
 				},
-				row: "  ┕ broken ⋯ 1 tool call · error: it fell over",
+				row: "  ┕ broken ⋯ 1 tool call · error",
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -561,14 +561,16 @@ func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		// The refusal fills the whole outcome slot, so the leader keeps its floor of one dot and
-		// the target gives way entirely — design call 4's order, played out to its end. Each row
-		// still wears its ▶: the task pushed off the row is precisely what the member opens onto
-		// (renderSubAgentMemberRows), so the delegation crowded out of its own header is the one
-		// with the most behind the indicator.
+		// The refusal is ONE WORD in the outcome slot, so the row has nothing to give up: each
+		// delegation keeps the task it carries on its own header, and the ▶ beside it opens onto
+		// the refusal in full. This test pinned the opposite shape until the ratified call on
+		// failed tool rows (plan "2026-09-03 - 02", item 7) — an unbounded refusal took the slot at
+		// full width before the target was given any budget, so design call 4's order played out
+		// to its end and both rows went out with no target at all, showing which delegation was
+		// refused nowhere on screen.
 		"✦ Sub-Agent (2)",
-		groupMemberLine("  ┝ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper su" + clipTail),
-		groupMemberLine("  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper su" + clipTail),
+		groupMemberLine("  ┝ first ⋯ error"),
+		groupMemberLine("  ┕ second ⋯ error"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("refused delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -633,7 +635,7 @@ func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
 
 // A delegation that FAILED paints its outcome slot red wherever it is drawn — lone or grouped, shut
 // or open — and wears no done ✓, since design call 6 makes that red the whole of the failure
-// marking. The row's line is a COMPOSED reading, "1 tool call · error: …", whose own opening words
+// marking. The row's line is a COMPOSED reading, "1 tool call · error", whose own opening words
 // say nothing about how the run ended: the verdict is the HEAD's, carried onto that line
 // (subAgentSummary), and reading the composed words instead is what left every failed delegation
 // painted in the ordinary tone (F-28).
@@ -679,7 +681,7 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 		}
 	}
 
-	const failedSlot = "1 tool call · error: it fell over"
+	const failedSlot = "1 tool call · error"
 
 	t.Run("a lone failed run is red on the one row it has", func(t *testing.T) {
 		tr := &transcript{}
@@ -730,10 +732,12 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 
 	// The other end of the same rule: a delegation REFUSED before it ran (the depth bound, a hook
 	// failure, a construct error — agent.runSubAgent) returns an error result and left no span, so
-	// its head wears the refusal in its own words (absorbFailure) and that error status is the whole
-	// verdict — red, and no ✓ beside a name whose run never happened.
+	// its head wears the bare verdict word (absorbFailure, and the refusal itself behind the ▶) and
+	// that error status is the whole verdict — red, and no ✓ beside a name whose run never happened.
+	// The lone block is collapsed, so the count of what stands behind the ▶ joins the slot after the
+	// same middle dot the stats use, and the red covers the whole of what the slot says.
 	t.Run("a delegation refused before it ran is red and wears no done mark", func(t *testing.T) {
-		const slot = "error: sub-agent depth limit reached (max 2)"
+		const slot = "error · +1 more line"
 
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "delegate deeper", 0)
@@ -1514,10 +1518,14 @@ func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
 			want:    "error: " + envelopeFaultLine + " · steered by 1 message",
 		},
 		{
+			// Nobody steered this one, so delegationFailure declines and the fallback branch words
+			// the slot: the bare verdict word, with the fault line itself behind the ▶ (the ratified
+			// call on failed tool rows). What the case still pins is that the envelope adds nothing
+			// where there was no steering to add.
 			name:    "a faulted run nobody steered reads exactly as it did",
 			content: envelopeFaultLine,
 			failed:  true,
-			want:    "error: " + envelopeFaultLine,
+			want:    "1 tool call · error",
 		},
 	}
 	for _, tc := range cases {

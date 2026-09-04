@@ -302,9 +302,15 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 	return slot
 }
 
-// failedSummary reads a WORDING for a verdict of failure (errorSummaryPrefix and the three bare
+// failedSummary reads a WORDING for a verdict of failure (errorSummaryPrefix and the four bare
 // verdicts beside it), plus the count a TYPE ROW aggregates its run's failures into ("3 errors",
 // runAggregate).
+//
+// erroredSummary is read here because it is what a failed call whose tool words no verdict of its
+// own now SAYS (absorbFailure): reading the word is what keeps such a row red, keeps a faulted
+// delegation's head off the done ✓ (subAgentFinished), and keeps a run counting it among its "N
+// errors" (failedCalls). Changing the wording without extending this reading is the regression the
+// ratified call on failed tool rows was checked against.
 //
 // The text is read ONCE, at the seam that words it, and namedSummary is now the only caller: it puts
 // its own sentence to this vocabulary on the way in and the answer rides the summary from there
@@ -323,7 +329,7 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 // call that produced no outcome, and the ONE place that answer has to reach is subAgentFinished — a
 // delegation closed at replay must not wear the done ✓ its row would otherwise earn from being done.
 func failedSummary(text string) bool {
-	if strings.HasPrefix(text, errorSummaryPrefix) ||
+	if strings.HasPrefix(text, errorSummaryPrefix) || text == erroredSummary ||
 		text == deniedSummary || text == cancelledSummary || text == interruptedSummary {
 		return true
 	}

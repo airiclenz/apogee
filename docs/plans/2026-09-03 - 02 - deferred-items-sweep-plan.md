@@ -310,7 +310,17 @@ catalogue un-swapped lands on `setSkipped`, so the test proves the seam is what 
 
 ---
 
-## 7. A failed tool call says one word and keeps its whole message
+## 7. A failed tool call says one word and keeps its whole message — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): deviation — `internal/tui/transcriptbridge.go` was edited although the item's **Files** does not list it. Its card rule matched an ask_user record on "done beside a non-empty body", and its own comment names that rule as sound only because "an ask_user record carries Details if and only if askUserAnswerRecord wrote them". A failed call now lays a body too, so decode began carding exactly the errored questions the live paint groups — the shape that test pins as the live/replayed equality (`transcriptbridge_test.go:500-551`, named in the item's **Tests**). The rule now also reads the slot's own verdict (`!tv.Summary.failed`), which is the fact the painter already reads; the comment records why.
+
+NOTES (2026-09-04): consequential edit — layout.md: made necessary by the new fallback wording — the root spec's outcome-slot examples and its targetless-block shape both named the `error: …` sentence this item replaced.
+
+NOTES (2026-09-04): consequential edit — internal/tui/toolbranch.go: made necessary by the new fallback wording — the package doc's targetless-shape bullet and `branchDetails`' contract both said the branch list ends in an `error: …` sentence.
+
+NOTES (2026-09-04): the grep sweep the item mandates turned up eight further pinned sites the plan did not list, all moved with it: `TestRenderSubAgentGroupSketchStates`, `TestSubAgentScheduledUntilItStarts`, `TestLoneSubAgentRunWearsTheGroupMembersRow`, `TestFailedDelegationPaintsItsSlotRed` (three cases), `TestCollapsedRunSlotCarriesTheResultEnvelope`, `TestDelegationDoneReadsInTheSuccessTone`, `TestRenderNoTargetKeepsItsSummary` and `TestTranscriptCodecReDerivesAnsweredQuestionSolo`. `schedule.go`'s own `"error: " + …` Firing wording, `internal/run/transcript.go`, the three `failure` hooks' words and every quoted-report golden were left alone — none is `absorbFailure`'s fallback branch.
+
+NOTES (2026-09-04): a collapsed lone failure now also carries the body's count in its slot (`error · +1 more line`), because there is finally a body behind the ▶ to count. `TestFailedDelegationPaintsItsSlotRed`'s refused case pins that, red and all.
 
 **What.** Recast at the regression check (2026-09-03). Closes `apogee-b3u`. A failed call's summary is `errorSummaryPrefix + firstLine(content)`
 (`internal/tui/toolview.go:1171`) with no bound, and `leaderRowIn` reserves the slot at full width BEFORE

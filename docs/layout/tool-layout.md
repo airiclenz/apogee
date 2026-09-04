@@ -78,8 +78,13 @@ closer is drawn today.
 - `<tool-details-row-1..n>` — the expanded content of one call (diff, output, listing, …).
 - `<tool-top-level-details>` — the right-aligned outcome slot. It carries the
   **whole summary**, whatever kind: a typed stat ("12 lines", "exit 0 · 1.2s",
-  "+8 −3"), a promoted one-line output (quoted), or a red `error: …` /
-  `denied` / `cancelled`. On a type row it aggregates the run (below).
+  "+8 −3"), a promoted one-line output (quoted), or a red verdict — the bare
+  word `error`, `denied`, `cancelled`, or the `error: …` a tool that words its
+  own short failure carries (`error: exit 3`, the terminal, python_exec and a
+  steered delegation). A failed call whose tool words no such verdict says the
+  bare word and nothing more; the message it wrote goes to the body, where it
+  wraps whole instead of eating the target off the row. On a type row the slot
+  aggregates the run (below).
   **Remainder:** while a lone call is collapsed the slot also carries the count
   of the body behind it, after the same middle dot the stats use —
   `exit 0 · +3 more lines` — so the block is its header and one row and the
@@ -111,7 +116,10 @@ closer is drawn today.
 - The right slot always prints whole — with one guard: a one-line output is
   **promoted** into it only if the row keeps ≥ ~15 cells of target + 1 dot;
   otherwise it stays a body line and the right slot shows the typed stat
-  (e.g. `1 line`).
+  (e.g. `1 line`). The **failure** slot is the one kind that now always does
+  print whole, and always has the room to: an unhooked failure says the bare
+  word `error` with its message in the body, so there is no unbounded sentence
+  left to reserve the row's whole width before the target is given a budget.
 
 ## Fold states and interaction
 

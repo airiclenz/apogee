@@ -1220,7 +1220,7 @@ func TestDelegationDoneReadsInTheSuccessTone(t *testing.T) {
 			name:    "a failed run is red, and no success verdict overrides it",
 			content: "it fell over",
 			failed:  true,
-			slot:    "error: it fell over",
+			slot:    "error",
 			tone:    th.errorText,
 		},
 	} {

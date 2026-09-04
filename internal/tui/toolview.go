@@ -135,12 +135,19 @@ type branchSummary struct {
 	stat statValue
 }
 
-// The wordings that mark an outcome as a FAILURE, whatever produced it: the "error: …" line a
-// faulted result is summarised with (enrichWithResult), and the three bare verdicts a call that
-// never ran — or never finished — carries. The painter reads them to give the outcome slot its red
+// The wordings that mark an outcome as a FAILURE, whatever produced it: the bare word an unhooked
+// failed result is summarised with (erroredSummary), the "error: …" line a tool that words its own
+// short verdict carries (enrichWithResult), and the three bare verdicts a call that never ran — or
+// never finished — carries. The painter reads them to give the outcome slot its red
 // (summaryStyle, render.go), and design call 11 of docs/plans/"2026-08-10 - 04" makes that red the
 // ONLY failure marking — no glyph and no header changes colour — so the vocabulary and the mark stay
 // one fact in one place.
+//
+// erroredSummary is the whole of what a failed call says on the branch where its tool words no
+// verdict of its own, under the ratified call on failed tool rows (plan "2026-09-03 - 02", item 7):
+// the tool's message never enters the slot at all and lays out in the body instead (absorbFailure).
+// It spells the same word errorNoun counts a run's failures with, deliberately — one word for one
+// verdict, whether a member row carries it or a type row sums it.
 //
 // interruptedSummary is the one no live fold ever writes: it is what REPLAY closes a call with that
 // was still open when the record was written (closeInterruptedCalls), so a delegation the record
@@ -148,6 +155,7 @@ type branchSummary struct {
 // subAgentFinished answer false for such a head — an interrupted run wears no done ✓.
 const (
 	errorSummaryPrefix = "error: "
+	erroredSummary     = "error"
 	deniedSummary      = "denied"
 	cancelledSummary   = "cancelled"
 	interruptedSummary = "interrupted — the run did not finish"
@@ -973,8 +981,9 @@ func (tv toolView) demoted() toolView {
 }
 
 // errorNoun is the word a TYPE ROW counts its run's failures with — "1 error", "3 errors" — and the
-// only wording apogee reserves in the outcome slot beyond the three a single call may carry
-// (errorSummaryPrefix and the two bare verdicts). Reserving it is what lets the failure test stay
+// same bare word a single unhooked failure carries alone (erroredSummary), so the whole vocabulary a
+// slot may spell a failure in is that word, the "error: …" line a tool with a failure hook words,
+// and the two bare verdicts beside them. Reserving it is what lets the failure test stay
 // one reading of the TEXT for a member row and an aggregate alike (failedSummary, render.go).
 const errorNoun = "error"
 
@@ -983,8 +992,8 @@ const errorNoun = "error"
 // interaction"). Four answers, in this order:
 //
 //   - a run of ONE is its own member's summary, verbatim, whatever kind that is. Summing one call is
-//     that call, so nothing has to be invented: a lone failure keeps its "error: …" sentence instead
-//     of being counted as "1 error", and a promoted line stays the quoted line it is.
+//     that call, so nothing has to be invented: a lone failure keeps the verdict it words for itself
+//     instead of being counted as "1 error", and a promoted line stays the quoted line it is.
 //   - any FAILED member and the row counts them, "N errors", and that count is the row's OWN
 //     verdict: the summary it words goes through namedSummary like any other sentence in the
 //     failure vocabulary, so the type row carries failed and needs nothing read back out of it.
@@ -1151,15 +1160,31 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	}
 }
 
-// absorbFailure fills the halves from a FAILED result. The summary is the "error: …" line the
-// painter reads as the block's red (errorSummaryPrefix), worded by the tool's own failure hook
-// where it has one and by the result's first line everywhere else — for a tool that fails in prose
-// that first line IS the error message, which is why it stays the floor.
+// absorbFailure fills the halves from a FAILED result. What the slot says is a WORD the painter
+// reads as the block's red — the short verdict a tool's own failure hook words after
+// errorSummaryPrefix ("error: exit 3"), and the bare erroredSummary for every tool without one —
+// and the message the tool actually wrote lays out beneath the branch, whole.
 //
 // A hook that worded the slot also hands back the output left once it has read the failure off it,
 // and that output lays out beneath the branch. A failed subprocess call therefore reads as its
 // clean twin does — the exit code in the slot over the lines the command printed — instead of
 // spending the slot on whichever line the output happened to open with.
+//
+// This seam used to record the result's FIRST LINE as the slot's floor everywhere else, on the
+// reading that for a tool failing in prose that line IS the error message. The ratified call on
+// failed tool rows (plan "2026-09-03 - 02", item 7) supersedes that floor, and the floor was the
+// defect: the slot is reserved at FULL WIDTH before the target is given any budget at all
+// (leaderRowIn), and no promote-guard protects it, because that guard only takes back a summary the
+// block QUOTES (guardRefuses reads promotable) and a worded failure never is — so an unbounded
+// sentence ate the tool's own target down to " …", or off the row entirely. Nor was expanding a
+// remedy: this branch set no body, so there was nothing behind the ▶ to open. A word cannot crowd a
+// target out, and the message is now behind the ▶ where the body wraps it at paint time
+// (outputBody, bodyFrame.paint) and no clip reaches it.
+//
+// The message reaching the body is spelled as the TOOL wrote it, per the quoted-body rule
+// (shortenPaths): a body is quoted text and the shortening seam deliberately never touches one, so
+// read_file failing on an in-workspace path carries that path absolute beneath a branch whose slot
+// now names nothing at all.
 func (tv *toolView) absorbFailure(content string) {
 	if p, known := toolRegistry[tv.name]; known && p.failure != nil {
 		if word, output, ok := p.failure(content); ok {
@@ -1168,7 +1193,8 @@ func (tv *toolView) absorbFailure(content string) {
 			return
 		}
 	}
-	tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + firstLine(content)})
+	tv.Summary = namedSummary(detailLine{Text: erroredSummary})
+	tv.Details = tv.Details.with(outputBody(content))
 }
 
 // absorbProse fills the two halves from the result's PROSE — the layers that predate the ratified
