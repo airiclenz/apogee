@@ -804,7 +804,11 @@ nothing; a saving run is unchanged.
 
 ---
 
-## 17. `env-allowlist:` on a non-stdio MCP server gets a notice
+## 17. `env-allowlist:` on a non-stdio MCP server gets a notice — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): consequential edit — docs/manual/configuration.md: made necessary by the new startup notice; the `env-allowlist:` section documented the stdio semantics but not what a remote-transport entry does, which is now user-visible behaviour (one paragraph added, no existing text changed).
+
+NOTES (2026-09-04): a second test (`TestMCPEnvAllowlistNoticesNameTheTransportInFileOrder`) covers `streamable-http` and file order directly on `mcpEnvAllowlistNotices`, beyond the four cases the item's Tests list names — the predicate is two named transports and only `sse` was reachable through the ApplyConfig table.
 
 **What.** `env-allowlist:` is meaningful to the stdio launch only
 (`internal/mcp/transport.go:61-62`, `:172-176`); an `sse` or `streamable-http` entry that sets it

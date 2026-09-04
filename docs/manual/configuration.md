@@ -339,6 +339,11 @@ nothing on beyond what the platform itself needs to start a process. Either way 
 `env:` entries are appended **last**, so a variable you set for that server wins over an inherited
 one of the same name. Leaving the key out is today's behaviour, unchanged.
 
+The key is read by the **stdio** launch alone. An `sse` or `streamable-http` entry launches no
+process, so there is nothing for an allowlist to narrow — set it on one and apogee says so at
+startup, naming that entry. It is a notice, never a refusal: the server still connects and its tools
+still arrive; the line simply does nothing, and the fix is to drop it or make the entry `stdio`.
+
 The block is file-only (no flag, no environment variable) and it is **live**: save the file — or use
 `⏎` on the `mcp-servers:` row in [`/settings`](commands.md#the-settings-screen--settings), which
 opens your editor because no row can write a list this shape — and apogee reconnects, bringing the

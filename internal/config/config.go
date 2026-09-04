@@ -1080,6 +1080,39 @@ func quoteAll(names []string) []string {
 	return quoted
 }
 
+// mcpEnvAllowlistNotices is one line per `mcp-servers:` entry that sets `env-allowlist:` on a
+// transport that cannot read it, in the order the file lists them, or nil when nothing does.
+// `env-allowlist:` narrows what a stdio server INHERITS from apogee's own environment
+// (internal/mcp's stdio transport); an `sse` or `streamable-http` entry is dialled over http and
+// launches no process, so it inherits nothing there is anything to narrow — the key is read by
+// nobody and the entry behaves exactly as if it had been left out.
+//
+// It is a notice and never a refusal, for the roster complaints' reason above: the server still
+// loads and its tools still arrive, and the only thing wrong is that a line the user wrote does
+// nothing. Silence is the whole defect here.
+//
+// The predicate is the two NAMED remote transports rather than "not stdio". An entry that omits
+// `transport:` is not a third case to report: it loads here and is refused at connect, and naming
+// it would print this sentence with an empty transport word. And the trigger is the key's
+// PRESENCE, which is exactly what the pointer encodes — `env-allowlist: []`, the explicitly empty
+// list that hands a stdio child the platform floor alone, is a key the user set and notices like
+// any other, while an entry that omits the key never does.
+func mcpEnvAllowlistNotices(servers []mcp.ServerConfig) []string {
+	var notices []string
+	for _, server := range servers {
+		if server.EnvAllowlist == nil {
+			continue
+		}
+		switch server.Transport {
+		case mcp.TransportSSE, mcp.TransportStreamableHTTP:
+			notices = append(notices, fmt.Sprintf("apogee: mcp-servers.%s sets env-allowlist:, "+
+				"which only a stdio server reads — this %s server inherits nothing from it; "+
+				"drop the key or switch the transport to stdio", server.Name, server.Transport))
+		}
+	}
+	return notices
+}
+
 // resolveConfineToWorkspace is Auto's effective blast-radius decision (ADR 0012 as amended
 // 2026-07-21), in the order the ADR fixes:
 //
@@ -3061,6 +3094,13 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 		domain.ToolRosterDelta{Disabled: opts.ToolsDisabled, Enabled: opts.ToolsEnabled},
 		opts.ModelProfiles,
 	) {
+		notify(n)
+	}
+	// And an `mcp-servers:` entry that narrows an environment no child of its own will ever have:
+	// `env-allowlist:` is read by the stdio launch alone, so an `sse` or `streamable-http` entry
+	// that spells it says nothing to anyone. Reported at this same startup boundary, and a notice
+	// rather than a refusal for the roster lists' reason — the entry loads exactly as written.
+	for _, n := range mcpEnvAllowlistNotices(opts.MCPServers) {
 		notify(n)
 	}
 	// Which source won, for the keys where more than one could have: the resolved values above no

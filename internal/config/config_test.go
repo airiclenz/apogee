@@ -2201,6 +2201,116 @@ func TestApplyConfigMCPServerEnvAllowlist(t *testing.T) {
 	}
 }
 
+// `env-allowlist:` is meaningful to the stdio launch alone — it narrows what a child process
+// inherits — so an `sse` or `streamable-http` entry that sets it is a line doing nothing, and until
+// now doing nothing silently. The notice says so and names the entry; it is never a refusal, so the
+// server still loads. The trigger is the key's PRESENCE, which is why an explicitly empty list
+// notices too and an entry that omits the key never does.
+func TestApplyConfigMCPEnvAllowlistOnANonStdioServerNotices(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		entryYAML  string
+		wantNotice bool
+	}{
+		{
+			name: "an sse entry with a populated allowlist",
+			entryYAML: `  - name: remote
+    transport: sse
+    endpoint: https://mcp.example.com/
+    env-allowlist: [PATH, HOME]
+`,
+			wantNotice: true,
+		},
+		{
+			name: "the same entry with an explicitly empty allowlist",
+			entryYAML: `  - name: remote
+    transport: sse
+    endpoint: https://mcp.example.com/
+    env-allowlist: []
+`,
+			wantNotice: true,
+		},
+		{
+			name: "an sse entry that omits the key",
+			entryYAML: `  - name: remote
+    transport: sse
+    endpoint: https://mcp.example.com/
+`,
+			wantNotice: false,
+		},
+		{
+			name: "a stdio entry with the key",
+			entryYAML: `  - name: remote
+    transport: stdio
+    command: a-mcp
+    env-allowlist: [PATH]
+`,
+			wantNotice: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, "mcp-servers:\n"+tc.entryYAML)
+			opts := Options{ConfigDir: home}
+			var notices []string
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, func(n string) { notices = append(notices, n) }); err != nil {
+				t.Fatalf("an ignored key must not stop startup: %v", err)
+			}
+
+			const want = "apogee: mcp-servers.remote sets env-allowlist:, which only a stdio server " +
+				"reads — this sse server inherits nothing from it; drop the key or switch the " +
+				"transport to stdio"
+			var reported string
+			for _, n := range notices {
+				if strings.Contains(n, "env-allowlist:") {
+					reported = n
+				}
+			}
+			switch {
+			case !tc.wantNotice && reported != "":
+				t.Fatalf("a key the transport reads must produce no notice; got %q", reported)
+			case !tc.wantNotice:
+				return
+			case reported == "":
+				t.Fatalf("no env-allowlist notice; got %v", notices)
+			case reported != want:
+				t.Errorf("notice = %q; want %q", reported, want)
+			}
+			if len(opts.MCPServers) != 1 {
+				t.Errorf("the entry must still load: mcpServers = %+v", opts.MCPServers)
+			}
+		})
+	}
+}
+
+// The notice names the transport the entry actually spells, so a `streamable-http` server reads a
+// sentence about itself rather than about SSE: both remote transports are dialled over http and
+// neither launches the child an allowlist could scope.
+func TestMCPEnvAllowlistNoticesNameTheTransportInFileOrder(t *testing.T) {
+	t.Parallel()
+
+	notices := mcpEnvAllowlistNotices([]mcp.ServerConfig{
+		{Name: "first", Transport: mcp.TransportStreamableHTTP, EnvAllowlist: &[]string{"PATH"}},
+		{Name: "quiet", Transport: mcp.TransportStdio, EnvAllowlist: &[]string{"PATH"}},
+		{Name: "second", Transport: mcp.TransportSSE, EnvAllowlist: &[]string{}},
+	})
+
+	want := []string{
+		"apogee: mcp-servers.first sets env-allowlist:, which only a stdio server reads — this " +
+			"streamable-http server inherits nothing from it; drop the key or switch the transport to stdio",
+		"apogee: mcp-servers.second sets env-allowlist:, which only a stdio server reads — this " +
+			"sse server inherits nothing from it; drop the key or switch the transport to stdio",
+	}
+	if !reflect.DeepEqual(notices, want) {
+		t.Errorf("notices = %q; want %q", notices, want)
+	}
+}
+
 // The `tools:` block round-trips: the disabled roster parses into opts.toolsDisabled in file
 // order, an absent block leaves the whole roster standing, and a name matching no tool is a NOTICE
 // rather than a startup error — the rest of the list still applies, so pruning a roster can never
