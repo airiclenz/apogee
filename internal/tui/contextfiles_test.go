@@ -2,7 +2,9 @@ package tui
 
 // Item 4 of the workspace-context-files plan: the session notice. These tests pin WHEN the
 // notice is printed (at every session boundary the host owns, and only there), WHAT it says
-// about loaded and unreadable files, and the one condition the Budget warn fires under.
+// about loaded and unreadable files, the one condition the Budget warn fires under, and that
+// what reaches the terminal is escape-stripped. The WORDING itself is pinned once, beside its
+// composer in internal/notice; these are the host's half of that seam.
 
 import (
 	"slices"
@@ -104,6 +106,26 @@ func TestContextFilesNoticeNamesEveryFile(t *testing.T) {
 	want := []string{
 		"context: CONVENTIONS.md (512 B), AGENTS.md (3.1 KiB)",
 		"context: BROKEN.md unreadable — permission denied",
+	}
+	if got := contextNotes(m); !slices.Equal(got, want) {
+		t.Errorf("context notes = %v, want %v", got, want)
+	}
+}
+
+// A name traces to config and an error text to the filesystem, so both reach the terminal
+// escape-stripped — on the loaded line as well as the unreadable one, since the host strips
+// every composed notice rather than picking halves out of it.
+func TestContextFilesNoticeStripsEscapes(t *testing.T) {
+	eng := &fakeEngine{contextReport: domain.ContextFilesReport{Files: []domain.ContextFileNote{
+		{Name: "A\x1b[31mGENTS.md", Bytes: 512},
+		{Name: "BRO\x1b[31mKEN.md", Err: "permission\x07 denied"},
+	}}}
+
+	m := newTestModelEng(t, eng, testOpts)
+
+	want := []string{
+		"context: A[31mGENTS.md (512 B)",
+		"context: BRO[31mKEN.md unreadable — permission denied",
 	}
 	if got := contextNotes(m); !slices.Equal(got, want) {
 		t.Errorf("context notes = %v, want %v", got, want)

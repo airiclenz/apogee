@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -752,12 +753,19 @@ func (m *Model) replayScrollback(blob []byte, title string, inExchange bool) {
 // (startNewSession), and a /sessions restore. Each of those re-read the files, so the notice
 // always describes the bytes the NEXT request will actually carry.
 //
-// A repo with none of the configured names is the common case, and it stays completely silent —
-// no note at all, not an empty one. The warning is advisory: nothing is capped or truncated, and
-// a window nobody could name yet reports a zero share, which never warns (Oversize).
+// The SENTENCES themselves are not spelled here: [notice.ContextFileNotices] composes them, so
+// this Driver and the unattended ones word one event one way. What stays here is the host's own
+// half — when the notice is taken, that it is ephemeral, and the strip below.
 //
-// The name traces to config and the error text to the filesystem, so both are escape-stripped on
-// the way to the terminal exactly as the start-up box strips its host and model.
+// A repo with none of the configured names is the common case, and it stays completely silent —
+// no note at all, not an empty one. The early return says so at this seam as well as the
+// composer's, because a boundary that loaded nothing has nothing to ask the composer about. The
+// warning is advisory: nothing is capped or truncated, and a window nobody could name yet reports
+// a zero share, which never warns (Oversize).
+//
+// A name traces to config and an error text to the filesystem, so every composed notice is
+// escape-stripped on the way to the terminal exactly as the start-up box strips its host and
+// model — the whole line, since only the composer knows which halves came from where.
 //
 // Every notice is added EPHEMERALLY (addEphemeralNote), for the same reason the resume notices are
 // (replayScrollback): all of it is re-derived from the live workspace at each boundary — the files are
@@ -771,27 +779,8 @@ func (m *Model) noteContextFiles() {
 		return
 	}
 
-	loaded := make([]string, 0, len(report.Files))
-	unreadable := make([]string, 0, len(report.Files))
-	for _, f := range report.Files {
-		name := stripEscapes(f.Name)
-		if f.Err != "" {
-			unreadable = append(unreadable, "context: "+name+" unreadable — "+stripEscapes(f.Err))
-			continue
-		}
-		loaded = append(loaded, name+" ("+formatBytes(f.Bytes)+")")
-	}
-
-	if len(loaded) > 0 {
-		m.transcript.addEphemeralNote("context: " + strings.Join(loaded, ", "))
-	}
-	for _, note := range unreadable {
-		m.transcript.addEphemeralNote(note)
-	}
-	if report.Oversize() {
-		m.transcript.addEphemeralNote("standing system content ~" + format.TokensFine(report.StandingTokens) +
-			" tokens exceeds its Budget share (~" + format.TokensFine(report.SystemShare) +
-			") — trim context files, the task list or the system prompt")
+	for _, n := range notice.ContextFileNotices(report) {
+		m.transcript.addEphemeralNote(stripEscapes(n.Text))
 	}
 }
 
@@ -3608,21 +3597,6 @@ func renderGaugeBar(th theme, used, limit int) string {
 		b.WriteString(th.gaugeTrack.Render(strings.Repeat(" ", empty)))
 	}
 	return b.String()
-}
-
-// formatBytes renders a file size for the session notice: bytes below a kibibyte, else KiB or
-// MiB to one decimal (3174 → "3.1 KiB"). Binary units, because the number it describes is a
-// file's size on disk.
-func formatBytes(n int) string {
-	const kib = 1024
-	switch {
-	case n < kib:
-		return fmt.Sprintf("%d B", n)
-	case n < kib*kib:
-		return fmt.Sprintf("%.1f KiB", float64(n)/kib)
-	default:
-		return fmt.Sprintf("%.1f MiB", float64(n)/(kib*kib))
-	}
 }
 
 // nonEmpty returns the non-empty arguments in order — the footer's left segment skips an

@@ -1,7 +1,8 @@
 // Package format spells the numbers Apogee shows a user, so one figure is not spelled two ways
-// by two Drivers over one engine. Today it owns exactly one family — token and context-window
-// sizes — and it is the single global formatter for them: the TUI's context gauge, the startup
-// box, the pickers, the headless CLI's sub-agent lines.
+// by two Drivers over one engine. Today it owns two families — token and context-window sizes,
+// and the byte sizes of files on disk — and it is the single global formatter for them: the TUI's
+// context gauge, the startup box, the pickers, the headless CLI's sub-agent lines, and the
+// context-files notice every Driver composes through internal/notice.
 //
 // The rule (ratified 2026-08-07): no spelling ever shows a value of 1000 or more in its unit.
 // The ladder divides by 1024 per rung — bare, then k, M, G — because real context windows are
@@ -23,6 +24,11 @@
 // Both return "" for a non-positive count, and that empty string is load-bearing: it is the
 // "unknown" sentinel callers test to drop a row, a cell or half a line rather than print a zero
 // they do not actually know.
+//
+// Bytes is the second family, and neither the unknown sentinel nor the 1000-ceiling above is its
+// rule: a file's size on disk is a measurement rather than a budget, so it spells every count —
+// zero included, and "1023 B" as itself — stepping bare → KiB → MiB by 1024 with one decimal above
+// the bare rung. Binary units for the same reason the token ladder uses them.
 //
 // The package is stdlib-only and depends on nothing else in Apogee, which is what lets both
 // halves of the binary — the TUI and the CLI — reach one helper instead of keeping twins in

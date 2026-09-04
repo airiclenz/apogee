@@ -85,7 +85,17 @@ internal/validated/ apogee.go` prints nothing; `go build ./...` succeeds.
 
 ---
 
-## 2. One composer for the context-files notices
+## 2. One composer for the context-files notices — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): `internal/format/doc.go` gained a short paragraph beside the amended opening
+sentence, saying Bytes shares neither the unknown-sentinel nor the 1000-ceiling rule — the opening
+amendment alone would have left the ladder's rule reading as package-wide over a helper that spells
+"1023 B". The `stdlib-only` charter clause at `:27-29` is untouched.
+
+NOTES (2026-09-04): added `TestContextFilesNoticeStripsEscapes` to
+`internal/tui/contextfiles_test.go` beyond the item's Tests list, pinning the widening the item
+states — the host strips EVERY composed notice, so the loaded line is stripped too, not only the
+unreadable one. `TestContextFilesNoticeNamesEveryFile` is unchanged and green.
 
 **What.** Recast at the regression check (2026-09-03). TWO moves, not one. `formatBytes`
 (`internal/tui/model.go:3616`, one caller) becomes exported `Bytes` in `internal/format`, doc comment
