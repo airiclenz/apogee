@@ -1499,7 +1499,7 @@ func TestHeadlessExitCodes(t *testing.T) {
 	})
 
 	t.Run("a construction refusal never started, so it exits 2", func(t *testing.T) {
-		// run.Once's own shape for every pre-run exit: the ZERO Result — no Turn was ever driven —
+		// run.Once's own shape for every pre-run exit: ZERO TURNS — no Turn was ever driven —
 		// beside the error that says why. The commonest one in the field is a host whose config
 		// never named an endpoint, and it must not be reported as a run that failed.
 		stub := &stubRunner{err: errors.New("apogee: construct the firing's agent: apogee: Config.Endpoint is required")}

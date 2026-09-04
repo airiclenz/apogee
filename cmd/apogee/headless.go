@@ -489,12 +489,14 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 
 	// A refusal that stopped the Firing before it began is exit 2, not exit 1 — nothing was sent
 	// and nothing was saved, so what a script must do about it is fix the invocation, not read an
-	// outcome. run.Once marks that class structurally rather than by sentinel: it returns the ZERO
-	// Result from each of its three pre-run exits (a mode a Firing may not run, an Agent that would
-	// not construct, a prompt it would not accept) and a populated one from every run it actually
-	// drove, which always carries at least one Turn. So a non-nil error with no Turn behind it is a
-	// run that never started, whatever it travelled out of: Auto on a host with no filesystem
-	// confinement, an endpoint no config ever set, a model that would not bind.
+	// outcome. run.Once marks that class structurally rather than by sentinel: it returns ZERO
+	// TURNS from each of its three pre-run exits (a mode a Firing may not run, an Agent that would
+	// not construct, a prompt it would not accept) and at least one Turn from every run it actually
+	// drove. Turns is the field this gate reads, and it is the only one that stays zero: a pre-run
+	// exit may still carry a populated Result — the prompt-refusal one reports the context files
+	// the session had already loaded. So a non-nil error with no Turn behind it is a run that never
+	// started, whatever it travelled out of: Auto on a host with no filesystem confinement, an
+	// endpoint no config ever set, a model that would not bind.
 	//
 	// It returns here, ahead of the answer and the summary: there is no answer, and a "turns: 0"
 	// line would report a run that never happened. friendlyConstructErr names the rungs still open

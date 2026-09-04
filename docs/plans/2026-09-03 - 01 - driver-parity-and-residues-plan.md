@@ -149,7 +149,9 @@ oversize warning included; a report whose files all loaded and fits the budget y
 
 ---
 
-## 3. `run.Result` carries the context-files report
+## 3. `run.Result` carries the context-files report — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the submit-failure test drives Submit's refusal through an unbound model (`Config.Model: ""`) — construction succeeds, Submit returns `errNoModelBound` — since that is the package's only reachable Submit failure without a new double.
 
 **What.** `internal/run/run.go`: `Result` (`:82-129`) gains `ContextFiles
 domain.ContextFilesReport` — documented as measured at session construction, the same boundary the

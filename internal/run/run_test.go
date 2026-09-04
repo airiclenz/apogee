@@ -1859,3 +1859,91 @@ func TestOnceWithoutASkillCatalogSendsTheTokenVerbatim(t *testing.T) {
 		t.Errorf("the firing's user message = %q, want the prompt verbatim %q", got, prompt)
 	}
 }
+
+// TestOnceReportsTheWorkspaceContextFiles is the item's headline: a Firing carries back what
+// its session LOADED, so an unattended Driver can say the same three things an interactive
+// session says without re-reading the workspace itself. The report is measured at session
+// construction, so the byte size on it is the size the standing system content actually rode.
+func TestOnceReportsTheWorkspaceContextFiles(t *testing.T) {
+	t.Parallel()
+
+	const contents = "the workspace's standing instructions\n"
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(contents), 0o600); err != nil {
+		t.Fatalf("seed the context file: %v", err)
+	}
+
+	up := newUpstream(t, alwaysFinal("read it"))
+	spec := planSpec(up.url, "do the thing")
+	spec.Config.WorkspaceDir = dir
+	spec.Config.ContextFiles = []string{"AGENTS.md"}
+
+	res, err := Once(context.Background(), spec)
+
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	want := []domain.ContextFileNote{{Name: "AGENTS.md", Bytes: len(contents)}}
+	if !reflect.DeepEqual(res.ContextFiles.Files, want) {
+		t.Errorf("Result.ContextFiles.Files = %+v, want %+v", res.ContextFiles.Files, want)
+	}
+}
+
+// TestOnceReportsNoContextFilesWhenTheWorkspaceHasNone pins the common case: a repo carrying
+// none of the configured names produces an EMPTY note list, not a placeholder entry — absence
+// stays silent, which is what lets a Driver render the notice by saying nothing at all.
+func TestOnceReportsNoContextFilesWhenTheWorkspaceHasNone(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, alwaysFinal("nothing to read"))
+	spec := planSpec(up.url, "do the thing")
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.ContextFiles = []string{"AGENTS.md"}
+
+	res, err := Once(context.Background(), spec)
+
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if len(res.ContextFiles.Files) != 0 {
+		t.Errorf("Result.ContextFiles.Files = %+v, want none", res.ContextFiles.Files)
+	}
+}
+
+// TestOnceReportsTheContextFilesWhenSubmitFails is the exit that would otherwise lose them: a
+// session that constructed and loaded its files but was refused at Submit — here by a Firing
+// with no model bound — still reports what it loaded. Turns stays zero, which is the marker an
+// unattended Driver reads to tell a run that never started from one that failed.
+func TestOnceReportsTheContextFilesWhenSubmitFails(t *testing.T) {
+	t.Parallel()
+
+	const contents = "the workspace's standing instructions\n"
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(contents), 0o600); err != nil {
+		t.Fatalf("seed the context file: %v", err)
+	}
+
+	up := newUpstream(t, alwaysFinal("unreached"))
+	spec := planSpec(up.url, "do the thing")
+	spec.Config.Model = "" // no model bound: construction succeeds, Submit refuses
+	spec.Config.WorkspaceDir = dir
+	spec.Config.ContextFiles = []string{"AGENTS.md"}
+
+	res, err := Once(context.Background(), spec)
+
+	if err == nil {
+		t.Fatal("Once accepted a prompt with no model bound")
+	}
+	if res.Turns != 0 {
+		t.Errorf("Result.Turns = %d, want 0 — no Turn was driven", res.Turns)
+	}
+	want := []domain.ContextFileNote{{Name: "AGENTS.md", Bytes: len(contents)}}
+	if !reflect.DeepEqual(res.ContextFiles.Files, want) {
+		t.Errorf("Result.ContextFiles.Files = %+v, want %+v", res.ContextFiles.Files, want)
+	}
+	if up.calls() != 0 {
+		t.Errorf("the Upstream saw %d requests; a refused submit must never reach the wire", up.calls())
+	}
+}

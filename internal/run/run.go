@@ -122,6 +122,15 @@ type Result struct {
 	// the record (Meta.Usage plus Meta.DelegateUsage), and a caller reading the Result takes
 	// for itself.
 	Usage Usage
+	// ContextFiles is what the session's workspace context files contributed — one note per
+	// loaded or unreadable file, plus what the standing system content they ride in costs
+	// against its Budget share. It is measured at SESSION CONSTRUCTION, the same boundary an
+	// interactive session measures at, so it describes what the Firing was given rather than
+	// what it did. It rides out on every Result a constructed session produced, the
+	// submit-failure exit included — a run that never sent a byte still reports what it
+	// loaded; the exits that have no Agent to ask carry the zero report. Nothing here is
+	// rendered by this library: the notice's wording belongs to the Driver.
+	ContextFiles domain.ContextFilesReport
 	// Err is the run's own error — the loop's failure, or the cancellation that stopped it
 	// before an answer. It is nil on a Firing that reached its answer, even one whose
 	// record then failed to save (that failure is the returned error only).
@@ -262,6 +271,13 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	defer func() { _ = a.Close() }()
 
+	// What the workspace context files contributed, read HERE and held: this is session
+	// construction, the boundary an interactive session takes the same measure at, and the
+	// Agent is idle — ContextFilesReport is an idle-only read, so there is no later point in
+	// a Firing where it can be taken. Every Result below carries it, the submit-failure exit
+	// included.
+	contextFiles := a.ContextFilesReport()
+
 	// The caller's routing, latched BEFORE the first Turn so the Firing's very first
 	// delegation is already routed — there is no heartbeat here to install it later. Both
 	// fields nil ⇒ neither setter is called and the run is byte-for-byte what it was before
@@ -281,7 +297,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		SkillIDs: refs.SkillRefs(spec.Prompt, knownSkillID(spec.Config.Skills)),
 	}
 	if err := a.Submit(in); err != nil {
-		return Result{}, fmt.Errorf("apogee: submit the firing's prompt: %w", err)
+		return Result{ContextFiles: contextFiles}, fmt.Errorf("apogee: submit the firing's prompt: %w", err)
 	}
 
 	step, runErr := a.Run(ctx)
@@ -292,15 +308,16 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 
 	res := Result{
-		Title:     spec.title(startedAt),
-		FinalText: tap.finalText(),
-		Turns:     step.TurnIndex + 1,
-		Denied:    den.count(),
-		Faulted:   step.Faulted,
-		Fault:     a.LastFault(),
-		SubAgents: tap.subAgentRuns(),
-		Usage:     tap.totals(),
-		Err:       runErr,
+		Title:        spec.title(startedAt),
+		FinalText:    tap.finalText(),
+		Turns:        step.TurnIndex + 1,
+		Denied:       den.count(),
+		Faulted:      step.Faulted,
+		Fault:        a.LastFault(),
+		SubAgents:    tap.subAgentRuns(),
+		Usage:        tap.totals(),
+		ContextFiles: contextFiles,
+		Err:          runErr,
 	}
 	if spec.Store == nil {
 		return res, runErr
