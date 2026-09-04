@@ -1796,10 +1796,16 @@ func TestHeadlessRefusesEveryUndeterminedStartup(t *testing.T) {
 		name       string
 		configYAML string
 		want       string
+		// wantsRemedy marks the two name-shaped refusals — the ones a server NAME would fix, and
+		// so the only two that offer the other way to give one. Now that this command registers
+		// `--server`, that remedy is the flag rather than APOGEE_SERVER, and it is asserted in
+		// both directions so a message pointing at a parser that rejects it fails here.
+		wantsRemedy bool
 	}{
 		{name: "nothing configured", configYAML: "mode: plan\n", want: "no servers are configured"},
-		{name: "nothing chosen", configYAML: list, want: "no startup server is chosen"},
-		{name: "a stale choice", configYAML: list + "server: the-old-name\n", want: `names "the-old-name"`},
+		{name: "nothing chosen", configYAML: list, want: "no startup server is chosen", wantsRemedy: true},
+		{name: "a stale choice", configYAML: list + "server: the-old-name\n", want: `names "the-old-name"`,
+			wantsRemedy: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1821,6 +1827,12 @@ func TestHeadlessRefusesEveryUndeterminedStartup(t *testing.T) {
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("the refusal does not say what is missing (%q): %v", tt.want, err)
 			}
+			if tt.wantsRemedy && !strings.Contains(err.Error(), "or pass --server <name>") {
+				t.Errorf("the refusal does not offer the flag this command registers: %v", err)
+			}
+			if strings.Contains(err.Error(), "APOGEE_SERVER") {
+				t.Errorf("the refusal offers the environment variable on a command that has the flag: %v", err)
+			}
 			if code := exitCodeFor(err); code != exitNotStarted {
 				t.Errorf("exit code = %d; want %d (err: %v)", code, exitNotStarted, err)
 			}
@@ -1829,6 +1841,54 @@ func TestHeadlessRefusesEveryUndeterminedStartup(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The two flags a session has and an unattended run used to lack. `--server` names the `servers:`
+// entry to start on and `--bypass` runs with the lab Mechanisms off, both resolved exactly as the
+// root command resolves them — same run, different Driver (ADR 0031) — which is why their help
+// strings are root.go's verbatim rather than reworded here. Registering `--server` is also what
+// turns the startup refusal's remedy into the flag, pinned in
+// TestHeadlessRefusesEveryUndeterminedStartup.
+func TestHeadlessStartupServerAndBypassFlags(t *testing.T) {
+	const twoServers = "servers:\n  - name: other\n    endpoint: http://127.0.0.1:9999\n" +
+		"  - name: " + testServerName + "\n    endpoint: " + testServerEndpoint + "\nserver: other\n"
+
+	t.Run("--server starts on the entry it names", func(t *testing.T) {
+		t.Setenv(config.EnvServer, "")
+		t.Setenv(config.EnvEndpoint, "")
+		stub := &stubRunner{}
+		home := testConfigHome(t, twoServers)
+		_, _, err := headlessRunOn(t, stub, fenceableHost, home, "--server", testServerName, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if got := stub.spec.Config.Endpoint; got != testServerEndpoint {
+			t.Errorf("Config.Endpoint = %q; want %q — the flag's entry, over the file's server:",
+				got, testServerEndpoint)
+		}
+	})
+
+	t.Run("--bypass reaches the engine", func(t *testing.T) {
+		t.Setenv(config.EnvBypass, "")
+		stub := &stubRunner{}
+		if _, _, err := headlessRun(t, stub, "--bypass", "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if !stub.spec.Config.Bypass {
+			t.Error("Config.Bypass = false; want the flag's true on the Spec the runner was handed")
+		}
+	})
+
+	t.Run("without the flag the Mechanisms stay on", func(t *testing.T) {
+		t.Setenv(config.EnvBypass, "")
+		stub := &stubRunner{}
+		if _, _, err := headlessRun(t, stub, "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if stub.spec.Config.Bypass {
+			t.Error("Config.Bypass = true with no --bypass; the default must not flip")
+		}
+	})
 }
 
 // The prompt reaches the runner off stdin too — the pipeline form, with no argument at all.

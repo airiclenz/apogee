@@ -270,7 +270,15 @@ invocation exits 2 at the Auto refusal before the gate — and stays with `TestS
 
 ---
 
-## 6. `headless` registers `--server` and `--bypass`
+## 6. `headless` registers `--server` and `--bypass` — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): the item quotes `--bypass`'s help string as "run with Mechanisms off; structural context reducers stay on (ADR 0006)", but its own instruction is to copy `cmd/apogee/root.go`'s strings VERBATIM so the two commands describe the flag identically; root now reads "run with the lab Mechanisms off; Floor guards and structural reducers stay on (ADR 0071)" after the retirement wave. Took root's live string — the verbatim rule wins over the item's stale quotation.
+
+NOTES (2026-09-04): the remedy assertion is added per-case, not to all three, because the "nothing configured" refusal (`no servers are configured`) offers no name-shaped remedy at all — only the two cases a server NAME would fix carry `startupServerRemedy`. The unwanted direction (`APOGEE_SERVER` absent) is asserted on all three.
+
+NOTES (2026-09-04): the manual's `:24` flag list gained `--server` and `--bypass` and the `:27` clause was rewritten to name the flag; the same sentence also now states the `--server` > `APOGEE_SERVER` > `server:` order and `--endpoint`'s override, since removing the "there being no `--server` flag" clause left the precedence unstated.
+
+NOTES (2026-09-04): pre-existing, not caused by this item — `TestE2EPresentOpensOnlyTheAllowedFormats`, `TestE2ESmokeInProcess`, `TestFiringConfigDefaultsItsSeams` and `TestRegistryWithMCPThreadsExtraReadRoots` fail on this macOS host at HEAD (`08014b76`) as well as with this item's changes, all on the `/var` → `/private/var` symlink resolving a `t.TempDir()` root outside the workspace. Verified by stashing this item's diff and re-running the four.
 
 **What.** `cmd/apogee/headless.go:237-247` gains two flags, with `cmd/apogee/root.go:101-135`'s
 help strings copied verbatim so the two commands describe them identically:

@@ -251,6 +251,11 @@ func newHeadlessCommand() *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.StringVar(&opts.Endpoint, "endpoint", "", "OpenAI-compatible LLM server URL")
+	flags.StringVar(&opts.StartupServer, "server", "",
+		"name of the servers: entry to start on (default: the last one /server switched to)")
+	// The claim beside the registration above: this command has the flag, so its startup refusal
+	// may offer it as the fix. The commands that do not register it say APOGEE_SERVER instead.
+	opts.ServerFlagBound = true
 	flags.StringVar(&opts.Model, "model", "", "model name to request (default: the configured model)")
 	flags.StringVar(&opts.Mode, "mode", string(domain.ModePlan),
 		"autonomy mode for the run: plan | auto (an unattended run has nobody to ask)")
@@ -258,6 +263,8 @@ func newHeadlessCommand() *cobra.Command {
 		"workspace root the file tools are scoped to (default: current directory)")
 	flags.StringVar(&opts.ConfigDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
+	flags.BoolVar(&opts.Bypass, "bypass", false,
+		"run with the lab Mechanisms off; Floor guards and structural reducers stay on (ADR 0071)")
 	flags.BoolVar(&noSave, "no-save", false,
 		"run the prompt and print the answer, but record no session")
 

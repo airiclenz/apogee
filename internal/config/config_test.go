@@ -1129,11 +1129,11 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 	}
 }
 
-// The remedy a refusal offers has to be one the command printing it actually HAS. Only the root
-// command registers `--server` (root.go's flag block); `apogee headless` and `apogee probe` — the
-// drivers that PRINT these refusals rather than asking a human — declare their own flag surface
-// without it, so a message naming the flag there would send the user to a parser that rejects it.
-// Both name-shaped refusals are pinned, in both directions: what is offered, and what must not be.
+// The remedy a refusal offers has to be one the command printing it actually HAS. The root command
+// and `apogee headless` register `--server` (their flag blocks); `apogee probe` — the one driver
+// that PRINTS these refusals rather than asking a human and declares its flag surface without it —
+// would send the user to a parser that rejects the flag if the message named it. Both name-shaped
+// refusals are pinned, in both directions: what is offered, and what must not be.
 func TestSelectStartupServerRemedyFollowsTheFlagSurface(t *testing.T) {
 	t.Parallel()
 	servers := []ServerEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}}

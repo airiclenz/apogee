@@ -3259,10 +3259,10 @@ func selectStartupServer(name string, servers []ServerEntry, configPath string, 
 
 // startupServerRemedy is the OTHER way to answer "which server", offered by the two refusals above
 // that a name would fix. It follows the flag surface of the command the message is printed by: the
-// root command registers `--server`, and the non-interactive commands that actually PRINT these
-// refusals — `apogee headless`, `apogee probe` — do not, so naming the flag there would send the
-// user to a parser that rejects it. What every command has is the environment variable, beside the
-// `server:` key the message already names.
+// root command and `apogee headless` register `--server`, and `apogee probe` — the one printer of
+// these refusals that does not — would send the user to a parser that rejects it if the message
+// named the flag. What every command has is the environment variable, beside the `server:` key the
+// message already names.
 func startupServerRemedy(serverFlag bool) string {
 	if serverFlag {
 		return "or pass --server <name>"

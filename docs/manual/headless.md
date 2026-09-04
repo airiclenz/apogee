@@ -21,10 +21,11 @@ missing ref is skipped without notice — a Firing has no event sink. `/id` toke
 **skill references** on the same terms: a token naming a skill in this run's catalog
 attaches that skill's instructions to the message exactly as typing it into a session
 would, and any other slash word — a path, a typo — stays plain text.
-`--endpoint`, `--model`, `--workspace` and `--config` resolve exactly as a
+`--endpoint`, `--model`, `--server`, `--bypass`, `--workspace` and `--config` resolve exactly as a
 session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
 shape a session on this host would have; which listed entry it starts on comes from
-`APOGEE_SERVER` or the `server:` key, there being no `--server` flag on this command.
+`--server`, `APOGEE_SERVER` or the `server:` key, in that order, with `--endpoint`
+overriding all three.
 Nobody is there to answer a picker, so a run those sources leave with no server to start
 on is refused before anything is composed — the config file and the fix named, exit `2`. It is saved to
 `~/.apogee/sessions` and shows up in `/sessions` like any other; `--no-save` runs it and
