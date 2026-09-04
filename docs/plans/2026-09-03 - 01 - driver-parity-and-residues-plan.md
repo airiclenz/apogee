@@ -882,7 +882,13 @@ avoid.
 
 ---
 
-## 19. The closed entries leave the issue register
+## 19. The closed entries leave the issue register — ✅ DONE (2026-09-04)
+
+NOTES (2026-09-04): every bead in the two trees was delivered by items 2–18 except `apogee-kk0.7`, which stays OPEN by the item's own instruction — its revert half is undelivered by design.
+
+NOTES (2026-09-04): deviation — `apogee-kk0.7` also loses its `planned` label (the plan named only `--parent "" -p 3`). Per AGENTS.md that label means "designed, ready to implement", which the undesigned revert half is not; leaving it would have surfaced a parked bead in `bd ready --label planned`. Its `spec-id` is left pointing at this plan, which is where the split was decided.
+
+NOTES (2026-09-04): `.beads/issues.jsonl` lagged the register after the batch of closes — all fourteen rows still read `open` — the failure mode AGENTS.md warns about; re-exported with `bd export -o .beads/issues.jsonl` and re-checked row by row.
 
 **What.** Depends on every item above. The issue register (`bd`) holds OPEN work: a resolved item is
 CLOSED there, and its record lives in `CHANGELOG.md` under `[Unreleased]` — closing a bead does not
