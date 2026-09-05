@@ -278,7 +278,18 @@ the 9 top-level rig scripts.
 
 ---
 
-## 5. `hero.tape`'s comments name the generated strings and fix knob 1's arithmetic
+## 5. `hero.tape`'s comments name the generated strings and fix knob 1's arithmetic — ✅ DONE (2026-09-05)
+
+NOTES (2026-09-05): plan-text slip — the item's acceptance says `grep -c '^Sleep ' hero.tape` is
+"still 15"; the tree's actual count is 14, at HEAD (52bda58a) and after this item alike. The
+invariant the criterion tests — the count is unchanged by a comments-only edit — holds at 14.
+NOTES (2026-09-05): knob 1's submission moves ~10s → ~10.3s (golden total 1791 ms for `also add a
+CHANGELOG entry for the fix`, from `type.sh --check`, in place of the old 1.5s). That is +0.3 s,
+inside the item's 0.5 s threshold, so `Sleep 8s` is left untouched and no owner flag is raised.
+NOTES (2026-09-05): the regression grep's third hit, `graphics/demo/README.md:190`, is item 4's
+own new sentence ("typed strings now run **longer** than `40 ms × N`") — a correct statement of
+the new behaviour, not stale `40ms` arithmetic — so it is left as written; the two `hero.tape`
+hits are the `Set TypingSpeed 40ms` command lines, which the item excludes.
 
 **What.** Depends on items 1–4. Comments only — no command line and no `Type`/`Sleep` line changes.
 Two parts.

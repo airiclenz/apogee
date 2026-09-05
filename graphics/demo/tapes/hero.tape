@@ -21,12 +21,14 @@ Type "source ./env.sh"
 Enter
 Show
 
+# Generated rhythm: gen.sh replaces this line with type.sh's per-character block at record time.
 Sleep 500ms
 Type "apogee --mode auto"
 Sleep 500ms
 Enter
 Sleep 4s
 
+# Generated rhythm: gen.sh replaces this line with type.sh's per-character block at record time.
 Type "the test suite is failing - find the bug, fix it, and prove the tests pass"
 Sleep 800ms
 Enter
@@ -34,14 +36,16 @@ Enter
 # KNOB 1 — when the interjection arrives. It has to land while tool cards are still
 # streaming, which is what makes it visibly *queued* rather than a normal next turn.
 # 8s against OpenRouter deepseek-v4-flash: the exchange runs ~29s end to end, so submitting at
-# ~10s (8s + the 1.5s of typing + 0.5s) lands mid-stream with margin on both sides. The old 18s
-# was tuned for the local model and now fires AFTER the exchange has closed — the tell is the
-# session JSON, where the entry reads `user` instead of `interjected` and `/undo` then covers
-# only the CHANGELOG write. Retune if the model's pace changes.
+# ~10.3s (8s + the 1.8s of generated typing + 0.5s; `type.sh --check` pins that total) lands
+# mid-stream with margin on both sides. The old 18s was tuned for the local model and now fires
+# AFTER the exchange has closed — the tell is the session JSON, where the entry reads `user`
+# instead of `interjected` and `/undo` then covers only the CHANGELOG write. Retune if the
+# model's pace changes.
 Sleep 8s
 
 # Wording matters more than it looks: "also note the fix in the CHANGELOG" made the model
 # read CHANGELOG.md and then forget to write it. The imperative form lands it first try.
+# Generated rhythm: gen.sh replaces this line with type.sh's per-character block at record time.
 Type "also add a CHANGELOG entry for the fix"
 Sleep 500ms
 Enter
@@ -135,6 +139,7 @@ Sleep 12s
 # the "walked away, kept the fix" gesture, and the proof is `git -C <stage> diff --stat` still
 # non-empty after the take rather than anything on the frame. Never type `/undo confirm` — it
 # would unfix the bug on camera.
+# Generated rhythm: gen.sh replaces this line with type.sh's per-character block at record time.
 Type "/undo"
 Sleep 500ms
 Enter
