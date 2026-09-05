@@ -10,6 +10,44 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- The demo rig gained `graphics/demo/type.sh`, which expands one typed string into a VHS
+  typing block with a seeded per-character rhythm (per-letter 25–45 ms, 60–90 ms after a
+  space, 90–140 ms after punctuation, and an occasional 300–500 ms thinking pause) in place
+  of VHS's fixed 40 ms metronome. Its `--strings` mode publishes the hero tape's typed
+  strings so nothing downstream keeps a second copy. Toolset only — no GIF is re-recorded.
+
+- The demo rig gained `graphics/demo/gen.sh <src.tape> <dst.tape>`, which copies a tape and,
+  for `hero.tape` only, replaces each of its four human-typed lines with the matching
+  `type.sh --seed 4242` block. It reads the string table from `type.sh --strings` rather than
+  keeping its own copy, matches whole lines exactly (never a regex, never by line number), and
+  refuses to write the tape — naming the string — if any of them does not match exactly one
+  line. Needs neither the rig nor vhs. Toolset only — no GIF is re-recorded.
+
+- `graphics/demo/type.sh` gained `--check`, which regenerates all four hero strings at the
+  default seed and asserts the typing profile: every emitted `Sleep` inside the union of the
+  four declared bands, at most two thinking pauses per string, the pooled per-letter mean
+  (n=102) at 35 ± 2 ms, each block's total against a golden constant recorded in the script,
+  and every `Type` payload plain printable ASCII. It prints one line per string — per-letter
+  count, thinking pauses, total and the `40 ms × N` baseline — plus one trailing pooled-mean
+  line. It is a profile-edit gate, not a per-take step: the recording rig never runs it.
+
+- `graphics/demo/record.sh` now writes the work-dir copy of a tape with `gen.sh` instead of
+  `cp`, so the hero take records with humanized per-character typing; every other tape passes
+  through unchanged, and `--check` stays out of the record path. The rig README gained a
+  "Humanized typing" section — how the four typed messages are expanded, that the source tape
+  keeps its plain `Type "…"` lines, that `type.sh --check` is a profile-edit gate rather than a
+  per-take step, and the two timing consequences: typed strings now run longer than `40 ms × N`
+  (so knob 1 is retuned against a take) and `render.sh`'s head trim must be re-measured on the
+  next take. Its Layout table gained rows for `gen.sh` and `type.sh`.
+
+- `graphics/demo/tapes/hero.tape` now says which of its lines are generated: each of the four
+  human-typed strings — including `apogee --mode auto`, which carried no comment at all — is
+  headed by a line noting that `gen.sh` swaps it for `type.sh`'s per-character block at record
+  time, so a reader is not puzzled that the source shows a plain string while the take shows a
+  rhythm. Knob 1's arithmetic is corrected off the new goldens: the interjection submits at
+  ~10.3s (8s + the 1.8s the generated typing now takes + 0.5s), not the ~10s the stale
+  `38 chars × 40 ms` figure gave. Comments only — no command line changed.
+
 - **`bd init` can no longer swallow staged work.** A guard in the tail of `.beads/hooks/prepare-commit-msg` — outside the `BEGIN/END BEADS INTEGRATION` markers, so `bd hooks install` preserves it — refuses any commit whose subject is `bd init: initialize beads issue tracking` while the index carries paths bd does not own, printing what is staged and how to recover (commit the real work first, or unstage it) and exiting non-zero. `bd init` runs its own auto-commit, so an agent that runs it against a dirty index used to commit whatever was staged — that is what took the Mechanism-retirement wave's 22 staged deletions, and until now the hazard was recorded in prose only. The check lives in `prepare-commit-msg` because bd commits with `--no-verify`: neither `pre-commit` nor `commit-msg` fires for that commit, leaving `prepare-commit-msg` as the only hook that both reads the message and can abort. An ordinary commit, a legitimate bd-only commit and a `bd init` against a clean tree are all untouched.
 
 - Documented the repo's live git-hook path (`.beads/hooks/`, with `.git/hooks/commit-msg` as a dormant fallback) and what beads' `pre-commit` hook actually writes and stages, after reproducing the reported staged-file sweep in a throwaway clone: the hook does not sweep — `bd init`'s own auto-commit does.
