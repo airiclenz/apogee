@@ -35,7 +35,19 @@ so nothing visible ships until the next take uses it.
 
 ---
 
-## 1. `type.sh` — a seeded, portable generator for one typed string
+## 1. `type.sh` — a seeded, portable generator for one typed string — ✅ DONE (2026-09-05)
+
+NOTES (2026-09-05): the script refuses a string carrying a double quote, a backslash, or any
+non-printable/non-ASCII byte (exit 2) — such a character cannot survive the `Type "c"` line
+the block is spliced into. Not named in the item; it is the entry validation the block shape
+implies, and it pre-satisfies item 3's printable-ASCII invariant.
+NOTES (2026-09-05): only mawk 1.3.4 is installed in this environment, so the "identical under
+BSD awk, gawk and mawk" claim was verified by construction (MINSTD spelled out, no
+`srand()`/`rand()`, products under 2^53) rather than by running all three.
+NOTES (2026-09-05): measured at the default seed, for item 3's benefit — pooled per-letter
+n=102, mean 34.451 ms; per-string totals 775 / 3382 / 1791 / 135 ms against `40 ms × N`
+baselines of 720 / 2960 / 1520 / 200 ms; no Sleep outside the four bands; thinking pauses
+0/0/1/0, within the cap of 2.
 
 **What.** Add `graphics/demo/type.sh` (`bash`, `set -euo pipefail`), taking `[--seed N]` (default
 `4242`) and the raw string as its **last** argument, printing the expanded block to stdout: a
