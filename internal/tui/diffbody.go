@@ -726,7 +726,8 @@ const stackedRegionRuleCells = 8
 // the column then reads as one file's numbering, with the inserted lines — which have no before
 // line at all — marked as the exceptions they are. Wrapping is nobody's business here: a row too
 // wide for the block wraps at paint time through the same machinery every other detail line does
-// (hangingWrap), and the per-line clip is the 160-rune ceiling they all answer to (clipDetail).
+// (hangingWrap), and the per-line clip is the 160-rune ceiling every summarised body answers to
+// (clipDetail; a failed call's own message is the one body exempt from it, failureBody).
 //
 // No regions is no body, which is what leaves a call with nothing recorded showing the
 // argument-derived lines it was presented with (ratified call 9).

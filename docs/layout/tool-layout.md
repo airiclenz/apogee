@@ -83,7 +83,8 @@ closer is drawn today.
   own short failure carries (`error: exit 3`, the terminal, python_exec and a
   steered delegation). A failed call whose tool words no such verdict says the
   bare word and nothing more; the message it wrote goes to the body, where it
-  wraps whole instead of eating the target off the row. On a type row the slot
+  wraps whole — however long its longest line, that body being the only place
+  the message is said at all — instead of eating the target off the row. On a type row the slot
   aggregates the run (below).
   **Remainder:** while a lone call is collapsed the slot also carries the count
   of the body behind it, after the same middle dot the stats use —

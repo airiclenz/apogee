@@ -1559,6 +1559,28 @@ func consoleOpenDetail(content string) toolOutcome {
 // that is blank throughout has no lines at all — the callers word that case themselves, one as
 // "(no output)" and the other as the exit code standing alone (absorbFailure).
 func outputBody(content string) []detailLine {
+	return bodyLines(content, true)
+}
+
+// failureBody is outputBody for the message a failed call wrote with no verdict of its own, laid
+// out under NO per-line clip.
+//
+// The flood cap is right wherever a body is output the block also SUMMARISES: a clean command's
+// listing has its verdict in the slot beside it, so a minified line cut at 160 runes costs nothing
+// that is said nowhere else, and the same holds for the output a tool's failure hook hands back
+// beneath its own "error: exit 3". The fallback failure is the case where it is not: the slot says
+// the bare word `error` and nothing more (absorbFailure, the ratified call on failed tool rows of
+// plan "2026-09-03 - 02", item 7), so the body is the ONLY place that message exists and a clip
+// there drops the one thing the reader — and the model reading the same failure — is owed. A long
+// line wraps onto rows of its own at paint time instead (hangingWrap, bodyFrame.paint), which is
+// what the orphan branch's failure lines have done all along (renderOrphanResult).
+func failureBody(content string) []detailLine {
+	return bodyLines(content, false)
+}
+
+// bodyLines is the lay-out those two share: the content's physical lines, its trailing blank lines
+// and a leading run of them dropped, each under the per-line clip or not as its caller's case asks.
+func bodyLines(content string, clip bool) []detailLine {
 	lines := splitLines(strings.TrimRight(content, "\n"))
 	first := 0
 	for first < len(lines) && strings.TrimSpace(lines[first]) == "" {
@@ -1569,7 +1591,10 @@ func outputBody(content string) []detailLine {
 	}
 	body := make([]detailLine, 0, len(lines)-first)
 	for _, ln := range lines[first:] {
-		body = append(body, detailLine{Text: clipDetail(ln)})
+		if clip {
+			ln = clipDetail(ln)
+		}
+		body = append(body, detailLine{Text: ln})
 	}
 	return body
 }

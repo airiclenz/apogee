@@ -553,9 +553,8 @@ func TestPresentToolCallErrorResult(t *testing.T) {
 
 // TestPresentToolCallErrorBodyKeepsEveryLine is the same claim over a message of SEVERAL lines: the
 // slot is one word whatever the message is, and every line of that message reaches the body, where
-// the painter wraps it rather than clipping it. The lines are kept short on purpose — the per-line
-// flood cap (clipDetail, detailClipRunes) is a known and separate limit on one very long line, and
-// this test is about the lines that used to be dropped outright, not about that cap.
+// the painter wraps it rather than clipping it. Its lines are short, which is the ordinary case;
+// the LONG one is pinned beside it (TestPresentToolCallErrorBodyKeepsOneLongLine).
 func TestPresentToolCallErrorBodyKeepsEveryLine(t *testing.T) {
 	t.Parallel()
 
@@ -583,6 +582,43 @@ func TestPresentToolCallErrorBodyKeepsEveryLine(t *testing.T) {
 		if !strings.Contains(painted, line) {
 			t.Errorf("the expanded block does not show %q:\n%s", line, painted)
 		}
+	}
+}
+
+// TestPresentToolCallErrorBodyKeepsOneLongLine is that claim's other half: a message that comes to
+// ONE line far longer than the per-line flood cap keeps every rune of it. The cap is right for a
+// body a slot already summarises and stays there (clipDetail, detailClipRunes), but this body IS
+// the failure's whole message — the slot beside it says one word — so it is laid out under no clip
+// (failureBody), and the painter spends the rows the line needs.
+//
+// The line carries no spaces, so the painted proof can be read by stripping the frame's blanks and
+// row breaks back out: what is left is the message unbroken, with no cut and no " …" anywhere.
+func TestPresentToolCallErrorBodyKeepsOneLongLine(t *testing.T) {
+	t.Parallel()
+
+	long := "compile-failed:" + strings.Repeat("x", 4*detailClipRunes)
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: long, IsError: true}, workspaceRoot{})
+
+	if got := tv.Summary.Text; got != "error" {
+		t.Errorf("error summary = %q; want the bare verdict word", got)
+	}
+	if got := detailTexts(tv.Details.all()); !slices.Equal(got, []string{long}) {
+		t.Errorf("error body kept %d runes; want the message's own %d, unclipped", len([]rune(strings.Join(got, ""))), len([]rune(long)))
+	}
+
+	// And on screen: the block opens onto the line wrapped across rows of its own, every rune of it
+	// still there.
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "2", Content: long, IsError: true}})
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the failed block to open")
+	}
+	painted := renderPlain(tr, 60)
+	unwrapped := strings.NewReplacer(" ", "", "\n", "").Replace(painted)
+	if !strings.Contains(unwrapped, long) {
+		t.Errorf("the expanded block does not carry the message whole:\n%s", painted)
 	}
 }
 

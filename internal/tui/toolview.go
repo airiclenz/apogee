@@ -1168,7 +1168,9 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // A hook that worded the slot also hands back the output left once it has read the failure off it,
 // and that output lays out beneath the branch. A failed subprocess call therefore reads as its
 // clean twin does — the exit code in the slot over the lines the command printed — instead of
-// spending the slot on whichever line the output happened to open with.
+// spending the slot on whichever line the output happened to open with. It is laid out through the
+// clean twin's own builder for the same reason (outputBody): that body is output a slot beside it
+// already summarises, and it answers the per-line flood cap exactly as the clean run's does.
 //
 // This seam used to record the result's FIRST LINE as the slot's floor everywhere else, on the
 // reading that for a tool failing in prose that line IS the error message. The ratified call on
@@ -1179,7 +1181,9 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // sentence ate the tool's own target down to " …", or off the row entirely. Nor was expanding a
 // remedy: this branch set no body, so there was nothing behind the ▶ to open. A word cannot crowd a
 // target out, and the message is now behind the ▶ where the body wraps it at paint time
-// (outputBody, bodyFrame.paint) and no clip reaches it.
+// (failureBody, bodyFrame.paint) and no clip reaches it — not even the per-line flood cap every
+// summarised body answers to, because with the slot down to one word this body is the whole of what
+// the failure says (failureBody states that split).
 //
 // The message reaching the body is spelled as the TOOL wrote it, per the quoted-body rule
 // (shortenPaths): a body is quoted text and the shortening seam deliberately never touches one, so
@@ -1194,7 +1198,7 @@ func (tv *toolView) absorbFailure(content string) {
 		}
 	}
 	tv.Summary = namedSummary(detailLine{Text: erroredSummary})
-	tv.Details = tv.Details.with(outputBody(content))
+	tv.Details = tv.Details.with(failureBody(content))
 }
 
 // absorbProse fills the two halves from the result's PROSE — the layers that predate the ratified

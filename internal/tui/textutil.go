@@ -39,6 +39,10 @@ import (
 // behind it paints lower down, whole. TestPaintedWideDetailLineWrapsWithoutDisplacement
 // (paint_test.go) is the probe that measured all three of those claims and the pin that keeps
 // them true.
+//
+// It bounds a line a slot beside it already summarises, which is every body but one: a failed call
+// whose tool words no verdict of its own says the bare word `error` and keeps its message in the
+// body alone, so that body is laid out under no clip at all (failureBody, toolregistry.go).
 const detailClipRunes = 160
 
 // clipDetail truncates s to detailClipRunes runes with an ellipsis.
