@@ -145,7 +145,30 @@ Acceptance line invokes `graphics/demo/gen.sh` directly rather than through `bas
 
 ---
 
-## 3. `type.sh --check` — structural invariants and golden totals
+## 3. `type.sh --check` — structural invariants and golden totals — ✅ DONE (2026-09-05)
+
+NOTES (2026-09-05): the goldens were derived from the generator's actual output, not from the
+plan's numbers — `775 / 3382 / 1791 / 135 ms` at seed 4242, against `40 ms × N` baselines of
+`720 / 2960 / 1520 / 200`. The pooled per-letter mean is `34.451 ms` over `n=102` draws (23
+post-space, 5 post-punctuation, 1 thinking pause make up the other 29 of the 131 gaps), so the
+±2 ms tolerance sits ≈3.3σ out, exactly as the item's recast states.
+NOTES (2026-09-05): `--check` regenerates each block by re-invoking this script's own CLI
+(`bash "${BASH_SOURCE[0]}" --seed 4242 -- "$string"`) rather than by hoisting the awk generator
+into a shared function. It iterates `HERO_STRINGS` directly — item 1's table, never a second
+copy — and it asserts the block a tape actually gets, argument handling included; the
+alternative would have meant restyling item 1's generator, which this item does not own.
+NOTES (2026-09-05): `--check` is refused alongside `--seed` (exit 2, "runs at the default
+seed"). Not named in the item; the goldens are pinned at `DEFAULT_SEED`, so any other seed
+could only ever report four spurious total failures. Band membership and the pooled mean are
+asserted against the *declared* constants, never against `APOGEE_DEMO_JITTER_MIN/MAX`, which
+is what makes the forced-failure path in Tests a real failure rather than a moved goalpost.
+NOTES (2026-09-05): `check_profile` runs ~75 lines against coding-standards' ~20–30 line
+[should] — the embedded awk analysis program is the bulk of it, and splitting it out would
+leave a shallow pass-through on either side. The file is 330 lines, inside the ~400 limit.
+NOTES (2026-09-05): plan-text slip confirmed a third time from this item's own measurements —
+item 2's Acceptance `^Sleep ` golden of 146 is 145 (14 in `hero.tape` + 131 generated;
+`gen.sh tapes/hero.tape` re-measured at 145 against the finished `--check`). Item 3 pins no
+`^Sleep ` count of its own, so nothing here inherits the slip.
 
 **What.** Recast at the regression check (2026-09-04). Depends on items 1–2. Add `--check` to
 `type.sh`: regenerate all four strings at the default seed and assert, printing one line per string

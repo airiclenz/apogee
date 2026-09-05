@@ -4,6 +4,7 @@
 #   ./type.sh 'apogee --mode auto'           # the block for one string, default seed
 #   ./type.sh --seed 99 'apogee --mode auto' # the same string, a different rhythm
 #   ./type.sh --strings                      # the hero tape's typed strings, one per line
+#   ./type.sh --check                        # assert the profile against its golden totals
 #
 # VHS types on a fixed metronome (`Set TypingSpeed 40ms`), which reads on camera as a machine
 # at the keyboard. This prints an equivalent block that drops the metronome to 0ms and carries
@@ -23,6 +24,12 @@
 #
 # This script is the single owner of the hero tape's typed strings: `--strings` publishes the
 # table so nothing downstream has to keep a second copy that could drift out of step with it.
+#
+# `--check` regenerates all four of those strings at the default seed and asserts the profile
+# against the golden totals recorded below. It is a profile-edit gate, not a per-take step:
+# the seed and the bands are both fixed, so its verdict is a constant and the recording rig
+# never runs it. Run it when a band, the seed, the pause odds, the pause cap or a typed
+# string is edited, and re-baseline a golden deliberately when it reports a total that moved.
 set -euo pipefail
 
 readonly DEFAULT_SEED=4242
@@ -57,8 +64,21 @@ readonly -a HERO_STRINGS=(
   '/undo'
 )
 
+# GOLDEN block totals in milliseconds, one per HERO_STRINGS entry and in the same order: the
+# exact sum of the `Sleep`s `--check` regenerates at DEFAULT_SEED under the profile above. They
+# are exact rather than a band because the seed is fixed, and they are what pins the space,
+# punctuation and thinking-pause components — the ones carrying the whole timing delta away
+# from VHS's flat `40 ms x N`. Edit a band and every GOLDEN here moves; the diff is what makes
+# that re-baseline a conscious act rather than a silent drift.
+readonly -a GOLDEN_TOTALS_MS=(775 3382 1791 135)
+
+# The pooled per-letter mean is asserted against the midpoint of the declared per-letter band.
+# Pooled across all four strings, not per string: `/undo` has 4 gaps, where a per-string band
+# would pass or fail on seed luck rather than on the profile being right.
+readonly POOLED_MEAN_TOLERANCE_MS=2
+
 usage() {
-  sed -n '2,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 fail() {
@@ -66,8 +86,119 @@ fail() {
   exit 2
 }
 
+# Regenerate every hero string and assert the profile over the resulting blocks. The blocks
+# come from this script's own CLI rather than from reaching inside the generator, so what is
+# checked is the block a tape actually gets, argument handling included.
+check_profile() {
+  local status=0
+  local index=0
+  local pooled_letters=0 pooled_sum=0
+  local string block line summary letters letter_sum pauses total golden
+
+  printf 'type.sh --check: seed %d, bands %d-%d / %d-%d / %d-%d / %d-%d ms\n\n' \
+    "$DEFAULT_SEED" "$LETTER_GAP_MIN" "$LETTER_GAP_MAX" "$SPACE_GAP_MIN" "$SPACE_GAP_MAX" \
+    "$PUNCTUATION_GAP_MIN" "$PUNCTUATION_GAP_MAX" "$THINKING_PAUSE_MIN" "$THINKING_PAUSE_MAX"
+  printf '%3s  %7s  %6s  %9s  %11s  %s\n' '#' 'letters' 'pauses' 'total' '40 ms x N' 'string'
+
+  for string in "${HERO_STRINGS[@]}"; do
+    index=$((index + 1))
+    block="$(bash "${BASH_SOURCE[0]}" --seed "$DEFAULT_SEED" -- "$string")"
+    summary=''
+
+    # Every Sleep is classified by the character it follows, never by its own value, so a gap
+    # drawn from the wrong band is still counted as the per-letter draw it was meant to be.
+    while IFS= read -r line; do
+      case "$line" in
+        '!'*) printf 'type.sh --check: string %d: %s\n' "$index" "${line#!}" >&2; status=1 ;;
+        '='*) summary="${line#=}" ;;
+      esac
+    done <<<"$(
+      printf '%s\n' "$block" | awk \
+        -v punctuation="$PUNCTUATION_CHARACTERS" \
+        -v letterMin="$LETTER_GAP_MIN" -v letterMax="$LETTER_GAP_MAX" \
+        -v spaceMin="$SPACE_GAP_MIN" -v spaceMax="$SPACE_GAP_MAX" \
+        -v punctuationMin="$PUNCTUATION_GAP_MIN" -v punctuationMax="$PUNCTUATION_GAP_MAX" \
+        -v thinkingMin="$THINKING_PAUSE_MIN" -v thinkingMax="$THINKING_PAUSE_MAX" '
+      /^Type "/ {
+        payload = substr($0, 7, length($0) - 7)
+        if (payload !~ /^[ -~]$/) printf "!Type payload on block line %d is not printable ASCII\n", NR
+        previous = payload
+        next
+      }
+
+      /^Sleep / {
+        value = $2
+        sub(/ms$/, "", value)
+        value += 0
+        total += value
+
+        # The 60-90 and 90-140 bands touch at 90, so this is membership in the UNION of the
+        # four declared bands: any Sleep outside the profile, never "in exactly one band".
+        if (!((value >= letterMin && value <= letterMax) ||
+              (value >= spaceMin && value <= spaceMax) ||
+              (value >= punctuationMin && value <= punctuationMax) ||
+              (value >= thinkingMin && value <= thinkingMax)))
+          printf "!Sleep %dms on block line %d falls outside every declared band\n", value, NR
+
+        if (previous == " ") {
+          if (value >= thinkingMin) thinkingPauses++
+          else spaceGaps++
+        } else if (index(punctuation, previous) > 0) {
+          punctuationGaps++
+        } else {
+          letterGaps++
+          letterSum += value
+        }
+      }
+
+      END { printf "=%d %d %d %d\n", letterGaps + 0, letterSum + 0, thinkingPauses + 0, total + 0 }
+    ')"
+
+    [ -n "$summary" ] || fail "--check could not read a block summary for string $index"
+    read -r letters letter_sum pauses total <<<"$summary"
+
+    if [ "$pauses" -gt "$THINKING_PAUSE_LIMIT" ]; then
+      printf 'type.sh --check: string %d takes %d thinking pauses, cap is %d\n' \
+        "$index" "$pauses" "$THINKING_PAUSE_LIMIT" >&2
+      status=1
+    fi
+
+    golden="${GOLDEN_TOTALS_MS[$((index - 1))]}"
+    if [ "$total" -ne "$golden" ]; then
+      printf 'type.sh --check: string %d total %dms != golden %dms (GOLDEN_TOTALS_MS[%d]) — re-baseline deliberately\n' \
+        "$index" "$total" "$golden" "$((index - 1))" >&2
+      status=1
+    fi
+
+    printf '%3d  %7d  %6d  %7dms  %9dms  %s\n' \
+      "$index" "$letters" "$pauses" "$total" "$((40 * ${#string}))" "$string"
+
+    pooled_letters=$((pooled_letters + letters))
+    pooled_sum=$((pooled_sum + letter_sum))
+  done
+
+  # One pooled line, not four: the mean is a single number across all four strings and cannot
+  # sit on a per-string row. n is 102 of the 131 gaps, so sigma is ~0.6 ms and +/-2 ms is ~3.3 sigma.
+  if ! awk -v sum="$pooled_sum" -v n="$pooled_letters" \
+      -v low="$LETTER_GAP_MIN" -v high="$LETTER_GAP_MAX" -v tolerance="$POOLED_MEAN_TOLERANCE_MS" '
+    BEGIN {
+      if (n == 0) { print "type.sh --check: no per-letter draws to pool" > "/dev/stderr"; exit 1 }
+      target = (low + high) / 2
+      mean = sum / n
+      printf "\npooled per-letter mean %.3f ms over %d draws (want %g +/- %g ms)\n", mean, n, target, tolerance
+      exit (mean < target - tolerance || mean > target + tolerance) ? 1 : 0
+    }'; then
+    printf 'type.sh --check: the pooled per-letter mean is outside %g +/- %d ms\n' \
+      "$(((LETTER_GAP_MIN + LETTER_GAP_MAX) / 2))" "$POOLED_MEAN_TOLERANCE_MS" >&2
+    status=1
+  fi
+
+  return "$status"
+}
+
 seed="$DEFAULT_SEED"
 print_strings=false
+run_check=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -78,6 +209,10 @@ while [ $# -gt 0 ]; do
       ;;
     --strings)
       print_strings=true
+      shift
+      ;;
+    --check)
+      run_check=true
       shift
       ;;
     -h|--help)
@@ -105,6 +240,14 @@ if [ "$print_strings" = true ]; then
   [ $# -eq 0 ] || fail "--strings takes no string argument"
   printf '%s\n' "${HERO_STRINGS[@]}"
   exit 0
+fi
+
+if [ "$run_check" = true ]; then
+  [ $# -eq 0 ] || fail "--check takes no string argument"
+  # The goldens are pinned at DEFAULT_SEED, so a --seed of its own could only ever fail them.
+  [ "$seed" = "$DEFAULT_SEED" ] || fail "--check runs at the default seed and takes no --seed"
+  if check_profile; then exit 0; fi
+  exit 1
 fi
 
 [ $# -eq 1 ] || fail "expected exactly one string to type, got $# (usage: type.sh [--seed N] <string>)"
