@@ -1,6 +1,6 @@
 package floor
 
-import "sort"
+import "slices"
 
 // The tool-name families every Floor guard shares. A guard decides by asking what a tool call
 // DID — was it a read, did it mutate a file — and a model spells the same concept several ways,
@@ -66,6 +66,6 @@ func FileMutatingToolNames() []string {
 	for name := range wave4WriteTools {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
