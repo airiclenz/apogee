@@ -31,3 +31,42 @@ if command -v bd >/dev/null 2>&1; then
   if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
 fi
 # --- END BEADS INTEGRATION v1.2.2 ---
+
+# --- bd init dirty-index guard (apogee-f82) ---
+#
+# `bd init` runs its own `git commit -m "bd init: initialize beads issue
+# tracking"`, which sweeps in whatever the index already holds — that is how the
+# Mechanism-retirement wave silently lost 22 staged deletions. bd's own files
+# belong in that commit; anything else in the index at that moment is collateral,
+# so refuse rather than let it be swallowed.
+#
+# Why this hook: bd commits with `--no-verify`, so neither `pre-commit` nor
+# `commit-msg` ever runs for that commit — `prepare-commit-msg` is the only hook
+# git still fires that can both read the message ($1) and abort the commit with a
+# non-zero exit. The block sits deliberately OUTSIDE the BEGIN/END BEADS
+# INTEGRATION markers so a later `bd hooks install` preserves it.
+_bd_init_subject='bd init: initialize beads issue tracking'
+if [ -n "$1" ] && [ -r "$1" ] &&
+   [ "$(sed -n '/^[^#]/{p;q;}' "$1" | sed 's/[[:space:]]*$//')" = "$_bd_init_subject" ]; then
+  # Paths bd init legitimately writes and commits itself.
+  _bd_foreign=$(git diff --cached --name-only | grep -Ev \
+    '^(\.beads/|\.agents/|\.claude/|\.codex/|\.cursor/|\.github/copilot-instructions\.md$|\.gitignore$|\.cursorrules$|\.clinerules|AGENTS?\.md$|CLAUDE\.md$|GEMINI\.md$)')
+  if [ -n "$_bd_foreign" ]; then
+    # bd swallows hook stderr, so also speak straight to the terminal when
+    # stderr is not already one.
+    _bd_say() {
+      echo "prepare-commit-msg: REFUSED — this is bd init's own auto-commit, and the"
+      echo "index carries paths bd does not own. Letting it through would silently fold"
+      echo "your staged work into bd's initialization commit (that is what took the"
+      echo "Mechanism-retirement wave's 22 staged deletions):"
+      echo
+      printf '%s\n' "$_bd_foreign" | sed 's/^/  /'
+      echo
+      echo "Fix: commit the real work first, or unstage it"
+      echo "(git restore --staged <path>), then re-run bd init against a clean index."
+    }
+    _bd_say >&2
+    if [ ! -t 2 ] && { : >/dev/tty; } 2>/dev/null; then _bd_say >/dev/tty 2>/dev/null; fi
+    exit 1
+  fi
+fi
