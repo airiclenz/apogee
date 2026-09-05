@@ -94,11 +94,47 @@ func TestManualDocumentsEverySettingsKeyRejectsAnUndocumentedKey(t *testing.T) {
 	}
 }
 
-// manualPage is docs/manual/configuration.md read once — the whole body, and the fenced blocks
-// pulled out of it, since the third arm of the predicate looks only inside those.
+// TestManualDocumentsEverySettingsKeyRejectsALeafBorrowedFromAnotherBlock pins the scope of the
+// leaf arm. Every path here is fabricated, and every one of them has its leaf back-ticked SOMEWHERE
+// on the real page — under a different block. That is the collision the loose arm used to wave
+// through (`context-files.enable` passing off `validated-sets:`' own `enable:`), so the case is a
+// gate on the scoping and not merely another undocumented-key case: the test first asserts the leaf
+// really is on the page, then that the predicate still says no.
+func TestManualDocumentsEverySettingsKeyRejectsALeafBorrowedFromAnotherBlock(t *testing.T) {
+	t.Parallel()
+
+	manual := readManualConfig(t)
+
+	for _, borrowed := range []struct {
+		path string
+		from string
+	}{
+		{path: "context-files.alias", from: "validated-sets:"},
+		{path: "validated-sets.names", from: "context-files:"},
+		{path: "ui.max-age", from: "sessions:"},
+		{path: "sessions.enable", from: "validated-sets: and context-files:"},
+	} {
+		_, leaf, _ := strings.Cut(borrowed.path, ".")
+		if !backTickedKey(manual.body, leaf) {
+			t.Errorf("%s no longer spells `%s` anywhere, so %q pins nothing; pick a leaf the page "+
+				"still documents under another block", manualConfigPath, leaf, borrowed.path)
+			continue
+		}
+		if manualDocumentsSetting(manual, borrowed.path) {
+			t.Errorf("the predicate calls %q documented; its leaf `%s` is documented under %s, not "+
+				"under its own block, so the leaf arm is reading outside the block's section",
+				borrowed.path, leaf, borrowed.from)
+		}
+	}
+}
+
+// manualPage is docs/manual/configuration.md read once — the whole body, the fenced blocks pulled
+// out of it (the predicate's third arm looks only inside those), and the body cut into its `##`
+// sections (the second arm looks only inside the section that documents the key's own block).
 type manualPage struct {
-	body   string
-	fences []string
+	body     string
+	fences   []string
+	sections []string
 }
 
 // readManualConfig reads the settings reference. The repo layout is fixed and `go test` runs in the
@@ -115,15 +151,42 @@ func readManualConfig(t *testing.T) manualPage {
 	for _, m := range fencedBlock.FindAllStringSubmatch(page.body, -1) {
 		page.fences = append(page.fences, m[1])
 	}
+	page.sections = splitManualSections(page.body)
 	return page
+}
+
+// splitManualSections cuts the page at its `##` headings: one section per top-level heading, each
+// running to the next one, with whatever precedes the first heading as the opening section. A `###`
+// subsection stays inside the `##` section that holds it — the manual documents a block under one
+// top-level heading and elaborates it in subsections, so that is the unit "this block's section"
+// means. Fenced blocks are tracked while scanning so a `##` line inside a code example could never
+// cut a section in two; the page has none today, and this keeps that from becoming load-bearing.
+func splitManualSections(body string) []string {
+	lines := strings.Split(body, "\n")
+
+	var sections []string
+	start, inFence := 0, false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || i == start || !strings.HasPrefix(line, "## ") {
+			continue
+		}
+		sections = append(sections, strings.Join(lines[start:i], "\n"))
+		start = i
+	}
+	return append(sections, strings.Join(lines[start:], "\n"))
 }
 
 // manualDocumentsSetting is the gate's predicate, and it accepts the spellings the page actually
 // uses rather than only the registry's dotted Path:
 //
-//   - the dotted path, back-ticked — `ui.stall-after`;
-//   - the leaf segment, back-ticked — `max-age`, which is how the manual names a key while it is
-//     already talking about the block that holds it;
+//   - the dotted path, back-ticked anywhere on the page — `ui.stall-after`;
+//   - the leaf segment, back-ticked inside the section that documents the key's OWN block —
+//     `max-age`, which is how the manual names a key while it is already talking about the block
+//     that holds it;
 //   - the leaf spelled `<leaf>:` inside a fenced config example beneath its own block heading —
 //     `present:` with `auto-open:` indented under it, or a top-level key at column 0.
 //
@@ -131,21 +194,61 @@ func readManualConfig(t *testing.T) manualPage {
 // the manual's house spelling and `mcp-servers` never occurs, so without the colon a dozen
 // correctly documented keys would fail every arm.
 //
-// The leaf arm is deliberately loose — it does not check WHICH block's paragraph the back-ticked
-// leaf sits in, so two blocks sharing a leaf name vouch for each other. That is the price of
-// reading the page the way it is written; the strictness that matters is the first direction, that
-// no registry key goes unmentioned.
+// The leaf arm is SCOPED to the parent block's own section, which is what stops two blocks that
+// share a leaf name from vouching for each other: `context-files.enable` counts because the
+// `context-files:` paragraph spells `enable:` itself, never because `validated-sets:` spells its
+// own one screen away. The scope follows the page's own structure rather than a table this file
+// would have to maintain — a section documents a block when it names the block back-ticked (`ui:`)
+// or shows it as a block line in one of its fenced examples (`present:`) — so a block documented
+// across two sections is vouched for by either, and a leaf outside both is not documented at all.
+//
+// A top-level key is its own leaf and the whole page is its section, so only the first and third
+// arms apply to it.
 func manualDocumentsSetting(manual manualPage, path string) bool {
-	leaf := path
-	if _, after, nested := strings.Cut(path, "."); nested {
-		leaf = after
+	if backTickedKey(manual.body, path) {
+		return true
 	}
-	return backTickedKey(manual.body, path) ||
-		backTickedKey(manual.body, leaf) ||
-		settingSpelledInFence(manual.fences, path)
+	if parent, leaf, nested := strings.Cut(path, "."); nested && leafKeyInItsOwnSection(manual, parent, leaf) {
+		return true
+	}
+	return settingSpelledInFence(manual.fences, path)
 }
 
-// backTickedKey is the first two arms: `<name>` or `<name>:`.
+// leafKeyInItsOwnSection is the second arm: the back-ticked leaf counts only where it sits in a
+// section that is talking about the block that holds it.
+func leafKeyInItsOwnSection(manual manualPage, parent, leaf string) bool {
+	block := blockLine(parent)
+	for _, section := range manual.sections {
+		if sectionDocumentsBlock(section, parent, block) && backTickedKey(section, leaf) {
+			return true
+		}
+	}
+	return false
+}
+
+// sectionDocumentsBlock says whether one section is the place the manual documents `parent:` — it
+// either names the block in prose or shows it as a block line in one of its own examples.
+func sectionDocumentsBlock(section, parent string, block *regexp.Regexp) bool {
+	if backTickedKey(section, parent) {
+		return true
+	}
+	for _, m := range fencedBlock.FindAllStringSubmatch(section, -1) {
+		if block.MatchString(m[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// blockLine matches a block's own line inside a fenced example — `present:` with its keys indented
+// under it. It is the same shape settingSpelledInFence uses for a nested key's parent, spelled once
+// here and shared, so the two places that ask "is this fence showing that block?" cannot drift.
+func blockLine(parent string) *regexp.Regexp {
+	return regexp.MustCompile(`(?m)^[ \t]*` + regexp.QuoteMeta(parent) + `:[ \t]*$`)
+}
+
+// backTickedKey is the spelling both back-ticked arms look for, in whatever text they are given
+// — the whole page for the dotted path, one section for the leaf: `<name>` or `<name>:`.
 func backTickedKey(body, name string) bool {
 	return strings.Contains(body, "`"+name+"`") || strings.Contains(body, "`"+name+":`")
 }
@@ -164,7 +267,7 @@ func settingSpelledInFence(fences []string, path string) bool {
 		return false
 	}
 
-	block := regexp.MustCompile(`(?m)^[ \t]*` + regexp.QuoteMeta(parent) + `:[ \t]*$`)
+	block := blockLine(parent)
 	under := regexp.MustCompile(`(?m)^[ \t]+` + regexp.QuoteMeta(leaf) + `:`)
 	for _, fence := range fences {
 		if block.MatchString(fence) && under.MatchString(fence) {
