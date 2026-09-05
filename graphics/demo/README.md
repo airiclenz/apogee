@@ -34,6 +34,8 @@ which refuses to start a take while it is unset.
 | `record.sh <tape>` | resets the stage, then records `tapes/<tape>.tape` |
 | `render.sh` | raw take → shipping GIF (head trim, time-compression, palette encode) |
 | `reset.sh` | restores the planted bug + CHANGELOG stub, wipes session state |
+| `gen.sh <src> <dst>` | writes the work-dir copy of a tape, expanding the hero tape's typed lines into humanized typing |
+| `type.sh <string>` | one typed string → its humanized typing block; `--check` asserts the profile's totals |
 | `tapes/` | one tape per clip; `hero.tape` is the README clip |
 | `stage/` | templates for the taskman stage repo (copied out by `setup.sh`) |
 | `history/` | one folder per shipped clip: the GIF that shipped, its variants, and a `NOTES.md` of the recording facts |
@@ -166,15 +168,28 @@ python3 -c "import json,sys; e=json.load(open(sys.argv[1]))['transcript']['entri
 ```
 
 **VHS pitfalls already paid for.** Its parser has been seen to reject very long `Output`
-paths — `record.sh` copies the tape into the work dir and runs there so all paths stay short
-and relative. `Set FontFamily` takes a family name only: there is no weight setting, so
-`"Source Code Pro ExtraLight"` silently renders as regular-weight Source Code Pro (verified
-by diffing frames against a deliberately bogus font name). A missing font falls back
+paths — `record.sh` writes the tape into the work dir (through `gen.sh`) and runs there so all
+paths stay short and relative. `Set FontFamily` takes a family name only: there is no weight
+setting, so `"Source Code Pro ExtraLight"` silently renders as regular-weight Source Code Pro
+(verified by diffing frames against a deliberately bogus font name). A missing font falls back
 silently rather than erroring — check a frame if you change it. And `Alt+<arrow>` does not
 exist in the tape language: `Alt+up` parses, then types the literal text `up` into the
 terminal. The way to send ⌥↑ is the raw sequence — `Escape` followed by `Type "[1;3A"` under
 `Set TypingSpeed 0ms`, so the bytes arrive as one CSI; split by a typing delay the ESC is read
 on its own, which during a run means "stop" and kills the take.
+
+## Humanized typing
+
+`record.sh` runs the tape through `gen.sh`, which replaces each of the four messages a person
+types in `hero.tape` with the per-character block `type.sh` generates for it: a 0ms metronome
+and one `Sleep` per gap, from a fixed profile at a fixed seed, so the rhythm is the same on
+every machine. The source tape keeps its plain `Type "…"` lines so it stays readable, and the
+machine-typed lines keep their exact speeds — which is what keeps `Escape` and its CSI tail one
+keystroke (**VHS pitfalls already paid for**, above). `type.sh --check` pins the totals; run it
+when a band, the seed or a typed string is edited, not per take. Two timing consequences: typed
+strings now run **longer** than `40 ms × N` (25–45 ms a letter, plus pauses), so knob 1 is
+retuned against a take; and the `render.sh` head trim above (`1.25 3.8`) is re-measured on the
+next take: the expanded `apogee --mode auto` moves the shell+launch boundary by ~+0.2–0.5 s.
 
 ## Recording a new clip for a different feature
 

@@ -3,9 +3,11 @@
 #
 #   ./record.sh hero          # runs tapes/hero.tape -> <work>/hero.mp4
 #
-# The tape is copied into the work dir before running: VHS resolves `source ./env.sh` and
-# its Output paths relative to the working directory, and its parser has been seen to choke
-# on very long Output paths — short and relative keeps both problems away.
+# The tape is generated into the work dir before running — `gen.sh` writes the copy, expanding
+# the hero tape's typed lines into humanized typing on the way through. It has to be a work-dir
+# copy either way: VHS resolves `source ./env.sh` and its Output paths relative to the working
+# directory, and its parser has been seen to choke on very long Output paths — short and
+# relative keeps both problems away.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,7 +31,7 @@ fi
 
 "$HERE/reset.sh"
 
-cp "$SRC" "$WORK/$TAPE.tape"
+"$HERE/gen.sh" "$SRC" "$WORK/$TAPE.tape"
 cd "$WORK"
 echo "recording $TAPE …"
 time vhs "$TAPE.tape"
