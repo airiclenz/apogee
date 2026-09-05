@@ -88,7 +88,23 @@ add `test -x graphics/demo/type.sh` to Acceptance.
 
 ---
 
-## 2. `gen.sh` — expand a whole tape, with no rig and no vhs
+## 2. `gen.sh` — expand a whole tape, with no rig and no vhs — ✅ DONE (2026-09-05)
+
+NOTES (2026-09-05): the Acceptance line's `grep -c '^Sleep '` golden of **146** is off by one —
+the real total is **145**. `hero.tape` has 14 lines beginning `Sleep `; the 15th line matching a
+bare `Sleep` grep is prose inside the knob-2 comment at `hero.tape:81`. 131 generated gaps
+(17+73+37+4, as the plan header itself states) + 14 = 145, measured on the generated
+`/tmp/h1.tape`. Every other Acceptance figure landed exactly as written: `^Type "` = 137,
+`Type "/undo"` = 0, source tape untouched with its 6 `^Type "` lines, the CSI block
+byte-identical, and two runs `cmp`-silent. Item 3 pins goldens and should carry 145, not 146.
+NOTES (2026-09-05): a non-hero tape is copied with `cp` rather than passed through the awk
+line-by-line pass — the bytes are identical (verified with `cmp`), and building the string
+table for a tape that has nothing to expand would make every tape depend on `type.sh`.
+NOTES (2026-09-05): the expanded tape is built in a `mktemp -d` work dir and moved to the
+destination only after the guard passes, so a refused expansion never leaves a half-written
+tape where VHS could pick it up. The guard exits 1 (naming the string, on stderr); usage and
+input errors exit 2, matching `type.sh`'s convention. Both the no-match and the
+matches-twice paths were exercised in a scratch copy of the rig.
 
 **What.** Depends on item 1. Add `graphics/demo/gen.sh <src.tape> <dst.tape>`: copies the source line
 by line and, when the source basename is `hero.tape` and only then, replaces each of the four
