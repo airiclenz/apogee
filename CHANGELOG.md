@@ -48,7 +48,7 @@ point is a **minor** bump, not a breaking change.
   pins that the same entry against the shipped catalogue still lands on `setSkipped`, so the
   catalogue seam is provably what opened the rung.
 
-- A failed tool call's row now says the bare word `error` in its outcome slot and carries the tool's whole message in the body behind the ▶, instead of wording an unbounded first line into the slot — which reserved the row's full width before the target was given a budget and ate the tool's own name down to ` …`, or off the row entirely, with nothing behind the ▶ to expand to. The three tools that word their own short failure (`error: exit 3`) keep it, and `denied` / `cancelled` / `interrupted — the run did not finish` are unchanged. The transcript's orphan-result branch is worded the same way.
+- A failed tool call's row now says the bare word `error` in its outcome slot and carries the tool's whole message in the body behind the ▶, instead of wording an unbounded first line into the slot — which reserved the row's full width before the target was given a budget and ate the tool's own name down to ` …`, or off the row entirely, with nothing behind the ▶ to expand to. The three tools that word their own short failure (`error: exit 3`) keep it, and `denied` / `cancelled` / `interrupted — the run did not finish` are unchanged. The transcript's orphan-result branch is worded the same way. That fallback body is the one detail body exempt from the 160-rune per-line clip, so a single long error line survives whole and wraps rather than ending in `…`.
 
 - The demo rig's hero tape no longer guesses at when the fix's edit card lands: knob 3 is a VHS
   screen wait on the card's own diffstat (`Wait+Screen@40s`) instead of a fixed `Sleep 10s` that hit
@@ -101,7 +101,8 @@ point is a **minor** bump, not a breaking change.
   `docs/manual/configuration.md` — the spelling the page actually uses counts (the dotted path or
   its leaf, back-ticked with or without a trailing colon, or the leaf written `<leaf>:` inside a
   fenced config example beneath its own block), with a named allowlist, empty today, reserved for a
-  key documented on another manual page. Four keys the gate caught were spelled only with their
+  key documented on another manual page. The leaf arm is scoped to the section that documents the
+  key's own block, so two blocks sharing a leaf name cannot vouch for each other. Four keys the gate caught were spelled only with their
   value attached — `auto-compact: false`, `prune-tool-results: false`, `remember-model: true` and
   `context-files:`' `enable: false` — so the manual now names each key in its own right beside the
   prose that already explained it.
