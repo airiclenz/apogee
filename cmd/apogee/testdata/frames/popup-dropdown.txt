@@ -1,13 +1,11 @@
-╭────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ ▗▄▄ ▄▄▄ ▗▄▄ ▗▄▄▖▗▄▄ ▗▄▄                                                  host     probe-target │
-│ ▗▄▄▌▌  ▌▌  ▌▌  ▌▙▄▄▌▙▄▄▌                                                 model    popup-model  │
-│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                                                  version  <version>    │
-│     ▌        ▄▄▘                                                                               │
-╰────────────────────────────────────────────────────────────────────────────────────────────────╯
-
-· context window unknown — automatic compaction and the Budget are inactive; set context-window:
-  in config.yaml
-
+│ ▗▄▄ ▄▄▄ ▗▄▄ ▗▄▄▖▗▄▄ ▗▄▄                                                  host     probe-target │ │
+│ ▗▄▄▌▌  ▌▌  ▌▌  ▌▙▄▄▌▙▄▄▌                                                 model    popup-model  │ ┃
+│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                                                  version  <version>    │ ┃
+│     ▌        ▄▄▘                                                                               │ ┃
+╰────────────────────────────────────────────────────────────────────────────────────────────────╯ ┃
+                                                                                                   ┃
+· context window unknown — automatic compaction and the Budget are inactive; set context-window:   ┃
+  in config.yaml                                                                                   ┃
 
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
 

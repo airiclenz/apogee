@@ -1,5 +1,4 @@
 ❯ Ask me which findings to fix.                                                                    │
-                                                                                                   │
 ✦ Ask User                                                                                         │
   ┕ Which findings should I fix? ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ Fix the nil-check in submitAnswer · +4 more lines ▶ │
                                                                                                    │
@@ -9,7 +8,7 @@
                                                                                                    │
 ✦ Ask User                                                                                         │
   ┕ How to continue with the implementation of the featu … ⋯ Do the config first · +5 more lines ▶ │
-                                                                                                   ┃
+                                                                                                   │
 ✦ Noted, thank you.                                                                                ┃
                                                                                                    ┃
 ❯ Ask me an open question.                                                                         ┃
