@@ -382,12 +382,13 @@ func TestThinkingOpensOnTheNewestRecord(t *testing.T) {
 	if !seated {
 		t.Fatal("the frame seated no pane for a full board")
 	}
-	if len(spec.rows) <= spec.maxRows {
+	seats := reportSeats(spec)
+	if len(spec.rows) <= seats {
 		t.Fatalf("precondition: %d rows into a window of %d — the board must overflow the pane for a scroll to mean anything",
-			len(spec.rows), spec.maxRows)
+			len(spec.rows), seats)
 	}
-	if spec.rowTop+spec.maxRows != len(spec.rows) {
-		t.Errorf("window [%d,%d) of %d rows, want the last full window", spec.rowTop, spec.rowTop+spec.maxRows, len(spec.rows))
+	if spec.rowTop+seats != len(spec.rows) {
+		t.Errorf("window [%d,%d) of %d rows, want the last full window", spec.rowTop, spec.rowTop+seats, len(spec.rows))
 	}
 }
 
@@ -425,9 +426,9 @@ func TestThinkingPaneFollowsTheReasoningArrivingUnderIt(t *testing.T) {
 	if !seated {
 		t.Fatal("the frame seated no pane for a full board")
 	}
-	if len(spec.rows) <= spec.maxRows {
+	if seats := reportSeats(spec); len(spec.rows) <= seats {
 		t.Fatalf("precondition: %d rows into a window of %d — the board must overflow the pane for a follow to mean anything",
-			len(spec.rows), spec.maxRows)
+			len(spec.rows), seats)
 	}
 
 	m = growThinkingRecords(t, m, 6)
@@ -436,9 +437,9 @@ func TestThinkingPaneFollowsTheReasoningArrivingUnderIt(t *testing.T) {
 	if !seated {
 		t.Fatal("the frame seated no pane for the grown board")
 	}
-	if grown.rowTop+grown.maxRows != len(grown.rows) {
+	if seats := reportSeats(grown); grown.rowTop+seats != len(grown.rows) {
 		t.Errorf("window [%d,%d) of %d rows without a keystroke, want the last full window of the grown board",
-			grown.rowTop, grown.rowTop+grown.maxRows, len(grown.rows))
+			grown.rowTop, grown.rowTop+seats, len(grown.rows))
 	}
 	newest := grown.rows[len(grown.rows)-1][0]
 	if painted := strip(m.renderThinking()); !strings.Contains(painted, newest) {

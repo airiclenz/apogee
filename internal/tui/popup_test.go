@@ -2247,8 +2247,8 @@ func TestPopupCallersPaintTheOverflowBar(t *testing.T) {
 		}
 		rows := m.usageRows()
 		spec, seated := m.usageSpec(rows)
-		if !seated || spec.maxRows >= len(rows) {
-			t.Fatalf("the report did not overflow: %d of %d rows seated (seated=%v)", spec.maxRows, len(rows), seated)
+		if seats := reportSeats(spec); !seated || seats >= len(rows) {
+			t.Fatalf("the report did not overflow: %d of %d rows seated (seated=%v)", seats, len(rows), seated)
 		}
 		column := popupBarColumn(m.renderUsage())
 		if at, size := popupThumbSpan(column); at < 0 || size == 0 {

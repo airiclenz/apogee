@@ -97,6 +97,14 @@ func TestReportKindsResolveDistinctly(t *testing.T) {
 	}
 }
 
+// reportSeats is how many ROWS a composed report spec was granted: the LINES the frame handed its
+// row block (popupSpec.maxRows) less the two house blanks booked into them (Model.reportSpec). It is
+// what a claim about "a full window of rows" has to be measured against now that the pane's demand
+// and its grant are both in lines.
+func reportSeats(spec popupSpec) int {
+	return spec.maxRows - popupRowPadLines(len(spec.rows) > 0, spec.hint != "")
+}
+
 // pressReport presses one key on the named report and returns the model it left, failing when the
 // report did not claim the key at all.
 func pressReport(t *testing.T, m Model, r reportKind, msg tea.KeyPressMsg) Model {
@@ -197,9 +205,9 @@ func TestReportWindowIsThePaintersOwnAnswer(t *testing.T) {
 			if !ok {
 				t.Fatal("the open report reports no window")
 			}
-			if win.start != spec.rowTop || win.end-win.start != spec.maxRows || win.total != len(spec.rows) {
+			if seats := reportSeats(spec); win.start != spec.rowTop || win.end-win.start != seats || win.total != len(spec.rows) {
 				t.Errorf("window [%d,%d) of %d, want the composed [%d,%d) of %d",
-					win.start, win.end, win.total, spec.rowTop, spec.rowTop+spec.maxRows, len(spec.rows))
+					win.start, win.end, win.total, spec.rowTop, spec.rowTop+seats, len(spec.rows))
 			}
 		})
 	}
@@ -222,9 +230,9 @@ func TestReportScrollClampsToTheLastFullWindow(t *testing.T) {
 				t.Errorf("window [%d,%d) of %d rows, want it ending on the last row", win.start, win.end, win.total)
 			}
 			spec, _ := m.reportSpec(tc.kind, m.reportContent(tc.kind))
-			if win.end-win.start != spec.maxRows {
+			if seats := reportSeats(spec); win.end-win.start != seats {
 				t.Errorf("the clamped window shows %d rows, want the full %d the frame granted",
-					win.end-win.start, spec.maxRows)
+					win.end-win.start, seats)
 			}
 		})
 	}
@@ -387,10 +395,10 @@ func growInspectorRecords(t *testing.T, m Model, first int) Model {
 	for i := first; ; i++ {
 		if i >= maxWireRecords {
 			t.Fatalf("the ring's %d-record cap was reached before the list grew a full window of %d rows",
-				maxWireRecords, spec.maxRows)
+				maxWireRecords, reportSeats(spec))
 		}
 		m = m.foldEvent(wireEvent(domain.WireDirectionRequest, fmt.Sprintf(`{"n":%d}`, i), i, 0))
-		if rows, _ := m.inspectorRows(); len(rows)-before > spec.maxRows {
+		if rows, _ := m.inspectorRows(); len(rows)-before > reportSeats(spec) {
 			return m
 		}
 	}
@@ -408,11 +416,11 @@ func growThinkingRecords(t *testing.T, m Model, first int) Model {
 	for i := first; ; i++ {
 		if i >= maxThinkingRecords {
 			t.Fatalf("the board's %d-record cap was reached before the list grew a full window of %d rows",
-				maxThinkingRecords, spec.maxRows)
+				maxThinkingRecords, reportSeats(spec))
 		}
 		m = m.foldEvent(reasoningAt(runRef{}, i, "record "+strconv.Itoa(i)+" reasoning"))
 		m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(runRef{}, i)})
-		if rows, _ := m.thinkingRows(m.thinkingWrapColumn()); len(rows)-before > spec.maxRows {
+		if rows, _ := m.thinkingRows(m.thinkingWrapColumn()); len(rows)-before > reportSeats(spec) {
 			return m
 		}
 	}

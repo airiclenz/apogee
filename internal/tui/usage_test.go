@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -43,6 +44,77 @@ var (
 	mainTotals  = usageTotals{Calls: 3, PromptTokens: 20000, CompletionTokens: 1500, TotalTokens: 21500}
 	childTotals = usageTotals{Calls: 2, PromptTokens: 4000, CompletionTokens: 500, TotalTokens: 4500}
 )
+
+// TestReportPaneBreathes pins the house blanks on a REPORT pane, over the family's own painter
+// (Model.reportSpec, which /usage, /inspect and /thinking all compose through): an overflowing
+// reading stands one blank line clear of the title above it and one clear of the key legend below
+// it, both bought out of the ROW WINDOW rather than out of the pane's height — the pane is exactly
+// as tall as it was and shows two rows fewer — and neither blank carries a cell of the scrollbar
+// that runs beside the rows. At the pane's floor the two are handed back together and the reading
+// is what stays.
+func TestReportPaneBreathes(t *testing.T) {
+	m := usageModel(t, mainTotals, 8192)
+	for i := range maxUsageRows {
+		m = delegate(t, m, fmt.Sprintf("s%d", i), fmt.Sprintf("delegate %d", i), childTotals, 4096)
+	}
+
+	t.Run("a reading longer than its window is set off at both ends", func(t *testing.T) {
+		wide := step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		spec, seated := wide.usageSpec(wide.usageRows())
+		if !seated || len(spec.rows) <= spec.maxRows {
+			t.Fatalf("precondition: %d rows into a %d-line window (seated=%v) — the reading must overflow the pane",
+				len(spec.rows), spec.maxRows, seated)
+		}
+		view := wide.renderUsage()
+		lines := popupLines(view)
+
+		if got := popupInterior(lines[2]); got != "" {
+			t.Errorf("the line under the title is %q, want the blank the block opens on", got)
+		}
+		if got := popupInterior(lines[len(lines)-3]); got != "" {
+			t.Errorf("the line over the key legend is %q, want the blank the block closes on", got)
+		}
+		if got := popupInterior(lines[len(lines)-2]); got != usageHint {
+			t.Errorf("the pane closes on %q, want its key legend %q", got, usageHint)
+		}
+		// The two borders, the title, the hint and the two blanks are everything that is not a row.
+		rows := len(lines) - 6
+		if want := spec.maxRows - 2; rows != want {
+			t.Errorf("the pane seats %d rows out of the %d lines the frame granted its block, want %d — the blanks come out of the row window, not out of the frame",
+				rows, spec.maxRows, want)
+		}
+		if got := len(popupBarColumn(view)); got != rows {
+			t.Errorf("the scrollbar runs %d cells beside %d rows — it reaches onto a breathing blank", got, rows)
+		}
+	})
+
+	t.Run("a window down to its floor keeps the reading and drops the blanks", func(t *testing.T) {
+		// smallestOverlayWindow is the shortest window a boxed pane fits in at all; 17 and 18 are
+		// where this pane's block is down to one row and to two, which is where the painter hands
+		// the pads back rather than spend a row of the reading on them (popupRowLinesAt).
+		for _, height := range []int{smallestOverlayWindow, 17, 18} {
+			short := step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+
+			spec, seated := short.usageSpec(short.usageRows())
+			if !seated {
+				t.Fatalf("the frame seated no pane at %d rows", height)
+			}
+			lines := popupLines(short.renderUsage())
+
+			for i, line := range lines[1 : len(lines)-1] {
+				if popupInterior(line) == "" {
+					t.Errorf("at %d rows the pane paints a blank content line at %d, want its breathing room handed back to the reading:\n%s",
+						height, i+1, strip(short.renderUsage()))
+				}
+			}
+			// The two borders, the title and the hint: what is left is the reading itself.
+			if rows := len(lines) - 4; rows != spec.maxRows {
+				t.Errorf("at %d rows the pane seats %d rows of the %d the frame granted", height, rows, spec.maxRows)
+			}
+		}
+	})
+}
 
 // TestUsageRowsReportEveryAgentThatSpent pins what the report is made of: the column header, the
 // main agent, each delegate that reported a count — in transcript order — and the session total,

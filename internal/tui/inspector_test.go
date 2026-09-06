@@ -425,19 +425,20 @@ func TestInspectOpensOnTheNewestRecord(t *testing.T) {
 	if !seated {
 		t.Fatal("the frame seated no pane for a full ring")
 	}
-	if len(spec.rows) <= spec.maxRows {
+	seats := reportSeats(spec)
+	if len(spec.rows) <= seats {
 		t.Fatalf("precondition: %d rows into a window of %d — the ring must overflow the pane for a scroll to mean anything",
-			len(spec.rows), spec.maxRows)
+			len(spec.rows), seats)
 	}
-	if spec.rowTop+spec.maxRows != len(spec.rows) {
-		t.Fatalf("window [%d,%d) of %d rows, want the last full window", spec.rowTop, spec.rowTop+spec.maxRows, len(spec.rows))
+	if spec.rowTop+seats != len(spec.rows) {
+		t.Fatalf("window [%d,%d) of %d rows, want the last full window", spec.rowTop, spec.rowTop+seats, len(spec.rows))
 	}
 
 	up := step(t, m, keyUp())
 	if got, want := up.inspector.top, spec.rowTop-1; got != want {
 		t.Errorf("top = %d after ↑ from the end, want %d — the key moves from the window that was drawn", got, want)
 	}
-	if page := step(t, m, keyPgUp()); page.inspector.top != max(0, spec.rowTop-spec.maxRows) {
+	if page := step(t, m, keyPgUp()); page.inspector.top != max(0, spec.rowTop-seats) {
 		t.Errorf("top = %d after pgup, want a full window back from %d", page.inspector.top, spec.rowTop)
 	}
 	if down := step(t, m, keyDown()); down.inspector.top != spec.rowTop {
@@ -994,12 +995,13 @@ func TestInspectScopedOpensOnTheViewedRunsNewestRecord(t *testing.T) {
 	if !seated {
 		t.Fatal("the frame seated no pane for a full run")
 	}
-	if len(spec.rows) <= spec.maxRows {
-		t.Fatalf("precondition: %d rows into a window of %d — the run must overflow the pane", len(spec.rows), spec.maxRows)
+	seats := reportSeats(spec)
+	if len(spec.rows) <= seats {
+		t.Fatalf("precondition: %d rows into a window of %d — the run must overflow the pane", len(spec.rows), seats)
 	}
-	if spec.rowTop+spec.maxRows != len(spec.rows) {
+	if spec.rowTop+seats != len(spec.rows) {
 		t.Fatalf("window [%d,%d) of %d rows, want the last full window of the run's own list",
-			spec.rowTop, spec.rowTop+spec.maxRows, len(spec.rows))
+			spec.rowTop, spec.rowTop+seats, len(spec.rows))
 	}
 }
 
@@ -1022,9 +1024,9 @@ func TestInspectorFollowsTheTrafficArrivingUnderIt(t *testing.T) {
 	if !seated {
 		t.Fatal("the frame seated no pane for the ring")
 	}
-	if len(spec.rows) <= spec.maxRows {
+	if seats := reportSeats(spec); len(spec.rows) <= seats {
 		t.Fatalf("precondition: %d rows into a window of %d — the ring must overflow the pane for a follow to mean anything",
-			len(spec.rows), spec.maxRows)
+			len(spec.rows), seats)
 	}
 
 	m = growInspectorRecords(t, m, 6)
@@ -1033,9 +1035,9 @@ func TestInspectorFollowsTheTrafficArrivingUnderIt(t *testing.T) {
 	if !seated {
 		t.Fatal("the frame seated no pane for the grown ring")
 	}
-	if grown.rowTop+grown.maxRows != len(grown.rows) {
+	if seats := reportSeats(grown); grown.rowTop+seats != len(grown.rows) {
 		t.Errorf("window [%d,%d) of %d rows without a keystroke, want the last full window of the grown ring",
-			grown.rowTop, grown.rowTop+grown.maxRows, len(grown.rows))
+			grown.rowTop, grown.rowTop+seats, len(grown.rows))
 	}
 	newest := "request · turn " + strconv.Itoa(m.wire[len(m.wire)-1].turn)
 	if painted := strip(m.renderInspector()); !strings.Contains(painted, newest) {

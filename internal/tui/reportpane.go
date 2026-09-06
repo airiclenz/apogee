@@ -200,9 +200,34 @@ func (m Model) reportContent(r reportKind) reportContent {
 // not the composition's only reader, and the KEYS and the WHEEL have to be told about the very window
 // that was drawn (reportWindow) rather than a second derivation of it.
 func (m Model) reportSpec(r reportKind, c reportContent) (popupSpec, bool) {
-	maxBody, shown, seated := m.popupBudget(r.pane(), len(c.rows), c.rowCap, popupChrome, popupFloor{})
+	// The house blanks around the row block (popupSpec.rowPadAbove, popupRowStyle.padBelow) — one
+	// under whatever stands above the reading, one over the key legend — are BOOKED here, in the same
+	// arithmetic that asks the frame for the rows: what popupBudget is handed and hands back is LINES,
+	// so a pane asking for its rows alone would draw the two blanks out of the rows' own window and
+	// show two rows fewer than its taste on a terminal with the lines to spare (renderList books them
+	// the same way). RESERVING that window is the painter's business and not this call's — it takes
+	// the pads off the grant before it seats a row, and hands them back at the floor
+	// (popupRowLinesAt) — so a report too tall for its window gives up its breathing room rather than
+	// a row of the reading.
+	pad := popupRowPadLines(len(c.rows) > 0, c.hint != "")
+	maxBody, shown, seated := m.popupBudget(r.pane(), len(c.rows)+pad, c.rowCap+pad, popupChrome, popupFloor{})
 	if !seated {
 		return popupSpec{}, false
+	}
+	// The spec is composed before its rowTop is known, because the clamp below asks the PAINTER how
+	// many rows this very spec seats (reportFullWindow) and has nothing to ask with until it exists.
+	spec := popupSpec{
+		title:       c.title,
+		body:        c.body,
+		maxBodyRows: maxBody,
+		rows:        c.rows,
+		rowKinds:    c.kinds,
+		rowPadAbove: true,                          // the blank between what stands above the block and the reading
+		rowStyle:    popupRowStyle{padBelow: true}, // and the one between the reading and the key legend
+		selected:    -1,                            // a report has no selection: nothing here is chosen (the popup module's convention)
+		hint:        c.hint,
+		maxRows:     shown,
+		scrollbar:   m.popupScrollbarOn(),
 	}
 	// The scroll is clamped to the LAST full window rather than to the last row: a report scrolled to
 	// its end shows a full pane of rows, and a stale offset — the grant shrank with the window, or the
@@ -214,23 +239,29 @@ func (m Model) reportSpec(r reportKind, c reportContent) (popupSpec, bool) {
 	// while records arrive under them, and what lands an opening pane on the newest record — the verbs
 	// arm the follow and set the top past the last row (runInspectCommand, runThinkingCommand), so it
 	// is the follow rather than the clamp that answers for where they open.
-	last := max(0, len(c.rows)-shown)
-	rowTop := clampInt(m.reportState(r).top, 0, last)
+	last := max(0, len(c.rows)-m.reportFullWindow(spec))
+	spec.rowTop = clampInt(m.reportState(r).top, 0, last)
 	if r.follows() && m.reportState(r).follow {
-		rowTop = last
+		spec.rowTop = last
 	}
-	return popupSpec{
-		title:       c.title,
-		body:        c.body,
-		maxBodyRows: maxBody,
-		rows:        c.rows,
-		rowKinds:    c.kinds,
-		selected:    -1, // a report has no selection: nothing here is chosen (the popup module's convention)
-		rowTop:      rowTop,
-		hint:        c.hint,
-		maxRows:     shown,
-		scrollbar:   m.popupScrollbarOn(),
-	}, true
+	return spec, true
+}
+
+// reportFullWindow is how many ROWS the pane seats with its scroll at the TOP, asked of the painter
+// with the very spec about to be drawn. The clamp above needs that count and cannot do the sum
+// itself: the row window is what is left of the grant once the painter has reserved the two house
+// blanks, and at the pane's floor it hands them BACK to the rows (popupRowLinesAt) — so a grant with
+// the pads subtracted beside it names the wrong window on exactly the shortest terminals. Asking
+// costs one composition, the price [Model.reportWindow] already pays for the same reason: the
+// painter is the authority on which rows are on the screen.
+//
+// It is asked at rowTop 0 because the LAST FULL window is what the clamp is about. A window opened
+// at a top near the end of the list seats only the rows still under it, and a clamp measured against
+// that count would keep moving with the offset it is supposed to correct.
+func (m Model) reportFullWindow(spec popupSpec) int {
+	spec.rowTop = 0
+	_, place := renderPopupPlaced(m.th, spec, m.width)
+	return place.end - place.start
 }
 
 // renderReport paints the named report, or "" when it is closed or the frame cannot seat it.

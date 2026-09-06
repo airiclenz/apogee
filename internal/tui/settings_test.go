@@ -477,11 +477,52 @@ func TestSettingsRowCellsStripEscapes(t *testing.T) {
 	}
 }
 
+// TestSettingsPaneBreathesAboveItsHint pins this pane's two ends, which are the house rule spent
+// one blank instead of two: the blank the DESCRIPTION region closes with (settingsBody) is the
+// pane's breathing row above its list — the pane asks for no popupSpec.rowPadAbove of its own, and
+// the region still closes on exactly the two blanks it always did — while the list stands one blank
+// clear of the key legend below it (popupRowStyle.padBelow), like every other boxed pane.
+func TestSettingsPaneBreathesAboveItsHint(t *testing.T) {
+	m := settingsFrameModel(t, 80, 24, 40)
+	lines := popupLines(m.frameOverlays().settings)
+
+	desc := -1
+	for i, line := range lines {
+		if strings.HasPrefix(popupInterior(line), settingsDescLabel) {
+			desc = i
+			break
+		}
+	}
+	if desc < 0 {
+		t.Fatalf("the pane paints no %q header:\n%s", settingsDescLabel, strip(m.frameOverlays().settings))
+	}
+	// The region is settingsDescLines tall and closes with a blank of its own: with a one-line
+	// description that is two blanks, the second of them the block's breathing row.
+	for i := desc + 1; i <= desc+settingsDescLines; i++ {
+		if got := popupInterior(lines[i]); got != "" {
+			t.Errorf("line %d under %q is %q, want one of the region's two blanks", i-desc, settingsDescLabel, got)
+		}
+	}
+	if got := popupInterior(lines[desc+settingsDescLines+1]); got == "" {
+		t.Errorf("the list opens on a third blank under %q, want it flush against the region's own",
+			settingsDescLabel)
+	}
+	if got := popupInterior(lines[len(lines)-3]); got != "" {
+		t.Errorf("the line over the key legend is %q, want the blank the list closes on", got)
+	}
+	if got := popupInterior(lines[len(lines)-2]); got == "" {
+		t.Errorf("the pane closes on a blank rather than on its key legend:\n%s", strip(m.frameOverlays().settings))
+	}
+}
+
 // The full-height rule: while the pane is open the transcript keeps NO rows at all, and the pane is
 // as tall as the whole budget the frame had to give — not the eight-row window the picker and the
 // browser cap themselves at (ratified call 1 of the settings-screen plan).
 func TestSettingsPaneClaimsTheWholeTranscriptBudget(t *testing.T) {
-	m := settingsFrameModel(t, 80, 24, 40)
+	// Two rows taller than the package's usual 24-row fixture: the pane now spends one of its lines
+	// on the blank over its key legend (settingsKeyListSpec), and at 24 rows the budget left it
+	// exactly the picker's eight — a tie the claim below cannot be read off.
+	m := settingsFrameModel(t, 80, 26, 40)
 
 	ov := m.frameOverlays()
 	budget := m.transcriptBudget()

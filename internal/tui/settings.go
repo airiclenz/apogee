@@ -1289,8 +1289,11 @@ type settingsDisplay struct {
 //
 // The spacer is what makes the sections read as sections (docs/layout/settings-screen-layout.md) —
 // a header flush against the last key of the section above it divides nothing — and the FIRST
-// header is the one that goes without: the description header above it already closes with a blank
-// line of its own (settingsBody), and two blanks would open the pane on a gap.
+// header is the one that goes without: the blank the description region closes with (settingsBody)
+// IS this pane's breathing row above its block, the one every other boxed pane spends
+// popupSpec.rowPadAbove on, so the pane does not ask for that pad and a second blank here would open
+// it on a two-line gap. The t16-settings-rows frame holds both — that one blank above the first
+// header, and the one over the key legend (popupRowStyle.padBelow).
 func (m Model) settingsDisplayRows(rows []SettingRow, selected int) settingsDisplay {
 	if len(rows) == 0 {
 		return settingsDisplay{rows: singleCellRows([]string{noSettingsRow}), selected: -1}
@@ -1715,13 +1718,21 @@ func (m Model) renderSettings() string {
 func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDisplay, bool) {
 	display := m.settingsDisplayRows(rows, m.settingsSelection(len(rows)))
 	body := m.settingsBody(rows)
+	hint := m.settingsPaneHint(rows)
+	// The blank over the key legend (popupRowStyle.padBelow) is BOOKED here, in the same arithmetic
+	// that asks the frame for the rows: what popupBudget takes and returns is LINES, so a pane asking
+	// for its rows alone would draw the blank out of the list's own window and show one key fewer than
+	// it has room for (renderList books its pads the same way). The pane asks for no blank ABOVE its
+	// block — the description region closes with one of its own (settingsBody) and a second would open
+	// the list on a two-line gap (settingsDisplayRows).
+	pad := popupRowPadLines(false, hint != "")
 	// The body's own claim is its real height — the fixed description region and the blank under it
 	// (settingsBody), or none when no row is highlighted — rather than a taste, exactly as the ask
 	// prompt states its question's (popupFloor). Stating it is what seats the header ahead of the
 	// list on every window the pane is drawn in: the claim comes off the top of the grant, bounded
 	// only by the one line the rows keep for the row the window is anchored on, so it is the LIST
 	// that scrolls and never the header that goes.
-	maxBody, maxRows, seated := m.popupBudget(paneSettings, len(display.rows), len(display.rows),
+	maxBody, maxRows, seated := m.popupBudget(paneSettings, len(display.rows)+pad, len(display.rows)+pad,
 		popupChrome, popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
 	if !seated {
 		return popupSpec{}, settingsDisplay{}, false
@@ -1733,8 +1744,9 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 		maxBodyRows: maxBody,
 		rows:        display.rows,
 		rowKinds:    display.kinds,
+		rowStyle:    popupRowStyle{padBelow: true},
 		selected:    display.selected,
-		hint:        m.settingsPaneHint(rows),
+		hint:        hint,
 		maxRows:     maxRows,
 		scrollbar:   m.popupScrollbarOn(),
 	}, display, true
@@ -1802,7 +1814,12 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 	// the painter's own composition rather than counted off the value, which would ask for too few the
 	// moment a line wrapped and hide the tail of a prompt the pane had room for.
 	claim := popupRowBlockLines(popupRowHeights(popupRowBlocks(m.th, text, true, popupInnerWidth(m.th, m.width))), 0, 0)
-	maxBody, maxRows, seated := m.popupBudget(paneSettings, claim, claim, popupChrome,
+	hint := m.settingsPaneHint(rows)
+	// The blank over the key legend, booked into the claim in LINES for the reason the key list books
+	// it (settingsKeyListSpec) — the field breathes above its legend exactly as the list does, and no
+	// blank above the block, the description region having closed with one.
+	pad := popupRowPadLines(false, hint != "")
+	maxBody, maxRows, seated := m.popupBudget(paneSettings, claim+pad, claim+pad, popupChrome,
 		popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
 	if !seated {
 		return popupSpec{}, false
@@ -1814,9 +1831,10 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 		maxBodyRows: maxBody,
 		rows:        text,
 		rowKinds:    kinds,
+		rowStyle:    popupRowStyle{padBelow: true},
 		wrapRows:    true,
 		selected:    clampInt(m.settings.editor.caretLine(), 0, len(text)-1),
-		hint:        m.settingsPaneHint(rows),
+		hint:        hint,
 		maxRows:     maxRows,
 		scrollbar:   m.popupScrollbarOn(),
 	}, true

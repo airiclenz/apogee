@@ -148,7 +148,23 @@ Depends on items 0 and 1.
 
 **Commit:** `feat(tui): every list pop-up keeps a blank row under its title and above its hint`
 
-## 5. The report panes and /settings breathe
+## 5. The report panes and /settings breathe — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the pads ride `popupSpec.rowPadAbove` / `popupRowStyle.padBelow`, booked into the demand AND the cap handed to `popupBudget` through `popupRowPadLines` — reports set both flags, `/settings` only `padBelow` — and the painter (item 1) owns the reservation, so neither caller subtracts anything.
+
+NOTES (2026-09-06): `reportSpec`'s last-full-window clamp no longer subtracts the pads from the grant. `popupSpec.maxRows` is now LINES, and the painter hands both pads back at the floor, so the row count is asked of the painter itself through a new `Model.reportFullWindow` (one `renderPopupPlaced` at `rowTop` 0 — the price `reportWindow` already pays), exactly as the item's regression guard requires. The spec is therefore composed before its `rowTop` is set.
+
+NOTES (2026-09-06): consequential test edits — a report spec's `maxRows` reads as LINES now, so the assertions that read it as a ROW count go through a new `reportSeats` helper in `reportpane_test.go`: `reportpane_test.go` (2 window assertions, 2 growth helpers), `inspector_test.go` (5 sites), `thinkingpane_test.go` (3 sites), `popup_test.go:2250` (the /usage overflow precondition). No assertion was weakened; each now names the rows the frame granted rather than the lines.
+
+NOTES (2026-09-06): `TestSettingsPaneClaimsTheWholeTranscriptBudget`'s fixture went from 80×24 to 80×26. The pane spends one of its lines on the new blank, and at 24 rows the budget left it exactly the picker's eight-row taste — a tie the test's "well past maxPickerRows" claim cannot be read off. Every other assertion in it is height-agnostic and unchanged.
+
+NOTES (2026-09-06): deviation — the item says the `settings-screen-layout.md` sub-list mockups (the selection popup, the Mechanism catalogue) "gain both" blanks; they gained only the one above the hint, because `renderList` withholds `rowPadAbove` from a pane that carries a body and `renderSettingsSubList` sets no `bodyPad` (item 4's landed rule, `listsurface.go:483`). The mockups show what the code paints. The missing blank under those two questions is already on this run's ledger as item 4's DEFER, so it is not re-filed here.
+
+NOTES (2026-09-06): folded in one doc site the item does not name — the multi-line-field mockup (`system-prompt-text`) gained the blank above its hint, `settingsTextSpec` being one of the two specs this item changes.
+
+NOTES (2026-09-06): `internal/tui/paint_test.go` is on the item's **Files:** list but needed no amendment — `TestPaintedSettingsPaneAtItsFourRowFloor` is unchanged and green, as the item's Tests line states; `TestSettingsClickSelectsTheRowUnderThePointer` (`mouse_test.go:2741`) is green too, `popupPlacement.rowsAt` already stepping past the block's lead.
+
+NOTES (2026-09-06): new tests are `TestReportPaneBreathes` (usage_test.go — an overflowing /usage at 80×24: blank under the title, blank over the legend, the window two rows shorter than the grant, and the scrollbar column exactly as long as the rows; then `smallestOverlayWindow`, 17 and 18, where no blank is painted and the rows are the whole grant) and `TestSettingsPaneBreathesAboveItsHint` (settings_test.go — still exactly the two blanks under `Description:`, the list flush on the second of them, and one blank over the key legend).
 
 Depends on items 0 and 1.
 

@@ -65,13 +65,17 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 │                                                                                              │
 │   Model profile                                                                              │
 │   model-profile         native       · ⏎ opens $EDITOR                                       │
+│                                                                                              │
 │ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 The `Description:` header is a **fixed two-line region** with a blank line closing it, so walking the
 list moves the highlight and nothing else; a longer description loses its tail to an `…` rather than
-the list losing a row. Rows are four cells — key, value, an `(env)`/`(flag)` mark, and the note or
+the list losing a row. That closing blank is also this pane's **breathing row** above the list — the
+one every other boxed pane spends on itself, which is why the pane asks for none of its own — and the
+blank above the key legend is its counterpart below. Both are bought out of the row window rather
+than out of the pane's height, so a short terminal gives them up and keeps the keys. Rows are four cells — key, value, an `(env)`/`(flag)` mark, and the note or
 pointer — and the last two columns collapse away entirely on a configuration with nothing overridden
 and nothing read-only.
 
@@ -103,6 +107,7 @@ and a write whose apply then failed reads `✗ saved — live apply failed: …`
 │ ❯ ask-before   (current)                                                                     │
 │ · allow-edits                                                                                │
 │ · auto                                                                                       │
+│                                                                                              │
 │ ↑/↓ select · ⏎ set · esc back                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -129,6 +134,7 @@ longer names. Choosing a different server is how this key changes.
 │ ❯ codeinfo                on                                                                ▐│
 │ · guided_decomposition    off                                                               ░│
 │ · tool_result_cap         off                                                               ░│
+│                                                                                              │
 │ ⏎/space toggle · esc back                                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -178,6 +184,7 @@ becoming the space that stood where the break was. The hint reads `⏎ save · e
 │   You are apogee.                                                                            │
 │                                                                                              │
 │ ❯ Be brief.▏                                                                                 │
+│                                                                                              │
 │ ctrl+s save · esc discard                                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
