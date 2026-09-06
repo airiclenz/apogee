@@ -108,6 +108,11 @@ var (
 	_ apogee.ConfinementCaps
 	_ apogee.ConfinementBox
 	_ apogee.Session
+	_ apogee.Hook
+	_ apogee.HookEvent
+	_ apogee.HookPayload
+	_ apogee.HookOptions
+	_ apogee.HookRunner
 )
 
 // Forwarding constructors — referenced as values so the facade keeps delegating them.
@@ -120,6 +125,7 @@ var (
 	_ = apogee.BuildMechanisms
 	_ = apogee.CataloguedMechanisms
 	_ = apogee.DecodeSession
+	_ = apogee.NewHookRunner
 )
 
 // Re-exported consts and sentinel errors — one reference each.

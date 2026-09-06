@@ -39,6 +39,7 @@ package apogee
 import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 )
 
@@ -599,6 +600,40 @@ type Session = domain.Session
 // DecodeSession deserializes a session, returning ErrSessionVersion if the schema
 // version is newer than this build understands.
 func DecodeSession(data []byte) (Session, error) { return domain.DecodeSession(data) }
+
+// ----------------------------------------------------------------------------
+// Hooks (internal/hooks) — observe-only Driver-side reactions (ADR 0073)
+// ----------------------------------------------------------------------------
+
+// Hook is one entry of the user's global `hooks:` list: the events it fires on, the one
+// action it takes (an argv command or a webhook POST), and the workspace it is scoped to.
+// A Hook is the HOST's reaction to the engine's event stream, not a model action: nothing it
+// prints or answers reaches the model, the conversation or the Session record, and it can
+// neither veto nor delay the loop. It is unrelated to HookPoint, which is where a Mechanism
+// fires INSIDE the loop.
+type Hook = hooks.Hook
+
+// HookEvent names one of the five post-hoc moments a Hook may fire on, spelled as the
+// `events:` list spells it. It is the Hook vocabulary, not the engine's Event sum type.
+type HookEvent = hooks.Event
+
+// HookPayload is the JSON document a fired Hook receives — on stdin for a command, as the
+// POST body for a webhook. Its field names are a documented contract for the user's script.
+type HookPayload = hooks.Payload
+
+// HookOptions are the facts a HookRunner cannot derive: the sink it decorates, the workspace
+// it is rooted in, the Schedule a Firing runs for, where failures are reported, and how a
+// Hook reaches the outside world.
+type HookOptions = hooks.Options
+
+// HookRunner is the observe-only EventSink decorator that fires Hooks. A Driver installs one
+// as Config.Events, wrapping whatever sink it already had; Emit never blocks the loop, and
+// Close drains the workers within the grace its context allows.
+type HookRunner = hooks.Runner
+
+// NewHookRunner builds a HookRunner over a Hook list, keeping the entries active at the given
+// workspace and starting one worker per survivor. See internal/hooks for the contract.
+func NewHookRunner(list []Hook, o HookOptions) (*HookRunner, error) { return hooks.New(list, o) }
 
 // ----------------------------------------------------------------------------
 // Sentinel errors (internal/domain)

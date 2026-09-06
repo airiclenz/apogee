@@ -26,4 +26,6 @@
 // the SUBSCRIBED set so an unsubscribed event costs nothing.
 // workspace.go is the one path resolution the `workspace:` filter and the root's own workspace
 // are both compared through, so the two readings can never disagree.
+// runner.go is the sink decorator itself — the Executor seam, the per-Hook queues and workers,
+// the Driver-facing failure reporter, and the reload (Replace) and shutdown (Close) paths.
 package hooks
