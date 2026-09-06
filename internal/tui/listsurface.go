@@ -478,6 +478,19 @@ type listContent struct {
 // on the roomy terminals where the pane has lines to spare, and dropped by taking a row past the
 // pane's own taste.
 func (m Model) renderList(c listContent) string {
+	view, _, _ := m.renderListPlaced(c)
+	return view
+}
+
+// renderListPlaced is that same paint with the painter's own PLACEMENT beside it — where the row
+// block landed in the box and which of the spec's rows each of its lines belongs to
+// (popupPlacement) — and whether the frame could seat the pane at all. It is the call a POINTER
+// gesture goes through (popupPaneHit, mouse.go): the row under a click is read off the numbers the
+// painter spent rather than re-derived from the title, the hint, the row cap and the filter a
+// second time, so a click and the frame it was aimed at can never disagree about which row is
+// where. renderList above is this call with the placement dropped, for every caller that only
+// paints.
+func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 	claim := popupFloor{}
 	if c.body != "" {
 		claim.body = popupBodyLineCount(m.th, c.body, m.width) + popupBodyPadLines(c.bodyPad, c.bodyPad)
@@ -501,9 +514,9 @@ func (m Model) renderList(c listContent) string {
 	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
 	maxBody, shown, seated := m.popupBudget(c.pane, len(c.rows)+pad, c.rowCap+pad, popupChrome, claim)
 	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+		return "", popupPlacement{}, false // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
-	return renderPopup(m.th, popupSpec{
+	view, place := renderPopupPlaced(m.th, popupSpec{
 		title:        c.title,
 		body:         c.body,
 		bodyLead:     c.bodyLead,
@@ -519,6 +532,7 @@ func (m Model) renderList(c listContent) string {
 		maxRows:      shown,
 		scrollbar:    m.popupScrollbarOn(),
 	}, m.width)
+	return view, place, true
 }
 
 // renderFilterList paints an open FILTERING list overlay: the call above, with the filter line as
@@ -529,8 +543,17 @@ func (m Model) renderList(c listContent) string {
 // An empty filter leaves the body block exactly as the pane left it — nothing at all, for both panes
 // that filter — so a list nobody has typed into is the list it was before a filter existed.
 func (m Model) renderFilterList(filter lineEditor, c listContent) string {
+	view, _, _ := m.renderFilterListPlaced(filter, c)
+	return view
+}
+
+// renderFilterListPlaced is that call with the placement beside it, for the two filtering panes a
+// pointer names rows on (renderListPlaced's doc says what the placement buys). The filter line is
+// folded in here rather than by each caller, exactly as above: a pane's rows and its wording are
+// its own, and the line, its label and its pads are the surface's.
+func (m Model) renderFilterListPlaced(filter lineEditor, c listContent) (string, popupPlacement, bool) {
 	if line := overlayFilterLine(filter); line != "" {
 		c.body, c.bodyLead, c.bodyPad = line, pickerFilterLead, true
 	}
-	return m.renderList(c)
+	return m.renderListPlaced(c)
 }

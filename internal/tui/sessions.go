@@ -292,13 +292,7 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	case listAccepts:
-		meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows)
-		if !ok {
-			return m, nil
-		}
-		m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
-		m.layout()
-		return m, m.loadSession(meta.ID)
+		return m.acceptBrowser(rows)
 	case listUnclaimed:
 		return m.sessionBrowserVerb(msg, rows)
 	case listSwallowed:
@@ -308,6 +302,29 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.layout()
 	}
 	return m, cmd
+}
+
+// acceptBrowser resumes the record the highlight names — the whole of what ⏎ MEANS on this pane, in
+// one place because the POINTER spells it too (handleBrowserClick, mouse.go): a click on the
+// highlighted row is that ⏎, and two routes to a session resume must not be two readings of which
+// session that is.
+//
+// rows is the UNFILTERED composition the caller already made for this gesture, because that is what
+// [sessionBrowser.record] resolves the highlight through: the highlight indexes the rows the pane
+// PAINTS, and with a filter typed "the third painted row" and "the third record saved" are different
+// sessions. A list that emptied between the two reads takes the accept and nothing else.
+//
+// The load rides back as a Cmd rather than happening here: the resume runs when the record arrives
+// (sessionLoadedMsg), so a caller that dropped the Cmd would close the pane over a session that
+// never loads.
+func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
+	meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows)
+	if !ok {
+		return m, nil
+	}
+	m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
+	m.layout()
+	return m, m.loadSession(meta.ID)
 }
 
 // sessionBrowserVerb answers the three keys that are this browser's alone and no list's — the chords
@@ -619,9 +636,31 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 // is counted onto the title row (popupTitleLine) so a browser showing no sessions can be told apart
 // from a workspace that has none.
 func (m Model) renderSessionBrowser() string {
+	view, _ := m.renderSessionBrowserPlaced()
+	return view
+}
+
+// renderSessionBrowserPlaced is that paint with the painter's PLACEMENT beside it, for the pointer
+// (popupPaneHit, mouse.go): a click reads the row it landed on off the numbers the painter spent
+// rather than off a second arithmetic of its own. renderSessionBrowser above is this call with the
+// placement dropped.
+func (m Model) renderSessionBrowserPlaced() (string, popupPlacement) {
+	c, ok := m.browserListContent()
+	if !ok {
+		return "", popupPlacement{}
+	}
+	view, place, _ := m.renderFilterListPlaced(m.sessionBrowser.filter, c)
+	return view, place
+}
+
+// browserListContent is everything the browser says about itself to the shared list surface — its
+// slot, its title, its legend, its taste in rows, and either the filtered session rows or the one
+// line of prose an empty workspace gets. ok is false with the overlay closed, which is what makes
+// both renders above answer with nothing rather than with a pane.
+func (m Model) browserListContent() (listContent, bool) {
 	b := m.sessionBrowser
 	if !b.open {
-		return ""
+		return listContent{}, false
 	}
 	scope := "this workspace"
 	if b.allWorkspaces {
@@ -644,7 +683,7 @@ func (m Model) renderSessionBrowser() string {
 		c.rows = sessionRows(b, m.opts.Workspace, time.Now())
 		c.selected = b.highlight(len(c.rows))
 	}
-	return m.renderFilterList(b.filter, c)
+	return c, true
 }
 
 // sessionRows composes the row list the popup module paints: the filtered view's rows (browserView

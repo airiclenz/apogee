@@ -1097,18 +1097,40 @@ func (m Model) pickerFilteredView() pickerView {
 // three cost and the trade on a window too short for everything are the surface's
 // (renderFilterList).
 func (m Model) renderPicker() string {
+	view, _ := m.renderPickerPlaced()
+	return view
+}
+
+// renderPickerPlaced is that paint with the painter's PLACEMENT beside it, for the pointer
+// (popupPaneHit, mouse.go): a click reads the row it landed on off the numbers the painter spent
+// rather than off a second arithmetic of its own. renderPicker above is this call with the
+// placement dropped.
+func (m Model) renderPickerPlaced() (string, popupPlacement) {
+	c, ok := m.pickerListContent()
+	if !ok {
+		return "", popupPlacement{}
+	}
+	view, place, _ := m.renderFilterListPlaced(m.picker.filter, c)
+	return view, place
+}
+
+// pickerListContent is everything the picker says about itself to the shared list surface — its
+// slot, its name, its legend, its taste in rows, the FILTERED rows and which of them the highlight
+// is on. ok is false with the overlay closed, which is what makes both renders above answer with
+// nothing rather than with a pane.
+func (m Model) pickerListContent() (listContent, bool) {
 	if !m.picker.open {
-		return ""
+		return listContent{}, false
 	}
 	rows := m.pickerRows()
-	return m.renderFilterList(m.picker.filter, listContent{
+	return listContent{
 		pane:     panePicker,
 		title:    m.pickerTitle(),
 		hint:     pickerHintFor(m.picker.kind),
 		rowCap:   maxPickerRows,
 		rows:     rows,
 		selected: m.picker.highlight(len(rows)),
-	})
+	}, true
 }
 
 // pickerTitle names what is being switched and, for the model picker, on which host — the same

@@ -4149,6 +4149,204 @@ func TestPickerWheelWalksAScheduleStep(t *testing.T) {
 	}
 }
 
+// The pointer takes two clicks to answer the picker, and the first one only moves the highlight
+// (call J, owner 2026-09-06): a click on a row seats the ❯ on it and arms it, and the SECOND click
+// on that same row is the ⏎ — here the cycle question's accept, which carries the draft on to the
+// mode question.
+func TestPickerClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
+	m := pickerPaneModel(t, pickerCycle)
+	m.picker.draft.prompt = "tidy the logs"
+	x, y := frameCell(t, m, "15m")
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.picker.selected != 2 {
+		t.Fatalf("selected = %d after a click on the third cycle, want the highlight seated on 2", m.picker.selected)
+	}
+	if !m.clickArmed.holds(panePicker, 2) {
+		t.Errorf("the click armed %+v, want the row it highlighted", m.clickArmed)
+	}
+	if m.picker.kind != pickerCycle {
+		t.Fatalf("kind = %v after one click, want the cycle question still up", m.picker.kind)
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.picker.kind != pickerScheduleMode {
+		t.Fatalf("kind = %v after the second click, want the accept to move on to the mode question", m.picker.kind)
+	}
+	if m.picker.draft.cycle != 15*time.Minute {
+		t.Errorf("draft cycle = %v, want the clicked row's %v", m.picker.draft.cycle, 15*time.Minute)
+	}
+	if m.clickArmed.ok {
+		t.Errorf("the arm outlived the accept: %+v", m.clickArmed)
+	}
+}
+
+// The clicked row is resolved through the FILTER, exactly as ⏎ resolves it (ADR 0053 D5): with
+// "hour" typed the pane paints 1h and 4h, and a click on the first painted row takes 1h — not the
+// 1m that stands first in the unfiltered offering.
+func TestPickerClickTakesTheFilteredRow(t *testing.T) {
+	m := pickerPaneModel(t, pickerCycle)
+	m.picker.draft.prompt = "tidy the logs"
+	for _, r := range "hour" {
+		m = step(t, m, keyRune(r))
+	}
+	if got := m.pickerCount(); got != 2 {
+		t.Fatalf("the filter leaves %d rows, want the 2 the mapping is asserted over", got)
+	}
+	x, y := frameCell(t, m, "1h")
+
+	m = step(t, m, leftClick(x, y))
+	m = step(t, m, leftClick(x, y))
+
+	if m.picker.kind != pickerScheduleMode {
+		t.Fatalf("kind = %v after two clicks, want the cycle accepted", m.picker.kind)
+	}
+	if m.picker.draft.cycle != time.Hour {
+		t.Errorf("draft cycle = %v, want the filtered row's %v rather than the unfiltered first row",
+			m.picker.draft.cycle, time.Hour)
+	}
+}
+
+// The /sessions browser answers the same two clicks, and the second one is acceptBrowser — the very
+// call ⏎ makes (sessions.go), whose loadSession Cmd has to survive the click or the pane closes over
+// a session that never loads.
+func TestBrowserClickHighlightsThenTheSecondClickResumes(t *testing.T) {
+	m := browserPaneModel(t, 12)
+	x, y := frameCell(t, m, "session number 03")
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.sessionBrowser.selected != 3 {
+		t.Fatalf("selected = %d after a click on the fourth session, want the highlight seated on 3",
+			m.sessionBrowser.selected)
+	}
+	if !m.clickArmed.holds(paneBrowser, 3) {
+		t.Errorf("the click armed %+v, want the row it highlighted", m.clickArmed)
+	}
+	if !m.sessionBrowser.open {
+		t.Fatal("the first click closed the browser; a single click may never resume a session")
+	}
+
+	m, cmd := stepCmd(t, m, leftClick(x, y))
+
+	if m.sessionBrowser.open {
+		t.Error("the browser is still up after the resuming click")
+	}
+	if cmd == nil {
+		t.Error("the click dropped acceptBrowser's Cmd; without it the record never loads")
+	}
+	if m.clickArmed.ok {
+		t.Errorf("the arm outlived the accept: %+v", m.clickArmed)
+	}
+}
+
+// A live rename edit or delete confirm is a modal surface within the modal: it owns the pane until
+// it is answered, so a click over it moves nothing, resumes nothing and — the browser being modal —
+// never reaches the transcript behind it.
+func TestBrowserClickIsSwallowedByARenameOrAConfirm(t *testing.T) {
+	base := browserPaneModel(t, 12)
+	x, y := frameCell(t, base, "session number 03")
+
+	for _, tc := range []struct {
+		name string
+		arm  func(Model) Model
+	}{
+		{"a rename edit", func(m Model) Model { m.sessionBrowser.renaming = true; return m }},
+		{"a delete confirm", func(m Model) Model { m.sessionBrowser.confirming = true; return m }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.arm(base)
+
+			after := step(t, m, leftClick(x, y))
+
+			if after.sessionBrowser.selected != m.sessionBrowser.selected {
+				t.Errorf("selected = %d, want the armed surface to swallow the click and leave it at %d",
+					after.sessionBrowser.selected, m.sessionBrowser.selected)
+			}
+			if !after.sessionBrowser.open {
+				t.Error("the click closed the browser out from under a question the human is answering")
+			}
+			if after.transcriptSel.active {
+				t.Error("the swallowed click armed a transcript selection; the modal owns it")
+			}
+			if after.clickArmed.ok {
+				t.Errorf("the swallowed click armed a row: %+v", after.clickArmed)
+			}
+		})
+	}
+}
+
+// Outside the box these two are MODAL, so the click that closes them is spent on closing them (call
+// C as the owner amended it): the pane goes, and nothing underneath — no transcript selection, no
+// caret seat — hears the click that dismissed it.
+func TestListPaneClickOutsideTheBoxClosesItAndReachesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pane framePane
+		open func(Model) bool
+		make func(t *testing.T) Model
+	}{
+		{
+			name: "the /sessions browser",
+			pane: paneBrowser,
+			open: func(m Model) bool { return m.sessionBrowser.open },
+			make: func(t *testing.T) Model { t.Helper(); return browserPaneModel(t, 12) },
+		},
+		{
+			name: "the picker",
+			pane: panePicker,
+			open: func(m Model) bool { return m.picker.open },
+			make: func(t *testing.T) Model { t.Helper(); return pickerPaneModel(t, pickerCycle) },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.make(t)
+			paneTop, _, ok := m.frameSpans().pane(tc.pane)
+			if !ok {
+				t.Fatal("the pane is not on the frame")
+			}
+			if paneTop == 0 {
+				t.Fatal("the pane starts on the first row; there is nothing above it to aim at")
+			}
+
+			after := step(t, m, leftClick(0, paneTop-1))
+
+			if tc.open(after) {
+				t.Error("a click outside the box left the modal standing")
+			}
+			if after.transcriptSel.active {
+				t.Error("the dismissing click also armed a transcript selection; a modal's dismissal is the whole of it")
+			}
+			if after.clickArmed.ok {
+				t.Errorf("the dismissing click armed a row: %+v", after.clickArmed)
+			}
+		})
+	}
+}
+
+// With the pane SHUT, a click in the band it would have filled is nobody's but the transcript's: the
+// open gate is asked before the rectangle, so a handler cannot dismiss a pane that is not there or
+// swallow a click using a rectangle belonging to whatever the slot is holding instead.
+func TestClickWhereAClosedListPaneWouldStandFallsThrough(t *testing.T) {
+	open := browserPaneModel(t, 12)
+	paneTop, h, ok := open.frameSpans().pane(paneBrowser)
+	if !ok {
+		t.Fatal("the browser is not on the frame; there is no band to aim at")
+	}
+	shut := streamOneScreen(t, newTestModel(t))
+
+	after := step(t, shut, leftClick(0, paneTop+h/2))
+
+	if !after.transcriptSel.active {
+		t.Error("the click armed no transcript selection; with no pane up the band is the transcript's")
+	}
+	if after.clickArmed.ok {
+		t.Errorf("a click on a frame carrying no list pane armed a row: %+v", after.clickArmed)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Mouse in the approval and ask prompts (approval.go)
 // ----------------------------------------------------------------------------
@@ -5066,12 +5264,13 @@ func TestClickOnTheFooterModeMarkerIsRefusedWhereThePickerCannotBeAnswered(t *te
 		wantKind pickerKind
 	}{
 		{
-			// The one case with something to preserve: the open overlay must survive untouched
-			// rather than be replaced by a second one stacked under the same key routing.
-			name:     "a picker is already open",
-			block:    func(m Model) Model { m.picker = picker{open: true, kind: pickerModel}; m.layout(); return m },
-			wantOpen: true,
-			wantKind: pickerModel,
+			// The footer is OUTSIDE the open overlay's box, and since the pointer's outside-click
+			// rule landed (call C, owner 2026-09-06) that click is the picker's own: it dismisses
+			// the overlay and is spent on doing so (handlePickerClick), so the marker's handler is
+			// never reached. What this case guards is unchanged — no second overlay is stacked
+			// under the same key routing.
+			name:  "a picker is already open",
+			block: func(m Model) Model { m.picker = picker{open: true, kind: pickerModel}; m.layout(); return m },
 		},
 		{
 			name:  "a call is awaiting approval",

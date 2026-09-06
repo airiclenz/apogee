@@ -46,6 +46,20 @@ const (
 	dropdownTitle = "commands and skills"
 	pickerTitle   = "schedule — how often"
 	browserHint   = "type to filter · ↑/↓ select · ⏎ resume"
+
+	// The /schedule round the picker click drives, and the rows and the confirmation line it is
+	// steered by: the cycle gloss and the mode gloss are each unique on the frame, so the pointer is
+	// aimed at the row the pane actually painted rather than at a word the chrome also spells.
+	schedulePrompt    = "/schedule tidy the logs"
+	scheduleModeTitle = "schedule — autonomy mode"
+	scheduleCycleRow  = "every 15 minutes"
+	schedulePlanRow   = "read-only — it reads and reports"
+	scheduleCreated   = "schedule tidy the logs — every 15m"
+
+	// The one exchange the /sessions browser is given a record to list, and the line the resumed
+	// record repaints — the proof the clicked row actually loaded.
+	browserPrompt = "Hello there."
+	browserRow    = "Popup frames"
 )
 
 // popupRedactions is goldenRedactions plus the one age the default set does not cover: a record
@@ -209,6 +223,96 @@ func TestE2EPopupClickApproval(t *testing.T) {
 	drv.WaitGone(approvalMarker)
 	drv.WaitFor(func() bool { return stubSawMessage(stub, "tool call denied by approver") },
 		tuitest.Awaiting("the clicked denial to reach the model"))
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// TestE2EPopupClickLists drives the two MODAL list pop-ups with the pointer, through the same SGR
+// bytes: the picker across BOTH of /schedule's questions, and the /sessions browser onto a saved
+// record. Two clicks per row throughout — the first seats the highlight, the second is the ⏎ — and
+// what only a real program can show is at each end of that: a Schedule that exists because a pointer
+// created it, and a session whose stored scrollback is back on the screen because a pointer resumed
+// it. The semantics are asserted at the reducer (internal/tui/mouse_test.go).
+//
+// /schedule is the verb because its picker asks TWO questions in the one overlay (schedule.go): the
+// cycle's accept only swaps the pane for the mode question, so the round needs four clicks before
+// anything is created — which is exactly the case a handler that dropped its Cmd, or re-derived the
+// pane's geometry after the swap, would get wrong.
+func TestE2EPopupClickLists(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "popups"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+
+	// The cycle question. The pane opens on the first row, so the click on 15m has a visible answer:
+	// the ❯ moves onto it.
+	submit(drv, schedulePrompt)
+	drv.WaitText(pickerTitle)
+	drv.WaitQuiet(settled)
+	cycleX, cycleY, ok := drv.Frame().Find(scheduleCycleRow)
+	if !ok {
+		t.Fatalf("the cycle picker paints no %q row:\n%s", scheduleCycleRow, drv.Frame())
+	}
+
+	click(drv, cycleX, cycleY)
+	drv.WaitFor(func() bool { return strings.Contains(drv.Frame().Row(cycleY), popupMenuMarker) },
+		tuitest.Awaiting("the ❯ to move onto the clicked cycle row"))
+	drv.WaitQuiet(settled)
+	if !strings.Contains(drv.Frame().String(), pickerTitle) {
+		t.Fatalf("a single click answered the cycle question:\n%s", drv.Frame())
+	}
+
+	// The second click on that row takes it, and the overlay moves on to the mode question.
+	click(drv, cycleX, cycleY)
+	drv.WaitText(scheduleModeTitle)
+	drv.WaitQuiet(settled)
+	planX, planY, ok := drv.Frame().Find(schedulePlanRow)
+	if !ok {
+		t.Fatalf("the mode picker paints no plan row:\n%s", drv.Frame())
+	}
+
+	// The mode question opens on plan, so the first click here only ARMS it — the pane stays up,
+	// which is call J's whole promise: the pointer activates a row only once it highlighted it.
+	click(drv, planX, planY)
+	drv.WaitQuiet(settled)
+	if !strings.Contains(drv.Frame().String(), scheduleModeTitle) {
+		t.Fatalf("a single click on the already-highlighted mode row created the Schedule:\n%s", drv.Frame())
+	}
+
+	click(drv, planX, planY)
+	drv.WaitGone(scheduleModeTitle)
+	drv.WaitText(scheduleCreated)
+
+	// The /sessions browser lists saved records, so one exchange is run and saved first and the
+	// browser is opened on a relaunch over the same home — the way a human reaches it.
+	submit(drv, browserPrompt)
+	drv.WaitText("Nothing else to add.")
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the first run returned %v; want a clean quit", err)
+	}
+
+	next := sess.Relaunch()
+	waitIdle(next)
+	submit(next, "/sessions")
+	next.WaitText(browserHint)
+	next.WaitQuiet(settled)
+	rowX, rowY, ok := next.Frame().Find(browserRow)
+	if !ok {
+		t.Fatalf("the browser lists no %q row:\n%s", browserRow, next.Frame())
+	}
+
+	click(next, rowX, rowY)
+	next.WaitQuiet(settled)
+	if !strings.Contains(next.Frame().String(), browserHint) {
+		t.Fatalf("a single click resumed the session:\n%s", next.Frame())
+	}
+
+	// The second click on that row is the ⏎: the record loads and its stored scrollback is repainted.
+	click(next, rowX, rowY)
+	next.WaitGone(browserHint)
+	next.WaitText(browserPrompt)
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)

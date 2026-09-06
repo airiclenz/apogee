@@ -266,9 +266,21 @@ NOTES (2026-09-06): the e2e's three clicks go through a new local `click(drv, x,
 
 **Commit:** `feat(tui): the approval pane takes a click behind its arming latch`
 
-## 10. Click on the picker and the /sessions browser
+## 10. Click on the picker and the /sessions browser — ✅ DONE (2026-09-06)
 
 Depends on item 7.
+
+NOTES (2026-09-06): the `/schedule` mode question opens with `plan` already highlighted, so the e2e's
+third click can only ARM it — the pane has no visible change between that click and the accepting
+one, and the test settles between them rather than waiting on a frame difference (call J's own
+consequence, asserted positively: a single click on the default-highlighted mode row creates nothing).
+
+NOTES (2026-09-06): `TestClickOnTheFooterModeMarkerIsRefusedWhereThePickerCannotBeAnswered`'s
+"a picker is already open" case was amended from `wantOpen: true` to the default false. The footer is
+OUTSIDE the open picker's box, so under this item's ratified outside-click rule (call C) the click is
+the picker's own: it dismisses the overlay and is spent on that, and the marker's handler is never
+reached. What the case guards — no second overlay stacked under the same key routing — is unchanged,
+and the comment now says so.
 
 **What.** `mouse.go`: `handleBrowserClick` then `handlePickerClick` at the head of the new slot (before the prompt), geometry via `popupPaneHit` over the pane's `renderList` spec. Row hit ≠ cursor → `listCursor.highlight(row)`; row hit == cursor → the pane's accept: picker `m.acceptPicker()`; browser: extract the inline accept at `sessions.go:294-301` into `acceptBrowser()` so `⏎` and the click share one path (binding). ADR 0053 D5: the hit-test row is the DISPLAYED (filtered) index — resolve through the same filter mapping `⏎` uses, never the unfiltered items. Browser `renaming`/`confirming` sub-modes swallow every click (as `browserWheel` :452-454). Outside the rect → dismiss exactly as `listCloses` does (`picker.go:847-850`, `sessions.go:290-293`) and claim the click (call C).
 

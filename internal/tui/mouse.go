@@ -427,8 +427,11 @@ func (a clickArm) holds(pane framePane, row int) bool {
 // day). Whatever the pane is, no outside click may CANCEL its question, dismiss the pane where esc
 // would stop a run, or stop the run itself: those meanings are esc's, and a stray of the pointer's
 // never carries them. Beyond that a pane picks between the two answers the currency already has. A
-// pane with nothing to decide DISMISSES and does not claim, so the click goes on to whatever it named
-// (the report trio above). A DECISION pane — the ask prompt, and the approval prompt beside it — keeps
+// pane with nothing to decide DISMISSES, and what it does with the click AFTER that is the pane's
+// kind: the report trio does not claim, so the click goes on to whatever it named, while the two
+// MODAL lists — the picker and the /sessions browser — dismiss AND CLAIM, because a modal is what the
+// human was looking at and the click that closed it is spent on closing it. A DECISION pane — the
+// ask prompt, and the approval prompt beside it — keeps
 // standing and simply does not claim, so the click FALLS THROUGH to the footer, the prompt and the
 // transcript below. The fall-through is not a detail: [Model.inputEditable] promises the prompt to the
 // ask state, and a pane that swallowed every outside click would take the caret seat and the
@@ -468,6 +471,16 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return thinking, cmd
 	}
 	m = thinking
+	// The /sessions browser opens the MODAL half of the chain (handleBrowserClick), and it is asked
+	// first of the modals for the reason foldMouseWheel gives: it is the top rung of the overlay
+	// precedence (keyClaimOrder, model.go), so where it is up it is what the human is looking at.
+	if browser, cmd, claimed := m.handleBrowserClick(pre, msg); claimed {
+		return browser, cmd
+	}
+	// The picker is the rung below it and answers a click the same way (handlePickerClick).
+	if picked, cmd, claimed := m.handlePickerClick(pre, msg); claimed {
+		return picked, cmd
+	}
 	// The ask pane is asked next: it is drawn over the transcript like the panes above it, and while a
 	// question is up it claims what lands INSIDE its box (handleAskClick). A click outside leaves the
 	// question standing and travels on, by the outside-click rule above.
@@ -1390,6 +1403,112 @@ func (m Model) highlightSettingsEdit(view string, display settingsDisplay, place
 	}
 	lines[row] = shadeCells(m.th.measure, lines[row], x+c0, x+c1, m.th.selection)
 	return strings.Join(lines, "\n")
+}
+
+// ----------------------------------------------------------------------------
+// Mouse in the /sessions browser and the picker (sessions.go, picker.go)
+// ----------------------------------------------------------------------------
+
+// handleBrowserClick answers a left-click while the /sessions overlay is up. The pointer does what
+// the keyboard does on this pane and no more: a click on a session row moves the highlight onto it,
+// the way ↑/↓ do, and a SECOND click on that same row resumes it — the ⏎ the highlight was already
+// offering, through the pane's one accept (acceptBrowser, sessions.go), so the record the pointer
+// loads and the record ⏎ loads can never be two different sessions. Two clicks ALWAYS: the row an
+// activating click may take is the row the POINTER put the highlight on (clickArm, model.go), so the
+// pane's own default never becomes a session somebody chose to reopen.
+//
+// The row it names is the row the pane PAINTS — the filtered one — because that is what
+// popupPaneHit reads off the painter's placement, and acceptBrowser resolves it back to the record
+// it describes through the very filter mapping ⏎ uses (ADR 0053 D5). With a filter typed, "the third
+// painted row" and "the third record saved" are different sessions, and only the mapping tells them
+// apart.
+//
+// A live rename edit or a delete confirm swallows the click whole. They are modal surfaces WITHIN
+// the modal — the browser's wheel treats them the same way (browserWheel, sessions.go) — and each is
+// a question: dismissing the pane out from under one would cancel it with the pointer, which is
+// exactly what the outside-click rule handleMouseClick states forbids.
+//
+// Outside the box this pane DISMISSES and CLAIMS (call C as the owner amended it): the browser is
+// MODAL, so a click that closes it is the click that closed it and reaches nothing underneath. The
+// open gate above is what keeps that honest — with no browser on the frame there is no rectangle to
+// be outside of, and an ungated handler would dismiss and swallow every click in the program.
+//
+// pre is the pre-click frame the pane is placed from and the live model is what mutates
+// (handleMouseClick's rule); the rows are composed once here, unfiltered, and the count, the seat
+// and the accept all read that one composition, exactly as sessionBrowserKey composes them once per
+// keypress.
+func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	if !m.sessionBrowser.open || !pre.sessionBrowser.open {
+		return m, nil, false
+	}
+	if m.sessionBrowser.renaming || m.sessionBrowser.confirming {
+		return m, nil, true // a modal surface within the modal: it owns the pane until it is answered
+	}
+	row, inRect, onRow := popupPaneHit(pre, paneBrowser, pre.renderSessionBrowserPlaced, msg.Y)
+	if !inRect {
+		m.sessionBrowser = sessionBrowser{} // outside the modal: dismissed, and the click is spent on that
+		m.layout()
+		return m, nil, true
+	}
+	if !onRow {
+		return m, nil, true // the pane's chrome: claimed, with no row to take
+	}
+	rows, _ := m.sessionBrowser.unfilteredRows(m.opts.Workspace, time.Now())
+	count := len(m.sessionBrowser.view(rows).rows)
+	if count == 0 {
+		return m, nil, true // the empty-workspace note is prose, not a choice: no row to name
+	}
+	if m.clickArmed.holds(paneBrowser, row) {
+		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
+		// the next gesture to drop, because the pane it belonged to is closing.
+		m.clickArmed = clickArm{}
+		next, cmd := acceptedModel(m.acceptBrowser(rows))
+		return next, cmd, true
+	}
+	m.sessionBrowser.seat(row, count)
+	m.clickArmed = clickArm{pane: paneBrowser, row: row, ok: true}
+	return m, nil, true
+}
+
+// handlePickerClick answers a left-click while the picker is up — every kind of it, the two
+// /schedule questions and the start-up migrations included. It is handleBrowserClick's rule one pane
+// along and for the same reasons: a click on a row seats the highlight, a SECOND click on that row
+// is the ⏎ (acceptPicker, picker.go), and the arm is what makes it always two — a picker that acted
+// on its own default highlight would switch the model, or create a Schedule, on one press.
+//
+// The row is the FILTERED one the pane painted, and acceptPicker maps it back to the offering it
+// names (pickerView.offeringIndex) exactly as it does for ⏎, so a filtered list can never move the
+// session somewhere the human never saw.
+//
+// Outside the box: dismissed and CLAIMED, the browser's answer above, because the picker is modal
+// too. The dismissal zeroes the whole overlay — the half-built Schedule and the migration round with
+// it — which is what esc already does to it (pickerKey), and the open gate keeps a frame carrying no
+// picker out of it.
+func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	if !m.picker.open || !pre.picker.open {
+		return m, nil, false
+	}
+	row, inRect, onRow := popupPaneHit(pre, panePicker, pre.renderPickerPlaced, msg.Y)
+	if !inRect {
+		m.picker = picker{} // outside the modal: dismissed, and the click is spent on that
+		m.layout()
+		return m, nil, true
+	}
+	if !onRow {
+		return m, nil, true // the pane's chrome: claimed, with no row to take
+	}
+	count := m.pickerCount()
+	if count == 0 {
+		return m, nil, true // a filter matching nothing: the pane is up, and it offers no row
+	}
+	if m.clickArmed.holds(panePicker, row) {
+		m.clickArmed = clickArm{}
+		next, cmd := acceptedModel(m.acceptPicker())
+		return next, cmd, true
+	}
+	m.picker.seat(row, count)
+	m.clickArmed = clickArm{pane: panePicker, row: row, ok: true}
+	return m, nil, true
 }
 
 // ----------------------------------------------------------------------------

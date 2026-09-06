@@ -153,6 +153,10 @@ func TestSessionBrowserEmptyStoreNotesNoOverlay(t *testing.T) {
 // The resume happy path: enter loads the selected record, restores it into the live engine,
 // repaints its scrollback closed by a "resumed:" note, relights the gauge, and — because Load
 // activates the session — routes subsequent saves to the loaded id.
+//
+// The route it drives is [Model.acceptBrowser], the pane's ONE accept, which the pointer spells too
+// (handleBrowserClick, mouse.go): this is the binding that a click and an ⏎ resume the same record
+// the same way, so the extraction cannot quietly grow a second reading of it.
 func TestSessionBrowserResumeHappyPath(t *testing.T) {
 	var src transcript
 	src.addUser("what is the capital of france", nil)
