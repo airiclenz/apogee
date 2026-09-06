@@ -99,8 +99,9 @@ func TestE2EFiringMarksAnAbandonedFinalTurn(t *testing.T) {
 func TestDaemonFaultedVerbColumn(t *testing.T) {
 	stub := stubllm.New(t, loadScript(t, "empty-reply"))
 	h := newDaemonHarness(t)
-	// The harness installs a stub runner; this test wants the composition. Its own t.Cleanup puts
-	// the production value back, so nothing here has to.
+	// The harness installs a stub runner; this test wants the composition. newDaemonHarness captured
+	// the production runOnce before swapping in that stub and restores it from its own t.Cleanup, so
+	// overwriting it here needs no local save/restore — this is not the unbound-runOnce shape.
 	runOnce = run.Once
 	writeConfigHome(t, h.home, "servers:\n"+
 		"  - name: stub\n    endpoint: "+stub.URL+"\n    model: "+stub.Model+"\nserver: stub\n")
