@@ -421,6 +421,21 @@ type Model struct {
 	// while a press is genuinely in flight. A plain bool, so it rides the value-copied Model
 	// (ADR 0011).
 	mousePressed bool
+	// clickArmed is the row the POINTER itself highlighted on a boxed pane, and the whole of what
+	// lets a click activate one: a pane's click handler latches the row here when it moves the
+	// highlight onto it, and activates on the next click only where that click lands on the very row
+	// this says it armed (ok && the same pane && the same row). So the first click on any pane
+	// highlights and nothing more, whatever the keyboard or the pane's own default left highlighted,
+	// and no single click can ever take a decision, load a session or answer a question — two clicks
+	// always (owner, 2026-09-06).
+	//
+	// It is DROPPED wherever the highlight moves by any other means: a keypress (handleKey) and a
+	// wheel notch (foldMouseWheel) clear it in those two places and nowhere else, so no pane has to
+	// remember to. A stale arm cannot outlive its pane either — every hit test asks openPanes first
+	// (popupPaneHit, mouse.go) — and a pane clears it after activating.
+	//
+	// A plain value, so it rides the value-copied Model (ADR 0011).
+	clickArmed clickArm
 	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy or a
 	// refused child message (interject.go) and cleared by flashClearMsg after flashDuration.
 	flash string
@@ -1223,6 +1238,18 @@ func modalClaim(key func(Model, tea.KeyPressMsg) (tea.Model, tea.Cmd)) func(Mode
 	}
 }
 
+// acceptedModel narrows what a pane's ACCEPT hands back — the widened (tea.Model, tea.Cmd) every one
+// of them returns, because that is the signature Update's key path wants — to the concrete Model the
+// click chain carries, and passes the Cmd through untouched. A click activates the same accepts the
+// keyboard does (submitAnswer, resolveApproval, acceptPicker, the browser's accept, acceptAutocomplete),
+// so every pane's click handler goes through this ONE assertion instead of writing its own.
+//
+// The assertion is this package's own contract rather than a hope, the very one modalClaim makes above:
+// every handler in it returns the Model it was handed, widened only at the seam.
+func acceptedModel(next tea.Model, cmd tea.Cmd) (Model, tea.Cmd) {
+	return next.(Model), cmd
+}
+
 // paneClaim adapts a SOFT-MODAL surface's key handler — one that claims the few keys it acts on and
 // lets every other key go where it always went — to the claimant contract.
 //
@@ -1409,6 +1436,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// below claims the key, the stale coordinates are already gone.
 	sel := m.sel
 	m.sel = promptSel{}
+
+	// And any click-armed row goes with it, for the same reason one step along: the latch means "the
+	// POINTER put the highlight here", and a key that walks the list — or any other key, which is a
+	// human doing something else entirely — has moved on from that. It is dropped HERE rather than in
+	// each pane's key handler so no pane can forget, and unconditionally: whichever branch below
+	// claims the key, an activating click must not inherit a row the keyboard has since left
+	// (mouse.go, clickArm).
+	m.clickArmed = clickArm{}
 
 	// Recall mode ends on any keypress for the same reason and by the same shape: it means "the box
 	// holds a recalled entry the human has not acted in", and a keypress IS acting in it. The two

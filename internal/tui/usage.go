@@ -137,7 +137,7 @@ func (m Model) usageWindow() (reportWindow, bool) { return m.reportWindow(usageR
 
 // handleUsageClick answers a left-click while the report is up: inside the box it is claimed and
 // nothing happens, outside it the report is dismissed and the click goes on.
-func (m Model) handleUsageClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+func (m Model) handleUsageClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	return m.handleReportClick(usageReport, pre, msg)
 }
 

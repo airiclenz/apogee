@@ -376,6 +376,23 @@ func selectionText(value string, a, b int) string {
 	return string(r[lo:hi])
 }
 
+// clickArm is the row one boxed pane's click handler highlighted with the POINTER: which pane it was,
+// which of that pane's rows, and whether anything is armed at all. It is the Model field of the same
+// name (model.go), whose doc states the rule; the type is here because the click chain is its only
+// author and its only reader.
+type clickArm struct {
+	pane framePane
+	row  int
+	ok   bool
+}
+
+// holds reports whether row on pane is the row the POINTER armed — the one thing an activating click
+// is allowed to act on. Every pane's click handler asks it rather than comparing the three fields
+// itself, so "the pointer highlighted this" has one spelling in the package.
+func (a clickArm) holds(pane framePane, row int) bool {
+	return a.ok && a.pane == pane && a.row == row
+}
+
 // handleMouseClick starts a fresh, collapsed selection under a left-click. It arbitrates by
 // region: a click on the open /settings pane's row list belongs to the pane (selecting a row, or
 // seating the caret in the row being typed into); a click on the footer's mode marker opens the mode
@@ -397,6 +414,13 @@ func selectionText(value string, a, b int) string {
 // model, the next rect in the chain is a frame the human never clicked on. So a click landing where a
 // dismissed pane WAS drawn only dismisses: it is never claimed by the box that grew there, and it never
 // names a transcript row the pre-click frame did not show at that Y.
+//
+// Every handler in the chain answers in the same three-part currency — the Model, a tea.Cmd, and
+// whether it CLAIMED the click — and the Cmd of the claiming handler is the one this returns. The
+// pointer acts where the keyboard acts, and the keys on these panes answer questions: taking an
+// approval decision, submitting an answer, loading a session (approval.go, ask.go, sessions.go) all
+// hand back work for the runtime to do, so a chain that could only answer with a Model would have to
+// drop it.
 func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
@@ -406,38 +430,38 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	// here, and every rect below is a READ of it rather than a fresh render of every overlay
 	// ([Model.withFrameSpans], model.go).
 	pre := m.withFrameSpans()
-	if next, claimed := m.handleSettingsClick(pre, msg); claimed {
-		return next, nil
+	if next, cmd, claimed := m.handleSettingsClick(pre, msg); claimed {
+		return next, cmd
 	}
 	m.settings.sel = promptSel{} // the pane did not claim this click: its highlight goes, as the other two would
 	// The /usage report is asked next and answers in a different currency: a click on it is swallowed,
 	// and a click anywhere else DISMISSES it and then goes on to whatever it named (handleUsageClick).
-	usage, claimed := m.handleUsageClick(pre, msg)
+	usage, cmd, claimed := m.handleUsageClick(pre, msg)
 	if claimed {
-		return usage, nil
+		return usage, cmd
 	}
 	m = usage
 	// The /inspect pane answers in the same currency (handleInspectorClick), and it is one of the two
 	// panes that can be up BESIDE the report — View draws them under the report, in the same slot — so
 	// it is asked right after it, in the order they are drawn in.
-	inspector, claimed := m.handleInspectorClick(pre, msg)
+	inspector, cmd, claimed := m.handleInspectorClick(pre, msg)
 	if claimed {
-		return inspector, nil
+		return inspector, cmd
 	}
 	m = inspector
 	// The /thinking pane closes that slot and so closes this chain of it: same currency again
 	// (handleThinkingClick), asked LAST of the three because it is drawn last of the three.
-	thinking, claimed := m.handleThinkingClick(pre, msg)
+	thinking, cmd, claimed := m.handleThinkingClick(pre, msg)
 	if claimed {
-		return thinking, nil
+		return thinking, cmd
 	}
 	m = thinking
 	// The footer's mode marker is the frame's one CHROME control ([Model.handleFooterModeClick]): a
 	// click on it opens the mode picker. It is asked after the panes that draw OVER the transcript —
 	// they can cover any row, the footer's included, and a click on a pane belongs to the pane — and
 	// before the prompt and transcript rects, which own the rows above it.
-	if footer, claimed := m.handleFooterModeClick(pre, msg); claimed {
-		return footer, nil
+	if footer, cmd, claimed := m.handleFooterModeClick(pre, msg); claimed {
+		return footer, cmd
 	}
 	if m.inputEditable() {
 		if visRow, visCol, ok := pre.pointInputRow(msg.X, msg.Y); ok {
@@ -494,20 +518,20 @@ func (m Model) footerRowY() int {
 // one of those, or while a Turn is awaiting approval, would put up a modal the human can neither
 // answer nor close, which is the very thing that rung's comment forbids. shift+tab stays the
 // every-state route to the ladder.
-func (m Model) handleFooterModeClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+func (m Model) handleFooterModeClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if !m.state.live() || m.picker.open || m.sessionBrowser.open || m.settingsOwnsInput() {
-		return m, false
+		return m, nil, false
 	}
 	text, col, ok := pre.footerModeSpan(pre.width)
 	if !ok || msg.Y != pre.footerRowY() {
-		return m, false
+		return m, nil, false
 	}
 	if msg.X < col || msg.X >= col+pre.th.measure.Width(text) {
-		return m, false
+		return m, nil, false
 	}
 	m.picker = picker{open: true, kind: pickerMode}
 	m.layout()
-	return m, true
+	return m, nil, true
 }
 
 // handleMouseMotion extends whichever selection is live as the mouse drags with the left button
@@ -866,30 +890,57 @@ func (m Model) settingsPaneRect() (y0, h int, ok bool) {
 	return m.frameSpans().pane(paneSettings)
 }
 
-// settingsPaint is the open key list as it was DRAWN this frame: the display rows the pane composed,
-// the screen row its row block starts on, which display row that first line shows, and how many row
-// lines there are. It is everything a pointer needs in order to name what is under it.
+// popupPaneHit maps a screen row to the row the named pane drew on it. It is the whole of what a
+// pointer gesture over a boxed pane has to ask, in the order the answers matter:
 //
-// Mapping a screen row back to a display row is a subtraction because a settings row is exactly one
-// painted line — the pane asks the module for neither wrapped rows nor row gaps (settingsKeyListSpec),
-// which is the condition popupPlacement states for reading it this way.
-type settingsPaint struct {
-	display settingsDisplay
-	y0      int // screen row of the row block's first line
-	start   int // the display row that line shows
-	rows    int // how many row lines are drawn
+//   - ok is false and inRect false where the pane is not on the frame at all (openPanes) — the gate
+//     dropdownWheel makes for the same reason (autocomplete.go). A handler that skipped it would claim,
+//     or DISMISS, on a frame carrying no such pane, using a rectangle belonging to whatever else the
+//     slot is holding.
+//   - inRect says the point is inside the pane's box (frameSpans.pane). It is the answer the panes that
+//     dismiss on an outside click act on, and it is stated separately because "not on a row" and "not
+//     on the pane" are different clicks: one is the pane's chrome, the other is somebody else's frame.
+//   - row is which of the spec's rows is drawn on that line, through the painter's own placement
+//     (popupPlacement.rowAt) — ok is false on the title, the body, a pad line, a gap, the hint and the
+//     borders, so a click there claims the pane and does nothing.
+//
+// pre is the frame the gesture was aimed at (handleMouseClick's snapshot), and render composes that
+// frame's pane exactly as View does — one composition, the painter's own numbers, rather than a second
+// arithmetic that can disagree with it. It is called only once the point is inside the rectangle, so a
+// gesture the pane has no part in costs no render.
+func popupPaneHit(pre Model, pane framePane, render func() (string, popupPlacement), y int) (row int, inRect, ok bool) {
+	if !pre.openPanes().has(pane) {
+		return 0, false, false
+	}
+	paneTop, h, drawn := pre.frameSpans().pane(pane)
+	if !drawn || y < paneTop || y >= paneTop+h {
+		return 0, false, false
+	}
+	_, place := render()
+	row, _, ok = place.rowAt(y - paneTop)
+	return row, true, ok
 }
 
-// settingsPaint composes the open pane exactly as the frame does and reports where its rows landed. ok
-// is false wherever there is nothing to address: the pane closed or given way, or a second step up that
-// takes no pointer.
+// settingsPaint is the open key list as the frame composes it: the display rows the pane built, and the
+// composition a pointer is mapped through (popupPaneHit). It is everything a gesture needs in order to
+// name what is under it — the row through the placement, the value column through the display.
 //
-// It renders the pane to get the answer, which is the same price the transcript mapping already pays
-// (contentLineAt spends a frameOverlays of its own on every click): the painter is the authority on
-// where a row is, and asking it costs less than a second arithmetic that can disagree with it.
+// The pane is not RENDERED here. What a gesture needs is the row under one point, and popupPaneHit
+// renders only once that point is inside the box, so a motion that strays off the pane costs the spec
+// and nothing more.
+type settingsPaint struct {
+	display settingsDisplay
+	render  func() (string, popupPlacement) // the pane as View draws it, for popupPaneHit to place
+}
+
+// settingsPaint composes the open pane exactly as the frame does. ok is false wherever there is nothing
+// to address: the pane closed, or a second step up that takes no pointer. Whether the frame could seat
+// the pane at all is popupPaneHit's question, asked of the rectangle the frame published for it.
 func (m Model) settingsPaint() (settingsPaint, bool) {
-	paneTop, _, ok := m.settingsPaneRect()
-	if !ok {
+	if !m.settings.open {
+		// Asked before the frame is composed, because every gesture asks: with no pane up there is
+		// nothing to place, and building the pane's rows to learn that would put the whole config
+		// listing on the path of a click the pane has no part in.
 		return settingsPaint{}, false
 	}
 	rows := m.settingRows()
@@ -906,23 +957,21 @@ func (m Model) settingsPaint() (settingsPaint, bool) {
 	if !seated {
 		return settingsPaint{}, false
 	}
-	_, place := renderPopupPlaced(m.th, spec, m.width)
 	return settingsPaint{
 		display: display,
-		y0:      paneTop + place.rowsAt,
-		start:   place.start,
-		rows:    place.end - place.start,
+		render:  func() (string, popupPlacement) { return renderPopupPlaced(m.th, spec, m.width) },
 	}, true
 }
 
 // rowAt maps a screen row to the DISPLAY row drawn on it — the pane's own list index, its section
-// labels and spacers included. ok is false above or below the drawn window, so a click on the pane's
-// title, its description header or its legend names no row.
-func (p settingsPaint) rowAt(y int) (int, bool) {
-	if p.rows < 1 || y < p.y0 || y >= p.y0+p.rows {
-		return 0, false
-	}
-	return p.start + (y - p.y0), true
+// labels and spacers included. It is popupPaneHit with this pane's name bound to it, so the name is
+// written once. ok is false above or below the drawn window, so a click on the pane's title, its
+// description header or its legend names no row — and false too where the pane is not on the frame at
+// all. The two panes that DISMISS on an outside click need those told apart and ask popupPaneHit
+// themselves; /settings claims its rows and nothing else, so one answer serves it.
+func (p settingsPaint) rowAt(pre Model, y int) (int, bool) {
+	row, _, ok := popupPaneHit(pre, paneSettings, p.render, y)
+	return row, ok
 }
 
 // settingsContentX is the screen column a pane's content lines begin at: the box's left border glyph
@@ -987,23 +1036,26 @@ func (m Model) settingsEditCells(a, b int) (int, int) {
 // settingsPaint's counterpart for the state where the field IS the pane, and it carries one thing more —
 // the wrap — because a line of prose can cost several painted rows where a key row never does.
 //
-// top is the first painted line of the row block, in whichever coordinates the caller asked for: the
-// pane's own painted rows for the highlight, the SCREEN's for the pointer. One builder answers both, so
-// the row a click names and the row a span is shaded on cannot come apart.
+// origin is the pane's TOP BORDER, in whichever coordinates the caller asked for: the pane's own
+// painted rows for the highlight, the SCREEN's for the pointer. One builder answers both, so the row a
+// click names and the row a span is shaded on cannot come apart. It is the box's own origin rather than
+// the block's because that is the coordinate the placement maps in (popupPlacement.rowAt).
 type settingsTextPaint struct {
-	starts []int      // where each line begins as a rune offset into the painted text
-	blocks [][]string // the lines each of them wrapped to, as the painter broke them
-	subs   [][]int    // where each of THOSE begins in its own line (popupWrapOffsets)
-	top    int        // the row block's first painted line
-	start  int        // the first field line that block shows
-	end    int        // one past the last
+	starts []int          // where each line begins as a rune offset into the painted text
+	subs   [][]int        // where each of the wrapped sub-lines begins in its own line (popupWrapOffsets)
+	place  popupPlacement // where the painter put the field's lines, and what each of them wrapped to
+	origin int            // the pane's top border, in the caller's own coordinates
 }
+
+// top is the first painted line of the row block, in the caller's coordinates — the pane's origin plus
+// whatever the box drew above its rows.
+func (p settingsTextPaint) top() int { return p.origin + p.place.rowsAt }
 
 // settingsTextGeometry reads the placement the painter reported into the coordinates a pointer or a
 // highlight works in. It re-derives none of the wrap: blocks are the painter's own composition, and the
 // only arithmetic here is the running rune offset of each line into the painted text — the one fact the
 // module never had, because it is about the VALUE and not about the pane.
-func (m Model) settingsTextGeometry(place popupPlacement, top int) settingsTextPaint {
+func (m Model) settingsTextGeometry(place popupPlacement, origin int) settingsTextPaint {
 	lines := m.settingsTextLines()
 	starts := make([]int, len(lines))
 	subs := make([][]int, len(lines))
@@ -1015,14 +1067,7 @@ func (m Model) settingsTextGeometry(place popupPlacement, top int) settingsTextP
 			subs[i] = popupWrapOffsets(line, place.blocks[i])
 		}
 	}
-	return settingsTextPaint{
-		starts: starts,
-		blocks: place.blocks,
-		subs:   subs,
-		top:    top,
-		start:  place.start,
-		end:    place.end,
-	}
+	return settingsTextPaint{starts: starts, subs: subs, place: place, origin: origin}
 }
 
 // settingsTextPaint composes the open field exactly as the frame does and reports where its lines
@@ -1042,24 +1087,17 @@ func (m Model) settingsTextPaint() (settingsTextPaint, bool) {
 		return settingsTextPaint{}, false
 	}
 	_, place := renderPopupPlaced(m.th, spec, m.width)
-	return m.settingsTextGeometry(place, paneTop+place.rowsAt), true
+	return m.settingsTextGeometry(place, paneTop), true
 }
 
 // lineAt maps a row to the field LINE drawn on it and to which of that line's wrapped sub-lines the row
 // shows. ok is false above or below the drawn window, so a click on the pane's title, its description
 // header or its legend names no part of the prompt.
+//
+// The walk is the placement's own (popupPlacement.rowAt): the field's lines ARE the pane's rows, so
+// there is nothing here for a second arithmetic to disagree with the painter about.
 func (p settingsTextPaint) lineAt(y int) (line, sub int, ok bool) {
-	row := y - p.top
-	if row < 0 {
-		return 0, 0, false
-	}
-	for i := p.start; i < p.end && i < len(p.blocks); i++ {
-		if row < len(p.blocks[i]) {
-			return i, row, true
-		}
-		row -= len(p.blocks[i])
-	}
-	return 0, 0, false
+	return p.place.rowAt(y - p.origin)
 }
 
 // span is the range of PAINTED text one wrapped sub-line covers — its runes, and the offset it begins
@@ -1068,10 +1106,10 @@ func (p settingsTextPaint) lineAt(y int) (line, sub int, ok bool) {
 // column. The bounds check is unreachable defence — every caller walks the window lineAt maps against
 // — and it answers with an empty span, which shades nothing and seats no caret.
 func (p settingsTextPaint) span(line, sub int) (text []rune, start int) {
-	if line < 0 || line >= len(p.blocks) || sub < 0 || sub >= len(p.blocks[line]) {
+	if line < 0 || line >= len(p.place.blocks) || sub < 0 || sub >= len(p.place.blocks[line]) {
 		return nil, 0
 	}
-	return []rune(p.blocks[line][sub]), p.starts[line] + p.subs[line][sub]
+	return []rune(p.place.blocks[line][sub]), p.starts[line] + p.subs[line][sub]
 }
 
 // settingsTextCaretAt is the rune offset in the field's VALUE that a screen point names: the sub-line
@@ -1099,19 +1137,19 @@ func (m Model) settingsTextCaretAt(p settingsTextPaint, x, y int) (int, bool) {
 //
 // pre is the pre-click frame the field's own geometry is read from (handleMouseClick); the caret and
 // the selection are seated on the live model.
-func (m Model) handleSettingsTextClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+func (m Model) handleSettingsTextClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	paint, ok := pre.settingsTextPaint()
 	if !ok {
-		return m, false
+		return m, nil, false
 	}
 	off, ok := pre.settingsTextCaretAt(paint, msg.X, msg.Y)
 	if !ok {
-		return m, false
+		return m, nil, false
 	}
 	m.sel, m.transcriptSel = promptSel{}, transcriptSel{}
 	m.settings.editor.caretToRune(off)
 	m.settings.sel = promptSel{active: true, anchorOff: off, headOff: off}
-	return m, true
+	return m, nil, true
 }
 
 // handleSettingsTextMotion extends the field's selection as the mouse drags with the left button held —
@@ -1158,12 +1196,12 @@ func (m Model) highlightSettingsText(view string, place popupPlacement) string {
 	if hi > caret {
 		hi++ // and the same for its end, which is exclusive
 	}
-	paint := m.settingsTextGeometry(place, place.rowsAt)
+	paint := m.settingsTextGeometry(place, 0)
 	lines := strings.Split(view, "\n")
-	row := paint.top
+	row := paint.top()
 	x := m.settingsContentX() + popupRowIndent
-	for i := paint.start; i < paint.end && i < len(paint.blocks); i++ {
-		for sub := range paint.blocks[i] {
+	for i := paint.place.start; i < paint.place.end && i < len(paint.place.blocks); i++ {
+		for sub := range paint.place.blocks[i] {
 			text, start := paint.span(i, sub)
 			a, b := max(lo, start), min(hi, start+len(text))
 			if b > a && row >= 0 && row < len(lines) {
@@ -1192,17 +1230,17 @@ func (m Model) highlightSettingsText(view string, place popupPlacement) string {
 // pre is the pre-click frame the pane's rows are placed from (handleMouseClick). It is the same value
 // as the receiver while this is the FIRST handler in the chain, and it is written down anyway: the one
 // invariant the chain holds is that no rect in it is ever read off a model a dismissal has moved.
-func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if m.settings.kind == settingsTextEditor {
 		return m.handleSettingsTextClick(pre, msg) // the field IS the pane there: its own geometry answers
 	}
 	paint, ok := pre.settingsPaint()
 	if !ok {
-		return m, false
+		return m, nil, false
 	}
-	display, ok := paint.rowAt(msg.Y)
+	display, ok := paint.rowAt(pre, msg.Y)
 	if !ok {
-		return m, false
+		return m, nil, false
 	}
 	m.sel, m.transcriptSel = promptSel{}, transcriptSel{}
 	switch {
@@ -1218,7 +1256,7 @@ func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, boo
 			m.settings.selected = key
 		}
 	}
-	return m, true
+	return m, nil, true
 }
 
 // handleSettingsMotion extends the edit field's selection as the mouse drags with the left button held:
@@ -1239,7 +1277,11 @@ func (m Model) handleSettingsMotion(msg tea.MouseMotionMsg) (Model, bool) {
 	if !ok {
 		return m, false
 	}
-	if display, inRows := paint.rowAt(msg.Y); !inRows || display != paint.display.selected {
+	if _, _, drawn := m.settingsPaneRect(); !drawn {
+		return m, false // the pane gave way to a short window: none of it is on the frame to drag in
+	}
+	display, inRows := paint.rowAt(m, msg.Y)
+	if !inRows || display != paint.display.selected {
 		return m, true // off the field, but still the pane's drag: the span keeps what it had
 	}
 	off := m.settingsCaretAt(max(0, msg.X-m.settingsValueX(paint.display)))
@@ -1391,6 +1433,11 @@ func (m Model) highlightTranscript(view string) string {
 // Mouse reporting is enabled in View (MouseModeCellMotion); the viewport's own Update turns the
 // wheel into a scroll.
 func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	// A notch drops any click-armed row, whichever pane below takes it: the wheel MOVES the highlight
+	// on every list in this chain, and the latch means "the pointer highlighted this row". Cleared
+	// here rather than in each pane's wheel handler, the pair of the drop handleKey makes (model.go)
+	// — the two ways a highlight moves without a click, cleared in the two places they arrive.
+	m.clickArmed = clickArm{}
 	if next, handled := m.settingsWheel(msg); handled {
 		return next, nil
 	}

@@ -201,7 +201,12 @@ Depends on items 0, 2, 3, 4, 5.
 
 **Commit:** `test(cmd/apogee): the pop-up frames are held goldens; layout.md states the breathing rule`
 
-## 7. One shared row hit-test over popupPlacement
+## 7. One shared row hit-test over popupPlacement — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the item's Files list is a floor — the `tea.Cmd` currency of regression guard (a) also reaches `reportpane.go` (`handleReportClick`) and its three thin callers `usage.go`, `inspector.go`, `thinkingpane.go`, which every claim site in `handleMouseClick` goes through.
+NOTES (2026-09-06): `settingsPaint` no longer renders the pane — it hands `popupPaneHit` the composition to place, so a gesture that never enters the box costs no render — and the rect/give-way test it used to make through `settingsPaneRect` now lives in `popupPaneHit` behind the `openPanes` gate. `handleSettingsMotion` keeps its own `settingsPaneRect` give-way guard so its "a stray off the field is still the pane's drag" answer is bit-for-bit what it was.
+NOTES (2026-09-06): `settingsTextPaint` now carries the `popupPlacement` itself (its `blocks`/`start`/`end` fields deleted) and `top` became a method over a new `origin` field — the pane's top border in the caller's coordinates — because `popupPlacement.rowAt` maps from the box's origin, not from the block's first line.
+NOTES (2026-09-06): the three pieces items 8-11 inherit are installed with no production caller yet, each covered by a test so nothing is dead: `clickArm`/`clickArm.holds` + the `Model.clickArmed` field, `acceptedModel` (the one assertion for the five widened accepts), and `listCursor.seat`.
 
 **What.** `internal/tui/popup.go`: `popupPlacement` gains `gap int` (set in `renderPopupPlaced` from `spec.rowStyle.gapLines()`) and a method `rowAt(line int) (row int, ok bool)` — `line` is the painted line index (top border = 0); walk `blocks[start:end]` subtracting `len(blocks[i])` then `gap`, as `settingsTextPaint.lineAt` (`mouse.go:1051-1063`) does today; a title, blank, gap, hint or border line answers `ok=false`; an empty window answers `ok=false`. `internal/tui/mouse.go`: `settingsPaint.rowAt` (:921-927) and `settingsTextPaint.lineAt` become callers of `popupPlacement.rowAt` — one module, one reason to change (binding: delete their private arithmetic). Add `popupPaneHit(pre Model, pane paneID, render func() (string, popupPlacement), y int) (row int, inRect bool, ok bool)` — the `settingsPaneRect` + `settingsPaint` shape generalised: rect from `pre.frameSpans().pane(pane)`, placement by re-rendering the spec, `row` via `rowAt(y - paneTop)`. `settingsPaint` uses it.
 

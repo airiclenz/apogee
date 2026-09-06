@@ -552,7 +552,7 @@ func (m Model) inspectorWindow() (reportWindow, bool) { return m.reportWindow(in
 
 // handleInspectorClick answers a left-click while the pane is up: inside the box it is claimed and
 // nothing happens, outside it the pane is dismissed and the click goes on.
-func (m Model) handleInspectorClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+func (m Model) handleInspectorClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	return m.handleReportClick(inspectReport, pre, msg)
 }
 

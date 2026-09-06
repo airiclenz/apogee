@@ -440,15 +440,15 @@ func (m Model) reportWindow(r reportKind) (reportWindow, bool) {
 // The box is the one pre drew — the pre-click frame (handleMouseClick) — and the dismissal is applied
 // to the live receiver. That is also what keeps a click in the band the LOWER report regrows into,
 // once the one above it is dismissed, out of its rectangle (the doctrine above).
-func (m Model) handleReportClick(r reportKind, pre Model, msg tea.MouseClickMsg) (Model, bool) {
+func (m Model) handleReportClick(r reportKind, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	y0, h, ok := pre.reportPaneRect(r)
 	if !ok {
-		return m, false
+		return m, nil, false
 	}
 	if msg.Y >= y0 && msg.Y < y0+h {
-		return m, true
+		return m, nil, true
 	}
-	return m.dismissReport(r), false
+	return m.dismissReport(r), nil, false
 }
 
 // reportWheel scrolls the named report one row per notch while the pointer is over it, and CLAMPS at

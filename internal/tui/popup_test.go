@@ -2229,6 +2229,171 @@ func TestRenderPopupScrollbarSpansWrappedRowLines(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// popupPlacement.rowAt — the package's one mapping from a painted line to a row
+// ----------------------------------------------------------------------------
+
+// rowAt is asserted against the PAINT rather than against a second arithmetic: for every line the
+// pane drew, the row it names must be the row whose text is on that line, and a line it names no row
+// for must carry no row's text at all. That covers the whole of the mapping in one property — the
+// title, the body, the pad, the gaps, the hint and the two borders all fall out as the lines that
+// answer nothing — and it cannot drift from the painter, because the expectation IS the painter's
+// composition.
+//
+// The five shapes are the five ways a pane's rows can sit: one line each, wrapped a blank line apart
+// (the ask offering's askRowStyle), a window scrolled off the top of a long list, an offering with no
+// rows at all, and a block led by the breathing blank (popupSpec.rowPadAbove).
+func TestPopupPlacementRowAt(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const width = 60
+	inner := popupInnerWidth(th, width)
+	long := func(word string) string { return strings.TrimSpace(strings.Repeat(word+" ", inner/2)) }
+	many := make([]string, 12)
+	for i := range many {
+		many[i] = fmt.Sprintf("key-%02d", i)
+	}
+
+	// shape is what each case has to BE for its assertion to mean anything: a spec that failed to
+	// wrap, or a window that seated the whole list, would pass the property above while testing none
+	// of what it names.
+	cases := []struct {
+		name  string
+		spec  popupSpec
+		shape func(*testing.T, popupPlacement)
+	}{
+		{
+			name: "single-line rows",
+			spec: popupSpec{
+				title: "Providers", rows: singleCellRows([]string{"alpha", "bravo", "charlie"}),
+				hint: "esc close", maxRows: -1,
+			},
+		},
+		{
+			name: "wrapped rows a blank line apart",
+			spec: popupSpec{
+				body: "Which branch should the fix land on?", titleInBorder: true,
+				rows:     singleCellRows([]string{long("alpha"), long("bravo"), long("charlie")}),
+				rowStyle: askRowStyle, rowPadAbove: true, wrapRows: true,
+				selected: 1, hint: "↑↓ select · ⏎ answer", maxRows: -1,
+			},
+			shape: func(t *testing.T, place popupPlacement) {
+				t.Helper()
+				if place.gap != 1 {
+					t.Fatalf("gap = %d, want the ask style's one separator line", place.gap)
+				}
+				if len(place.blocks[0]) < 2 {
+					t.Fatalf("row 0 painted on %d lines, want a row the pane had to wrap", len(place.blocks[0]))
+				}
+			},
+		},
+		{
+			name: "a window scrolled off the top",
+			spec: popupSpec{
+				title: "Settings", rows: singleCellRows(many), selected: 9,
+				hint: "esc close", maxRows: 5,
+			},
+			shape: func(t *testing.T, place popupPlacement) {
+				t.Helper()
+				if place.start == 0 || place.end-place.start >= len(many) {
+					t.Fatalf("window [%d,%d) of %d rows, want one scrolled off the top", place.start, place.end, len(many))
+				}
+			},
+		},
+		{
+			name: "an offering with no rows",
+			spec: popupSpec{
+				body: "Nothing is on offer.", rowStyle: askRowStyle, hint: "esc close", maxRows: -1,
+			},
+			shape: func(t *testing.T, place popupPlacement) {
+				t.Helper()
+				if place.end != place.start {
+					t.Fatalf("window [%d,%d), want an empty one", place.start, place.end)
+				}
+			},
+		},
+		{
+			name: "a block led by the breathing blank",
+			spec: popupSpec{
+				title: "Providers", rows: singleCellRows([]string{"alpha", "bravo", "charlie"}),
+				rowPadAbove: true, hint: "esc close", maxRows: -1,
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			view, place := renderPopupPlaced(th, c.spec, width)
+			lines := popupLines(view)
+			if c.shape != nil {
+				c.shape(t, place)
+			}
+
+			claimed := map[[2]int]int{}
+			for y, line := range lines {
+				painted := strings.TrimSpace(strip(line))
+				row, sub, ok := place.rowAt(y)
+				if !ok {
+					for i := place.start; i < place.end; i++ {
+						for j, text := range place.blocks[i] {
+							if text = strings.TrimSpace(text); text != "" && strings.Contains(painted, text) {
+								t.Errorf("line %d paints row %d line %d (%q) and rowAt names no row for it",
+									y, i, j, text)
+							}
+						}
+					}
+					continue
+				}
+				want := strings.TrimSpace(place.blocks[row][sub])
+				if !strings.Contains(painted, want) {
+					t.Errorf("rowAt(%d) = row %d line %d (%q), but the line paints %q", y, row, sub, want, painted)
+				}
+				claimed[[2]int{row, sub}]++
+			}
+
+			for i := place.start; i < place.end; i++ {
+				for j := range place.blocks[i] {
+					if got := claimed[[2]int{i, j}]; got != 1 {
+						t.Errorf("row %d line %d is named by %d painted lines, want exactly 1", i, j, got)
+					}
+				}
+			}
+			if _, _, ok := place.rowAt(-1); ok {
+				t.Error("a line above the box names a row")
+			}
+			if _, _, ok := place.rowAt(len(lines)); ok {
+				t.Error("a line below the box names a row")
+			}
+		})
+	}
+}
+
+// The breathing blank the block leads with (popupSpec.rowPadAbove) moves the rows down one line and is
+// itself no row: the placement's own rowsAt carries the shift, so a pointer over the blank names
+// nothing while the row under it is still named correctly.
+func TestPopupPlacementRowAtCountsTheLeadingPad(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const width = 60
+	spec := popupSpec{
+		title: "Providers", rows: singleCellRows([]string{"alpha", "bravo"}), hint: "esc close", maxRows: -1,
+	}
+
+	_, bare := renderPopupPlaced(th, spec, width)
+	spec.rowPadAbove = true
+	_, padded := renderPopupPlaced(th, spec, width)
+
+	if padded.rowsAt != bare.rowsAt+1 {
+		t.Fatalf("the padded block starts on line %d, want one below the bare one (%d)", padded.rowsAt, bare.rowsAt+1)
+	}
+	if _, _, ok := padded.rowAt(padded.rowsAt - 1); ok {
+		t.Error("the blank above the block names a row")
+	}
+	if row, _, ok := padded.rowAt(padded.rowsAt); !ok || row != 0 {
+		t.Errorf("the block's first line names row %d (ok=%v), want row 0", row, ok)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The bar's CALLERS — every pane that windows rows opts in (Model.popupScrollbarOn)
 // ----------------------------------------------------------------------------
 

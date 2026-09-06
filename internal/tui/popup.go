@@ -400,22 +400,55 @@ func (s popupSpec) rowKind(i int) popupRowKind {
 // [start, end) window of spec.rows that block holds. It is meaningful only for a pane that was
 // actually drawn (renderPopupPlaced returning a non-empty view).
 //
-// It exists for the surface that has to map a SCREEN row back to one of its own rows — the mouse in
-// the /settings pane (mouse.go) — and it is the PAINTER's own answer rather than a second derivation
-// of it: the title row, the body block and the row window are all things the module decides, and a
-// caller re-deriving them would name the row above or below the one under the pointer the first time
-// a description wrapped differently than it guessed.
+// It exists for the surface that has to map a SCREEN row back to one of its own rows — the pointer on
+// every boxed pane (mouse.go) — and it is the PAINTER's own answer rather than a second derivation of
+// it: the title row, the body block and the row window are all things the module decides, and a caller
+// re-deriving them would name the row above or below the one under the pointer the first time a
+// description wrapped differently than it guessed.
 //
-// Mapping a line back to a row is a subtraction only where every row is ONE line — a spec with
-// neither popupSpec.wrapRows nor a row style's gap, which is what the /settings key list is. A spec
-// whose rows cost more than a line each maps through blocks instead: the lines each row was composed
-// into, in order, so the caller walks the window counting the heights the painter actually drew. The
-// /settings multi-line field is that caller (settingsTextPaint) — its rows are the prompt's lines and
-// they wrap.
+// Every such caller asks rowAt rather than mapping the line itself, so the package holds ONE walk over
+// a pane's rows. The walk is over blocks — the lines each row was composed into, in order — because a
+// row is a single line only where the spec asks for neither popupSpec.wrapRows nor a row style's gap
+// (the /settings key list), while the ask offering's options and the /settings multi-line field's
+// prose both cost as many lines as they wrapped to.
 type popupPlacement struct {
 	rowsAt     int        // painted row index of the row block's first line
 	start, end int        // the window of spec.rows that block holds
+	gap        int        // the lines one separator between two adjacent rows was drawn on (popupRowStyle.gapLines)
 	blocks     [][]string // the composed lines of EVERY row, the window's and the rows outside it alike
+}
+
+// rowAt maps a PAINTED line of the pane back to the row drawn on it: which of spec.rows it belongs to
+// and which of that row's own wrapped lines it is. line is counted from the box's top border, which is
+// line 0 (popupBoxBorderRow), so a caller holding a screen row subtracts the pane's top from it first.
+//
+// ok is false for every line that is not a row: the title, the body, the blank the block leads with
+// (popupSpec.rowPadAbove), a separator between two rows (popupRowStyle.gap), the blank it closes on
+// (popupRowStyle.padBelow), the hint, the two borders — and every line of a pane whose window seated no
+// row at all. That is the one answer a click chain can act on without guessing: a caller may claim the
+// pointer for the pane and still do nothing with it.
+//
+// The walk is over the painter's own composition (blocks) rather than a height the caller re-derives,
+// which is what keeps the answer right where a row WRAPPED to three lines and the row under the pointer
+// is not the row a subtraction would have named.
+func (p popupPlacement) rowAt(line int) (row, sub int, ok bool) {
+	line -= p.rowsAt
+	if line < 0 {
+		return 0, 0, false
+	}
+	for i := p.start; i < p.end && i < len(p.blocks); i++ {
+		if i > p.start {
+			if line < p.gap {
+				return 0, 0, false // the separator between this row and the one above it
+			}
+			line -= p.gap
+		}
+		if line < len(p.blocks[i]) {
+			return i, line, true
+		}
+		line -= len(p.blocks[i])
+	}
+	return 0, 0, false
 }
 
 // popupBoxBorderRow is the one row drawTitledBox draws above a pane's content lines: its top border.
@@ -494,6 +527,7 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 		rowsAt: popupBoxBorderRow + len(lines) + len(body) + block.lead,
 		start:  block.start,
 		end:    block.end,
+		gap:    spec.rowStyle.gapLines(),
 		blocks: block.blocks,
 	}
 	lines = append(lines, body...)

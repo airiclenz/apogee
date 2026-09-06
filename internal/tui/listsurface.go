@@ -186,6 +186,21 @@ func (l listCursor) highlight(n int) int {
 	return clampInt(l.selected, 0, n-1)
 }
 
+// seat puts the highlight ON row, clamped into a list of count painted rows — the SETTER beside
+// highlight's getter, and the one way anything but a key moves a list's cursor. The pointer is what
+// needs it: a click names a row outright instead of walking to it (mouse.go), and every pane's click
+// handler goes through here rather than assigning the field, so a row the pane never painted can no
+// more be highlighted by the mouse than by ↑/↓ (listCursor.key clamps for exactly this reason).
+//
+// An empty list seats nothing: there is no row to put the highlight on, and highlight answers −1 for
+// it whatever the field holds.
+func (l *listCursor) seat(row, count int) {
+	if count == 0 {
+		return
+	}
+	l.selected = clampInt(row, 0, count-1)
+}
+
 // key routes one keypress through the cursor at l over a list of n painted rows, and reports what it
 // did (listVerdict). It is the key contract every list OVERLAY in the package shares — the whole of
 // it for a list that does not filter, and the floor [Model.listKey] adds the typing keys to for one

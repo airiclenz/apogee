@@ -2713,6 +2713,103 @@ func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The shared row hit-test — popupPaneHit and the click arm (mouse.go)
+// ----------------------------------------------------------------------------
+
+// popupPaneHit asks openPanes BEFORE it touches a rectangle, and the model here proves the order: it
+// carries the published spans of a frame the pane WAS drawn on while the pane itself is shut, so a hit
+// test that read the rect first would put the pointer inside a box that is no longer there — claiming,
+// or dismissing, on somebody else's frame. Nothing is named, and the pane is never even composed.
+func TestPopupPaneHitAnswersNothingWithThePaneShut(t *testing.T) {
+	m := settingsFrameModel(t, 80, 30, 8)
+	paint, ok := m.settingsPaint()
+	if !ok {
+		t.Fatal("the /settings pane is not on the frame")
+	}
+	renders := 0
+	render := func() (string, popupPlacement) {
+		renders++
+		return paint.render()
+	}
+	_, y := settingsFrameCell(t, m, "key-02")
+	row, inRect, ok := popupPaneHit(m.withFrameSpans(), paneSettings, render, y)
+	if !ok || !inRect {
+		t.Fatalf("with the pane up, y=%d named row %d (inRect=%v, ok=%v), want the row inside the box", y, row, inRect, ok)
+	}
+	if key, isKey := paint.display.settingKeyAt(row); !isKey || key != 2 {
+		t.Fatalf("display row %d is key %d (isKey=%v), want the key-02 row the pointer is on", row, key, isKey)
+	}
+
+	shut := m.withFrameSpans() // the frame's spans, still placing the pane...
+	shut.settings = settingsPane{}
+	renders = 0
+
+	row, inRect, ok = popupPaneHit(shut, paneSettings, render, y)
+
+	if ok || inRect || row != 0 {
+		t.Errorf("with the pane shut: row %d, inRect %v, ok %v — want nothing named at all", row, inRect, ok)
+	}
+	if renders != 0 {
+		t.Errorf("the shut pane was composed %d times; the gate must answer before the rect", renders)
+	}
+}
+
+// acceptedModel is the ONE assertion the click chain makes about an accept: every pane's accept returns
+// the widened (tea.Model, tea.Cmd) the key path wants, and a click activating the same accept has to
+// carry the concrete Model on down the chain — with the Cmd the accept handed back, which is the whole
+// reason the chain has a Cmd currency at all.
+func TestAcceptedModelNarrowsAnAcceptsAnswer(t *testing.T) {
+	m := newTestModel(t)
+	m.flash = "the accept ran"
+	accept := func() (tea.Model, tea.Cmd) { return m, tea.Quit }
+
+	next, cmd := acceptedModel(accept())
+
+	if next.flash != "the accept ran" {
+		t.Errorf("flash = %q, want the Model the accept returned", next.flash)
+	}
+	if cmd == nil {
+		t.Error("the accept's Cmd was dropped")
+	}
+}
+
+// The click arm is what makes the pointer take two clicks to act (owner, 2026-09-06), and it means "the
+// POINTER put the highlight on this row". So it is dropped the moment anything else moves a highlight:
+// any keypress, and any wheel notch. Both drops live in one place each — handleKey (model.go) and
+// foldMouseWheel — so a pane added later inherits them without knowing they exist.
+func TestClickArmClearsOnKeyAndWheel(t *testing.T) {
+	armed := func(t *testing.T) Model {
+		t.Helper()
+		m := newTestModel(t)
+		m.clickArmed = clickArm{pane: panePrompt, row: 2, ok: true}
+		if !m.clickArmed.holds(panePrompt, 2) {
+			t.Fatalf("the arm did not latch: %+v", m.clickArmed)
+		}
+		return m
+	}
+
+	cases := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{"a typed rune", tea.KeyPressMsg{Code: 'x', Text: "x"}},
+		{"an arrow", tea.KeyPressMsg{Code: tea.KeyDown}},
+		{"esc", keyEsc()},
+		{"a wheel notch up", tea.MouseWheelMsg{X: 10, Y: 3, Button: tea.MouseWheelUp}},
+		{"a wheel notch down", tea.MouseWheelMsg{X: 10, Y: 3, Button: tea.MouseWheelDown}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := step(t, armed(t), c.msg)
+
+			if m.clickArmed.ok || m.clickArmed.holds(panePrompt, 2) {
+				t.Errorf("the arm survived %s: %+v", c.name, m.clickArmed)
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Mouse in the /settings pane (mouse.go)
 // ----------------------------------------------------------------------------
 
@@ -2926,8 +3023,8 @@ func TestSettingsTextClickSeatsTheCaretInTheProse(t *testing.T) {
 			if !ok {
 				t.Fatal("the field is not on the frame")
 			}
-			if wrapped := len(paint.blocks[1]) > 1; wrapped != c.wrapped {
-				t.Fatalf("the prose's second line paints on %d rows, want wrapped = %v", len(paint.blocks[1]), c.wrapped)
+			if wrapped := len(paint.place.blocks[1]) > 1; wrapped != c.wrapped {
+				t.Fatalf("the prose's second line paints on %d rows, want wrapped = %v", len(paint.place.blocks[1]), c.wrapped)
 			}
 			x, y := settingsFrameCell(t, m, c.want)
 

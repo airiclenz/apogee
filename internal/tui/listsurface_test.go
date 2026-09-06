@@ -276,6 +276,36 @@ func TestListSurfaceHighlightIsOffAnEmptyList(t *testing.T) {
 	}
 }
 
+// seat is the setter beside highlight's getter — the one way the POINTER moves a list's cursor, since
+// a click names a row outright instead of walking to it. It clamps like every other move, so a row the
+// pane never painted can no more be highlighted by the mouse than by ↑/↓, and an empty list seats
+// nothing at all: there is no row to put the highlight on.
+func TestListCursorSeatClampsTheRowThePointerNames(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		row, count int
+		want       int
+	}{
+		{"a painted row", 2, 5, 2},
+		{"past the last row", 9, 5, 4},
+		{"above the first", -3, 5, 0},
+		{"an empty list seats nothing", 2, 0, 7},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			l := listCursor{selected: 7}
+
+			l.seat(c.row, c.count)
+
+			if l.selected != c.want {
+				t.Errorf("seat(%d, %d) left the highlight on %d, want %d", c.row, c.count, l.selected, c.want)
+			}
+		})
+	}
+}
+
 // An accept is resolved through the filter, never against the list underneath it: row 0 of a pruned
 // list is row 1 of the offering, and taking row 0 of the offering would act on something the human
 // never saw.
