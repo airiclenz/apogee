@@ -10,6 +10,56 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- The refusal a Driver shows when the startup beat never answered — `cannot send — server
+  offline (<endpoint>)`, with the failure's own words after a colon when the beat had any — is
+  now composed once, by `notice.ServerOffline`. It was spelled out three times (the TUI's
+  `upstreamBlockNote`, the headless pre-send gate, a daemon Firing's refusal) and bound only by
+  comments asking whoever edited one copy to visit the other two. The sentence is byte-identical
+  to what all three printed before, each Driver keeps its own guard, endpoint and failure sources
+  and its own delivery, and each keeps its own test spelling the wording out. `internal/notice`
+  also gained a `doc.go` carrying the package charter, moved off the head of `contextfiles.go`.
+
+- An unattended run now SAYS when its context window is unknown. A headless or daemon Firing
+  with no `context-window:` pinned derives its Budget from configuration alone, so the Budget
+  and automatic compaction are inactive and the oversize warning that would otherwise catch the
+  same trouble can never fire there — and nothing said so. The composition now appends the
+  sentence a session already shows at its rebind seam, in one spelling
+  (`internal/notice.WindowUnknown`, which the TUI's own note is now bound to): headless prints
+  it on stderr, the daemon logs it at most once per process — latched as the unconfined-Auto
+  warning is, because it reports a standing fact about the configuration rather than anything a
+  tick did. It is said exactly once however it is said: an unadvertised model's hint already
+  carries the clause, so the bare line is the else. A Firing whose server never answered says
+  nothing about the window, leaving the offline refusal the only sentence that run gets.
+
+- A `/schedule` Firing now reports what its run could not read of the workspace's context
+  files. `schedule.Outcome` gained `ContextAnomalies`, which `scheduleWiring.fire` fills from
+  the anomalies alone — a file present but unreadable, standing content past its Budget share —
+  exactly as the daemon's journal does; the plain loaded-files line stays a launch's narration
+  and is still dropped. The TUI renders one body line per anomaly in the Firing block, between
+  the fault line and the record pointer, escape-stripped at that block's own sanitize seam.
+  Before this the whole report was thrown away at the fire seam, so a Firing raised from a
+  session answered from a workspace it could not see and no surface said so.
+
+- The daemon Driver's failed-Firing narration is pinned on both Result shapes: a failure that still produced a Result logs its context-file anomalies and its written-files block and wraps the error with the salvaged record's id, while a failure carrying a zero `run.Result` logs neither, reports the zero `schedule.Outcome` and returns the runner's error unwrapped. The two comments that claimed the narration happens "whether the run answered or failed" now say what is actually true.
+
+- `Store.Prune` now reads its clock once per sweep rather than only under a `MaxAge` rule, so the
+  "first error, keep sweeping" contract is pinned on a `MaxCount`-only sweep as well. Behaviour is
+  unchanged.
+
+- `gcSessions` no longer carries a nil-store guard: every production caller builds the sweep store unconditionally, so the branch was unreachable and its comment named a Driver that no longer exists.
+
+- `internal/tui/reportpane.go`: the doc comments locate a function's siblings by name rather than by position, so a reordered file cannot make them false.
+
+- The demo rig's typing generator now runs `${AWK:-awk}`: `graphics/demo/type.sh` and
+  `graphics/demo/gen.sh` each carry a `readonly AWK_BIN="${AWK:-awk}"` and use it at every awk
+  call site, so an `AWK=<implementation>` prefix picks the awk for a whole pass — including the
+  `--check` classifier, which re-invokes the script through `bash`. The header's byte-stability
+  claim is therefore checkable rather than only readable, and the rig README records the recipe
+  and the verified result: under mawk 1.3.4, GNU Awk 5.2.1 and one-true-awk 2023-11-27,
+  `type.sh --check` passes and both the generated blocks and the whole generated hero tape are
+  byte-identical. The knob defaults to `awk`, so `record.sh` and `gen.sh` behave exactly as
+  before when `AWK` is unset; no golden total, band, seed or typed string moved.
+
 - The demo rig gained `graphics/demo/type.sh`, which expands one typed string into a VHS
   typing block with a seeded per-character rhythm (per-letter 25–45 ms, 60–90 ms after a
   space, 90–140 ms after punctuation, and an occasional 300–500 ms thinking pause) in place
