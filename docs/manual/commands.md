@@ -372,8 +372,8 @@ instead of being pinned to a copy of it. The default is applied on the same keyp
 row reports it with the same marker: `default *`.
 
 **What no row can write opens your editor.** `servers:`, `sub-agents-server:`, `mcp-servers:`,
-`validated-sets: alias:`, `system-prompt-models:`, `system-prompt-layers:`, `tools.enabled:` and the
-model profile render as a summary with an
+`hooks:`, `validated-sets: alias:`, `system-prompt-models:`, `system-prompt-layers:`,
+`tools.enabled:` and the model profile render as a summary with an
 `· ⏎ opens $EDITOR` pointer, and that is what `⏎` does — in the editor the
 [four-rung ladder](configuration.md) `editor:` heads, with the cursor on that key's line where the
 editor takes a line argument. A **terminal** editor (`vi`, `vim`, `nvim`, `nano`, `pico`,
