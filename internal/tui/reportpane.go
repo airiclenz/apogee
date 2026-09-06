@@ -63,7 +63,7 @@ import (
 // dismissal it was aimed at.
 
 // reportKind names one of the read-only report panes. It is this module's ONE parameter: every
-// function below takes it, resolves the pane's state and its content through it, and is otherwise the
+// function here takes it, resolves the pane's state and its content through it, and is otherwise the
 // same code for all of them — which is what keeps "what a report does" a single answer rather than
 // three copies that drift a key at a time.
 //
@@ -126,7 +126,7 @@ type reportPane struct {
 // an accounting, asked and answered, rather than a stream a reader sits and watches, and its scroll
 // stays the clamp-only one it has always had.
 //
-// It is an exhaustive switch with a panicking default for the reason the three resolvers above are
+// It is an exhaustive switch with a panicking default for the reason its three siblings are
 // (reportKind's doc): a fourth report has to state its own answer here rather than inherit /usage's
 // by falling through.
 func (r reportKind) follows() bool {
@@ -143,7 +143,7 @@ func (r reportKind) follows() bool {
 // reportState points at the named report's state inside THIS Model value — the module's one statement
 // of which field a report keeps its {open, top} in, read through and written through alike.
 //
-// The pointer never outlives the call: every caller below is a value-receiver method that reads or
+// The pointer never outlives the call: every caller is a value-receiver method that reads or
 // mutates through it and returns its own copy, so nothing here puts a self-pointer on a Model that is
 // copied on every Update (ADR 0011).
 func (m *Model) reportState(r reportKind) *reportPane {

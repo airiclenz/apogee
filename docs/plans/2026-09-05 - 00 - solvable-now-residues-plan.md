@@ -314,7 +314,14 @@ first assertion (a sweep over a missing sessions root creates nothing) intact.
 
 commit: `refactor(wire): drop gcSessions' unreachable nil-store guard`
 
-## 7. `follows()`'s doc names its siblings instead of counting them
+## 7. `follows()`'s doc names its siblings instead of counting them — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the regression guard's rule found two more positional sibling
+references beyond `follows()`'s — `reportKind`'s doc ("every function below takes it" →
+"every function here takes it", `:66`) and `reportState`'s ("every caller below" → "every
+caller", `:146`); both reworded in the same commit. The `above`/`below` hits at `:36`, `:58`,
+`:61`, `:280`, `:379`, `:411`, `:424` locate frame geometry or a prose doctrine block, not a
+function, and are left alone.
 
 **What.** Closes `apogee-v00.7`. `internal/tui/reportpane.go:129` says the switch panics "for the
 reason the three resolvers above are", but only `pane()` (`:88`) precedes `follows()` (`:132`) —
