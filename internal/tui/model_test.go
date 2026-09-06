@@ -1579,11 +1579,12 @@ func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
 }
 
 // A gate whose cause the user can lift carries a Remedy, and the pane draws it as its own `Fix:`
-// line on the row directly under the Reason it answers: the diagnosis and the way out are two
-// facts, and a human who has just read that this host cannot confine wants the next line to say
-// what to do about it. The label is the TUI's — the engine ships the bare sentence — so this is the
-// Driver's assertion to make. Panes for the gates the autonomy rung itself asked for carry no
-// Remedy and draw no Fix line at all, which is most of them.
+// paragraph under the Reason it answers — a blank line between them, because every part of this
+// body is a paragraph: the diagnosis and the way out are two facts, and a human who has just read
+// that this host cannot confine wants the next thing they read to say what to do about it. The
+// label is the TUI's — the engine ships the bare sentence — so this is the Driver's assertion to
+// make. Panes for the gates the autonomy rung itself asked for carry no Remedy and draw no Fix
+// line at all, which is most of them.
 func TestModelApprovalDrawsRemedyUnderReason(t *testing.T) {
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
@@ -1599,8 +1600,11 @@ func TestModelApprovalDrawsRemedyUnderReason(t *testing.T) {
 	if !strings.Contains(got, "Fix: /confine off") {
 		t.Errorf("the remedy did not reach the pane:\n%s", got)
 	}
-	if reason, fix := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "Fix:"); fix != reason+1 {
-		t.Errorf("Fix: sits %d lines under Reason:, want it on the very next row:\n%s", fix-reason, got)
+	reason, fix := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "Fix:")
+	if fix != reason+2 {
+		t.Errorf("Fix: sits %d lines under Reason:, want the two set off by one blank:\n%s", fix-reason, got)
+	} else if !paneRowIsBlank(rows[reason+1]) {
+		t.Errorf("the line between Reason: and Fix: = %q, want it blank:\n%s", rows[reason+1], got)
 	}
 
 	// The same call with nothing to fix: the line is absent, not blank.
@@ -1731,16 +1735,15 @@ func TestModelApprovalArgsReadAsLabelledLines(t *testing.T) {
 	}
 }
 
-// TestModelApprovalMenuSpacing pins the mockup's vertical spacing
-// (docs/layout/user-questions-layout.md:13-22, the approval box): Reason: and Command: run ADJACENT
-// — two labelled facts about one call, and a blank line between them reads as two blocks — ONE blank
-// line sets the menu off from the body, the four decisions stay adjacent to each other, and the last
-// of them ends the box with the bottom border directly under it. That single blank is the whole of
-// the pane's spacing: the ask box closes its offering with a second one (its answers are a blank
-// line apart, so its last would otherwise be crowded), this one does not, and the difference is the
-// mockup's. It is asserted as the SHAPE of the pane rather than as a substring anywhere in it,
-// because a blank line in the wrong place is exactly what a substring check cannot see and what the
-// eye reads as a second block.
+// TestModelApprovalMenuSpacing pins the pane's vertical spacing
+// (docs/layout/user-questions-layout.md, the approval box): Reason: and command: are two PARTS of
+// the body and stand a blank line apart, ONE further blank line sets the menu off from the body,
+// the four decisions stay adjacent to each other, and the last of them ends the box with the bottom
+// border directly under it. The ask box closes its offering with a blank of its own (its answers
+// are a blank line apart, so its last would otherwise be crowded); this one does not, and that
+// difference is the whole of what separates the two boxes' spacing now. It is asserted as the SHAPE
+// of the pane rather than as a substring anywhere in it, because a blank line in the wrong place is
+// exactly what a substring check cannot see and what the eye reads as a second block.
 func TestModelApprovalMenuSpacing(t *testing.T) {
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{
 		Tool:      "terminal",
@@ -1749,10 +1752,13 @@ func TestModelApprovalMenuSpacing(t *testing.T) {
 	})
 	rows := strings.Split(ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), ""), "\n")
 	got := strings.Join(rows, "\n")
-	blank := func(i int) bool { return strings.TrimSpace(strings.Trim(rows[i], "│")) == "" }
+	blank := func(i int) bool { return paneRowIsBlank(rows[i]) }
 
-	if reason, command := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "command:"); command != reason+1 {
-		t.Errorf("command: sits %d lines under Reason:, want the two labels adjacent:\n%s", command-reason, got)
+	reason, command := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "command:")
+	if command != reason+2 {
+		t.Errorf("command: sits %d lines under Reason:, want the two parts set off by one blank:\n%s", command-reason, got)
+	} else if !blank(reason + 1) {
+		t.Errorf("the line between Reason: and command: = %q, want it blank:\n%s", rows[reason+1], got)
 	}
 	allow, cancel := paneRowIndex(t, rows, "❯ Allow"), paneRowIndex(t, rows, "· Cancel")
 	if !blank(allow - 1) {
@@ -1764,6 +1770,93 @@ func TestModelApprovalMenuSpacing(t *testing.T) {
 	if cancel != len(rows)-2 {
 		t.Errorf("%d lines sit between the last option and the bottom border, want none:\n%s", len(rows)-2-cancel, got)
 	}
+}
+
+// TestModelApprovalPartsAreParagraphs is the rule the pane's spacing now follows, asserted over the
+// bodies that actually differ: every PART the body composes — the Reason:, the Fix:, the Scope:,
+// the labelled arguments, the resolved-path note — is a paragraph, one blank line from the next,
+// none before the first and none after the last. The last matters as much as the middle: a trailing
+// blank would double with the one the menu is set off by (popupSpec.rowPadAbove) and open a gap
+// nothing means. A part that WRAPS is still ONE part, which is why the cases include a remedy long
+// enough to run several lines at this width: the blank belongs after its LAST line, not after each.
+func TestModelApprovalPartsAreParagraphs(t *testing.T) {
+	longRemedy := "a terminal command naming ~/.apogee needs approval, even for a read; list, " +
+		"read or copy from there with the dedicated tools instead (list_dir, read_file, grep, " +
+		"find_files, or copy_file's source argument)"
+	cases := []struct {
+		name  string
+		req   domain.ApprovalRequest
+		parts []string
+	}{
+		{
+			"reason only",
+			domain.ApprovalRequest{Tool: "terminal", Reason: "subprocess execution"},
+			[]string{"Reason:"},
+		},
+		{
+			"reason and a remedy that wraps",
+			domain.ApprovalRequest{
+				Tool:      "terminal",
+				Reason:    "dangerous-action guard forced approval",
+				Remedy:    longRemedy,
+				Arguments: json.RawMessage(`{"command":"ls ~/.apogee"}`),
+			},
+			[]string{"Reason:", "Fix:", "command:"},
+		},
+		{
+			"reason, scope, arguments and a resolved path",
+			domain.ApprovalRequest{
+				Tool:         "write_file",
+				Reason:       "write outside the workspace",
+				Scope:        "go vet reads the whole package directory internal/tools.",
+				Arguments:    json.RawMessage(`{"path":"docs/notes.md","content":"hi"}`),
+				ResolvedPath: "/elsewhere/notes.md",
+			},
+			[]string{"Reason:", "Scope:", "path:", "→ resolves to"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+			m = step(t, m, approvalReqMsg{Request: tc.req, Reply: make(chan domain.ApprovalDecision, 1)})
+			rows := strings.Split(ansiPattern.ReplaceAllString(m.approvalPrompt(tc.req), ""), "\n")
+			got := strings.Join(rows, "\n")
+
+			first := paneRowIndex(t, rows, tc.parts[0])
+			if paneRowIsBlank(rows[first-1]) {
+				t.Errorf("a blank line stands above the first part %q:\n%s", tc.parts[0], got)
+			}
+			for i := 1; i < len(tc.parts); i++ {
+				above, at := paneRowIndex(t, rows, tc.parts[i-1]), paneRowIndex(t, rows, tc.parts[i])
+				if !paneRowIsBlank(rows[at-1]) {
+					t.Errorf("%q follows %q with no blank between them:\n%s", tc.parts[i], tc.parts[i-1], got)
+				}
+				for j := above + 1; j < at-1; j++ {
+					if paneRowIsBlank(rows[j]) {
+						t.Errorf("a second blank sits between %q and %q on row %d:\n%s", tc.parts[i-1], tc.parts[i], j, got)
+					}
+				}
+			}
+
+			// Nothing after the last part but the menu's own single blank: the row above the first
+			// option is blank, and the one above that is the body's last line.
+			allow := paneRowIndex(t, rows, "❯ Allow")
+			if !paneRowIsBlank(rows[allow-1]) {
+				t.Errorf("the line above the menu = %q, want the blank setting it off:\n%s", rows[allow-1], got)
+			}
+			if paneRowIsBlank(rows[allow-2]) {
+				t.Errorf("the body closes with a trailing blank, doubling the menu's own:\n%s", got)
+			}
+		})
+	}
+}
+
+// paneRowIsBlank reports whether a painted pop-up row carries nothing but its two side borders —
+// the blank line the eye reads as a paragraph break. It trims the borders rather than the whole
+// row's space so a row of spaces INSIDE a box still reads as blank, which is what it is.
+func paneRowIsBlank(row string) bool {
+	return strings.TrimSpace(strings.Trim(row, "│")) == ""
 }
 
 // Arguments with no names to label fall back to the raw JSON, because that is what keeps the human

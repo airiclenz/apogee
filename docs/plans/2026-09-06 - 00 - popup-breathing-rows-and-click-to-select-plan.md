@@ -98,7 +98,17 @@ Depends on items 0 and 1.
 
 **Commit:** `feat(tui): the free-text ask pane keeps a blank row above its hint`
 
-## 3. Every part of the approval body is a paragraph
+## 3. Every part of the approval body is a paragraph — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): consequential edit — cmd/apogee/e2e_approval_test.go: made necessary by the paragraph join; `assertFixFollowsReason` asserted `Fix:` on the row directly under `Reason:`, and the file-top doc block said the same. The item's own Acceptance names `TestE2EApprovalForcesALook`, so both are rewritten to the call-F shape (one blank between the two parts) rather than dropped; the frame the test holds (`t10-forced-pane`) now matches without `-update`.
+
+NOTES (2026-09-06): consequential edit — layout.md: made necessary by the paragraph join; the sketch under `**What the approval prompt's body says…**` and the sentence beneath it stated "the reason and the arguments adjacent", which call F makes false. The sketch gains the blank, the sentence states the paragraph rule, and the paragraph was re-wrapped to the file's ~100-column measure. No other layout.md section touched — item 6 owns the breathing rule's own statement.
+
+NOTES (2026-09-06): `internal/tui/model_test.go:2212` ("unlike the approval box's adjacent decisions") and `internal/tui/popup.go:351` ("the approval's four adjacent rows") were left as written — both name the MENU rows' adjacency, which call F does not change. The regression guard's grep ran clean afterwards.
+
+NOTES (2026-09-06): `TestModelApprovalPartsAreParagraphs` builds its model at 100×30 rather than through `newApprovalModel`, whose default window elides the multi-part bodies the table needs whole; the blank-row predicate `paneRowIsBlank` was lifted out of `TestModelApprovalMenuSpacing`'s local closure so the three tests judge a blank the same way.
+
+NOTES (2026-09-06): pre-existing and NOT this item's — `TestDocsEnvRootsMoveTheHomeAndTheFence` fails ("timed out waiting for apogee's first frame") whenever `./cmd/apogee` is run with `-popup-design`, on the clean tree at the plan's base as well as with this item's changes (verified by stashing). It spawns a child apogee that does not know the flag. Item 6 deletes `-popup-design` and closes it. `TestE2ELiveStateFollowsTheRunningSession` (t16) and `TestE2EPopupFramesLists` still fail under `-popup-design`: those are items 4 and 5's design frames, unaffected by this item.
 
 Depends on items 0 and 1.
 

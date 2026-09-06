@@ -17,8 +17,17 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 
 # User Approval:
 
+> Amended 2026-09-06 by `docs/plans/2026-09-06 - 00 - popup-breathing-rows-and-click-to-select-plan.md`,
+> whose ratified call F makes every PART of the approval body a paragraph: the sub-agent line, the
+> `Reason:`, the `Fix:`, the `Scope:`, the labelled arguments and the notes under them are each set
+> off from the next by one blank line, and a part that wraps keeps the blank after its last line.
+> The sketch below draws that blank between `Reason:` and `command:`; the earlier mockup ran the two
+> adjacent. Nothing else about the box changes — the menu is still set off by one blank and the last
+> option still closes on the bottom border.
+
 ╭────────────────────────── Approve terminal? ───────────────────────────╮
 │ Reason: subprocess execution                                           │
+│                                                                        │
 │ command:                                                               │
 │   cd /workspace/repos/apogee && git status                             │
 │                                                                        │

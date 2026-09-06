@@ -304,26 +304,30 @@ the arguments in the order the model wrote them. So a shell call reads
 
 ```
 │ Reason: subprocess execution                                                 │
+│                                                                              │
 │ command:                                                                     │
 │   cd /workspace/repos/apogee && git status                                   │
 ```
 
-— the reason and the arguments adjacent, two labelled facts about one call, and a command that spans
-several lines showing the lines it will actually run. The JSON object the arguments travelled in is
-NOT drawn: no braces around the set, no quoted key names, no `\n` between one line of a command and
-the next. That envelope is three things to read past on the one surface whose whole job is that the
-fact is read, and it says nothing the labels do not. Nothing is dropped to buy that: EVERY argument
-gets a label, so a workdir naming where a command runs is on the screen rather than summarised away,
-and arguments with no names to label — a blob that does not parse, a value that is not an object at
-all — are shown exactly as they arrived, since half a labelled body would be a claim about the call
-the bytes do not support. Those unlabelled lines hang at the same two spaces a value does, because
-this pane tells its own rows from the model's by the column they start in: a line of argument bytes
-at column zero is indistinguishable from the `Reason:` the pane wrote, so no argument-derived line
-is ever painted there — the bytes are all on the screen, two columns to the right of where a label
-can live. **The wrap holds that column too:** a body line too long for the pane continues under its
-own leading indent rather than flush left, so a value only long enough to wrap cannot walk into the
-column the pane's own rows start in; a pane too narrow to hold the indent and text beside it sheds
-the hang whole and wraps flat, as every hanging surface here does. A single value with no flat shape
+— the reason and the arguments a blank line apart, because every PART of this body is a paragraph
+(the sub-agent line, the `Reason:`, the `Fix:`, the `Scope:`, the labelled arguments and the notes
+under them), and a command that spans several lines showing the lines it will actually run. A part
+that wraps keeps the blank after its LAST line: the blank separates parts, not rows. The JSON object
+the arguments travelled in is NOT drawn: no braces around the set, no quoted key names, no `\n`
+between one line of a command and the next. That envelope is three things to read past on the one
+surface whose whole job is that the fact is read, and it says nothing the labels do not. Nothing is
+dropped to buy that: EVERY argument gets a label, so a workdir naming where a command runs is on the
+screen rather than summarised away, and arguments with no names to label — a blob that does not
+parse, a value that is not an object at all — are shown exactly as they arrived, since half a
+labelled body would be a claim about the call the bytes do not support. Those unlabelled lines hang
+at the same two spaces a value does, because this pane tells its own rows from the model's by the
+column they start in: a line of argument bytes at column zero is indistinguishable from the
+`Reason:` the pane wrote, so no argument-derived line is ever painted there — the bytes are all on
+the screen, two columns to the right of where a label can live. **The wrap holds that column too:**
+a body line too long for the pane continues under its own leading indent rather than flush left, so
+a value only long enough to wrap cannot walk into the column the pane's own rows start in; a pane
+too narrow to hold the indent and text beside it sheds the hang whole and wraps flat, as every
+hanging surface here does. A single value with no flat shape
 (a nested object, an array) is indented
 JSON under its own label, which is the one place a brace still reaches this pane. All of it is
 display: the arguments the tool receives are the ones the model sent, whatever shape they were read

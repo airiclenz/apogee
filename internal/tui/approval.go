@@ -255,15 +255,22 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // chrome is its two borders and nothing else (popupBorderChrome) and the menu costs the frame no
 // more than the legend did.
 //
-// The mockup's vertical spacing is the same argument in blank lines: the Reason: line and the
-// labelled arguments under it run ADJACENT — they are labelled facts about one call, and a blank
-// line between them reads as two blocks — while ONE blank line sets the menu off from them
-// (popupSpec.rowPadAbove), because that is
-// the break that matters, between what the human is deciding about and what the decisions are. It is
-// the ONLY blank the pane spends: the menu's four options are adjacent to each other and the last of
-// them ends the box, so nothing separates Cancel from the bottom border (popupRowStyle.padBelow stays off, and
-// the mockup draws it that way). The blank is booked out of the pane's own row budget below, and it
-// gives way before an option does on a window too short for both.
+// The vertical spacing is the same argument in blank lines, and every PART of the body is a
+// paragraph: the Sub-agent line, the Reason:, the Fix:, the Scope:, the labelled arguments, the
+// resolved-path note and the MCP grant note are each set off from the next by ONE blank line, and a
+// part that WRAPS — a Fix: running four lines — keeps the blank after its last line, because the
+// blank separates parts rather than rows. An earlier mockup ran the Reason: and the arguments
+// adjacent, on the argument that labelled facts about one call read as one block; the pane draws
+// them apart now (2026-09-06) because a body that keeps growing parts — a remedy, a scope, a
+// resolved path, a grant — reads as one undifferentiated wall when nothing separates them, and the
+// human has to find the fact they are ruling on before they can rule on it. ONE further blank line
+// sets the menu off from the body (popupSpec.rowPadAbove), because that is still the break that
+// matters most: between what the human is deciding about and what the decisions are. Below the
+// menu there is none — the four options are adjacent to each other and the last of them ends the
+// box, so nothing separates Cancel from the bottom border (popupRowStyle.padBelow stays off). The
+// menu's blank is booked out of the pane's own row budget below and gives way before an option does
+// on a window too short for both; the body's blanks are body LINES, counted by popupBodyLineCount
+// and elided with the rest of the body ("… (+N more lines)") when the window cannot seat them.
 //
 // Every model-authored string (tool name, reason, args) is escape-stripped at this call site;
 // stripEscapes drops the C0 control characters and DEL (keeping \n and \t), drops the bidi
@@ -395,14 +402,15 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		// that keeps the fold beside the pane's other field treatments, where the reason for it is.
 		title:         "Approve " + flattenField(stripEscapes(req.Tool)) + "?",
 		titleInBorder: true,
-		body:          strings.Join(parts, "\n"), // Reason: and command: adjacent, as the mockup draws them
-		maxBodyRows:   maxBodyRows,
-		rows:          rows,
-		menuRows:      true,
-		rowPadAbove:   true, // the one blank line between the body and the menu; the mockup closes on the border
-		selected:      m.approvalSel.highlight(len(rows)),
-		maxRows:       rowsShown,
-		scrollbar:     m.popupScrollbarOn(),
+		// One blank line between consecutive parts: each is a paragraph, whatever it wrapped to.
+		body:        strings.Join(parts, "\n\n"),
+		maxBodyRows: maxBodyRows,
+		rows:        rows,
+		menuRows:    true,
+		rowPadAbove: true, // the one blank line between the body and the menu; the mockup closes on the border
+		selected:    m.approvalSel.highlight(len(rows)),
+		maxRows:     rowsShown,
+		scrollbar:   m.popupScrollbarOn(),
 	}
 	return renderPopup(m.th, spec, m.width)
 }

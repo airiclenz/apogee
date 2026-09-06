@@ -51,7 +51,8 @@ func TestModelApprovalTitleFoldsAToolNameNewline(t *testing.T) {
 // A tool whose reach is WIDER than its arguments — go vet takes one filename and reads every .go
 // file in that file's directory — states so on the request (domain.ApprovalRequest.Scope), and the
 // pane is where that has to be readable: it is the surface the human decides on. The line is
-// painted like its Reason:/Fix: neighbours, labelled by this Driver rather than by the engine, and
+// painted like its Reason:/Fix: neighbours — a paragraph of its own, one blank line under the
+// Reason it widens — labelled by this Driver rather than by the engine, and
 // it is ABSENT (not blank) for the overwhelming majority of calls, whose tools declare no scope.
 func TestModelApprovalRendersTheDeclaredScope(t *testing.T) {
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -68,8 +69,11 @@ func TestModelApprovalRendersTheDeclaredScope(t *testing.T) {
 	if !strings.Contains(got, "Scope: "+req.Scope) {
 		t.Errorf("the declared scope did not reach the pane:\n%s", got)
 	}
-	if reason, scope := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "Scope:"); scope <= reason {
+	reason, scope := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "Scope:")
+	if scope <= reason {
 		t.Errorf("the scope sits on row %d, above the Reason on row %d it widens:\n%s", scope, reason, got)
+	} else if scope != reason+2 || !paneRowIsBlank(rows[reason+1]) {
+		t.Errorf("the scope sits %d rows under the Reason, want one blank between the two parts:\n%s", scope-reason, got)
 	}
 
 	// A tool that declares nothing: no line at all, not an empty label.

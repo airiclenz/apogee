@@ -7,9 +7,10 @@ package main
 // Both were manual for the same reason in two different shapes. T-10: "the wording and placement of
 // the sanctioned-route hint on a live approval pane is human judgment". T-13: "a 100 ms arming latch
 // is a timing behaviour ... only a human at a real keyboard can feel that". What a driver can settle
-// is everything up to the judgment — that the pane is raised at all, that the `Fix:` line stands on
-// its own row under the `Reason:` it answers, that its continuation rows hang under its own indent
-// rather than falling flush left, that an early keystroke is swallowed and a deliberate one is not.
+// is everything up to the judgment — that the pane is raised at all, that the `Fix:` line stands as
+// a paragraph of its own under the `Reason:` it answers, one blank row down, that its continuation
+// rows hang under its own indent rather than falling flush left, that an early keystroke is
+// swallowed and a deliberate one is not.
 // The judgment half that is left is one rubric, at the bottom of this file.
 
 import (
@@ -402,16 +403,19 @@ func pressAndSettle(t *testing.T, drv driven, key string) {
 }
 
 // assertFixFollowsReason pins the geometry the checklist's step 5 asks a human to check: the hint is
-// a line of its OWN, directly under the reason it answers, rather than a tail glued onto that
-// reason or a note below the arguments block.
+// a PARAGRAPH of its own under the reason it answers — one blank row between the two, the spacing
+// every part of this body carries — rather than a tail glued onto that reason or a note below the
+// arguments block.
 func assertFixFollowsReason(t *testing.T, f tuitest.Frame) {
 	t.Helper()
 
 	reason := rowIndexContaining(t, f, forcedReason)
 	fix := rowIndexContaining(t, f, "Fix: ")
-	if fix != reason+1 {
-		t.Errorf("the Fix: line is on row %d and the Reason: line on row %d; want the very next row:\n%s",
+	if fix != reason+2 {
+		t.Errorf("the Fix: line is on row %d and the Reason: line on row %d; want one blank row between them:\n%s",
 			fix, reason, f)
+	} else if between := strings.TrimSpace(strings.Trim(f.Row(reason+1), " │")); between != "" {
+		t.Errorf("the row between Reason: and Fix: reads %q; want it blank:\n%s", between, f)
 	}
 	if strings.Contains(f.Row(reason), "Fix:") {
 		t.Errorf("the hint is glued onto the Reason: line: %q", f.Row(reason))
