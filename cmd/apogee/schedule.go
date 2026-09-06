@@ -194,8 +194,10 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		// ratified split the daemon's journal takes (daemonfire.go): a file present but unreadable,
 		// standing content past its Budget share. The plain loaded-files line stays dropped, because
 		// it is a launch's narration and a Firing's narration is the session record it leaves behind.
-		// Carried whether the run answered or failed, since a Firing that went wrong is the one whose
-		// loading is worth suspecting.
+		// Carried on an answer and on a failure that still produced a Result, since a Firing that
+		// went wrong is the one whose loading is worth suspecting. A failure carrying a ZERO
+		// run.Result carries nothing here: its report is empty, so this field is assigned an empty
+		// slice and the Firing block renders no anomaly line.
 		//
 		// Not stripped here: the text crosses as plain data (internal/notice composes; this Driver
 		// only routes), and the surface that renders it strips at its own seam — the TUI's Firing

@@ -487,7 +487,7 @@ func ensureScratchDir(root, id string) string {
 // ----------------------------------------------------------------------------
 
 // gcSessions applies the configured retention policy to the session store once per boot — the
-// sibling of gcScratchDirs above, and deliberately its posture: silent and best-effort, so a sweep
+// sibling of gcScratchDirs, and deliberately its posture: silent and best-effort, so a sweep
 // that could not read a directory or could not remove a record is never a reason a start fails.
 // Nothing is printed even when records go: the policy is opt-in, so its effect is not a surprise to
 // the only person who could have asked for it.
