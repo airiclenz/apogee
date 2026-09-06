@@ -325,6 +325,16 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // keystroke — one already in the input buffer, aimed at whatever the human was reading a moment
 // earlier — and the pane's whole guarantee is about what the human was shown before they ruled.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
+	view, _ := m.approvalPromptPlaced(req)
+	return view
+}
+
+// approvalPromptPlaced is [Model.approvalPrompt] with the painter's own placement handed back beside
+// the view — what a POINTER needs and a paint does not. A click on this pane is mapped through the
+// very composition View draws (popupPaneHit, mouse.go), so the menu row under the pointer is the row
+// on the screen rather than a second arithmetic that can disagree with it. The doc above is the
+// pane's; this is the same pane, said twice over (askPromptPlaced is its twin).
+func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPlacement) {
 	var parts []string
 	if line := subAgentPromptLine(req.SubAgentName, req.SubAgentTask); line != "" {
 		parts = append(parts, line)
@@ -391,7 +401,7 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	menuLines := popupRowBlockLines(popupFlatRowHeights(len(rows)), 0, popupRowPadLines(true, false))
 	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome, popupFloor{})
 	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 	spec := popupSpec{
 		// The tool NAME is a field like any other on this pane, and apogee does not author it — an MCP
@@ -412,7 +422,7 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		maxRows:     rowsShown,
 		scrollbar:   m.popupScrollbarOn(),
 	}
-	return renderPopup(m.th, spec, m.width)
+	return renderPopupPlaced(m.th, spec, m.width)
 }
 
 // approvalTaskClipRunes bounds the delegated task the Sub-agent line spends body rows on. It is the

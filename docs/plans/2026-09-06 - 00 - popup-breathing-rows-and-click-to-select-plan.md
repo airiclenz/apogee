@@ -244,9 +244,15 @@ NOTES (2026-09-06): `settingsFrameCell` was renamed to `frameCell` in place (12 
 
 **Commit:** `feat(tui): the ask pane takes a click — highlight, toggle, second click sends`
 
-## 9. Click on the approval pane
+## 9. Click on the approval pane — ✅ DONE (2026-09-06)
 
 Depends on item 8.
+
+NOTES (2026-09-06): consequential edit — internal/tui/approval.go: made necessary by the click's geometry — `approvalPrompt` is split into `approvalPromptPlaced` (view + the painter's own `popupPlacement`) so `popupPaneHit` maps the pointer through the very composition View draws, the split `askPromptPlaced` already made for item 8's ask click.
+
+NOTES (2026-09-06): the handler's liveness guard is `m.state != stateAwaitingApproval || m.pending == nil || pre.pending == nil` rather than the item's bare `m.pending != nil` — the state test is `promptWheel`'s and `handleAskClick`'s shape on this shared rectangle, and `pre.pending` is what the geometry is composed from once `sendApproval` has cleared the live one.
+
+NOTES (2026-09-06): the e2e's three clicks go through a new local `click(drv, x, y)` helper (press + release) in `cmd/apogee/e2e_popups_test.go`; `TestE2EPopupClickAsk`'s existing raw `Press` pairs were left untouched.
 
 **What.** `mouse.go`: `handleApprovalClick(pre, msg)` in the prompt slot beside `handleAskClick` (one `handlePromptClick` dispatching on state is acceptable; binding: the ask and approval semantics stay in their own functions), live while `m.pending != nil`, geometry via `popupPaneHit` over `approvalPrompt`. Row hit ≠ `approvalSel` → `approvalSel.highlight(row)` (outside the latch, like `↑/↓`); row hit == `approvalSel` → `if !m.approvalArmed { claimed, no-op }` else `m.resolveApproval()` (call D — the same gate `model.go:1515-1529` puts on `⏎`; the Cancel row stops the worker as `resolveApproval` already does). Non-row line and outside the rect → claimed, no-op (call C).
 

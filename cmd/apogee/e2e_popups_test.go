@@ -38,6 +38,10 @@ const (
 	// on the frame.
 	askTicked = "[✔]"
 
+	// The marker a menu-style pop-up paints on its highlighted row (popupSpec.menuRows) — what says
+	// where the ❯ sits on the approval pane's four decisions.
+	popupMenuMarker = "❯"
+
 	// The headings the three list pop-ups paint — the one text on each that does not scroll.
 	dropdownTitle = "commands and skills"
 	pickerTitle   = "schedule — how often"
@@ -55,6 +59,13 @@ func popupRedactions(sess *e2eSession) []tuitest.Redaction {
 		With:    "<age>${1}   │",
 	}
 	return append([]tuitest.Redaction{age}, goldenRedactions(sess)...)
+}
+
+// click presses and releases the left button over one cell — the two reports a terminal in SGR mouse
+// mode sends for one click, which is what a pointer test aims with.
+func click(drv *tuitest.Driver, x, y int) {
+	drv.Press(tuitest.Click(x, y))
+	drv.Press(tuitest.Release(x, y))
 }
 
 // TestE2EPopupFramesLists records the three list pop-ups: the `/` dropdown, the picker and the
@@ -147,6 +158,57 @@ func TestE2EPopupClickAsk(t *testing.T) {
 	drv.Press(tuitest.Release(x, y))
 	drv.WaitText(askReply)
 	drv.WaitGone(askChoiceHint)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// TestE2EPopupClickApproval drives the APPROVAL pane with the pointer, through the same SGR bytes: a
+// click on a decision row moves the highlight onto it, and a second click on that row rules. It is
+// the security surface of the five, so what this e2e adds to the reducer tests
+// (internal/tui/mouse_test.go) is the one claim only a real program can make — that a single click on
+// the row the pane itself highlighted, on a pane that has been up long enough for its latch to have
+// landed, still grants nothing.
+func TestE2EPopupClickApproval(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "popups"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+
+	submit(drv, popupApprovalPrompt)
+	pane := awaitApprovalPane(drv) // settles past the 100 ms arming latch, so the clicks below are live
+
+	allowX, allowY, ok := pane.Find("Allow")
+	if !ok {
+		t.Fatalf("the pane paints no Allow row:\n%s", pane)
+	}
+	denyX, denyY, ok := pane.Find("Deny")
+	if !ok {
+		t.Fatalf("the pane paints no Deny row:\n%s", pane)
+	}
+
+	// One click on the row the PANE highlighted: the arm is the pointer's own, so this rules nothing.
+	click(drv, allowX, allowY)
+	drv.WaitQuiet(settled)
+	if !strings.Contains(drv.Frame().String(), approvalMarker) {
+		t.Fatalf("a single click on the highlighted Allow answered the call:\n%s", drv.Frame())
+	}
+
+	// A click on Deny moves the ❯ onto it, off the Allow row the pane opened on.
+	click(drv, denyX, denyY)
+	drv.WaitFor(func() bool { return strings.Contains(drv.Frame().Row(denyY), popupMenuMarker) },
+		tuitest.Awaiting("the ❯ to move onto the clicked Deny row"))
+	drv.WaitQuiet(settled)
+	if strings.Contains(drv.Frame().Row(allowY), popupMenuMarker) {
+		t.Fatalf("the ❯ is still on Allow after a click on Deny:\n%s", drv.Frame())
+	}
+
+	// The second click on that row is the ⏎: the denial reaches the model with the tool result.
+	click(drv, denyX, denyY)
+	drv.WaitGone(approvalMarker)
+	drv.WaitFor(func() bool { return stubSawMessage(stub, "tool call denied by approver") },
+		tuitest.Awaiting("the clicked denial to reach the model"))
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)

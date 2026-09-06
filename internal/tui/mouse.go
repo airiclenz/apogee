@@ -474,6 +474,13 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if ask, cmd, claimed := m.handleAskClick(pre, msg); claimed {
 		return ask, cmd
 	}
+	// The approval pane is the other half of that slot: it shares the ask pane's rectangle (panePrompt
+	// is "the approval or the ask prompt", model.go) and answers a click the same way, for the same
+	// reasons (handleApprovalClick). Which of the two is up is a question of STATE rather than of
+	// geometry, so the two are asked one after the other rather than arbitrated between here.
+	if approval, cmd, claimed := m.handleApprovalClick(pre, msg); claimed {
+		return approval, cmd
+	}
 	// The footer's mode marker is the frame's one CHROME control ([Model.handleFooterModeClick]): a
 	// click on it opens the mode picker. It is asked after the panes that draw OVER the transcript —
 	// they can cover any row, the footer's included, and a click on a pane belongs to the pane — and
@@ -1444,6 +1451,70 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 			m.askChecked[sel] = !m.askChecked[sel]
 		}
 	}
+	m.clickArmed = clickArm{pane: panePrompt, row: row, ok: true}
+	return m, nil, true
+}
+
+// ----------------------------------------------------------------------------
+// Mouse in the approval prompt (approval.go)
+// ----------------------------------------------------------------------------
+
+// handleApprovalClick answers a left-click while a tool call waits on the human. The pointer does
+// what the keyboard does on this pane and no more: a click on a menu row moves the highlight onto it,
+// the way ↑/↓ do, and a SECOND click on that same row takes it — the ⏎ the highlight was already
+// offering (resolveApproval), so a click on Cancel stops the worker exactly as ⏎ on it does.
+//
+// Two clicks ALWAYS, and on this pane that rule is what keeps the surface a security surface. The
+// pane opens with Allow highlighted (foldApprovalRequest) and settles long before a hand reaches the
+// mouse, so a handler that activated whatever the highlight already sat on would grant a tool call on
+// ONE click. The row an activating click may take is therefore the row the POINTER put the highlight
+// on — the arm (clickArm, model.go) — and the pane's own default is never one of those.
+//
+// The pane's ARMING latch gates that second click on top of the arm, exactly as it gates ⏎
+// (approvalArmDelay, approval.go; model.go's ⏎ case): the pane's promise is that the human saw the
+// call before they ruled on it, and a click is as capable as a keystroke of having been aimed at the
+// frame before this one. An unarmed activating click is swallowed and leaves the arm STANDING, so
+// once the tick lands the next click on that row rules — the latch costs the gesture nothing but the
+// milliseconds it exists for.
+//
+// Everything else INSIDE the box it swallows: a click naming no row — the reason, the argument block,
+// a pad line, the border — is the pane's and does nothing. Nothing is selected by it, so
+// handleMouseRelease falls through unchanged.
+//
+// A click OUTSIDE the box is not the pane's at all: it goes back unclaimed and the chain carries on
+// with it, by the outside-click rule handleMouseClick states. The call is untouched by it —
+// cancelling a decision stays esc's alone — and the transcript the human reads the call's context in
+// stays draggable for as long as the pane stands.
+//
+// pre is the pre-click frame the pane is placed from (handleMouseClick) and the live model is what
+// mutates — the chain's rule, and here it is also the reason the request the geometry is composed from
+// is read off pre: sendApproval clears m.pending, and a second click composing the pane from the
+// answered model would have nothing to place.
+func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	if m.state != stateAwaitingApproval || m.pending == nil || pre.pending == nil {
+		return m, nil, false
+	}
+	req := pre.pending.Request
+	row, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
+		return pre.approvalPromptPlaced(req)
+	}, msg.Y)
+	if !inRect {
+		return m, nil, false // outside the box: unclaimed, and the chain goes on with it
+	}
+	if !onRow {
+		return m, nil, true // the pane's chrome: claimed, with no row to take
+	}
+	if m.clickArmed.holds(panePrompt, row) {
+		if !m.approvalArmed {
+			return m, nil, true // the latch, not the arm: the row stays armed for the click after the tick
+		}
+		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
+		// the next gesture to drop, because the decision it belonged to is taken.
+		m.clickArmed = clickArm{}
+		next, cmd := acceptedModel(m.resolveApproval())
+		return next, cmd, true
+	}
+	m.approvalSel.seat(row, len(approvalMenu))
 	m.clickArmed = clickArm{pane: panePrompt, row: row, ok: true}
 	return m, nil, true
 }

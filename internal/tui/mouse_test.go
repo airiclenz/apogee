@@ -4603,6 +4603,205 @@ func TestAskClickOutsideTheBoxReachesTheTranscriptAndThePrompt(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// Clicking the approval prompt (mouse.go, approval.go)
+// ----------------------------------------------------------------------------
+
+// approvalClickModel raises a tool call over a screenful of transcript and hands back the rendezvous
+// channel with it: what a click RULES is only provable at the other end of the channel the blocked
+// tool is waiting on, so every test below reads the decision from there rather than from a field on
+// the Model. The transcript above the pane is the surface an outside click has to keep reaching.
+func approvalClickModel(t *testing.T) (Model, chan domain.ApprovalDecision) {
+	t.Helper()
+	reply := make(chan domain.ApprovalDecision, 1)
+	m := step(t, streamOneScreen(t, newTestModel(t)), approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file"},
+		Reply:   reply,
+	})
+	if m.state != stateAwaitingApproval {
+		t.Fatalf("state = %v, want the call waiting on the human", m.state)
+	}
+	if _, _, ok := m.frameSpans().pane(panePrompt); !ok {
+		t.Fatal("the approval pane is not on the frame; there is nothing to aim at")
+	}
+	return m, reply
+}
+
+// sentDecision is what the blocked tool received, if anything: the channel is buffered (cap 1) and
+// the send is synchronous, so a read that finds it empty right after an Update proves nothing was
+// ruled.
+func sentDecision(t *testing.T, reply chan domain.ApprovalDecision) (domain.ApprovalDecision, bool) {
+	t.Helper()
+	select {
+	case d := <-reply:
+		return d, true
+	default:
+		return "", false
+	}
+}
+
+// The pointer takes two clicks to rule on a call, and the first one only moves the highlight (call J,
+// owner 2026-09-06): a click on Deny seats the ❯ on it and arms it, and the SECOND click on that same
+// row is the ⏎ — the decision reaches the blocked tool.
+func TestApprovalClickHighlightsThenTheSecondClickRules(t *testing.T) {
+	m, reply := approvalClickModel(t)
+	m = armApproval(t, m)
+	const denyRow = 2
+	x, y := frameCell(t, m, "Deny")
+
+	m = step(t, m, leftClick(x, y))
+
+	if got := m.approvalSel.highlight(len(approvalMenu)); got != denyRow {
+		t.Fatalf("approvalSel = %d after a click on Deny, want the highlight seated on %d", got, denyRow)
+	}
+	if !m.clickArmed.holds(panePrompt, denyRow) {
+		t.Errorf("the click armed %+v, want the row it highlighted", m.clickArmed)
+	}
+	if d, sent := sentDecision(t, reply); sent {
+		t.Fatalf("the FIRST click ruled %q; a single click may never answer an approval", d)
+	}
+	if m.state != stateAwaitingApproval {
+		t.Fatalf("state = %v after one click, want the call still up", m.state)
+	}
+
+	m, cmd := stepCmd(t, m, leftClick(x, y))
+
+	d, sent := sentDecision(t, reply)
+	if !sent {
+		t.Fatal("the second click on the highlighted row ruled nothing")
+	}
+	if d != domain.ApprovalDeny {
+		t.Errorf("the tool received %q, want the clicked row's decision %q", d, domain.ApprovalDeny)
+	}
+	if cmd == nil {
+		t.Error("the click dropped sendApproval's Cmd; the spinner tick it re-arms has to survive a click")
+	}
+	if m.state != stateRunning {
+		t.Errorf("state = %v after the decision, want running", m.state)
+	}
+	if m.clickArmed.ok {
+		t.Errorf("the arm outlived the decision: %+v", m.clickArmed)
+	}
+}
+
+// The pane's OWN default highlight is not a decision anybody gave, so a click on Allow — the row the
+// ❯ already sits on when the pane opens — arms it and grants nothing. On this surface that is the
+// whole point of the arm: one click can never run a tool call, whatever the highlight was left on.
+func TestApprovalClickOnTheDefaultHighlightArmsAndGrantsNothing(t *testing.T) {
+	m, reply := approvalClickModel(t)
+	m = armApproval(t, m)
+	if m.approvalSel.highlight(len(approvalMenu)) != 0 {
+		t.Fatalf("setup: the pane opened on row %d, want Allow", m.approvalSel.highlight(len(approvalMenu)))
+	}
+	x, y := frameCell(t, m, "Allow")
+
+	m = step(t, m, leftClick(x, y))
+
+	if d, sent := sentDecision(t, reply); sent {
+		t.Fatalf("a first click on the default-highlighted Allow granted %q", d)
+	}
+	if !m.clickArmed.holds(panePrompt, 0) {
+		t.Errorf("the click armed %+v, want the default row it landed on", m.clickArmed)
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	if d, sent := sentDecision(t, reply); !sent || d != domain.ApprovalAllow {
+		t.Errorf("the second click ruled %q (sent=%v), want %q", d, sent, domain.ApprovalAllow)
+	}
+}
+
+// The pane's arming latch gates the activating click exactly as it gates ⏎ (call D): before the
+// approvalArmedMsg tick lands, the highlight still MOVES — the pointer's ↑/↓ are outside the latch —
+// but the second click on the armed row rules nothing. The arm survives it, so the first click after
+// the tick takes the row rather than a third one.
+func TestApprovalClickBeforeTheLatchRulesNothing(t *testing.T) {
+	m, reply := approvalClickModel(t)
+	if m.approvalArmed {
+		t.Fatal("setup: the pane armed itself; there is no latch left to assert against")
+	}
+	x, y := frameCell(t, m, "Deny")
+
+	m = step(t, m, leftClick(x, y))
+
+	if got := m.approvalSel.highlight(len(approvalMenu)); got != 2 {
+		t.Fatalf("approvalSel = %d before the latch, want the highlight to move anyway (2)", got)
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	if d, sent := sentDecision(t, reply); sent {
+		t.Fatalf("a click ruled %q with the pane's keys still dead", d)
+	}
+	if !m.clickArmed.holds(panePrompt, 2) {
+		t.Errorf("the swallowed click dropped the arm (%+v); the latch must not cost a third click", m.clickArmed)
+	}
+
+	m = armApproval(t, m)
+	m = step(t, m, leftClick(x, y))
+
+	if d, sent := sentDecision(t, reply); !sent || d != domain.ApprovalDeny {
+		t.Errorf("the first click after the tick ruled %q (sent=%v), want %q", d, sent, domain.ApprovalDeny)
+	}
+}
+
+// The Cancel row stops the in-flight worker, which is what ⏎ on it already does (resolveApproval) —
+// and it takes two clicks like every other row. The prompt stays up until the worker reports back.
+func TestApprovalClickOnCancelStopsTheWorker(t *testing.T) {
+	m, reply := approvalClickModel(t)
+	m = armApproval(t, m)
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+	x, y := frameCell(t, m, "Cancel")
+
+	m = step(t, m, leftClick(x, y))
+
+	if cancelled {
+		t.Fatal("the FIRST click on Cancel stopped the worker; it may only move the highlight")
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	if !cancelled {
+		t.Error("the second click on Cancel did not stop the worker")
+	}
+	if d, sent := sentDecision(t, reply); sent {
+		t.Errorf("the Cancel row ruled %q; it decides nothing", d)
+	}
+	if m.state != stateAwaitingApproval {
+		t.Errorf("state = %v, want the prompt standing until the worker reports back", m.state)
+	}
+}
+
+// A click OUTSIDE the box is not the pane's (call C as the owner narrowed it, 2026-09-06). It may not
+// cancel the call — that stays esc's — but it is otherwise the frame's own click, so the transcript
+// the human reads the call's context in keeps taking a drag for as long as the pane stands.
+func TestApprovalClickOutsideTheBoxLeavesTheCallStanding(t *testing.T) {
+	m, reply := approvalClickModel(t)
+	m = armApproval(t, m)
+	paneTop, _ := promptRect(t, m)
+	_, row := frameCell(t, m, "a streamed line of reply")
+	if row >= paneTop {
+		t.Fatalf("the transcript's first line is drawn on row %d, at or inside the pane at %d", row, paneTop)
+	}
+
+	m = step(t, m, leftClick(0, row))
+	m = step(t, m, leftDrag(m.viewport.Width(), row))
+
+	if !m.transcriptSel.active {
+		t.Error("a drag over the transcript armed no selection; the pane must not swallow the rows above it")
+	}
+	if d, sent := sentDecision(t, reply); sent {
+		t.Fatalf("a click outside the box ruled %q", d)
+	}
+	if m.state != stateAwaitingApproval || m.pending == nil {
+		t.Fatalf("state = %v (pending call: %v), want the call still up", m.state, m.pending != nil)
+	}
+	if _, _, ok := m.frameSpans().pane(panePrompt); !ok {
+		t.Error("the approval pane left the frame; an outside click may not dismiss it")
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Mouse in the "/" | "@" autocomplete dropdown (autocomplete.go)
 // ----------------------------------------------------------------------------
 
