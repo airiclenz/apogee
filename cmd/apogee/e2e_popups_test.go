@@ -9,35 +9,17 @@ package main
 // browser — need no upstream turn but the title and the fallback. The decision surfaces — the approval pane and
 // the ask pane in its four states — are raised by testdata/stubllm/popups.yaml.
 //
-// The frames on disk are the DESIGNS: recorded as baselines and then edited by hand into the
-// target layout (docs/handoffs/2026-09-06 - 00 - popup-redesign-plan-handoff.md), so until that
-// layout lands the comparison fails by design and its diff is the spec. Both tests therefore skip
-// unless asked for — `go test ./cmd/apogee -run TestE2EPopupFrames -popup-design -v` — which keeps
-// `make check` an honest gate while the work is open. The layout plan's own item deletes the flag
-// and the skips; from then on the frames are held like every other golden, and re-recorded with
-// `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
+// The frames on disk are HELD: they began as hand-edited designs of the target layout, that layout
+// has landed, and they are now records like every other golden — re-recorded, when a deliberate
+// layout change makes them stale, with `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
 
 import (
-	"flag"
 	"regexp"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
-
-// popupDesign opts the two frame tests in while the frames on disk are still designs rather than
-// records — see the file comment.
-var popupDesign = flag.Bool("popup-design", false,
-	"compare the pop-up frames against the hand-edited designs (fails until the layout lands)")
-
-// skipUnlessDesign is the gate both tests share.
-func skipUnlessDesign(t *testing.T) {
-	t.Helper()
-	if !*popupDesign {
-		t.Skip("the pop-up frames on disk are designs, not records — run with -popup-design to diff them")
-	}
-}
 
 // The prompts popups.yaml answers.
 const (
@@ -73,7 +55,6 @@ func popupRedactions(sess *e2eSession) []tuitest.Redaction {
 // TestE2EPopupFramesLists records the three list pop-ups: the `/` dropdown, the picker and the
 // `/sessions` browser.
 func TestE2EPopupFramesLists(t *testing.T) {
-	skipUnlessDesign(t)
 	stub := stubllm.New(t, loadScript(t, "popups"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -124,7 +105,6 @@ func TestE2EPopupFramesLists(t *testing.T) {
 // single-select, multi-select with one box ticked, single-select with a custom answer typed, and
 // free-text.
 func TestE2EPopupFramesPrompts(t *testing.T) {
-	skipUnlessDesign(t)
 	stub := stubllm.New(t, loadScript(t, "popups"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)

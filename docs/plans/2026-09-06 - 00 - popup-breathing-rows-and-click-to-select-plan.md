@@ -180,7 +180,12 @@ Depends on items 0 and 1.
 
 **Commit:** `feat(tui): the report panes and /settings keep a blank row above their hint`
 
-## 6. The designs become held goldens; layout.md states the rule
+## 6. The designs become held goldens; layout.md states the rule — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): all eleven frames pass without `-update`; `git diff --stat -- cmd/apogee/testdata/frames/` is empty and `go test ./cmd/apogee -count=1` is green, so no layout item's frame was wrong.
+NOTES (2026-09-06): deviation — the item's parenthetical for the `:227-230` restatement ("one row above it the hint gets its blank") does not describe the painter: `popup.go:791-793` hands BOTH pads back together whenever what remains cannot seat the anchor row, so a two-padded pane at floor+1 and floor+2 still shows rows with no blanks and only wins the pair back at floor+3. The restatement therefore says the pane wins the blanks back "only once the window can pay for both of them and still seat a row" rather than naming a single row.
+NOTES (2026-09-06): deviation — the redrawn approval example (now `layout.md:485-496`) is two rows TALLER than the one it replaces and keeps its `… (+7 more lines)` count, rather than paying for the two paragraph blanks out of the elision. That is what the pane does: the body's blanks are body lines the window pays for when it can (`approval.go:271-273`), and the `command:` block still shows label, marker and tail, so the count it reports is unchanged. A clause after the sketch states that a tighter window elides those blanks into the same marker, and that the blank over `❯ Allow` is the other kind — the row-block pad.
+NOTES (2026-09-06): `CHANGELOG.md:21` and `:36` still describe the frames as designs behind `-popup-design`; the CHANGELOG is a closed trail and this item's own entry supersedes them, so neither line was edited (rule 6 forbids it anyway).
 
 Depends on items 0, 2, 3, 4, 5.
 

