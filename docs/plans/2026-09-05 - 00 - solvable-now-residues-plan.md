@@ -284,7 +284,11 @@ continues past it, and the survivor set is the one the budget allows.
 
 commit: `test(session): pin Prune's partial-failure contract on the count-only sweep`
 
-## 6. `gcSessions` loses its unreachable nil-store guard
+## 6. `gcSessions` loses its unreachable nil-store guard — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the regression grep confirmed the only nil caller was
+`wire_session_test.go:681`; the "no store directory" subtest keeps its missing-root
+assertion unchanged.
 
 **What.** Closes `apogee-v00.6`. Item 16 of plan `2026-09-03 - 01` made headless build the sweep
 store unconditionally, so all three production callers hand `gcSessions` a non-nil store
