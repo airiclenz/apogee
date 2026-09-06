@@ -99,7 +99,15 @@ go test . -count=1
 
 **Commit.** `test(facade): guard every unguarded apogee re-export in the compile guard`
 
-## 2. Make the Replace off-caller test assert something (apogee-apz.2)
+## 2. Make the Replace off-caller test assert something (apogee-apz.2) — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): emitted `2*hookQueueDepth` = 128 events, the item's binding formula; the section's parenthetical "(≥130)" is arithmetically inconsistent with it and was not followed. 128 leaves 63 real drops (64 queued + 1 parked in the gated Run).
+
+NOTES (2026-09-06): `queueDepth` is unexported in `internal/hooks`, so the count enters the test as a local `hookQueueDepth = 64` const documented as mirroring `internal/hooks/runner.go:19`.
+
+NOTES (2026-09-06): the report barrier is fed only from the off-caller arm, so releasing it IS the off-goroutine promise; `noteDrop`'s first, synchronous, on-caller report therefore cannot satisfy it. The `default:` arm's `t.Error` is armed by an `atomic.Bool` set just before `Replace`, exactly as the regression guard requires.
+
+NOTES (2026-09-06): the package did not compile in the shared tree — concurrent items had `cmd/apogee/e2e_hooks_test.go` mid-edit (`undefined: regexp`). Build and acceptance were therefore run in a throwaway detached worktree at HEAD carrying only this item's file; the worktree was removed and the shared tree left untouched.
 
 **What.** `cmd/apogee/wire_settings_test.go:2992`
 `TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine` passes vacuously: `Replace`

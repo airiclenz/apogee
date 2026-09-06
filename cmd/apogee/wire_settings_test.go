@@ -2879,6 +2879,34 @@ func (r *recordingHookExec) Run(ctx context.Context, h hooks.Hook, p hooks.Paylo
 	return nil
 }
 
+// hookQueueDepth mirrors the unexported queueDepth in internal/hooks (runner.go:19) — how many
+// pending firings ONE Hook may hold before the newest are dropped. A test that wants a real drop
+// has to name the count, not the threshold: the queue holds this many AND the worker holds one
+// more in flight, so anything up to hookQueueDepth+1 events is swallowed whole.
+const hookQueueDepth = 64
+
+// gatingHookExec is the second half of that: an Executor that parks in Run until its gate is
+// closed, so a test can hold one firing still and let the queue behind it overflow on purpose.
+// It is what replaces a sleep — the drop is caused, not waited for.
+type gatingHookExec struct {
+	gate chan struct{}
+}
+
+func newGatingHookExec() *gatingHookExec {
+	return &gatingHookExec{gate: make(chan struct{})}
+}
+
+func (g *gatingHookExec) Run(ctx context.Context, h hooks.Hook, p hooks.Payload) error {
+	select {
+	case <-g.gate:
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+// release lets every parked and every subsequent firing through. It is called once.
+func (g *gatingHookExec) release() { close(g.gate) }
+
 // hookEntry is the one shape every case below configures: a named Hook subscribed to one event, with
 // an argv action the recording executor never actually runs.
 func hookEntry(name string, event hooks.Event) hooks.Hook {
@@ -2994,27 +3022,61 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 	workspace := t.TempDir()
 	caller := make(chan struct{})
 	var offCaller atomic.Bool
-	report := func(string) {
+	// noteDrop reports the FIRST drop synchronously, on the goroutine that emitted it — the
+	// contract Report's own doc pins (internal/hooks/runner.go:62-64), and one this test yields
+	// to rather than judges. So the caller-goroutine arm only becomes a failure once the emit
+	// loop is behind us; everything reported after that belongs to Replace's drain, which is the
+	// promise under test.
+	var armed atomic.Bool
+	// The barrier carries the drain's line back to the test goroutine. Buffered and sent to
+	// non-blockingly, because Report runs under the Runner's own mutex and must never block.
+	barrier := make(chan string, 4)
+	report := func(line string) {
 		select {
 		case <-caller:
 			offCaller.Store(true)
+			select {
+			case barrier <- line:
+			default:
+			}
 		default:
-			t.Error("Report was called on the goroutine that called Replace; the Update loop would deadlock")
+			if armed.Load() {
+				t.Error("Report was called on the goroutine that called Replace; the Update loop would deadlock")
+			}
 		}
 	}
+	gate := newGatingHookExec()
 	runner, err := hooks.New([]hooks.Hook{hookEntry("boot", hooks.TurnFinished)}, hooks.Options{
-		Workspace: workspace, Exec: newRecordingHookExec(), Report: report,
+		Workspace: workspace, Exec: gate, Report: report,
 	})
 	if err != nil {
 		t.Fatalf("hooks.New: %v", err)
 	}
 	t.Cleanup(func() { _ = runner.Close(context.Background()) })
 
+	// The retired generation has to carry REAL drops or its drain reports nothing at all and both
+	// select arms stay dead — which is exactly how this test used to pass without asserting
+	// anything. One firing parks in the gated Run and hookQueueDepth more fit the queue, so twice
+	// that many events leaves the remainder dropped.
+	for i := 0; i < 2*hookQueueDepth; i++ {
+		runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	}
+	armed.Store(true)
+
 	if err := runner.Replace([]hooks.Hook{hookEntry("next", hooks.TurnFinished)}); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
 	close(caller)
-	_ = offCaller.Load()
+	gate.release()
+
+	select {
+	case <-barrier:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Replace's drain never reported the retired generation's drops; the off-goroutine promise went untested")
+	}
+	if !offCaller.Load() {
+		t.Error("the drop total did not reach Report off the goroutine that called Replace")
+	}
 }
 
 // The WriteTarget the root hands its Runner is a LAZY closure over the live tool set, because the
