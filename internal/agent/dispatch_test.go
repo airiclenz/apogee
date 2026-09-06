@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -830,10 +831,12 @@ func shippedRuleHint(t *testing.T, ruleID string) string {
 
 // approvalRequests returns every ApprovalEvent's request, in order — the sequence of questions
 // dispatch actually put to the human, which is what a two-prompt path has to be checked against.
+// It reads the REQUESTED phase alone: one Approval is announced twice, so counting both would
+// report every prompt as two (domain.ApprovalPhase).
 func approvalRequests(events []domain.Event) []domain.ApprovalRequest {
 	var out []domain.ApprovalRequest
 	for _, e := range events {
-		if approval, ok := e.(domain.ApprovalEvent); ok {
+		if approval, ok := e.(domain.ApprovalEvent); ok && approval.Phase == domain.ApprovalRequested {
 			out = append(out, approval.Request)
 		}
 	}
@@ -1784,16 +1787,16 @@ func TestApprovalScopeRidesTheRequest(t *testing.T) {
 	})
 }
 
-// scopeOnApproval returns the scope the first ApprovalEvent's request carried — the request the
+// scopeOnApproval returns the scope the first raised Approval's request carried — the request the
 // Approver itself was handed, since dispatch emits the very value it sent.
 func scopeOnApproval(t *testing.T, events []domain.Event) string {
 	t.Helper()
 	for _, e := range events {
-		if approval, ok := e.(domain.ApprovalEvent); ok {
+		if approval, ok := e.(domain.ApprovalEvent); ok && approval.Phase == domain.ApprovalRequested {
 			return approval.Request.Scope
 		}
 	}
-	t.Fatal("no ApprovalEvent was emitted; the call did not gate")
+	t.Fatal("no requested ApprovalEvent was emitted; the call did not gate")
 	return ""
 }
 
@@ -1878,17 +1881,114 @@ func TestMCPServerGrantRidesTheRequest(t *testing.T) {
 	})
 }
 
-// requestOnApproval returns the first ApprovalEvent's request — the value dispatch handed the
+// requestOnApproval returns the first raised Approval's request — the value dispatch handed the
 // Approver itself, since it emits the very request it sent.
 func requestOnApproval(t *testing.T, events []domain.Event) domain.ApprovalRequest {
 	t.Helper()
 	for _, e := range events {
-		if approval, ok := e.(domain.ApprovalEvent); ok {
+		if approval, ok := e.(domain.ApprovalEvent); ok && approval.Phase == domain.ApprovalRequested {
 			return approval.Request
 		}
 	}
-	t.Fatal("no ApprovalEvent was emitted; the call did not gate")
+	t.Fatal("no requested ApprovalEvent was emitted; the call did not gate")
 	return domain.ApprovalRequest{}
+}
+
+// ----------------------------------------------------------------------------
+// One Approval is announced twice — when it is raised, and when it is decided
+// ----------------------------------------------------------------------------
+
+// TestDispatch_ApprovalIsAnnouncedRequestedThenDecided proves the two-phase announcement: a gated
+// call puts exactly one question to the human and reports it twice — once BEFORE the Approver is
+// consulted, so an observer learns about the wait while it is still going on, and once with the
+// verdict. Both phases carry the same request, and the requested one carries no decision at all:
+// a consumer that read Decision off it would report a deny for every pending gate.
+func TestDispatch_ApprovalIsAnnouncedRequestedThenDecided(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "write_it", readOnly: false, result: "wrote"})
+	cfg.Mode = domain.ModeAskBefore
+	cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "write_it", "{}"),
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "edit the file"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	approvals := approvalEvents(sink.events)
+	if len(approvals) != 2 {
+		t.Fatalf("got %d ApprovalEvents, want 2: one gate is announced requested then decided", len(approvals))
+	}
+	if approvals[0].Phase != domain.ApprovalRequested {
+		t.Errorf("first phase = %q, want %q: the raise is announced before the Approver blocks", approvals[0].Phase, domain.ApprovalRequested)
+	}
+	if approvals[0].Decision != domain.ApprovalDecision("") {
+		t.Errorf("requested phase carries Decision %q, want the zero value: no verdict exists yet", approvals[0].Decision)
+	}
+	if approvals[1].Phase != domain.ApprovalDecided {
+		t.Errorf("second phase = %q, want %q", approvals[1].Phase, domain.ApprovalDecided)
+	}
+	if approvals[1].Decision != domain.ApprovalAllow {
+		t.Errorf("decided phase carries Decision %q, want %q", approvals[1].Decision, domain.ApprovalAllow)
+	}
+	if !reflect.DeepEqual(approvals[0].Request, approvals[1].Request) {
+		t.Errorf("the two phases describe different requests:\n requested %+v\n decided   %+v", approvals[0].Request, approvals[1].Request)
+	}
+}
+
+// TestDispatch_RememberedAllowAnnouncesNoApproval is the silence half: a call cleared by the
+// session's remembered allow raises no Approval, so it announces NEITHER phase. The requested
+// phase must not turn the silent fast path into a visible prompt the human never saw.
+func TestDispatch_RememberedAllowAnnouncesNoApproval(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "write_it", readOnly: false, result: "wrote"})
+	cfg.Mode = domain.ModeAskBefore
+	cfg.Approver = &fakeApprover{decision: domain.ApprovalAllowForSession}
+	// The remembered allow keys on the call as the model wrote it, so the second call must be the
+	// SAME call; the tool-loop breaker is off for the same reason as TestDispatch_ApprovalAllowForSession.
+	cfg.Floor.DisableToolLoopBreaker = true
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "write_it", "{}"),
+		toolCallScript("c2", "write_it", "{}"),
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "edit twice"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	approvals := approvalEvents(sink.events)
+	if len(approvals) != 2 {
+		t.Fatalf("got %d ApprovalEvents, want 2: only the FIRST call gates, and it announces two phases", len(approvals))
+	}
+}
+
+// approvalEvents returns every ApprovalEvent in order, both phases — the raw announcement stream a
+// two-phase claim has to be checked against, where approvalRequests reads the raises alone.
+func approvalEvents(events []domain.Event) []domain.ApprovalEvent {
+	var out []domain.ApprovalEvent
+	for _, e := range events {
+		if approval, ok := e.(domain.ApprovalEvent); ok {
+			out = append(out, approval)
+		}
+	}
+	return out
 }
 
 // ----------------------------------------------------------------------------

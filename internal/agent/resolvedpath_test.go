@@ -197,16 +197,16 @@ func resolvedPathOnCall(t *testing.T, events []domain.Event) string {
 	return ""
 }
 
-// resolvedPathOnApproval returns the disclosure the first ApprovalEvent's request carried — the
+// resolvedPathOnApproval returns the disclosure the first raised Approval's request carried — the
 // request the Approver itself was handed, since dispatch emits the very value it sent.
 func resolvedPathOnApproval(t *testing.T, events []domain.Event) string {
 	t.Helper()
 	for _, e := range events {
-		if approval, ok := e.(domain.ApprovalEvent); ok {
+		if approval, ok := e.(domain.ApprovalEvent); ok && approval.Phase == domain.ApprovalRequested {
 			return approval.Request.ResolvedPath
 		}
 	}
-	t.Fatal("no ApprovalEvent was emitted; the write did not gate")
+	t.Fatal("no requested ApprovalEvent was emitted; the write did not gate")
 	return ""
 }
 

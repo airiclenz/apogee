@@ -1539,7 +1539,7 @@ func modelWithTwoToolBlocks(t *testing.T) Model {
 	m.transcript.addUser("run the tests", nil)
 	for i, output := range []string{"ok   a\nok   b\nok   c\nPASS", "ok   d\nok   e\nok   f\nPASS"} {
 		if i > 0 {
-			m.transcript.apply(domain.ApprovalEvent{
+			m.transcript.apply(domain.ApprovalEvent{Phase: domain.ApprovalDecided,
 				Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
 		}
 		id := fmt.Sprintf("c%d", i+1)

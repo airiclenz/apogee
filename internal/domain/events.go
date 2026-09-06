@@ -229,11 +229,33 @@ type ChildInterjectionEvent struct {
 	Landed bool
 }
 
+// ApprovalPhase names the point in one Approval's life that an ApprovalEvent reports.
+type ApprovalPhase string
+
+const (
+	// ApprovalRequested reports that the gate has been RAISED and the Approver is now being
+	// consulted — emitted before the (blocking) consultation, so an observer learns that a human
+	// is being waited on while the wait is still happening. Only the gates that actually reach the
+	// Approver raise it: a call cleared by the remembered allow-for-session, and one refused
+	// because no Approver is configured, raise no Approval and emit nothing.
+	ApprovalRequested ApprovalPhase = "requested"
+	// ApprovalDecided reports the verdict the Approver returned for that same request. An
+	// Approver that FAILED produces neither this phase nor a verdict — the error is reported as
+	// an ErrorEvent instead — so a requested phase is not guaranteed a decided one.
+	ApprovalDecided ApprovalPhase = "decided"
+)
+
 // ApprovalEvent reports that an Approval was requested/decided for a tool call.
 // (The decision is obtained synchronously via the Approver; this event is for
 // observers — TUI display, bench accounting.)
+//
+// One Approval produces the event TWICE — once at ApprovalRequested and once at ApprovalDecided,
+// carrying the same Request — so that the WAIT itself is observable and not only its outcome.
+// Decision is the zero value on the requested phase and carries meaning only on the decided one;
+// a consumer that wants one note per Approval (the TUI transcript) folds ApprovalDecided alone.
 type ApprovalEvent struct {
 	EventBase
+	Phase    ApprovalPhase
 	Request  ApprovalRequest
 	Decision ApprovalDecision
 }

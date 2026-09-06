@@ -627,6 +627,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	t.Run("approval record", func(t *testing.T) {
 		tr := &transcript{}
 		tr.apply(domain.ApprovalEvent{
+			Phase:    domain.ApprovalDecided,
 			Request:  domain.ApprovalRequest{Tool: "writ" + osc52 + "e_file"},
 			Decision: domain.ApprovalAllow,
 		})
@@ -1060,11 +1061,37 @@ func TestTranscriptToolResultError(t *testing.T) {
 
 func TestTranscriptApprovalRecorded(t *testing.T) {
 	tr := feed(domain.ApprovalEvent{
+		Phase:    domain.ApprovalDecided,
 		Request:  domain.ApprovalRequest{Tool: "write_file"},
 		Decision: domain.ApprovalAllow,
 	})
 	if got := plainRender(tr); !strings.Contains(got, "approval allow: write_file") {
 		t.Errorf("approval not recorded observationally:\n%s", got)
+	}
+}
+
+// TestTranscriptApprovalRecordedOncePerApproval holds the transcript to ONE note per Approval now
+// that the engine announces each gate twice (domain.ApprovalPhase). The requested phase exists for
+// observers that want the wait itself — Hooks (ADR 0073) — and carries no verdict to render, so
+// folding it too would double every approval line the human reads.
+func TestTranscriptApprovalRecordedOncePerApproval(t *testing.T) {
+	request := domain.ApprovalRequest{Tool: "write_file"}
+
+	both := feed(
+		domain.ApprovalEvent{Phase: domain.ApprovalRequested, Request: request},
+		domain.ApprovalEvent{Phase: domain.ApprovalDecided, Request: request, Decision: domain.ApprovalAllow},
+	)
+
+	if got := len(both.entries); got != 1 {
+		t.Errorf("both phases appended %d transcript entries, want 1:\n%s", got, plainRender(both))
+	}
+
+	// A gate still WAITING has no answer to show: the human is looking at the approval pane, and a
+	// transcript note before the verdict would report a decision nobody has made.
+	pending := feed(domain.ApprovalEvent{Phase: domain.ApprovalRequested, Request: request})
+
+	if got := len(pending.entries); got != 0 {
+		t.Errorf("the requested phase alone appended %d transcript entries, want 0:\n%s", got, plainRender(pending))
 	}
 }
 

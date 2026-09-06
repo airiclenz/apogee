@@ -299,7 +299,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 			{BeforeStart: 1, AfterStart: 1, Inserted: []string{"# Notes", "", "rewrote main.go"}}}}}})
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c9", Tool: "mcp_search",
 		Arguments: []byte(`{"query":"collapse","limit":20}`)}})
-	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
+	tr.apply(domain.ApprovalEvent{Phase: domain.ApprovalDecided, Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
 	readCall(tr, "c10", "main.go", 1, 154, 1)
 	// The Terminal run is opened to its member and the member to its body, so the golden carries all
 	// three of the canon sketch's states at once: the umbrella collapsed to its type rows, one row

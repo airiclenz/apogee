@@ -212,7 +212,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				run(tr, "c1", "go build ./...", "a\nb\nc", 0)
-				tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
+				tr.apply(domain.ApprovalEvent{Phase: domain.ApprovalDecided, Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
 				run(tr, "c2", "go vet ./...", "x\ny", 0)
 			},
 			want: []blockMark{

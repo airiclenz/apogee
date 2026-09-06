@@ -680,7 +680,7 @@ func TestFoldActivityIgnoresObservationalEvents(t *testing.T) {
 		domain.ErrorEvent{Source: "loop", Err: "recovered"},
 		domain.AuditEvent{Tool: "terminal", CallID: "1", Decision: "allowed"},
 		domain.MechanismFiredEvent{Mechanism: "m", Hook: "h", Action: "a"},
-		domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow},
+		domain.ApprovalEvent{Phase: domain.ApprovalDecided, Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow},
 	} {
 		m = m.foldEvent(e)
 		if shownAct(m) != want {

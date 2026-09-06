@@ -282,6 +282,15 @@ const (
 	ApprovalAllowForSession = domain.ApprovalAllowForSession
 )
 
+// ApprovalPhase is the phase an ApprovalEvent reports.
+type ApprovalPhase = domain.ApprovalPhase
+
+// The two phases one Approval is announced at — when the gate is raised, and when it is answered.
+const (
+	ApprovalRequested = domain.ApprovalRequested
+	ApprovalDecided   = domain.ApprovalDecided
+)
+
 // ----------------------------------------------------------------------------
 // Ask-user (internal/domain) — the free-text host question delegate (P3.11)
 // ----------------------------------------------------------------------------

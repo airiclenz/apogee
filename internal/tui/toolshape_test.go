@@ -485,7 +485,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 			name: "an approval note between two reads",
 			build: func(tr *transcript) {
 				readCall(tr, "c1", "a.go", 1, 5, 0)
-				tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "read_file"}, Decision: domain.ApprovalAllow})
+				tr.apply(domain.ApprovalEvent{Phase: domain.ApprovalDecided, Request: domain.ApprovalRequest{Tool: "read_file"}, Decision: domain.ApprovalAllow})
 				readCall(tr, "c2", "b.go", 1, 9, 0)
 			},
 			want: []string{

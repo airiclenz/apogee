@@ -992,6 +992,11 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		// declares no scope, which is all but one of them (domain.ApprovalRequest.Scope).
 		Scope: a.approvalScope(call),
 	}
+	// The gate is announced BEFORE the Approver is consulted, because the consultation blocks for
+	// as long as the human takes: an observer that only saw the decided phase would learn about
+	// the wait only once it was over. Both phases carry the same request (domain.ApprovalPhase).
+	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Phase: domain.ApprovalRequested, Request: areq})
+
 	decision, err := a.cfg.Approver.Approve(ctx, areq)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -1001,7 +1006,7 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		return false, dispatchDone
 	}
 
-	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Request: areq, Decision: decision})
+	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Phase: domain.ApprovalDecided, Request: areq, Decision: decision})
 	switch decision {
 	// The two allows are one branch here: whether this verdict is also REMEMBERED was settled by
 	// the CacheKey above and acted on by the seam, so all dispatch has left to read from either is

@@ -939,7 +939,12 @@ func (t *transcript) apply(e domain.Event) {
 	case domain.ChildInterjectionEvent:
 		t.addChildInterjection(e)
 	case domain.ApprovalEvent:
-		t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
+		// One note per Approval, not two: the engine announces a gate at both of its phases, and
+		// only the decided one carries a verdict to render. The requested phase exists for
+		// observers that want the WAIT (Hooks, ADR 0073) and folds to nothing here.
+		if e.Phase == domain.ApprovalDecided {
+			t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
+		}
 	case domain.MechanismFiredEvent:
 		t.addMechanism(e)
 	case domain.FloorGuardEvent:

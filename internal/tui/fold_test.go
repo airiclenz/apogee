@@ -215,9 +215,16 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
-			name:        "ApprovalEvent is a transcript note and no activity at all",
-			event:       domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow},
+			name: "ApprovalEvent decided phase is a transcript note; requested phase is nothing",
+			// The engine announces one Approval twice (domain.ApprovalPhase). Only the phase that
+			// carries a verdict becomes a note, so the human reads one line per gate, not two.
+			event:       domain.ApprovalEvent{Phase: domain.ApprovalDecided, Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow},
 			wantEntries: 1,
+		},
+		{
+			name:        "ApprovalEvent requested phase is deliberately nothing",
+			event:       domain.ApprovalEvent{Phase: domain.ApprovalRequested, Request: domain.ApprovalRequest{Tool: "terminal"}},
+			wantEntries: 0,
 		},
 		{
 			name: "TurnEvent is deliberately nothing",
