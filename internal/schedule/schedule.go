@@ -97,6 +97,16 @@ type Outcome struct {
 	// is RAW upstream text — a surface escape-strips it at its own render seam, this library
 	// does not.
 	Fault string
+	// ContextAnomalies is what the run found WRONG with the workspace's context files, one
+	// composed sentence per finding — a file present but unreadable, standing content that has
+	// outgrown its Budget share. It carries the ANOMALIES alone: the plain record of what loaded
+	// is a launch's narration and never crosses here. Empty on a Firing whose loading went as
+	// expected, which is what lets a surface show nothing rather than an "all clear" line.
+	//
+	// Like FinalText and Fault it is RAW text — the names trace to configuration and the errors to
+	// the filesystem, so a surface escape-strips it at its own render seam and this library does
+	// not; the library reads none of it either (ADR 0033, runner-agnostic).
+	ContextAnomalies []string
 	// TotalTokens is what the whole Firing spent: the run's OWN cumulative total plus every
 	// delegated run's, summed by the runner — the same figure /sessions shows as a session's
 	// spend. It is 0 both when the Upstream reported no usage at all and when a caller fills

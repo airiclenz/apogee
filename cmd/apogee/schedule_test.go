@@ -27,6 +27,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/library"
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
@@ -383,6 +384,84 @@ func TestScheduleFiringReportsNoSpendWhenThereWasNone(t *testing.T) {
 		t.Errorf("Outcome spend = (%d tokens, %d sub-agents), want both zero so the report line omits them",
 			out.TotalTokens, out.SubAgents)
 	}
+}
+
+// A Firing reports what its run could not read of the workspace's context files, and nothing else.
+// Before this the whole report was dropped at this seam, so an unreadable AGENTS.md in a Firing
+// raised from a session was invisible on every surface — the run answered from a workspace it could
+// not see and said so nowhere. The plain loaded-files line stays dropped by ratified call, exactly
+// as it is on the daemon's journal: a Firing's narration is the session record it leaves behind.
+//
+// The wanted strings come from notice.ContextFileNotices itself rather than a hand-typed copy, for
+// the reason both other Drivers read them off the composer: the point of one composer is that the
+// Drivers cannot drift.
+//
+// Composed against the package's runner seam rather than a live model, which is why this test does
+// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
+	// One of each kind the composer distinguishes: a file that loaded, a file present but
+	// unreadable, and standing content past its Budget share.
+	report := domain.ContextFilesReport{
+		Files: []domain.ContextFileNote{
+			{Name: "AGENTS.md", Bytes: 3174},
+			{Name: "BROKEN.md", Err: "permission denied"},
+		},
+		StandingTokens: 9000,
+		SystemShare:    4000,
+	}
+
+	firingWith := func(t *testing.T, res run.Result) schedule.Outcome {
+		t.Helper()
+		roots, err := resolveRoots(t.TempDir(), t.TempDir())
+		if err != nil {
+			t.Fatalf("resolveRoots: %v", err)
+		}
+		stub := &stubRunner{res: res}
+		prevRunner := runOnce
+		runOnce = stub.once
+		t.Cleanup(func() { runOnce = prevRunner })
+
+		w := scheduleWiring{
+			roots:   roots,
+			live:    newLiveSettings(config.Options{}, nil),
+			binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+			width:   func() int { return 1 },
+		}
+		out, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan})
+		if err != nil {
+			t.Fatalf("fire: %v", err)
+		}
+		return out
+	}
+
+	t.Run("the anomalies cross and the loaded line does not", func(t *testing.T) {
+		var want []string
+		for _, n := range notice.ContextFileNotices(report) {
+			if n.Anomaly {
+				want = append(want, n.Text)
+			}
+		}
+		if len(want) != 2 {
+			t.Fatalf("the composer marks %d notices as anomalies, want 2 — the fixture no longer "+
+				"covers both kinds", len(want))
+		}
+
+		out := firingWith(t, run.Result{SessionID: "s-1", Turns: 1, ContextFiles: report})
+
+		if !slices.Equal(out.ContextAnomalies, want) {
+			t.Errorf("Outcome.ContextAnomalies = %q, want exactly the composer's anomalies %q — the "+
+				"loaded-files line belongs to a launch's narration, never to a Firing's", out.ContextAnomalies, want)
+		}
+	})
+
+	t.Run("a clean report carries none", func(t *testing.T) {
+		out := firingWith(t, run.Result{SessionID: "s-2", Turns: 1})
+
+		if len(out.ContextAnomalies) != 0 {
+			t.Errorf("Outcome.ContextAnomalies = %q on a firing whose loading went as expected, want "+
+				"none so the block shows nothing rather than an all-clear line", out.ContextAnomalies)
+		}
+	})
 }
 
 // A Firing writes into a scratch dir of its OWN, named after the record it will be saved under

@@ -171,7 +171,10 @@ refusal stays the only sentence that run gets.
 
 commit: `fix(firing): an unattended run says when its context window is unknown`
 
-## 3. A `/schedule` Firing reports the context files it could not read
+## 3. A `/schedule` Firing reports the context files it could not read — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): consequential edit — layout.md: made necessary by the new Firing-block body line — the spec's enumeration of that block's body (stats, fault line, record pointer) was complete and became false.
+NOTES (2026-09-06): the fill goes through a new `contextAnomalies(run.Result.ContextFiles)` helper beside `firingSpend` in cmd/apogee/schedule.go rather than an inline loop, so the Outcome stays one composite literal — the same shape `firingSpend` was factored out for.
 
 **What.** Closes the fourth-Driver gap the item-2 investigation found: `scheduleWiring.fire` drops
 `res.ContextFiles` entirely (`cmd/apogee/schedule.go:176-186` maps only the Outcome's own fields),

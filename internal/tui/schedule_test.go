@@ -762,6 +762,69 @@ func TestScheduleFiringMarksAnAbandonedFinalTurn(t *testing.T) {
 	}
 }
 
+// A Firing SAYS what its run could not read of the workspace's context files. The chat states the
+// same fact at launch and the daemon logs it per tick; until this the fourth Driver's Firings said
+// nothing at all, so a nightly schedule whose AGENTS.md had become unreadable answered from a
+// workspace it could not see and no surface mentioned it.
+//
+// One body line per anomaly, in the composer's order, between the fault line and the record
+// pointer: the pointer is the block's closer, and what went wrong belongs above it.
+func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 4 * time.Second,
+		Outcome: schedule.Outcome{
+			RecordID: "s1", Title: "nightly tidy — 14:05", FinalText: "half a thought", Turns: 2,
+			Faulted: true, Fault: "upstream returned an empty reply",
+			ContextAnomalies: []string{
+				"context: BROKEN.md unreadable — permission denied",
+				"standing system content ~8.8k tokens exceeds its Budget share (~3.9k) — trim context files, the task list or the system prompt",
+			},
+		},
+	}})
+
+	e := lastEntry(t, m)
+	want := []string{
+		"prompt: check the log",
+		"2 turns · 4s · faulted",
+		"final turn abandoned — upstream returned an empty reply",
+		"context: BROKEN.md unreadable — permission denied",
+		"standing system content ~8.8k tokens exceeds its Budget share (~3.9k) — trim context files, the task list or the system prompt",
+		`saved as "nightly tidy — 14:05" — find it in /sessions`,
+	}
+	if got := firingBody(e); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want one line per anomaly between the fault and the record %q", got, want)
+	}
+}
+
+// The anomaly lines are RAW text like the prompt, the answer and the fault — the file names trace to
+// configuration and the errors to the filesystem — so they are escape-stripped at the block's own
+// sanitize seam and nowhere earlier.
+func TestScheduleFiringStripsEscapesInTheContextAnomalies(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Outcome: schedule.Outcome{
+			RecordID:         "s1",
+			ContextAnomalies: []string{"context: \x1b]52;c;x\x07BROKEN.md unreadable — \x1b[2Jpermission denied"},
+		},
+	}})
+
+	e := lastEntry(t, m)
+	body := detailsText(e.tool)
+	if strings.ContainsRune(body, 0x1b) {
+		t.Errorf("an ESC byte reached the block through an anomaly line: %q", body)
+	}
+	if !strings.Contains(body, "BROKEN.md unreadable") {
+		t.Errorf("the anomaly did not survive the strip at all: %q", body)
+	}
+}
+
 // What the run COST joins the stats line after the denial cell and before the faulted one, so the
 // faulted cell stays the line's last word however much the line gained (layout.md). Both readings
 // are self-hiding, which is why a faulted Firing that also spent tokens is the case worth pinning:

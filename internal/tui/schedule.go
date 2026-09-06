@@ -504,11 +504,12 @@ func presentFiring(ev schedule.Event) toolView {
 // what it cost, why its final Turn was abandoned when one was, and where the record is.
 //
 // A failure words the summary itself and shows no answer: the error is what happened, and a partial
-// answer under an "error:" line would read as a result. The stats and any salvaged record pointer
-// still land, because a failed Firing that got half way is exactly the one worth opening.
+// answer under an "error:" line would read as a result. The stats, what the run could not read of
+// the workspace's context files, and any salvaged record pointer still land, because a failed
+// Firing that got half way is exactly the one worth opening.
 func (tv *toolView) enrichWithFiring(ev schedule.Event) {
 	defer tv.finishDisplay(workspaceRoot{})
-	lines := make([]detailLine, 0, tv.Details.len()+4)
+	lines := make([]detailLine, 0, tv.Details.len()+4+len(ev.Outcome.ContextAnomalies))
 	if ev.Kind == schedule.EventFailed {
 		tv.Summary = namedSummary(detailLine{Text: "error: " + scheduleErrText(ev.Err)})
 	} else {
@@ -520,6 +521,15 @@ func (tv *toolView) enrichWithFiring(ev schedule.Event) {
 	lines = append(lines, detailLine{Text: firingStats(ev)})
 	if ev.Outcome.Faulted {
 		lines = append(lines, detailLine{Text: firingFaultLine(ev.Outcome.Fault)})
+	}
+	// What the run could not read of the workspace's context files, one line each, in the order the
+	// composer put them in (notice.ContextFileNotices, kept to its anomalies by the Driver that
+	// filled the Outcome). They are the Firing's half of a fact the chat states at launch and the
+	// daemon logs per tick: a Firing whose AGENTS.md never loaded answers from a workspace it cannot
+	// see, and until now no surface said so. RAW text, landed like the prompt and the fault and
+	// escape-stripped with them at this block's own sanitize seam.
+	for _, anomaly := range ev.Outcome.ContextAnomalies {
+		lines = append(lines, detailLine{Text: anomaly})
 	}
 	if ev.Outcome.RecordID != "" {
 		lines = append(lines, detailLine{Text: firingRecordLine(ev.Outcome.Title)})

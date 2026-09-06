@@ -8,7 +8,9 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
@@ -181,15 +183,26 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// is runner-agnostic (ADR 0033) — and a Driver renders the Firing from these fields alone: the
 	// answer without decoding a record, the stats without a second seam onto the run.
 	out := schedule.Outcome{
-		RecordID:    res.SessionID,
-		Title:       res.Title,
-		FinalText:   res.FinalText,
-		Turns:       res.Turns,
-		Denied:      res.Denied,
-		Faulted:     res.Faulted,
-		Fault:       res.Fault,
-		TotalTokens: firingSpend(res),
-		SubAgents:   len(res.SubAgents),
+		RecordID:  res.SessionID,
+		Title:     res.Title,
+		FinalText: res.FinalText,
+		Turns:     res.Turns,
+		Denied:    res.Denied,
+		Faulted:   res.Faulted,
+		Fault:     res.Fault,
+		// What the run found WRONG with the workspace's context files, and only that — the same
+		// ratified split the daemon's journal takes (daemonfire.go): a file present but unreadable,
+		// standing content past its Budget share. The plain loaded-files line stays dropped, because
+		// it is a launch's narration and a Firing's narration is the session record it leaves behind.
+		// Carried whether the run answered or failed, since a Firing that went wrong is the one whose
+		// loading is worth suspecting.
+		//
+		// Not stripped here: the text crosses as plain data (internal/notice composes; this Driver
+		// only routes), and the surface that renders it strips at its own seam — the TUI's Firing
+		// block does it for the prompt, the answer and the fault already.
+		ContextAnomalies: contextAnomalies(res.ContextFiles),
+		TotalTokens:      firingSpend(res),
+		SubAgents:        len(res.SubAgents),
 	}
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once fills its Result with whatever
@@ -217,6 +230,24 @@ func firingSpend(res run.Result) int {
 		total += sub.TotalTokens
 	}
 	return total
+}
+
+// contextAnomalies is what a Firing carries of its run's context files: the composed sentences
+// notice.ContextFileNotices marks as ANOMALIES, in the composer's own order, and nothing else. The
+// plain loaded-files line is dropped here exactly as it is on the daemon's journal
+// (daemonfire.go) — one line per Firing naming every file that loaded as expected is noise on a
+// surface a week's worth of ticks fills.
+//
+// Nothing is stripped: the sentences cross as plain data and the surface that renders them strips
+// at its own seam. nil on a clean report, so a surface that ranges over it shows nothing.
+func contextAnomalies(report domain.ContextFilesReport) []string {
+	var out []string
+	for _, n := range notice.ContextFileNotices(report) {
+		if n.Anomaly {
+			out = append(out, n.Text)
+		}
+	}
+	return out
 }
 
 // idleGate is the host half of schedule.Config.Gate: the TUI publishes its activity through

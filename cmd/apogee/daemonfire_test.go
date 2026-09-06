@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -344,7 +345,7 @@ func TestDaemonFireReportsWhatTheRunDid(t *testing.T) {
 		TotalTokens: 41984,
 		SubAgents:   2,
 	}
-	if out != want {
+	if !reflect.DeepEqual(out, want) {
 		t.Errorf("the firing reports %+v, want the run's own %+v", out, want)
 	}
 }
@@ -514,7 +515,7 @@ func TestDaemonFireRefusesOnlyAServerThatAnsweredNothing(t *testing.T) {
 			// No Outcome at all, and so never Faulted: internal/schedule reserves Faulted for a run
 			// that RETURNED with its Exchange at a boundary, and a run with no Turn has none. The
 			// error alone is what the library renders, through its EventFailed line.
-			if out != (schedule.Outcome{}) {
+			if !reflect.DeepEqual(out, schedule.Outcome{}) {
 				t.Errorf("the refused firing recorded %+v; want no Outcome at all", out)
 			}
 		})

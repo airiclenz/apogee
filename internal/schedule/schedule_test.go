@@ -3,6 +3,7 @@ package schedule
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -540,7 +541,7 @@ func bare(t *testing.T, e Event) {
 	if e.Prompt != "" {
 		t.Errorf("%s event carried prompt %q, want none", e.Kind, e.Prompt)
 	}
-	if e.Outcome != (Outcome{}) {
+	if !reflect.DeepEqual(e.Outcome, Outcome{}) {
 		t.Errorf("%s event carried outcome %+v, want none", e.Kind, e.Outcome)
 	}
 	if e.Elapsed != 0 {
@@ -576,7 +577,7 @@ func TestThePromptRidesEventFiredAndLifecycleEventsStayBare(t *testing.T) {
 	if fired.Prompt != want {
 		t.Errorf("fired event carried prompt %q, want %q", fired.Prompt, want)
 	}
-	if fired.Outcome != (Outcome{}) || fired.Elapsed != 0 {
+	if !reflect.DeepEqual(fired.Outcome, Outcome{}) || fired.Elapsed != 0 {
 		t.Errorf("fired event carried %+v / %s, want neither yet", fired.Outcome, fired.Elapsed)
 	}
 
@@ -633,7 +634,7 @@ func TestElapsedIsMeasuredAroundFireOnTheSchedulersClock(t *testing.T) {
 	if done.Elapsed != took {
 		t.Errorf("completed event carried elapsed %s, want %s", done.Elapsed, took)
 	}
-	if done.Outcome != reported {
+	if !reflect.DeepEqual(done.Outcome, reported) {
 		t.Errorf("completed event carried %+v, want the runner's report %+v", done.Outcome, reported)
 	}
 }
@@ -666,7 +667,7 @@ func TestAFailedFiringCarriesItsSalvagedOutcomeAndElapsed(t *testing.T) {
 	if !errors.Is(got.Err, boom) {
 		t.Errorf("failed event carried %v, want %v", got.Err, boom)
 	}
-	if got.Outcome != salvaged {
+	if !reflect.DeepEqual(got.Outcome, salvaged) {
 		t.Errorf("failed event carried %+v, want the salvaged outcome %+v", got.Outcome, salvaged)
 	}
 	if got.Elapsed != took {
@@ -701,7 +702,7 @@ func TestAGateRefusalCarriesNeitherOutcomeNorElapsed(t *testing.T) {
 	if !errors.Is(got.Err, refused) {
 		t.Errorf("failed event carried %v, want %v", got.Err, refused)
 	}
-	if got.Outcome != (Outcome{}) {
+	if !reflect.DeepEqual(got.Outcome, Outcome{}) {
 		t.Errorf("failed event carried %+v, want a zero outcome", got.Outcome)
 	}
 	if got.Elapsed != 0 {

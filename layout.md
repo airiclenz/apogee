@@ -1040,6 +1040,8 @@ what the run cost — a `· 41k tokens` cell and a `· 2 sub-agents` cell, each 
 non-zero — and a `· faulted` cell, always the line's last, only when the engine ABANDONED the run's
 final Turn), the line naming why it was
 abandoned when one was (`final turn abandoned — …`, the lead alone when the fault named no cause),
+one line for each thing the run found WRONG with the workspace's context files (`context: AGENTS.md
+unreadable — …`, the standing-content warning) and none at all when the loading went as expected,
 and the record pointer (`saved as "…" — find it in /sessions`), dropped when nothing was persisted.
 A failed Firing words its branch `error: …` and shows no answer — a partial answer under an error
 reads as a result — while keeping the stats and any salvaged pointer. The `⟳` is **static**: the
