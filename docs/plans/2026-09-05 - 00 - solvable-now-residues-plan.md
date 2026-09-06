@@ -212,7 +212,9 @@ assert today — no assertion is weakened to get the tree compiling.
 
 commit: `feat(schedule): a Firing reports the context files it could not read`
 
-## 4. The daemon's failed-Firing narration is pinned on both Result shapes
+## 4. The daemon's failed-Firing narration is pinned on both Result shapes — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): subtest (b) asserts the absence of the two RESULT narrations (the context-file lines and the `changed — ` block) rather than an empty log — the composition's own notices, including the unknown-window sentence, precede the run and are what `TestDaemonFireLogsTheCompositionsNotices` and the neighbouring "a clean run says nothing at all" subtest already pin; the subtest's comment says so.
 
 **What.** Closes `apogee-y9g`, whose text is partly stale: `fd27a732` already pinned the
 `res.Wrote`-on-failure half (`cmd/apogee/daemonfire_test.go:680-694`). Depends on item 3. What is

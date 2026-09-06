@@ -683,6 +683,75 @@ func TestDaemonFireLogsContextFileAnomaliesAlone(t *testing.T) {
 			t.Errorf("a firing that wrote no files still narrated a written-files block:\n%s", logged)
 		}
 	})
+
+	// A failure that still produced a Result is narrated exactly as an answer is: run.Once fills
+	// what it salvaged before it stopped, so the anomaly it found and the write it landed are both
+	// on that Result and both belong on the journal — beside the salvaged record's id, which is
+	// what lets a supervisor open the interrupted run. The report is this subtest's OWN, smaller
+	// than the fixture above: that one is pinned at three notices, and a second reader would tie
+	// two unrelated assertions to the same shape.
+	t.Run("a failure that still produced a result narrates both", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		harness.runner.res = run.Result{
+			SessionID: "s-3",
+			Turns:     2,
+			Wrote:     []string{"/ws/half.go"},
+			ContextFiles: domain.ContextFilesReport{
+				Files: []domain.ContextFileNote{{Name: "BROKEN.md", Err: "permission denied"}},
+			},
+		}
+		harness.runner.err = errors.New("the model stopped mid-edit")
+
+		_, err := harness.raise(entryFor(t, "nightly", daemon.Action{Server: "box"}))
+		if err == nil {
+			t.Fatal("the failed firing reported no error")
+		}
+		if want := "(partial run saved as s-3)"; !strings.Contains(err.Error(), want) {
+			t.Errorf("the failed firing answered %q, want it wrapped with %q so the salvaged record "+
+				"can be opened rather than guessed at", err, want)
+		}
+
+		logged := harness.logged.String()
+		if want := "context: BROKEN.md unreadable — permission denied"; !strings.Contains(logged, want) {
+			t.Errorf("the failed firing's context anomaly %q never reached the daemon log; it holds:\n%s", want, logged)
+		}
+		if !strings.Contains(logged, "changed — 1 file(s) this run:") {
+			t.Errorf("the failed firing's written-files block never reached the daemon log; it holds:\n%s", logged)
+		}
+	})
+
+	// The OTHER failure shape: a run that stopped before it produced anything at all. Its report is
+	// empty and its write list nil, so neither composer yields a line; every Outcome field maps off
+	// that zero Result, so the Outcome is its own zero value; and with no record id there is no
+	// partial run to name, so the runner's error comes back exactly as it was raised. "Narrates
+	// nothing" is about the two RESULT narrations — the journal still carries what the COMPOSITION
+	// said before the run, which no Result reaches (TestDaemonFireLogsTheCompositionsNotices).
+	t.Run("a failure with a zero result narrates nothing", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		wantErr := errors.New("the run never started")
+		harness.runner.err = wantErr
+
+		out, err := harness.raise(entryFor(t, "nightly", daemon.Action{Server: "box"}))
+		if err != wantErr {
+			t.Fatalf("the failed firing answered %v, want the runner's own error returned unwrapped — "+
+				"a run that saved no record has no partial to name", err)
+		}
+		if !reflect.DeepEqual(out, schedule.Outcome{}) {
+			t.Errorf("a firing whose run produced nothing reported %+v, want the zero Outcome", out)
+		}
+
+		logged := harness.logged.String()
+		if strings.Contains(logged, "context:") || strings.Contains(logged, "standing system content") {
+			t.Errorf("a firing whose run produced no report still narrated its context files:\n%s", logged)
+		}
+		if strings.Contains(logged, "changed — ") {
+			t.Errorf("a firing whose run produced no report still narrated a written-files block:\n%s", logged)
+		}
+	})
 }
 
 // An `auto:` schedule's deliverable IS the state of the workspace afterwards, and the daemon's log

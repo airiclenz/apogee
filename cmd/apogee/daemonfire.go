@@ -413,8 +413,11 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// but unreadable, standing content that has outgrown its Budget share. The loaded-files line
 	// stays off this log by ratified call — a daemon's journal is read for trouble, and one line
 	// per Firing naming every file that loaded as expected is noise a week's worth of ticks
-	// multiplies. Reported whether the run answered or failed, because a Firing that went wrong is
-	// the one whose loading is worth suspecting (internal/notice composes; this Driver routes).
+	// multiplies. Reported on an answer and on a failure that still produced a Result, because a
+	// Firing that went wrong is the one whose loading is worth suspecting (internal/notice
+	// composes; this Driver routes). A failure carrying a ZERO run.Result reports nothing here:
+	// its report is empty and the composer yields no notice for it (daemonfire_test.go pins both
+	// shapes side by side).
 	//
 	// Escape-stripped to a single line: the names trace to config and the errors to the
 	// filesystem, and this log is one line per event — the same reason a prompt goes through
@@ -447,9 +450,10 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// of the workspace afterwards — and the daemon's log is the only place a supervisor sees it,
 	// since the journal behind the list died with the run and no revert is offered here or anywhere.
 	//
-	// Reported whether the run answered or failed: a Firing that stopped halfway is exactly the one
-	// whose partial writes a human has to know about. A `plan:` Firing writes nothing and so logs
-	// nothing — the composer returns no lines for an empty list.
+	// Reported on an answer and on a failure that still produced a Result: a Firing that stopped
+	// halfway is exactly the one whose partial writes a human has to know about. A `plan:` Firing
+	// writes nothing and so logs nothing — the composer returns no lines for an empty list, which
+	// is what a failure carrying a ZERO run.Result logs too.
 	for _, line := range writtenFilesLines(res.Wrote) {
 		w.log.line("%s", line)
 	}
