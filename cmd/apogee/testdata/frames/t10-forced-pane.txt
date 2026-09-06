@@ -9,10 +9,12 @@
 
 ╭─────────────────── Approve terminal? ────────────────────╮
 │ Reason: dangerous-action guard forced approval           │
+│                                                          │
 │ Fix: a terminal command naming ~/.apogee needs approval, │
 │ even for a read; list, read or copy from there with the  │
 │ dedicated tools instead (list_dir, read_file, grep,      │
 │ find_files, or copy_file's source argument)              │
+│                                                          │
 │ command:                                                 │
 │   ls ~/.apogee                                           │
 │                                                          │

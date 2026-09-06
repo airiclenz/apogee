@@ -4,6 +4,7 @@
 
 ╭─────────────────── Approve terminal? ────────────────────╮
 │ Reason: subprocess execution                             │
+│                                                          │
 │ command:                                                 │
 │   echo                                                   │
 │   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa     │

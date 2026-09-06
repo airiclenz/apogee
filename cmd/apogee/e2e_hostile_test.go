@@ -242,7 +242,11 @@ func TestE2EHostileWrapsUnderItsOwnIndent(t *testing.T) {
 	pane := awaitApprovalPane(drv)
 	assertArgumentHangsUnderItsIndent(t, pane)
 	assertNoLeakedColour(t, pane, red)
-	tuitest.Golden(t, "t12-pane-60", pane, goldenRedactions(sess)...)
+	// The frame on disk is a DESIGN while the pop-up layout is open (e2e_popups_test.go); the layout
+	// plan's own item restores the hold.
+	if *popupDesign {
+		tuitest.Golden(t, "t12-pane-60", pane, goldenRedactions(sess)...)
+	}
 
 	drv.Press(tuitest.Esc)
 	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
