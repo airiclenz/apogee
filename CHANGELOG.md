@@ -10,20 +10,98 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- The ask pane takes the pointer: a click on an offered answer highlights it (and ticks its box on a
+  multi-select question), and a second click on that same row sends it. A click anywhere else inside
+  the box is swallowed, and a click outside it leaves the question standing — no stray click can
+  cancel it or stop the run — while the transcript above and the answer box below keep their own
+  pointer.
+
+- The approval pane now takes a click. A click on one of its four decision rows moves the highlight
+  onto it exactly as `↑/↓` do, and a second click on that same row takes it, the way `⏎` already
+  does — so a click on Cancel stops the in-flight worker and a click on a decision row sends it. Two
+  clicks are always required: the row an activating click may take is the row the POINTER put the
+  highlight on, so the pane's own opening highlight on `Allow` can never be turned into a granted
+  tool call by a single stray click, whatever the keyboard left under the pointer. The pane's 100 ms
+  arming latch gates that second click on top of it, exactly as it gates `⏎`, and an unarmed click is
+  swallowed with the arm left standing, so the latch never costs a third click. A click inside the
+  box that names no row — the reason, the argument block, a pad line, the border — is the pane's and
+  does nothing; a click outside the box is not the pane's at all and falls through to the transcript
+  below it, which keeps the call's context draggable and readable while the pane stands. Cancelling a
+  call stays `esc`'s alone.
+
+- The picker and the `/sessions` browser take a click. A click on a row seats the highlight on it, the
+  way `↑`/`↓` do, and a SECOND click on that same row is the `⏎` — the picker's accept, or the
+  browser's resume. Two clicks always: the row an activating click may take is the row the pointer
+  itself highlighted, so neither pane's own default highlight can be switched, scheduled or resumed on
+  one press. The clicked row is resolved through the pane's FILTER, exactly as `⏎` resolves it, so a
+  filtered list can never act on the record or the offering standing at that index unfiltered. A click
+  outside either box dismisses the overlay and is spent on doing so — both are modal, so the click
+  that closed one reaches nothing underneath it — while a live rename edit or delete confirm in the
+  browser swallows the click whole, since dismissing the pane would cancel a question the human is
+  answering. The `/sessions` resume now has ONE spelling shared by the key and the pointer
+  (`acceptBrowser`), and the two list panes render through a placed sibling of the shared list surface
+  (`renderListPlaced`) so a click reads the row off the numbers the painter spent rather than
+  re-deriving them.
+
+- The `/` and `@` autocomplete dropdown answers the pointer: a click on a row moves the highlight onto
+  it, and a second click on that same row accepts it exactly as `tab` does — so a stray press can
+  never run a command. A click outside the menu dismisses it and travels on, so the click that closed
+  it still seats the caret in the box below or starts a drag over the transcript.
+
+- The click doctrine is written down where the wheel's already was: `handleMouseClick` states that a
+  click follows the notch, `foldMouseWheel` says the click chain asks the same panes through the same
+  hit-test, `internal/tui/doc.go` names the shared `popupPaneHit` mapping for both `mouse.go` and
+  `popup.go`, and `layout.md`, `docs/layout/user-questions-layout.md` and the commands manual gain the
+  two-click rule and the one table of what a click outside a box means.
+
 - A golden frame of every boxed pop-up, so the layout of each can be read, edited by hand and
   then held: the ask pane single-select, multi-select with one box ticked, single-select with a
   custom answer typed, and free-text; the approval pane; the picker; the `/sessions` browser; and
   the `/` dropdown — `cmd/apogee/testdata/frames/popup-*.txt`, recorded by
   `TestE2EPopupFramesLists` and `TestE2EPopupFramesPrompts` over the new
   `testdata/stubllm/popups.yaml`, whose two questions are the mockups pinned in
-  `docs/layout/user-questions-layout.md` word for word. The frames on disk are the hand-edited
-  TARGET layout rather than records of the current one, so until that layout lands the two tests
-  skip unless run with `-popup-design`, under which their diff is the spec
-  (`docs/handoffs/2026-09-06 - 00 - popup-redesign-plan-handoff.md`); once it has landed they
-  are held like every other golden and re-recorded with
-  `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
+  `docs/layout/user-questions-layout.md` word for word. The frames on disk were the hand-edited
+  TARGET layout rather than records of the current one; that layout has since landed, so they are
+  HELD like every other golden — compared on every `make check`, with no opt-in flag — and
+  re-recorded with `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
 
 ### Changed
+
+- Pop-up panes breathe where they are supposed to: the painter now keeps the blank line above a pane's
+  hint even when its row list is empty (the free-text ask box no longer sits flush against its key
+  legend), draws that closing blank only where there IS a hint, and reserves both blanks out of the row
+  window BEFORE the rows are seated — so a list that overflows its window breathes too, and only a
+  window down to its last row gives the blanks back. The overflow bar now runs down the rows alone and
+  stops at those blanks.
+
+- The free-text ask pane books the blank row above its hint on the painter's own terms: an offering with
+  no choices costs the closing pad alone, so a question that overflows keeps the line the pane used to
+  book for a pad it never draws.
+
+- The approval pane sets every part of its body off as a paragraph — the sub-agent line, `Reason:`,
+  `Fix:`, `Scope:`, the labelled arguments, the resolved-path note and the MCP grant note each stand one
+  blank line from the next, and a part that wraps keeps the blank after its last line. The menu is still
+  set off by one further blank and the last decision still closes on the bottom border.
+
+- The list pop-ups breathe: the picker, the `/sessions` browser, the `/` dropdown and the `/settings`
+  sub-lists keep one blank row between whatever stands above their rows and the row block, and one
+  between the block and their key legend. A pane already showing a body of its own — a typed filter, the
+  sub-list's question — spends only the lower blank, so the gap never doubles, and on a window too short
+  to seat a row beside them both blanks go back to the rows.
+
+- The report panes and the `/settings` pane breathe. `/usage`, `/inspect` and `/thinking` stand their
+  reading one blank row clear of the title above it and one clear of the key legend below it; the
+  `/settings` key list and its multi-line field keep the lower blank, the description region's own
+  closing blank already being the breathing row above the list. Both are booked out of the ROW window
+  rather than out of the pane's height, so a pane is exactly as tall as it was and the three reports
+  show two rows fewer at every height, and a window down to its floor hands the blanks back and keeps
+  the reading. `docs/layout/settings-screen-layout.md`'s mockups are redrawn to match.
+
+- The eleven pop-up frame goldens are HELD: the `-popup-design` opt-in flag and its skips are gone, so
+  `make check` compares every boxed pane against its frame like any other golden, and `layout.md`'s
+  height section states the breathing rule the frames draw — one blank row over a pane's row block, one
+  under it, booked out of the row window and given back as a pair when the window cannot seat the
+  anchor row.
 
 - The refusal a Driver shows when the startup beat never answered — `cannot send — server
   offline (<endpoint>)`, with the failure's own words after a colon when the beat had any — is

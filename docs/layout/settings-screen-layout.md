@@ -75,9 +75,9 @@ list moves the highlight and nothing else; a longer description loses its tail t
 the list losing a row. That closing blank is also this pane's **breathing row** above the list — the
 one every other boxed pane spends on itself, which is why the pane asks for none of its own — and the
 blank above the key legend is its counterpart below. Both are bought out of the row window rather
-than out of the pane's height, so a short terminal gives them up and keeps the keys. Rows are four cells — key, value, an `(env)`/`(flag)` mark, and the note or
-pointer — and the last two columns collapse away entirely on a configuration with nothing overridden
-and nothing read-only.
+than out of the pane's height, so a short terminal gives them up and keeps the keys. Rows are four
+cells — key, value, an `(env)`/`(flag)` mark, and the note or pointer — and the last two columns
+collapse away entirely on a configuration with nothing overridden and nothing read-only.
 
 The mockup is **abridged**: it shows five of the pane's ten sections. In the built pane
 `Tools & skills`, `Session`, `Presentation`, `Interface` and `Mechanisms` sit between `Confinement`
