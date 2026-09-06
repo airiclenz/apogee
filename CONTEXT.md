@@ -104,6 +104,31 @@ _Avoid_: "server" (the engine is wire-silent and v1 has no listener; the future 
 surface is this Driver's composition), "the scheduler" (that names the library both Drivers
 share, not this Driver).
 
+**Hook**:
+A user-configured, **observe-only** reaction to one **Hook event**: an entry in the global
+`hooks:` list naming the event(s) it fires on and either an argv `command:` or a `webhook:` URL,
+optionally filtered to one `workspace:`. A Hook is composed by every **Driver** from one shared
+library over the engine's event stream, so the TUI, `apogee headless` and a daemon **Firing** fire
+the same list. It is strictly one-way: nothing a Hook prints, returns or answers reaches the model,
+the conversation or the Session record, and a Hook can neither veto nor delay the loop — the runner
+queues per Hook, in order, off the engine's path, and drops under overload rather than block. It is
+**not a Mechanism** and fires at no **Hook point**: it runs after the fact on the user's own machine,
+outside confinement, as the user's config rather than a model action. See
+[ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md).
+_Avoid_: "plugin" (a Hook adds no capability to apogee), "trigger" (that names the `on:` half of
+a daemon Schedule's envelope), "hook" for a **Mechanism** or an **Experimental hook** (those fire
+*inside* the loop at a Hook point and may act on the model; say "Mechanism" or "Experimental hook").
+
+**Hook event**:
+One of the named moments a **Hook** may fire on — all after the fact, none model-visible:
+`exchange-finished` (a Depth-0 Turn closed its Exchange; carries faulted / step-capped),
+`turn-finished` (every Depth-0 Turn boundary, with its status), `file-changed` (a write tool
+succeeded, at any depth), `approval-waiting` (an **Approval** was raised, before its decision),
+`error` (an engine error, at any depth). The set is additive by design; a moment not on it is not
+a Hook event yet. Per-token, tool-call, sub-agent-phase, session-save, prune and usage moments are
+deliberately not in the first set.
+_Avoid_: "hook point" (a Mechanism seam, not a Hook event).
+
 **Sub-agent**:
 A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with its
 own Session. It is itself an instance of the **Embeddable agent**, spawned in-process; its
@@ -1093,7 +1118,9 @@ Four positions plus a cross-cutting capability:
   hook until a production trigger is found). New to the loop; the proxy could not host it.
 - **history-rewrite** — a capability that edits conversation state; may attach at more than one
   point. No shipped row attaches here or at post-tool-result: both are lab positions now.
-_Avoid_: "stage" (a pre-request-only, pipeline-era word), "phase".
+_Avoid_: "stage" (a pre-request-only, pipeline-era word), "phase", "Hook" (a user-configured,
+observe-only reaction composed by a Driver — see [Hook](#identity-and-shape) — is not a Hook point and
+fires at none).
 
 **Post-response decision**:
 The action a post-response Mechanism chooses: **retry** (re-call the Upstream now, **in
