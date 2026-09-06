@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -283,6 +284,15 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 // scratch sweep, the notices this command prints in its own voice, and the store the record lands
 // in.
 func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave bool) error {
+	// Every line this command narrates leaves through ONE lock from here on. The Hook Runner built
+	// below reports a Hook's trouble on a Hook worker's goroutine (internal/hooks), while this
+	// function is still writing its own notices and its closing summary on the goroutine it was
+	// called on — and Cobra's Print helpers hand both straight to the same io.Writer: a data race on
+	// that writer (`go test -race`), and interleaved bytes on a real terminal. Wrapping the command's
+	// error stream serialises the two at the only thing they share, so the reporter stays a plain
+	// func(string) that knows nothing about this Driver and every line reads exactly as it did.
+	cmd.SetErr(&serialWriter{w: cmd.ErrOrStderr()})
+
 	// Before anything is resolved or constructed: with no prompt there is no run to configure.
 	prompt, err := resolveHeadlessPrompt(args, cmd.InOrStdin())
 	if err != nil {
@@ -683,6 +693,21 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		return exitError{code: exitRunFaulted, err: err}
 	}
 	return nil
+}
+
+// serialWriter guards one io.Writer with a mutex, so goroutines that narrate at the same time can
+// neither race on it nor split each other's lines. One Write is one line here: Cobra's Print
+// helpers format the whole line before they write it, so the lock is never taken mid-line.
+type serialWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+// Write hands p to the wrapped writer with the lock held.
+func (s *serialWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }
 
 // resolveHeadlessPrompt reads the run's single prompt: the positional argument when there is one,
