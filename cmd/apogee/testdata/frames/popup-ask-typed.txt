@@ -1,0 +1,30 @@
+❯ Ask me which findings to fix.                                                                    │
+✦ Ask User                                                                                         │
+  ┕ Which findings should I fix? ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ Fix the nil-check in submitAnswer · +4 more lines ▶ │
+                                                                                                   │
+✦ Noted, thank you.                                                                                │
+                                                                                                   │
+❯ Ask me how to continue.                                                                          │
+                                                                                                   │
+✦ Ask User                                                                                         ┃
+  ┕ How to continue with the implementation of the feature "The best. Feature in the world"? ⋯⋯⋯   ┃
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ How to continue with the implementation of the feature "The best. Feature in the world"?         │
+│                                                                                                  │
+│ · Just do it all in one shot and commit once.                                                    │
+│                                                                                                  │
+│ · Commit each piece as you go and run make check after every commit.                             │
+│                                                                                                  │
+│ · Implement the config redesign first, commit it, then do the TUI part in a separate commit. Run │
+│   make check after each. The config change is the riskier part — get it stable first.            │
+│                                                                                                  │
+│ type your answer below · ⏎ send · ⇧⏎/⌥⏎ newline · esc cancel                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Popup frames ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  answer needed
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Do the config first                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  probe-target ✦ popup-model <footer tail>
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

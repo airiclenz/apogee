@@ -1,0 +1,153 @@
+package main
+
+// The pop-up frame goldens: one recorded frame per boxed overlay, so the layout of every pop-up
+// can be read, edited by hand and then held. They are rendering surfaces — the whole point of a
+// pop-up is how it looks — which is what a golden is for (ADR 0062, ratified call 13); everything
+// the panes DO is asserted elsewhere.
+//
+// Two runs, one per family. The list pop-ups — the `/` dropdown, the picker and the `/sessions`
+// browser — need no upstream turn but the title and the fallback. The decision surfaces — the approval pane and
+// the ask pane in its four states — are raised by testdata/stubllm/popups.yaml.
+//
+// Record them with `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
+
+import (
+	"testing"
+
+	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/tuitest"
+)
+
+// The prompts popups.yaml answers.
+const (
+	popupApprovalPrompt = "Run ls in /tmp and nothing else."
+	popupSinglePrompt   = "Ask me how to continue."
+	popupMultiPrompt    = "Ask me which findings to fix."
+	popupFreePrompt     = "Ask me an open question."
+
+	// The hint each ask state paints, which is what tells the pane's states apart on a frame.
+	askChoiceHint = "type for a custom answer"
+	askFreeHint   = "type your answer below"
+	askReply      = "Noted, thank you."
+
+	// The headings the three list pop-ups paint — the one text on each that does not scroll.
+	dropdownTitle = "commands and skills"
+	pickerTitle   = "schedule — how often"
+	browserHint   = "type to filter · ↑/↓ select · ⏎ resume"
+)
+
+// popupRedactions is goldenRedactions plus the one age the default set does not cover: a record
+// saved seconds ago reads `just now` rather than `N secs ago`, and a slow relaunch would age it.
+func popupRedactions(sess *e2eSession) []tuitest.Redaction {
+	return append([]tuitest.Redaction{tuitest.Redact(`just now`, "<age>")}, goldenRedactions(sess)...)
+}
+
+// TestE2EPopupFramesLists records the three list pop-ups: the `/` dropdown, the picker and the
+// `/sessions` browser.
+func TestE2EPopupFramesLists(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "popups"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+	drv.WaitQuiet(settled)
+
+	// The `/` dropdown.
+	drv.Type("/")
+	drv.WaitText(dropdownTitle)
+	drv.WaitQuiet(settled)
+	tuitest.Golden(t, "popup-dropdown", drv.Frame(), goldenRedactions(sess)...)
+	drv.Press(tuitest.Backspace)
+	drv.WaitGone(dropdownTitle)
+
+	// The picker, through the one verb that opens it under a one-server, no-dial config: the
+	// prompt-only /schedule form, whose first popup asks how often. /model notes that the server
+	// serves no other model, /server that there is no other server, and /effort that the stub
+	// reports no dial.
+	submit(drv, "/schedule tidy the logs")
+	drv.WaitText(pickerTitle)
+	drv.WaitQuiet(settled)
+	tuitest.Golden(t, "popup-picker", drv.Frame(), goldenRedactions(sess)...)
+	drv.Press(tuitest.Esc)
+	drv.WaitGone(pickerTitle)
+
+	// The `/sessions` browser lists saved records, so one exchange is run and saved first and the
+	// browser is opened on a relaunch over the same home — the way a human reaches it.
+	submit(drv, "Hello there.")
+	drv.WaitText("Nothing else to add.")
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the first run returned %v; want a clean quit", err)
+	}
+	next := sess.Relaunch()
+	waitIdle(next)
+	submit(next, "/sessions")
+	next.WaitText(browserHint)
+	next.WaitQuiet(settled)
+	tuitest.Golden(t, "popup-sessions", next.Frame(), popupRedactions(sess)...)
+	next.Press(tuitest.Esc)
+	next.WaitGone(browserHint)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// TestE2EPopupFramesPrompts records the two decision surfaces: the approval pane, and the ask pane
+// single-select, multi-select with one box ticked, single-select with a custom answer typed, and
+// free-text.
+func TestE2EPopupFramesPrompts(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "popups"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+
+	// The approval pane.
+	submit(drv, popupApprovalPrompt)
+	pane := awaitApprovalPane(drv)
+	tuitest.Golden(t, "popup-approval", pane, goldenRedactions(sess)...)
+	decide(drv, "a")
+	drv.WaitText("That is what the command had to say.")
+
+	// Single-select, the first choice highlighted.
+	submit(drv, popupSinglePrompt)
+	drv.WaitText(askChoiceHint)
+	drv.WaitQuiet(settled)
+	tuitest.Golden(t, "popup-ask-single", drv.Frame(), goldenRedactions(sess)...)
+	drv.Press(tuitest.Enter)
+	drv.WaitText(askReply)
+
+	// Multi-select, the first box ticked.
+	submit(drv, popupMultiPrompt)
+	drv.WaitText(askChoiceHint)
+	drv.WaitQuiet(settled)
+	drv.Press(tuitest.Space)
+	drv.WaitText("[✔]")
+	drv.WaitQuiet(settled)
+	tuitest.Golden(t, "popup-ask-multi", drv.Frame(), goldenRedactions(sess)...)
+	drv.Press(tuitest.Enter)
+	drv.WaitGone(askChoiceHint)
+
+	// Single-select with a custom answer typed: the highlight drops and the box shows the draft.
+	submit(drv, popupSinglePrompt)
+	drv.WaitText(askChoiceHint)
+	drv.WaitQuiet(settled)
+	drv.Type("Do the config first")
+	drv.WaitText("Do the config first")
+	drv.WaitQuiet(settled)
+	tuitest.Golden(t, "popup-ask-typed", drv.Frame(), goldenRedactions(sess)...)
+	drv.Press(tuitest.Enter)
+	drv.WaitGone(askChoiceHint)
+
+	// Free-text: no choices at all.
+	submit(drv, popupFreePrompt)
+	drv.WaitText(askFreeHint)
+	drv.WaitQuiet(settled)
+	tuitest.Golden(t, "popup-ask-free", drv.Frame(), goldenRedactions(sess)...)
+	drv.Type("popups")
+	drv.WaitText("popups")
+	drv.Press(tuitest.Enter)
+	drv.WaitGone(askFreeHint)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}

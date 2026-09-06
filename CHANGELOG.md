@@ -8,6 +8,17 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- A golden frame of every boxed pop-up, so the layout of each can be read, edited by hand and
+  then held: the ask pane single-select, multi-select with one box ticked, single-select with a
+  custom answer typed, and free-text; the approval pane; the picker; the `/sessions` browser; and
+  the `/` dropdown — `cmd/apogee/testdata/frames/popup-*.txt`, recorded by
+  `TestE2EPopupFramesLists` and `TestE2EPopupFramesPrompts` over the new
+  `testdata/stubllm/popups.yaml`, whose two questions are the mockups pinned in
+  `docs/layout/user-questions-layout.md` word for word. Re-record with
+  `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
+
 ### Changed
 
 - The refusal a Driver shows when the startup beat never answered — `cannot send — server

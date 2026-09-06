@@ -1,0 +1,32 @@
+╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ▗▄▄ ▄▄▄ ▗▄▄ ▗▄▄▖▗▄▄ ▗▄▄                                                  host     probe-target │
+│ ▗▄▄▌▌  ▌▌  ▌▌  ▌▙▄▄▌▙▄▄▌                                                 model    popup-model  │
+│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                                                  version  <version>    │
+│     ▌        ▄▄▘                                                                               │
+╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+· context window unknown — automatic compaction and the Budget are inactive; set context-window:
+  in config.yaml
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ commands and skills                                                                              │
+│                                                                                                  │
+│ ❯ /clear                       reset the model's memory of this session                        ┃ │
+│   /color-scheme                list, switch or export the screen's colour schemes              ┃ │
+│   /compact                     summarise the conversation to reclaim context                   │ │
+│   /confine                     report or change auto mode's blast radius                       │ │
+│   /continue                    ask the model to keep going                                     │ │
+│   /inspect                     the recent wire traffic, readable — ctrl+r for the raw bytes    │ │
+│   /model                       switch model — the launcher's profiles, or what the server serv…│ │
+│   /new                         start a fresh conversation (same as /clear)                     │ │
+│                                                                                                  │
+│ ↑/↓ select · ⏎/tab accept · esc dismiss                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ /                                                                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  probe-target ✦ popup-model <footer tail>
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

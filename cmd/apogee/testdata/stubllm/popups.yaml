@@ -1,0 +1,58 @@
+# The upstream the pop-up frame goldens talk to: a model that raises each decision surface on
+# request — the approval pane through a terminal call, and the ask pane in its three shapes through
+# ask_user — so a frame of every boxed pop-up can be recorded and edited by hand.
+#
+# The single-select and multi-select questions are the two mockups pinned in
+# docs/layout/user-questions-layout.md, word for word, so the recorded frame and the canon can be
+# read side by side. Every turn repeats: the same question is asked more than once (once to record
+# the highlight, once to record a typed custom answer), and a consumed turn would leave the second
+# pane unscripted.
+model: popup-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Popup frames
+    # The wrap-ups once a tool has come back, matched BEFORE the prompt turns so a result is never
+    # answered as a fresh request.
+    - when:
+        tool_result: ask_user
+      repeat: true
+      text: Noted, thank you.
+    - when:
+        tool_result: terminal
+      repeat: true
+      text: That is what the command had to say.
+    # The approval pane: an ordinary subprocess gate, `Reason: subprocess execution`.
+    - when:
+        last_message: ^Run ls in /tmp
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"ls -d /tmp"}'
+    # The single-select question — the canon's own three options, one of them long enough to wrap.
+    - when:
+        last_message: ^Ask me how to continue
+      repeat: true
+      tool_calls:
+        - name: ask_user
+          arguments: '{"question":"How to continue with the implementation of the feature \"The best. Feature in the world\"?","choices":["Just do it all in one shot and commit once.","Commit each piece as you go and run make check after every commit.","Implement the config redesign first, commit it, then do the TUI part in a separate commit. Run make check after each. The config change is the riskier part — get it stable first."]}'
+    # The multi-select question — the canon's three findings.
+    - when:
+        last_message: ^Ask me which findings
+      repeat: true
+      tool_calls:
+        - name: ask_user
+          arguments: '{"question":"Which findings should I fix?","choices":["Fix the nil-check in submitAnswer","Add the missing layout() call","Guard the empty-choices path"],"multi_select":true}'
+    # The free-text question: no choices at all.
+    - when:
+        last_message: ^Ask me an open question
+      repeat: true
+      tool_calls:
+        - name: ask_user
+          arguments: '{"question":"What should the new module be called?"}'
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

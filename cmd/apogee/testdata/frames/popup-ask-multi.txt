@@ -1,0 +1,30 @@
+❯ Ask me how to continue.                                                                          │
+                                                                                                   │
+✦ Ask User                                                                                         │
+  ┕ How to continue with the … ⋯⋯⋯⋯⋯ Just do it all in one shot and commit once. · +4 more lines ▶ │
+                                                                                                   │
+✦ Noted, thank you.                                                                                │
+                                                                                                   │
+❯ Ask me which findings to fix.                                                                    ┃
+                                                                                                   ┃
+✦ Ask User                                                                                         ┃
+  ┕ Which findings should I fix? ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯   ┃
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Which findings should I fix?                                                                     │
+│                                                                                                  │
+│ ❯ [✔]  Fix the nil-check in submitAnswer                                                         │
+│                                                                                                  │
+│ · [ ]  Add the missing layout() call                                                             │
+│                                                                                                  │
+│ · [ ]  Guard the empty-choices path                                                              │
+│                                                                                                  │
+│ ↑↓ select · ␣ toggle · ⏎ send · type for a custom answer · esc cancel                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Popup frames ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  answer needed
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  probe-target ✦ popup-model <footer tail>
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
