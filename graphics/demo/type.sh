@@ -34,6 +34,11 @@ set -euo pipefail
 
 readonly DEFAULT_SEED=4242
 
+# The awk this script runs on. Overridable so the byte-stability claim in the header can be
+# exercised against each of the three awks rather than only read; `--check` re-invokes this
+# file through bash, so an `AWK=...` prefix reaches that pass too.
+readonly AWK_BIN="${AWK:-awk}"
+
 # The typing profile, in milliseconds. Ratified with the plan — edit only deliberately, since
 # every band change moves the recorded duration of every typed line.
 readonly LETTER_GAP_MIN=25
@@ -113,7 +118,7 @@ check_profile() {
         '='*) summary="${line#=}" ;;
       esac
     done <<<"$(
-      printf '%s\n' "$block" | awk \
+      printf '%s\n' "$block" | "$AWK_BIN" \
         -v punctuation="$PUNCTUATION_CHARACTERS" \
         -v letterMin="$LETTER_GAP_MIN" -v letterMax="$LETTER_GAP_MAX" \
         -v spaceMin="$SPACE_GAP_MIN" -v spaceMax="$SPACE_GAP_MAX" \
@@ -179,7 +184,7 @@ check_profile() {
 
   # One pooled line, not four: the mean is a single number across all four strings and cannot
   # sit on a per-string row. n is 102 of the 131 gaps, so sigma is ~0.6 ms and +/-2 ms is ~3.3 sigma.
-  if ! awk -v sum="$pooled_sum" -v n="$pooled_letters" \
+  if ! "$AWK_BIN" -v sum="$pooled_sum" -v n="$pooled_letters" \
       -v low="$LETTER_GAP_MIN" -v high="$LETTER_GAP_MAX" -v tolerance="$POOLED_MEAN_TOLERANCE_MS" '
     BEGIN {
       if (n == 0) { print "type.sh --check: no per-letter draws to pool" > "/dev/stderr"; exit 1 }
@@ -270,7 +275,7 @@ fi
 letter_gap_min="${APOGEE_DEMO_JITTER_MIN:-$LETTER_GAP_MIN}"
 letter_gap_max="${APOGEE_DEMO_JITTER_MAX:-$LETTER_GAP_MAX}"
 
-TYPE_SH_TEXT="$text" awk \
+TYPE_SH_TEXT="$text" "$AWK_BIN" \
   -v seed="$seed" \
   -v letterMin="$letter_gap_min" -v letterMax="$letter_gap_max" \
   -v spaceMin="$SPACE_GAP_MIN" -v spaceMax="$SPACE_GAP_MAX" \

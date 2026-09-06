@@ -191,6 +191,21 @@ strings now run **longer** than `40 ms × N` (25–45 ms a letter, plus pauses),
 retuned against a take; and the `render.sh` head trim above (`1.25 3.8`) is re-measured on the
 next take: the expanded `apogee --mode auto` moves the shell+launch boundary by ~+0.2–0.5 s.
 
+The generator's byte-stability across awks is checkable, not just claimed: both `type.sh` and
+`gen.sh` run `${AWK:-awk}`, so an `AWK=<implementation>` prefix picks the awk for a whole pass
+(`type.sh --check` re-invokes itself through `bash`, so the prefix reaches that pass too).
+Nothing in the recording rig sets `AWK`, so `record.sh` and `gen.sh` behave exactly as before
+when it is unset. The recipe, and what it verified on 2026-09-05 against mawk 1.3.4, GNU Awk
+5.2.1 and one-true-awk 2023-11-27 — `--check` passes under all three, and both the generated
+blocks and the whole generated hero tape are byte-identical between them:
+
+```bash
+apt-get install -y gawk original-awk   # original-awk IS the one-true-awk
+for a in mawk gawk original-awk; do AWK=$a ./type.sh --check || break; done
+for a in mawk gawk original-awk; do AWK=$a ./gen.sh tapes/hero.tape "/tmp/hero.$a.tape" || break; done
+cmp /tmp/hero.mawk.tape /tmp/hero.gawk.tape && cmp /tmp/hero.mawk.tape /tmp/hero.original-awk.tape
+```
+
 ## Recording a new clip for a different feature
 
 Add `tapes/<name>.tape`, then `./record.sh <name>`. The stage repo, isolated home, warm

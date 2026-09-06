@@ -345,7 +345,10 @@ No test or doc pins the current wording (`grep -rn 'three resolvers' .` returns 
 
 commit: `docs(tui): follows() names its siblings instead of counting them`
 
-## 8. The demo rig's awk is selectable, and the three awks are checked
+## 8. The demo rig's awk is selectable, and the three awks are checked — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the README records the plan's literal 2026-09-05 measurement date; the same
+three awk versions were re-run on 2026-09-06 during implementation with identical results.
 
 **What.** Closes `apogee-at8`. `graphics/demo/type.sh:19-23` claims the generator is byte-stable
 across BSD awk, gawk and mawk, but every awk call is the bare `awk`, so the claim could only be read,

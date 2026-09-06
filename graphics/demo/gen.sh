@@ -30,6 +30,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly HERE
 readonly TYPE_SH="$HERE/type.sh"
 
+# The awk this script runs on. Overridable so the tape guard can be exercised against each of
+# the three awks; it defaults to the plain `awk` the recording rig uses.
+readonly AWK_BIN="${AWK:-awk}"
+
 # The hero take's rhythm is pinned here rather than left to type.sh's default: a fixed seed is
 # what makes two people recording the same tape produce byte-identical typing.
 readonly HERO_SEED=4242
@@ -97,7 +101,7 @@ expanded_tape="$work_dir/expanded.tape"
 # awk reports its complaints on stdout — the tape goes to a file — so a guard failure can be
 # relayed to stderr here without depending on /dev/stderr, which the three awks disagree about.
 if ! guard_report="$(
-  awk \
+  "$AWK_BIN" \
     -v workDir="$work_dir" \
     -v outputFile="$expanded_tape" \
     -v tapePath="$source_tape" '
