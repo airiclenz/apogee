@@ -10,6 +10,69 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Every Turn boundary is now an event. `TurnEvent` reports the Turn that just ended — its status,
+  and whether it was abandoned (`Faulted`) or ended by the delegate step cap (`StepCapped`) — once
+  per boundary, on the same stream everything else travels, and at the delegate's own depth for a
+  sub-agent's Turns. It is observation-only: nothing in the loop reads it, the transcript renders
+  nothing for it, and a Driver that ignores it loses only the notification. A `Step`-driving host
+  (the bench, headless) and a `Run`-driving one see the identical sequence. The root facade also
+  re-exports the delegation variants that were reachable only from inside the engine until now:
+  `SubAgentPhaseEvent`, `SubAgentNamedEvent`, `ChildInterjectionEvent` and `SubAgentPhase` with its
+  two values.
+
+- An Approval is now announced twice on the event stream — once when the gate is raised, before
+  the Approver is consulted, and once with the verdict (`ApprovalEvent.Phase`) — so a Driver can
+  observe that a human is being waited on while the wait is still happening. The transcript is
+  unchanged: it still shows one approval note per gate, folded from the decided phase alone.
+
+- Hooks: `internal/hooks` gained the Runner — the observe-only `EventSink` decorator that fires
+  configured Hooks. `Emit` forwards to the sink it decorates first and never blocks the loop:
+  matching is pure, and each active Hook has its own bounded queue (64) and worker goroutine, so a
+  slow Hook drops its newest firings rather than delaying the engine or another Hook. `Replace`
+  swaps the Hook list for a live config reload and drains the previous workers in the background;
+  `Close` stops intake, waits out its context's grace and then cancels whatever is still running.
+  Failures and drops reach the Driver through a reporter — de-duplicated per Hook until it
+  succeeds again — and never become an `ErrorEvent`. The root facade re-exports `Hook`,
+  `HookEvent`, `HookPayload`, `HookOptions`, `HookRunner` and `NewHookRunner`.
+
+- Hooks: a configured Hook now actually runs — an argv `command:` under the `api-key-cmd` exec
+  posture (no shell, the program fenced out of the workspace, the payload JSON on stdin, the
+  `APOGEE_HOOK_*` facts in the environment, stdout discarded and stderr quoted back on failure), or
+  a `webhook:` POST of the same JSON with its literal `headers:` and its `headers-env:` resolved
+  from the environment at send time and no retry. Both are bounded by the entry's `timeout:`.
+
+- **`hooks:` in the config file.** A global `hooks:` list names the observe-only reactions a session
+  runs when an engine event fires — an argv `command:` or a `webhook:` POST, scoped by `events:`,
+  bounded by `timeout:` (default 30s) and optionally by `workspace:`. Webhook headers are literal
+  (`headers:`) or read from a named environment variable at send time (`headers-env:`), so a token
+  never sits in the file. The block is read, validated at startup — a mistyped event, two actions on
+  one entry or a duplicate name is refused naming the entry — shown in `/settings` as a count, and
+  documented in the seeded template and `docs/manual/configuration.md`.
+
+- The TUI session now composes the global `hooks:` list (ADR 0073): the Hook Runner decorates the
+  Bridge's event sink as `Config.Events`, a Hook's failure or dropped firing appears as an ephemeral
+  transcript note the session record never keeps, an edit of the block — in the `/settings` pane or
+  in the file — swaps the running list and the list a `/schedule` Firing composes from, and a
+  webhook's `headers-env:` variables are scrubbed from the environment the execution tools hand a
+  subprocess. The `/settings` row reads `N hooks` and ⏎ opens the file in `$EDITOR`.
+
+- Hooks now fire from every unattended root: an `apogee headless` run, a daemon Firing and a
+  `/schedule` Firing raised inside a session each compose their own Hook Runner from the same
+  `hooks:` list, and a daemon or `/schedule` payload names the Schedule it ran for. A Hook's
+  trouble is reported where that Driver already speaks — headless on stderr, the daemon in its
+  log as one sanitised line, a session's Firing as an ephemeral note — and a webhook's
+  `headers-env:` variables are scrubbed out of the subprocesses a Firing's model can run.
+
+- Documented Hooks: `docs/manual/hooks.md` is the full reference — what a hook is and is not
+  (observe-only, never model-visible, no `pre-*` events), the five events and the depth each fires
+  at, every key of an entry, the whole JSON payload field by field and the `APOGEE_HOOK_*`
+  environment set, the exec posture a `command:` runs under (argv, no shell, outside confinement,
+  fenced at the program, stdout discarded, stderr tail quoted in the notice, `timeout:`), the
+  webhook contract (one POST, no retry, literal and `headers-env:` headers, no URL in a failure
+  line), `workspace:` matching, the per-hook queue and its drop and shutdown behaviour, where a
+  failure notice lands in each front-end, and live reload. The manual's index and the root README's
+  documentation table gain the row, and the README gains a Hooks feature line.
+
 - The ask pane takes the pointer: a click on an offered answer highlights it (and ticks its box on a
   multi-select question), and a second click on that same row sends it. A click anywhere else inside
   the box is swallowed, and a click outside it leaves the question standing — no stray click can
@@ -695,6 +758,11 @@ point is a **minor** bump, not a breaking change.
   closing epic and parked at P3 as top-level work.
 
 ### Fixed
+
+- **`apogee headless` no longer races on its own error stream.** A Hook's failure line is reported
+  from a Hook worker's goroutine while the run is still writing its notices and closing summary,
+  and both now leave through one mutex-guarded writer. The text is unchanged;
+  `go test ./cmd/apogee -race` is clean.
 
 - **The `/settings` value sub-list no longer opens its choices flush against the question above
   them.** The pane's question is a caption that sets off neither end of itself, and the list surface
