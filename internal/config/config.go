@@ -612,6 +612,19 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// The entries are mapped across one by one like the block above it. A mapping FAILURE leaves
+		// the list empty rather than half-applied: parseConfigFile has already refused any file this
+		// could fail on (validateHooks), so the only way to reach it is a fileConfig built in code,
+		// and a partially fired Hook set is a worse answer there than none.
+		row: mustKey("hooks"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.Hooks = nil
+			if mapped, err := toHooks(fc.Hooks); err == nil {
+				o.Hooks = mapped
+			}
+		},
+	},
+	{
 		// Each half of the `tools:` block projects on its own, the way the `url-safety:` pair below
 		// does: a block that names only one of them configures that one and leaves the other empty.
 		row: mustKey("tools.disabled"),
@@ -1398,6 +1411,12 @@ type fileConfig struct {
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
 	MCPServers []mcpServerConfig `yaml:"mcp-servers"`
+	// Hooks is the global list of observe-only reactions to engine events (ADR 0073): each entry
+	// names the events it fires on and the one action it takes — an argv command run outside
+	// confinement, or a webhook POST. Absent/empty ⇒ the feature is dormant (nothing runs, no error).
+	// Nothing a Hook does reaches the model, the conversation or the Session record, so an entry is
+	// never part of what a run produces — only of what a machine is told about it.
+	Hooks []hookConfig `yaml:"hooks"`
 	// Tools is the GLOBAL roster block (ADR 0057): `disabled:`, the built-in tools this config takes
 	// off the menu, and `enabled:`, the ones it puts back on it. A pointer so an absent block falls
 	// through to the default (every tool the build offers) rather than reading as an explicit empty
@@ -2697,6 +2716,9 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 	}
 	canonicaliseServers(&fc)
 	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
+		return fileConfig{}, err
+	}
+	if err := validateHooks(fc.Hooks); err != nil {
 		return fileConfig{}, err
 	}
 	if err := validateResponseReserveFraction(fc.ResponseReserve); err != nil {

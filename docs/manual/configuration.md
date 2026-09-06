@@ -353,6 +353,38 @@ opens your editor because no row can write a list this shape — and apogee reco
 new set up before swapping the tools over, so a server that will not come back leaves the old
 connections serving and says why on the row.
 
+## Hooks — `hooks:`
+
+`hooks:` is the list of **observe-only** reactions apogee runs when something happens in a session:
+each entry names the events it fires on and the one action it takes — a `command:` argv list run
+directly (no shell; write `["sh", "-c", "…"]` when you want one) or a `webhook:` the JSON payload is
+POSTed to. It is **empty by default**. A hook is told what already happened and can change nothing:
+it cannot veto a tool call or an approval, and nothing it prints reaches the model, the conversation
+or the saved session. The five events are `exchange-finished`, `turn-finished`, `file-changed`,
+`approval-waiting` (raised, before you answer) and `error`.
+
+```yaml
+# ~/.apogee/config.yaml
+hooks:
+  - name: notify
+    events: [approval-waiting]
+    command: ["notify-send", "apogee is waiting for an answer"]
+    timeout: 10s
+  - name: ci-bell
+    events: [file-changed, exchange-finished]
+    webhook: https://hooks.example.com/apogee
+    headers-env:
+      Authorization: APOGEE_HOOK_TOKEN
+    workspace: ~/code/apogee
+```
+
+The block is file-only (no flag, no environment variable) and it is **live in the interactive TUI**:
+save the file — or use `⏎` on the `hooks:` row in [`/settings`](commands.md#the-settings-screen--settings),
+which opens your editor because no row can write a list this shape — and the running session swaps
+its hooks over. A headless run and the daemon read the list once, at start. The full reference —
+every payload field, the exec posture, the webhook contract, `workspace:` matching, and what happens
+when a hook fails or falls behind — is on the [Hooks](hooks.md) page.
+
 ## Skills a repository ships — `use-project-skills:`
 
 A **skill** is a folder holding a `SKILL.md` — frontmatter naming it, and a Markdown body of

@@ -434,6 +434,49 @@ context-files:
 #     endpoint: https://mcp.example.com/ # the server URL (http://127.0.0.1:… is fine too)
 
 # =============================================================================
+# Hooks: commands and webhooks Apogee runs when something happens in a session. Default-EMPTY: with
+# no entries listed, nothing runs and nothing is reported. A hook is OBSERVE-ONLY — it is told what
+# already happened, it can change or veto nothing, and nothing it prints ever reaches the model, the
+# conversation or the saved session. Use one to ring a bell for an approval nobody is watching, or
+# to poke a build when a file changed. Config-file only, and live in the interactive TUI: save the
+# file and the running session swaps its hooks over (a headless run and the daemon read the list
+# once, at start).
+#
+# The five events are:
+#   exchange-finished  a top-level exchange closed — the model answered, or the loop gave up
+#   turn-finished      every top-level turn boundary, whatever its outcome
+#   file-changed       a workspace write tool succeeded; the payload carries the path it landed on
+#   approval-waiting   an approval was raised and is waiting on you — fires BEFORE the decision
+#   error              a localised, recovered engine fault
+#
+# Each entry takes exactly ONE action: `command:` (an argv list, run DIRECTLY — no shell, so write
+# ["sh", "-c", "…"] when you want one) or `webhook:` (an absolute http(s) URL the payload is POSTed
+# to, once, with no retry). The payload is JSON on the command's stdin, and its headline facts are
+# in the environment too as APOGEE_HOOK_EVENT, APOGEE_HOOK_NAME, APOGEE_HOOK_WORKSPACE and
+# APOGEE_HOOK_PATH. A command runs OUTSIDE the workspace confinement with Apogee's whole
+# environment — it is yours, at the same trust level as an `api-key-cmd:` above — and a program that
+# lives inside the workspace is refused, so the model cannot write the script its own hook runs. Its
+# stdout is ignored; a non-zero exit is reported to you and to nobody else. `timeout:` bounds the
+# run and the POST alike (default 30s), and `workspace:` scopes an entry to one workspace, leaving
+# it inactive at every other. Webhook headers are literal (`headers:`) or read from a named
+# environment variable at send time (`headers-env:`, the api-key-env spelling), so a token you send
+# with a hook never has to sit in this file.
+#
+# hooks:
+#   - name: notify                       # unique; it is what a failure notice names
+#     events: [approval-waiting]         # one or more of the five above
+#     command: ["notify-send", "apogee is waiting for an answer"]
+#     timeout: 10s                       # optional; default 30s
+#   - name: ci-bell
+#     events: [file-changed, exchange-finished]
+#     webhook: https://hooks.example.com/apogee
+#     headers:
+#       X-Source: apogee                 # a literal header value
+#     headers-env:
+#       Authorization: APOGEE_HOOK_TOKEN # the NAME of the variable holding the value
+#     workspace: ~/code/apogee           # optional; fires in this workspace only
+
+# =============================================================================
 # The tool roster: which of Apogee's BUILT-IN tools this configuration offers the model. Almost all
 # of them are on by default; list a name under disabled: and it is taken off the menu entirely — the
 # model is never shown it, and a call naming it is refused as a tool that does not exist. The other

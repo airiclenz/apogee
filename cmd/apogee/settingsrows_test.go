@@ -388,6 +388,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"unconfined-hosts":        "1 host",
 		"web-search-endpoint":     "off",
 		"mcp-servers":             noneSettingValue,
+		"hooks":                   noneSettingValue, // unset in the fixture: the feature is dormant by default
 		"tools.disabled":          "[view_diff]",
 		"tools.enabled":           "[]", // unset: nothing is added back, which is the whole default menu
 		"url-safety.allow-hosts":  "[docs.example.com]",

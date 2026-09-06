@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
 )
@@ -314,6 +315,12 @@ type Options struct {
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), loaded from
 	// the config file only (default-empty ⇒ MCP dormant). ApplyConfig sets it from settings.
 	MCPServers []mcp.ServerConfig
+
+	// hooks is the resolved global `hooks:` list (ADR 0073) — the observe-only reactions a root
+	// composes over its event sink — loaded from the config file only (default-empty ⇒ no Runner
+	// fires anything). ApplyConfig sets it from settings; every root builds its Hook Runner from it,
+	// and the TUI re-reads it in place when the file changes.
+	Hooks []hooks.Hook
 
 	// toolsDisabled and toolsEnabled are the resolved GLOBAL roster deltas (ADR 0057) — the built-in
 	// tools this config takes off the menu, and the ones it puts back on it. Loaded from the config

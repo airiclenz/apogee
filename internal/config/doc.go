@@ -29,7 +29,10 @@
 // ApplyConfig fills. registry.go is the declarative table describing every schema key exactly
 // once — its type, default, env var, flag, validator, /settings visibility, and the projections
 // that read its value back out of a resolved [Options] — guarded as a bijection with fileConfig,
-// so a key added to the schema breaks the build gate until it is described. defaults.go is the starter config embedded from defaults/config.yaml and seeded on
+// so a key added to the schema breaks the build gate until it is described. hooks.go is the
+// `hooks:` block — the on-disk shape of one observe-only reaction to an engine event, its mapping
+// onto the value internal/hooks fires, the whole-list refusal parseConfigFile runs, and the
+// environment variable names its webhook headers read (ADR 0073). defaults.go is the starter config embedded from defaults/config.yaml and seeded on
 // first run, plus the seed-if-absent write everything else reuses. configsplice.go is the line and
 // node machinery every write into config.yaml shares — read, parse for positions, cut and rejoin
 // the text, verify the result against the original, replace the file atomically — which is what
