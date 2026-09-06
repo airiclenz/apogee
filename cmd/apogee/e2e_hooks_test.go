@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -42,13 +43,82 @@ const (
 	hookTokenHeader = "X-Apogee-Hook-Token"
 )
 
-// hookMarkers are the spellings a Hook would leave behind if any part of it leaked into what a
-// human or a script reads. None of them may appear in a frame — or on the streams an unattended
-// root writes — of a run whose Hooks all succeeded (ADR 0073 §1).
+// hookMarkers are the spellings a Hook would leave behind that no run's own vocabulary can
+// produce: the environment a fired command inherits, and the event names its payload carries. None
+// of them may appear in a frame — or on the streams an unattended root writes — of a run whose
+// Hooks all succeeded (ADR 0073 §1).
+//
+// The reports a Hook can put on screen are NOT in this list. They are caught by shape instead — see
+// [hookReportPattern] — because a whitelist of prose stops biting the moment a report is reworded.
 var hookMarkers = []string{
-	"hook sink", "hook bell", "APOGEE_HOOK",
+	"APOGEE_HOOK",
 	string(hooks.FileChanged), string(hooks.ExchangeFinished), string(hooks.ApprovalWaiting),
 }
+
+// hookReportPattern is the shape EVERY report the hooks path can put in front of a human takes: the
+// word `hook`, the Hook's configured name, and then a separator — a colon before a Runner message
+// (internal/hooks/runner.go:240, :397) or a space before the parenthesised event of a failure
+// (:363). Those reports reach a frame through Report → Bridge.NotifyHook → an ephemeral note,
+// and an unattended root's stderr the same way.
+//
+// It is built from the names a case CONFIGURES rather than from the prose those sites happen to use
+// today, which is what keeps an absence check armed: renaming a Hook in the config re-aims the
+// pattern instead of silently un-arming it, and a report worded in some way nobody whitelisted —
+// a queue-drop line, say — still matches.
+func hookReportPattern(names ...string) *regexp.Regexp {
+	quoted := make([]string, 0, len(names))
+	for _, name := range names {
+		quoted = append(quoted, regexp.QuoteMeta(name))
+	}
+	return regexp.MustCompile(`hook (` + strings.Join(quoted, "|") + `)[ :(]`)
+}
+
+// TestE2EHooksAbsenceCheckMatchesARenamedHooksReport is the bite the whitelist [hookReportPattern]
+// replaced never had. That whitelist spelled the reports out — "hook sink", "hook bell" — so it
+// went blind on the one config change it exists to survive: a Hook renamed in the very block the
+// absence check is watching. The derived pattern follows the rename instead, and covers every
+// report shape the Runner emits rather than the two a whitelist happened to list.
+func TestE2EHooksAbsenceCheckMatchesARenamedHooksReport(t *testing.T) {
+	t.Parallel()
+
+	const renamed = "watcher"
+	pattern := hookReportPattern(renamed)
+
+	for _, report := range []string{
+		"hook " + renamed + ": dropped 3 events",
+		"hook " + renamed + ": dropped 1 event (queue full)",
+		"hook " + renamed + " (turn-finished): exit 1",
+	} {
+		if strings.Contains(report, "hook "+hooksSinkName) {
+			t.Fatalf("the report %q still carries the whitelisted spelling, so it cannot prove "+
+				"that a rename is what the pattern buys", report)
+		}
+		if !pattern.MatchString(report) {
+			t.Errorf("the pattern %v misses %q, a report a renamed Hook would put on screen",
+				pattern, report)
+		}
+	}
+
+	// And it stays silent about what the runs themselves say, which is what makes a match a
+	// finding rather than noise — the separator included: a Hook named `sink` does not make the
+	// word `sinks` a hook report.
+	configured := hookReportPattern(hooksSinkName, hooksBellName, hooksFailingName)
+	for _, innocent := range []string{
+		hooksAnswer,
+		smokeWriteReply,
+		"the hook sinks are files the test reads",
+	} {
+		if report := configured.FindString(innocent); report != "" {
+			t.Errorf("the pattern reads %q in %q, which no Hook wrote", report, innocent)
+		}
+	}
+}
+
+// smokeWriteReply is what the smoke script answers the write prompt with
+// (testdata/stubllm/smoke.yaml), and so the one thing the TUI half's final frame is certain to
+// carry. The absence check uses it as its positive control: a frame that has lost it is not the
+// frame the journey produced, and its silence about Hooks would prove nothing.
+const smokeWriteReply = "Appended the smoke test line"
 
 // TestE2EHooksFireFromTheTUI drives the smoke journey with two Hooks configured — a command on
 // `file-changed` and `exchange-finished`, a webhook on `approval-waiting` — and asserts what each
@@ -111,7 +181,7 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 	// journey produced.
 	drv.WaitQuiet(settled)
 	drv.Type("a")
-	drv.WaitText("Appended the smoke test line")
+	drv.WaitText(smokeWriteReply)
 
 	wantPath := filepath.Join(sess.Workspace(), "a.txt")
 	drv.WaitFor(func() bool {
@@ -138,9 +208,18 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 			changed.Schedule)
 	}
 
-	// Nothing a Hook did reached the screen.
+	// Nothing a Hook did reached the screen. The positive control comes first: an empty or
+	// scrolled-away frame would satisfy every absence check below without proving anything, so the
+	// frame must first be shown to carry the reply the successful run put there.
 	drv.WaitQuiet(settled)
 	final := drv.Frame().String()
+	if !strings.Contains(final, smokeWriteReply) {
+		t.Fatalf("the final frame does not carry the run's own reply %q, so its silence about "+
+			"Hooks proves nothing:\n%s", smokeWriteReply, final)
+	}
+	if report := hookReportPattern(hooksSinkName, hooksBellName).FindString(final); report != "" {
+		t.Errorf("the final frame carries the hook report %q:\n%s", report, final)
+	}
 	for _, marker := range hookMarkers {
 		if strings.Contains(final, marker) {
 			t.Errorf("the final frame carries the hook marker %q:\n%s", marker, final)
@@ -206,17 +285,22 @@ func TestE2EHooksReportAFailureAsAnEphemeralNote(t *testing.T) {
 }
 
 // The unattended halves' conversation, restated from testdata/stubllm/hooks.yaml so an assertion
-// reads as the claim it makes. The answer shares no word with a Hook's own vocabulary
-// (hookMarkers), so finding it on stdout is finding the model's reply and nothing else.
+// reads as the claim it makes. The answer shares no word with a Hook's own vocabulary — neither a
+// [hookMarkers] spelling nor a [hookReportPattern] shape — so finding it on stdout is finding the
+// model's reply and nothing else, which is what lets it serve as the absence check's positive
+// control.
 const (
 	hooksPrompt = "Say what both roots do."
 	hooksAnswer = "Both roots fired their hooks."
 
-	// The schedule the daemon half puts on the clock, and the two Hooks the two unattended cases
-	// subscribe: one that records every payload it is handed, one that refuses to run at all.
+	// The schedule the daemon half puts on the clock, and the Hooks the cases subscribe: one that
+	// records every payload it is handed, one that refuses to run at all, and the webhook the
+	// driven half rings. Every absence check derives its [hookReportPattern] from these same
+	// names, so renaming a Hook here re-aims the assertion rather than un-arming it.
 	hooksScheduleName = "hook-probe"
 	hooksSinkName     = "sink"
 	hooksFailingName  = "noisy"
+	hooksBellName     = "bell"
 )
 
 // TestE2EHooksFireFromAHeadlessRun is the unattended half: no screen, no human, one prompt, and the
@@ -264,7 +348,19 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 	}
 
 	// Nothing a Hook did reached either stream. Hooks that succeed are silent, and the one that
-	// fired here did.
+	// fired here did. The positive control comes first, for the reason the driven half has one: a
+	// run that never produced any output at all would pass every absence check below.
+	if !strings.Contains(stdout, hooksAnswer) {
+		t.Fatalf("stdout does not carry the run's own answer %q, so its silence about Hooks "+
+			"proves nothing:\n%s", hooksAnswer, stdout)
+	}
+	reports := hookReportPattern(hooksSinkName)
+	if report := reports.FindString(stdout); report != "" {
+		t.Errorf("stdout carries the hook report %q:\n%s", report, stdout)
+	}
+	if report := reports.FindString(stderr); report != "" {
+		t.Errorf("stderr carries the hook report %q:\n%s", report, stderr)
+	}
 	for _, marker := range hookMarkers {
 		if strings.Contains(stdout, marker) {
 			t.Errorf("stdout carries the hook marker %q:\n%s", marker, stdout)
@@ -396,10 +492,10 @@ func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfi
 // environment rather than written in the file.
 func hookBlock(webhook string) string {
 	return hookBlockOf(
-		"  - name: sink\n" +
+		"  - name: " + hooksSinkName + "\n" +
 			"    events: [file-changed, exchange-finished]\n" +
 			"    command: [sh, -c, 'cat >> \"$APOGEE_HOOK_SINK\"']\n" +
-			"  - name: bell\n" +
+			"  - name: " + hooksBellName + "\n" +
 			"    events: [approval-waiting]\n" +
 			"    webhook: " + webhook + "\n" +
 			"    headers-env:\n" +

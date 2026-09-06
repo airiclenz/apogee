@@ -174,7 +174,16 @@ The `-v` output must list all three names; the `grep` must return nothing.
 
 **Commit.** `test(headless): rename the file-changed roster test into the Headless.*Hook family`
 
-## 4. Assert hook-report absence on the emission shape (apogee-apz.4)
+## 4. Assert hook-report absence on the emission shape (apogee-apz.4) — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): `hookMarkers` keeps its name and its `APOGEE_HOOK`/event-literal entries; the
+two report spellings move to the derived `hookReportPattern`, and the comment that named
+`hookMarkers` (the unattended halves' conversation) was reworded to name both checks, as the item
+permits.
+
+NOTES (2026-09-06): the pattern is derived from constants, so `hookBlock`'s two inline names became
+`hooksSinkName` and a new `hooksBellName`, and the smoke script's write reply became
+`smokeWriteReply` — without that the "not from hardcoded prose" requirement cannot hold.
 
 **What.** `cmd/apogee/e2e_hooks_test.go:45` `hookMarkers` is a six-spelling whitelist, so hook
 text under a different wording — a queue-drop line, say — reaches the final frame unnoticed.
