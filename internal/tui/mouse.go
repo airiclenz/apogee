@@ -421,6 +421,18 @@ func (a clickArm) holds(pane framePane, row int) bool {
 // approval decision, submitting an answer, loading a session (approval.go, ask.go, sessions.go) all
 // hand back work for the runtime to do, so a chain that could only answer with a Model would have to
 // drop it.
+//
+// What a boxed pane does with a click OUTSIDE its own box is ONE rule for the whole chain, stated here
+// rather than re-decided in each handler (call C, owner 2026-09-06, narrowed by the owner the same
+// day). Whatever the pane is, no outside click may CANCEL its question, dismiss the pane where esc
+// would stop a run, or stop the run itself: those meanings are esc's, and a stray of the pointer's
+// never carries them. Beyond that a pane picks between the two answers the currency already has. A
+// pane with nothing to decide DISMISSES and does not claim, so the click goes on to whatever it named
+// (the report trio above). A DECISION pane — the ask prompt, and the approval prompt beside it — keeps
+// standing and simply does not claim, so the click FALLS THROUGH to the footer, the prompt and the
+// transcript below. The fall-through is not a detail: [Model.inputEditable] promises the prompt to the
+// ask state, and a pane that swallowed every outside click would take the caret seat and the
+// transcript drag away from the human for as long as its box was up.
 func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
@@ -456,8 +468,9 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return thinking, cmd
 	}
 	m = thinking
-	// The ask pane is asked next: it is drawn over the transcript like the panes above it, and it
-	// swallows every click the frame hands it while a question is up (handleAskClick, call C).
+	// The ask pane is asked next: it is drawn over the transcript like the panes above it, and while a
+	// question is up it claims what lands INSIDE its box (handleAskClick). A click outside leaves the
+	// question standing and travels on, by the outside-click rule above.
 	if ask, cmd, claimed := m.handleAskClick(pre, msg); claimed {
 		return ask, cmd
 	}
@@ -1383,13 +1396,16 @@ func (m Model) highlightSettingsEdit(view string, display settingsDisplay, place
 // arm's (clickArm, model.go): the pane's own default highlight was put there by the pane, not by the
 // human, so a single click can never turn it into an answer somebody gave.
 //
-// Everything else it swallows. A click inside the box that names no row — the question, a pad line, the
-// hint, a border — is the pane's and does nothing; so is every click while the input box holds text,
-// which is the empty-box guard askChoiceKey makes for the arrows (D5, call G), and so is a question
-// offering no choices at all, which has no row to name. And so, deliberately, is a click OUTSIDE the box
-// (call C, owner 2026-09-06): a question is a decision surface, and no stray click of the pointer's may
-// cancel it or stop the run the way esc there does. Nothing is ever selected by these clicks, so
-// handleMouseRelease falls through unchanged.
+// Everything else INSIDE the box it swallows. A click that names no row — the question, a pad line,
+// the hint, a border — is the pane's and does nothing; so is every click while the input box holds
+// text, which is the empty-box guard askChoiceKey makes for the arrows (D5, call G), and so is a
+// question offering no choices at all, which has no row to name. Nothing is ever selected by those
+// clicks, so handleMouseRelease falls through unchanged.
+//
+// A click OUTSIDE the box is not the pane's at all: it goes back unclaimed and the chain carries on
+// with it, by the outside-click rule handleMouseClick states. The question is untouched by it —
+// cancelling a decision stays esc's alone — and the prompt's caret seat and the transcript's drag
+// stay reachable for as long as it stands.
 //
 // pre is the pre-click frame the pane is placed from (handleMouseClick) and the live model is what
 // mutates — the chain's rule, and here it is also the reason the question the geometry is composed from
@@ -1403,8 +1419,11 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 	row, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
 		return pre.askPromptPlaced(req)
 	}, msg.Y)
-	if !inRect || !onRow || m.input.Value() != "" {
-		return m, nil, true // outside the box, off its rows, or the box holds a typed answer
+	if !inRect {
+		return m, nil, false // outside the box: unclaimed, and the chain goes on with it
+	}
+	if !onRow || m.input.Value() != "" {
+		return m, nil, true // off its rows, or the box holds a typed answer
 	}
 	choices := m.pendingAsk.Request.Choices
 	if len(choices) == 0 {

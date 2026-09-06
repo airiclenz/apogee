@@ -4546,29 +4546,56 @@ func TestAskClickOnAChoicelessQuestionDoesNothing(t *testing.T) {
 	}
 }
 
-// A click OUTSIDE the box is swallowed too (call C): a question is a decision surface, and no stray
-// click may cancel it or reach past it. Nothing is selected, so the release that ends the click has
-// nothing to copy either.
-func TestAskClickOutsideTheBoxIsSwallowed(t *testing.T) {
-	m, reply := askClickModel(t, domain.AskRequest{
-		Question: "which way?",
-		Choices:  []string{"left", "middle", "right"},
+// A click OUTSIDE the box is not the pane's (call C as the owner narrowed it, 2026-09-06). It may not
+// cancel the question — that stays esc's — but it is otherwise the frame's own click, so the two
+// rectangles the human always has stay reachable for as long as a question stands: the transcript
+// takes a drag, and the answer box takes a caret seat, which is what inputEditable promises at an ask.
+func TestAskClickOutsideTheBoxReachesTheTranscriptAndThePrompt(t *testing.T) {
+	reply := make(chan domain.AskAnswer, 1)
+	m := step(t, modelWithTranscript(t, "hello world"), askReqMsg{
+		Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "middle", "right"}},
+		Reply:   reply,
 	})
-	paneTop, _ := promptRect(t, m)
-	if paneTop == 0 {
-		t.Fatal("the pane starts on the first row; there is no transcript above it to aim at")
-	}
-
-	m, cmd := stepCmd(t, m, leftClick(4, paneTop-1))
-
-	if m.transcriptSel.active {
-		t.Error("a click above the pane armed a transcript selection; the question swallows it")
-	}
-	if cmd != nil {
-		t.Error("a click above the pane returned a Cmd")
-	}
 	if m.state != stateAwaitingAsk {
-		t.Errorf("state = %v, want the question still up", m.state)
+		t.Fatalf("state = %v, want the question up", m.state)
+	}
+	paneTop, _ := promptRect(t, m)
+	row := promptRow(t, m)
+	if row >= paneTop {
+		t.Fatalf("the user block is drawn on row %d, at or inside the pane at %d; nothing outside the box to aim at", row, paneTop)
+	}
+
+	m = step(t, m, leftClick(0, row))
+	m = step(t, m, leftDrag(m.viewport.Width(), row))
+
+	if !m.transcriptSel.active {
+		t.Fatal("a drag over the transcript armed no selection; the question must not swallow the rows above it")
+	}
+	got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	if want := glyphUser + " hello world"; got != want {
+		t.Errorf("selected text = %q, want %q", got, want)
+	}
+
+	m = typeInput(t, m, "my own answer")
+	x0, y0, _, _ := m.inputContentRect()
+
+	m = step(t, m, leftClick(x0+4, y0))
+
+	if col := m.input.Column(); col != 4 {
+		t.Errorf("caret column = %d after a click on the answer box, want 4", col)
+	}
+	if !m.sel.active {
+		t.Error("the click on the answer box armed no prompt selection; the caret seat is the prompt's")
+	}
+	if m.input.Value() != "my own answer" {
+		t.Errorf("the box reads %q, want the draft untouched by the seating click", m.input.Value())
+	}
+
+	if m.state != stateAwaitingAsk || m.pendingAsk == nil {
+		t.Fatalf("state = %v (pending question: %v), want the question still up after both clicks", m.state, m.pendingAsk != nil)
+	}
+	if _, _, ok := m.frameSpans().pane(panePrompt); !ok {
+		t.Error("the ask pane left the frame; an outside click may not dismiss it")
 	}
 	if answer, sent := sentAnswer(t, reply); sent {
 		t.Fatalf("a click outside the box sent %q", answer)
