@@ -387,9 +387,11 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 
 	stub := stubllm.New(t, loadScript(t, "hooks"))
 	h := newDaemonHarness(t)
-	// The harness installs a stub runner; this test wants the composition. Its own t.Cleanup puts
-	// the production value back, so nothing here has to.
+	// The harness installs a stub runner; this test wants the composition — and restores what it
+	// found, so the swap cannot outlive the case under `go test -shuffle`.
+	prev := runOnce
 	runOnce = run.Once
+	t.Cleanup(func() { runOnce = prev })
 	writeConfigHome(t, h.home, hookBlockOf(
 		"  - name: "+hooksSinkName+"\n"+
 			"    events: [turn-finished]\n"+
@@ -457,10 +459,15 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 // It is [headlessAgainst]'s twin rather than a call to it: that one returns stderr ALONE, pins the
 // naming journey's own prompt, and wraps the run's Event sink to drive a gate
 // (e2e_naming_test.go) — three things this file needs otherwise. Nothing else differs, the runner
-// least of all: `runOnce` is left at the production [run.Once], because what a Hook observes is
-// exactly the engine's own event stream and a stubbed runner produces none of it.
+// least of all: it BINDS `runOnce` to the production [run.Once] and restores it after, because what
+// a Hook observes is exactly the engine's own event stream and a stubbed runner produces none of it
+// — a claim that has to rest on this helper's own code rather than on whatever ran before it.
 func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfig string) (stdout, stderr, workspace string) {
 	t.Helper()
+
+	prev := runOnce
+	runOnce = run.Once
+	t.Cleanup(func() { runOnce = prev })
 
 	// The environment must not move the home or the mode out from under the run.
 	assertNoAmbientApogeeConfig(t)

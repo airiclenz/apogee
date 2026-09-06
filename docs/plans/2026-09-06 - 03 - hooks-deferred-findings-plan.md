@@ -222,7 +222,11 @@ go test ./cmd/apogee -run 'TestE2EHooks' -count=1
 
 **Commit.** `test(hooks): assert hook-report absence on the emission shape, with a positive control`
 
-## 5. Bind and restore runOnce at both dependent sites (apogee-apz.5)
+## 5. Bind and restore runOnce at both dependent sites (apogee-apz.5) — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): `TestDaemonFiringFiresHooks` keeps the first half of its comment (the harness
+installs a stub runner; this test wants the composition) and drops only the sentence deferring to
+the harness's cleanup, as the item asks.
 
 **What.** Depends on item 4 (same file). `runOnce` (`cmd/apogee/headless.go:92`) is the
 package-level seam onto `run.Once`. `cmd/apogee/e2e_hooks_test.go:294–296`, in
