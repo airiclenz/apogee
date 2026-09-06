@@ -437,8 +437,9 @@ func TestDaemonFireRefusesAnUnadoptedSchedule(t *testing.T) {
 // A Firing whose bound server answered NOTHING is refused before a prompt is sent — and only that
 // one: a server that answered anything at all keeps today's proceed-and-degrade, because a 401, a
 // 500 and a 429 are answers this Driver has no standing to judge while nobody is watching. The
-// sentence is the TUI's own (internal/tui/heartbeat.go's upstreamBlockNote), so the two Drivers word
-// one refusal one way.
+// sentence is the one all three Drivers compose through notice.ServerOffline, so a Firing words the
+// refusal exactly as a session does; this pin spells that wording out, which is what a change to it
+// has to get past.
 func TestDaemonFireRefusesOnlyAServerThatAnsweredNothing(t *testing.T) {
 	for _, tc := range []struct {
 		name string

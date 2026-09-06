@@ -1,13 +1,3 @@
-// Package notice composes the SENTENCES a Driver shows a user about what a session loaded, so
-// the TUI, the headless CLI and the daemon narrate one event with one wording instead of three.
-// It is the leaf between internal/domain — whose reports are values, not prose (see
-// domain/contextfile.go, which reserves formatting for the host) — and internal/format, which
-// spells the numbers those sentences carry.
-//
-// A composer here returns text and nothing else: no terminal escapes are stripped, no stream is
-// chosen, no note is recorded. Each Driver owns that half, because each strips, routes and
-// records differently — the TUI adds an ephemeral transcript note, headless writes stderr, the
-// daemon logs the anomalies alone. That split is what the Anomaly flag exists for.
 package notice
 
 import (

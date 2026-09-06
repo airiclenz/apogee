@@ -486,17 +486,14 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// spent, and the exit is the existing never-started code (2), so a script can tell "the model
 	// never got the chance" from "the model ran and it went wrong".
 	//
-	// The wording is the TUI's own, from Model.upstreamBlockNote (internal/tui/heartbeat.go), so a
+	// The wording comes from notice.ServerOffline, the one composer all three Drivers read, so a
 	// human who has seen a session refuse a send reads the same sentence from an unattended run.
-	// The two are composed SEPARATELY — the TUI's is a Model method over its live heartbeat state,
-	// and hoisting it is a bigger change than this gate — so each site names the other and the test
-	// below pins the exact sentence; an edit to one wording must visit both.
+	// This gate keeps its own half — the one-shot beat it judges, the endpoint it names and the
+	// never-started exit it returns — and takes only the words; an edit to the wording belongs in
+	// internal/notice. The test below still pins the exact sentence, which is what catches a drift
+	// the composer cannot.
 	if !routing.Beat.Answered {
-		note := "cannot send — server offline (" + entry.Endpoint + ")"
-		if routing.Beat.Failure != "" {
-			note += ": " + routing.Beat.Failure
-		}
-		return notStarted(errors.New(note))
+		return notStarted(errors.New(notice.ServerOffline(entry.Endpoint, routing.Beat.Failure)))
 	}
 
 	// The shared sessions store, built whatever --no-save says: the sweep below is about the

@@ -10,6 +10,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -671,10 +672,11 @@ func (m Model) blockedUpstream() bool {
 // the server has not answered YET, which on a cold start is a matter of seconds.
 //
 // The offline sentence is SHARED with the unattended Drivers, which refuse a Firing on the same
-// finding (cmd/apogee/headless.go's offline gate, off firingRouting.Beat.Answered). The two compose
-// it separately — this one is a Model method over live heartbeat state, that one a one-shot beat —
-// so an edit to the wording here must visit that site too; each names the other for exactly that
-// reason, and both are pinned by tests that spell the sentence out.
+// finding (cmd/apogee/headless.go's offline gate and cmd/apogee/daemonfire.go's, both off
+// Beat.Answered). All three now READ it from one composer, notice.ServerOffline — the guard, the
+// endpoint and failure sources and the delivery still differ per Driver, only the wording is
+// shared — so the wording is edited there and nowhere else. Each Driver keeps its own test
+// spelling the sentence out, which is what catches a drift the composer cannot.
 func (m Model) upstreamBlockNote() string {
 	if m.prebound() {
 		// The blocked-upstream ladder reads a session with no server as one whose first beat has not
@@ -687,11 +689,7 @@ func (m Model) upstreamBlockNote() string {
 	if !m.hb.offline {
 		return "cannot send — still connecting to " + m.opts.Endpoint
 	}
-	note := "cannot send — server offline (" + m.opts.Endpoint + ")"
-	if m.hb.lastFailure != "" {
-		note += ": " + m.hb.lastFailure
-	}
-	return note
+	return notice.ServerOffline(m.opts.Endpoint, m.hb.lastFailure)
 }
 
 // foldRoutingNotice folds one change of the Sub-agent server's routing state into the transcript

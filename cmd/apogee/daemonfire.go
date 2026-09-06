@@ -352,16 +352,13 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// Outcome, because nothing was sent and there is nothing to report. The schedule's own
 	// retry and next-fire behaviour is untouched.
 	//
-	// The sentence is the TUI's own refusal, spelled at internal/tui/heartbeat.go's
-	// upstreamBlockNote and at runHeadless' pre-send gate (headless.go). The three are deliberately
-	// identical and NOT hoisted — the TUI's is a Model method over its live monitor — so an edit to
-	// one of these wordings belongs at all three.
+	// The sentence is the same refusal the TUI shows (internal/tui/heartbeat.go's
+	// upstreamBlockNote) and the headless pre-send gate returns (headless.go), because all three
+	// now read it from one composer, notice.ServerOffline. Each Driver keeps its own guard,
+	// endpoint source and delivery — this one's is a failed Firing — and takes only the words, so
+	// an edit to the wording belongs in internal/notice and nowhere else.
 	if !routing.Beat.Answered {
-		refusal := "cannot send — server offline (" + server.Endpoint + ")"
-		if routing.Beat.Failure != "" {
-			refusal += ": " + routing.Beat.Failure
-		}
-		return schedule.Outcome{}, errors.New(refusal)
+		return schedule.Outcome{}, errors.New(notice.ServerOffline(server.Endpoint, routing.Beat.Failure))
 	}
 
 	// Through the package's runner seam (headless.go) rather than run.Once directly: production

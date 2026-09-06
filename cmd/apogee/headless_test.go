@@ -759,9 +759,10 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 // pin from the other side — a 429 on the model list, and a completions-only endpoint that serves no
 // list at all, both of which answer completions perfectly well today.
 //
-// The sentence is asserted verbatim because it is composed twice: this Driver's copy here, and the
-// TUI's Model.upstreamBlockNote (internal/tui/heartbeat.go). Neither is derived from the other, so
-// this assertion is what tells a future edit of one that the other exists.
+// The sentence is asserted verbatim even though all three Drivers now compose it through one
+// helper (notice.ServerOffline): the composer keeps the wording identical, and this pin is what
+// says what that wording IS, so a change to it fails here rather than reaching an operator's
+// stderr unannounced.
 func TestHeadlessRefusesAServerThatAnsweredNothing(t *testing.T) {
 	const boundServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
 		"\nserver: testbox\n"
