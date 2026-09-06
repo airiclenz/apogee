@@ -250,7 +250,13 @@ go test ./cmd/apogee -run 'TestE2EHooks|TestDaemonFiringFiresHooks' -count=1 -sh
 
 **Commit.** `test(hooks): bind and restore runOnce at both sites that depend on it`
 
-## 6. Complete the external-edit key list (apogee-apz.6)
+## 6. Complete the external-edit key list (apogee-apz.6) — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the plan's regression guard asked for the full registry enumeration, not only
+the three keys it names; enumerating `config.KeyRegistry` through `externallyEdited` found a
+fourth absentee, `validated-sets.alias`, which is included. Bite proof done and reverted:
+`Editable: true` on the `hooks` registry row failed the test at the extended list
+(`settingsrows_test.go:557` and `:560`); `internal/config/registry.go` is unchanged.
 
 **What.** `cmd/apogee/settingsrows_test.go:550–551`, in
 `TestSettingsRowsPointReadOnlyKeysAtTheirEditor` (`:511`), pins an explicit list of registry

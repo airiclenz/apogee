@@ -547,8 +547,12 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	}
 	// system-prompt-text is NOT among them since it became editable in its own multi-line field: the
 	// prose the file carries as a block is written in the pane now (tui.SettingText).
+	// The list is every key externallyEdited accepts, written out by hand rather than derived from
+	// that predicate: a derived list would only restate the invariant asserted over all rows above,
+	// while this one fails when a new read-only key reaches the pane without anyone naming it here.
 	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
-		"system-prompt-layers", "model-profiles"} {
+		"system-prompt-layers", "model-profiles", "sub-agents-server", "hooks", "tools.enabled",
+		"validated-sets.alias"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}
