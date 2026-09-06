@@ -250,7 +250,12 @@ schedule.Outcome{})` holds (written as `if !reflect.DeepEqual(…)`, reusing the
 
 commit: `test(daemon): pin the failed-Firing narration on both Result shapes`
 
-## 5. `Store.Prune`'s partial-failure contract is pinned on the count-only sweep
+## 5. `Store.Prune`'s partial-failure contract is pinned on the count-only sweep — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): survivor set compared with `slices.Equal` (already imported, and the style the
+neighbouring `storedIDs` assertion at store_test.go:929 uses) rather than a new `reflect` import.
+NOTES (2026-09-06): non-vacuity checked — with the hoist reverted the new test fails ("Prune
+returned no error"); restored before finishing.
 
 **What.** Closes `apogee-v00.5`. `Store.Prune` reads `s.now()` only inside `if r.MaxAge > 0`
 (`internal/session/store.go:355-358`), so the injected clock — the only seam between `scan()` and

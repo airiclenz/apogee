@@ -352,9 +352,13 @@ func (s *Store) Prune(r Retention, keep ...string) (int, error) {
 	for _, id := range keep {
 		kept[id] = true
 	}
+	// The clock is read unconditionally, not just under MaxAge: it is the one seam between the
+	// scan and the delete loop, so reading it on every sweep is what lets a test perturb the
+	// store mid-sweep on a MaxCount-only run too. Deliberate, not dead work.
+	now := s.now().UTC()
 	var cutoff time.Time
 	if r.MaxAge > 0 {
-		cutoff = s.now().UTC().Add(-r.MaxAge)
+		cutoff = now.Add(-r.MaxAge)
 	}
 	// Every kept record present in the store reserves one of MaxCount's slots up front, so
 	// retaining it costs the oldest record that would otherwise have filled that slot rather

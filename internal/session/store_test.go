@@ -1036,3 +1036,39 @@ func TestPruneReportsFirstErrorAndKeepsSweeping(t *testing.T) {
 		t.Errorf("survivors = %v, want none — every expired record must be gone", got)
 	}
 }
+
+// The same contract on a count-only sweep: with MaxAge unset the clock is still read between the
+// scan and the delete loop, so "first error, keep sweeping" is pinned on BOTH paths and not just
+// the age one — a Prune that read its clock only under MaxAge would leave this half untested.
+func TestPruneReportsFirstErrorOnACountOnlySweep(t *testing.T) {
+	t.Parallel()
+	st := pruneStore(t, pruneAges)
+
+	// MaxCount 1 keeps the newest record and makes the other two candidates; the clock removes
+	// the middle one's file from under the sweep, leaving its Delete to fail with ENOENT.
+	vanished := filepath.Join(st.dir, pruneMidID+".json")
+	st.now = func() time.Time {
+		if err := os.Remove(vanished); err != nil {
+			t.Errorf("unlink %s from under the sweep: %v", pruneMidID, err)
+		}
+		return pruneNow
+	}
+
+	removed, err := st.Prune(Retention{MaxCount: 1})
+	if err == nil {
+		t.Fatal("Prune returned no error, want the first failed delete")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Prune error = %v, want the ENOENT from the vanished record", err)
+	}
+	if !strings.Contains(err.Error(), pruneMidID) {
+		t.Errorf("Prune error = %v, want it to name %s", err, pruneMidID)
+	}
+	if removed != 1 {
+		t.Errorf("removed = %d, want 1 — the sweep continues past the failure to the oldest record", removed)
+	}
+	want := []string{pruneNewID}
+	if got := storedIDs(t, st); !slices.Equal(got, want) {
+		t.Errorf("survivors = %v, want %v — only the newest record fits the budget", got, want)
+	}
+}
