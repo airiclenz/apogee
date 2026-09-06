@@ -828,6 +828,34 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 	}
 }
 
+// The sub-list's question breathes over its values: one blank line between the prose asking which
+// value and the first row answering it (popupSpec.rowPadAbove, the house rule renderList books for
+// every list pane). The question pads neither end of itself — it is a caption on the pane and not a
+// line being typed — so the blank is the ROW block's, exactly as on a pane with no body at all
+// (apogee-7ur); without it the values read as more of the sentence above them.
+func TestSettingsEnumSubListBreathesUnderItsQuestion(t *testing.T) {
+	row := settingsEnumRow()
+	m, _ := settingsEditModel(t, []SettingRow{row}, &settingsWriteLog{})
+
+	lines := popupLines(step(t, m, keyEnter()).renderSettings())
+	question := -1
+	for i, line := range lines {
+		if strings.HasPrefix(popupInterior(line), row.Path+" — ") {
+			question = i
+			break
+		}
+	}
+	if question < 0 {
+		t.Fatalf("the sub-list paints no question naming %q:\n%s", row.Path, strings.Join(lines, "\n"))
+	}
+	if got := popupInterior(lines[question+1]); got != "" {
+		t.Errorf("the line under the question is %q, want the blank the values are set off by", got)
+	}
+	if got := popupInterior(lines[question+2]); !strings.Contains(got, row.Value) {
+		t.Errorf("the line after that blank is %q, want the first value row (%q)", got, row.Value)
+	}
+}
+
 // settingsServerRow is the `server:` row as the registry describes it (internal/config/registry.go): a
 // row picked from a sub-list like an enum, but with no vocabulary of its own — what it may hold is
 // whatever [ServerHost.List] answers with — and whose ⏎ is the `/server` switch rather than a write.

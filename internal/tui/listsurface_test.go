@@ -423,8 +423,9 @@ func breathingListModel(t *testing.T, height int, bar bool) Model {
 
 // breathingList is the offering those assertions are made over: a titled, hinted list of ten plain
 // one-cell choices in the picker's own slot, with the picker's own taste for how many of them to show
-// at once. body is the caller's, because a pane WITH one is the case the upper blank is not spent on.
-func breathingList(body string) listContent {
+// at once. body and its pad are the caller's, because what the upper blank is spent on turns on both:
+// a body that closes with a blank of its own has already drawn it, and one that does not has not.
+func breathingList(body string, pad bool) listContent {
 	c := listContent{
 		pane:     panePicker,
 		title:    "a list",
@@ -434,9 +435,12 @@ func breathingList(body string) listContent {
 		selected: 0,
 	}
 	if body != "" {
-		// What renderFilterListPlaced composes for a list being narrowed, and the shape the /settings
-		// sub-list's question arrives in too: a body block set off by its own two blanks.
-		c.body, c.bodyLead, c.bodyPad = body, pickerFilterLead, true
+		c.body, c.bodyPad = body, pad
+		if pad {
+			// What renderFilterListPlaced composes for a list being narrowed: a body block set off by
+			// its own two blanks, the label naming the live line.
+			c.bodyLead = pickerFilterLead
+		}
 	}
 	return c
 }
@@ -459,16 +463,19 @@ func listPaneLines(t *testing.T, pane string) []string {
 // Every list pop-up keeps one blank line between whatever stands above its row block and the block,
 // and one between the block and its key legend (popupSpec.rowPadAbove, popupRowStyle.padBelow) — the
 // house rule renderList books for all four of its panes at once. The upper blank is NOT spent where
-// the line above the block is already one: a pane with a body of its own closes it with the body's
-// own lower pad, so a list being narrowed never opens a two-line gap under its filter. And the two
-// are the FIRST lines the pane gives up: on a window that cannot seat a row beside them they are
-// handed back together, because breathing room is not worth a decision.
+// the line above the block is already one: a body set off by its own lower pad closes it, so a list
+// being narrowed never opens a two-line gap under its filter. A body that books no such pad — the
+// /settings sub-list's question — leaves that line to its own prose, and the pane spends the blank
+// there like a pane with no body at all. And the two are the FIRST lines the pane gives up: on a
+// window that cannot seat a row beside them they are handed back together, because breathing room is
+// not worth a decision.
 func TestRenderListBreathes(t *testing.T) {
 	cases := []struct {
-		name   string
-		height int
-		body   string
-		want   []string
+		name    string
+		height  int
+		body    string
+		bodyPad bool
+		want    []string
 	}{
 		{
 			// 26 rows is the first window that pays for the picker's whole taste and both blanks.
@@ -476,8 +483,14 @@ func TestRenderListBreathes(t *testing.T) {
 			want: []string{"a list", "", "❯ one", "two", "three", "four", "five", "six", "seven", "eight", "", "esc close"},
 		},
 		{
-			name: "a body — its own blank is the block's", height: 26, body: pickerFilterLead + "t",
+			name: "a padded body — its own blank is the block's", height: 26, body: pickerFilterLead + "t", bodyPad: true,
 			want: []string{"a list", "", pickerFilterLead + "t", "", "❯ one", "two", "three", "four", "five", "six", "seven", "", "esc close"},
+		},
+		{
+			// The /settings sub-list's shape: a question that pads neither end, so the block draws its
+			// own blank and the rows never sit flush against the prose asking about them (apogee-7ur).
+			name: "an unpadded body — the block draws the blank", height: 26, body: "which spinner?",
+			want: []string{"a list", "which spinner?", "", "❯ one", "two", "three", "four", "five", "six", "seven", "eight", "", "esc close"},
 		},
 		{
 			// The floor: two lines of rows is all the grant has, so both blanks go back to them.
@@ -488,7 +501,7 @@ func TestRenderListBreathes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := breathingListModel(t, tc.height, false)
-			got := listPaneLines(t, m.renderList(breathingList(tc.body)))
+			got := listPaneLines(t, m.renderList(breathingList(tc.body, tc.bodyPad)))
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("pane lines =\n%q\nwant\n%q", got, tc.want)
 			}
@@ -500,7 +513,7 @@ func TestRenderListBreathes(t *testing.T) {
 // off by carry no cell of it, so the bar never says the list runs on into the breathing room.
 func TestRenderListBreathingRowsCarryNoScrollbarCell(t *testing.T) {
 	m := breathingListModel(t, 26, true)
-	lines := listPaneLines(t, m.renderList(breathingList("")))
+	lines := listPaneLines(t, m.renderList(breathingList("", false)))
 	if n := len(lines); lines[1] != "" || lines[n-2] != "" {
 		t.Fatalf("the blanks are not at 1 and %d: %q", n-2, lines)
 	}

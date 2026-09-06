@@ -441,6 +441,12 @@ func overlayFilterLine(filter lineEditor) string {
 // read that name is what the sub-list replaced — or leaves it to [Model.renderFilterListPlaced], which
 // fills all three body fields from the filter being typed. The two cannot both be true of one pane:
 // a filtering list's body IS its filter line.
+//
+// bodyPad is whether that body is set off by blanks of its OWN (popupSpec.bodyPadAbove, bodyPadBelow)
+// — true for the live line a filter is typed on, false for the sub-list's question, which is a
+// caption on the pane rather than a line moving under the eye. It is the one thing that decides the
+// row block's upper breathing row too, because a body that pads itself below has already drawn it
+// (renderListPlaced).
 type listContent struct {
 	pane     framePane
 	title    string
@@ -497,10 +503,14 @@ func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 	}
 	// The house blanks around the ROW block (popupSpec.rowPadAbove, popupRowStyle.padBelow): one under
 	// whatever stands above the rows, one over the key legend. The upper one is not asked for where the
-	// line above the block is already blank — a pane with a body of its own closes it with the body's
-	// OWN lower pad (bodyPadBelow), which is every list showing a typed filter (renderFilterListPlaced) and
-	// the /settings sub-list's question — so the two never double into a two-line gap. The lower one
-	// follows the legend, because a blank above nothing is a blank above the bottom border.
+	// line above the block is already blank, and the ONE thing that makes it blank is a body that pads
+	// ITSELF below (bodyPad ⇒ bodyPadBelow) — every list showing a typed filter
+	// (renderFilterListPlaced) — so the two never double into a two-line gap. A body that books no pad
+	// of its own is the /settings sub-list's question, and the line above the rows is then that
+	// question's last line: such a pane spends the blank exactly as a pane with no body at all does,
+	// or the rows read as more of the prose asking about them (the approval menu's shape, approval.go).
+	// The lower blank follows the legend, because a blank above nothing is a blank above the bottom
+	// border.
 	//
 	// Both are BOOKED here, in the same arithmetic that books the filter's pads above: the demand and
 	// the cap handed to popupBudget are LINES, so a pane asking for its rows alone would draw the two
@@ -508,7 +518,7 @@ func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 	// lines to spare. Reserving that window is NOT this call's business — the painter takes the pads
 	// off the grant before it seats a row, and hands them back at the floor (popupRowLinesAt) — so a
 	// list too tall for its window gives up its breathing room rather than a row of the list.
-	padAbove, padBelow := c.body == "", c.hint != ""
+	padAbove, padBelow := c.body == "" || !c.bodyPad, c.hint != ""
 	pad := popupRowPadLines(padAbove && len(c.rows) > 0, padBelow)
 	// The pane's rowCap is the taste; popupBudget is the screen's answer to it, so a long offering on a
 	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).

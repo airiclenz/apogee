@@ -126,7 +126,7 @@ call sites now, and the two non-wrapping arrow idioms the review counted are gon
 
 The render call split the same way, for the same reason: `renderList` takes a pane's own body block
 (the /settings sub-list's question — the pane it replaced is where the human read the key's name),
-and `renderFilterList` fills that block with the filter line, its label and its two pads before
+and `renderFilterList` (since replaced by `renderFilterListPlaced`) fills that block with the filter line, its label and its two pads before
 delegating. Decision 6 is unchanged — the line is still stated in exactly one place.
 
 ## Consequences

@@ -676,6 +676,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `/settings` value sub-list no longer opens its choices flush against the question above
+  them.** The pane's question is a caption that sets off neither end of itself, and the list surface
+  withheld the row block's breathing row from any pane that had a body at all — so the enum step,
+  alone among the list pop-ups, lost the blank line the breathing-rows work gave the rest. The upper
+  blank is now withheld only where the body already closes with one of its own (a list being narrowed
+  by a typed filter), so every list pane stands one line clear of whatever is above it and none opens
+  on a two-line gap.
+
 - **`TestE2ESmokeInProcess` no longer asserts on the length of the host's TMPDIR.** Two claims
   about the footer named the workspace at a fixed window — the 100-column first frame, and a
   120-column wide frame — which only ever held because Linux spells its temp dir `/tmp/…`. Under
