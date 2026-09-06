@@ -16,7 +16,11 @@ point is a **minor** bump, not a breaking change.
   the `/` dropdown — `cmd/apogee/testdata/frames/popup-*.txt`, recorded by
   `TestE2EPopupFramesLists` and `TestE2EPopupFramesPrompts` over the new
   `testdata/stubllm/popups.yaml`, whose two questions are the mockups pinned in
-  `docs/layout/user-questions-layout.md` word for word. Re-record with
+  `docs/layout/user-questions-layout.md` word for word. The frames on disk are the hand-edited
+  TARGET layout rather than records of the current one, so until that layout lands the two tests
+  skip unless run with `-popup-design`, under which their diff is the spec
+  (`docs/handoffs/2026-09-06 - 00 - popup-redesign-plan-handoff.md`); once it has landed they
+  are held like every other golden and re-recorded with
   `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
 
 ### Changed
