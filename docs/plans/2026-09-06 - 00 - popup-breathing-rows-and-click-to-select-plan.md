@@ -319,9 +319,17 @@ click against and `/con` opens only two.
 
 **Commit:** `feat(tui): the / dropdown takes a click`
 
-## 12. The click doctrine in the code narration and the layout docs
+## 12. The click doctrine in the code narration and the layout docs — ✅ DONE (2026-09-06)
 
 Depends on items 9, 11.
+
+NOTES (2026-09-06): the doctrine written down is what SHIPPED, not the plan's call-C wording — the owner narrowed call C mid-run (`a8f8ec73`): an outside click never cancels a question, dismisses a decision pane or stops the run; the report trio dismisses without claiming, the picker and the `/sessions` browser dismiss AND consume, the `/` | `@` dropdown dismisses and continues, and the ask and approval panes leave it unclaimed so caret-seating and transcript drag keep working. `handleMouseClick`'s doc block is the authority the prose was made to agree with; the plan's "outside the rect → claimed, no-op" wording is restated nowhere.
+
+NOTES (2026-09-06): the outside-click TABLE landed in `layout.md`'s frame-wide `## What "height" means` section, beside the wheel paragraph the item names, rather than under `## The /usage popup` — the table covers all five pane families and that heading is the frame-wide one. `## The /usage popup` gains the click rule as its own line of that table and points at it, so both ranges the acceptance greps carry click wording.
+
+NOTES (2026-09-06): `/settings` is called out in `layout.md` as the pane the two-click rule does NOT cover — a click there selects a key row outright (`handleSettingsClick`) and `⏎` still opens the value; the item's "five panes" wording would otherwise have read as covering it.
+
+NOTES (2026-09-06): the five READ-only files the prose rule names (`docs/manual/probe.md`, `sessions.md`, `configuration.md`, `docs/layout/tool-layout.md`, `settings-screen-layout.md`) were re-greped and carry no keyboard-only or wheel-only claim about the five panes — **Files:** stayed closed, as the item predicted.
 
 **What.** `internal/tui/mouse.go`: the `handleMouseClick` doc block (:390-399) and the wheel doctrine (:1362-1392) state that a click follows the notch — the pane under the pointer owns it — and the two outside-click policies with their reason (esc on ask/approval is not a dismiss). `internal/tui/doc.go` file narration for `mouse.go` and `popup.go` names the shared hit-test. `layout.md`: the wheel paragraph (:111-114) and `## The /usage popup` (:1708-1712) gain the click rule and the outside-click table; `docs/layout/user-questions-layout.md` states click semantics for both prompts. Rule for the prose: every sentence that says the five panes are keyboard-only or wheel-only — `grep -rn 'wheel\|click\|pointer' layout.md docs/layout docs/manual internal/tui/doc.go`. Hints untouched (call H).
 

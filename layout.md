@@ -113,6 +113,38 @@ pane — its rows are not the transcript's — and the transcript is what a notc
 else, the approval and ask prompts included, since those two leave the transcript scrollable under
 them and claim only the notches inside their own box.
 
+**And the click follows the notch.** Every boxed pane the wheel routes to answers a click off the
+same rectangle and the same rows. On the five that ask a question — the approval prompt, the ask
+prompt, the `/sessions` browser, the `/model` | `/server` picker and the `/` | `@` dropdown — a
+click on a row moves the highlight onto it, the way `↑`/`↓` do (ticking its box where the question
+is multi-select, exactly as `␣` does), and a **second** click on that same row is the `⏎` the
+highlight was already offering: it takes the approval decision, sends the answer, loads the session,
+switches the model, completes the token in the box. It is always two clicks, never select-and-send
+in one: the row an activating click may take is the row the *pointer* highlighted, so a pane's own
+opening highlight — `Allow` on the approval prompt, `/clear` at the top of the `/` menu — can never
+be turned into an answer nobody gave. The approval prompt's arming delay gates that second click
+exactly as it gates `⏎`, and a click on an ask pane's choice is swallowed while the input box holds
+a typed answer, the same guard the arrows take there. A click inside the box but on no row — the
+title, a blank, the hint, the border — belongs to the pane and does nothing. (The `/settings` pane
+is the one that is not answering a question: a click there selects a key row outright, as it always
+has, and `⏎` is still what opens the value.)
+
+**What a click OUTSIDE a box means is one rule for the whole frame**, and no version of it ever
+cancels a question, dismisses a pane where `esc` would stop a run, or stops the run: those meanings
+are `esc`'s, and a stray of the pointer never carries them. What is left is whether the pane closes
+and whether the click is spent on closing it:
+
+| Pane | A click outside it |
+| --- | --- |
+| `/usage`, `/inspect`, `/thinking` | dismisses the pane, and the click still lands where it was aimed |
+| `/sessions` browser, `/model` \| `/server` picker | dismisses the pane, and the click is spent on that — these two are modal |
+| `/` \| `@` dropdown | dismisses the menu, and the click still lands where it was aimed — the menu decides nothing, and the next keystroke re-derives it |
+| approval prompt, ask prompt | leaves the question standing and is not the pane's at all: it seats the caret, starts a transcript drag, opens the mode picker, exactly as it would with no prompt up |
+
+The last row is why the two decision panes are *soft*-modal to the pointer as they already are to
+the wheel: the prompt stays live under an ask question, and a pane that swallowed every outside
+click would take the caret seat and the transcript drag away for as long as its box was up.
+
 **And a pane in that slot sits flush on the bottom chrome.** The frame spends exactly one blank gap
 row, and it sits ABOVE the slot — between the session area and whatever comes next — so the approval
 and ask prompts, the `/sessions` browser and the `/model` | `/server` picker each seat their bottom
@@ -1748,7 +1780,12 @@ saying so, with no header row and no columns.
 the report — and, because the pane is not modal, that click still lands where it was aimed: it seats
 the caret in the prompt or starts a transcript selection exactly as it would have with no report up. A
 click **inside** the box does nothing at all, and is swallowed rather than dragging a selection across
-the transcript drawn under it. The **wheel** scrolls the rows one notch at a time where a session fanned
+the transcript drawn under it. That is this pane's line of the frame-wide click rule — the pane under
+the pointer owns the click, and what a click outside a box means is the one table under
+*What "height" means* (above) — and it is the
+lightest line of it: the report has no row to highlight and no answer to give, so it is the only pane
+family where a click **on** a row does nothing either. The panes that ask a question take two clicks
+on a row; this one takes none. The **wheel** scrolls the rows one notch at a time where a session fanned
 out to more delegates than the pane was granted rows for — a window two rows smaller than the pane's
 own, the report's rows keeping the house blank under the column header and the one over the hint
 like every other pane's block, so a spend list scrolls two rows sooner than a count of its rows

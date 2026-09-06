@@ -14,6 +14,24 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 > draws are **not** painted — the always-painted hint row under it is. The approval prompt's `[a]` /
 > `[s]` / `[d]` / `[esc]` cells are unaffected: those shortcuts are live (`approvalMenu`).
 
+> Amended 2026-09-06 by `docs/plans/2026-09-06 - 00 - popup-breathing-rows-and-click-to-select-plan.md`:
+> the arrows are no longer the only way onto a row. **Both prompts take a POINTER**, on the terms
+> `layout.md` states for every boxed pane ("What "height" means"). A click on a row moves the `❯`
+> onto it exactly as `↑↓` do — and on a multi-select question it ticks that row's `[✔]`, exactly as
+> `␣` does — and a **second** click on that same row is the `⏎`: it sends the answer, or takes the
+> approval decision the row names, `Cancel` included. It is always two clicks. The row an activating
+> click may take is the row the *pointer* put the `❯` on, so the highlight both sketches below open
+> with — the first choice, and `Allow` — is never one a single click can act on, and no approval is
+> ever granted by one press. The approval prompt's arming delay gates that second click just as it
+> gates `⏎`; a click on a choice is swallowed while the input box holds a custom answer being typed,
+> the same empty-box rule the arrows follow; and a click on the question text, a blank, the hint row
+> or the border belongs to the box and does nothing.
+>
+> A click **outside** the box is not the prompt's at all. It never cancels the question — cancelling
+> stays `esc`'s alone — and it is not swallowed either: it falls through to whatever it was aimed at,
+> seating the caret in the input box or starting a transcript selection, because the prompt below an
+> ask question stays live and the transcript behind an approval is where its context is read.
+
 
 # User Approval:
 

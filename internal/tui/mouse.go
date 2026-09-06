@@ -55,12 +55,16 @@ import (
 //   - At the bottom, the approval and ask popups, the /sessions browser, the picker, the
 //     autocomplete dropdown and the staged-interjection strip take their rows OFF the transcript
 //     (Model.transcriptRows composes the frame from what is left). Those rows map to no content
-//     line at all, so a click on a popup border or a session row arms nothing — the alternative,
-//     bounding by the height layout() stored, addressed reply lines that were not on screen. The
+//     line at all, so a click on a popup border or a session row arms no transcript selection — the
+//     alternative, bounding by the height layout() stored, addressed reply lines that were not on
+//     screen. The
 //     WHEEL reads the same rows the same way and gives the same answer: a notch on them belongs to
 //     the pane that painted them, so it walks that pane's own list instead of scrolling a transcript
 //     that is not there (foldMouseWheel below routes all seven panes; the /settings pane takes the
-//     whole budget rather than a slot at the bottom, and is in that chain too).
+//     whole budget rather than a slot at the bottom, and is in that chain too). The CLICK follows
+//     the notch through the same panes in the same order (handleMouseClick below), so a row a notch
+//     would walk is a row a click can highlight, and what a click OUTSIDE a pane means is that
+//     chain's one rule, stated on handleMouseClick.
 
 // cell is an absolute visual position inside the textarea content: row counts wrapped (visual)
 // lines from the top of the value; col is the display column within that row.
@@ -403,6 +407,17 @@ func (a clickArm) holds(pane framePane, row int) bool {
 //
 // The pane is asked FIRST because it is drawn over the transcript, and only for its own rows: it takes
 // no more of the frame than its list needs, so the transcript above it keeps its pointer.
+//
+// A click FOLLOWS THE NOTCH. Region arbitration is the wheel's doctrine spelled for the other gesture
+// — the pane under the POINTER owns it, not the pane with focus and not the topmost modal — and the
+// chain below asks the same panes in the same order foldMouseWheel does, off the same rectangles and
+// through the same shared hit-test (popupPaneHit, over the placement the painter itself returned). So
+// the row a notch would walk onto is the row a click highlights, and on every pane that ASKS something
+// a second click on that same row is the ⏎ the highlight was already offering: never one click, because
+// the row an activating click may take is the row the POINTER armed (clickArm above) and a pane's own
+// default highlight was never put there by the human. What differs from the notch is only the answer to
+// a point outside every box — the wheel has no dismissal to spend there — and that is the one rule
+// stated below, for the whole chain at once.
 //
 // Every GEOMETRY question the chain asks is put to the PRE-CLICK frame — pre below, the Model value as
 // it stood when the button went down (the Model is a value, ADR 0011, so the copy is the snapshot),
@@ -1770,6 +1785,14 @@ func (m Model) highlightTranscript(view string) string {
 // reaches once no open pane has claimed it, so a pane never has to argue its way past a transcript
 // that took the notch first. That is the whole doctrine — the pane under the POINTER owns the notch —
 // and it is why the wheel answer does not follow focus or modality.
+//
+// A CLICK follows the notch. handleMouseClick asks the same panes in the same order, off the same
+// rectangles and through the same shared hit-test (popupPaneHit over the painter's own placement),
+// so the row a notch would walk onto is the row a click highlights and a second click on that row
+// acts as ⏎ does. Only the answer to a point OUTSIDE every box differs between the two gestures,
+// because only the click has a dismissal to spend: a notch outside a pane simply scrolls the
+// transcript, while a click outside one may close the pane it missed — never cancel its question —
+// and the per-pane spelling of that is stated once, on handleMouseClick, rather than here.
 //
 // The approval menu and the ask offering are the frame's SOFT-modal panes: the transcript stays
 // scrollable underneath them, so what they claim is the notch INSIDE their box and only inside it,

@@ -259,7 +259,20 @@
 // goes on to whatever it named, and the wheel scrolls its rows ([Model.reportWindow], reading the
 // same painter's placement). They are also the panes that can be up TOGETHER, so they are asked in
 // the order the slot draws them — the report first, the raw-protocol pane next, the thinking pane
-// last. The
+// last. The five that were wheel-only close the set — the /sessions browser, the /model | /server
+// picker, the ask prompt, the approval prompt and the "/" | "@" dropdown — and they are one
+// rectangle written once as well: [popupPaneHit] maps a screen row through the painter's OWN
+// placement (popup.go) for every boxed pane, so the row a click names is the row the painter drew
+// and no handler re-derives geometry the painter already spent. On all five the pointer only ever
+// does what the keyboard does: a click highlights the row it landed on, and a SECOND click on that
+// same row is the ⏎ the highlight was offering — always two, because the row an activating click may
+// take is the row the POINTER armed ([clickArm], model.go) and a pane's own default highlight is
+// never one of those, which is what keeps a single stray click from granting an approval or running
+// the /clear the dropdown opens on. What a click OUTSIDE a box means is ONE rule for the whole
+// chain, stated on [Model.handleMouseClick]: no outside click ever cancels a question or stops a
+// run, so the two DECISION panes leave it unclaimed and keep the caret seat and the transcript drag
+// reachable under them, the two MODAL lists dismiss and claim, and the dropdown — which decides
+// nothing and hangs over a box still being typed in — dismisses and lets the click travel on. The
 // handlers arbitrate by region, so no two of them coexist. Scope is the owner's rule, not an
 // accident of routing: the TRANSCRIPT selects in every state, while the PROMPT follows
 // [Model.inputEditable] — idle, ask, running — and stays inert at approval/errored, where a/d/s and
@@ -877,7 +890,11 @@
 // wheel), written once and named three times, with every rectangle in the transcript-side slot a
 // lookup into the geometry View publishes while it stacks that slot (model.go) rather than a prefix
 // sum of its own; popup.go the one bordered pane every overlay — those four, the autocomplete
-// dropdown, the ask and approval prompts — is painted through; logo.go the embedded start-up wordmark;
+// dropdown, the ask and approval prompts — is painted through, and the [popupPlacement] it hands
+// back with each paint is where the pointer READS that pane: which line the row block starts on and
+// how many lines each row took, walked by [popupPlacement.rowAt], so the package holds one mapping
+// from a painted line to a row and the click and the wheel cannot disagree about what is under the
+// mouse; logo.go the embedded start-up wordmark;
 // actuation.go the launcher-verb latch and the folds that close one out (ADR 0029) — at most one
 // world-changing call in flight per address, narrated while it blocks, with the next Beat rather
 // than the call's own return deciding what the world became, plus the start-up restore that enters
