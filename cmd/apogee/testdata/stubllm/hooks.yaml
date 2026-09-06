@@ -1,0 +1,16 @@
+# The upstream the two UNATTENDED hook roots talk to (ADR 0073): one `apogee headless` run and one
+# daemon Firing, neither of which has a screen to drive.
+#
+# There is nothing to script here but an answer. What those two cases are about is the Runner each
+# root composes AROUND the run — that a Hook fires at all when nobody is watching, that a Firing's
+# payload names the Schedule it ran for and a plain headless run's names none — so the conversation
+# is deliberately the shortest one that closes an Exchange: one Turn, no tool call, one line of text.
+#
+# One repeating turn answers every request, both roots' prompts included, and nothing is asserted
+# consumed: the headless half titles its record from the prompt and the daemon half from the
+# schedule, so neither asks this server for a title, and a `when:` per prompt would pin only which
+# of the two is speaking — a fact neither case reads.
+model: hooks-model
+turns:
+    - repeat: true
+      text: Both roots fired their hooks.
