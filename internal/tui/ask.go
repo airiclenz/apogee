@@ -351,9 +351,17 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	// The SAME rows are measured and painted — a multi-select question's marker column is part of
 	// what its options cost in lines, so the budget below is spent on the pane that is drawn rather
 	// than on a narrower one composed for the arithmetic.
+	//
+	// The pad is booked on the painter's own terms (popupRowPads): the leading blank belongs to a
+	// BLOCK, so an offering with no options books only the blank that closes it off from the hint,
+	// and the free-text question — which is every ask pane the model gave no choices — asks the frame
+	// for the one line it will actually paint instead of two. One arithmetic serves all four variants
+	// rather than a branch of its own restating the count, which is how booking and painting stay in
+	// step: a pane that over-books spends a line of the question on a blank it never draws, and one
+	// that under-books draws a blank out of the body's lines.
 	rows := askChoiceRows(stripEscapesAll(req.Choices), req.MultiSelect, m.askChecked)
 	heights := popupWrappedRowHeights(m.th, rows, m.width)
-	askPad := popupRowPadLines(true, askRowStyle.padBelow)
+	askPad := popupRowPadLines(len(rows) > 0, askRowStyle.padBelow)
 	wanted := popupRowBlockLines(heights, askRowStyle.gapLines(), askPad)
 	capped := popupRowBlockLines(heights[:min(len(heights), maxAskChoiceRows)], askRowStyle.gapLines(), askPad)
 	floor := popupFloor{

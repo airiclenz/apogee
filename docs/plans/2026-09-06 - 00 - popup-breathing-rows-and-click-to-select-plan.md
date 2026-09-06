@@ -82,7 +82,9 @@ NOTES (2026-09-06): three subtests of `TestRenderPopupRowPadSurroundsTheBlock` c
 
 **Commit:** `feat(tui): the pop-up painter keeps the pad above the hint when a pane has no rows`
 
-## 2. The free-text ask pane breathes
+## 2. The free-text ask pane breathes — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the item's named test passes both before and after the arithmetic change — at 80×24 and at `smallestOverlayWindow` the free-text pane renders identically either way, because a roomy window pays for the unpainted line out of its surplus and a floored one affords neither line. Added a third subtest ("an overflowing question spends every granted row", 80×20 with an overflowing question) that pins the BOOKING: the pane must paint every row `frameRowPlan` granted it. It fails on the old `popupRowPadLines(true, …)` (8 of 9 rows) and passes on the new one.
 
 Depends on items 0 and 1.
 

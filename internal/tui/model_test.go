@@ -2159,6 +2159,67 @@ func TestModelAskPromptMenuChrome(t *testing.T) {
 	}
 }
 
+// TestModelAskFreeTextBreathesAboveTheHint is that same spacing where there is no menu: a question
+// the model offered no choices for still closes on one blank line above its key legend, so the hint
+// reads as the pane's footer rather than as the last line of the question. The blank is BOOKED as
+// well as painted — an empty offering costs the closing pad alone (popupRowPads), so the pane asks
+// popupBudget for the one line it will draw rather than for the two a block between two pads costs,
+// and the surplus goes back to the question on the windows in between.
+//
+// It is also the FIRST thing the pane gives up: at the shortest window a boxed overlay is drawn on
+// at all the row block is unaffordable, and what is left is the chrome and the question — a legend
+// under a question with no blank between them, rather than a pane that dropped a line of the
+// question to keep its breathing room.
+func TestModelAskFreeTextBreathesAboveTheHint(t *testing.T) {
+	const question, hintLead = "which way?", "type your answer below"
+	m, _ := newAskModel(t, domain.AskRequest{Question: question})
+
+	rows := askModelPaneLines(t, m)
+	got := strings.Join(rows, "\n")
+	lead, hint := paneRowIndex(t, rows, question), paneRowIndex(t, rows, hintLead)
+
+	if hint != lead+2 {
+		t.Errorf("the hint is %d line(s) under the question, want one blank line between them:\n%s", hint-lead, got)
+	}
+	if sep := strings.TrimSpace(strings.Trim(rows[lead+1], "│")); sep != "" {
+		t.Errorf("the line between the question and the hint = %q, want it blank:\n%s", sep, got)
+	}
+
+	short := askModelPaneLines(t, step(t, m, tea.WindowSizeMsg{Width: 80, Height: smallestOverlayWindow}))
+	shortGot := strings.Join(short, "\n")
+	questionLines := popupBodyLineCount(m.th, question, m.width)
+
+	if want := popupTitleBorderChrome + questionLines; len(short) != want {
+		t.Errorf("the pane is %d line(s) at %d rows, want %d — the chrome and %d question line(s), no blank:\n%s",
+			len(short), smallestOverlayWindow, want, questionLines, shortGot)
+	}
+	if shortHint := paneRowIndex(t, short, hintLead); shortHint != paneRowIndex(t, short, question)+1 {
+		t.Errorf("the hint is not flush under the question at %d rows:\n%s", smallestOverlayWindow, shortGot)
+	}
+
+	// Neither pane above can see the BOOKING: a window with room to spare pays for a line the pane
+	// never draws out of its surplus, and one at the floor affords neither line either way. A
+	// question that OVERFLOWS is where the over-booking lands — the line goes off the prose, and the
+	// pane paints one row less than the frame granted it while the transcript keeps the row nobody
+	// spent.
+	t.Run("an overflowing question spends every granted row", func(t *testing.T) {
+		long := "how should I continue with the implementation of the feature? " +
+			strings.Repeat("Here is another sentence of context that pushes the question onto more lines. ", 6)
+		m := modelWithOverlayRoomAt(t, 80, 20, Options{Workspace: "/ws/a"})
+		pane := m.askPrompt(domain.AskRequest{Question: long})
+		got := ansiPattern.ReplaceAllString(pane, "")
+
+		if !strings.Contains(got, "more lines)") {
+			t.Fatalf("the question fits at 80×20 — test premise broken:\n%s", got)
+		}
+		granted := m.frameRowPlan(m.openPanes().with(panePrompt)).panes[panePrompt]
+		if h := lipgloss.Height(pane); h != granted {
+			t.Errorf("the pane paints %d of the %d rows the frame granted it: a line booked for a pad "+
+				"it never draws is a line off the question\n%s", h, granted, got)
+		}
+	})
+}
+
 // A question raised by a sub-agent leads its body with the child's delegated task, exactly as an
 // approval prompt does (ADR 0039 decision 12): concurrent children's questions queue one at a time,
 // in an order nothing on the screen predicts, so the question's own words no longer say whose work
