@@ -30,6 +30,10 @@ var (
 	_ apogee.DelegationTarget
 	_ apogee.DelegationSeat
 	_ apogee.ContextConfig
+	_ apogee.DelegationConfig
+	_ apogee.FloorConfig
+	_ apogee.ContextFilesReport
+	_ apogee.ContextFileNote
 	_ apogee.ModelProfile
 	_ apogee.ToolCallFormat
 	_ apogee.ThinkingProfile
@@ -54,13 +58,16 @@ var (
 	_ apogee.ChildInterjectionEvent
 	_ apogee.SubAgentPhase
 	_ apogee.MechanismFiredEvent
+	_ apogee.FloorGuardEvent
 	_ apogee.ErrorEvent
+	_ apogee.PruneEvent
 	_ apogee.UsageEvent
 	_ apogee.AuditEvent
 	_ apogee.WireEvent
 	_ apogee.Approver
 	_ apogee.ApprovalRequest
 	_ apogee.ApprovalDecision
+	_ apogee.ApprovalPhase
 	_ apogee.Asker
 	_ apogee.AskRequest
 	_ apogee.AskAnswer
@@ -76,6 +83,15 @@ var (
 	_ apogee.ExternalEffectKind
 	_ apogee.ToolCall
 	_ apogee.ToolResult
+	_ apogee.ToolSummary
+	_ apogee.ReadSpan
+	_ apogee.ListedEntries
+	_ apogee.MatchedLines
+	_ apogee.DiffStat
+	_ apogee.ChangedFiles
+	_ apogee.EditRegion
+	_ apogee.EditRegions
+	_ apogee.SearchHits
 	_ apogee.ToolRegistry
 	_ apogee.ExternalEffects
 	_ apogee.HookPoint
@@ -104,6 +120,8 @@ var (
 	_ apogee.Response
 	_ apogee.FinishReason
 	_ apogee.Conversation
+	_ apogee.ToolCallEdit
+	_ apogee.ToolResultEdit
 	_ apogee.Confiner
 	_ apogee.ConfinementCaps
 	_ apogee.ConfinementBox
@@ -130,6 +148,10 @@ var (
 
 // Re-exported consts and sentinel errors — one reference each.
 var (
+	_ = apogee.SeatFallbackNote
+	_ = apogee.DelegateReportBlock
+	_ = apogee.TaskListFence
+
 	_ = apogee.FormatNative
 	_ = apogee.FormatMarkdownFenced
 	_ = apogee.FormatCustomRegex
@@ -156,9 +178,17 @@ var (
 	_ = apogee.StatusExchangeComplete
 	_ = apogee.StatusCancelled
 
+	_ = apogee.SubAgentStarted
+	_ = apogee.SubAgentFinished
+
+	_ = apogee.WireDirectionRequest
+	_ = apogee.WireDirectionResponse
+
 	_ = apogee.ApprovalAllow
 	_ = apogee.ApprovalDeny
 	_ = apogee.ApprovalAllowForSession
+	_ = apogee.ApprovalRequested
+	_ = apogee.ApprovalDecided
 
 	_ = apogee.PresentOpened
 	_ = apogee.PresentServed

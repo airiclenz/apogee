@@ -45,7 +45,25 @@ Three beads mis-cite their file — the corrected locations are binding here.
 - Hand-editing `.beads/issues.jsonl` — bd owns it.
 - Version identifiers of any kind.
 
-## 1. Guard every unguarded facade re-export (apogee-apz.1)
+## 1. Guard every unguarded facade re-export (apogee-apz.1) — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the item named nine symbols; the binding enumeration rule found 27
+unguarded re-exports (18 types, 9 consts) and all 27 are guarded — the extra 18 are
+`DelegationConfig`, `FloorConfig`, `ContextFilesReport`, `ContextFileNote`,
+`ToolSummary`, `ReadSpan`, `ListedEntries`, `MatchedLines`, `DiffStat`,
+`ChangedFiles`, `EditRegion`, `EditRegions`, `SearchHits`, `ToolCallEdit`,
+`ToolResultEdit`, `SeatFallbackNote`, `DelegateReportBlock`, `TaskListFence`.
+
+NOTES (2026-09-06): each new line was inserted at the slot mirroring its declaration
+order in `apogee.go`; no existing guard line was moved or reordered.
+
+NOTES (2026-09-06): bite proved — renaming `ApprovalPhase` in `apogee.go` made
+`go test . -count=1` fail with `./example_test.go:70:11: undefined: apogee.ApprovalPhase`;
+reverted, `apogee.go` is untouched in the diff.
+
+NOTES (2026-09-06): `go vet ./...` fails in `cmd/apogee` (`e2e_hooks_test.go:67:42:
+undefined: regexp`) from another item's in-flight edit to a file this item does not
+own; `go vet .` on the changed package is clean.
 
 **What.** `example_test.go` carries the facade compile guard in two blocks: type aliases as
 `_ apogee.X` (lines 25–116) and re-exported consts/sentinels as `_ = apogee.X` (lines
