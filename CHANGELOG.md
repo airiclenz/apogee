@@ -54,6 +54,21 @@ point is a **minor** bump, not a breaking change.
   `popup.go`, and `layout.md`, `docs/layout/user-questions-layout.md` and the commands manual gain the
   two-click rule and the one table of what a click outside a box means.
 
+- `make test` now runs the race-enabled suite as several concurrent `go test` processes rather
+  than one, cutting `make check` from 224s to 77s on a 9-core box (the test phase itself from
+  212s to 68s). Nearly all the suite's wall time is in `cmd/apogee` and `internal/tui`, and in
+  both it is in tests that cannot be `t.Parallel` ones — the e2e launch helpers call `t.Setenv`,
+  which the testing package forbids alongside `t.Parallel`, and `tuitest.CheckLeaks` diffs the
+  process-wide goroutine dump — so `-parallel` buys nothing there (`-parallel 1` and
+  `-parallel 32` land within 3% of each other). Both constraints are per-process, so
+  `scripts/test-shards.sh` splits by process: every test runs with the same flags and the same
+  isolation it had before, nothing is skipped or reordered within its shard, and the roster comes
+  from `go test -list` with a guard that refuses a plan not covering every listed test. Shards are
+  balanced from the previous run's durations (`.test-timings`, gitignored) and `APOGEE_TEST_SHARDS`
+  overrides the count; a missing cache costs evenness, never coverage.
+  `go test -race -count=1 ./...` remains the equivalent single-process run — see
+  `docs/manual/building.md` §Testing.
+
 - A golden frame of every boxed pop-up, so the layout of each can be read, edited by hand and
   then held: the ask pane single-select, multi-select with one box ticked, single-select with a
   custom answer typed, and free-text; the approval pane; the picker; the `/sessions` browser; and
@@ -102,6 +117,11 @@ point is a **minor** bump, not a breaking change.
   height section states the breathing rule the frames draw — one blank row over a pane's row block, one
   under it, booked out of the row window and given back as a pair when the window cannot seat the
   anchor row.
+
+- `make cross` builds its six release targets concurrently instead of one after another (5.9s to
+  1.5s), and reports every broken target rather than stopping at the first: which platforms are
+  broken is more useful than which one is alphabetically first. The six builds share only the
+  module cache, which is concurrency-safe by design.
 
 - The refusal a Driver shows when the startup beat never answered — `cannot send — server
   offline (<endpoint>)`, with the failure's own words after a colon when the beat had any — is

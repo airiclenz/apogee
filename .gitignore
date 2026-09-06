@@ -12,6 +12,11 @@
 IDEAS.md
 .go-cache
 
+# Per-test durations measured by the last `make test`, used by scripts/test-shards.sh to balance
+# the shards. It is a local performance cache, not a fact about the tree: a machine's own timings
+# are what balance its own run, and a missing one costs only a less even split.
+/.test-timings
+
 # Release archives staged by `make dist` — published as GitHub release assets, never committed
 /dist/
 

@@ -167,10 +167,16 @@ install: build
 		*) echo "warning: $$dir is not on your PATH — add it (e.g. 'export PATH=\"$$dir:\$$PATH\"') to run '$(BINARY)' by name." >&2 ;; \
 	esac
 
-## test: run the full test suite with the race detector
+## test: run the full test suite with the race detector, sharded across processes
+#
+# The suite's wall time sits almost entirely in two packages whose tests cannot be `t.Parallel`
+# ones — `t.Setenv` in the e2e launch helpers, and the process-wide goroutine dump behind
+# `tuitest.CheckLeaks` — so the split is by PROCESS, which keeps both constraints exactly as
+# they are. scripts/test-shards.sh holds the reasoning and the shard plan; `go test -race
+# -count=1 ./...` remains the equivalent single-process run for a bisect or a one-off.
 .PHONY: test
 test:
-	go test -race -count=1 ./...
+	@./scripts/test-shards.sh $(ARGS)
 
 ## live-eval: run the opt-in live-model eval and the gated judge tests against a real local model (always -count=1, never cached)
 #
@@ -225,15 +231,25 @@ lint:
 vulncheck:
 	$(GOVULNCHECK) ./...
 
-## cross: build every release target (CGO off); fails on the first broken one
+## cross: build every release target (CGO off); reports every broken one
+#
+# The six builds share nothing but the module cache, which is concurrency-safe by design, so
+# they run at once — six sequential full-module builds is the single largest non-test cost in
+# `make check`. Every target is built even when one fails, because "which platforms are broken"
+# is more useful than "the first one alphabetically".
 .PHONY: cross
 cross:
-	@for t in $(CROSS_TARGETS); do \
+	@pids=""; \
+	for t in $(CROSS_TARGETS); do \
 		os=$${t%/*}; arch=$${t#*/}; \
-		printf '  -> %s/%s\n' "$$os" "$$arch"; \
-		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o /dev/null ./... || exit 1; \
-	done
-	@echo "cross-build OK ($(words $(CROSS_TARGETS)) targets)"
+		( GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o /dev/null ./... \
+			&& printf '  -> %s/%s ok\n' "$$os" "$$arch" \
+			|| { printf '  -> %s/%s FAILED\n' "$$os" "$$arch"; exit 1; } ) & \
+		pids="$$pids $$!"; \
+	done; \
+	rc=0; for p in $$pids; do wait $$p || rc=1; done; \
+	[ $$rc -eq 0 ] || { echo "cross-build FAILED" >&2; exit 1; }; \
+	echo "cross-build OK ($(words $(CROSS_TARGETS)) targets)"
 
 ## dist: build the publishable release archives for every target into dist/ (+ SHA256SUMS)
 .PHONY: dist
@@ -277,8 +293,8 @@ check:
 	@go build ./...
 	@echo "==> govulncheck"
 	@$(MAKE) --no-print-directory vulncheck
-	@echo "==> go test -race ./..."
-	@go test -race -count=1 ./...
+	@echo "==> go test -race (sharded — scripts/test-shards.sh)"
+	@$(MAKE) --no-print-directory test
 	@echo "==> workflow action pins (SHA + version comment)"
 	@./scripts/check-pins.sh
 	@echo "==> actionlint"

@@ -19,7 +19,7 @@ A `Makefile` wraps the common Go invocations:
 | `make build` | Compile the binary to `./apogee` |
 | `make install` | Build, then copy the binary to a directory on your `PATH` |
 | `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
-| `make test` | Run the test suite with the race detector |
+| `make test` | Run the test suite with the race detector, sharded across processes (see [Testing](#testing)) |
 | `make lint` | Run `golangci-lint` (the standard linter set, configured by `.golangci.yml`) over the module |
 | `make vulncheck` | Run `govulncheck` over the dependency graph — needs the network |
 | `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
@@ -53,6 +53,31 @@ always a commit of its own and, at a release cut, the *last* one — the `CHANGE
 rollup lands first, so the tree the tag pins already contains it. Publishing a GitHub
 Release on top of that tag, with the archives `make dist` packs, stays a separate manual
 act; CI creates the tag and nothing more.
+
+## Testing
+
+`make test` does not run `go test ./...` in one process. Almost all of the suite's wall time
+is in two packages — `cmd/apogee` and `internal/tui` — and in both it is in tests that
+*cannot* be `t.Parallel` tests: the e2e launch helpers call `t.Setenv` (which the testing
+package forbids alongside `t.Parallel`), and `tuitest.CheckLeaks` diffs the process-wide
+goroutine dump, so a concurrent test's goroutines would read as another test's leak. Adding
+`-parallel` therefore changes nothing: on a 9-core box `-parallel 1` and `-parallel 32` are
+within 3% of each other.
+
+`scripts/test-shards.sh` splits those two packages across several concurrent `go test`
+processes instead. Both constraints are per-process, so every test runs exactly as it does
+today — same flags, same isolation, nothing skipped or reordered within its shard — and the
+run is bounded by the slowest shard rather than the slowest package. Measured on a 9-core
+box: 212s in one process, 68s sharded, with `make check` going from 224s to 77s.
+
+Shards are balanced from the previous run's per-test durations, cached in `.test-timings`
+(gitignored, rewritten every run). A missing or stale cache costs only a less even split,
+never a skipped test: the roster comes from `go test -list`, and the script refuses to run a
+plan that does not cover every listed test. `APOGEE_TEST_SHARDS=n` overrides the per-package
+shard count; the script prints each shard's wall time so the balance can be read off a run.
+
+`go test -race -count=1 ./...` remains the equivalent single-process run, and is the one to
+reach for when bisecting or debugging a single test. CI still runs that form.
 
 ## Releasing
 
