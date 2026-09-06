@@ -28,4 +28,10 @@
 // are both compared through, so the two readings can never disagree.
 // runner.go is the sink decorator itself — the Executor seam, the per-Hook queues and workers,
 // the Driver-facing failure reporter, and the reload (Replace) and shutdown (Close) paths.
+// exec.go is the production Executor — DefaultExecutor's dispatch onto whichever action the entry
+// configured, and the one JSON encoding both actions send.
+// command.go runs a Hook's argv: the api-key-cmd exec posture, copied, with the payload on stdin
+// and the APOGEE_HOOK_* facts in the environment.
+// webhook.go POSTs the same document to a Hook's URL, with the literal and environment-resolved
+// headers it carries and no retry.
 package hooks
