@@ -87,7 +87,17 @@ latter two files only the binding comment above the test moves.
 
 commit: `refactor(notice): one composer for the server-offline refusal`
 
-## 2. An unattended run says when its context window is unknown
+## 2. An unattended run says when its context window is unknown — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): consequential edit — internal/notice/doc.go: made necessary by adding
+internal/notice/window.go — the package doc's "Two families today" enumeration named
+ContextFileNotices and ServerOffline only, and is now three with WindowUnknown's own entry.
+NOTES (2026-09-06): the table row `an advertised model is unremarkable`
+(cmd/apogee/wire_firing_test.go) is renamed to `an advertised model is unremarkable but its
+unknown window is not` — that row IS the plan's new advertised-and-unpinned case, and the old
+name asserted the opposite of what it now pins. Two further rows were added beside it, both
+named in the item's guard: a pinned+advertised Firing that says nothing about the window, and
+the offline case (a beat that never answered).
 
 **What.** Recast at the regression check (2026-09-05). Fixes `apogee-m67`. An unpinned headless or
 daemon run derives its Budget from configuration alone, so `ContextFilesReport.SystemShare` is 0

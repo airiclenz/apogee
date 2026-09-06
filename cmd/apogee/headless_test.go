@@ -1581,6 +1581,46 @@ func TestHeadlessPrintsTheContextFileNotices(t *testing.T) {
 	})
 }
 
+// TestHeadlessSaysWhenTheContextWindowIsUnknown is the unattended half of the sentence a session
+// gets at its rebind seam. A headless run derives its Budget from configuration alone — the
+// composition deliberately binds no observed window (wire_firing.go) — so with no `context-window:`
+// pinned the Budget and auto-compaction are inactive and the oversize warning that would otherwise
+// catch the same trouble can never fire, because it is gated on a system share this path leaves at
+// zero (internal/domain/contextfile.go). Nothing else on this Driver says so.
+//
+// The wanted string is notice.WindowUnknown itself rather than a hand-typed copy: the point of one
+// spelling is that the TUI and the unattended Drivers cannot drift.
+func TestHeadlessSaysWhenTheContextWindowIsUnknown(t *testing.T) {
+	t.Run("an unpinned run says it on stderr, and not on stdout", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{SessionID: "s-12", FinalText: "the answer", Turns: 1}}
+
+		out, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if !strings.Contains(errOut, notice.WindowUnknown) {
+			t.Errorf("stderr is missing the unknown-window line %q: %q", notice.WindowUnknown, errOut)
+		}
+		if strings.Contains(out, notice.WindowUnknown) {
+			t.Errorf("the unknown-window line leaked onto stdout: %q", out)
+		}
+	})
+
+	t.Run("a pinned window leaves nothing to say", func(t *testing.T) {
+		home := testConfigHome(t, "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\n"+
+			"    context-window: 32768\nserver: testbox\n")
+		stub := &stubRunner{res: run.Result{SessionID: "s-13", FinalText: "the answer", Turns: 1}}
+
+		_, errOut, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.Contains(errOut, notice.WindowUnknown) {
+			t.Errorf("a run bound to a pinned window said the window is unknown: %q", errOut)
+		}
+	})
+}
+
 // TestHeadlessReportsTheFilesTheRunWrote pins the end-of-run account of what a Firing CHANGED on
 // disk: the header, one indented path per entry, on stderr and nowhere else. The block is what
 // replaces the interactive /undo pane on a Driver that has nobody to offer a revert to — the

@@ -494,13 +494,13 @@ func (m *Model) applyPendingRebind() {
 	}
 }
 
-// unknownWindowNote is the honesty line for a binding whose context window nobody could name: the
-// Budget and automatic Compaction both bind against the window, so with none known they silently do
-// nothing. It rides the rebind rather than the start-up sequence because the window is known — or
-// not — only once a beat has landed: printed at launch it would fire on every cold start and be
-// wrong a second later.
-const unknownWindowNote = "context window unknown — automatic compaction and the Budget are inactive; " +
-	"set context-window: in config.yaml"
+// unknownWindowNote is the honesty line for a binding whose context window nobody could name. The
+// wording is notice.WindowUnknown's, because the unattended Drivers say the same sentence about the
+// same silence (cmd/apogee/wire_firing.go) and announced text gets one spelling; what stays here is
+// this Driver's own half of it. It rides the rebind rather than the start-up sequence because the
+// window is known — or not — only once a beat has landed: printed at launch it would fire on every
+// cold start and be wrong a second later.
+const unknownWindowNote = notice.WindowUnknown
 
 // rebindNote words what a successful rebind actually moved, in the three shapes it can take: the
 // late seed that binds the session's first model (the async cold start — same code path, different

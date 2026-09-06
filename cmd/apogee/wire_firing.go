@@ -7,6 +7,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -212,8 +213,19 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// says the window is unknown and a pinned one names the pin, while a session's own clause can credit
 	// the base entry for a window it actually bound. The two sentences differ because the two Drivers
 	// bind differently; aligning them would mean changing what a Firing binds.
-	if notice := hintNotice(spec.Model, beat.Resolution, beat.ContextWindow, spec.MaxContextTokens); notice != "" {
-		notices = append(notices, notice)
+	//
+	// The else is the whole no-double-say rule. hintNotice's own default branch already carries an
+	// unknown-window clause, and it is reached exactly when the bound window is 0 — so an
+	// unadvertised unpinned Firing says it once, inside the hint, and an ADVERTISED unpinned one,
+	// which composes no hint at all, gets the bare sentence instead. It is gated on the beat too:
+	// both unattended Drivers emit these notices BEFORE their offline gate, and a beat that never
+	// answered carries a zero Resolution, so an unpinned run against a dead endpoint would
+	// otherwise announce an unknown window ahead of "cannot send — server offline" and, in the
+	// daemon, burn the once-per-process latch on a Firing that never ran.
+	if hint := hintNotice(spec.Model, beat.Resolution, beat.ContextWindow, spec.MaxContextTokens); hint != "" {
+		notices = append(notices, hint)
+	} else if spec.MaxContextTokens == 0 && beat.Answered {
+		notices = append(notices, notice.WindowUnknown)
 	}
 
 	// How wide this run may fan its delegations out — the same cap a session resolves, so every

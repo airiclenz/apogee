@@ -582,6 +582,47 @@ func TestDaemonFireLogsTheCompositionsNotices(t *testing.T) {
 	}
 }
 
+// An unpinned daemon Firing SAYS its context window is unknown — once per process. A Firing derives
+// its Budget from configuration alone, so the oversize warning that would otherwise catch the same
+// trouble can never fire on this path (internal/domain/contextfile.go gates it on a system share an
+// unattended run leaves at zero); without this line a nightly schedule runs forever with the Budget
+// and auto-compaction inactive and nothing in the journal saying so.
+//
+// The latch is the second half, shaped on TestDaemonFireWarnsOnceOnUnconfinedAuto: the sentence
+// reports a standing fact about the daemon's configuration rather than anything a tick did, so
+// repeating it every tick is how a journal becomes unreadable.
+func TestDaemonFireSaysOnceWhenTheContextWindowIsUnknown(t *testing.T) {
+	t.Run("two firings say it exactly once", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+		})
+		entry := entryFor(t, "nightly", daemon.Action{Server: "box"})
+
+		harness.fire(t, entry)
+		harness.fire(t, entry)
+
+		if got := strings.Count(harness.logged.String(), notice.WindowUnknown); got != 1 {
+			t.Errorf("the unknown-window line was logged %d times over two firings, want exactly 1; "+
+				"the log holds:\n%s", got, harness.logged.String())
+		}
+	})
+
+	t.Run("an entry that pins a window never says it", func(t *testing.T) {
+		harness := newDaemonFireHarness(t, config.Options{
+			Servers: []config.ServerEntry{{
+				Name: "box", Endpoint: "http://box.invalid", ContextWindow: config.TokenCount(32768),
+			}},
+		})
+
+		harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
+
+		if strings.Contains(harness.logged.String(), notice.WindowUnknown) {
+			t.Errorf("a Firing bound to a pinned window said the window is unknown; the log holds:\n%s",
+				harness.logged.String())
+		}
+	})
+}
+
 // A Firing logs what its run found WRONG with the workspace's context files and nothing else. The
 // plain record of what loaded stays off the daemon log by ratified call — a journal is read for
 // trouble, and one line per tick naming every file that loaded as expected buries the ticks worth
@@ -630,8 +671,15 @@ func TestDaemonFireLogsContextFileAnomaliesAlone(t *testing.T) {
 
 		harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
 
-		if logged := harness.logged.String(); logged != "" {
-			t.Errorf("a firing with no notices and no context files still wrote to the daemon log:\n%s", logged)
+		// What is asserted is the absence of the two lines this test is about, not an empty log:
+		// the fixture pins no `context-window:`, so the journal legitimately carries the
+		// unknown-window sentence (TestDaemonFireSaysOnceWhenTheContextWindowIsUnknown).
+		logged := harness.logged.String()
+		if strings.Contains(logged, "context:") || strings.Contains(logged, "standing system content") {
+			t.Errorf("a firing whose run loaded no context files still narrated them:\n%s", logged)
+		}
+		if strings.Contains(logged, "file(s) this run") {
+			t.Errorf("a firing that wrote no files still narrated a written-files block:\n%s", logged)
 		}
 	})
 }

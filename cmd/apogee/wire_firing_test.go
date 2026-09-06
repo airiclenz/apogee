@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/notice"
 	// Aliased because the tests below hold a skills.Provider in a variable called `provider`,
 	// which shadows the package name inside those functions.
 	apiprovider "github.com/airiclenz/apogee/internal/provider"
@@ -762,9 +763,14 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 			if got := routing.seat != nil; got != tc.wantSeat {
 				t.Fatalf("routing.seat non-nil = %v, want %v", got, tc.wantSeat)
 			}
+			// A run that names no Sub-agent server has nothing to say ABOUT THE SEAT. The slice
+			// itself is shared — an unpinned Firing also carries notice.WindowUnknown — so what is
+			// asserted is the absence of a `sub-agents:` line, not an empty composition.
 			if tc.wantNotice == "" {
-				if len(notices) != 0 {
-					t.Errorf("notices = %q; a run that names no Sub-agent server has nothing to say", notices)
+				if slices.ContainsFunc(notices, func(n string) bool {
+					return strings.HasPrefix(n, "sub-agents:")
+				}) {
+					t.Errorf("notices = %q; a run that names no Sub-agent server says nothing about a seat", notices)
 				}
 			} else if !slices.ContainsFunc(notices, func(n string) bool {
 				if tc.noticePrefix {
@@ -887,6 +893,9 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 		pinnedWindow int
 		wantContains []string
 		wantBound    int
+		// wantWindowUnknown says this composition owes the run notice.WindowUnknown's BARE
+		// sentence — the else branch, reached when no hint carries the clause of its own.
+		wantWindowUnknown bool
 	}{
 		{
 			name: "an unadvertised model with no pin has no window to report",
@@ -918,12 +927,34 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 			wantBound:    32768,
 		},
 		{
-			name: "an advertised model is unremarkable",
+			// Unremarkable about the MODEL, and that is exactly the run this item is for: nothing is
+			// unadvertised, so no hint is composed, and without the else the fact that the Budget and
+			// auto-compaction are inactive would never be said at all.
+			name: "an advertised model is unremarkable but its unknown window is not",
 			beat: heartbeat.Beat{
 				Reachable: true, Answered: true,
 				ActiveModel: "my-alias", ContextWindow: 131072,
 				Resolution: apiprovider.HintExact,
 			},
+			wantWindowUnknown: true,
+		},
+		{
+			name: "a pin leaves nothing to say about the window",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "my-alias", ContextWindow: 131072,
+				Resolution: apiprovider.HintExact,
+			},
+			pinnedWindow: 32768,
+			wantBound:    32768,
+		},
+		{
+			// The offline order: both unattended Drivers emit these notices BEFORE their offline
+			// gate, so a line said here would reach the user ahead of "cannot send — server
+			// offline" — and in the daemon it would burn the once-per-process latch on a Firing
+			// that never ran.
+			name: "a beat that never answered says nothing about the window",
+			beat: heartbeat.Beat{ActiveModel: "my-alias", Failure: "dial tcp: refused"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -950,14 +981,47 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 			}
 
 			hint := ""
-			for _, notice := range notices {
-				if strings.Contains(notice, "not advertised") {
-					hint = notice
+			for _, n := range notices {
+				if strings.Contains(n, "not advertised") {
+					hint = n
 				}
 			}
+
+			// An unknown window is announced ONCE however it is announced: inside the hint when the
+			// model is unadvertised, as notice.WindowUnknown's bare sentence when it is not.
+			// Counting both spellings is what pins the else — a plain append would say it twice on
+			// the unadvertised-and-unpinned run, which is the commonest unattended run there is.
+			said, bare := 0, 0
+			for _, n := range notices {
+				if strings.Contains(n, "context window unknown") {
+					said++
+				}
+				if n == notice.WindowUnknown {
+					bare++
+				}
+			}
+			if said > 1 {
+				t.Errorf("notices = %q; the unknown window was announced %d times — the hint's own clause "+
+					"and notice.WindowUnknown are alternatives, never both", notices, said)
+			}
+			switch {
+			case tc.wantWindowUnknown && bare != 1:
+				t.Errorf("notices = %q; want notice.WindowUnknown exactly once — an unattended run derives "+
+					"its Budget from configuration alone, so this sentence is the only thing that can "+
+					"tell its user the Budget and auto-compaction are inactive", notices)
+			case !tc.wantWindowUnknown && bare != 0:
+				t.Errorf("notices = %q; want no bare unknown-window line here", notices)
+			}
+			if cfg.Context.MaxContextTokens != tc.wantBound {
+				t.Errorf("Config.Context.MaxContextTokens = %d, want %d; the observed window reaches the "+
+					"NOTICE alone — binding it would prune a prompt an unpinned Firing sends whole",
+					cfg.Context.MaxContextTokens, tc.wantBound)
+			}
+
 			if len(tc.wantContains) == 0 {
 				if hint != "" {
-					t.Fatalf("notices = %q; a model the server advertises is ordinary and says nothing", notices)
+					t.Fatalf("notices = %q; a model the server advertises is ordinary and says nothing "+
+						"about the model", notices)
 				}
 				return
 			}
@@ -966,11 +1030,6 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 					t.Errorf("hint notice = %q; want it to name %q — the unattended Drivers read this "+
 						"slice and have no other channel for it", hint, want)
 				}
-			}
-			if cfg.Context.MaxContextTokens != tc.wantBound {
-				t.Errorf("Config.Context.MaxContextTokens = %d, want %d; the observed window reaches the "+
-					"NOTICE alone — binding it would prune a prompt an unpinned Firing sends whole",
-					cfg.Context.MaxContextTokens, tc.wantBound)
 			}
 		})
 	}

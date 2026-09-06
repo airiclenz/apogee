@@ -94,6 +94,8 @@ type daemonWiring struct {
 	adopted map[string]daemon.Entry
 	// warnedUnconfined latches the unconfined-Auto warning (see [daemonWiring.latchUnconfinedWarning]).
 	warnedUnconfined bool
+	// saidWindowUnknown latches the unknown-context-window line (see [daemonWiring.latchWindowUnknown]).
+	saidWindowUnknown bool
 	// prewarmed is the set of workspace roots whose label walk this daemon has already pre-warmed
 	// (see [daemonWiring.latchPrewarm]).
 	prewarmed map[string]struct{}
@@ -209,6 +211,26 @@ func (w *daemonWiring) latchUnconfinedWarning() bool {
 		return false
 	}
 	w.warnedUnconfined = true
+	return true
+}
+
+// latchWindowUnknown reports whether THIS Firing is the one that says the unknown-context-window
+// line, and marks it said. Same shape and same reason as the unconfined-Auto warning above: the
+// sentence is about the daemon's CONFIGURATION — no `context-window:` is pinned, so the Budget and
+// auto-compaction are inactive for every Firing this process will ever raise — and a fact that
+// cannot change between ticks said once per tick is a nightly schedule writing the same line into
+// the supervisor's journal forever. Every OTHER composition notice keeps logging per Firing,
+// because those describe the run that just happened.
+//
+// It is per WIRING rather than a package-level sync.Once for the same reason: two daemons in one
+// test process are two daemons, each owing its own log the disclosure its own first Firing earns.
+func (w *daemonWiring) latchWindowUnknown() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.saidWindowUnknown {
+		return false
+	}
+	w.saidWindowUnknown = true
 	return true
 }
 
@@ -333,7 +355,17 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// other than what its entry names is exactly the fact a supervisor's journal has to hold.
 	// Printed in the composer's own voice, unstripped, as runHeadless prints the same lines
 	// (headless.go): these are apogee's sentences about apogee's own configuration.
+	//
+	// The ONE exception to per-Firing narration is the unknown-context-window line, latched to once
+	// per process: it reports a standing fact about this daemon's configuration rather than
+	// anything this tick did, so a nightly schedule would otherwise repeat it in the journal
+	// forever. Recognised by exact-string compare against the exported const, which is the whole
+	// point of there being one spelling (internal/notice). Every other notice still logs per
+	// Firing, and headless — one run per process — always says it.
 	for _, n := range notices {
+		if n == notice.WindowUnknown && !w.latchWindowUnknown() {
+			continue
+		}
 		w.log.line("%s", n)
 	}
 
