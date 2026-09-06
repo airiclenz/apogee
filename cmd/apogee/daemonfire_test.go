@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
@@ -884,5 +885,73 @@ func TestDaemonFirePrewarmsEachWorkspaceOnce(t *testing.T) {
 
 	if got := len(harness.wiring.prewarmed); got != 2 {
 		t.Errorf("a firing of a second workspace left %d pre-warms latched, want 2", got)
+	}
+}
+
+// The Schedule a Firing belongs to rides every payload its Hooks are handed. That is the whole
+// reason a Runner is composed per FIRING rather than per daemon: two adopted schedules fire the
+// same `hooks:` list, and a script that could not tell them apart could not act on either.
+func TestDaemonFireStampsTheScheduleOnItsHookPayload(t *testing.T) {
+	requireHookShell(t)
+
+	marker := filepath.Join(t.TempDir(), "fired.json")
+	harness := newDaemonFireHarness(t, config.Options{
+		Endpoint: "http://box.invalid",
+		Hooks: []hooks.Hook{{
+			Name:    "record",
+			Events:  []hooks.Event{hooks.ExchangeFinished},
+			Command: []string{"sh", "-c", `cat > "$0"`, marker},
+			Timeout: 10 * time.Second,
+		}},
+	})
+	harness.runner.emit = func(sink domain.EventSink) {
+		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	}
+
+	harness.fire(t, entryFor(t, "audit", daemon.Action{}))
+
+	payload := readHookPayload(t, marker)
+	if payload.Schedule == nil {
+		t.Fatal("the payload carries no schedule block; a daemon Firing always belongs to one")
+	}
+	if payload.Schedule.ID != "sched-1" || payload.Schedule.Name != "audit" {
+		t.Errorf("the payload names the Schedule (%q, %q), want the Firing's (%q, %q)",
+			payload.Schedule.ID, payload.Schedule.Name, "sched-1", "audit")
+	}
+}
+
+// A Hook's trouble reaches the daemon log — this Driver's whole user interface (ADR 0034 decision
+// 10) — as ONE line, escape-stripped, with whatever the script said quoted literally. The `%` in the
+// tail is the point: the reporter goes through daemonLogWriter, which takes the line as DATA, so a
+// percent sign in someone else's stderr is a percent sign rather than a format verb eating the rest
+// of the sentence.
+func TestDaemonFireLogsAFailingHookAsOneSanitisedLine(t *testing.T) {
+	requireHookShell(t)
+
+	harness := newDaemonFireHarness(t, config.Options{
+		Endpoint: "http://box.invalid",
+		Hooks: []hooks.Hook{{
+			Name:    "record",
+			Events:  []hooks.Event{hooks.ExchangeFinished},
+			Command: []string{"sh", "-c", "printf 'boom 100%% done\\n' >&2; exit 1"},
+			Timeout: 10 * time.Second,
+		}},
+	})
+	harness.runner.emit = func(sink domain.EventSink) {
+		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	}
+
+	harness.fire(t, entryFor(t, "audit", daemon.Action{}))
+
+	const want = "hook record (exchange-finished): exit 1: boom 100% done"
+	var found int
+	for _, line := range strings.Split(harness.logged.String(), "\n") {
+		if strings.Contains(line, want) {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Errorf("the daemon log carries the failure line %d times, want exactly one:\n%s",
+			found, harness.logged.String())
 	}
 }

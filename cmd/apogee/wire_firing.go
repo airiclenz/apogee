@@ -7,9 +7,11 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // firingInputs is everything a Driver decides about ONE unattended run. Every difference between
@@ -78,6 +80,14 @@ type firingInputs struct {
 	// is what hands it to the runner. The run's scratch dir is created under it, so a saved run and
 	// the working files its model left behind are one thing to find and one thing to sweep.
 	recordID string
+	// hooks is the Hook Runner this ONE Firing fires through (ADR 0073), built by the Driver from
+	// firingHooks and closed by it when the Firing ends. It is a field rather than a branch for the
+	// file's own rule: the three Drivers differ in where a Hook's trouble is reported and in whether
+	// the run belongs to a Schedule at all, and both of those are decided before the Runner exists.
+	//
+	// nil is the legitimate absence — a Driver that raises no Hooks, and every composition test —
+	// and it leaves Config.Events nil exactly as it was before this key existed.
+	hooks *hooks.Runner
 }
 
 // firingConfig composes the construction surface EVERY unattended run is driven from: one prompt,
@@ -92,8 +102,12 @@ type firingInputs struct {
 // headless prints on stderr, the daemon logs, and the TUI's `/schedule` Driver drops (its narration
 // is the session record it leaves behind).
 //
-// Events, Approver, Asker and Presenter are deliberately left nil: run.Once pins its own, and
-// handing it any of them is how a run acquires a human it does not have. Tools is left nil too and
+// Approver, Asker and Presenter are deliberately left nil: run.Once pins its own, and handing it
+// any of them is how a run acquires a human it does not have. Events is the ONE exception, and only
+// where the Driver built a Hook Runner (in.hooks): that Runner observes and forwards, so a Firing
+// gains no human from it — a Hook can read what the run did and nothing a Hook does reaches the
+// model, the conversation or the Session record (ADR 0073 §2). With no Runner it stays nil, exactly
+// as it was before the key existed. Tools is left nil too and
 // the engine builds its own registry — EXCEPT under `sub-agents-choice: model`, where the gate
 // shapes the sub_agent SCHEMA rather than anything on the Config the engine reads (ADR 0031), so a
 // Firing that must publish `run_on` has to hand over a roster assembled here. Either way a Firing
@@ -295,7 +309,12 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		URLAllowHosts: in.opts.URLAllowHosts,
 		URLDenyHosts:  in.opts.URLDenyHosts,
 		Inspector:     in.opts.UI.Inspector,
-		SecretEnvVars: config.APIKeyEnvNames(in.opts),
+		// Both halves of what the `terminal` tool may not read back out of the environment it
+		// inherits: the names an API key is resolved from, and the names a Hook's webhook header is
+		// (config.HookEnvNames). A Firing runs the same `hooks:` list a session does, so it has to
+		// scrub the same variables — a token the session hides would otherwise be readable by a
+		// model the moment the same configuration ran unattended.
+		SecretEnvVars: append(config.APIKeyEnvNames(in.opts), config.HookEnvNames(in.opts)...),
 		// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
 		// rather than off opts, so the run reads responses in the same shape a session on the same
 		// model would, and a built-in match has already narrated itself through the notices.
@@ -347,6 +366,19 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		// (floorFromOptions). A Firing is composed out of the session's LIVE options, so a guard
 		// switched off in `/settings` is off for the run this session raises as well.
 		Floor: floorFromOptions(in.opts),
+	}
+
+	// The Hook Runner this Driver built for this ONE Firing, installed as the run's Event sink (ADR
+	// 0073 §2). It is assigned after the literal rather than inside it because a nil *hooks.Runner
+	// boxed into the domain.EventSink interface is a NON-nil interface holding a nil pointer, and
+	// run.Once's own tap would then wrap a sink that panics on the first Event. A Driver that built
+	// no Runner leaves Events nil, which is what every composition test asserts.
+	//
+	// It is the INNERMOST sink of the run: run.Once wraps whatever it is handed (eventTap), and the
+	// one Driver that renders an Event itself wraps this Runner in turn (headless's prune notice),
+	// so the renderer stays outermost and the Hooks stay invisible to it.
+	if in.hooks != nil {
+		cfg.Events = in.hooks
 	}
 
 	// Where this run's delegations go, resolved off the same `sub-agents-server:` key a session
@@ -501,4 +533,50 @@ func resolveFiringRouting(
 	target := resolveDelegationTarget(entry, apiKey, observed, in.opts.ModelProfiles, server.catalogue)
 	return firingRouting{target: target, seat: seat},
 		delegationStateNotice(name, target, "", nil)
+}
+
+// firingHooks builds the Hook Runner ONE unattended run fires through (ADR 0073). Every Firing root
+// composes one of its own — `apogee headless`, a daemon tick, the `/schedule` picker inside a live
+// session — because a Runner per Firing is what carries the Schedule a run belongs to onto every
+// payload it stamps, with no per-event plumbing to carry it there.
+//
+// It is one constructor rather than three literals for firingConfig's own reason: everything except
+// the four arguments is the same at every root, and three copies of it is three chances for one
+// `hooks:` list to mean two different things depending on which Driver read it.
+//
+// The caller closes what comes back — [hookCloseGrace], the same grace the session gives (wire.go) —
+// and a returned error fails the Firing: a `hooks:` list this root cannot resolve is structural
+// configuration, exactly as an unreadable prompt is.
+func firingHooks(list []hooks.Hook, workspace string, sched *hooks.ScheduleRef, report func(string)) (*hooks.Runner, error) {
+	return hooks.New(list, hooks.Options{
+		// Inner stays nil: a Firing's Config carries no sink of its own (firingConfig), so there is
+		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself
+		// wraps THIS Runner rather than being wrapped by it (headless's prune notice), which keeps the
+		// renderer outermost and the Hooks invisible to it.
+		Workspace:   workspace,
+		Schedule:    sched,
+		Report:      report,
+		WriteTarget: firingWriteTarget(workspace),
+		Exec:        hooks.DefaultExecutor(workspace),
+	})
+}
+
+// firingWriteTarget answers whether one tool call wrote a file and where it landed — the seam the
+// `file-changed` derivation reads (hooks.WriteTarget).
+//
+// A Firing holds no live tool registry to ask: firingConfig leaves Config.Tools nil and the engine
+// builds its own, which no Driver has a handle on. So this builds a lookup-only roster of its own,
+// scoped to the same workspace, and asks it exactly what the session asks its live set. Only the
+// writer marker each tool carries is read (tools.WorkspaceWriteTarget), so a roster assembled with
+// no host delegates answers identically to the one the engine runs — and nothing here is offered to
+// a model, dispatched, or reachable in any other way.
+func firingWriteTarget(workspace string) hooks.WriteTarget {
+	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{})
+	return func(call domain.ToolCall) (string, bool) {
+		tool, ok := registry.Lookup(call.Tool)
+		if !ok {
+			return "", false
+		}
+		return tools.WorkspaceWriteTarget(tool, call)
+	}
 }

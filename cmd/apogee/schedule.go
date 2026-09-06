@@ -10,6 +10,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -87,6 +88,13 @@ type scheduleWiring struct {
 	// store is the session store a Firing's record lands in — the interactive session's own, so a
 	// Firing shows up in /sessions beside the conversations it ran beneath (items 2 and 7).
 	store *session.Store
+
+	// notifyHook is where a Hook's trouble is told (ADR 0073 §8); wired to Bridge.NotifyHook, the
+	// same seam this session's OWN Runner reports through, so a failing Hook reads identically
+	// whether the session fired it or a Firing this session raised did. It is a seam rather than a
+	// direct call for the Bridge's reason: it is invoked from the Runner's worker goroutines, never
+	// from Update. nil leaves a Hook's failure silent, which is what a composition test wants.
+	notifyHook func(string)
 }
 
 // fire performs one Firing and reports the record it left behind. It is the value wired into
@@ -109,6 +117,31 @@ type scheduleWiring struct {
 func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Outcome, error) {
 	binding := w.binding()
 	opts, entry, manualIDs := w.live.firingSources(binding)
+
+	// This Firing's own Hook Runner (ADR 0073), built from the `hooks:` list the SESSION is running
+	// now — the one firingSources hands over, which the config-watcher's reload arm keeps current
+	// (liveSettings.setHooks) — rather than the list the process launched with. A `hooks:` edit
+	// applied mid-session therefore reaches the Firings that session raises, which is the same
+	// promise every other live key already carries into them (ADR 0037).
+	//
+	// Per Firing rather than per session, even though a session already holds a Runner of its own:
+	// this one stamps the Schedule the run belongs to onto every payload, so a Hook can tell a
+	// scheduled run from the conversation it was raised beneath. The session's Runner keeps
+	// observing the session; the two never see each other's events.
+	hookRunner, err := firingHooks(opts.Hooks, w.roots.workspace,
+		&hooks.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.notifyHook)
+	if err != nil {
+		return schedule.Outcome{}, fmt.Errorf("apogee: build the firing's hooks: %w", err)
+	}
+	// Drained when the Firing ends, on the same five-second grace every root gives (ADR 0073 §7) and
+	// deferred here so a composition that failed below takes its workers down with it. The session
+	// outlives this run, so a Runner left behind per Firing would accumulate for as long as the
+	// Schedule keeps firing.
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
+		defer cancel()
+		_ = hookRunner.Close(closeCtx)
+	}()
 
 	// This Firing's own record id, minted here because the runner is handed it beside the Config
 	// (run.Spec) and the composer creates the run's scratch dir under that name. Minted per FIRING
@@ -156,6 +189,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 			}
 		},
 		recordID: recordID,
+		hooks:    hookRunner,
 	})
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's bindings: %w", err)

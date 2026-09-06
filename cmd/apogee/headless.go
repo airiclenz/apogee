@@ -320,6 +320,27 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		return notStarted(err)
 	}
 
+	// This run's own Hook Runner (ADR 0073), built as soon as the workspace it is rooted in is
+	// known — the `workspace:` filter that decides which Hooks are active here is compared against
+	// exactly that path (firingHooks), so it cannot be built any earlier.
+	//
+	// It belongs to the RUN rather than to the process: an `apogee headless` invocation is one
+	// Firing, and building the Runner per Firing is what lets a daemon tick and a `/schedule` Firing
+	// stamp the Schedule they belong to onto the payload while this one stamps none.
+	//
+	// A Hook's trouble is reported on stderr, beside every other thing this command narrates: stdout
+	// is the model's answer and nothing else, and a Hook that failed is a fact about a script the
+	// user configured rather than anything the answer should carry.
+	//
+	// A malformed list fails the run before a token is spent. `hooks:` is validated when the config
+	// file is parsed, so what is left to fail here is a `workspace:` this host cannot resolve — and
+	// an unattended run that quietly fired nothing would be indistinguishable from one whose Hooks
+	// all ran.
+	hookRunner, err := firingHooks(opts.Hooks, roots.workspace, nil, func(line string) { cmd.PrintErrln(line) })
+	if err != nil {
+		return notStarted(err)
+	}
+
 	// The scratch sweep, run once here for the reason runRoot runs it at boot (wire.go): this run
 	// mints a dir of its own below and a host that is only ever driven headlessly never passes the
 	// TUI's boot, so this is the only beat on which the dirs earlier runs left behind are reclaimed.
@@ -358,6 +379,19 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 			}
 		}()
 	}
+
+	// The Hooks are drained AFTER the run and BEFORE the confinement teardown above — defers run in
+	// reverse, and this one is registered second — so a Hook still holding an event this run
+	// produced finishes it while everything it was composed from still stands. The grace is the five
+	// seconds every root gives (ADR 0073 §7); what is still running when it expires is killed by the
+	// context, because a wedged script may not hold the shell's prompt. Close's own error is
+	// discarded: it says only that a Hook was killed at the deadline, the drop totals it wanted to
+	// report have already gone to stderr, and the run is over either way.
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
+		defer cancel()
+		_ = hookRunner.Close(closeCtx)
+	}()
 
 	// Auto's eligibility is ruled on HERE, by the surface that offered the mode (ADR 0033,
 	// decision 3) — the same call the `/schedule` picker makes, through the same sentence, because
@@ -461,6 +495,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		confiner:  confiner,
 		mode:      mode,
 		recordID:  recordID,
+		hooks:     hookRunner,
 	})
 	if err != nil {
 		return notStarted(err)
@@ -527,8 +562,10 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// The one Event this Driver renders live. Everything else a headless run reports comes back on
 	// Result, but a prune happens MID-run and leaves no trace on the answer, so a human watching an
 	// unattended run would otherwise see a window quietly shrink with nothing said. The sink WRAPS
-	// whatever the Config already carries (nil here today) rather than replacing it, exactly as
-	// run.Once's own tap wraps this one in turn (run.Spec).
+	// whatever the Config already carries — the Hook Runner since ADR 0073 — rather than replacing
+	// it, exactly as run.Once's own tap wraps this one in turn (run.Spec). The order that leaves is
+	// prune notice → Hooks → nothing: the renderer sees every Event first, and installing Hooks
+	// cannot change what this command prints.
 	cfg.Events = pruneNoticeSink{inner: cfg.Events, out: cmd.ErrOrStderr()}
 
 	// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a

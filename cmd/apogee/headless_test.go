@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -22,6 +24,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -2318,3 +2321,138 @@ func TestPruneNoticeSinkForwardsEveryEvent(t *testing.T) {
 type recordingSink struct{ events []domain.Event }
 
 func (s *recordingSink) Emit(e domain.Event) { s.events = append(s.events, e) }
+
+// requireHookShell skips a test that scripts its Hook with `sh`. What these tests prove is what the
+// headless Driver does with a fired Hook, never what the child itself does, so a host with no POSIX
+// shell has nothing here to prove (internal/hooks' own tests skip on the same terms).
+func requireHookShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("these tests script the Hook with sh; Windows has no POSIX shell to script it with")
+	}
+}
+
+// hookHomeRecording writes an apogee home whose one Hook subscribes to events and dumps the payload
+// it is handed onto marker, and returns that home. The script writes the document byte for byte, so
+// a test reads back exactly what the run put on the Hook's stdin.
+func hookHomeRecording(t *testing.T, marker string, events ...string) string {
+	t.Helper()
+	return testConfigHome(t, fmt.Sprintf(
+		"hooks:\n  - name: record\n    events: [%s]\n    command: [\"sh\", \"-c\", \"cat > \\\"$0\\\"\", %q]\n",
+		strings.Join(events, ", "), marker))
+}
+
+// readHookPayload decodes the payload one fired Hook recorded. The Runner is drained before the
+// command returns (runHeadless's deferred Close), so the file is there by the time a test looks —
+// no polling, and a missing file is a real failure rather than a race.
+func readHookPayload(t *testing.T, marker string) hooks.Payload {
+	t.Helper()
+	raw, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the Hook wrote no payload: %v", err)
+	}
+	var payload hooks.Payload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode the Hook's payload %q: %v", raw, err)
+	}
+	return payload
+}
+
+// A headless run fires the `hooks:` list its config carries. This is the whole of what makes an
+// unattended run observable to a script the user configured: the Driver builds a Runner of its own
+// per run and installs it as the Config's sink, so the exchange boundary the engine announces
+// reaches the Hook.
+//
+// The payload carries NO schedule block: a plain headless run belongs to no Schedule, which is what
+// lets a script tell it apart from a daemon tick reading the same document.
+func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
+	requireHookShell(t)
+
+	marker := filepath.Join(t.TempDir(), "fired.json")
+	stub := &stubRunner{emit: func(sink domain.EventSink) {
+		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	}}
+
+	if _, _, err := headlessRunOn(t, stub, fenceableHost,
+		hookHomeRecording(t, marker, "exchange-finished"), "explain this repo"); err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	payload := readHookPayload(t, marker)
+	if payload.Event != hooks.ExchangeFinished {
+		t.Errorf("the Hook was fired for %q, want %q", payload.Event, hooks.ExchangeFinished)
+	}
+	if payload.Hook != "record" {
+		t.Errorf("the payload names the Hook %q, want the entry's own name", payload.Hook)
+	}
+	if payload.Schedule != nil {
+		t.Errorf("the payload carries a schedule block %+v; a plain headless run belongs to none",
+			*payload.Schedule)
+	}
+}
+
+// The `file-changed` derivation at a root that holds no tool registry. firingConfig leaves
+// Config.Tools nil and the engine builds its own, so the Driver has nothing to ask where a write
+// landed — it builds a lookup-only roster instead (firingWriteTarget), and this is the proof that
+// roster answers for a real write the run announced.
+func TestHeadlessDerivesFileChangedFromItsOwnRoster(t *testing.T) {
+	requireHookShell(t)
+
+	marker := filepath.Join(t.TempDir(), "changed.json")
+	stub := &stubRunner{emit: func(sink domain.EventSink) {
+		sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID:        "call-1",
+			Tool:      "write_file",
+			Arguments: []byte(`{"path":"a.txt","content":"hi"}`),
+		}})
+		sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call-1"}})
+	}}
+
+	if _, _, err := headlessRunOn(t, stub, fenceableHost,
+		hookHomeRecording(t, marker, "file-changed"), "write a file"); err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	payload := readHookPayload(t, marker)
+	if payload.Tool != "write_file" {
+		t.Errorf("the payload names the tool %q, want write_file", payload.Tool)
+	}
+	if payload.Workspace != stub.spec.Config.WorkspaceDir {
+		t.Errorf("the payload is rooted at %q, want the run's own workspace %q",
+			payload.Workspace, stub.spec.Config.WorkspaceDir)
+	}
+	if want := filepath.Join(payload.Workspace, "a.txt"); payload.Path != want {
+		t.Errorf("the write landed at %q, want %q — the roster resolved the argument against "+
+			"something other than the run's workspace", payload.Path, want)
+	}
+}
+
+// A Hook that fails is reported to the HUMAN and nowhere else: on stderr, beside every other thing
+// this command narrates, and never on stdout, which carries the model's answer and nothing else. It
+// is never an ErrorEvent either (ADR 0073 §8) — a Hook subscribed to `error` would otherwise fire on
+// its own failure and loop.
+func TestHeadlessReportsAFailingHookOnStderr(t *testing.T) {
+	requireHookShell(t)
+
+	home := testConfigHome(t, "hooks:\n  - name: record\n    events: [exchange-finished]\n"+
+		"    command: [\"sh\", \"-c\", \"echo boom >&2; exit 1\"]\n")
+	stub := &stubRunner{
+		res: run.Result{FinalText: "the answer", Turns: 1},
+		emit: func(sink domain.EventSink) {
+			sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+		},
+	}
+
+	out, errOut, err := headlessRunOn(t, stub, fenceableHost, home, "explain this repo")
+	if err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	const want = "hook record (exchange-finished): exit 1: boom"
+	if !strings.Contains(errOut, want) {
+		t.Errorf("stderr carries no failure line reading %q:\n%s", want, errOut)
+	}
+	if strings.TrimSpace(out) != "the answer" {
+		t.Errorf("stdout = %q, want the answer alone — a Hook's trouble never contaminates it", out)
+	}
+}

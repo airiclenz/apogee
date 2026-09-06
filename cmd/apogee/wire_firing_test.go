@@ -8,11 +8,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/notice"
 	// Aliased because the tests below hold a skills.Provider in a variable called `provider`,
@@ -1088,5 +1090,89 @@ func TestFiringConfigBeatsTheSubAgentServerOnItsOwnEndpoint(t *testing.T) {
 		t.Errorf("routing.Beat reports %d slots; want the primary's 1 — the Sub-agent server's beat "+
 			"answered %d and must not be what a Driver gates the run on",
 			routing.Beat.TotalSlots, delegation.beat.TotalSlots)
+	}
+}
+
+// The Hook Runner a Driver built for ONE Firing reaches the run, and the variables its webhook
+// headers are read from reach the credential scrub. Both halves matter: a Runner the composer
+// dropped would leave a configured `hooks:` list silently dead at every unattended root, and a
+// header token left out of SecretEnvVars would be readable by the very model this run is about to
+// hand a `terminal` tool to.
+func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
+	t.Parallel()
+
+	roots := firingRoots(t)
+	list := []hooks.Hook{{
+		Name:       "notify",
+		Events:     []hooks.Event{hooks.ExchangeFinished},
+		Webhook:    "https://hooks.example/fire",
+		HeadersEnv: map[string]string{"Authorization": "NOTIFY_TOKEN"},
+		Timeout:    time.Second,
+	}}
+	runner, err := firingHooks(list, roots.workspace, &hooks.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil)
+	if err != nil {
+		t.Fatalf("firingHooks: %v", err)
+	}
+	t.Cleanup(func() { _ = runner.Close(context.Background()) })
+
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+		opts: config.Options{
+			Bypass:    true,
+			Hooks:     list,
+			APIKeyEnv: "STARTUP_KEY",
+		},
+		entry:    config.ServerEntry{Endpoint: "http://box.example/v1"},
+		apiKey:   "sk-test",
+		roots:    roots,
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		beat:     firingBeat,
+		recordID: "2026-09-06T09-00-00-firing",
+		hooks:    runner,
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+
+	if cfg.Events != domain.EventSink(runner) {
+		t.Errorf("cfg.Events = %v, want the Runner the Driver built — a Firing fires the "+
+			"`hooks:` list through the sink it was handed", cfg.Events)
+	}
+	for _, want := range []string{"STARTUP_KEY", "NOTIFY_TOKEN"} {
+		if !slices.Contains(cfg.SecretEnvVars, want) {
+			t.Errorf("SecretEnvVars = %v, want it to carry %q — both the key sources and the "+
+				"Hook header sources are scrubbed out of a subprocess the model chose",
+				cfg.SecretEnvVars, want)
+		}
+	}
+}
+
+// The lookup-only roster the `file-changed` derivation asks. A Firing holds no live registry, so
+// this seam is the whole of what makes the event derivable at an unattended root: it must name a
+// write tool's target and stay silent about a read.
+func TestFiringWriteTargetNamesAWriteAndNothingElse(t *testing.T) {
+	t.Parallel()
+
+	workspace := readFenceRealDir(t)
+	writeTarget := firingWriteTarget(workspace)
+
+	path, ok := writeTarget(domain.ToolCall{
+		ID:        "call-1",
+		Tool:      "write_file",
+		Arguments: []byte(`{"path":"notes/a.txt","content":"hi"}`),
+	})
+	if !ok {
+		t.Fatal("the roster named no target for a write_file call; `file-changed` would never fire")
+	}
+	if want := filepath.Join(workspace, "notes", "a.txt"); path != want {
+		t.Errorf("write target = %q, want the workspace-resolved %q", path, want)
+	}
+
+	if _, ok := writeTarget(domain.ToolCall{
+		ID:        "call-2",
+		Tool:      "read_file",
+		Arguments: []byte(`{"path":"notes/a.txt"}`),
+	}); ok {
+		t.Error("the roster named a target for read_file; only a workspace-scoped WRITER changes a file")
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -277,6 +278,35 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		return schedule.Outcome{}, err
 	}
 
+	// This Firing's own Hook Runner (ADR 0073), built as soon as the workspace it is rooted in is
+	// known — a daemon's workspace is the SCHEDULE ENTRY's, so two adopted schedules can be rooted
+	// in two different trees and the `workspace:` filter has to be compared against the one this
+	// tick runs in.
+	//
+	// Per Firing rather than per daemon for that reason and one more: the Schedule this run belongs
+	// to is stamped onto every payload the Runner hands out, so a Hook can tell "the 6am docs sweep
+	// finished" from "the nightly audit finished" without a single field of per-event plumbing.
+	//
+	// A Hook's trouble goes on the daemon log, which is this Driver's whole user interface (ADR 0034
+	// decision 10), through daemonLogWriter rather than daemonLog.line — the writer is the sanitiser
+	// this journal's one-line-per-event shape needs, and it takes the report as DATA, so a `%` in
+	// some script's stderr is a percent sign rather than a format verb.
+	//
+	// The drain is deferred here rather than after the composition below, so a Firing refused by the
+	// offline gate — or by a composition that failed — takes its workers down with it. A daemon runs
+	// for weeks; a Runner leaked per refused tick is a leak that accumulates.
+	hookRunner, err := firingHooks(w.opts.Hooks, roots.workspace,
+		&hooks.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName},
+		func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) })
+	if err != nil {
+		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's hooks: %w", entry.Name, err)
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
+		defer cancel()
+		_ = hookRunner.Close(closeCtx)
+	}()
+
 	// The confinement posture THIS Firing runs under, said now that its mode and its workspace are
 	// both known — the two facts the launch path has at startup and a daemon does not, because a
 	// schedule entry carries its own mode and its own tree (ADR 0034).
@@ -344,6 +374,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		model:     entry.Run.Model,
 		mode:      f.Mode,
 		recordID:  recordID,
+		hooks:     hookRunner,
 	})
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)

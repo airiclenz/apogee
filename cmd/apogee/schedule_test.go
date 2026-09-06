@@ -26,6 +26,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -1350,5 +1351,64 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 	if got := stub.spec.Config.EffortDialect; got != domain.EffortDialectOpenAI {
 		t.Errorf("the firing speaks EffortDialect %q, want the %q this session's own beat observed",
 			got, domain.EffortDialectOpenAI)
+	}
+}
+
+// A Firing raised inside a session composes its Hooks from the list the session is running NOW —
+// the one a config reload wrote back through setHooks — and never from the list the process
+// launched with (ADR 0037: a Firing sees what the session sees). The two entries write different
+// markers, so a Runner built from the boot list fails on both halves at once.
+func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
+	requireHookShell(t)
+
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	dir := t.TempDir()
+	bootMarker, reloadedMarker := filepath.Join(dir, "boot.json"), filepath.Join(dir, "reloaded.json")
+	recorder := func(name, marker string) hooks.Hook {
+		return hooks.Hook{
+			Name:    name,
+			Events:  []hooks.Event{hooks.ExchangeFinished},
+			Command: []string{"sh", "-c", `cat > "$0"`, marker},
+			Timeout: 10 * time.Second,
+		}
+	}
+
+	stub := &stubRunner{emit: func(sink domain.EventSink) {
+		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	}}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	live := newLiveSettings(config.Options{Hooks: []hooks.Hook{recorder("boot", bootMarker)}}, nil)
+	live.setHooks([]hooks.Hook{recorder("reloaded", reloadedMarker)})
+
+	w := scheduleWiring{
+		roots:   roots,
+		live:    live,
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 1 },
+	}
+	if _, err := w.fire(context.Background(), schedule.Firing{
+		ScheduleID:   "sch-1-abcd",
+		ScheduleName: "Nightly build",
+		Prompt:       "check the build",
+		Mode:         domain.ModePlan,
+	}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	payload := readHookPayload(t, reloadedMarker)
+	if payload.Hook != "reloaded" {
+		t.Errorf("the payload names the Hook %q, want the reloaded entry's own name", payload.Hook)
+	}
+	if payload.Schedule == nil || payload.Schedule.Name != "Nightly build" {
+		t.Errorf("the payload names the Schedule %+v, want the Firing's own", payload.Schedule)
+	}
+	if _, err := os.Stat(bootMarker); err == nil {
+		t.Error("the boot list's Hook fired; a Firing must run the Hooks the session is running now")
 	}
 }
