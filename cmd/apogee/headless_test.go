@@ -2395,7 +2395,7 @@ func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
 // Config.Tools nil and the engine builds its own, so the Driver has nothing to ask where a write
 // landed — it builds a lookup-only roster instead (firingWriteTarget), and this is the proof that
 // roster answers for a real write the run announced.
-func TestHeadlessDerivesFileChangedFromItsOwnRoster(t *testing.T) {
+func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 	requireHookShell(t)
 
 	marker := filepath.Join(t.TempDir(), "changed.json")

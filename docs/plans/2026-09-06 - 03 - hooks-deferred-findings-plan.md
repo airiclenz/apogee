@@ -144,7 +144,7 @@ go test ./cmd/apogee -run '^TestHookRunnerReplaceNeverReportsOnTheCallersGorouti
 
 **Commit.** `test(hooks): give the Replace off-caller test a real barrier and a live assertion`
 
-## 3. Rename the file-changed roster test into the hook family (apogee-apz.3)
+## 3. Rename the file-changed roster test into the hook family (apogee-apz.3) — ✅ DONE (2026-09-06)
 
 **What.** `cmd/apogee/headless_test.go:2398` `TestHeadlessDerivesFileChangedFromItsOwnRoster`
 is not matched by `Headless.*Hook` — the pattern the archived hooks plan's item 8 Acceptance
