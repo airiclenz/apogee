@@ -1040,20 +1040,44 @@ func autocompleteTitle(kind acKind) string {
 // and the ask prompt use — a menu that quietly showed nothing while its hint still read "↑/↓
 // select" would be the browser's silent-drop defect wearing this pane's title.
 func (m Model) renderAutocomplete() string {
+	view, _ := m.renderAutocompletePlaced()
+	return view
+}
+
+// renderAutocompletePlaced is that paint with the painter's PLACEMENT beside it, for the pointer
+// (popupPaneHit, mouse.go): a click reads the row it landed on off the numbers the painter spent
+// rather than off a second arithmetic of its own — this menu's title, hint, row cap and scroll
+// window re-derived in the click chain could disagree with the frame the human aimed at, and on the
+// one pane that moves under every keystroke they would. renderAutocomplete above is this call with
+// the placement dropped.
+func (m Model) renderAutocompletePlaced() (string, popupPlacement) {
+	c, ok := m.autocompleteListContent()
+	if !ok {
+		return "", popupPlacement{}
+	}
+	view, place, _ := m.renderListPlaced(c)
+	return view, place
+}
+
+// autocompleteListContent is everything this overlay says about itself to the shared list surface —
+// its slot, its name, its legend, its taste in rows, the rows and which of them the highlight is on.
+// ok is false with the menu inactive or empty, which is the predicate openPanes keeps (model.go) and
+// what makes both renders above answer with nothing rather than with a pane.
+func (m Model) autocompleteListContent() (listContent, bool) {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 {
-		return ""
+		return listContent{}, false
 	}
 	rows := make([]popupRow, len(ac.items))
 	for i, it := range ac.items {
 		rows[i] = it.cells
 	}
-	return m.renderList(listContent{
+	return listContent{
 		pane:     paneDropdown,
 		title:    autocompleteTitle(ac.kind),
 		hint:     autocompleteHint,
 		rowCap:   maxAutocompleteItems,
 		rows:     rows,
 		selected: ac.highlight(len(rows)),
-	})
+	}, true
 }

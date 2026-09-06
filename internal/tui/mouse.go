@@ -430,7 +430,11 @@ func (a clickArm) holds(pane framePane, row int) bool {
 // pane with nothing to decide DISMISSES, and what it does with the click AFTER that is the pane's
 // kind: the report trio does not claim, so the click goes on to whatever it named, while the two
 // MODAL lists — the picker and the /sessions browser — dismiss AND CLAIM, because a modal is what the
-// human was looking at and the click that closed it is spent on closing it. A DECISION pane — the
+// human was looking at and the click that closed it is spent on closing it. The "/" | "@" DROPDOWN
+// dismisses and CONTINUES, the report trio's answer, because it is the one list that is not modal at
+// all: it hangs over a chat box the human is still typing in, so the click that closed it is very
+// often the click that seats the caret in that box — and it decides nothing, the next keystroke in
+// the box deriving it back. A DECISION pane — the
 // ask prompt, and the approval prompt beside it — keeps
 // standing and simply does not claim, so the click FALLS THROUGH to the footer, the prompt and the
 // transcript below. The fall-through is not a detail: [Model.inputEditable] promises the prompt to the
@@ -494,6 +498,15 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if approval, cmd, claimed := m.handleApprovalClick(pre, msg); claimed {
 		return approval, cmd
 	}
+	// The "/" | "@" dropdown closes the chain of panes: it is the input slot's OWN tenant, drawn
+	// flush over the box rather than over the transcript (foldMouseWheel's reason for asking it
+	// last), and it answers in the report trio's currency — a click outside it dismisses the menu
+	// and travels on (handleDropdownClick).
+	dropdown, cmd, claimed := m.handleDropdownClick(pre, msg)
+	if claimed {
+		return dropdown, cmd
+	}
+	m = dropdown
 	// The footer's mode marker is the frame's one CHROME control ([Model.handleFooterModeClick]): a
 	// click on it opens the mode picker. It is asked after the panes that draw OVER the transcript —
 	// they can cover any row, the footer's included, and a click on a pane belongs to the pane — and
@@ -1635,6 +1648,70 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 	}
 	m.approvalSel.seat(row, len(approvalMenu))
 	m.clickArmed = clickArm{pane: panePrompt, row: row, ok: true}
+	return m, nil, true
+}
+
+// ----------------------------------------------------------------------------
+// Mouse in the "/" | "@" dropdown (autocomplete.go)
+// ----------------------------------------------------------------------------
+
+// handleDropdownClick answers a left-click while the "/" | "@" menu is up. The pointer does what the
+// keyboard does on this pane and no more: a click on a row moves the highlight onto it, the way ↑/↓
+// do, and a SECOND click on that same row accepts it — the tab spelling (acceptAutocomplete),
+// unconditionally, never ⏎'s fall-through to submit on an already-typed token
+// (autocompleteExactMatch): tab is the key a dropdown over a text box is completed with, and it is
+// the one whose answer never depends on what the box happens to hold.
+//
+// Two clicks ALWAYS, and on this pane the arm (clickArm, model.go) is what keeps that honest. The
+// menu opens with row 0 already highlighted (computeAutocomplete), row 0 of the "/" menu is /clear
+// (the alphabetical table, command.go) and accepting /clear RUNS it — so a handler that activated
+// whatever the highlight already sat on would throw away the session on the pointer's FIRST press.
+// The row an activating click may take is the row the POINTER put the highlight on, and the menu's
+// own default is never one of those.
+//
+// A click OUTSIDE the box DISMISSES the menu and then goes on down the chain unclaimed — the report
+// trio's currency (handleUsageClick, usage.go) rather than the modals' dismiss-and-claim (call C as
+// the owner amended it). This is the one list of the package that is NOT modal: it hangs over a chat
+// box the human is still typing in, which is what its keys and its wheel already say
+// (autocompleteKey, dropdownWheel), so the click that closes it is very often the click that seats
+// the caret in that box or starts a drag over the transcript, and swallowing it would cost the human
+// the gesture they actually made. Nothing is decided by the dismissal: the menu is DERIVED from the
+// token in the box (recomputeAutocomplete) and the next keystroke there puts it back.
+//
+// Inside the box but on no row — the title, a pad line, the hint, a border — the click is the pane's
+// and does nothing, exactly as it is on the four panes above: "not on a row" is the pane's chrome and
+// "not on the pane" is somebody else's frame, and only the second one dismisses.
+//
+// The open gate comes BEFORE the rectangle, as dropdownWheel's does (autocomplete.go): ungated,
+// inRect == false cannot tell "no menu on the frame" from "a click outside the menu", so every click
+// in the program would pay a layout() and clear the skillRegion edge-trigger the menu's dismissal
+// carries with it.
+//
+// pre is the pre-click frame the pane is placed from and the live model is what mutates
+// (handleMouseClick's rule); the geometry is composed from pre's own menu, so a second click reads
+// the frame the human aimed at rather than one an accept has already re-derived.
+func (m Model) handleDropdownClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	if !m.openPanes().has(paneDropdown) || !pre.openPanes().has(paneDropdown) {
+		return m, nil, false
+	}
+	row, inRect, onRow := popupPaneHit(pre, paneDropdown, pre.renderAutocompletePlaced, msg.Y)
+	if !inRect {
+		m.dismissAutocomplete() // outside a menu that decides nothing: it closes, and the click travels on
+		m.layout()              // the menu's rows go back to the transcript, which moves the scroll clamp with them
+		return m, nil, false
+	}
+	if !onRow {
+		return m, nil, true // the pane's chrome: claimed, with no row to take
+	}
+	if m.clickArmed.holds(paneDropdown, row) {
+		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
+		// the next gesture to drop, because the menu it belonged to is being accepted from.
+		m.clickArmed = clickArm{}
+		next, cmd := acceptedModel(m.acceptAutocomplete())
+		return next, cmd, true
+	}
+	m.autocomplete.seat(row, len(m.autocomplete.items))
+	m.clickArmed = clickArm{pane: paneDropdown, row: row, ok: true}
 	return m, nil, true
 }
 

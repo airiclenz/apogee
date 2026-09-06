@@ -294,9 +294,18 @@ and the comment now says so.
 
 **Commit:** `feat(tui): the picker and the /sessions browser take a click`
 
-## 11. Click on the / dropdown
+## 11. Click on the / dropdown — ✅ DONE (2026-09-06)
 
 Depends on item 10.
+
+NOTES (2026-09-06): the plan document's own call C wording is stale; the dispatch's DECISION
+(owner narrowing, commit a8f8ec73) governs — the dropdown's outside click dismisses and CONTINUES
+unclaimed, and the rule's branch list in `handleMouseClick`'s doc block gained the dropdown's case
+rather than being restated in the handler.
+
+NOTES (2026-09-06): the reducer case for "an outside click in the box dismisses and seats the
+caret" drives the `/c` menu rather than `/con` — `dropdownPaneModel` requires three rows to place a
+click against and `/con` opens only two.
 
 **What.** Recast at the regression check (2026-09-06). `mouse.go`: `handleDropdownClick` last in the slot (the dropdown is the input-slot tenant — `foldMouseWheel:1436-1440`'s reason), geometry via `popupPaneHit` over the autocomplete spec. Row hit ≠ `selected` → highlight; row hit == `selected` → `m.acceptAutocomplete()` unconditionally (the `tab` spelling, never `⏎`'s exact-match decline at `autocomplete.go:684-716`). Outside the rect → `m.dismissAutocomplete(); m.layout()` and let the click CONTINUE down the chain (call C amended, the `handleUsageClick` currency) — it still reaches the box and the transcript.
 

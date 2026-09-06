@@ -5182,6 +5182,166 @@ func TestDropdownWheelYieldsToAModalPrompt(t *testing.T) {
 	}
 }
 
+// dropdownItemRow reports which of the open menu's rows carries value — the index the highlight is
+// asserted against, read off the menu itself rather than counted out of the alphabetical table by
+// hand, so a new verb cannot quietly move what these cases are aiming at.
+func dropdownItemRow(t *testing.T, m Model, value string) int {
+	t.Helper()
+	for i, it := range m.autocomplete.items {
+		if it.value == value {
+			return i
+		}
+	}
+	t.Fatalf("the open menu offers no %q row; it offers %d", value, len(m.autocomplete.items))
+	return 0
+}
+
+// The pointer takes two clicks to answer the dropdown, and the first one only moves the highlight
+// (call J, owner 2026-09-06). The row clicked is /confine — a verb that takes arguments and does not
+// run bare, so its accept SPLICES "/confine " into the box (acceptAutocomplete) and the box is where
+// the answer can be read. It is also why an unconditional accept on the first press would be a
+// defect rather than a shortcut: the menu opens on /clear, whose accept throws the session away.
+func TestDropdownClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
+	m := dropdownPaneModel(t, testOpts, "/")
+	want := dropdownItemRow(t, m, "confine")
+	if want == m.autocomplete.selected {
+		t.Fatalf("/confine is already the highlighted row (%d); the case needs a row the pane did not pick", want)
+	}
+	x, y := frameCell(t, m, "/confine")
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.autocomplete.selected != want {
+		t.Fatalf("selected = %d after a click on /confine, want the highlight seated on %d", m.autocomplete.selected, want)
+	}
+	if !m.clickArmed.holds(paneDropdown, want) {
+		t.Errorf("the click armed %+v, want the row it highlighted", m.clickArmed)
+	}
+	if !m.autocomplete.active {
+		t.Fatal("the first click closed the menu; a single click may never accept from it")
+	}
+	if m.input.Value() != "/" {
+		t.Errorf("the box reads %q after one click, want the draft untouched", m.input.Value())
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.input.Value() != "/confine " {
+		t.Fatalf("the box reads %q after the second click, want tab's own splice %q", m.input.Value(), "/confine ")
+	}
+	if m.autocomplete.active {
+		t.Error("the accept left the menu open")
+	}
+	if m.clickArmed.ok {
+		t.Errorf("the arm outlived the accept: %+v", m.clickArmed)
+	}
+}
+
+// The activating click is the TAB spelling, unconditionally — never ⏎'s fall-through to submit on a
+// token that is already fully typed (autocompleteExactMatch). With "/confine" typed out the keyboard
+// ⏎ hands the draft to the box; the pointer, which has no other way to accept the row it is aiming
+// at, splices it.
+func TestDropdownClickAcceptsThroughAnExactMatchTheEnterKeyWouldDecline(t *testing.T) {
+	m := modelWithOverlayRoomAt(t, 100, 30, testOpts)
+	m.input.SetValue("/confine")
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+	m.layout()
+	if !m.autocompleteExactMatch() {
+		t.Fatal("the draft is not an exact match; this case is about the one ⏎ declines")
+	}
+	x, y := frameCell(t, m, "report or change auto mode's blast radius")
+
+	m = step(t, m, leftClick(x, y))
+	m = step(t, m, leftClick(x, y))
+
+	if m.input.Value() != "/confine " {
+		t.Errorf("the box reads %q after two clicks, want the tab splice %q", m.input.Value(), "/confine ")
+	}
+	if m.state != stateIdle {
+		t.Errorf("state = %v, want the clicks to have completed the token rather than submitted it", m.state)
+	}
+}
+
+// Inside the box but on no row — here the menu's own key legend — the click is the pane's and does
+// nothing: no highlight moves, no arm is taken, and the menu stays exactly as it stood. Dismissal is
+// reserved for a click OUTSIDE the rectangle, which is a different click entirely.
+func TestDropdownClickOnTheHintRowDoesNothing(t *testing.T) {
+	m := dropdownPaneModel(t, testOpts, "/")
+	x, y := frameCell(t, m, "esc dismiss")
+
+	after := step(t, m, leftClick(x, y))
+
+	if !after.autocomplete.active {
+		t.Fatal("a click on the menu's own legend dismissed it")
+	}
+	if after.autocomplete.selected != m.autocomplete.selected {
+		t.Errorf("selected = %d after a click on the legend, want it left at %d",
+			after.autocomplete.selected, m.autocomplete.selected)
+	}
+	if after.clickArmed.ok {
+		t.Errorf("a click on the pane's chrome armed a row: %+v", after.clickArmed)
+	}
+	if after.transcriptSel.active || after.sel.active {
+		t.Error("the swallowed click armed a selection underneath the pane")
+	}
+}
+
+// Outside the box the dropdown DISMISSES and lets the click CONTINUE down the chain (call C as the
+// owner amended it, 2026-09-06). The click aimed at here is the one a human actually makes: into the
+// chat box the menu hangs over. The menu closes AND the caret seats where they pointed — a
+// dismiss-and-claim would have cost them the seat and left them clicking twice for it.
+func TestDropdownClickInTheBoxDismissesTheMenuAndSeatsTheCaret(t *testing.T) {
+	m := dropdownPaneModel(t, testOpts, "/c")
+	x0, y0, _, _ := m.inputContentRect()
+	if _, _, ok := m.frameSpans().pane(paneDropdown); !ok {
+		t.Fatal("the menu is not on the frame; there is nothing for the click to dismiss")
+	}
+
+	m = step(t, m, leftClick(x0+2, y0))
+
+	if m.autocomplete.active {
+		t.Fatal("the click in the box left the menu standing")
+	}
+	if m.input.Value() != "/c" {
+		t.Errorf("the box reads %q, want the dismissing click to leave the draft alone", m.input.Value())
+	}
+	if col := m.input.Column(); col != 2 {
+		t.Errorf("caret column = %d after the click, want 2 — the dismissal may not swallow the seat", col)
+	}
+	if !m.sel.active {
+		t.Error("the click armed no prompt selection; the caret seat is the prompt's")
+	}
+	if m.transcriptSel.active {
+		t.Error("the click armed a transcript selection as well as the caret seat")
+	}
+}
+
+// With the menu SHUT, a click in the band it would have filled is nobody's but the transcript's: the
+// open gate is asked before the rectangle (dropdownWheel's reason), so a handler cannot dismiss a
+// menu that is not there — the skillRegion edge-trigger a dismissal clears survives untouched — or
+// pay a layout() on every click in the program.
+func TestClickWhereAClosedDropdownWouldStandDismissesNothing(t *testing.T) {
+	open := dropdownPaneModel(t, testOpts, "/")
+	paneTop, h, ok := open.frameSpans().pane(paneDropdown)
+	if !ok {
+		t.Fatal("the menu is not on the frame; there is no band to aim at")
+	}
+	shut := modelWithOverlayRoomAt(t, 100, 30, testOpts)
+	shut.skillRegion = true
+
+	after := step(t, shut, leftClick(0, paneTop+h/2))
+
+	if !after.transcriptSel.active {
+		t.Error("the click armed no transcript selection; with no menu up the band is the transcript's")
+	}
+	if !after.skillRegion {
+		t.Error("the click cleared the skillRegion edge-trigger; with no menu up there is nothing to dismiss")
+	}
+	if after.clickArmed.ok {
+		t.Errorf("a click on a frame carrying no dropdown armed a row: %+v", after.clickArmed)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // The footer's mode marker as a pointer target (handleFooterModeClick, mouse.go)
 // ----------------------------------------------------------------------------

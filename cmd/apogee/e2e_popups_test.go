@@ -44,8 +44,19 @@ const (
 
 	// The headings the three list pop-ups paint — the one text on each that does not scroll.
 	dropdownTitle = "commands and skills"
-	pickerTitle   = "schedule — how often"
-	browserHint   = "type to filter · ↑/↓ select · ⏎ resume"
+
+	// The dropdown row the pointer is aimed at and the token its accept splices into the box.
+	// /confine takes arguments and does not run bare (command.go), so accepting it COMPLETES and
+	// waits — the one menu row whose activation is readable on the frame and runs nothing.
+	dropdownConfineRow   = "report or change auto mode's blast radius"
+	dropdownConfineToken = "/confine "
+
+	// The box's own content once a second "/" reopens the menu over the accepted verb. The token
+	// alone would also match the menu's /confine ROW, and the click that has to be aimed at the box
+	// is the whole point of the case, so the draft is spelled out.
+	dropdownBoxDraft = "/confine /"
+	pickerTitle      = "schedule — how often"
+	browserHint      = "type to filter · ↑/↓ select · ⏎ resume"
 
 	// The /schedule round the picker click drives, and the rows and the confirmation line it is
 	// steered by: the cycle gloss and the mode gloss are each unique on the frame, so the pointer is
@@ -374,6 +385,67 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	drv.WaitText("popups")
 	drv.Press(tuitest.Enter)
 	drv.WaitGone(askFreeHint)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// TestE2EPopupClickDropdown drives the `/` menu with the pointer, through the same SGR bytes. The
+// dropdown is the fifth and last of the clickable pop-ups and the only NON-modal one: it hangs over
+// a chat box the human is still typing in, so what this adds to the reducer tests
+// (internal/tui/mouse_test.go) is the two claims only a real program can make — that two clicks on a
+// row splice its verb into the box the way tab does, and that a click in the box below dismisses the
+// menu without costing the human the caret seat they aimed at.
+//
+// The row clicked is `/confine`, which takes arguments and does not run bare (command.go), so its
+// accept completes to `/confine ` and waits: the answer is READABLE in the box, and nothing runs.
+// `/compact` and the menu's own first row `/clear` would both RUN on accept, which is exactly what
+// the two-click rule exists to keep a stray press away from.
+func TestE2EPopupClickDropdown(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "popups"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+
+	drv.Type("/")
+	drv.WaitText(dropdownTitle)
+	drv.WaitQuiet(settled)
+	x, y, ok := drv.Frame().Find(dropdownConfineRow)
+	if !ok {
+		t.Fatalf("the dropdown paints no %q row:\n%s", dropdownConfineRow, drv.Frame())
+	}
+
+	// The menu opens on /clear, so the first click on /confine only moves the ❯ onto it and arms it.
+	click(drv, x, y)
+	drv.WaitFor(func() bool { return strings.Contains(drv.Frame().Row(y), popupMenuMarker) },
+		tuitest.Awaiting("the ❯ to move onto the clicked /confine row"))
+	drv.WaitQuiet(settled)
+	if !strings.Contains(drv.Frame().String(), dropdownTitle) {
+		t.Fatalf("a single click accepted from the menu:\n%s", drv.Frame())
+	}
+
+	// The second click on that row is tab: the verb is spliced into the box and the menu closes.
+	click(drv, x, y)
+	drv.WaitGone(dropdownTitle)
+	drv.WaitText(dropdownConfineToken)
+
+	// And a click in the box below a menu that is up dismisses it and seats the caret there, rather
+	// than being spent on the dismissal the way a modal list spends it.
+	drv.Type("/")
+	drv.WaitText(dropdownTitle)
+	drv.WaitQuiet(settled)
+	boxX, boxY, ok := drv.Frame().Find(dropdownBoxDraft)
+	if !ok {
+		t.Fatalf("the input box does not read %q:\n%s", dropdownBoxDraft, drv.Frame())
+	}
+
+	click(drv, boxX, boxY)
+	drv.WaitGone(dropdownTitle)
+	drv.WaitQuiet(settled)
+	if !strings.Contains(drv.Frame().String(), dropdownBoxDraft) {
+		t.Fatalf("the dismissing click ate the draft:\n%s", drv.Frame())
+	}
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
