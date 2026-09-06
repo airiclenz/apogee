@@ -1,0 +1,308 @@
+package hooks
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
+
+// allSubscribed is the set a run with a Hook on every event is built over.
+func allSubscribed() map[Event]bool {
+	return SubscribedEvents([]Hook{{Events: Events()}})
+}
+
+// writeTargetFor answers like tools.WorkspaceWriteTarget over a registry holding only apogee's
+// own write tools: a write reports its destination, a reader reports nothing.
+func writeTargetFor(t *testing.T, calls *int) WriteTarget {
+	t.Helper()
+	writers := map[string]bool{"write_file": true, "edit_file": true, "delete_file": true, "move_file": true}
+	return func(call domain.ToolCall) (string, bool) {
+		*calls++
+		if !writers[call.Tool] {
+			return "", false
+		}
+		return "/work/repo/" + call.ID + ".txt", true
+	}
+}
+
+// TestMatchTurnBoundary — a Depth-0 boundary fires turn-finished, and a Depth-0 boundary that
+// CLOSED its Exchange fires both, boundary first. A sub-agent's Turn fires neither.
+func TestMatchTurnBoundary(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		event domain.TurnEvent
+		want  []Event
+	}{
+		{
+			name:  "a depth-1 turn yields nothing",
+			event: domain.TurnEvent{EventBase: domain.EventBase{Depth: 1, Turn: 2}, Status: domain.StatusExchangeComplete},
+			want:  nil,
+		},
+		{
+			name:  "a depth-0 turn-complete yields the boundary alone",
+			event: domain.TurnEvent{EventBase: domain.EventBase{Turn: 2}, Status: domain.StatusTurnComplete},
+			want:  []Event{TurnFinished},
+		},
+		{
+			name: "a depth-0 exchange-complete yields both, boundary first",
+			event: domain.TurnEvent{
+				EventBase: domain.EventBase{Turn: 3}, Status: domain.StatusExchangeComplete,
+				Faulted: true, StepCapped: true,
+			},
+			want: []Event{TurnFinished, ExchangeFinished},
+		},
+		{
+			name:  "a cancelled depth-0 turn yields the boundary alone",
+			event: domain.TurnEvent{EventBase: domain.EventBase{Turn: 4}, Status: domain.StatusCancelled},
+			want:  []Event{TurnFinished},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := newMatcher(allSubscribed(), nil).match(c.event)
+
+			assertEvents(t, got, c.want)
+			for _, f := range got {
+				if f.Payload.Status != string(c.event.Status) {
+					t.Errorf("payload status = %q, want %q", f.Payload.Status, c.event.Status)
+				}
+				if f.Payload.Faulted != c.event.Faulted || f.Payload.StepCapped != c.event.StepCapped {
+					t.Errorf("payload faulted/step-capped = %v/%v, want %v/%v",
+						f.Payload.Faulted, f.Payload.StepCapped, c.event.Faulted, c.event.StepCapped)
+				}
+				if f.Payload.Turn != c.event.Turn || f.Payload.Depth != c.event.Depth {
+					t.Errorf("payload turn/depth = %d/%d, want %d/%d",
+						f.Payload.Turn, f.Payload.Depth, c.event.Turn, c.event.Depth)
+				}
+			}
+		})
+	}
+}
+
+// TestMatchTurnBoundaryHonoursTheSubscribedSet — a run whose only Hook wants the closure never
+// hears about the plain boundary, and the reverse.
+func TestMatchTurnBoundaryHonoursTheSubscribedSet(t *testing.T) {
+	t.Parallel()
+
+	closed := domain.TurnEvent{EventBase: domain.EventBase{Turn: 1}, Status: domain.StatusExchangeComplete}
+
+	onlyExchange := newMatcher(map[Event]bool{ExchangeFinished: true}, nil).match(closed)
+	onlyTurn := newMatcher(map[Event]bool{TurnFinished: true}, nil).match(closed)
+
+	assertEvents(t, onlyExchange, []Event{ExchangeFinished})
+	assertEvents(t, onlyTurn, []Event{TurnFinished})
+}
+
+// TestMatchApproval — the RAISED gate is the event; the verdict is deliberately not one.
+func TestMatchApproval(t *testing.T) {
+	t.Parallel()
+
+	request := domain.ApprovalRequest{
+		Tool: "terminal", Reason: "write", Remedy: "run `apogee doctor`",
+		SubAgentName: "docs sweep", Scope: "reads the package directory",
+	}
+
+	requested := newMatcher(allSubscribed(), nil).match(domain.ApprovalEvent{
+		EventBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-2"},
+		Phase:     domain.ApprovalRequested, Request: request,
+	})
+	decided := newMatcher(allSubscribed(), nil).match(domain.ApprovalEvent{
+		EventBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-2"},
+		Phase:     domain.ApprovalDecided, Request: request, Decision: domain.ApprovalAllow,
+	})
+
+	assertEvents(t, requested, []Event{ApprovalWaiting})
+	assertEvents(t, decided, nil)
+	got := requested[0].Payload
+	if got.Tool != "terminal" || got.Reason != "write" || got.Remedy != "run `apogee doctor`" ||
+		got.SubAgentName != "docs sweep" || got.Scope != "reads the package directory" {
+		t.Errorf("approval payload = %+v, want the request's fields carried through", got)
+	}
+	if got.Depth != 1 || got.Turn != 4 || got.CallID != "call-2" {
+		t.Errorf("approval payload identity = %d/%d/%q, want 1/4/\"call-2\"", got.Depth, got.Turn, got.CallID)
+	}
+}
+
+// TestMatchError — a recovered fault at any depth.
+func TestMatchError(t *testing.T) {
+	t.Parallel()
+
+	got := newMatcher(allSubscribed(), nil).match(domain.ErrorEvent{
+		EventBase: domain.EventBase{Depth: 2, Turn: 5, CallID: "call-9"},
+		Source:    "terminal", Err: "exit status 1",
+	})
+
+	assertEvents(t, got, []Event{Error})
+	if got[0].Payload.Source != "terminal" || got[0].Payload.Error != "exit status 1" {
+		t.Errorf("error payload = %+v, want the source and message carried through", got[0].Payload)
+	}
+	if got[0].Payload.Depth != 2 {
+		t.Errorf("error payload depth = %d, want 2 — an error fires at any depth", got[0].Payload.Depth)
+	}
+}
+
+// TestMatchFileChanged walks a write from its call to its result, which is the only place the
+// tool name, the destination and the success are all known.
+func TestMatchFileChanged(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		tool    string
+		isError bool
+		want    []Event
+	}{
+		{name: "a successful write fires", tool: "write_file", want: []Event{FileChanged}},
+		{name: "a delete reports its destination", tool: "delete_file", want: []Event{FileChanged}},
+		{name: "an erroring write fires nothing", tool: "write_file", isError: true, want: nil},
+		{name: "a read never fires", tool: "read_file", want: nil},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			calls := 0
+			m := newMatcher(allSubscribed(), writeTargetFor(t, &calls))
+			call := domain.ToolCall{ID: "call-7", Tool: c.tool}
+
+			assertEvents(t, m.match(domain.ToolCallEvent{Call: call}), nil)
+			got := m.match(domain.ToolResultEvent{
+				EventBase: domain.EventBase{Depth: 1, Turn: 2},
+				Result:    domain.ToolResult{CallID: call.ID, IsError: c.isError},
+			})
+
+			assertEvents(t, got, c.want)
+			if len(got) == 1 {
+				if got[0].Payload.Tool != c.tool || got[0].Payload.Path != "/work/repo/call-7.txt" {
+					t.Errorf("file-changed payload = %+v, want the tool and its destination", got[0].Payload)
+				}
+			}
+			if len(m.pending) != 0 {
+				t.Errorf("%d pending entries remain, want the entry dropped on its result", len(m.pending))
+			}
+		})
+	}
+}
+
+// TestMatchFileChangedIgnoresAnUnknownResult — a result whose call was never remembered (a read,
+// a call from before the Hook set was replaced) closes nothing and fires nothing.
+func TestMatchFileChangedIgnoresAnUnknownResult(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	m := newMatcher(allSubscribed(), writeTargetFor(t, &calls))
+
+	got := m.match(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "never-seen"}})
+
+	assertEvents(t, got, nil)
+}
+
+// TestMatchPendingWritesAreBounded — a call whose result never arrives would otherwise leak an
+// entry for the life of the session, so the map refuses to grow past the cap.
+func TestMatchPendingWritesAreBounded(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	m := newMatcher(allSubscribed(), writeTargetFor(t, &calls))
+
+	for i := 0; i < maxPendingWrites+50; i++ {
+		m.match(domain.ToolCallEvent{Call: domain.ToolCall{ID: fmt.Sprintf("call-%d", i), Tool: "write_file"}})
+	}
+
+	if len(m.pending) != maxPendingWrites {
+		t.Errorf("pending = %d entries, want it capped at %d", len(m.pending), maxPendingWrites)
+	}
+}
+
+// TestMatchNeverAsksWriteTargetWhenFileChangedIsUnsubscribed is the item's regression guard: a
+// matcher built over a set that does not hold file-changed does no work at all for a write —
+// no WriteTarget call, no pending entry — so an unsubscribed run pays nothing for the feature.
+func TestMatchNeverAsksWriteTargetWhenFileChangedIsUnsubscribed(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	m := newMatcher(map[Event]bool{TurnFinished: true, Error: true}, writeTargetFor(t, &calls))
+	call := domain.ToolCall{ID: "call-7", Tool: "write_file"}
+
+	assertEvents(t, m.match(domain.ToolCallEvent{Call: call}), nil)
+	assertEvents(t, m.match(domain.ToolResultEvent{Result: domain.ToolResult{CallID: call.ID}}), nil)
+
+	if calls != 0 {
+		t.Errorf("WriteTarget was invoked %d times, want 0 when no hook subscribes to file-changed", calls)
+	}
+	if len(m.pending) != 0 {
+		t.Errorf("pending = %d entries, want none when no hook subscribes to file-changed", len(m.pending))
+	}
+}
+
+// TestMatchWithNoActiveHookIsANoOpForEveryEvent — the ordinary case for a user who configured no
+// Hooks at all: the decorator is in the sink chain and costs one map length check per event.
+func TestMatchWithNoActiveHookIsANoOpForEveryEvent(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	m := newMatcher(SubscribedEvents(nil), writeTargetFor(t, &calls))
+	events := []domain.Event{
+		domain.TurnEvent{Status: domain.StatusExchangeComplete},
+		domain.ApprovalEvent{Phase: domain.ApprovalRequested},
+		domain.ErrorEvent{Source: "loop", Err: "boom"},
+		domain.ToolCallEvent{Call: domain.ToolCall{ID: "call-7", Tool: "write_file"}},
+		domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call-7"}},
+		domain.MessageEvent{Text: "hello"},
+	}
+
+	for _, ev := range events {
+		if got := m.match(ev); len(got) != 0 {
+			t.Errorf("match(%T) = %v, want nothing with no active hook", ev, got)
+		}
+	}
+
+	if calls != 0 || len(m.pending) != 0 {
+		t.Errorf("WriteTarget calls = %d, pending = %d, want 0/0", calls, len(m.pending))
+	}
+}
+
+// TestMatchIgnoresEveryOtherVariant — the vocabulary is closed; an event outside it produces
+// nothing even when every Hook event is subscribed.
+func TestMatchIgnoresEveryOtherVariant(t *testing.T) {
+	t.Parallel()
+
+	m := newMatcher(allSubscribed(), nil)
+
+	for _, ev := range []domain.Event{
+		domain.MessageEvent{Text: "hello"},
+		domain.PruneEvent{},
+		domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
+	} {
+		if got := m.match(ev); len(got) != 0 {
+			t.Errorf("match(%T) = %v, want nothing — it is not a hook event", ev, got)
+		}
+	}
+}
+
+// assertEvents compares the events a match produced, in order.
+func assertEvents(t *testing.T, got []firing, want []Event) {
+	t.Helper()
+	if len(got) != len(want) {
+		names := make([]Event, 0, len(got))
+		for _, f := range got {
+			names = append(names, f.Event)
+		}
+		t.Fatalf("match produced %v, want %v", names, want)
+	}
+	for i := range want {
+		if got[i].Event != want[i] {
+			t.Errorf("match produced [%d] = %q, want %q", i, got[i].Event, want[i])
+		}
+		if got[i].Payload.Event != want[i] {
+			t.Errorf("payload [%d] event = %q, want %q", i, got[i].Payload.Event, want[i])
+		}
+	}
+}
