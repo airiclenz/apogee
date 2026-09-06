@@ -145,6 +145,34 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- The facade completeness guard in `example_test.go` now names every exported symbol
+  `apogee.go` re-exports: 18 previously unguarded type aliases (`ApprovalPhase`,
+  `FloorGuardEvent`, `PruneEvent`, `DelegationConfig`, `FloorConfig`,
+  `ContextFilesReport`, `ContextFileNote`, the nine `ToolSummary`…`SearchHits`
+  tool-summary types, `ToolCallEdit`, `ToolResultEdit`) and 9 consts
+  (`ApprovalRequested`, `ApprovalDecided`, `SubAgentStarted`, `SubAgentFinished`,
+  `WireDirectionRequest`, `WireDirectionResponse`, `SeatFallbackNote`,
+  `DelegateReportBlock`, `TaskListFence`). Dropping any of them now breaks the build
+  instead of silently shrinking the public API.
+
+- Renamed `TestHeadlessDerivesFileChangedFromItsOwnRoster` to
+  `TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster` so the file-changed roster case is
+  selected by the `Headless.*Hook` pattern the hook family's targeted runs use.
+
+- The hooks end-to-end tests now assert the absence of hook reports by their emission shape —
+  a pattern derived from the hook names each case configures — instead of a whitelist of the
+  spellings those reports happen to use, and each absence site is guarded by a positive control
+  so an empty capture cannot pass as silence.
+
+- Tests: the two hook end-to-end sites that drive the production `run.Once` now bind and restore
+  `runOnce` themselves (`prev := runOnce` / `t.Cleanup`), instead of leaning on another harness's
+  cleanup and on test ordering — so they hold under `go test -shuffle`.
+
+- The settings-row test that pins which read-only keys open `$EDITOR` now names the whole set
+  `externallyEdited` accepts: `hooks`, `sub-agents-server`, `tools.enabled` and
+  `validated-sets.alias` join the five already listed, so a structured key losing its editor
+  pointer is caught by name rather than only by the general flag-matches-pointer invariant.
+
 - Pop-up panes breathe where they are supposed to: the painter now keeps the blank line above a pane's
   hint even when its row list is empty (the free-text ask box no longer sits flush against its key
   legend), draws that closing blank only where there IS a hint, and reserves both blanks out of the row
