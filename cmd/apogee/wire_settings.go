@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
@@ -64,6 +65,15 @@ type liveSettings struct {
 	// resolved, and re-listing them here is how they would start to drift from what runRoot resolved.
 	// Nothing writes to it; the fields below are what a `/settings` commit moves.
 	boot config.Options
+
+	// hooks mirrors the `hooks:` list the session is running NOW (ADR 0073). It is held beside boot
+	// rather than among the pushed keys below because it is the only key whose live value lives in
+	// two places at once: the session's own Runner holds it (settingsApplier.hooks), and a Firing
+	// raised INSIDE the session builds a Runner of its own out of this projection — so a `hooks:`
+	// edit that reached the session and not the runs it raises would be exactly the drift ADR 0037
+	// abolished. It is written by the reload arm after Runner.Replace has accepted the list, so a
+	// refused edit leaves both the session and this mirror on the list that is actually running.
+	hooks []hooks.Hook
 
 	// pinnedWindow is the `context-window:` key in tokens: > 0 is the user's pin, which outranks
 	// whatever the server reports (ADR 0024 decision 9), and 0 means "discover it, live".
@@ -280,6 +290,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		// rest are: a session nobody edits must hand back exactly the configuration it launched with.
 		searchEndpoint:   opts.WebSearchEndpoint,
 		disabledTools:    opts.ToolsDisabled,
+		hooks:            opts.Hooks,
 		allowHosts:       opts.URLAllowHosts,
 		denyHosts:        opts.URLDenyHosts,
 		bypass:           opts.Bypass,
@@ -692,6 +703,19 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 	s.validatedEnable, s.validatedAlias = enable, alias
 }
 
+// setHooks installs the re-read `hooks:` list the session's Runner has just accepted, so a Firing
+// raised inside this session composes its own Runner from the Hooks the session is running rather
+// than the ones the process launched with (firingSources).
+//
+// It is called AFTER Runner.Replace returned, never before, for setToolSet's reason: a refused list
+// leaves the session firing the Hooks it already had, and a mirror written ahead of the swap would
+// hand a Firing a list this session never ran.
+func (s *liveSettings) setHooks(list []hooks.Hook) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hooks = list
+}
+
 // setToolSet mirrors the spec the live tool set was just BUILT from — the four keys that reach the
 // session through liveTools' swap door. It takes the whole spec rather than the one value that
 // moved because that spec IS what the running set was assembled from (liveTools.built), so the
@@ -829,6 +853,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	// The keys that are PUSHED at a seam and are in force the moment their apply returns. Nothing
 	// re-reads them from here; they are mirrored so this projection can answer for them at all.
 	next.WebSearchEndpoint = s.searchEndpoint
+	next.Hooks = slices.Clone(s.hooks)
 	next.ToolsDisabled = slices.Clone(s.disabledTools)
 	next.URLAllowHosts = slices.Clone(s.allowHosts)
 	next.URLDenyHosts = slices.Clone(s.denyHosts)
@@ -982,6 +1007,11 @@ type settingsApplier struct {
 	// mcp is the session's live MCP connections: the one key whose apply is a reconnect rather than a
 	// write, and the source of half the tool set the door above swaps.
 	mcp *liveMCP
+	// hooks is the session's Hook Runner (ADR 0073), reached by exactly one key: a re-read `hooks:`
+	// list is swapped into it wholesale, the retired generation draining in the background. nil ⇒
+	// this Driver composed no Runner, so the key refuses on its own row rather than being
+	// dereferenced on the Update goroutine.
+	hooks *hooks.Runner
 	// present is the presentation ladder, which rebuilds from a changed `present:` block and
 	// re-installs itself on the presenter the engine holds.
 	present *livePresentation
@@ -1227,6 +1257,20 @@ var settingsTable = []settingsEntry{
 			// that answered (ADR 0037 decision 6). The value the pane persisted is not read, for the
 			// `servers:` reason — a list of blocks is a shape no single string spells.
 			return "", a.reconnectMCP()
+		},
+	},
+	{
+		key: "hooks",
+		// The Runner is the seam and the holder is the mirror, so BOTH are required: an arm that
+		// moved only one of them would leave the session and the Firings it raises on two different
+		// lists (ADR 0073 §9 — one library at every root, composed from one list).
+		reaches: func(a settingsApplier) bool { return a.hooks != nil && a.live != nil },
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			// A list of blocks is a shape no single string spells, so the value the pane persisted
+			// is not read — the file layer is re-resolved exactly as startup resolved it, the
+			// `mcp-servers:` reason. Nothing here is pushed at the engine either: Hooks are
+			// observe-only, and swapping the list is the whole of what a session can do about them.
+			return "", a.reloadHooks()
 		},
 	},
 	{
@@ -2053,6 +2097,32 @@ func (a settingsApplier) reconnectMCP() error {
 		return err
 	}
 	return a.mcp.reconnect(file.MCPServers, a.tools, a.engine)
+}
+
+// reloadHooks re-reads the `hooks:` block and moves the session onto it (ADR 0073 §9). It is
+// reconnectMCP's shape for reconnectMCP's reason — only the FILE carries this key, so resolving the
+// file layer as startup resolved it IS most of the apply — and it differs in what it does with the
+// answer: the list is swapped into the running Runner, whose retired generation finishes what it
+// already holds in the background and then stops.
+//
+// A file that no longer parses is refused before anything is swapped, and so is a list the Runner
+// will not take (a malformed entry, an unresolvable `workspace:`): a broken edit costs the session
+// nothing, and it keeps firing the Hooks it already had.
+//
+// The holder is written only once the swap has COMMITTED, so a refused edit leaves the session and
+// the runs it raises describing the same list. That is also why nothing here reports: Replace drains
+// the retired generation on a goroutine of its own, and this arm runs on the Update loop — a
+// synchronous Report would deadlock the program against the send it is waiting for (bridge.go).
+func (a settingsApplier) reloadHooks() error {
+	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	if err != nil {
+		return err
+	}
+	if err := a.hooks.Replace(file.Hooks); err != nil {
+		return err
+	}
+	a.live.setHooks(file.Hooks)
+	return nil
 }
 
 // reloadModelProfiles re-reads the `model-profiles:` map, installs it on the holder, and swaps the

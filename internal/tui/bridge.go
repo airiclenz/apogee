@@ -124,6 +124,22 @@ func (b *Bridge) NotifySchedule(ev schedule.Event) { b.prog.send(scheduleEventMs
 // Update, for the reason every send here carries (programRef.send).
 func (b *Bridge) NotifyRouting(note string) { b.prog.send(routingNoticeMsg{note: note}) }
 
+// NotifyHook carries one Hook's trouble into the running program — the reporter the composition root
+// installs as hooks.Options.Report (ADR 0073 §8). A Hook that failed, or a queue that dropped a
+// firing, is told to the HUMAN and to nobody else: it is never an ErrorEvent, because a Hook
+// subscribed to `error` would then fire on its own failure and loop.
+//
+// It is NotifyRouting's twin. The note arrives already worded — it names a Hook the file declares
+// and quotes what its command said, both facts of the config and the outside world this package
+// deliberately knows nothing about (ADR 0031) — and the fold places it as one EPHEMERAL note: a
+// Hook's failure is a fact about a script that ran once, not something the conversation earned.
+//
+// It is never called from Update, for the reason every send here carries (programRef.send): the
+// callers are the Runner's own worker goroutines and, on a queue drop, whichever goroutine emitted
+// the Event — never the Update loop, which is why Runner.Replace drains a retired generation in the
+// background rather than reporting its drop totals on the caller's goroutine.
+func (b *Bridge) NotifyHook(note string) { b.prog.send(hookNoticeMsg{note: note}) }
+
 // programRef is a concurrency-safe, late-bound handle to the running program. send runs on
 // the worker goroutine (via Emit/Approve); bind runs once on the program goroutine inside
 // Run. The atomic pointer makes that hand-off race-free no matter how Bubble Tea schedules

@@ -54,6 +54,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -84,6 +85,13 @@ var _ tui.Engine = (*apogee.Agent)(nil)
 // (probe.DegradedNotice, probe.ResidualNotice, the unattended Auto refusal) are therefore all
 // drivable from one place, on every host, in both directions.
 var newConfiner = platform.NewConfiner
+
+// hookCloseGrace is how long a root gives its Hook Runner to finish what it is already running
+// before the context cancels the rest. It is the SAME five seconds at every root — this session,
+// a headless run, a daemon Firing — because a Hook must take the same worst case whether a human is
+// watching or not (ADR 0073 §7), and it matches the grace internal/hooks gives a generation retired
+// by a `hooks:` reload.
+const hookCloseGrace = 5 * time.Second
 
 // ----------------------------------------------------------------------------
 // Root command body
@@ -184,6 +192,12 @@ type rootWiring struct {
 	bridge       *tui.Bridge
 	presentation *livePresentation
 	confiner     domain.Confiner
+	// hooks is this session's Hook Runner (ADR 0073): the observe-only decorator installed as
+	// Config.Events over the Bridge's own sink, so every engine Event reaches the renderer first and
+	// whatever the `hooks:` list subscribes to is fired off the engine's path afterwards. It is built
+	// in resolveConfig — before the Config that carries it — and it is the ONE Runner this session
+	// has; a Firing raised inside the session composes its own (wire_firing.go).
+	hooks *hooks.Runner
 	// namer names an unnamed delegation out of band on the child's own Upstream (ADR 0068). It is
 	// held rather than left inside cfg because the `auto-title:` gate on it is live: the renderer
 	// flips it through tui.Options.OnAutoTitle when the pane or the file moves the key, long after
@@ -239,6 +253,19 @@ func (w *rootWiring) close() {
 	// assembly let go of outlives runRoot.
 	if w.configWatch != nil {
 		w.configWatch.Stop()
+	}
+
+	// The Hooks go after the Firings and BEFORE the engine, for the Firings' own reason: a Hook is
+	// still holding an event this session produced, and it finishes it while everything it was
+	// composed from still stands. The grace is the five seconds every root gives (ADR 0073 §7), and
+	// what is still running when it expires is killed by the context — a wedged script may not hold
+	// the alternate screen down. A Hook killed at the deadline is reported by Close's error, which
+	// there is nowhere left to say: stderr belongs to the shell again the moment the TUI tears down,
+	// and the run is over either way.
+	if w.hooks != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
+		_ = w.hooks.Close(ctx)
+		cancel()
 	}
 
 	if w.engine != nil {

@@ -10,11 +10,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -801,6 +805,21 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		Servers:            []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
 		Mechanisms:         map[string]bool{"codeinfo": true},
 		ValidatedSetsAlias: map[string]string{"label": "entry"},
+		// The `hooks:` list is the one key here that NO case below edits, and it is in the snapshot
+		// for exactly that reason: its own apply is a whole-list swap tested beside the arm, so what
+		// this test owes it is the other half — a holder nobody edited hands back the list the run
+		// launched with, so a Firing raised before any `/settings` commit fires the session's Hooks
+		// rather than none at all.
+		Hooks: []hooks.Hook{hookEntry("boot", hooks.TurnFinished)},
+	}
+
+	// The unedited case, asserted around every apply below: seeded from the snapshot, handed back as
+	// a COPY, and left alone by every other key's apply.
+	assertBootHooks := func(t *testing.T, opts config.Options) {
+		t.Helper()
+		if len(opts.Hooks) != 1 || opts.Hooks[0].Name != "boot" {
+			t.Errorf("options().Hooks = %+v, want the one hook the run launched with", opts.Hooks)
+		}
 	}
 	// The list the `servers:` apply re-reads. Its second entry names a key SOURCE rather than a key,
 	// which is the fact an unattended run composed from these Options has to see (SecretEnvVars).
@@ -956,15 +975,19 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				engine: &applySettingSpy{}, live: live, tools: set, configPath: path,
 			})
 
+			assertBootHooks(t, live.options())
+
 			if _, err := apply(tt.key, tt.value); err != nil {
 				t.Fatalf("apply %s=%s: %v", tt.key, tt.value, err)
 			}
 
 			handed := live.options()
 			tt.want(t, handed)
+			assertBootHooks(t, handed)
 
 			clobberOptions(handed)
 			tt.want(t, live.options())
+			assertBootHooks(t, live.options())
 		})
 	}
 }
@@ -985,6 +1008,9 @@ func clobberOptions(opts config.Options) {
 	}
 	for i := range opts.ModelProfiles {
 		opts.ModelProfiles[i] = profiles.Entry{}
+	}
+	for i := range opts.Hooks {
+		opts.Hooks[i] = hooks.Hook{Name: "clobbered"}
 	}
 	clear(opts.Mechanisms)
 	clear(opts.ValidatedSetsAlias)
@@ -1906,6 +1932,15 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	if _, err := rec.opts.Settings.Apply("mcp-servers", "none"); err != nil {
 		t.Errorf("Settings.Apply(mcp-servers): %v", err)
 	}
+	// And the fourth: the Hook Runner (ADR 0073). A member the root forgot to pass would refuse this
+	// key with the dispatcher's own "cannot be applied" in the running binary while the arm's own
+	// tests stayed green, so this is where the literal is proved. It is asked for the ABSENCE of that
+	// sentence rather than for success, because runRoot has already returned here and close() ends
+	// the Runner with everything else it opened: reaching a CLOSED Runner is the wiring being right.
+	if _, err := rec.opts.Settings.Apply("hooks", "none"); err != nil &&
+		strings.Contains(err.Error(), "cannot be applied") {
+		t.Errorf("Settings.Apply(hooks): %v; the composition root did not pass its Runner to the applier", err)
+	}
 	if _, err := rec.opts.Settings.Apply("model-profiles", "1 model profile"); err != nil {
 		t.Errorf("Settings.Apply(model-profiles): %v", err)
 	}
@@ -2812,5 +2847,271 @@ func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
 	}
 	if opts, _, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "" {
 		t.Errorf("firingSources after the opt-out names %q; want no Sub-agent server at all", opts.SubAgentsServer)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The `hooks:` list (ADR 0073)
+// ----------------------------------------------------------------------------
+
+// recordingHookExec stands in for the command runner and the webhook sender, so a test can prove
+// WHICH Hooks a Runner is firing without a process or a socket — the reason hooks.Executor is the
+// package's one seam onto the outside world. It is written from a worker goroutine and read from the
+// test's, so the mutex is real.
+type recordingHookExec struct {
+	mu    sync.Mutex
+	fired []string
+	done  chan string
+}
+
+func newRecordingHookExec() *recordingHookExec {
+	return &recordingHookExec{done: make(chan string, 8)}
+}
+
+func (r *recordingHookExec) Run(ctx context.Context, h hooks.Hook, p hooks.Payload) error {
+	r.mu.Lock()
+	r.fired = append(r.fired, h.Name)
+	r.mu.Unlock()
+	select {
+	case r.done <- h.Name:
+	default:
+	}
+	return nil
+}
+
+// hookEntry is the one shape every case below configures: a named Hook subscribed to one event, with
+// an argv action the recording executor never actually runs.
+func hookEntry(name string, event hooks.Event) hooks.Hook {
+	return hooks.Hook{
+		Name:    name,
+		Events:  []hooks.Event{event},
+		Command: []string{"apogee-test-hook"},
+		Timeout: time.Second,
+	}
+}
+
+// The `hooks:` arm is the whole of what a `/settings` commit can do about an observe-only list: it
+// re-reads the file, swaps the running Runner onto the new set, and mirrors that set into the live
+// Options a Firing raised inside this session composes from. All three, or none — a session firing
+// one list while the runs it raises fire another is exactly the drift ADR 0037 abolished.
+func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	boot := []hooks.Hook{hookEntry("boot", hooks.TurnFinished)}
+	exec := newRecordingHookExec()
+	runner, err := hooks.New(boot, hooks.Options{Workspace: workspace, Exec: exec})
+	if err != nil {
+		t.Fatalf("hooks.New: %v", err)
+	}
+	t.Cleanup(func() { _ = runner.Close(context.Background()) })
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	const reloaded = "hooks:\n  - name: reloaded\n    events: [turn-finished]\n    command: [apogee-test-hook]\n"
+	if err := os.WriteFile(path, []byte(reloaded), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	live := newLiveSettings(config.Options{Hooks: boot}, nil)
+	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
+	// The value is not read for this key — a list of blocks is a shape no single string spells — so
+	// what the pane persisted is the row's own summary.
+	if _, err := apply("hooks", "1 hook"); err != nil {
+		t.Fatalf("apply hooks: %v", err)
+	}
+
+	// The projection a Firing composes from now names the re-read entry, not the boot one.
+	handed := live.options()
+	if len(handed.Hooks) != 1 || handed.Hooks[0].Name != "reloaded" {
+		t.Fatalf("options().Hooks = %+v, want the one entry the re-read file lists", handed.Hooks)
+	}
+
+	// And the RUNNER fires it: a Turn boundary reaches the new generation's worker, never the
+	// retired one's.
+	runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	select {
+	case name := <-exec.done:
+		if name != "reloaded" {
+			t.Errorf("the runner fired %q; want the hook the reload installed", name)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no hook fired after the reload; the runner is still on the boot list")
+	}
+}
+
+// A file the session cannot read leaves BOTH halves where they were. The write has already landed —
+// that is what a `/settings` commit is — so the honest answer is that the file changed and the
+// session did not, with the Hooks it is actually firing unchanged and the projection saying the same.
+func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	boot := []hooks.Hook{hookEntry("boot", hooks.TurnFinished)}
+	exec := newRecordingHookExec()
+	runner, err := hooks.New(boot, hooks.Options{Workspace: workspace, Exec: exec})
+	if err != nil {
+		t.Fatalf("hooks.New: %v", err)
+	}
+	t.Cleanup(func() { _ = runner.Close(context.Background()) })
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("hooks:\n  - name: broken\n    events: [not-an-event]\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	live := newLiveSettings(config.Options{Hooks: boot}, nil)
+	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
+	if _, err := apply("hooks", "1 hook"); err == nil {
+		t.Fatal("a hooks: block naming an unknown event applied silently; want a refusal")
+	}
+	if got := live.options().Hooks; len(got) != 1 || got[0].Name != "boot" {
+		t.Errorf("options().Hooks = %+v, want the boot list a refused edit leaves standing", got)
+	}
+}
+
+// The two members the arm dereferences are both required, so a Driver composed without either
+// refuses the key by name on the Update goroutine rather than panicking halfway through an edit the
+// file already carries (ADR 0031).
+func TestApplySettingHooksRefusesWithoutTheRunnerOrTheHolder(t *testing.T) {
+	t.Parallel()
+	entry, ok := settingsEntryFor("hooks")
+	if !ok {
+		t.Fatal("the settings table has no `hooks` arm; a hooks: edit could never reach the session")
+	}
+	if entry.reaches(settingsApplier{live: newLiveSettings(config.Options{}, nil)}) {
+		t.Error("the arm claims to reach a Driver with no Runner")
+	}
+	if entry.reaches(settingsApplier{hooks: &hooks.Runner{}}) {
+		t.Error("the arm claims to reach a Driver with no live holder")
+	}
+}
+
+// Replace runs on the UPDATE goroutine — the pane's ⏎ and the config watcher's own fold both land
+// there — while Report goes to the Bridge, whose send BLOCKS until Update takes the message. A
+// Replace that reported the retired generation's drop totals on the caller's goroutine would
+// therefore hang the program against the loop that is waiting for it. This is that promise, driven
+// with the worst reporter there is: one that calls straight back into the Runner.
+func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	caller := make(chan struct{})
+	var offCaller atomic.Bool
+	report := func(string) {
+		select {
+		case <-caller:
+			offCaller.Store(true)
+		default:
+			t.Error("Report was called on the goroutine that called Replace; the Update loop would deadlock")
+		}
+	}
+	runner, err := hooks.New([]hooks.Hook{hookEntry("boot", hooks.TurnFinished)}, hooks.Options{
+		Workspace: workspace, Exec: newRecordingHookExec(), Report: report,
+	})
+	if err != nil {
+		t.Fatalf("hooks.New: %v", err)
+	}
+	t.Cleanup(func() { _ = runner.Close(context.Background()) })
+
+	if err := runner.Replace([]hooks.Hook{hookEntry("next", hooks.TurnFinished)}); err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+	close(caller)
+	_ = offCaller.Load()
+}
+
+// The WriteTarget the root hands its Runner is a LAZY closure over the live tool set, because the
+// registry does not exist when the Runner is built and every roster edit and MCP reconnect swaps it
+// afterwards. That makes it a genuinely shared read: the closure runs on whatever goroutine emitted
+// the Event, while a `/settings` commit installs a new registry from the Update goroutine. Under
+// -race this is what fails if the closure ever reads liveTools.current unlocked.
+func TestRootHookWriteTargetIsRaceSafeAcrossARosterSwap(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	w := newRootWiring(config.Options{
+		Workspace: workspace,
+		Hooks:     []hooks.Hook{hookEntry("watcher", hooks.FileChanged)},
+	}, domain.ModeAskBefore, stateRoots{config: t.TempDir(), workspace: workspace})
+	if err := w.resolveConfig(); err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	t.Cleanup(func() { _ = w.hooks.Close(context.Background()) })
+
+	build := func(toolSetSpec) *apogee.ToolRegistry {
+		return tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{})
+	}
+	w.toolSet = newLiveTools(build(toolSetSpec{}), toolSetSpec{}, build)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			if err := w.toolSet.rebuildWith(toolSetSpec{}, &applySettingSpy{}); err != nil {
+				t.Errorf("rebuildWith: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			// read_file is not a workspace-scoped writer, so the closure resolves it out of
+			// whichever registry is current and answers "no target" — the lookup is the point,
+			// not the firing.
+			w.hooks.Emit(domain.ToolCallEvent{
+				Call: domain.ToolCall{ID: fmt.Sprintf("call-%d", i), Tool: "read_file"},
+			})
+		}
+	}()
+	wg.Wait()
+}
+
+// The Runner is installed as Config.Events, which is what makes the whole feature reachable at all:
+// a root that built one and left the engine emitting into the Bridge's bare sink would run every
+// Hook never, and one that set Events to a Runner built later would box a nil pointer past
+// apogee.New's required-Events check and nil-deref on the first Emit.
+func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	w := newRootWiring(config.Options{Workspace: workspace}, domain.ModeAskBefore,
+		stateRoots{config: t.TempDir(), workspace: workspace})
+	if err := w.resolveConfig(); err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if w.hooks == nil {
+		t.Fatal("the root built no hook Runner")
+	}
+	if w.cfg.Events != domain.EventSink(w.hooks) {
+		t.Fatalf("Config.Events = %T, want the root's own *hooks.Runner", w.cfg.Events)
+	}
+	// And an Event emitted before wireSession has installed a tool set at all — the first beat of a
+	// cold start — is forwarded rather than dereferencing the registry the closure has not got.
+	w.cfg.Events.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	_ = w.hooks.Close(context.Background())
+}
+
+// A webhook Hook's `headers-env:` names a variable holding a token, and the execution tools drop it
+// from the environment they hand a subprocess for exactly the reason an `api-key-env:` variable is
+// dropped: a token a `terminal` child can read is a token the model can read.
+func TestRootWiringScrubsHookHeaderVariables(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	w := newRootWiring(config.Options{
+		Workspace: workspace,
+		Servers:   []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111", APIKeyEnv: "SERVER_KEY"}},
+		Hooks: []hooks.Hook{{
+			Name:       "notify",
+			Events:     []hooks.Event{hooks.TurnFinished},
+			Webhook:    "https://hooks.example.com/notify",
+			HeadersEnv: map[string]string{"Authorization": "HOOK_TOKEN"},
+			Timeout:    time.Second,
+		}},
+	}, domain.ModeAskBefore, stateRoots{config: t.TempDir(), workspace: workspace})
+	if err := w.resolveConfig(); err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	t.Cleanup(func() { _ = w.hooks.Close(context.Background()) })
+	for _, want := range []string{"SERVER_KEY", "HOOK_TOKEN"} {
+		if !slices.Contains(w.cfg.SecretEnvVars, want) {
+			t.Errorf("Config.SecretEnvVars = %v, want it to carry %q", w.cfg.SecretEnvVars, want)
+		}
 	}
 }

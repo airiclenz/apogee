@@ -15,9 +15,11 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -168,16 +170,56 @@ func (w *rootWiring) resolveConfig() error {
 	// the switch is off (naming.go).
 	w.namer = newDelegationNamer(w.sessionNamingUpstream, w.routedNamingUpstream, w.opts.AutoTitle)
 
+	// This session's Hook Runner (ADR 0073), built HERE rather than beside the facilities above for
+	// two reasons that pull the same way: it can fail — a malformed `hooks:` entry or an unresolvable
+	// `workspace:` is structural configuration, and it fails the run the way an unreadable prompt does
+	// — and the Config below is where it is installed, so building it any later would either box a
+	// nil Runner into Events or leave a Runner the engine never emits into.
+	//
+	// It DECORATES the Bridge's sink rather than replacing it: every Event reaches the renderer first
+	// and unconditionally (Runner.Emit forwards before it matches), so installing Hooks cannot change
+	// what the transcript sees. A run whose `hooks:` list is empty gets a Runner with no workers,
+	// which costs one atomic load per Event and nothing else.
+	//
+	// The WriteTarget is a CLOSURE over the wiring rather than a value, because the tool registry it
+	// asks does not exist yet — wireSession installs it, and every `/settings` roster edit and MCP
+	// reconnect swaps it afterwards. Reading it through liveTools.lookup at call time is what makes
+	// the `file-changed` derivation follow the set the session is actually running, and what keeps
+	// the read off an unlocked pointer the Update goroutine writes.
+	runner, err := hooks.New(w.opts.Hooks, hooks.Options{
+		Inner:     w.bridge.Sink(),
+		Workspace: w.roots.workspace,
+		Report:    w.bridge.NotifyHook,
+		WriteTarget: func(call domain.ToolCall) (string, bool) {
+			if w.toolSet == nil {
+				return "", false
+			}
+			tool, ok := w.toolSet.lookup(call.Tool)
+			if !ok {
+				return "", false
+			}
+			return tools.WorkspaceWriteTarget(tool, call)
+		},
+		Exec: hooks.DefaultExecutor(w.roots.workspace),
+	})
+	if err != nil {
+		return err
+	}
+	w.hooks = runner
+
 	w.cfg = apogee.Config{
 		Endpoint: w.opts.Endpoint,
 		Model:    w.opts.Model,
 		// The upstream bearer token resolved above, from the startup `servers:` entry's own key
 		// source, which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
 		// Authorization header at all.
-		APIKey:   apiKey,
-		Mode:     w.mode,
-		Bypass:   w.opts.Bypass,
-		Events:   w.bridge.Sink(),
+		APIKey: apiKey,
+		Mode:   w.mode,
+		Bypass: w.opts.Bypass,
+		// The Hook Runner built above, which DECORATES the Bridge's sink: the renderer sees every
+		// Event exactly as it did before this key existed, and the `hooks:` list is fired behind it
+		// (ADR 0073 §2 — observe-only, nothing a Hook does reaches the model or the record).
+		Events:   w.hooks,
 		Approver: w.bridge.Approver(),
 		Asker:    w.bridge.Asker(),
 		// The namer built above: an unnamed delegation is named out of band on the CHILD's own
@@ -220,7 +262,10 @@ func (w *rootWiring) resolveConfig() error {
 		// mid-session, and a scrub that followed the binding would leave the other entries' keys
 		// readable in every `terminal` / `python_exec` / `run_tests` child until it happened. Empty
 		// ⇒ apogee's own APOGEE_API_KEY alone, exactly the scrub before this key existed.
-		SecretEnvVars: config.APIKeyEnvNames(w.opts),
+		// A webhook Hook's `headers-env:` names variables holding a token too (ADR 0073 §6), and they
+		// are scrubbed beside the key sources for exactly the same reason: a token readable out of a
+		// `terminal` child is a token the model can read.
+		SecretEnvVars: append(config.APIKeyEnvNames(w.opts), config.HookEnvNames(w.opts)...),
 		// The Model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
 		// resolved above for THIS model out of the `model-profiles:` map and the shipped shape
 		// table. A model neither tier knows gets the zero profile: native tool calls with no inline

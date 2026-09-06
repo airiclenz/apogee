@@ -215,6 +215,26 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 	return ws
 }
 
+// lookup resolves one tool out of the set the session is running NOW, under the mutex — the read a
+// caller outside the Update goroutine needs. webSearch above is the same read for a tool this root
+// re-points; this one is for a caller that only ASKS the set something: the Hook Runner's
+// WriteTarget, which is handed a tool call on the engine's worker goroutine while a `/settings`
+// commit may be swapping the registry on the Update goroutine (rebuildWith writes t.current under
+// the same lock). Reading the pointer unlocked is a data race the -race build would fail on, and
+// capturing the registry once at wiring time would answer out of the set the session left.
+//
+// It answers (nil, false) before wireSession has installed a set at all, which is exactly what a
+// caller wants from a session that has no tools yet.
+func (t *liveTools) lookup(name string) (domain.Tool, bool) {
+	t.mu.Lock()
+	registry := t.current
+	t.mu.Unlock()
+	if registry == nil {
+		return nil, false
+	}
+	return registry.Lookup(name)
+}
+
 // registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the
 // workspace (with the same host configuration the Agent would derive from Config — the
 // url-safety guard, the web-search endpoint, the Asker, the Presenter, the skill catalog, the
