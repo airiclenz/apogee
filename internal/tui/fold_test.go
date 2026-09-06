@@ -220,6 +220,14 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
+			name: "TurnEvent is deliberately nothing",
+			// A Turn boundary is not news the human asked for: the transcript already shows the
+			// work the Turn did, and the activity line already says what the loop is doing. The
+			// variant exists so a Driver can react to the boundary out of band (ADR 0073), which
+			// is not the view's business — so no entry, no phrase, no stats.
+			event: domain.TurnEvent{Status: domain.StatusExchangeComplete},
+		},
+		{
 			name: "MechanismFiredEvent is inert outside the debug view",
 			// Nothing: no entry (transcript.debug is off by default), no phrase, no stats.
 			event: domain.MechanismFiredEvent{Mechanism: "m", Hook: "h", Action: "a"},

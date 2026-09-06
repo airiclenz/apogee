@@ -4,6 +4,9 @@ package agent
 // (SetEffortOverride / ThinkingEffort): what the door does to the session, what it deliberately
 // does NOT do to a delegated child, and how it composes with a model switch — plus the effort WIRE
 // DIALECT the same switch carries in from the server (ADR 0060).
+//
+// It also covers the Agent's own Turn-boundary reporting: TurnEvent, emitted once per StepResult
+// at the exported returns (ADR 0073).
 
 import (
 	"context"
@@ -216,5 +219,186 @@ func TestRebindCarriesTheEffortDialectOntoTheRequest(t *testing.T) {
 	}
 	if got := a.toProviderRequest(effortTestRequest()).EffortDialect; got != provider.EffortDialectNone {
 		t.Errorf("dialect after rebinding onto an undialled server = %q, want the zero", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Turn boundaries on the stream (TurnEvent)
+// ---------------------------------------------------------------------------
+
+// turnEvents collects the TurnEvents a sink recorded, in emission order.
+func turnEvents(events []domain.Event) []domain.TurnEvent {
+	out := make([]domain.TurnEvent, 0, len(events))
+	for _, e := range events {
+		if te, ok := e.(domain.TurnEvent); ok {
+			out = append(out, te)
+		}
+	}
+	return out
+}
+
+// TestTurnEventReportsEveryBoundaryToStepAndRunHostsAlike is the variant's whole contract at the
+// top level: one event per boundary, in Turn order, carrying the same Status the StepResult did —
+// and the SAME sequence whether the host drives Step itself (the bench, headless) or hands the
+// Exchange to Run. The emit site is the exported return precisely so the two agree.
+func TestTurnEventReportsEveryBoundaryToStepAndRunHostsAlike(t *testing.T) {
+	t.Parallel()
+
+	drivers := []struct {
+		name  string
+		drive func(t *testing.T, a *Agent)
+	}{
+		{"Step-driven", func(t *testing.T, a *Agent) {
+			t.Helper()
+			for {
+				res, err := a.Step(context.Background())
+				if err != nil {
+					t.Fatalf("Step: %v", err)
+				}
+				if res.Status != domain.StatusTurnComplete {
+					return
+				}
+			}
+		}},
+		{"Run-driven", func(t *testing.T, a *Agent) {
+			t.Helper()
+			if _, err := a.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+		}},
+	}
+
+	want := []domain.TurnEvent{
+		{EventBase: domain.EventBase{Turn: 0}, Status: domain.StatusTurnComplete},
+		{EventBase: domain.EventBase{Turn: 1}, Status: domain.StatusExchangeComplete},
+	}
+
+	for _, driver := range drivers {
+		t.Run(driver.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "the answer is 42"})
+			a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
+				toolCallScript("c1", "lookup", `{"q":"meaning"}`),
+				contentScript("all done"),
+			}})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+
+			driver.drive(t, a)
+
+			got := turnEvents(sink.events)
+			if len(got) != len(want) {
+				t.Fatalf("emitted %d TurnEvents, want %d: %+v", len(got), len(want), got)
+			}
+			for i, w := range want {
+				if got[i] != w {
+					t.Errorf("TurnEvent %d = %+v, want %+v", i, got[i], w)
+				}
+			}
+		})
+	}
+}
+
+// TestTurnEventMarksTheStepCappedChildBoundary pins the reason the emit site is the exported
+// return rather than step(): StepCapped is decided ABOVE step(), and the capped exit has two
+// shapes — the wrap-up Turn's own boundary, and the turns.end fallback row built when that
+// wrap-up produced no trustworthy boundary of its own. Both must reach an observer as one capped
+// TurnEvent on the CHILD's stream, at its depth and under the delegating call's id, and never as
+// a failure.
+func TestTurnEventMarksTheStepCappedChildBoundary(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		wrapUp []provider.Delta
+	}{
+		{"the wrap-up Turn completes", contentScript("here is what I found")},
+		{"the wrap-up Turn faults", errorScript("upstream exploded on the wrap-up")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+			cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+			cfg.Delegation.MaxSteps = 3
+
+			scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
+			scripts = append(scripts, cappedChildTurns(3)...)
+			scripts = append(scripts, tc.wrapUp, contentScript("parent done"))
+
+			a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if _, err := a.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			capped := make([]domain.TurnEvent, 0, 1)
+			for _, te := range turnEvents(sink.events) {
+				if te.StepCapped {
+					capped = append(capped, te)
+				}
+			}
+			if len(capped) != 1 {
+				t.Fatalf("%d capped TurnEvents, want exactly 1: %+v", len(capped), capped)
+			}
+			got := capped[0]
+			if got.Depth != 1 || got.CallID != "c1" {
+				t.Errorf("capped TurnEvent base = %+v, want the child's identity (Depth 1, CallID %q)", got.EventBase, "c1")
+			}
+			if got.Status != domain.StatusExchangeComplete {
+				t.Errorf("capped TurnEvent status = %q, want %q — the cap closes the Exchange", got.Status, domain.StatusExchangeComplete)
+			}
+			if got.Faulted {
+				t.Error("capped TurnEvent is Faulted; the delegate step cap is a bound, never a failure")
+			}
+		})
+	}
+}
+
+// TestTurnEventReportsACancelledTurn covers the third disposition: a Turn abandoned by a cancelled
+// ctx still reaches its quiescent boundary, so it is still one Turn boundary and still one event —
+// carrying StatusCancelled, which is what tells an observer the Turn produced nothing.
+func TestTurnEventReportsACancelledTurn(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	responder := blockingResponder{started: make(chan struct{})}
+	a, err := newAgent(baseConfig(sink), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "slow"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+	if _, err := a.Step(ctx); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	got := turnEvents(sink.events)
+	if len(got) != 1 {
+		t.Fatalf("emitted %d TurnEvents, want 1: %+v", len(got), got)
+	}
+	if got[0].Status != domain.StatusCancelled {
+		t.Errorf("TurnEvent status = %q, want %q", got[0].Status, domain.StatusCancelled)
 	}
 }

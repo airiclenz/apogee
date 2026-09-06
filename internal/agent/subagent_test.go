@@ -218,6 +218,8 @@ func eventBaseOf(e domain.Event) (domain.EventBase, bool) {
 		return ev.EventBase, true // likewise the CHILD run's identity: the run the message was addressed to
 	case domain.ApprovalEvent:
 		return ev.EventBase, true
+	case domain.TurnEvent:
+		return ev.EventBase, true
 	case domain.MechanismFiredEvent:
 		return ev.EventBase, true
 	case domain.ErrorEvent:

@@ -566,7 +566,25 @@ func (a *Agent) Submit(in domain.UserInput) error {
 // converted to an ErrorEvent, and the loop degrades to the quiescent boundary
 // rather than unwinding into the host (ADR 0007 / ADR 0002). Step returns a non-nil
 // error only for loop-level faults the Agent itself cannot localise.
-func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) { return a.step(ctx) }
+func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) {
+	res, err := a.step(ctx)
+	a.emitTurn(res)
+	return res, err
+}
+
+// emitTurn reports one completed Turn boundary as a TurnEvent (observation-only, ADR 0073). It is
+// called at the EXPORTED returns — Step's, and each boundary Run hands back — and deliberately not
+// inside step(): StepCapped is decided only after step() returns, and the capped fallback boundary
+// finishAtStepCap builds from turns.end never passes through step() at all, so an emit down there
+// would misreport both. One StepResult, one event.
+func (a *Agent) emitTurn(res domain.StepResult) {
+	a.cfg.Events.Emit(domain.TurnEvent{
+		EventBase:  a.base(res.TurnIndex),
+		Status:     res.Status,
+		Faulted:    res.Faulted,
+		StepCapped: res.StepCapped,
+	})
+}
 
 // Run steps the loop until the Exchange completes (a final no-tool response),
 // cancellation, or a loop-level error — a convenience wrapper over Step for hosts
@@ -594,6 +612,7 @@ func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) { return a.
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 	for {
 		res, err := a.step(ctx)
+		a.emitTurn(res)
 		if err != nil || res.Status != domain.StatusTurnComplete {
 			return res, err
 		}
@@ -604,7 +623,9 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 		// alternation-clean. A top-level Agent has no cap and never leaves this loop early.
 		a.turns.exchangeTurns++
 		if a.stepCap > 0 && a.turns.exchangeTurns >= a.stepCap {
-			return a.finishAtStepCap(ctx, res), nil
+			capped := a.finishAtStepCap(ctx, res)
+			a.emitTurn(capped)
+			return capped, nil
 		}
 		// AFTER the cap check, because this boundary is only a delivery point if another Turn
 		// actually follows it: committing a remark into an Exchange that ends here would report it

@@ -238,6 +238,27 @@ type ApprovalEvent struct {
 	Decision ApprovalDecision
 }
 
+// TurnEvent reports that a Turn reached its quiescent boundary — the loop's own Turn boundary made
+// observable, emitted once per StepResult the engine hands back. Like SubAgentPhaseEvent it is
+// OBSERVATION-ONLY: nothing in the loop reads it, no conversation state depends on it, and a Driver
+// that ignores it loses only the boundary notification.
+//
+// EventBase.Turn is the index of the Turn that just ended, Depth its nesting level and CallID the
+// spawning delegation's id — a child's Turns are reported on the same stream at Depth > 0, since a
+// sub-agent runs the same loop.
+//
+// Status, Faulted and StepCapped mirror the StepResult the boundary produced, and carry that
+// type's meanings exactly: Faulted marks a Turn the loop ABANDONED rather than completed, and
+// StepCapped an Exchange the delegate step cap ended rather than the model. Both are orthogonal to
+// Status, so an observer that only wants finished work must read them alongside it. A Turn ended by
+// cancellation reports StatusCancelled.
+type TurnEvent struct {
+	EventBase
+	Status     StepStatus
+	Faulted    bool
+	StepCapped bool
+}
+
 // MechanismFiredEvent reports that a Mechanism (or experimental hook) fired at a
 // hook point — the observability spine for self-regulation and bench attribution.
 type MechanismFiredEvent struct {

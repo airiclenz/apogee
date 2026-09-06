@@ -48,6 +48,11 @@ var (
 	_ apogee.ToolCallEvent
 	_ apogee.ToolResultEvent
 	_ apogee.ApprovalEvent
+	_ apogee.TurnEvent
+	_ apogee.SubAgentPhaseEvent
+	_ apogee.SubAgentNamedEvent
+	_ apogee.ChildInterjectionEvent
+	_ apogee.SubAgentPhase
 	_ apogee.MechanismFiredEvent
 	_ apogee.ErrorEvent
 	_ apogee.UsageEvent

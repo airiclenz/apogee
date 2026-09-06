@@ -228,20 +228,33 @@ type Event = domain.Event
 
 // The Event variants. The set is additively extensible (a new variant is a minor bump).
 type (
-	TokenEvent          = domain.TokenEvent
-	ReasoningEvent      = domain.ReasoningEvent
-	StreamResetEvent    = domain.StreamResetEvent
-	MessageEvent        = domain.MessageEvent
-	ToolCallEvent       = domain.ToolCallEvent
-	ToolResultEvent     = domain.ToolResultEvent
-	ApprovalEvent       = domain.ApprovalEvent
-	MechanismFiredEvent = domain.MechanismFiredEvent
-	FloorGuardEvent     = domain.FloorGuardEvent
-	ErrorEvent          = domain.ErrorEvent
-	PruneEvent          = domain.PruneEvent
-	UsageEvent          = domain.UsageEvent
-	AuditEvent          = domain.AuditEvent
-	WireEvent           = domain.WireEvent
+	TokenEvent             = domain.TokenEvent
+	ReasoningEvent         = domain.ReasoningEvent
+	StreamResetEvent       = domain.StreamResetEvent
+	MessageEvent           = domain.MessageEvent
+	ToolCallEvent          = domain.ToolCallEvent
+	ToolResultEvent        = domain.ToolResultEvent
+	ApprovalEvent          = domain.ApprovalEvent
+	TurnEvent              = domain.TurnEvent
+	SubAgentPhaseEvent     = domain.SubAgentPhaseEvent
+	SubAgentNamedEvent     = domain.SubAgentNamedEvent
+	ChildInterjectionEvent = domain.ChildInterjectionEvent
+	MechanismFiredEvent    = domain.MechanismFiredEvent
+	FloorGuardEvent        = domain.FloorGuardEvent
+	ErrorEvent             = domain.ErrorEvent
+	PruneEvent             = domain.PruneEvent
+	UsageEvent             = domain.UsageEvent
+	AuditEvent             = domain.AuditEvent
+	WireEvent              = domain.WireEvent
+)
+
+// SubAgentPhase is the phase a SubAgentPhaseEvent reports.
+type SubAgentPhase = domain.SubAgentPhase
+
+// The two phases a delegation is reported at.
+const (
+	SubAgentStarted  = domain.SubAgentStarted
+	SubAgentFinished = domain.SubAgentFinished
 )
 
 // The two values WireEvent.Direction takes.
