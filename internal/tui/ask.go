@@ -311,6 +311,16 @@ func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
 // nowhere else: with one line of the question on the screen the border is plain, as the mockup draws
 // it.
 func (m Model) askPrompt(req domain.AskRequest) string {
+	view, _ := m.askPromptPlaced(req)
+	return view
+}
+
+// askPromptPlaced is [Model.askPrompt] with the painter's own placement handed back beside the view —
+// what a POINTER needs and a paint does not. A click on this pane is mapped through the very
+// composition View draws (popupPaneHit, mouse.go), so the row under the pointer is the row on the
+// screen rather than a second arithmetic that can disagree with it. The doc above is the pane's; this
+// is the same pane, said twice over.
+func (m Model) askPromptPlaced(req domain.AskRequest) (string, popupPlacement) {
 	choicesShown := len(req.Choices) > 0 && m.input.Value() == ""
 
 	selected := -1
@@ -370,7 +380,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	}
 	maxBodyRows, rowLines, seated := m.popupBudget(panePrompt, wanted, capped, popupTitleBorderChrome, floor)
 	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 
 	spec := popupSpec{
@@ -390,7 +400,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 		maxRows:     rowLines,
 		scrollbar:   m.popupScrollbarOn(),
 	}
-	return renderPopup(m.th, spec, m.width)
+	return renderPopupPlaced(m.th, spec, m.width)
 }
 
 // askAnchorRowLines is what the ask prompt's offering must keep to put ONE answer on the screen: the

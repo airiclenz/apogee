@@ -56,6 +56,21 @@ func (l *msgLog) keys() []tea.KeyPressMsg {
 	return out
 }
 
+// mouse returns every mouse message recorded so far, in order — press and release alike, since what
+// a pin has to show is that the two arrive as the two different events they are.
+func (l *msgLog) mouse() []tea.Msg {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []tea.Msg
+	for _, msg := range l.msgs {
+		switch msg.(type) {
+		case tea.MouseClickMsg, tea.MouseReleaseMsg:
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
 // sizes returns every window size recorded so far, in order.
 func (l *msgLog) sizes() []tea.WindowSizeMsg {
 	l.mu.Lock()
@@ -165,6 +180,34 @@ func TestKeysDecodeAsIntended(t *testing.T) {
 			t.Errorf("%s (%q) decoded as %q (code %q, mod %d); want code %q, mod %d",
 				tc.name, string(tc.key), got[i].String(), got[i].Code, got[i].Mod, tc.code, tc.mod)
 		}
+	}
+
+	// The pointer is pinned on the same terms as the keys: Click and Release are byte sequences too
+	// (keys.go), and what proves them is the parser turning them into a left press and a left release
+	// at the cell they name. They come after the keys because esc resolves on a timeout and anything
+	// pressed behind it would arrive first.
+	const clickX, clickY = 7, 3
+	drv.Press(Click(clickX, clickY))
+	drv.WaitFor(func() bool { return len(log.mouse()) >= 1 }, Awaiting("the click to reach the model"))
+	drv.Press(Release(clickX, clickY))
+	drv.WaitFor(func() bool { return len(log.mouse()) >= 2 }, Awaiting("the release to reach the model"))
+
+	pointer := log.mouse()
+	press, ok := pointer[0].(tea.MouseClickMsg)
+	if !ok {
+		t.Fatalf("Click(%d, %d) decoded as %T, want a tea.MouseClickMsg", clickX, clickY, pointer[0])
+	}
+	if press.Button != tea.MouseLeft || press.X != clickX || press.Y != clickY {
+		t.Errorf("Click(%d, %d) decoded as button %v at (%d, %d); want the left button at the cell named",
+			clickX, clickY, press.Button, press.X, press.Y)
+	}
+	release, ok := pointer[1].(tea.MouseReleaseMsg)
+	if !ok {
+		t.Fatalf("Release(%d, %d) decoded as %T, want a tea.MouseReleaseMsg", clickX, clickY, pointer[1])
+	}
+	if release.Button != tea.MouseLeft || release.X != clickX || release.Y != clickY {
+		t.Errorf("Release(%d, %d) decoded as button %v at (%d, %d); want the left button at the cell named",
+			clickX, clickY, release.Button, release.X, release.Y)
 	}
 }
 

@@ -15,6 +15,7 @@ package main
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -32,6 +33,10 @@ const (
 	askChoiceHint = "type for a custom answer"
 	askFreeHint   = "type your answer below"
 	askReply      = "Noted, thank you."
+
+	// The filled checkbox a ticked multi-select row paints — what the pointer's first click leaves
+	// on the frame.
+	askTicked = "[✔]"
 
 	// The headings the three list pop-ups paint — the one text on each that does not scroll.
 	dropdownTitle = "commands and skills"
@@ -95,6 +100,53 @@ func TestE2EPopupFramesLists(t *testing.T) {
 	tuitest.Golden(t, "popup-sessions", next.Frame(), popupRedactions(sess)...)
 	next.Press(tuitest.Esc)
 	next.WaitGone(browserHint)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// TestE2EPopupClickAsk drives the ask pane with the POINTER, through the bytes a terminal in SGR
+// mouse mode sends (tuitest.Click / tuitest.Release): a click on an offered answer ticks it, and a
+// second click on that same row sends it. It is the one e2e click on this pane family — the
+// semantics are asserted at the reducer (internal/tui/mouse_test.go); what only a real program can
+// show is the report reaching the model at the cell the frame drew.
+//
+// The multi-select question is the one driven because its first click leaves a mark on the screen:
+// the box on the clicked row fills, so the highlight-then-send rule is readable in the frame rather
+// than only in the answer.
+func TestE2EPopupClickAsk(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "popups"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+
+	submit(drv, popupMultiPrompt)
+	drv.WaitText(askChoiceHint)
+	drv.WaitQuiet(settled)
+
+	const secondFinding = "Add the missing layout() call"
+	x, y, ok := drv.Frame().Find(secondFinding)
+	if !ok {
+		t.Fatalf("the pane does not paint %q:\n%s", secondFinding, drv.Frame())
+	}
+
+	// The first click: the row is highlighted and its box ticked, and the question stays up.
+	drv.Press(tuitest.Click(x, y))
+	drv.Press(tuitest.Release(x, y))
+	drv.WaitFor(func() bool { return strings.Contains(drv.Frame().Row(y), askTicked) },
+		tuitest.Awaiting("the clicked row's box to fill"))
+	drv.WaitQuiet(settled)
+	if !strings.Contains(drv.Frame().String(), askChoiceHint) {
+		t.Fatalf("the first click answered the question:\n%s", drv.Frame())
+	}
+
+	// The second click on the same row is the ⏎: the ticked answer reaches the blocked tool and the
+	// model's wrap-up comes back.
+	drv.Press(tuitest.Click(x, y))
+	drv.Press(tuitest.Release(x, y))
+	drv.WaitText(askReply)
+	drv.WaitGone(askChoiceHint)
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)

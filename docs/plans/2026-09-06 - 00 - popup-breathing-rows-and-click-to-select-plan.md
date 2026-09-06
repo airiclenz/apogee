@@ -220,9 +220,17 @@ NOTES (2026-09-06): the three pieces items 8-11 inherit are installed with no pr
 
 **Commit:** `refactor(tui): one row hit-test over popupPlacement, shared by every boxed pane`
 
-## 8. Click on the ask pane
+## 8. Click on the ask pane — ✅ DONE (2026-09-06)
 
 Depends on item 7.
+
+NOTES (2026-09-06): `TestMouseClickOnOverlayRowsArmsNoSelection` (mouse_test.go) was NOT amended — it raises the APPROVAL pane (`newApprovalModel`), which item 9 owns, so item 8 changes nothing it asserts and it passes untouched. The equivalent assertions for the ask pane are made by the new `TestAskClickOnAChoicelessQuestionDoesNothing` and `TestAskClickOutsideTheBoxIsSwallowed`.
+
+NOTES (2026-09-06): `askPaneModel` was left alone and the new tests go through `newAskModel` (model_test.go), which already hands back the reply channel — the regression guard's first option, and the one that touches no existing helper's signature.
+
+NOTES (2026-09-06): the `askPrompt` doc block stays on `askPrompt`; the new `askPromptPlaced` carries the placement and a short doc of its own, so the pane is composed once and the pointer reads the painter's own numbers.
+
+NOTES (2026-09-06): `settingsFrameCell` was renamed to `frameCell` in place (12 call sites updated) rather than moved out of the `/settings` section header it sits under — a rename the item asks for, a reorder it does not.
 
 **What.** `internal/tui/mouse.go`: `handleAskClick(pre, msg)` in `handleMouseClick` after the report panes (:430) and before `handleFooterModeClick` (:439), live only while `m.state == stateAwaitingAsk && m.pendingAsk != nil`, geometry via `popupPaneHit` over `askPrompt`. Inside the rect: box holds text → claimed, no-op (call G); no choices → claimed, no-op; row hit ≠ `askSel` → `askSel.highlight(row)`, and on multi-select also `askChecked[row] = !askChecked[row]`; row hit == `askSel` → `m.submitAnswer()`; a non-row line → claimed, no-op. Outside the rect → claimed, no-op (call C). No selection is armed, so `handleMouseRelease` falls through unchanged. `internal/tuitest/keys.go`: `Click(x, y int) Key` and `Release(x, y int) Key` emitting SGR press/release (1-based, from 0-based cell coordinates), pinned in `TestKeysDecodeAsIntended`. `mouse_test.go`: generalise `settingsFrameCell` (:2724-2733) into `frameCell(t, m, want)` used by every pane click test (no second copy).
 

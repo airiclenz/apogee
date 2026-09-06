@@ -2731,7 +2731,7 @@ func TestPopupPaneHitAnswersNothingWithThePaneShut(t *testing.T) {
 		renders++
 		return paint.render()
 	}
-	_, y := settingsFrameCell(t, m, "key-02")
+	_, y := frameCell(t, m, "key-02")
 	row, inRect, ok := popupPaneHit(m.withFrameSpans(), paneSettings, render, y)
 	if !ok || !inRect {
 		t.Fatalf("with the pane up, y=%d named row %d (inRect=%v, ok=%v), want the row inside the box", y, row, inRect, ok)
@@ -2813,12 +2813,12 @@ func TestClickArmClearsOnKeyAndWheel(t *testing.T) {
 // Mouse in the /settings pane (mouse.go)
 // ----------------------------------------------------------------------------
 
-// settingsFrameCell is where want is PAINTED in the composed frame: the screen row it lands on and the
-// display column its first cell occupies. A settings-mouse test aims at it rather than at coordinates
+// frameCell is where want is PAINTED in the composed frame: the screen row it lands on and the
+// display column its first cell occupies. Every pane's click test aims at it rather than at coordinates
 // of its own, so what the pointer is told to hit is what the frame actually drew there — the mapping
 // under test never gets to define its own target. The column is measured in the width authority (the
 // painter's, ADR 0030) because that is what a terminal reports a click in.
-func settingsFrameCell(t *testing.T, m Model, want string) (x, y int) {
+func frameCell(t *testing.T, m Model, want string) (x, y int) {
 	t.Helper()
 	frame := plain(m.View())
 	for row, line := range strings.Split(frame, "\n") {
@@ -2839,7 +2839,7 @@ func TestSettingsClickSelectsTheRowUnderThePointer(t *testing.T) {
 	for _, height := range []int{24, 30, 40} {
 		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
 			m := settingsFrameModel(t, 80, height, 8)
-			x, y := settingsFrameCell(t, m, "key-02")
+			x, y := frameCell(t, m, "key-02")
 
 			m = step(t, m, leftClick(x, y))
 			if m.settings.selected != 2 {
@@ -2850,11 +2850,11 @@ func TestSettingsClickSelectsTheRowUnderThePointer(t *testing.T) {
 				t.Errorf("a click on the pane armed another surface's selection: %+v / %+v", m.sel, m.transcriptSel)
 			}
 
-			labelX, labelY := settingsFrameCell(t, m, "Interface")
+			labelX, labelY := frameCell(t, m, "Interface")
 			if onLabel := step(t, m, leftClick(labelX, labelY)); onLabel.settings.selected != 2 {
 				t.Errorf("a click on the %q section label moved the selection to %d", "Interface", onLabel.settings.selected)
 			}
-			hintX, hintY := settingsFrameCell(t, m, settingsHint)
+			hintX, hintY := frameCell(t, m, settingsHint)
 			if onHint := step(t, m, leftClick(hintX, hintY)); onHint.settings.selected != 2 {
 				t.Errorf("a click on the pane's legend moved the selection to %d", onHint.settings.selected)
 			}
@@ -2887,7 +2887,7 @@ func TestSettingsClickSeatsTheCaretInTheEditField(t *testing.T) {
 			if m.settings.kind != settingsValueBuffer {
 				t.Fatalf("pane = %+v, want the edit buffer open", m.settings)
 			}
-			x, y := settingsFrameCell(t, m, c.want)
+			x, y := frameCell(t, m, c.want)
 
 			m = step(t, m, leftClick(x, y))
 
@@ -2912,12 +2912,12 @@ func TestSettingsDragSelectsAndCopies(t *testing.T) {
 	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
 	m = step(t, m, keyEnter())
 
-	x, y := settingsFrameCell(t, m, "http://box:1111")
+	x, y := frameCell(t, m, "http://box:1111")
 	m = step(t, m, leftClick(x, y)) // anchor on the first rune
 	if m.settings.sel.anchorOff != 0 {
 		t.Fatalf("anchor at %d, want the value's first rune", m.settings.sel.anchorOff)
 	}
-	head, _ := settingsFrameCell(t, m, "://box")
+	head, _ := frameCell(t, m, "://box")
 	m = step(t, m, leftDrag(head, y))
 
 	if got := m.settings.sel.headOff; got != 4 {
@@ -2952,7 +2952,7 @@ func TestSettingsDragSelectsAndCopies(t *testing.T) {
 // the pane is the transcript's, which is what keeps the conversation above a short pane scrollable.
 func TestSettingsWheelWalksTheKeyList(t *testing.T) {
 	m := settingsFrameModel(t, 80, 30, 8)
-	_, y := settingsFrameCell(t, m, "key-00")
+	_, y := frameCell(t, m, "key-00")
 	wheel := func(m Model, button tea.MouseButton, y int) Model {
 		return step(t, m, tea.MouseWheelMsg{X: 10, Y: y, Button: button})
 	}
@@ -3026,7 +3026,7 @@ func TestSettingsTextClickSeatsTheCaretInTheProse(t *testing.T) {
 			if wrapped := len(paint.place.blocks[1]) > 1; wrapped != c.wrapped {
 				t.Fatalf("the prose's second line paints on %d rows, want wrapped = %v", len(paint.place.blocks[1]), c.wrapped)
 			}
-			x, y := settingsFrameCell(t, m, c.want)
+			x, y := frameCell(t, m, c.want)
 
 			m = step(t, m, leftClick(x, y))
 
@@ -3052,12 +3052,12 @@ func TestSettingsTextClickSeatsTheCaretInTheProse(t *testing.T) {
 func TestSettingsTextDragSelectsAcrossLines(t *testing.T) {
 	m := settingsTextEditModel(t, "You are apogee.\nWork step by step.")
 
-	x, y := settingsFrameCell(t, m, "You are apogee.")
+	x, y := frameCell(t, m, "You are apogee.")
 	m = step(t, m, leftClick(x, y))
 	if m.settings.sel.anchorOff != 0 {
 		t.Fatalf("anchor at %d, want the prose's first rune", m.settings.sel.anchorOff)
 	}
-	head, headY := settingsFrameCell(t, m, "step by")
+	head, headY := frameCell(t, m, "step by")
 	m = step(t, m, leftDrag(head, headY))
 
 	const want = "You are apogee.\nWork "
@@ -3140,7 +3140,7 @@ func TestTranscriptDragOutlivesASettingsHighlight(t *testing.T) {
 	m = step(t, m, keyEnter()) // the buffer opens on key-00, seeded with its value
 
 	// A real, non-empty highlight in the field — the state that used to swallow everything after it.
-	fieldX, fieldY := settingsFrameCell(t, m, "value-00")
+	fieldX, fieldY := frameCell(t, m, "value-00")
 	m = step(t, m, leftClick(fieldX, fieldY))
 	m = step(t, m, leftDrag(fieldX+4, fieldY))
 	if !m.settings.sel.active || m.settings.sel.anchorOff == m.settings.sel.headOff {
@@ -4360,6 +4360,218 @@ func TestPromptWheelOverAChoicelessQuestion(t *testing.T) {
 	if after.viewport.YOffset() != m.viewport.YOffset() {
 		t.Errorf("the transcript scrolled to %d; a notch inside the box is the pane's whether or not it has rows",
 			after.viewport.YOffset())
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Clicking the ask prompt (mouse.go, ask.go)
+// ----------------------------------------------------------------------------
+
+// askClickModel raises a question the pointer can be aimed at and hands back the reply channel with
+// it: what a click SENDS is only provable at the other end of the rendezvous the blocked ask_user
+// tool is waiting on (newAskModel), so every test below reads its answer from there rather than from
+// a field on the Model.
+func askClickModel(t *testing.T, req domain.AskRequest) (Model, chan domain.AskAnswer) {
+	t.Helper()
+	m, reply := newAskModel(t, req)
+	if _, _, ok := m.frameSpans().pane(panePrompt); !ok {
+		t.Fatal("the ask pane is not on the frame; there is nothing to aim at")
+	}
+	return m, reply
+}
+
+// sentAnswer is what the worker received, if anything: the channel is buffered (cap 1) and the send
+// is synchronous, so a read that finds it empty right after an Update proves nothing was sent.
+func sentAnswer(t *testing.T, reply chan domain.AskAnswer) (string, bool) {
+	t.Helper()
+	select {
+	case a := <-reply:
+		return a.Text, true
+	default:
+		return "", false
+	}
+}
+
+// The pointer takes two clicks to answer a question, and the first one only moves the highlight
+// (call J, owner 2026-09-06): a click on an offered answer seats the ❯ on it and arms it, and the
+// SECOND click on that same row is the ⏎ — the label reaches the blocked worker.
+func TestAskClickHighlightsThenTheSecondClickSends(t *testing.T) {
+	m, reply := askClickModel(t, domain.AskRequest{
+		Question: "which way?",
+		Choices:  []string{"left", "middle", "right"},
+	})
+	x, y := frameCell(t, m, "middle")
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.askSel.selected != 1 {
+		t.Fatalf("askSel = %d after a click on the second answer, want the highlight seated on 1", m.askSel.selected)
+	}
+	if !m.clickArmed.holds(panePrompt, 1) {
+		t.Errorf("the click armed %+v, want the row it highlighted", m.clickArmed)
+	}
+	if answer, sent := sentAnswer(t, reply); sent {
+		t.Fatalf("the FIRST click sent %q; a single click may never answer a question", answer)
+	}
+	if m.state != stateAwaitingAsk {
+		t.Fatalf("state = %v after one click, want the question still up", m.state)
+	}
+
+	m, cmd := stepCmd(t, m, leftClick(x, y))
+
+	answer, sent := sentAnswer(t, reply)
+	if !sent {
+		t.Fatal("the second click on the highlighted row sent nothing")
+	}
+	if answer != "middle" {
+		t.Errorf("the worker received %q, want the clicked answer %q", answer, "middle")
+	}
+	if cmd == nil {
+		t.Error("the click dropped submitAnswer's Cmd; the spinner tick it re-arms has to survive a click")
+	}
+	if m.state != stateRunning {
+		t.Errorf("state = %v after the answer, want running", m.state)
+	}
+	if m.clickArmed.ok {
+		t.Errorf("the arm outlived the answer: %+v", m.clickArmed)
+	}
+}
+
+// The pane's OWN default highlight is not an answer the pointer gave, so a click on the first choice
+// — the one the ❯ already sits on — arms it and sends nothing. It is the whole point of the arm: two
+// clicks always, whatever the keyboard or the pane left highlighted (call J).
+func TestAskClickOnTheDefaultHighlightArmsAndSendsNothing(t *testing.T) {
+	m, reply := askClickModel(t, domain.AskRequest{
+		Question: "which way?",
+		Choices:  []string{"left", "middle", "right"},
+	})
+	if m.askSel.highlight(3) != 0 {
+		t.Fatalf("setup: the highlight starts on %d, want the first choice", m.askSel.highlight(3))
+	}
+	x, y := frameCell(t, m, "left")
+
+	m = step(t, m, leftClick(x, y))
+
+	if answer, sent := sentAnswer(t, reply); sent {
+		t.Fatalf("a first click on the default-highlighted answer sent %q", answer)
+	}
+	if !m.clickArmed.holds(panePrompt, 0) {
+		t.Errorf("the click armed %+v, want the default row it landed on", m.clickArmed)
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	if answer, sent := sentAnswer(t, reply); !sent || answer != "left" {
+		t.Errorf("the second click sent %q (sent=%v), want %q", answer, sent, "left")
+	}
+}
+
+// On a MULTI-SELECT question the first click does what ␣ does as well as what ↑/↓ do: it ticks the
+// row it highlights. The second click on that row sends the TICKED SET, which is submitAnswer's own
+// rule rather than a second one written for the pointer.
+func TestAskClickTicksAMultiSelectRowThenSendsTheSet(t *testing.T) {
+	m, reply := askClickModel(t, domain.AskRequest{
+		Question:    "which findings?",
+		Choices:     []string{"the nil check", "the missing layout call", "the empty path"},
+		MultiSelect: true,
+	})
+	x, y := frameCell(t, m, "the missing layout call")
+
+	m = step(t, m, leftClick(x, y))
+
+	if !m.askChecked[1] {
+		t.Errorf("askChecked = %v after a click on the second finding, want its box ticked", m.askChecked)
+	}
+	if m.askChecked[0] || m.askChecked[2] {
+		t.Errorf("askChecked = %v; the click ticked a row it did not land on", m.askChecked)
+	}
+	if m.askSel.selected != 1 {
+		t.Errorf("askSel = %d, want the highlight on the row the click ticked", m.askSel.selected)
+	}
+	if answer, sent := sentAnswer(t, reply); sent {
+		t.Fatalf("the ticking click sent %q", answer)
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	answer, sent := sentAnswer(t, reply)
+	if !sent {
+		t.Fatal("the second click on the ticked row sent nothing")
+	}
+	if answer != "the missing layout call" {
+		t.Errorf("the worker received %q, want the one ticked label", answer)
+	}
+}
+
+// The empty-box guard askChoiceKey makes for the arrows is the pointer's too (call G): the moment the
+// human types, the offering is no longer what ⏎ would send, so a click on a choice row is swallowed —
+// the highlight stays dropped and the draft in the box is untouched.
+func TestAskClickIsSwallowedWhileTheBoxHoldsText(t *testing.T) {
+	m, reply := askClickModel(t, domain.AskRequest{
+		Question: "which way?",
+		Choices:  []string{"left", "middle", "right"},
+	})
+	x, y := frameCell(t, m, "middle")
+	m = typeInput(t, m, "my own answer")
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.input.Value() != "my own answer" {
+		t.Errorf("the box reads %q after a click on a choice, want the draft untouched", m.input.Value())
+	}
+	if m.clickArmed.ok {
+		t.Errorf("the swallowed click armed %+v; nothing on this pane is armable while the box holds text", m.clickArmed)
+	}
+	if answer, sent := sentAnswer(t, reply); sent {
+		t.Fatalf("a click while the box holds text sent %q", answer)
+	}
+}
+
+// A question offering no choices has no row to name, and a click inside its box does nothing at all —
+// it is still the pane's, so nothing under it is selected either.
+func TestAskClickOnAChoicelessQuestionDoesNothing(t *testing.T) {
+	m, reply := askClickModel(t, domain.AskRequest{Question: "what should it be called?"})
+	_, y := promptRect(t, m)
+
+	m = step(t, m, leftClick(4, y))
+
+	if m.state != stateAwaitingAsk {
+		t.Errorf("state = %v, want the question still up", m.state)
+	}
+	if m.transcriptSel.active {
+		t.Error("a click inside the pane armed a transcript selection")
+	}
+	if answer, sent := sentAnswer(t, reply); sent {
+		t.Fatalf("a click on a choiceless question sent %q", answer)
+	}
+}
+
+// A click OUTSIDE the box is swallowed too (call C): a question is a decision surface, and no stray
+// click may cancel it or reach past it. Nothing is selected, so the release that ends the click has
+// nothing to copy either.
+func TestAskClickOutsideTheBoxIsSwallowed(t *testing.T) {
+	m, reply := askClickModel(t, domain.AskRequest{
+		Question: "which way?",
+		Choices:  []string{"left", "middle", "right"},
+	})
+	paneTop, _ := promptRect(t, m)
+	if paneTop == 0 {
+		t.Fatal("the pane starts on the first row; there is no transcript above it to aim at")
+	}
+
+	m, cmd := stepCmd(t, m, leftClick(4, paneTop-1))
+
+	if m.transcriptSel.active {
+		t.Error("a click above the pane armed a transcript selection; the question swallows it")
+	}
+	if cmd != nil {
+		t.Error("a click above the pane returned a Cmd")
+	}
+	if m.state != stateAwaitingAsk {
+		t.Errorf("state = %v, want the question still up", m.state)
+	}
+	if answer, sent := sentAnswer(t, reply); sent {
+		t.Fatalf("a click outside the box sent %q", answer)
 	}
 }
 

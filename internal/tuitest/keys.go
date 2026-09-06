@@ -1,5 +1,7 @@
 package tuitest
 
+import "fmt"
+
 // Key is one keystroke, spelled the only way a terminal can spell one: as the bytes it sends. A
 // driver types bytes into a program's input, and what the program makes of them is the key parser's
 // business — the same parser the shipped binary uses, reading the same bytes a real xterm would
@@ -55,3 +57,28 @@ const (
 	F11 Key = "\x1b[23~"
 	F12 Key = "\x1b[24~"
 )
+
+// Click and Release are the two halves of one left-button click at a cell, spelled the way a terminal
+// in SGR mouse mode (1006) spells one: `ESC [ < 0 ; col ; row M` for the press and the same report
+// ending in `m` for the release. x and y are the ZERO-based cell coordinates a [Frame] answers in
+// ([Frame.Find], [Frame.Cell]); the report itself is 1-based, so the conversion happens here and a
+// caller never does the arithmetic that puts the pointer one row off what it read.
+//
+// They are [Key] values like every other key because they are the same thing: bytes fed through the
+// program's own parser. Nothing here builds a tea.MouseClickMsg — a Msg built in a test proves the
+// Model handles a Msg, not that the pointer reaches it — and both are pinned by
+// TestKeysDecodeAsIntended alongside the keys.
+//
+// The press and the release are separate because a terminal sends them separately: apogee's own
+// release handler ends a drag and copies a selection (mouse.go), so a driver that pressed without
+// releasing would leave the program mid-gesture.
+func Click(x, y int) Key { return sgrMouse(x, y, 'M') }
+
+// Release ends the click Click began, at the same cell.
+func Release(x, y int) Key { return sgrMouse(x, y, 'm') }
+
+// sgrMouse is the one place the report's shape is written: button 0 (left), the 1-based column and
+// row, and the final byte that tells a press from a release.
+func sgrMouse(x, y int, final rune) Key {
+	return Key(fmt.Sprintf("\x1b[<0;%d;%d%c", x+1, y+1, final))
+}

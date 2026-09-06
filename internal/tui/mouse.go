@@ -456,6 +456,11 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return thinking, cmd
 	}
 	m = thinking
+	// The ask pane is asked next: it is drawn over the transcript like the panes above it, and it
+	// swallows every click the frame hands it while a question is up (handleAskClick, call C).
+	if ask, cmd, claimed := m.handleAskClick(pre, msg); claimed {
+		return ask, cmd
+	}
 	// The footer's mode marker is the frame's one CHROME control ([Model.handleFooterModeClick]): a
 	// click on it opens the mode picker. It is asked after the panes that draw OVER the transcript —
 	// they can cover any row, the footer's included, and a click on a pane belongs to the pane — and
@@ -1365,6 +1370,63 @@ func (m Model) highlightSettingsEdit(view string, display settingsDisplay, place
 	}
 	lines[row] = shadeCells(m.th.measure, lines[row], x+c0, x+c1, m.th.selection)
 	return strings.Join(lines, "\n")
+}
+
+// ----------------------------------------------------------------------------
+// Mouse in the ask prompt (ask.go)
+// ----------------------------------------------------------------------------
+
+// handleAskClick answers a left-click while an ask_user question is up. The pointer does what the
+// keyboard does on this pane and no more: a click on an offered answer moves the highlight onto it —
+// ticking its box where the question is multi-select, exactly as ␣ does — and a SECOND click on that
+// same row sends it, the ⏎ the highlight was already offering (submitAnswer). The two-click rule is the
+// arm's (clickArm, model.go): the pane's own default highlight was put there by the pane, not by the
+// human, so a single click can never turn it into an answer somebody gave.
+//
+// Everything else it swallows. A click inside the box that names no row — the question, a pad line, the
+// hint, a border — is the pane's and does nothing; so is every click while the input box holds text,
+// which is the empty-box guard askChoiceKey makes for the arrows (D5, call G), and so is a question
+// offering no choices at all, which has no row to name. And so, deliberately, is a click OUTSIDE the box
+// (call C, owner 2026-09-06): a question is a decision surface, and no stray click of the pointer's may
+// cancel it or stop the run the way esc there does. Nothing is ever selected by these clicks, so
+// handleMouseRelease falls through unchanged.
+//
+// pre is the pre-click frame the pane is placed from (handleMouseClick) and the live model is what
+// mutates — the chain's rule, and here it is also the reason the question the geometry is composed from
+// is read off pre: submitAnswer clears m.pendingAsk, and a second click composing the pane from the
+// answered model would have nothing to place.
+func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	if m.state != stateAwaitingAsk || m.pendingAsk == nil || pre.pendingAsk == nil {
+		return m, nil, false
+	}
+	req := pre.pendingAsk.Request
+	row, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
+		return pre.askPromptPlaced(req)
+	}, msg.Y)
+	if !inRect || !onRow || m.input.Value() != "" {
+		return m, nil, true // outside the box, off its rows, or the box holds a typed answer
+	}
+	choices := m.pendingAsk.Request.Choices
+	if len(choices) == 0 {
+		return m, nil, true
+	}
+	if m.clickArmed.holds(panePrompt, row) {
+		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
+		// the next keypress to drop, because the question it belonged to is over.
+		m.clickArmed = clickArm{}
+		next, cmd := acceptedModel(m.submitAnswer())
+		return next, cmd, true
+	}
+	m.askSel.seat(row, len(choices))
+	if req.MultiSelect {
+		// A checked set shorter than the offering ticks nothing rather than panicking — the −1
+		// listCursor.highlight answers for an empty one, the same guard ␣ takes (askChoiceKey).
+		if sel := m.askSel.highlight(len(m.askChecked)); sel >= 0 {
+			m.askChecked[sel] = !m.askChecked[sel]
+		}
+	}
+	m.clickArmed = clickArm{pane: panePrompt, row: row, ok: true}
+	return m, nil, true
 }
 
 // highlightTranscript overlays the transcript drag-selection's background on the viewport's
