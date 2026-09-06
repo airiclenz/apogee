@@ -434,7 +434,7 @@ func breathingList(body string) listContent {
 		selected: 0,
 	}
 	if body != "" {
-		// What renderFilterList composes for a list being narrowed, and the shape the /settings
+		// What renderFilterListPlaced composes for a list being narrowed, and the shape the /settings
 		// sub-list's question arrives in too: a body block set off by its own two blanks.
 		c.body, c.bodyLead, c.bodyPad = body, pickerFilterLead, true
 	}

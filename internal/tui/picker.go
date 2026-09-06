@@ -1086,7 +1086,7 @@ func (m Model) pickerFilteredView() pickerView {
 // Rendering
 // ----------------------------------------------------------------------------
 
-// renderPicker paints the open picker through the shared list surface (renderFilterList,
+// renderPicker paints the open picker through the shared list surface (renderFilterListPlaced,
 // listsurface.go):
 // a titled, bordered pane spanning the full window width holding the filter line, the rows and a key
 // legend, the selected row highlighted. It returns "" when the picker is closed, so View treats it
@@ -1095,7 +1095,7 @@ func (m Model) pickerFilteredView() pickerView {
 // What this file states is what only this pane knows — its slot in the frame, its name, its legend,
 // its taste in rows and the rows themselves. The filter line, its two blanks, the budget claim all
 // three cost and the trade on a window too short for everything are the surface's
-// (renderFilterList).
+// (renderFilterListPlaced).
 func (m Model) renderPicker() string {
 	view, _ := m.renderPickerPlaced()
 	return view

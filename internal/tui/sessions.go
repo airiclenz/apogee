@@ -626,7 +626,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 // so View treats it like the approval-prompt slot.
 //
 // While a filter is being typed the pane grows one line for it, set off by a blank line at each end —
-// the shared list surface's own line, budget and trade (renderFilterList, listsurface.go): the three
+// the shared list surface's own line, budget and trade (renderFilterListPlaced, listsurface.go): the three
 // lines
 // are the module's BODY block, both blanks are the body's own pads, and the whole claim comes off the
 // top of the frame's grant so a short window gives up ROWS before it gives up the line the human is

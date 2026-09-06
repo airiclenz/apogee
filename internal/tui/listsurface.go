@@ -54,7 +54,7 @@ import (
 //     in every one of them (listCursor.wheel), because a wheel is a scroll and rolling past the last
 //     row onto the first would move the human somewhere they did not aim (ratified 2026-08-22).
 //   - The filter LINE is the surface's, not the painter's spec. Its label, its caret, its two
-//     blank lines and the budget claim all three cost ride here (renderFilterList), so a pane cannot
+//     blank lines and the budget claim all three cost ride here (renderFilterListPlaced), so a pane cannot
 //     paint a line it did not claim room for. A pane with a body of its own instead — the /settings
 //     sub-list's question — states it as body and takes the same budget→render call (renderList).
 //
@@ -438,7 +438,7 @@ func overlayFilterLine(filter lineEditor) string {
 //
 // body is the block between the title and the rows, and a pane either states one of its own — the
 // /settings sub-list's question, which names the key being answered because the list where the human
-// read that name is what the sub-list replaced — or leaves it to [Model.renderFilterList], which
+// read that name is what the sub-list replaced — or leaves it to [Model.renderFilterListPlaced], which
 // fills all three body fields from the filter being typed. The two cannot both be true of one pane:
 // a filtering list's body IS its filter line.
 type listContent struct {
@@ -466,7 +466,7 @@ type listContent struct {
 // what it asked the frame for. The claim is also what decides the trade on a window too short for
 // everything — it comes off the top of the grant, so the ROWS shrink and the body stays. That is the
 // right way round for both bodies a list has: the one line the human is actively typing
-// (renderFilterList) is what says the list is being narrowed, and the /settings sub-list's question
+// (renderFilterListPlaced) is what says the list is being narrowed, and the /settings sub-list's question
 // is what says which key is being answered — while a list you cannot see all of is still a list. The
 // row demand and the row cap are untouched by any of it: the pane's taste is its taste with a body
 // exactly as without.
@@ -498,7 +498,7 @@ func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 	// The house blanks around the ROW block (popupSpec.rowPadAbove, popupRowStyle.padBelow): one under
 	// whatever stands above the rows, one over the key legend. The upper one is not asked for where the
 	// line above the block is already blank — a pane with a body of its own closes it with the body's
-	// OWN lower pad (bodyPadBelow), which is every list showing a typed filter (renderFilterList) and
+	// OWN lower pad (bodyPadBelow), which is every list showing a typed filter (renderFilterListPlaced) and
 	// the /settings sub-list's question — so the two never double into a two-line gap. The lower one
 	// follows the legend, because a blank above nothing is a blank above the bottom border.
 	//
@@ -535,22 +535,17 @@ func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 	return view, place, true
 }
 
-// renderFilterList paints an open FILTERING list overlay: the call above, with the filter line as
-// the pane's body. It is the one place the line, its label, its two blanks and the claim for all
-// three are stated (renderList's own doc says what that claim buys), so a pane states its rows and
-// its wording and cannot forget the pads or set them out of step with what it asked the frame for.
+// renderFilterListPlaced paints an open FILTERING list overlay: the call above, with the filter line
+// as the pane's body and the painter's own placement beside the view, for the two filtering panes a
+// pointer names rows on (renderListPlaced's doc says what the placement buys). It is the one place
+// the line, its label, its two blanks and the claim for all three are stated (renderList's own doc
+// says what that claim buys), so a pane states its rows and its wording and cannot forget the pads
+// or set them out of step with what it asked the frame for: the line is folded in here rather than
+// by each caller, because a pane's rows and its wording are its own and the line, its label and its
+// pads are the surface's.
 //
 // An empty filter leaves the body block exactly as the pane left it — nothing at all, for both panes
 // that filter — so a list nobody has typed into is the list it was before a filter existed.
-func (m Model) renderFilterList(filter lineEditor, c listContent) string {
-	view, _, _ := m.renderFilterListPlaced(filter, c)
-	return view
-}
-
-// renderFilterListPlaced is that call with the placement beside it, for the two filtering panes a
-// pointer names rows on (renderListPlaced's doc says what the placement buys). The filter line is
-// folded in here rather than by each caller, exactly as above: a pane's rows and its wording are
-// its own, and the line, its label and its pads are the surface's.
 func (m Model) renderFilterListPlaced(filter lineEditor, c listContent) (string, popupPlacement, bool) {
 	if line := overlayFilterLine(filter); line != "" {
 		c.body, c.bodyLead, c.bodyPad = line, pickerFilterLead, true
