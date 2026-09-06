@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"context"
+	"reflect"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -370,4 +373,118 @@ func TestListCursorWheelClampsWhereTheKeysWrap(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The row block's breathing rows
+// ----------------------------------------------------------------------------
+
+// breathingListModel is a model sized to one window with the overflow bar OFF, so the pane-shape
+// assertions below read a row as its own text rather than as its text plus a bar cell. The bar is a
+// contract of its own (popupRowScrollbar) and the one thing these assertions care about it — that it
+// never runs down the blanks — is asserted separately, with it on.
+func breathingListModel(t *testing.T, height int, bar bool) Model {
+	t.Helper()
+	opts := testOpts
+	opts.HideScrollbar = !bar
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	return step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+}
+
+// breathingList is the offering those assertions are made over: a titled, hinted list of ten plain
+// one-cell choices in the picker's own slot, with the picker's own taste for how many of them to show
+// at once. body is the caller's, because a pane WITH one is the case the upper blank is not spent on.
+func breathingList(body string) listContent {
+	c := listContent{
+		pane:     panePicker,
+		title:    "a list",
+		hint:     "esc close",
+		rowCap:   8,
+		rows:     listTestRows("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"),
+		selected: 0,
+	}
+	if body != "" {
+		// What renderFilterList composes for a list being narrowed, and the shape the /settings
+		// sub-list's question arrives in too: a body block set off by its own two blanks.
+		c.body, c.bodyLead, c.bodyPad = body, pickerFilterLead, true
+	}
+	return c
+}
+
+// listPaneLines is a rendered list pane as a human reads it: the two borders dropped and every line
+// between them stripped of its styling and its border/padding chrome, so a blank arrives as "".
+func listPaneLines(t *testing.T, pane string) []string {
+	t.Helper()
+	lines := popupLines(pane)
+	if len(lines) < 3 {
+		t.Fatalf("the pane is %d lines, want at least its two borders and a line between them: %q", len(lines), lines)
+	}
+	out := make([]string, 0, len(lines)-2)
+	for _, ln := range lines[1 : len(lines)-1] {
+		out = append(out, popupInterior(ln))
+	}
+	return out
+}
+
+// Every list pop-up keeps one blank line between whatever stands above its row block and the block,
+// and one between the block and its key legend (popupSpec.rowPadAbove, popupRowStyle.padBelow) — the
+// house rule renderList books for all four of its panes at once. The upper blank is NOT spent where
+// the line above the block is already one: a pane with a body of its own closes it with the body's
+// own lower pad, so a list being narrowed never opens a two-line gap under its filter. And the two
+// are the FIRST lines the pane gives up: on a window that cannot seat a row beside them they are
+// handed back together, because breathing room is not worth a decision.
+func TestRenderListBreathes(t *testing.T) {
+	cases := []struct {
+		name   string
+		height int
+		body   string
+		want   []string
+	}{
+		{
+			// 26 rows is the first window that pays for the picker's whole taste and both blanks.
+			name: "no body — the blank under the title", height: 26,
+			want: []string{"a list", "", "❯ one", "two", "three", "four", "five", "six", "seven", "eight", "", "esc close"},
+		},
+		{
+			name: "a body — its own blank is the block's", height: 26, body: pickerFilterLead + "t",
+			want: []string{"a list", "", pickerFilterLead + "t", "", "❯ one", "two", "three", "four", "five", "six", "seven", "", "esc close"},
+		},
+		{
+			// The floor: two lines of rows is all the grant has, so both blanks go back to them.
+			name: "at the floor — the rows keep the lines", height: 18,
+			want: []string{"a list", "❯ one", "two", "esc close"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := breathingListModel(t, tc.height, false)
+			got := listPaneLines(t, m.renderList(breathingList(tc.body)))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("pane lines =\n%q\nwant\n%q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The overflow bar is the rows' own stroke and stops where they do: the two blanks the block is set
+// off by carry no cell of it, so the bar never says the list runs on into the breathing room.
+func TestRenderListBreathingRowsCarryNoScrollbarCell(t *testing.T) {
+	m := breathingListModel(t, 26, true)
+	lines := listPaneLines(t, m.renderList(breathingList("")))
+	if n := len(lines); lines[1] != "" || lines[n-2] != "" {
+		t.Fatalf("the blanks are not at 1 and %d: %q", n-2, lines)
+	}
+	if !containsAny(lines, glyphScrollThumb) {
+		t.Fatalf("precondition: the pane painted no bar at all, so there is nothing to hold off the blanks: %q", lines)
+	}
+}
+
+// containsAny reports whether any of the lines carries s.
+func containsAny(lines []string, s string) bool {
+	for _, ln := range lines {
+		if strings.Contains(ln, s) {
+			return true
+		}
+	}
+	return false
 }

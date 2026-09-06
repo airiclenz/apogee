@@ -780,8 +780,8 @@ func TestSessionBrowserPaneSpansFullWidth(t *testing.T) {
 }
 
 // A session title wider than the box is truncated, not wrapped: the pane keeps exactly
-// 2 borders + title + one session row + hint physical lines, and the over-wide row ends in an
-// ellipsis.
+// 2 borders + title + the row block's blank + one session row + its blank + hint physical lines, and
+// the over-wide row ends in an ellipsis.
 func TestSessionBrowserLongTitleDoesNotWrap(t *testing.T) {
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", strings.Repeat("verylongtitle ", 12), "/ws/a", time.Now(), 0, nil)
@@ -789,7 +789,7 @@ func TestSessionBrowserLongTitleDoesNotWrap(t *testing.T) {
 	m = openBrowser(t, m)
 
 	pane := m.renderSessionBrowser()
-	const wantLines = 2 + 1 + 1 + 1 // borders + title + one session row + hint
+	const wantLines = 2 + 1 + 1 + 1 + 1 + 1 // borders + title + blank + one session row + blank + hint
 	if got := len(popupLines(pane)); got != wantLines {
 		t.Fatalf("pane has %d lines, want %d (a wide title must truncate, not wrap):\n%s",
 			got, wantLines, strip(pane))
@@ -800,7 +800,8 @@ func TestSessionBrowserLongTitleDoesNotWrap(t *testing.T) {
 }
 
 // With more than maxSessionRows sessions the pane still scrolls a window around the selection: its
-// physical line count is capped at 2 borders + title + maxSessionRows + hint, never the full list.
+// physical line count is capped at 2 borders + title + the row block (its two blanks and
+// maxSessionRows rows) + hint, never the full list.
 func TestSessionBrowserWindowsLongList(t *testing.T) {
 	host := &fakeSessionHost{}
 	now := time.Now()
@@ -812,7 +813,7 @@ func TestSessionBrowserWindowsLongList(t *testing.T) {
 	m = openBrowser(t, m)
 
 	pane := m.renderSessionBrowser()
-	const wantLines = 2 + 1 + maxSessionRows + 1 // borders + title + capped rows + hint
+	const wantLines = 2 + 1 + 1 + maxSessionRows + 1 + 1 // borders + title + blank + capped rows + blank + hint
 	if got := len(popupLines(pane)); got != wantLines {
 		t.Errorf("pane has %d lines, want %d (a long list must window to maxSessionRows):\n%s",
 			got, wantLines, strip(pane))
@@ -994,7 +995,7 @@ func TestSessionBrowserScheduleTagHoldsTheWidthContract(t *testing.T) {
 
 			pane := m.renderSessionBrowser()
 			lines := popupLines(pane)
-			const wantLines = 2 + 1 + 2 + 1 // borders + title + two session rows + hint
+			const wantLines = 2 + 1 + 1 + 2 + 1 + 1 // borders + title + blank + two rows + blank + hint
 			if len(lines) != wantLines {
 				t.Fatalf("pane has %d lines, want %d (a tagged row must truncate, not wrap):\n%s",
 					len(lines), wantLines, strip(pane))
@@ -1352,12 +1353,17 @@ func browserPaneLines(t *testing.T, m Model) []string {
 }
 
 // The browser paints the picker's own filter line: under the title, one blank line above and one
-// below, and nothing at all while the filter is empty. The legend says the verbs are chords now.
+// below, and nothing at all while the filter is empty — the two blanks an unfiltered pane still
+// shows are the row block's own house pads, not the filter's. The legend says the verbs are chords now.
 func TestSessionBrowserPaintsTheFilterLine(t *testing.T) {
 	m, _ := filterableBrowser(t)
 
-	for i, ln := range browserPaneLines(t, m) {
-		if ln == "" {
+	unfiltered := browserPaneLines(t, m)
+	if n := len(unfiltered); n < 4 || unfiltered[1] != "" || unfiltered[n-2] != "" {
+		t.Fatalf("an unfiltered pane wants the row block's blanks at 1 and %d: %q", n-2, unfiltered)
+	}
+	for i, ln := range unfiltered {
+		if ln == "" && i != 1 && i != len(unfiltered)-2 {
 			t.Errorf("line %d is blank: an unfiltered pane spends no spacer on a line it has not got", i)
 		}
 		if strings.HasPrefix(ln, pickerFilterLead) {

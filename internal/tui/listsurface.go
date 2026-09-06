@@ -467,9 +467,24 @@ func (m Model) renderList(c listContent) string {
 	if c.body != "" {
 		claim.body = popupBodyLineCount(m.th, c.body, m.width) + popupBodyPadLines(c.bodyPad, c.bodyPad)
 	}
+	// The house blanks around the ROW block (popupSpec.rowPadAbove, popupRowStyle.padBelow): one under
+	// whatever stands above the rows, one over the key legend. The upper one is not asked for where the
+	// line above the block is already blank — a pane with a body of its own closes it with the body's
+	// OWN lower pad (bodyPadBelow), which is every list showing a typed filter (renderFilterList) and
+	// the /settings sub-list's question — so the two never double into a two-line gap. The lower one
+	// follows the legend, because a blank above nothing is a blank above the bottom border.
+	//
+	// Both are BOOKED here, in the same arithmetic that books the filter's pads above: the demand and
+	// the cap handed to popupBudget are LINES, so a pane asking for its rows alone would draw the two
+	// blanks out of the rows' own window and show one row fewer than its taste on a terminal with the
+	// lines to spare. Reserving that window is NOT this call's business — the painter takes the pads
+	// off the grant before it seats a row, and hands them back at the floor (popupRowLinesAt) — so a
+	// list too tall for its window gives up its breathing room rather than a row of the list.
+	padAbove, padBelow := c.body == "", c.hint != ""
+	pad := popupRowPadLines(padAbove && len(c.rows) > 0, padBelow)
 	// The pane's rowCap is the taste; popupBudget is the screen's answer to it, so a long offering on a
 	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
-	maxBody, shown, seated := m.popupBudget(c.pane, len(c.rows), c.rowCap, popupChrome, claim)
+	maxBody, shown, seated := m.popupBudget(c.pane, len(c.rows)+pad, c.rowCap+pad, popupChrome, claim)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
@@ -482,6 +497,8 @@ func (m Model) renderList(c listContent) string {
 		bodyPadBelow: c.bodyPad,
 		rows:         c.rows,
 		menuRows:     c.menuRows,
+		rowPadAbove:  padAbove,
+		rowStyle:     popupRowStyle{padBelow: padBelow},
 		selected:     c.selected,
 		hint:         c.hint,
 		maxRows:      shown,

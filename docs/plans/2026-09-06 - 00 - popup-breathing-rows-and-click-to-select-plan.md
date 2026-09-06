@@ -124,7 +124,15 @@ Depends on items 0 and 1.
 
 **Commit:** `feat(tui): the approval body sets every part off as a paragraph`
 
-## 4. The list panes breathe — picker, /sessions browser, / dropdown, /settings sub-lists
+## 4. The list panes breathe — picker, /sessions browser, / dropdown, /settings sub-lists — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the pads ride `popupSpec.rowPadAbove` / `popupRowStyle.padBelow` set in `renderList`, booked into the demand and cap handed to `popupBudget` through `popupRowPadLines`; the painter's own reservation (item 1) owns the window, so `renderList` subtracts nothing.
+
+NOTES (2026-09-06): `internal/tui/autocomplete_test.go` is on the item's **Files:** list but needed no amendment — `autocomplete_test.go:160,227` and `picker_test.go:2427,2480` index rows by content, not by an offset from the title, and stayed green. `picker_test.go` and `sessions_test.go` were amended: four physical-line counts gained the two blanks, and the two "an unfiltered pane spends no spacer" loops now exempt the row block's own pads.
+
+NOTES (2026-09-06): new tests are `TestRenderListBreathes` (three exact pane shapes: no body at 26 rows = full `rowCap` plus both blanks; a body at 26 rows = the body's own pads and no double; the floor at 18 rows = rows and no blanks) and `TestRenderListBreathingRowsCarryNoScrollbarCell`.
+
+NOTES (2026-09-06): the `/settings` enum sub-list (`renderSettingsSubList`, settings.go:1844) carries a body with `bodyPad` false, so under the item's literal `c.body == ""` gate it gains only the lower blank — its question still sits flush on the rows. Implemented as the item's text states; see DEFER.
 
 Depends on items 0 and 1.
 

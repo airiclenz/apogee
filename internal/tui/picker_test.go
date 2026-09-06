@@ -2308,10 +2308,16 @@ func TestPickerPaintsTheFilterLineWithBreathingRoom(t *testing.T) {
 	if at := pickerFilterRow(unfiltered); at >= 0 {
 		t.Errorf("an empty filter still painted a line at %d: %q", at, unfiltered)
 	}
-	for i, ln := range unfiltered {
+	// The two blanks an unfiltered pane DOES spend are the row block's own house pads — one under the
+	// title, one over the hint (popupSpec.rowPadAbove, popupRowStyle.padBelow). Everything BETWEEN them
+	// is rows: the filter's own spacers are what a pane nobody has typed into spends nothing on.
+	if n := len(unfiltered); n < 4 || unfiltered[1] != "" || unfiltered[n-2] != "" {
+		t.Fatalf("an unfiltered pane wants the row block's blanks at 1 and %d: %q", n-2, unfiltered)
+	}
+	for i, ln := range unfiltered[2 : len(unfiltered)-2] {
 		if ln == "" {
 			t.Errorf("line %d is blank: an unfiltered pane spends no spacer on a line it has not got: %q",
-				i, unfiltered)
+				i+2, unfiltered)
 		}
 	}
 
