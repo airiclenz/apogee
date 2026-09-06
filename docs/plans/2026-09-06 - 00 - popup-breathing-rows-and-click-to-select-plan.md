@@ -64,7 +64,11 @@ NOTES (2026-09-06): `internal/tui/popup.go` and `internal/tui/popup_test.go` wer
 
 **Commit:** `test(cmd/apogee): the pop-up design frames are trimmed to their screen height`
 
-## 1. The painter keeps the pad above the hint when the row block is empty
+## 1. The painter keeps the pad above the hint when the row block is empty — ✅ DONE (2026-09-06)
+
+NOTES (2026-09-06): the item's regression guard states "Pad lines never carry a scrollbar cell (popup.go:726-736 paints it on row lines only)" — the code did the opposite, painting a track cell on every block line including the pads, which the reservation change makes visible on any overflowing padded list. Implemented the guard as written and as the design goldens draw it: `popupRowBlock` gained a `trail` counterpart to `lead`, and `popupRowScrollbar` sizes and paints the bar over the ROW slice only.
+NOTES (2026-09-06): `popupRowBlockLines` keeps its `pad int` signature as the plan directs, so "counts pad.below for an empty list" is honoured by returning `pad` for empty heights and by a new `popupRowPads(spec, rows)` helper that drops `rowPadAbove` for an empty block and `padBelow` without a hint — one place both the painter and the arithmetic read the two conditions from.
+NOTES (2026-09-06): three subtests of `TestRenderPopupRowPadSurroundsTheBlock` changed verdict, as the binding reservation addition requires — an overflowing window now keeps both pads instead of dropping them — and were renamed to say so; a floor case, the empty-block cases and the base spec's hint were added alongside.
 
 **What.** `internal/tui/popup.go`: (a) `popupRowLinesAt` (:742-811) paints `padBelow` for an EMPTY row block when `spec.hint != ""` — today the early return at :762-765 skips both pads, which is why `popup-ask-free` sits flush; (b) `popupRowBlockLines` (:1037-1039) counts `pad.below` for an empty list so booking and painting agree; (c) `padBelow` is painted only when `spec.hint != ""` — a hintless pane never ends on a blank; (d) the `popupSpec` doc block (:187-301) states the house rule in one paragraph: every boxed pane sets `rowPadAbove` unless the line above its row block is already blank, and `rowStyle.padBelow` whenever it has a hint; the give-way at :767-770 (both pads dropped before any row) is the short-window rule. `popupChrome`, `popupTitleBorderChrome`, `popupBorderChrome`, `popupPlacement.rowsAt` unchanged. `rowPadAbove` with an empty block paints nothing.
 

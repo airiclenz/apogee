@@ -1694,10 +1694,13 @@ func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
 // rowPadAbove and the row style's padBelow set the row BLOCK one blank line off what stands above it and below
 // it, EACH END ON ITS OWN — the ask box asks for both, the approval box for the opening one alone
 // (docs/layout/user-questions-layout.md) — and neither puts a line between rows that did not ask for
-// a gap. The pad is also the LAST thing the row budget pays for: it is the only part of the block
-// that is not content, so a window that can seat every row unpadded keeps the rows and drops the
-// blanks — both ends together, since a block that kept one and dropped the other would move rather
-// than tighten — instead of scrolling an option off the pane to make room for whitespace.
+// a gap. The pad is RESERVED out of the row budget rather than spent out of what the seated rows left
+// over, so a list that OVERFLOWS its window breathes too — the pane with the most rows to read is the
+// last one that should be reading them flush against the prose and the hint. It is still the first
+// thing the pane gives up: a window that cannot seat even the anchor row inside what the pads left
+// hands both blanks back — both ends together, since a block that kept one and dropped the other
+// would move rather than tighten — instead of showing no option at all. A block with NO rows keeps
+// only the closing blank, which stands under a hint rather than around a list.
 func TestRenderPopupRowPadSurroundsTheBlock(t *testing.T) {
 	t.Parallel()
 	th := newTheme(scheme.Default())
@@ -1705,7 +1708,10 @@ func TestRenderPopupRowPadSurroundsTheBlock(t *testing.T) {
 		rows:     singleCellRows([]string{"one", "two", "three"}),
 		menuRows: true,
 		selected: 0,
-		maxRows:  -1,
+		// The closing blank is drawn only where a hint stands under it, so the spec these subtests vary
+		// carries one: without it every padBelow case would be asserting the hintless rule instead.
+		hint:    "↑↓ select",
+		maxRows: -1,
 	}
 
 	// contentBlanks is which of the pane's content lines (borders excluded) are blank.
@@ -1717,27 +1723,35 @@ func TestRenderPopupRowPadSurroundsTheBlock(t *testing.T) {
 		return out
 	}
 
+	// The trailing false in every want is the hint row itself.
 	for name, tc := range map[string]struct {
 		above, below bool
+		noRows       bool
 		maxRows      int
 		want         []bool // the blank/filled shape of the content block
 	}{
-		"both ends, uncapped":                      {true, true, -1, []bool{true, false, false, false, true}},
-		"both ends, a budget that books them":      {true, true, 5, []bool{true, false, false, false, true}},
-		"both ends, a budget one short drops them": {true, true, 4, []bool{false, false, false}},
-		"both ends never cost the block a row":     {true, true, 3, []bool{false, false, false}},
-		"a budget under the rows still scrolls":    {true, true, 2, []bool{false, false}},
-		"the opening end alone opens the block":    {true, false, -1, []bool{true, false, false, false}},
-		"the opening end alone, budget books it":   {true, false, 4, []bool{true, false, false, false}},
-		"the opening end alone, budget one short":  {true, false, 3, []bool{false, false, false}},
-		"the closing end alone closes it":          {false, true, -1, []bool{false, false, false, true}},
-		"neither is the unbroken block":            {false, false, -1, []bool{false, false, false}},
+		"both ends, uncapped":                     {above: true, below: true, maxRows: -1, want: []bool{true, false, false, false, true, false}},
+		"both ends, a budget that books them":     {above: true, below: true, maxRows: 5, want: []bool{true, false, false, false, true, false}},
+		"both ends, an overflowing list breathes": {above: true, below: true, maxRows: 4, want: []bool{true, false, false, true, false}},
+		"both ends, a one-row window keeps them":  {above: true, below: true, maxRows: 3, want: []bool{true, false, true, false}},
+		"both ends, the floor hands them back":    {above: true, below: true, maxRows: 2, want: []bool{false, false, false}},
+		"both ends, the anchor row alone":         {above: true, below: true, maxRows: 1, want: []bool{false, false}},
+		"the opening end alone opens the block":   {above: true, maxRows: -1, want: []bool{true, false, false, false, false}},
+		"the opening end alone, budget books it":  {above: true, maxRows: 4, want: []bool{true, false, false, false, false}},
+		"the opening end alone, one row short":    {above: true, maxRows: 3, want: []bool{true, false, false, false}},
+		"the closing end alone closes it":         {below: true, maxRows: -1, want: []bool{false, false, false, true, false}},
+		"neither is the unbroken block":           {maxRows: -1, want: []bool{false, false, false, false}},
+		"no rows keeps the closing end alone":     {above: true, below: true, noRows: true, maxRows: -1, want: []bool{true, false}},
+		"no rows and no budget keeps neither":     {above: true, below: true, noRows: true, maxRows: 0, want: []bool{false}},
 	} {
 		name, tc := name, tc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			spec := base
 			spec.rowPadAbove, spec.rowStyle.padBelow, spec.maxRows = tc.above, tc.below, tc.maxRows
+			if tc.noRows {
+				spec.rows = nil
+			}
 			lines := popupLines(renderPopup(th, spec, 40))
 			flat := strip(strings.Join(lines, "\n"))
 			if got := contentBlanks(lines); !slices.Equal(got, tc.want) {
@@ -1745,10 +1759,116 @@ func TestRenderPopupRowPadSurroundsTheBlock(t *testing.T) {
 			}
 			// …and whatever the pad did, the block still fits the budget it was handed: the blanks are
 			// counted in it, never painted past it.
-			if rowLines := len(lines) - 2; tc.maxRows >= 0 && rowLines > tc.maxRows {
+			if rowLines := len(lines) - 3; tc.maxRows >= 0 && rowLines > tc.maxRows { // borders + hint row
 				t.Errorf("row block paints %d lines, past its %d-line budget:\n%s", rowLines, tc.maxRows, flat)
 			}
 		})
+	}
+}
+
+// The overflow bar is the LIST's, not the block's: it runs down the rows and the separators between
+// them and stops at the pads, because a stroke through the breathing room would say the list carries
+// on into it.
+func TestRenderPopupScrollbarSkipsTheRowPads(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	spec := popupSpec{
+		rows:        singleCellRows([]string{"one", "two", "three", "four", "five"}),
+		selected:    0,
+		rowPadAbove: true,
+		rowStyle:    popupRowStyle{padBelow: true},
+		hint:        "↑↓ select",
+		maxRows:     5, // two pads and three of the five rows: the list overflows and still breathes
+		scrollbar:   true,
+	}
+
+	lines := popupLines(renderPopup(th, spec, 40))
+	flat := strip(strings.Join(lines, "\n"))
+	content := make([]string, 0, len(lines)-2)
+	for _, ln := range lines[1 : len(lines)-1] {
+		content = append(content, popupContent(ln))
+	}
+
+	if got, want := len(content), 6; got != want { // pad, three rows, pad, hint
+		t.Fatalf("pane has %d content lines, want %d:\n%s", got, want, flat)
+	}
+	for _, i := range []int{0, 4} {
+		if content[i] != "" {
+			t.Errorf("content line %d = %q, want a bare pad with no bar cell:\n%s", i, content[i], flat)
+		}
+	}
+	for _, i := range []int{1, 2, 3} {
+		if !strings.ContainsAny(content[i], glyphScrollTrack+glyphScrollThumb) {
+			t.Errorf("content line %d = %q, want a bar cell on a row line:\n%s", i, content[i], flat)
+		}
+	}
+}
+
+// An EMPTY row block still closes on the blank above its hint — the free-text ask pane, whose choices
+// are gone and whose key legend must not read as the last line of the question above it — and the
+// blank is dropped with every other line on a window that has none to spare.
+func TestRenderPopupEmptyRowBlockPadsAboveTheHint(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	base := popupSpec{
+		title:       "how to continue?",
+		body:        "the question the pane is asking",
+		maxBodyRows: -1,
+		rowStyle:    popupRowStyle{padBelow: true},
+		selected:    -1,
+		hint:        "⏎ send",
+		maxRows:     -1,
+	}
+
+	t.Run("the blank stands between the body and the hint", func(t *testing.T) {
+		t.Parallel()
+		lines := popupLines(renderPopup(th, base, 40))
+		flat := strip(strings.Join(lines, "\n"))
+		if got, want := len(lines), 2+4; got != want { // borders + title, body, pad, hint
+			t.Fatalf("pane is %d lines, want %d:\n%s", got, want, flat)
+		}
+		if got := popupContent(lines[3]); got != "" {
+			t.Errorf("line between body and hint = %q, want a blank:\n%s", got, flat)
+		}
+		if got, want := popupInterior(lines[4]), base.hint; got != want {
+			t.Errorf("hint row = %q, want %q:\n%s", got, want, flat)
+		}
+	})
+
+	t.Run("a budget of nothing drops it", func(t *testing.T) {
+		t.Parallel()
+		spec := base
+		spec.maxRows = 0
+		lines := popupLines(renderPopup(th, spec, 40))
+		flat := strip(strings.Join(lines, "\n"))
+		if got, want := len(lines), 2+3; got != want { // borders + title, body, hint
+			t.Fatalf("pane is %d lines, want %d (the blank dropped):\n%s", got, want, flat)
+		}
+		if got, want := popupInterior(lines[3]), spec.hint; got != want {
+			t.Errorf("hint row = %q, want %q:\n%s", got, want, flat)
+		}
+	})
+}
+
+// padBelow closes the block off from the HINT beneath it, so a pane with no hint never ends on a
+// blank: there the border already closes the block, and the blank would only push it off the frame.
+func TestRenderPopupPadBelowNeedsAHint(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	spec := popupSpec{
+		rows:     singleCellRows([]string{"one", "two"}),
+		selected: 0,
+		rowStyle: popupRowStyle{padBelow: true},
+		maxRows:  -1,
+	}
+
+	lines := popupLines(renderPopup(th, spec, 40))
+	flat := strip(strings.Join(lines, "\n"))
+	if got, want := len(lines), 2+2; got != want { // borders + the two rows, no trailing blank
+		t.Fatalf("pane is %d lines, want %d (a hintless pane ends on its last row):\n%s", got, want, flat)
+	}
+	if got := popupContent(lines[len(lines)-2]); got == "" {
+		t.Errorf("last content line is blank, want the last row:\n%s", flat)
 	}
 }
 

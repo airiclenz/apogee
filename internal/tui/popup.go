@@ -252,9 +252,20 @@ const (
 // mockup draws them. That is also why it stays a field of the SPEC while the closing blank rides the
 // style: this one opening blank is the one thing of the shape two panes ask for.
 //
-// Either pad (rowPadAbove, popupRowStyle.padBelow) is drawn only out of the lines the seated rows
-// LEFT OVER (popupRowLines), so it never pushes an option out of the window: a short pane loses its
-// breathing room rather than a decision.
+// Either pad (rowPadAbove, popupRowStyle.padBelow) is a HOUSE rule rather than one pane's taste, and
+// it is the BUILDER's to state — the painter draws what it is asked for and defaults neither, the way
+// bodyPadAbove and bodyPadBelow are already the caller's (ADR 0053). Every boxed pane sets
+// rowPadAbove unless the line above its row block is already blank — the /settings pane, whose body
+// closes with one, and any list showing a typed filter (bodyPadBelow) — and sets rowStyle.padBelow
+// whenever it has a hint. No pane's rows sit flush against the prose above them or the key legend
+// below them.
+//
+// The painter holds the two ends to that: the closing blank is drawn only where there IS a hint under
+// it, and the opening one only where there is a block for it to set off, so a pane with no rows at all
+// still closes above its hint and opens on nothing (popupRowPads). Both are reserved out of the row
+// window BEFORE the rows are seated, which is what lets an overflowing list breathe too, and both are
+// dropped together as the FIRST thing a short pane gives up, before any row (popupRowLines): breathing
+// room rather than a decision.
 //
 // bodyPadAbove and bodyPadBelow are those same blank lines one block up: they set the BODY off what
 // stands above and below it, for a pane whose body is neither a caption nor the thing being decided
@@ -646,7 +657,8 @@ type popupRowBlock struct {
 	lines      []string
 	hidden     int
 	start, end int
-	lead       int
+	lead       int        // the block's leading pad lines: 1 where popupSpec.rowPadAbove was drawn, else 0
+	trail      int        // the block's trailing pad lines: 1 where popupRowStyle.padBelow was drawn, else 0
 	blocks     [][]string // what each row was composed into, before the window and the styling
 }
 
@@ -667,14 +679,17 @@ type popupRowBlock struct {
 // between two seated rows costs a line of the same budget. Whole rows or none of them, because half
 // an option on the screen is worse than the scroll that reaches the whole of it.
 //
-// The pad around the block (popupSpec.rowPadAbove, popupRowStyle.padBelow) is spent LAST, out of the lines the
-// seated window left over, and BOTH ends are dropped together where they do not cover it — a pane
-// that keeps one blank and drops the other would move the block rather than tighten it. That order
-// is the priority the pane is budgeted on (popupBudget): the rows are what the human acts on and the
-// pad is what makes them pleasant to read, so a window that can seat every option unpadded shows
-// every option — the approval menu keeps its four decisions on a short terminal and gives up its
-// breathing room, which is the trade the other way round from the one a decision surface must never
-// make.
+// The pad around the block (popupSpec.rowPadAbove, popupRowStyle.padBelow) is RESERVED out of the
+// window before a single row is seated, and BOTH ends are handed back together — never one — where
+// what is left cannot seat the anchor row at all. Reserving it is what lets a list that OVERFLOWS
+// breathe: drawn instead out of the lines the seated window left over, the pad would vanish on
+// exactly the panes with the most rows to read, because a window that overflowed left nothing over.
+// Handing it back is the priority the pane is budgeted on (popupBudget): the rows are what the human
+// acts on and the pad is what makes them pleasant to read, so a window down to its floor shows the
+// option and drops the blanks — the approval menu keeps its four decisions on a short terminal and
+// gives up its breathing room, which is the trade the other way round from the one a decision surface
+// must never make. A pane that kept one blank and dropped the other would move the block rather than
+// tighten it.
 //
 // The hidden count is ALL-OR-NOTHING on purpose, and it is not the body's rule with the words
 // changed. A window granted at least one row scrolls around the selection (popupRowWindow): the
@@ -707,31 +722,36 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 
 // popupRowScrollbar paints the overflow bar down the last column of a row block composed one column
 // short of the pane's inner width (popupRowLines), and returns the block with the bar folded into its
-// lines. Every line of the block carries a cell of it — the pad and the separators between rows as
-// much as the rows themselves — so the bar reads as one stroke down the block's right edge rather
-// than as a dashed one.
+// lines. Every ROW line of the block carries a cell of it — the separators between rows as much as
+// the rows themselves — so the bar reads as one stroke down the list rather than as a dashed one.
+//
+// The block's own PAD lines are the exception, and they are the reason the bar is drawn over a slice
+// rather than over every line: those blanks set the list off from the prose above it and the hint
+// below it (popupRowPads), and a bar running through them would say the list extends into the
+// breathing room it was given. The stroke starts where the rows start and ends where they end.
 //
 // The geometry is the shared one (scrollbarThumb, boxdraw.go), which the transcript's gutter is
 // placed from too. It is asked with the two counts a bar conflates pulled apart: there a painted line
 // IS a row, here a row can cost several, so the thumb is sized from the ROW counts — the seated
-// window over the whole list — and drawn in the block's painted LINES.
+// window over the whole list — and drawn in the block's painted ROW LINES.
 func popupRowScrollbar(th theme, block popupRowBlock, rows, rowInner int, blackFill lipgloss.Style) popupRowBlock {
-	h, shown := len(block.lines), block.end-block.start
-	if h == 0 || shown <= 0 || shown >= rows {
+	first, last := block.lead, len(block.lines)-block.trail
+	h, shown := last-first, block.end-block.start
+	if h <= 0 || shown <= 0 || shown >= rows {
 		// No row seated at all (the count went to the title row instead), or nothing off-screen after
 		// the narrower composition: either way there is no window to describe.
 		return block
 	}
 	pos, thumb := scrollbarThumb(block.start, shown, rows, h) // pos: 0 (top) … h-thumb (bottom)
-	for i, line := range block.lines {
+	for i := first; i < last; i++ {
 		cell := th.scrollTrack.Render(glyphScrollTrack)
-		if i >= pos && i < pos+thumb {
+		if i-first >= pos && i-first < pos+thumb {
 			cell = th.scrollThumb.Render(glyphScrollThumb)
 		}
 		// The line is squared on the pane's own black field before the cell is appended: a row shorter
 		// than the block leaves a gap between its text and the bar, and a bare pad there would show the
 		// terminal's background through it (squareOnField).
-		block.lines[i] = squareOnField(th.measure, blackFill, line, rowInner) + blackFill.Render(cell)
+		block.lines[i] = squareOnField(th.measure, blackFill, block.lines[i], rowInner) + blackFill.Render(cell)
 	}
 	return block
 }
@@ -744,33 +764,49 @@ func popupRowLinesAt(th theme, spec popupSpec, inner int, blackFill lipgloss.Sty
 	heights := popupRowHeights(blocks)
 
 	gap := spec.rowStyle.gapLines()
-	padAbove, padBelow := spec.rowPadAbove, spec.rowStyle.padBelow
+	padAbove, padBelow := popupRowPads(spec, len(blocks))
 	capLines := spec.maxRows
 	if capLines < 0 {
 		// Negative spends whatever the whole list needs.
 		capLines = popupRowBlockLines(heights, gap, popupRowPadLines(padAbove, padBelow))
 	}
-	// A list with a cursor windows around the cursor; a REPORT has none, so its window opens where the
-	// reader scrolled it (popupSpec.rowTop) — and at rowTop 0 that is the very window the other branch
-	// would have opened, which is what leaves every selection-less pane before it unchanged.
-	var start, end int
-	if spec.selected < 0 {
-		start, end = popupRowWindowFrom(spec.rowTop, heights, gap, capLines)
-	} else {
-		start, end = popupRowWindow(spec.selected, heights, gap, capLines)
+	// window opens the row window against one budget: around the cursor for a list that has one, and
+	// at the reader's own top for a REPORT, which has none (popupSpec.rowTop) — and at rowTop 0 the
+	// two answer alike, which is what leaves every selection-less pane before it unchanged. It is
+	// asked twice because the pads are reserved before the rows are seated and handed back where they
+	// cannot be afforded.
+	window := func(budget int) (int, int) {
+		if spec.selected < 0 {
+			return popupRowWindowFrom(spec.rowTop, heights, gap, budget)
+		}
+		return popupRowWindow(spec.selected, heights, gap, budget)
+	}
+
+	// The pads come OUT OF the budget before the rows are windowed against what is left, which is what
+	// lets an OVERFLOWING list breathe: spent afterwards they would be drawn out of the lines the
+	// seated window left over, and a window that overflowed left none — the pane with the most rows to
+	// read would have been the one pane without the blanks that make them readable. They are handed
+	// back to the rows — both ends together, never one — only where what remains cannot seat the
+	// anchor row at all: a window at its floor gives up its breathing room rather than a decision.
+	start, end := window(capLines - popupRowPadLines(padAbove, padBelow))
+	if start == end && len(blocks) > 0 {
+		padAbove, padBelow = false, false
+		start, end = window(capLines)
 	}
 	if start == end {
+		if len(blocks) == 0 && capLines > 0 && padBelow {
+			// An offering with NO rows still closes on the blank above its hint: there is no decision
+			// here for the pad to crowd out, and a key legend flush under the prose above it reads as
+			// that prose's last line rather than as the pane's footer (popupSpec.rowPadAbove).
+			return popupRowBlock{lines: []string{""}, start: start, end: end, trail: 1, blocks: blocks}
+		}
 		// No row on the screen: with rows on offer this is the budget's call, and the pane owes the
 		// human the count (an empty offering owes nothing — there is no list to hide).
 		return popupRowBlock{hidden: len(blocks), start: start, end: end, blocks: blocks}
 	}
-	if popupRowBlockLines(heights[start:end], gap, popupRowPadLines(padAbove, padBelow)) > capLines {
-		// The block fits, the blank lines around it do not: the rows come first.
-		padAbove, padBelow = false, false
-	}
 
 	out := make([]string, 0, capLines)
-	blockLead := 0
+	blockLead, blockTrail := 0, 0
 	if padAbove {
 		out = append(out, "")
 		blockLead = 1 // the pad stands between the block's first LINE and its first ROW (popupPlacement)
@@ -806,8 +842,9 @@ func popupRowLinesAt(th theme, spec popupSpec, inner int, blackFill lipgloss.Sty
 	}
 	if padBelow {
 		out = append(out, "")
+		blockTrail = 1
 	}
-	return popupRowBlock{lines: out, start: start, end: end, lead: blockLead, blocks: blocks}
+	return popupRowBlock{lines: out, start: start, end: end, lead: blockLead, trail: blockTrail, blocks: blocks}
 }
 
 // popupWrapOffsets is where each line of a wrapped SINGLE-CELL row began in the row's own text: the
@@ -1010,6 +1047,18 @@ func popupRowHeights(blocks [][]string) []int {
 	return heights
 }
 
+// popupRowPads is which of a spec's two blank lines its row block actually DRAWS, given how many
+// rows were composed for it. It is the one place the two conditions on the flags live, so the
+// painter and the arithmetic that books the block's lines can never read them differently.
+//
+// The pad above needs a block to set off: with no rows there is nothing under the blank, and a pane
+// would end on two blanks where it meant to end on one. The pad below needs a HINT under it: the
+// blank closes the offering off from the key legend beneath it (popupRowStyle.padBelow), and on a
+// hintless pane it would close the block against the border instead, which the border already does.
+func popupRowPads(spec popupSpec, rows int) (above, below bool) {
+	return spec.rowPadAbove && rows > 0, spec.rowStyle.padBelow && spec.hint != ""
+}
+
 // popupRowPadLines is what a spec's pad flags cost the row budget: one line per padded END of the
 // block, whichever way the rows inside it are laid out. It is a function rather than two constants
 // because both halves of the budget spend the same figure — the painter draws the pad and the CALLER
@@ -1032,11 +1081,12 @@ func popupRowPadLines(above, below bool) int {
 // (popupRowPadLines, 0 when it asks for neither end). It is the budget an uncapped row
 // list (maxRows < 0) is windowed against and the figure a caller states its own demand in, so "show
 // everything", "show what fits" and "ask the frame for the room" are all the one arithmetic rather
-// than three that have to agree. An EMPTY list costs nothing at all, pad included: there is no block
-// for a blank line to sit around.
+// than three that have to agree. An EMPTY list costs the pad alone — the closing blank a hinted pane
+// still draws above its hint with nothing on offer (popupRowPads) — and a caller that books for a
+// list which may come up empty states that pad and no other, so booking and painting agree.
 func popupRowBlockLines(heights []int, gap, pad int) int {
 	if len(heights) == 0 {
-		return 0
+		return pad
 	}
 	total := pad + gap*(len(heights)-1)
 	for _, h := range heights {
@@ -1158,8 +1208,9 @@ func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFi
 // up — so a pane whose body filled its whole grant keeps the text and loses the breathing room: a
 // blank line may never cost a line of the very thing it was drawn to set off. A spec asking for both
 // gets both or neither, for the reason the row block drops its pair together: half a pad moves the
-// block instead of tightening it. An empty block gets no pad at all, for the reason an empty row list
-// gets none (popupRowBlockLines): there is nothing for a blank line to stand around.
+// block instead of tightening it. An empty block gets no pad at all: there is nothing for a blank
+// line to stand around. The row block one level down keeps its CLOSING blank when it is empty
+// (popupRowPads) — that one stands under a hint rather than around a block.
 func popupBodyPad(body []string, padAbove, padBelow bool, maxBodyRows int) []string {
 	pad := popupBodyPadLines(padAbove, padBelow)
 	if pad == 0 || len(body) == 0 || (maxBodyRows >= 0 && len(body)+pad > maxBodyRows) {
