@@ -104,6 +104,24 @@ type lateEngine struct {
 	// dir must not be a move the eventual engine never hears about. nil means the session host
 	// never moved it here, so a bind leaves the Agent on the seed its Config carried.
 	pendingScratch *string
+
+	// pendingJournal is the last undo journal opened while there was no Agent to record into it
+	// (SetJournal), pendingScratch's exact shape and for its exact reason: the boot journal is
+	// opened the moment the session id is known, which on a pre-bound session is before any engine
+	// exists, and a /clear before a server is picked opens another one under the new id. nil means
+	// no journal was ever handed here, so a bind leaves the Agent on construction's own in-memory
+	// funnel journal — ADR 0051 exactly, and a supported configuration (ADR 0074 decision 2).
+	pendingJournal *sessionJournal
+}
+
+// sessionJournal is one opened undo journal together with the note that says why it is the journal
+// it is ("git not found", "undo-snapshots is off", "" when snapshots are in force). The pair
+// travels together because either half alone is a different instruction: a journal with no note
+// would tell the human undo covers everything when it may not, and a note with no journal is a
+// sentence about nothing (agent.SetJournal takes both).
+type sessionJournal struct {
+	journal *undo.Journal
+	note    string
 }
 
 // contextFileChoice is one remembered SetContextFiles call. The pair travels together because
@@ -180,6 +198,9 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	}
 	if s := e.pendingScratch; s != nil {
 		agent.SetScratchDir(*s)
+	}
+	if j := e.pendingJournal; j != nil {
+		agent.SetJournal(j.journal, j.note)
 	}
 	// The one remembered value that can be REFUSED: a dialect this build cannot parse. The Agent is
 	// released and the bind fails, which is exactly what a config carrying that profile at launch
@@ -349,6 +370,28 @@ func (e *lateEngine) SetScratchDir(dir string) {
 	e.mu.Unlock()
 	if agent != nil {
 		agent.SetScratchDir(dir)
+	}
+}
+
+// SetJournal installs the undo journal this session records into, together with the note that says
+// why it is the journal it is — the composition root opens one per session id (snapshot.OpenJournal)
+// and pushes it here at every identity boundary. Remembered while unbound for SetScratchDir's
+// reason: the boot journal is opened before a server is picked on a pre-bound session, and the
+// engine that eventually binds must record into the store the session's id names.
+//
+// A nil journal is ignored rather than remembered, exactly as [apogee.Agent.SetJournal] refuses
+// one: an engine that records nothing is what construction already provides, and forgetting the
+// journal would take `/undo` away mid-session.
+func (e *lateEngine) SetJournal(j *undo.Journal, note string) {
+	if j == nil {
+		return
+	}
+	e.mu.Lock()
+	e.pendingJournal = &sessionJournal{journal: j, note: note}
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetJournal(j, note)
 	}
 }
 
@@ -530,6 +573,27 @@ func (e *lateEngine) UndoRevert(generation uint64) (undo.Report, error) {
 		return undo.Report{}, undo.ErrNothingToUndo
 	}
 	return agent.UndoRevert(generation)
+}
+
+// RedoPreview describes what `/redo` would re-apply, or reports nothing to redo while the session
+// is unbound — an unbound holder has run no tool call, so there is no undone write to re-apply.
+func (e *lateEngine) RedoPreview() (undo.Step, bool) {
+	agent := e.bound()
+	if agent == nil {
+		return undo.Step{}, false
+	}
+	return agent.RedoPreview()
+}
+
+// RedoRevert re-applies the previewed step against the bound Agent's journal. Unbound it answers
+// undo.ErrNothingToRedo for UndoRevert's reason: nothing was undone, so the honest refusal is the
+// empty stack's and not "pick a server" — `/redo` has no business with the upstream either.
+func (e *lateEngine) RedoRevert(generation uint64) (undo.Report, error) {
+	agent := e.bound()
+	if agent == nil {
+		return undo.Report{}, undo.ErrNothingToRedo
+	}
+	return agent.RedoRevert(generation)
 }
 
 // SetEffortOverride states the session's Thinking effort (the /effort command, ADR 0050), remembered

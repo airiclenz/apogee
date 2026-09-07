@@ -13,6 +13,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/validated"
 )
 
@@ -339,5 +340,171 @@ func TestAValidatedSetBuildsAsTheEnableList(t *testing.T) {
 	}
 	if _, err := apogee.BuildMechanisms(validCfg(t), live.Set); err != nil {
 		t.Errorf("BuildMechanisms over the shed set %v: %v", live.Set, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The session's undo snapshot store (ADR 0074)
+// ---------------------------------------------------------------------------
+
+// TestWireSessionOpensTheBootSessionsSnapshotStore is item 13's headline for the TUI Driver: the
+// journal is opened under the id the session host minted, before the first tool call and before any
+// server is picked, so the very first Exchange is imaged into the store that session's id names.
+// An empty note is the whole point — it is what `/undo` reads as "undo reaches every write here".
+func TestWireSessionOpensTheBootSessionsSnapshotStore(t *testing.T) {
+	t.Parallel()
+	requireSnapshotStore(t)
+
+	w := urlGuardWiring(t, config.Options{UndoSnapshots: true})
+
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+
+	held := w.engine.pendingJournal
+	if held == nil {
+		t.Fatal("no journal was opened for the boot session")
+	}
+	if held.note != "" {
+		t.Errorf("the boot journal's note = %q; want the empty note snapshots in force carry", held.note)
+	}
+	dir := snapshot.Dir(w.roots.config, w.host.SessionID())
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("the boot session's store was not created at %s: %v", dir, err)
+	}
+}
+
+// The key OFF is a supported configuration, not a degraded one: the session keeps ADR 0051's
+// in-memory funnel journal, the reason says so in the words `/undo` will put in a sentence, and
+// nothing at all is created under the snapshots root.
+func TestWireSessionKeepsTheInMemoryJournalWhenSnapshotsAreOff(t *testing.T) {
+	t.Parallel()
+
+	w := urlGuardWiring(t, config.Options{UndoSnapshots: false})
+
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+
+	held := w.engine.pendingJournal
+	if held == nil || held.note != "undo-snapshots is off" {
+		t.Fatalf("the boot journal = %+v; want the in-memory journal with the key-off reason", held)
+	}
+	if _, err := os.Stat(w.roots.snapshots); !os.IsNotExist(err) {
+		t.Errorf("a run with the key off created the snapshots root (stat err = %v)", err)
+	}
+}
+
+// An index this build cannot read is the one case snapshot.OpenJournal reports as an ERROR, and a
+// start is never lost over an undo store: the session falls back to the in-memory journal carrying
+// the error's own text as the reason, and wireSession returns nil.
+func TestOpenSessionJournalSurvivesACorruptIndex(t *testing.T) {
+	t.Parallel()
+	requireSnapshotStore(t)
+
+	w := urlGuardWiring(t, config.Options{UndoSnapshots: true})
+	w.engine = newLateEngine(apogee.ModeAskBefore, true)
+	dir := snapshot.Dir(w.roots.config, "sess-corrupt")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "journal.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	w.openSessionJournal(context.Background(), "sess-corrupt")
+
+	held := w.engine.pendingJournal
+	if held == nil {
+		t.Fatal("a corrupt index left the session with no journal at all")
+	}
+	if !strings.Contains(held.note, "journal index") {
+		t.Errorf("the reason = %q; want the index error's own text", held.note)
+	}
+}
+
+// A Config that injects no apogee home names no store — the embedder case ADR 0001 leaves open —
+// and the reason says exactly that rather than blaming git or the key.
+func TestOpenSessionJournalWithNoApogeeHome(t *testing.T) {
+	t.Parallel()
+
+	w := &rootWiring{
+		opts:   config.Options{UndoSnapshots: true},
+		roots:  stateRoots{workspace: t.TempDir()},
+		engine: newLateEngine(apogee.ModeAskBefore, true),
+	}
+	t.Cleanup(func() { _ = w.engine.Close() })
+
+	w.openSessionJournal(context.Background(), "sess-1")
+
+	held := w.engine.pendingJournal
+	if held == nil || held.note != "no apogee home" {
+		t.Fatalf("the journal = %+v; want the in-memory journal with the no-home reason", held)
+	}
+}
+
+// git is a convenience dependency (ADR 0042 decision 2): a host without it keeps the in-memory
+// journal and a reason naming git, and the session starts exactly as it always has.
+func TestOpenSessionJournalWithoutGit(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	home := t.TempDir()
+	w := &rootWiring{
+		opts:   config.Options{UndoSnapshots: true},
+		roots:  stateRoots{config: home, workspace: t.TempDir()},
+		engine: newLateEngine(apogee.ModeAskBefore, true),
+	}
+	t.Cleanup(func() { _ = w.engine.Close() })
+
+	w.openSessionJournal(context.Background(), "sess-1")
+
+	held := w.engine.pendingJournal
+	if held == nil || held.note != "git not found" {
+		t.Fatalf("the journal = %+v; want the in-memory journal with the no-git reason", held)
+	}
+	if _, err := os.Stat(filepath.Join(home, "snapshots")); !os.IsNotExist(err) {
+		t.Errorf("a host without git created the snapshots root (stat err = %v)", err)
+	}
+}
+
+// A /clear re-opens the journal under the NEW session id, and leaves the store of the session just
+// left exactly as it was — one journal.json holds one session's Exchanges (ADR 0074 decision 10),
+// which is what keeps `/undo` from reaching across a session boundary in either direction.
+func TestRotateReopensTheJournalUnderTheNewSessionID(t *testing.T) {
+	t.Parallel()
+	requireSnapshotStore(t)
+
+	w := urlGuardWiring(t, config.Options{UndoSnapshots: true})
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+	boot := w.host.SessionID()
+	bootIndex := filepath.Join(snapshot.Dir(w.roots.config, boot), "journal.json")
+	if err := os.WriteFile(bootIndex, []byte("the boot session's own index"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	w.host.Rotate()
+
+	rotated := w.host.SessionID()
+	if rotated == boot {
+		t.Fatal("Rotate kept the boot session's id")
+	}
+	if _, err := os.Stat(snapshot.Dir(w.roots.config, rotated)); err != nil {
+		t.Errorf("the rotated session's store was not opened: %v", err)
+	}
+	kept, err := os.ReadFile(bootIndex)
+	if err != nil || string(kept) != "the boot session's own index" {
+		t.Errorf("the boot session's index = %q (err %v); want it untouched by the rotate", kept, err)
+	}
+}
+
+// requireSnapshotStore skips a test on a machine that cannot open a snapshot store — the store is a
+// git object database, and git is a convenience dependency (ADR 0042 decision 2).
+func requireSnapshotStore(t *testing.T) {
+	t.Helper()
+
+	if !snapshot.Available() {
+		t.Skip("git is not on PATH: the snapshot store cannot be opened here")
 	}
 }

@@ -309,6 +309,13 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		URLAllowHosts: in.opts.URLAllowHosts,
 		URLDenyHosts:  in.opts.URLDenyHosts,
 		Inspector:     in.opts.UI.Inspector,
+		// `undo-snapshots:` — whether this run images the workspace around each Exchange into a
+		// store of its own (ADR 0074). It rides the Config because the Config is what an unattended
+		// run is composed from: run.Once opens the store itself, under the record id this Driver
+		// already minted, and a flag it could not read there would make the key silently a TUI-only
+		// one — the Driver-parity break ADR 0031 rules out. It is what gives `apogee undo
+		// <session-id>` something to reverse after a headless or scheduled run.
+		UndoSnapshots: in.opts.UndoSnapshots,
 		// Both halves of what the `terminal` tool may not read back out of the environment it
 		// inherits: the names an API key is resolved from, and the names a Hook's webhook header is
 		// (config.HookEnvNames). A Firing runs the same `hooks:` list a session does, so it has to

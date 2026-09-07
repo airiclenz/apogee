@@ -12,8 +12,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/refs"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // ErrMode is returned when a Spec names an autonomy mode a Firing may not run in. A Firing
@@ -46,9 +48,11 @@ type Spec struct {
 	Store *session.Store
 
 	// RecordID is the id the saved record is filed under, minted by the CALLER before the
-	// Firing starts so anything the caller keys on that id — the Firing's scratch dir — exists
-	// under the same name from the first tool call. Empty ⇒ Once mints one at completion, as
-	// it always has; the bench and every caller that keys nothing on the id leave it empty.
+	// Firing starts so anything the caller keys on that id — the Firing's scratch dir, and the
+	// undo snapshot store this run images its workspace into — exists under the same name from
+	// the first tool call. Empty ⇒ Once mints one at completion, as it always has, and the run
+	// takes the in-memory funnel journal because there is no id to name a store with; the bench
+	// and every caller that keys nothing on the id leave it empty.
 	RecordID string
 
 	// Title overrides the record's title. Empty ⇒ Once derives one: "<schedule name> —
@@ -288,6 +292,24 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// a Firing where it can be taken. Every Result below carries it, the submit-failure exit
 	// included.
 	contextFiles := a.ContextFilesReport()
+
+	// This run's own undo store, opened under the id its record will be filed under (ADR 0074) and
+	// installed before the first Turn, so every Exchange is imaged and `apogee undo <session-id>`
+	// has something to reverse once the run is over. The home comes off the Config the caller
+	// composed (ConfigDir) and the flag off the caller's `undo-snapshots:` answer, because an
+	// unattended run resolves neither for itself — the whole reason the flag rides the construction
+	// surface at all.
+	//
+	// It never fails the Firing. Every ordinary "no snapshots here" case — the key off, no git, no
+	// home, and a Spec that named no RecordID and so has no store to name — already comes back as
+	// ADR 0051's in-memory funnel journal with a reason, and the one case OpenJournal reports as an
+	// error gets exactly the same answer with the error's own text as that reason.
+	journal, reason, err := snapshot.OpenJournal(
+		ctx, cfg.ConfigDir, spec.RecordID, cfg.WorkspaceDir, cfg.UndoSnapshots)
+	if err != nil {
+		journal, reason = undo.New(), err.Error()
+	}
+	a.SetJournal(journal, reason)
 
 	// The caller's routing, latched BEFORE the first Turn so the Firing's very first
 	// delegation is already routed — there is no heartbeat here to install it later. Both

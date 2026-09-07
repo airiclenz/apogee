@@ -6,6 +6,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 func TestFriendlyConstructErr(t *testing.T) {
@@ -132,5 +133,74 @@ func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 	engine.SetFloor(apogee.FloorConfig{})
 	if engine.pendingFloor == nil || *engine.pendingFloor != (apogee.FloorConfig{}) {
 		t.Errorf("pendingFloor after a bound edit = %+v; want the whole floor back on", engine.pendingFloor)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The session's undo journal (ADR 0074)
+// ---------------------------------------------------------------------------
+
+// The composition root opens the session's undo journal the moment its id is known, which on a
+// pre-bound session is long before any Agent exists — and a /clear before a server is picked mints
+// another id and opens another journal. So the holder REMEMBERS the last one and installs it at the
+// bind: without that, the session would record into construction's in-memory journal and the store
+// under the new session's name would stay empty for the whole run. The note travels with it,
+// because it is what `/undo` says about what it can reach.
+func TestLateEngineRemembersTheUndoJournalUntilTheBind(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	if engine.pendingJournal != nil {
+		t.Fatalf("a fresh holder already carries a journal: %+v", engine.pendingJournal)
+	}
+
+	// The boot session's journal, and then the one a /clear opened under the new session id.
+	engine.SetJournal(undo.New(), "git not found")
+	rotated := undo.New()
+	engine.SetJournal(rotated, "")
+
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	if note := engine.bound().UndoNote(); note != "" {
+		t.Errorf("the bound Agent's undo note = %q; want the journal the /clear opened, whose note is empty", note)
+	}
+	if engine.pendingJournal == nil || engine.pendingJournal.journal != rotated {
+		t.Errorf("pendingJournal = %+v; want the journal the /clear opened", engine.pendingJournal)
+	}
+}
+
+// A nil journal is ignored rather than remembered, exactly as the Agent's own SetJournal refuses
+// one: forgetting the journal at a boundary would take `/undo` away for the rest of the session.
+func TestLateEngineIgnoresANilUndoJournal(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	held := undo.New()
+	engine.SetJournal(held, "workspace mismatch")
+	engine.SetJournal(nil, "")
+
+	if engine.pendingJournal == nil || engine.pendingJournal.journal != held {
+		t.Errorf("pendingJournal = %+v; want the journal a nil push left alone", engine.pendingJournal)
+	}
+}
+
+// `/redo` has no business with the upstream: an unbound holder has undone nothing, so the honest
+// refusal is the empty stack's rather than "pick a server" — the shape UndoRevert already answers in.
+func TestLateEngineRedoRefusesUnboundWithTheEmptyStack(t *testing.T) {
+	t.Parallel()
+
+	var engine lateEngine
+
+	if _, ok := engine.RedoPreview(); ok {
+		t.Error("RedoPreview reports something to redo on an unbound holder")
+	}
+	if _, err := engine.RedoRevert(1); !errors.Is(err, undo.ErrNothingToRedo) {
+		t.Errorf("RedoRevert err = %v; want undo.ErrNothingToRedo", err)
 	}
 }

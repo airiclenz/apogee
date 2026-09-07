@@ -10,12 +10,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -43,6 +45,18 @@ type sessionHost struct {
 	// a /sessions resume), so the confinement box handed to the next tool call is fenced to the
 	// new session's scratch rather than the old one's. nil ⇒ no listener.
 	scratchMoved func(dir string)
+
+	// snapshotsRoot is the run's `~/.apogee/snapshots` root (stateRoots.snapshots): the host owns
+	// the per-session undo stores for the scratch dirs' reason — a store is named by the id this
+	// host mints, and identity is the host's (ADR 0074). "" disables that half entirely: Delete
+	// removes the record alone, which is every host built without one, tests included.
+	snapshotsRoot string
+	// journalMoved tells the composition root that the ACTIVE session's id moved (a /clear|/new
+	// rotate, a /sessions resume), so the undo journal is re-opened under the new id's own store
+	// and handed to the engine. It carries the ID rather than a path, unlike scratchMoved above,
+	// because opening a journal takes the apogee home and the workspace as well and those are the
+	// composition root's to know, not this host's. nil ⇒ no listener.
+	journalMoved func(id string)
 
 	mu sync.Mutex
 	// model is the model id stamped on saved metadata. It MOVES: a heartbeat rebind switches the
@@ -78,11 +92,14 @@ var _ tui.SessionHost = (*sessionHost)(nil)
 // its file in place — its id, CreatedAt, and Title carried over rather than a new session forked.
 // A fresh start instead PRE-MINTS the id its first Save will adopt (nextID), so the session's
 // scratch dir can exist before the first tool call. scratchRoot and scratchMoved wire the scratch
-// seam ("" / nil disable it — see the fields).
+// seam, snapshotsRoot and journalMoved the undo-store seam beside it ("" / nil disable either —
+// see the fields).
 func newSessionHost(store *session.Store, workspace, model string, resumed *session.Record,
-	scratchRoot string, scratchMoved func(dir string)) *sessionHost {
+	scratchRoot string, scratchMoved func(dir string),
+	snapshotsRoot string, journalMoved func(id string)) *sessionHost {
 	h := &sessionHost{store: store, workspace: workspace, model: model, now: time.Now,
-		scratchRoot: scratchRoot, scratchMoved: scratchMoved}
+		scratchRoot: scratchRoot, scratchMoved: scratchMoved,
+		snapshotsRoot: snapshotsRoot, journalMoved: journalMoved}
 	if resumed != nil {
 		h.active = &activeSession{
 			id:        resumed.Meta.ID,
@@ -166,6 +183,7 @@ func (h *sessionHost) Rotate() {
 	id := h.nextID
 	h.mu.Unlock()
 	h.followScratch(id)
+	h.followJournal(id)
 }
 
 // List returns every stored session's browsable metadata, newest first (the store's ordering).
@@ -189,6 +207,10 @@ func (h *sessionHost) Activate(meta session.Meta) {
 	// The scratch dir follows the activation: the resumed session's own dir (re)exists and is
 	// what the engine fences the next tool call to.
 	h.followScratch(meta.ID)
+	// And the undo journal follows it too: the resumed session's own store is re-opened, so
+	// `/undo` reaches the exchanges of the session the human just came back to rather than those
+	// of the one they left (ADR 0074 decision 10).
+	h.followJournal(meta.ID)
 }
 
 // SessionScratchDir returns the scratch dir of the session Saves currently target — the active
@@ -221,8 +243,43 @@ func (h *sessionHost) followScratch(id string) {
 	}
 }
 
-// Delete removes a stored session's file.
-func (h *sessionHost) Delete(id string) error { return h.store.Delete(id) }
+// followJournal tells the listener the active session's id moved, so the undo journal is re-opened
+// under the store that id names. Outside the lock for followScratch's reason: the listener reaches
+// into the engine holder, and nothing here reads host state. A host with no listener does nothing.
+func (h *sessionHost) followJournal(id string) {
+	if h.journalMoved == nil {
+		return
+	}
+	h.journalMoved(id)
+}
+
+// SessionID reports the id the session Saves currently target — the active session's, or the id a
+// fresh start pre-minted for its first Save to adopt. It is SessionScratchDir's answer without the
+// directory, and it is deliberately not ActiveID: the composition root opens the boot session's
+// undo store before any Save has run, which is exactly the window ActiveID answers "" in.
+func (h *sessionHost) SessionID() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.active != nil {
+		return h.active.id
+	}
+	return h.nextID
+}
+
+// Delete removes a stored session's file — and, with it, the session's own undo snapshot store: the
+// objects image a conversation that no longer exists, so keeping them would leave a store nothing
+// can ever open again (ADR 0074 decision 13). The store goes only once the record actually did, and
+// its removal is best-effort — a failed removal is not a failed delete, and the boot sweep
+// (gcSnapshotDirs) collects whatever is left behind.
+func (h *sessionHost) Delete(id string) error {
+	if err := h.store.Delete(id); err != nil {
+		return err
+	}
+	if h.snapshotsRoot != "" && id != "" {
+		_ = snapshot.Remove(filepath.Join(h.snapshotsRoot, id))
+	}
+	return nil
+}
 
 // Rename sets a stored session's title. When the renamed session is the active one, the new title
 // is mirrored onto the active identity too, so the next Save preserves it rather than reverting to

@@ -27,6 +27,8 @@ import (
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/snapshot"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // configWatchTiming is the seam onto how fast the session's `config.yaml` watcher runs (ADR 0041
@@ -219,6 +221,14 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	}
 	gcSessions(w.store, w.opts.Sessions, keepSessions...)
 
+	// The undo stores' own sweep, HERE rather than at the boot beat beside gcScratchDirs for the
+	// session sweep's reason: one of its two rules asks the session store whether a record still
+	// exists, and the store — and the resolved id this run must not lose — only exist from this
+	// line on (wire.go). It runs after the session sweep so a record that sweep just pruned is
+	// already gone when this one looks for it, which is what lets a retired session's objects go
+	// with it rather than a boot later.
+	gcSnapshotDirs(w.roots.snapshots, w.store, time.Now(), keepSessions...)
+
 	// The engine seam the renderer drives. It is a HOLDER rather than the Agent itself, because
 	// construction is no longer something startup always gets to do: with no startup server
 	// determined the TUI opens pre-bound and the engine arrives with the human's first pick (ADR
@@ -236,9 +246,17 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// engine holder, so the confinement box follows /clear|/new and /sessions resume. The seed
 	// below puts the boot session's dir on the Config the binder captures, which is what makes it
 	// writable from the engine's very first tool call (workspace-clobber hardening, 2026-08-22).
+	// The undo seam rides the host beside the scratch seam and for the same reason — the store is
+	// named by the id the host mints — but carries the ID rather than a path: opening a journal
+	// needs the apogee home and the workspace too, and those are this root's to know (ADR 0074).
 	w.host = newSessionHost(w.store, w.roots.workspace, w.opts.Model, w.resumed,
-		w.roots.scratch, w.engine.SetScratchDir)
+		w.roots.scratch, w.engine.SetScratchDir,
+		w.roots.snapshots, func(id string) { w.openSessionJournal(ctx, id) })
 	w.cfg.ScratchDir = w.host.SessionScratchDir()
+	// And the boot session's own journal, opened now that its id is known and pushed onto the
+	// engine holder, so the very first Exchange is imaged — a bind that has not happened yet
+	// applies it the moment it does (lateEngine.pendingJournal).
+	w.openSessionJournal(ctx, w.host.SessionID())
 
 	// The upstream monitor: one beat every heartbeat.Interval, from inside the running TUI. The
 	// configured model id travels with it as the discovery HINT (decision 10) — while the server
@@ -434,6 +452,25 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	w.colorScheme, w.colorSchemeWarnings = resolveColorScheme(w.opts.UI.ColorScheme, w.roots.schemes)
 
 	return nil
+}
+
+// openSessionJournal opens the undo journal for one session id and installs it on the engine
+// holder — the whole of this Driver's half of persistent undo (ADR 0074). It is called once at
+// startup with the boot session's id, and again at every identity boundary the session host
+// reports (a /clear|/new rotate, a /sessions resume), so a session's exchanges are recorded into
+// the store its own id names and never into the store of the session before it.
+//
+// It NEVER fails a start. snapshot.OpenJournal already answers the ordinary "no snapshots here"
+// cases — the key off, no git on PATH, a store imaging another workspace — with ADR 0051's
+// in-memory funnel journal and a reason to tell the human, and the one case it reports as an error
+// (a store that could not be prepared, an index this build cannot read) gets the same treatment
+// here with the error's own text as that reason. An undo store is never worth a session.
+func (w *rootWiring) openSessionJournal(ctx context.Context, id string) {
+	journal, reason, err := snapshot.OpenJournal(ctx, w.roots.config, id, w.roots.workspace, w.opts.UndoSnapshots)
+	if err != nil {
+		journal, reason = undo.New(), err.Error()
+	}
+	w.engine.SetJournal(journal, reason)
 }
 
 // mcpGuard builds the url-safety guard an MCP connect is made under, from the host lists whichever

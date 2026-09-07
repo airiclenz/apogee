@@ -259,10 +259,13 @@ type Agent struct {
 	contextFiles []contextFile
 
 	// journal is the per-Exchange pre-image record behind the human's `/undo` (ADR 0051):
-	// what every funnel write replaced, grouped by the Exchange that caused it. It is LIVE
-	// HOST STATE, not session state (ADR 0022 §8) — in memory, for this process only, never
-	// serialized — so a resumed session starts with an empty one and cannot revert an earlier
-	// process's writes. newAgent always supplies it; a nil journal is the honest encoding of an
+	// what every write replaced, grouped by the Exchange that caused it. It is LIVE HOST STATE,
+	// not session state (ADR 0022 §8) — it is never part of the Session snapshot, and the Agent
+	// never reads or writes a file for it. What it can REACH is the Driver's call: construction
+	// supplies ADR 0051's in-memory funnel journal, which lives and dies with the process, and a
+	// Driver that opened the session's own snapshot store hands that one over instead
+	// (SetJournal), which is what lets a resumed session revert an earlier process's writes
+	// (ADR 0074). A nil journal is the honest encoding of an
 	// engine that records nothing, and every reader treats it as such rather than as an error.
 	// A delegated child is handed the PARENT's instance rather than its own (newChildAgent), so
 	// the whole tree's writes land in one Exchange's undo step; only the depth-0 Agent opens a
@@ -1226,12 +1229,16 @@ func (a *Agent) Snapshot() (domain.Session, error) {
 // It is also a session boundary, so the workspace context files are re-read here: the new
 // session speaks from whatever the repo's AGENTS.md says NOW. A refused call changes nothing.
 //
-// It is a boundary for the Consoles too, and that is the ONE place their lifetime diverges from
-// the undo journal's: the journal survives /clear so `/undo` can still reach the writes of the
-// conversation just forgotten, while every Console is closed here (ADR 0059 §1). A Console is a
-// live process the model steers by id, and the ids live in the history this call drops — leaving
-// four shells running that nothing in the new session can name is exactly the forgotten-process
-// leak the cap exists to prevent.
+// It is a boundary for the Consoles too, and every Console is closed here (ADR 0059 §1). A Console
+// is a live process the model steers by id, and the ids live in the history this call drops —
+// leaving four shells running that nothing in the new session can name is exactly the
+// forgotten-process leak the cap exists to prevent.
+//
+// The undo journal is neither closed nor swapped HERE, and that is not the same as surviving: a
+// /clear mints a new session id, and the Driver that owns identity re-opens the journal under the
+// new id's own store around this call (ADR 0074 decision 10 — one journal.json holds one session's
+// Exchanges). What `/undo` reaches after a /clear is therefore the new session's store, and the
+// writes of the conversation just forgotten stay reachable through the session they belong to.
 //
 // The task list is emptied here for the same reason (ADR 0072): it is the checklist for the work
 // the conversation just forgotten was doing, so carrying it into the new session would leave the

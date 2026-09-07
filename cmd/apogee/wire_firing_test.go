@@ -76,6 +76,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		URLAllowHosts:      []string{"allowed.example"},
 		URLDenyHosts:       []string{"denied.example"},
 		UI:                 config.UISettings{Inspector: true},
+		UndoSnapshots:      true,
 		ContextFiles:       []string{"AGENTS.md"},
 		AutoCompact:        true,
 		PruneToolResults:   true,
@@ -182,6 +183,9 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	}
 	if !cfg.Inspector {
 		t.Error("Config.Inspector = false; the wire capture the host armed did not reach the run")
+	}
+	if !cfg.UndoSnapshots {
+		t.Error("Config.UndoSnapshots = false; the run would open no undo store and `apogee undo` would have nothing to reverse")
 	}
 	if !slices.Equal(cfg.ContextFiles, opts.ContextFiles) {
 		t.Errorf("Config.ContextFiles = %v; want %v", cfg.ContextFiles, opts.ContextFiles)

@@ -61,6 +61,7 @@ import (
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -386,6 +387,7 @@ type stateRoots struct {
 	prompts   string
 	schemes   string
 	scratch   string
+	snapshots string
 	workspace string
 }
 
@@ -458,7 +460,15 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		// flat `<id>.json` — and, like every root here, a path only: the session host creates
 		// the active session's dir when its id is minted, and gcScratchDirs sweeps the stale
 		// ones at startup.
-		scratch:   filepath.Join(absHome, "scratch"),
+		scratch: filepath.Join(absHome, "scratch"),
+		// The per-session undo snapshot stores (ADR 0074): one `snapshots/<session-id>/` bare
+		// object database per session, outside the workspace by construction. This is the ROOT
+		// alone — the sweep below walks it and the session host removes one store under it, while
+		// every per-session path is composed by [snapshot.Dir] from the apogee home, which is the
+		// one seam that names a store (TestSnapshotRootMatchesStoreDir pins the two together). Like
+		// every root here it is a path only: snapshot.Open creates a session's directory the first
+		// time its journal is opened, and a run whose `undo-snapshots:` is off creates nothing.
+		snapshots: filepath.Join(absHome, "snapshots"),
 		workspace: absWorkspace,
 	}, nil
 }
@@ -489,6 +499,71 @@ func gcScratchDirs(root string, now time.Time) {
 		}
 		if now.Sub(info.ModTime()) > scratchMaxAge {
 			_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Session snapshot stores (the boot sweep, ADR 0074 decision 13)
+// ----------------------------------------------------------------------------
+
+// snapshotOrphanMaxAge is how long a snapshot store whose session record is already gone survives
+// before the boot sweep removes it. It is short where scratchMaxAge is long, and for a reason the
+// two roots do not share: a store the session store has no record for images a conversation nobody
+// can open again, so the objects are already unreachable — the only thing the day buys is a margin
+// against sweeping the store of a session whose record has not been written yet, which is every
+// fresh session until its first Turn lands.
+const snapshotOrphanMaxAge = 24 * time.Hour
+
+// gcSnapshotDirs removes the snapshot stores under root that nothing can reach any more —
+// gcScratchDirs' sibling and gcSessions' companion, run once per boot beside the session sweep
+// because the record rule below needs the store and the same keep list.
+//
+// Two rules, and a store goes when EITHER fires: it has not been touched in scratchMaxAge (the
+// scratch root's own age rule, so an abandoned session's objects do not accumulate forever), or
+// the session store holds no record under its name AND it is older than snapshotOrphanMaxAge.
+// keep names the ids this run must not lose — the id a --resume or --continue start resolved, as
+// gcSessions is passed it — so the session being opened never loses its own undo history to the
+// sweep that runs a moment before it opens.
+//
+// Strictly best-effort, exactly as gcScratchDirs is: a root that does not exist, an unreadable
+// entry and a failed removal are all ignored, because GC must never be a reason a session fails to
+// start. A session store that could not be LISTED disables the record rule alone rather than
+// deleting on a guess — every store would otherwise look record-less — and the age rule still runs.
+func gcSnapshotDirs(root string, store *session.Store, now time.Time, keep ...string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+
+	kept := make(map[string]struct{}, len(keep))
+	for _, id := range keep {
+		kept[id] = struct{}{}
+	}
+	// nil means "the store could not be listed", which is not the same as "no records" — the
+	// record rule is skipped entirely in that case (see the doc comment).
+	var recorded map[string]struct{}
+	if metas, err := store.List(); err == nil {
+		recorded = make(map[string]struct{}, len(metas))
+		for _, meta := range metas {
+			recorded[meta.ID] = struct{}{}
+		}
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if _, ok := kept[name]; ok {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		age := now.Sub(info.ModTime())
+		_, hasRecord := recorded[name]
+		orphaned := recorded != nil && !hasRecord && age > snapshotOrphanMaxAge
+		if age > scratchMaxAge || orphaned {
+			_ = snapshot.Remove(filepath.Join(root, name))
 		}
 	}
 }

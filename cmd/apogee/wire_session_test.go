@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/snapshot"
 )
 
 func TestBuildAgentResumeRoundTrip(t *testing.T) {
@@ -60,7 +61,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 	}
 
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
-	host := newSessionHost(store, t.TempDir(), "fake", nil, "", nil)
+	host := newSessionHost(store, t.TempDir(), "fake", nil, "", nil, "", nil)
 	if err := host.Save(snap, nil, "hi", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestBuildAgentResumeFutureVersion(t *testing.T) {
 func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "model-x", nil, "", nil)
+	host := newSessionHost(store, "/ws", "model-x", nil, "", nil, "", nil)
 
 	if host.ActiveID() != "" {
 		t.Errorf("ActiveID before any Save = %q; want empty", host.ActiveID())
@@ -169,7 +170,7 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 func TestSessionHostSetModelStampsSaves(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "", nil, "", nil) // a cold start: nothing bound yet
+	host := newSessionHost(store, "/ws", "", nil, "", nil, "", nil) // a cold start: nothing bound yet
 
 	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save before the bind: %v", err)
@@ -198,7 +199,7 @@ func TestSessionHostSetModelStampsSaves(t *testing.T) {
 func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil, "", nil)
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
 
 	if err := host.Save(apogee.Session{}, nil, "A", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save A: %v", err)
@@ -246,7 +247,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 func TestSessionHostRenameActiveSticks(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil, "", nil)
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
 	if err := host.Save(apogee.Session{}, nil, "original", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -272,7 +273,7 @@ func TestSessionHostResumeBeginsActive(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
 	seed := &session.Record{Meta: session.Meta{ID: "20260724T120000Z-abcd", Title: "kept"}}
-	host := newSessionHost(store, "/ws", "m", seed, "", nil)
+	host := newSessionHost(store, "/ws", "m", seed, "", nil, "", nil)
 
 	if host.ActiveID() != seed.Meta.ID {
 		t.Errorf("ActiveID of a resumed host = %q; want the resumed id %q", host.ActiveID(), seed.Meta.ID)
@@ -354,7 +355,7 @@ func TestResolveResumeByPathRemintsID(t *testing.T) {
 
 	// The run continues as a NEW session: its autosave lands on its own file and the victim's
 	// record is untouched.
-	host := newSessionHost(store, "/ws", "m", rec, "", nil)
+	host := newSessionHost(store, "/ws", "m", rec, "", nil, "", nil)
 	if host.ActiveID() != rec.Meta.ID {
 		t.Errorf("host active id = %q; want the re-minted %q", host.ActiveID(), rec.Meta.ID)
 	}
@@ -419,7 +420,7 @@ func TestResolveContinuePicksWorkspaceNewest(t *testing.T) {
 // UpdatedAt), returning the minted id. Each call uses its own host so it mints a distinct session.
 func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title string) string {
 	t.Helper()
-	h := newSessionHost(store, ws, "m", nil, "", nil)
+	h := newSessionHost(store, ws, "m", nil, "", nil, "", nil)
 	h.now = func() time.Time { return when }
 	if err := h.Save(apogee.Session{}, nil, title, 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("saveAt %q: %v", title, err)
@@ -448,7 +449,7 @@ func TestResolveResumeMutuallyExclusive(t *testing.T) {
 func TestSessionHostStoresBothTokenAccountings(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "model-x", nil, "", nil)
+	host := newSessionHost(store, "/ws", "model-x", nil, "", nil, "", nil)
 
 	main := session.Usage{Calls: 4, PromptTokens: 60000, CachedPromptTokens: 12000, TotalTokens: 64000}
 	delegates := session.Usage{Calls: 300, PromptTokens: 900000, TotalTokens: 936000}
@@ -537,7 +538,7 @@ func TestSessionHostScratchFollowsTheActiveSession(t *testing.T) {
 	root := t.TempDir()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	var moved []string
-	host := newSessionHost(store, "/ws", "m", nil, root, func(dir string) { moved = append(moved, dir) })
+	host := newSessionHost(store, "/ws", "m", nil, root, func(dir string) { moved = append(moved, dir) }, "", nil)
 
 	bootDir := host.SessionScratchDir()
 	if bootDir == "" {
@@ -579,7 +580,7 @@ func TestSessionHostWithoutScratchRootIsInert(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	called := false
-	host := newSessionHost(store, "/ws", "m", nil, "", func(string) { called = true })
+	host := newSessionHost(store, "/ws", "m", nil, "", func(string) { called = true }, "", nil)
 
 	if dir := host.SessionScratchDir(); dir != "" {
 		t.Errorf("SessionScratchDir = %q on a disabled seam, want \"\"", dir)
@@ -719,4 +720,145 @@ func TestWireSessionSweepsAfterResolvingContinue(t *testing.T) {
 	if len(metas) != 1 || metas[0].ID != target {
 		t.Errorf("after the boot sweep the store holds %d records (%v); want only the continued one", len(metas), metas)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The per-session undo snapshot stores (ADR 0074)
+// ---------------------------------------------------------------------------
+
+// The root the sweep walks and the directory [snapshot.Dir] names must be the SAME place or
+// persistent undo quietly does nothing: the Driver would open a store under one path while the
+// sweep and the session delete removed another. The two are spelled in different packages, so the
+// agreement is pinned here rather than left to a comment.
+func TestSnapshotRootMatchesStoreDir(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+
+	roots, err := resolveRoots(home, t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+
+	if got, want := snapshot.Dir(home, "sess-1"), filepath.Join(roots.snapshots, "sess-1"); got != want {
+		t.Errorf("snapshot.Dir = %q; want the store under the swept root %q", got, want)
+	}
+}
+
+// TestGCSnapshotDirsSweepsWhatNothingCanReach pins both of the sweep's rules and both of its
+// refusals: an untouched store goes on age alone, a store whose session record is gone goes after a
+// day, and neither a young record-less store (the session whose first Turn has not landed yet) nor
+// the id this run is resuming is ever taken.
+func TestGCSnapshotDirsSweepsWhatNothingCanReach(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	root := t.TempDir()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+
+	recorded := saveAt(t, store, "/ws", now, "still open")
+	resumed := saveAt(t, store, "/ws", now, "the one being resumed")
+
+	aged := snapshotDirAt(t, root, "aged", now.Add(-scratchMaxAge-time.Hour))
+	orphan := snapshotDirAt(t, root, "orphan", now.Add(-snapshotOrphanMaxAge-time.Hour))
+	youngOrphan := snapshotDirAt(t, root, "young-orphan", now.Add(-time.Hour))
+	kept := snapshotDirAt(t, root, recorded, now.Add(-snapshotOrphanMaxAge-time.Hour))
+	// The resumed session's own store, backdated past BOTH rules: the keep list is what saves it.
+	resuming := snapshotDirAt(t, root, resumed, now.Add(-scratchMaxAge-time.Hour))
+
+	gcSnapshotDirs(root, store, now, resumed)
+
+	for _, dir := range []string{aged, orphan} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("unreachable store %s survived the sweep (stat err = %v)", filepath.Base(dir), err)
+		}
+	}
+	for _, dir := range []string{youngOrphan, kept, resuming} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("reachable store %s did not survive the sweep: %v", filepath.Base(dir), err)
+		}
+	}
+
+	// And the sweep's posture: a root that was never created is not an error and creates nothing.
+	gcSnapshotDirs(filepath.Join(root, "does-not-exist"), store, now)
+	if _, err := os.Stat(filepath.Join(root, "does-not-exist")); !os.IsNotExist(err) {
+		t.Errorf("the sweep created the root it could not read (stat err = %v)", err)
+	}
+}
+
+// A deleted session's snapshot store images a conversation nobody can open again, so it goes with
+// the record — and only once the record actually went, which is what keeps a failed delete from
+// destroying the undo history of a session that is still there.
+func TestSessionHostDeleteRemovesTheSnapshotStore(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	id := saveAt(t, store, "/ws", time.Now(), "done with")
+	dir := snapshotDirAt(t, root, id, time.Now())
+
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, root, nil)
+	if err := host.Delete(id); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the deleted session's snapshot store survived (stat err = %v)", err)
+	}
+
+	// A record that was never there fails, and the store of an unrelated session stays put.
+	survivor := saveAt(t, store, "/ws", time.Now(), "still here")
+	survivorDir := snapshotDirAt(t, root, survivor, time.Now())
+	if err := host.Delete("no-such-session"); err == nil {
+		t.Error("Delete of a missing record: want an error, got none")
+	}
+	if _, err := os.Stat(survivorDir); err != nil {
+		t.Errorf("an unrelated session's store went with a failed delete: %v", err)
+	}
+}
+
+// The journal follows session identity exactly as the scratch dir does: a /clear|/new rotate and a
+// /sessions resume each report the id the session now runs under, so the composition root re-opens
+// the journal against that session's own store rather than leaving the previous session's open.
+func TestSessionHostJournalFollowsTheActiveSession(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	var reopened []string
+	host := newSessionHost(store, "/ws", "m", nil, "", nil,
+		t.TempDir(), func(id string) { reopened = append(reopened, id) })
+
+	boot := host.SessionID()
+	if boot == "" {
+		t.Fatal("SessionID answered \"\" before the first Save: the boot journal has no store to open")
+	}
+
+	host.Rotate()
+	rotated := host.SessionID()
+	host.Activate(session.Meta{ID: "resumed-session"})
+
+	want := []string{rotated, "resumed-session"}
+	if !slices.Equal(reopened, want) {
+		t.Errorf("the journal was re-opened under %v; want %v", reopened, want)
+	}
+	if rotated == boot {
+		t.Error("Rotate re-used the boot session's id: the new session would record into the old store")
+	}
+	if got := host.SessionID(); got != "resumed-session" {
+		t.Errorf("SessionID after Activate = %q; want the resumed session's id", got)
+	}
+}
+
+// snapshotDirAt creates one session's store directory under root with a file in it and backdates
+// it, so a sweep sees a store of a known age with content worth losing.
+func snapshotDirAt(t *testing.T, root, id string, mtime time.Time) string {
+	t.Helper()
+
+	dir := filepath.Join(root, id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "journal.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Chtimes(dir, mtime, mtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	return dir
 }

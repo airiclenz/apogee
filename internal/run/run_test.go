@@ -19,8 +19,10 @@ import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // TestOncePersistsAFiringUnderItsScheduleIdentity is the item's headline: one Firing lands
@@ -2046,4 +2048,91 @@ func TestOnceReportsTheFilesAFaultedFiringWrote(t *testing.T) {
 	if len(res.Wrote) != 1 || filepath.Base(res.Wrote[0]) != "half-done.txt" {
 		t.Errorf("Result.Wrote = %v, want the one file the faulted run wrote", res.Wrote)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The Firing's own undo snapshots (ADR 0074)
+// ---------------------------------------------------------------------------
+
+// TestOnceImagesTheWorkspaceIntoTheRecordsSnapshotStore is item 13's headline for the unattended
+// Drivers: a Firing opens the undo store named by the record id its caller minted, so what a run
+// nobody watched changed is reversible afterwards through `apogee undo <session-id>`. The proof is
+// the index the store keeps beside its objects — one exchange, with both halves of its capture pair
+// — because that file, not the process's memory, is what the revert verb reads.
+func TestOnceImagesTheWorkspaceIntoTheRecordsSnapshotStore(t *testing.T) {
+	t.Parallel()
+	requireSnapshots(t)
+
+	var turns atomic.Int32
+	up := newUpstream(t, func(w http.ResponseWriter, _ request) {
+		if turns.Add(1) == 1 {
+			writeToolCall(w, "call_1", "write_file", `{"path":"note.txt","content":"written"}`)
+			return
+		}
+		writeFinal(w, "the file is written")
+	})
+
+	home := t.TempDir()
+	spec := planSpec(up.url, "write the note")
+	spec.Config.Mode = domain.ModeAuto
+	spec.Config.Confiner = stubConfiner{}
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.ConfigDir = home
+	spec.Config.UndoSnapshots = true
+	spec.RecordID = "firing-1"
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	index := readJournalIndex(t, filepath.Join(home, "snapshots", "firing-1", "journal.json"))
+	if len(index.Groups) != 1 {
+		t.Fatalf("journal.json holds %d groups, want the Firing's one exchange", len(index.Groups))
+	}
+	if index.Groups[0].Pre == "" || index.Groups[0].Post == "" {
+		t.Errorf("the recorded group is %+v, want both halves of the capture pair", index.Groups[0])
+	}
+}
+
+// TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal pins the fallback an embedder and the bench both
+// run in: a Config that injects no apogee home names no store, so the run keeps ADR 0051's
+// in-memory journal and nothing at all is written outside the workspace. A missing home is a
+// supported configuration, never a failed Firing.
+func TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, alwaysFinal("nothing to do"))
+	spec := planSpec(up.url, "look around")
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.UndoSnapshots = true
+	spec.RecordID = "firing-2"
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+}
+
+// requireSnapshots skips a test on a machine that cannot open a snapshot store — the store is a
+// git object database, and git is a convenience dependency (ADR 0042 decision 2).
+func requireSnapshots(t *testing.T) {
+	t.Helper()
+
+	if !snapshot.Available() {
+		t.Skip("git is not on PATH: the snapshot store cannot be opened here")
+	}
+}
+
+// readJournalIndex decodes the index a session's snapshot store keeps beside its objects.
+func readJournalIndex(t *testing.T, path string) undo.Index {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the journal index: %v", err)
+	}
+	var index undo.Index
+	if err := json.Unmarshal(data, &index); err != nil {
+		t.Fatalf("decode the journal index: %v", err)
+	}
+	return index
 }
