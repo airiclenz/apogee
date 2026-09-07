@@ -83,7 +83,11 @@
 // the staged / unstaged / untracked path lists. It reads git's porcelain v2 format with -z, so
 // a path with a space, a quote, or a newline arrives verbatim rather than C-quoted, and it
 // caps EACH list (maxGitStatusPaths) while stating the full count in the section header — a
-// tree mid-refactor must not flood a small model's context. Like git_diff_range it declares
+// tree mid-refactor must not flood a small model's context. It passes --ignore-submodules=dirty
+// because git's default of none makes git status run `git status --porcelain=2` inside every
+// submodule, whose own config (.git/modules/<name>/config) repoLocalCommandConfig never scans —
+// dirty drops that child spawn while still reporting a submodule whose recorded commit moved.
+// Like git_diff_range it declares
 // ReadOnly() and still carries the subprocess marker, which is what classifies the call.
 //
 // git_log (2026-08-10) is the family's fifth member and the history half of git_status's

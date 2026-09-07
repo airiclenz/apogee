@@ -33,7 +33,10 @@
 
 **Out of scope:** `diagnostics` in Plan (any half); MCP `readOnlyHint`; network tools in Plan; a `terminal` command allowlist; a submodule-config scan; `run_tests`; version bumps.
 
-## 1. `git_status` stops spawning a child git in submodules
+## 1. `git_status` stops spawning a child git in submodules — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): the `description` was read and left untouched — it promises no submodule work-tree dirt, as the item anticipated.
+NOTES (2026-09-07): both new tests were confirmed to bite by reverting the flag against them — the dirt-only case reports `Unstaged (1):` / `M  sub` at BASE and the argv test sees `status --porcelain=v2 --branch -z`.
 
 **What:** In `internal/tools/git.go`, `GitStatus.Execute` adds `--ignore-submodules=dirty` to its argv (after `--branch`, before `-z`). Extend the `git_status` doc block (the `git_status (2026-08-10)` paragraph in `internal/tools/doc.go` and the tool's own comment in `git.go`) with one sentence: with the default `none`, git runs `git status --porcelain=2` inside every submodule, whose own config (`.git/modules/<name>/config`) `repoLocalCommandConfig` never scans; `dirty` drops that child spawn while still reporting a submodule whose recorded commit moved. Update the tool's `description` only if it currently promises submodule work-tree dirt (read it; it does not appear to).
 

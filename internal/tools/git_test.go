@@ -919,6 +919,105 @@ func TestGitStatus_ReportsStagedUnstagedAndUntracked(t *testing.T) {
 	}
 }
 
+// TestGitStatus_IgnoresSubmoduleWorkTreeDirt pins the flag that keeps git_status ONE process.
+// With git's default of none, a dirty submodule made git run a child `git status --porcelain=2`
+// inside it — under the submodule's own config, which the repo-local program-key scan never
+// reads — and reported "Unstaged (1):" / "M  sub". With --ignore-submodules=dirty that dirt is
+// invisible (the tree reads clean), while a submodule whose RECORDED COMMIT moved is still
+// reported: the case the flag must not silence.
+func TestGitStatus_IgnoresSubmoduleWorkTreeDirt(t *testing.T) {
+	root := gitRepo(t)
+	submoduleOrigin := gitRepo(t)
+
+	runInRepo(t, root, "-c", "protocol.file.allow=always", "submodule", "add", submoduleOrigin, "sub")
+	runInRepo(t, root, "commit", "-m", "add the submodule")
+	submodule := filepath.Join(root, "sub")
+
+	if err := os.WriteFile(filepath.Join(submodule, "README.md"), []byte("edited inside the submodule\n"), 0o644); err != nil {
+		t.Fatalf("edit inside the submodule: %v", err)
+	}
+
+	res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("status errored: %q", res.Content)
+	}
+
+	if !strings.Contains(res.Content, "Working tree clean") {
+		t.Errorf("status with a dirty submodule = %q, want a clean tree", res.Content)
+	}
+	if got, want := res.Summary, (domain.ChangedFiles{}); got != want {
+		t.Errorf("summary = %#v, want %+v", got, want)
+	}
+
+	// The submodule's recorded commit moves: the superproject's own index is now stale, which
+	// is a change to the PARENT and must still be reported.
+	runInRepo(t, submodule, "add", "README.md")
+	runInRepo(t, submodule, "commit", "-m", "move the recorded commit")
+
+	res, err = NewGitStatus(root).Execute(context.Background(), statusCall("c2"))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("status errored: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "Unstaged (1):") || !strings.Contains(res.Content, "M  sub") {
+		t.Errorf("status after the submodule commit moved = %q, want it to list sub as modified", res.Content)
+	}
+}
+
+// TestGitStatus_PassesIgnoreSubmodulesDirty asserts the real command line rather than its
+// effect: a fake git records the argv it was launched with, so the flag cannot be lost to a
+// refactor that keeps the two-case behaviour above passing by accident.
+func TestGitStatus_PassesIgnoreSubmodulesDirty(t *testing.T) {
+	posixScriptHost(t)
+
+	dir := t.TempDir()
+	record := filepath.Join(dir, "record")
+	fakeGit := filepath.Join(dir, "fake-git")
+	script := "#!/bin/sh\necho \"$*\" >> \"" + record + "\"\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	withFakeGit(t, true, fakeGit)
+
+	res, err := NewGitStatus(t.TempDir()).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("status err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("status = %q, want the fake git's success", res.Content)
+	}
+
+	logged, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+
+	// The repo-local command-config probe is recorded first; the status invocation is the line
+	// carrying the subcommand, and everything from it on is the argv this tool chose.
+	const wantArgv = "status --porcelain=v2 --branch --ignore-submodules=dirty -z"
+	var gotArgv string
+	for _, line := range strings.Split(string(logged), "\n") {
+		fields := strings.Fields(line)
+		for i, field := range fields {
+			if field == "status" {
+				gotArgv = strings.Join(fields[i:], " ")
+				break
+			}
+		}
+		if gotArgv != "" {
+			break
+		}
+	}
+	if gotArgv != wantArgv {
+		t.Errorf("status argv = %q, want %q (record: %q)", gotArgv, wantArgv, string(logged))
+	}
+}
+
 func TestGitStatus_DetachedHead(t *testing.T) {
 	root := gitRepo(t)
 	gitPath, _ := exec.LookPath("git")

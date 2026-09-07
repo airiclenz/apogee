@@ -670,7 +670,16 @@ func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// Porcelain v2 is the stable machine format (it carries the branch and ahead/behind
 	// headers v1 lacks), and -z makes every record NUL-terminated so a path containing a
 	// space, a quote, or a newline arrives verbatim instead of C-quoted.
-	res, err := runGit(ctx, gitPath, t.root, gitTimeout, "status", "--porcelain=v2", "--branch", "-z")
+	//
+	// --ignore-submodules=dirty is what keeps this a single process: with git's default of
+	// none, git status runs `git status --porcelain=2` INSIDE every submodule, and that child
+	// reads the submodule's own config (.git/modules/<name>/config), which
+	// repoLocalCommandConfig never scans — so the program-key refusal that guards this
+	// repository does not guard the child. dirty drops the child spawn while still reporting a
+	// submodule whose recorded commit moved; only work-tree dirt inside a submodule goes
+	// unreported.
+	res, err := runGit(ctx, gitPath, t.root, gitTimeout,
+		"status", "--porcelain=v2", "--branch", "--ignore-submodules=dirty", "-z")
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
