@@ -1300,7 +1300,17 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 //
 // Nothing is appended, ever: a phase is a fact about a block the transcript already holds, and an
 // event naming no such block (a phase for a run this view never saw) folds nothing at all.
+//
+// A CANCELLED finished folds nothing either, and deliberately does not even record the phase. That
+// phase exists to close the bracket for a log reader (ADR 0075 decision 12); on screen the
+// delegation was rolled back, so it carries no report to enrich with and must keep reading as
+// interrupted. Storing the phase is what would break that: subAgentReported and childPhaseOf both
+// answer from it, so a cancelled head would tick ✓ and lose its live star — the interrupted mark
+// closeInterruptedCalls gives it is the honest one.
 func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
+	if e.Cancelled {
+		return
+	}
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		en := &t.entries[i]
 		if !en.headsRunFor(e.CallID) {

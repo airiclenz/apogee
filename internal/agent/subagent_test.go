@@ -638,7 +638,8 @@ func TestSubAgent_FaultedDelegationBooksNoProductiveWrite(t *testing.T) {
 
 // TestSubAgent_CancelledChildRollsTheParentTurnBack pins the neighbouring row the fault marker
 // must not disturb: a CANCELLED child still unwinds the parent Turn wholesale (D2) — no tool
-// result is surfaced at all, and the cancel is not reported as a fault.
+// result is surfaced at all, and the cancel is not reported as a fault. The serial path closes the
+// cancelled delegation's bracket exactly as the pool does (ADR 0075 decision 12).
 func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
 	sink := &recordingSink{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -671,6 +672,7 @@ func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
 	if sub, ok := lastSubAgentResult(sink.events); ok {
 		t.Errorf("a cancelled delegation surfaced a tool result (%+v); no partial result may reach the parent", sub)
 	}
+	assertCancelledBracket(t, sink.events, "c1")
 }
 
 // TestSubAgent_DepthLimitConstant guards the recursion bound's value so a careless change is

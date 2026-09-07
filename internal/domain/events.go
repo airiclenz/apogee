@@ -149,7 +149,9 @@ const (
 	SubAgentStarted SubAgentPhase = "started"
 	// SubAgentFinished reports that the child reached its boundary and its result is known. The
 	// result rides the event, so an observer can show THAT delegation's report the moment it lands
-	// instead of waiting for the group's trailing result burst.
+	// instead of waiting for the group's trailing result burst. It also closes the bracket of a
+	// delegation that was CANCELLED rather than reported — see SubAgentPhaseEvent.Cancelled, which
+	// is the one thing that separates the two.
 	SubAgentFinished SubAgentPhase = "finished"
 )
 
@@ -171,13 +173,20 @@ const (
 // event the child itself emits carries, and the id of the parent's tool-call block the phase is
 // about.
 //
-// Result is the child's ToolResult on SubAgentFinished and the zero value on SubAgentStarted. A
-// delegation the human CANCELLED emits no finished phase at all: the cancelled group is dropped
-// unappended and never becomes a result, so its phase pair stays open exactly as its tool call does.
+// Result is the child's ToolResult on SubAgentFinished and the zero value on SubAgentStarted.
+//
+// Cancelled says the finished phase closes a delegation the human CANCELLED: the group is dropped
+// unappended and never becomes a result, so Result is the zero value and no ToolResultEvent will
+// follow. The phase is still emitted, because a bracket a Driver cannot see close is a bracket
+// left permanently open in its log (ADR 0075 decision 12); it is the rollback's announcement, not
+// a report. A consumer that treats finished as "the child reported" must therefore ask this first:
+// a cancelled finished has nothing to fold and nothing to mark done. It is always false on
+// SubAgentStarted.
 type SubAgentPhaseEvent struct {
 	EventBase
-	Phase  SubAgentPhase
-	Result ToolResult
+	Phase     SubAgentPhase
+	Result    ToolResult
+	Cancelled bool
 }
 
 // SubAgentNamedEvent reports that a delegation the model left unnamed has just been GIVEN a name by

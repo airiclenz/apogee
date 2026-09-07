@@ -135,7 +135,7 @@ func (a runActivities) drop(run runRef) {
 // dropChildren closes every DELEGATE's slot, leaving the top-level one alone. A child runs
 // atomically inside its parent's Turn (ADR 0013 D5), so the parent being heard from at depth 0 is
 // proof every child of that Turn is over — including one whose SubAgentFinished the view never saw
-// (a cancelled group is dropped unappended and emits no finished phase).
+// (a child whose run ended before it emitted anything, so its slot was never opened by a phase).
 func (a runActivities) dropChildren() {
 	for run := range a {
 		if run.depth > 0 {
@@ -453,7 +453,8 @@ func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 		m.foldSlot(runOf(e.EventBase), activity{kind: actThinking})
 	case domain.SubAgentPhaseEvent:
 		// The delegation is OVER: its slot goes, and the top-level phrase falls back to whatever is
-		// still running — a sibling, the merged count, or the parent's own word (runningPhrase).
+		// still running — a sibling, the merged count, or the parent's own word (runningPhrase). A
+		// CANCELLED finished drops the slot too: the child was rolled back, which is just as over.
 		// Its start is deliberately not folded: a child that has produced nothing has nothing to
 		// say, and its first real event opens the slot.
 		if e.Phase == domain.SubAgentFinished {

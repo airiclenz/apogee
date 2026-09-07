@@ -33,7 +33,15 @@
 
 **Out of scope:** `apogee serve` (`apogee-afu`); live text rendering from the stream (`apogee-czf`); `--format` on the daemon or `probe`; `hooks.Payload` changes; any `EventBase` extension; version bumps.
 
-## 1. Engine: a cancelled delegation closes its bracket
+## 1. Engine: a cancelled delegation closes its bracket — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): consequential edit — internal/domain/events.go (SubAgentFinished const doc): made necessary by the new Cancelled field, since "its result is known" no longer holds for every finished phase.
+NOTES (2026-09-07): consequential edit — internal/agent/dispatch.go (runDelegationPool doc comment): made necessary by the pool now bracketing cancelled children too.
+NOTES (2026-09-07): consequential edit — internal/tui/fold.go (progressSaveTrigger doc bullet): made necessary by the cancelled exception added to the predicate.
+NOTES (2026-09-07): consequential edit — internal/tui/activity.go (foldEvent's SubAgentPhaseEvent comment): made necessary by a cancelled group now emitting a finished phase the slot drop sees.
+NOTES (2026-09-07): the item's "set the phase but never call enrichWithResult" is implemented as the plan's own Regression guard directs — a `Cancelled: true` finished returns from `addSubAgentPhase` before touching `en.phase`, so `subAgentReported`/`childPhaseOf` stay false and the live star and `assertNoDoneMark` hold.
+NOTES (2026-09-07): `internal/tui/subagentblock.go` needed no edit — `subAgentReported` already stays false because the cancelled phase is never recorded; the plan listed only its test file, which gained the new test.
+NOTES (2026-09-07): the two cancel tests share one `assertCancelledBracket` helper placed in `delegationphase_test.go` beside `subAgentPhases`, rather than duplicating the assertion in both files.
 
 **What:** Implements ADR 0075 §12. `internal/domain/events.go:177-181` — `SubAgentPhaseEvent` gains `Cancelled bool`; rewrite the doc comment at `:174-176` (a cancelled group now emits `finished` with `Cancelled: true`). `internal/agent/dispatch.go` — pool `:425-430`: emit `finished` for `dispatchCancelled` slots with `Cancelled: true` instead of skipping; serial `:865-870`: emit the same before returning `dispatchCancelled`. `emitSubAgentPhase` (`:473-478`) takes the flag. TUI: `internal/tui/transcript.go:1303-1316` `addSubAgentPhase` — on a cancelled finished, set the phase but never call `enrichWithResult`; `internal/tui/subagentblock.go:506` `subAgentFinished()` stays false for a cancelled head (it is closed by `closeInterruptedCalls` as today); `internal/tui/activity.go:135-140` comment rewritten (drop on finished is still right — the run is over). Binding: no new export on `apogee.go` (the field rides the alias).
 

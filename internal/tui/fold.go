@@ -217,9 +217,11 @@ func (m Model) foldStats(e domain.Event) Model {
 //     delegation's progress. A depth-0 result is deliberately not one — the Turn's own tool calls
 //     are followed by the per-Turn snapshot that saves them (turnSnapshotMsg), and a long LEAF tool
 //     is out of scope (the plan's ratified call 3: generalising is one predicate away, later).
-//   - A SubAgentPhaseEvent reporting SubAgentFinished: one delegation of a group reached its
-//     boundary and its report is in the record. Under a fan-out its siblings run on, so this is a
-//     progress point of its own rather than the Turn's end.
+//   - A SubAgentPhaseEvent reporting SubAgentFinished with Cancelled false: one delegation of a
+//     group reached its boundary and its report is in the record. Under a fan-out its siblings run
+//     on, so this is a progress point of its own rather than the Turn's end. A CANCELLED finished
+//     is not one — it closes a bracket for a log reader (ADR 0075 decision 12) and nothing reached
+//     the record to save.
 //   - A SubAgentNamedEvent: a running delegation has just been given its generated name (ADR 0068),
 //     and what a run is CALLED is part of the run rather than view state — so a record saved
 //     before the rename, and resumed after it, would paint the task's first line the session had
@@ -238,7 +240,9 @@ func progressSaveTrigger(e domain.Event) bool {
 	case domain.ToolResultEvent:
 		return e.Depth >= 1
 	case domain.SubAgentPhaseEvent:
-		return e.Phase == domain.SubAgentFinished
+		// A CANCELLED finished is the exception: it closes the bracket of a delegation the parent
+		// Turn rolled back, so no report landed and the record has gained nothing to save.
+		return e.Phase == domain.SubAgentFinished && !e.Cancelled
 	case domain.SubAgentNamedEvent:
 		return true
 	}

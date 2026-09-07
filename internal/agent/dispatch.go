@@ -410,8 +410,10 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 //
 // The worker brackets each child with its lifecycle phases (domain.SubAgentPhaseEvent): started as
 // the job is DEQUEUED — which is what makes a slot-less delegation observably queued rather than
-// silently pending — and finished, carrying the result, as the child returns. They are the group's
-// only per-child timing: the results themselves still burst after the join, in call order.
+// silently pending — and finished, carrying the result, as the child returns. A child the human
+// CANCELLED is bracketed too: its finished phase carries no result and says so (ADR 0075 decision
+// 12). They are the group's only per-child timing: the results themselves still burst after the
+// join, in call order.
 func (a *Agent) runDelegationPool(ctx context.Context, turn, width int, slots []fanOutSlot) {
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -420,14 +422,17 @@ func (a *Agent) runDelegationPool(ctx context.Context, turn, width int, slots []
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				a.emitSubAgentPhase(turn, slots[i].call, domain.SubAgentStarted, domain.ToolResult{})
+				a.emitSubAgentPhase(turn, slots[i].call, domain.SubAgentStarted, domain.ToolResult{}, false)
 				slots[i].result, slots[i].outcome = a.runDelegation(ctx, turn, slots[i].call)
-				if slots[i].outcome != dispatchCancelled {
+				cancelled := slots[i].outcome == dispatchCancelled
+				result := slots[i].result
+				if cancelled {
 					// A cancelled group is discarded unappended, so its children never finish into
-					// a result: claiming one here would report a delegation the parent Turn is
-					// about to roll back.
-					a.emitSubAgentPhase(turn, slots[i].call, domain.SubAgentFinished, slots[i].result)
+					// a result: the phase closes the bracket and says the delegation was rolled
+					// back, carrying no result to be mistaken for one (ADR 0075 decision 12).
+					result = domain.ToolResult{}
 				}
+				a.emitSubAgentPhase(turn, slots[i].call, domain.SubAgentFinished, result, cancelled)
 			}
 		}()
 	}
@@ -470,11 +475,26 @@ func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCal
 //
 // Both delegation paths call it, so a lone (serial) delegation reports the same started/finished
 // pair a pooled one does: nothing that runs is ever left looking queued.
-func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, phase domain.SubAgentPhase, result domain.ToolResult) {
+//
+// cancelled marks a finished phase that closes a ROLLED-BACK delegation rather than a reported one
+// (ADR 0075 decision 12). It rides the event so an observer can tell the two apart; a started phase
+// is never cancelled.
+func (a *Agent) emitSubAgentPhase(
+	turn int,
+	call domain.ToolCall,
+	phase domain.SubAgentPhase,
+	result domain.ToolResult,
+	cancelled bool,
+) {
 	base := a.base(turn)
 	base.Depth++
 	base.CallID = call.ID
-	a.cfg.Events.Emit(domain.SubAgentPhaseEvent{EventBase: base, Phase: phase, Result: result})
+	a.cfg.Events.Emit(domain.SubAgentPhaseEvent{
+		EventBase: base,
+		Phase:     phase,
+		Result:    result,
+		Cancelled: cancelled,
+	})
 }
 
 // emitSubAgentNamed surfaces the ONE rename a generated delegation name produces (ADR 0068). It is
@@ -862,12 +882,15 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 // pool emits: a delegation that runs alone starts the instant it is reached and finishes with its
 // result, exactly as a pooled sibling does.
 func (a *Agent) executeDelegate(ctx context.Context, turn int, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
-	a.emitSubAgentPhase(turn, call, domain.SubAgentStarted, domain.ToolResult{})
+	a.emitSubAgentPhase(turn, call, domain.SubAgentStarted, domain.ToolResult{}, false)
 	result, outcome := a.runSubAgent(ctx, call)
 	if outcome == dispatchCancelled {
+		// The cancelled delegation is rolled back with the parent Turn and never becomes a result,
+		// but its bracket still closes: an unclosed one is a delegation no Driver can see end.
+		a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, domain.ToolResult{}, true)
 		return result, dispatchCancelled
 	}
-	a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, result)
+	a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, result, false)
 	a.recordExecuted(turn, call, verdict.auditDecision, verdict.auditReason, result)
 	return result, dispatchDone
 }

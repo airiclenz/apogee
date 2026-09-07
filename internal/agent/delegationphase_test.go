@@ -31,6 +31,47 @@ func subAgentPhases(events []domain.Event) []domain.SubAgentPhaseEvent {
 	return out
 }
 
+// assertCancelledBracket pins ADR 0075 decision 12 for every named delegation: the child that was
+// CANCELLED reports exactly one started and one finished phase, the finished one flagged Cancelled
+// and carrying no result, stamped with the same run identity its started carried. A bracket a
+// Driver cannot see close is a bracket left open forever in its log, which is the whole point of
+// emitting a phase for a delegation the parent Turn is about to roll back.
+func assertCancelledBracket(t *testing.T, events []domain.Event, callIDs ...string) {
+	t.Helper()
+	for _, id := range callIDs {
+		var started, finished []domain.SubAgentPhaseEvent
+		for _, pe := range subAgentPhases(events) {
+			if pe.CallID != id {
+				continue
+			}
+			if pe.Phase == domain.SubAgentStarted {
+				started = append(started, pe)
+				continue
+			}
+			finished = append(finished, pe)
+		}
+		if len(started) != 1 || len(finished) != 1 {
+			t.Errorf("call %s: %d started / %d finished phases, want exactly one of each", id, len(started), len(finished))
+			continue
+		}
+		if started[0].Cancelled {
+			t.Errorf("call %s: started phase reported Cancelled; only a finished phase ever is", id)
+		}
+		if finished[0].Phase != domain.SubAgentFinished {
+			t.Errorf("call %s: closing phase = %q, want %q", id, finished[0].Phase, domain.SubAgentFinished)
+		}
+		if !finished[0].Cancelled {
+			t.Errorf("call %s: finished phase of a cancelled delegation was not flagged Cancelled", id)
+		}
+		if finished[0].Result != (domain.ToolResult{}) {
+			t.Errorf("call %s: cancelled finished carried a result (%+v); a rolled-back delegation reports none", id, finished[0].Result)
+		}
+		if finished[0].Depth != started[0].Depth {
+			t.Errorf("call %s: finished Depth = %d, want %d (its own started phase's child identity)", id, finished[0].Depth, started[0].Depth)
+		}
+	}
+}
+
 // phaseTripwireSink is a recording sink that also RELEASES a waiting child when a named
 // delegation finishes. It is how these tests pin a completion ORDER instead of hoping for one:
 // the child that waits on done cannot finish before the watched sibling has.

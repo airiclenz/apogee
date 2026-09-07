@@ -314,7 +314,8 @@ func TestFanOut_SiblingSurvivesAFailedChild(t *testing.T) {
 
 // TestFanOut_CancelRollsTheWholeTurnBack pins decision 10 at N children: Esc reaches every
 // in-flight child, the pool waits for all of them, and the parent Turn rolls back with NO partial
-// delegation in history.
+// delegation in history — while every child's lifecycle bracket still CLOSES (ADR 0075 decision
+// 12), so a log reader sees the rollback rather than a delegation that never ends.
 func TestFanOut_CancelRollsTheWholeTurnBack(t *testing.T) {
 	sink := &recordingSink{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -350,6 +351,7 @@ func TestFanOut_CancelRollsTheWholeTurnBack(t *testing.T) {
 	if got := subAgentResults(sink.events); len(got) != 0 {
 		t.Errorf("cancelled fan-out surfaced %d tool results, want none", len(got))
 	}
+	assertCancelledBracket(t, sink.events, "c1", "c2")
 	for _, m := range a.conv.Messages() {
 		if m.Role == domain.RoleTool {
 			t.Fatalf("a tool message survived the rollback: %+v", m)

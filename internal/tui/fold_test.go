@@ -176,6 +176,17 @@ func foldCases() []foldCase {
 			wantProgressSave: true,
 		},
 		{
+			name: "a CANCELLED finished phase fires no progress save",
+			// The bracket closes for a log reader (ADR 0075 decision 12), but the delegation was
+			// rolled back with its parent Turn: no report reached the record, so there is nothing
+			// the save would write that the record does not already hold.
+			event: domain.SubAgentPhaseEvent{
+				EventBase: domain.EventBase{Depth: 1, CallID: "1"},
+				Phase:     domain.SubAgentFinished,
+				Cancelled: true,
+			},
+		},
+		{
 			name: "SubAgentNamedEvent moves nothing on a Model with no run to rename, but fires the save",
 			// The rename lands ON the sub_agent block its call id names (item 5), so on this fresh
 			// Model — which has no such block — it appends nothing, says nothing and counts nothing.

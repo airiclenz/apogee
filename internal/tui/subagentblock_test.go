@@ -629,6 +629,43 @@ func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
 	}
 }
 
+// A delegation the human CANCELLED now closes its lifecycle bracket on the stream (ADR 0075
+// decision 12), and that finished phase must change nothing on screen. The Turn was rolled back:
+// the child reported nothing, so the head keeps reading as unreported — no done ✓, no report folded
+// into its body — and it is closeInterruptedCalls that settles it, exactly as before the phase
+// existed. Recording the phase is what would break it: subAgentReported answers from the phase, so
+// a cancelled head would tick finished on the strength of a rollback.
+func TestSubAgentCancelledFinishedLeavesTheHeadInterrupted(t *testing.T) {
+	const report = "a report no cancelled delegation ever produced"
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey", 0)
+	subAgentStarted(tr, "s1", 1)
+	readCall(tr, "r1", "a.go", 1, 5, 1)
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Phase:     domain.SubAgentFinished,
+		Result:    domain.ToolResult{CallID: "s1", Content: report},
+		Cancelled: true,
+	})
+
+	head := tr.entries[0].painted()
+	if subAgentReported(head) {
+		t.Error("subAgentReported = true after a cancelled finished; the delegation was rolled back, not reported")
+	}
+	if subAgentFinished(head) {
+		t.Error("subAgentFinished = true after a cancelled finished; a rolled-back run wears no ✓")
+	}
+
+	painted := renderPlain(tr, 80)
+	if strings.Contains(painted, glyphDone) {
+		t.Errorf("the cancelled run wears the done ✓:\n%s", painted)
+	}
+	if strings.Contains(painted, report) {
+		t.Errorf("the cancelled finished enriched the head with a result:\n%s", painted)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // A failed delegation's outcome slot (surfaces-that-lie plan, item 12)
 // ----------------------------------------------------------------------------
