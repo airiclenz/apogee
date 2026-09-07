@@ -31,6 +31,9 @@ type script struct {
 	// malformedTools is a raw tool_calls array spliced in place of the well-formed entry, so a
 	// test can play a server that answers with a placeholder call the loop cannot dispatch.
 	malformedTools string
+	// salvageableTools plays a model that writes its call out as fenced JSON in the visible
+	// content instead of on the wire — nothing native, but something the salvage guard runs.
+	salvageableTools bool
 }
 
 // requestLog records the body of every chat request the fake Upstream received, so a test can
@@ -110,6 +113,10 @@ func batteryServer(t *testing.T, s script) (*httptest.Server, *requestLog) {
 func (s script) toolReply() string {
 	if s.malformedTools != "" {
 		return chatReply("null", `,"tool_calls":`+s.malformedTools)
+	}
+	if s.salvageableTools {
+		return chatReply(jsonString("Calling it now.\n```json\n"+
+			`{"name":"probe_echo","arguments":{"text":"apogee"}}`+"\n```"), "")
 	}
 	if !s.nativeTools {
 		return chatReply(`"I would call probe_echo with the text apogee."`, "")
@@ -247,6 +254,34 @@ func TestBatteryNoNativeTools(t *testing.T) {
 	}
 	if got := SuggestProfile(b).ToolCallFormat; got != domain.FormatMarkdownFenced {
 		t.Errorf("suggested tool-call-format = %q; want the text format for a model with no native calls", got)
+	}
+}
+
+// The writes-it-out model: nothing on the structured channel, but the visible content carries a
+// fenced JSON call for the canary tool. The capability is still not observed — the wire stayed
+// empty — yet the finding names what the tool-call salvage guard would run, because a report
+// that stopped at "no tool_calls entry" would describe a session the user never has. The
+// fingerprint is a feature match over outcomes, so the richer Detail must not move it.
+func TestBatteryNamesASalvageableToolCall(t *testing.T) {
+	t.Parallel()
+	salvaged := runBattery(t, script{salvageableTools: true, structured: true, logprobs: true})
+	prose := runBattery(t, script{structured: true, logprobs: true})
+
+	if salvaged.Observed(CapNativeToolCall) {
+		t.Errorf("a call written in the content is not native tool-call evidence: %+v", salvaged.Findings)
+	}
+
+	want := "the reply carried no tool_calls entry, but its content carried a JSON call for " +
+		"probe_echo — the tool-call salvage guard runs it"
+	if got := findingDetail(t, salvaged, CapNativeToolCall); got != want {
+		t.Errorf("detail = %q; want %q", got, want)
+	}
+	if got := findingDetail(t, prose, CapNativeToolCall); !strings.HasPrefix(got,
+		"the reply carried no tool_calls entry — ") {
+		t.Errorf("a plain-text reply keeps the old detail; got %q", got)
+	}
+	if first, second := BehaviorSignature(salvaged), BehaviorSignature(prose); first != second {
+		t.Errorf("the salvage detail moved the fingerprint: %q vs %q", first, second)
 	}
 }
 

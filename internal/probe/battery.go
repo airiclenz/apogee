@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -171,6 +173,24 @@ func malformedToolCallsDetail(calls []provider.ToolCall, content string) string 
 		len(calls)) + firstWords(content)
 }
 
+// salvageableCallName reports the tool the tool-call salvage guard would run from a reply that
+// carried no tool_calls entry, and whether it would fire at all. The probe asks the guard itself
+// rather than re-deciding what a written-out call looks like: a report that said "no tool_calls
+// entry" while the loop went on to dispatch the call anyway would describe a session the user
+// never has. The guard is pure and takes a *domain.Response, so the probe's raw reply is wrapped
+// as one; the canary tool is the only offered name, because an object naming anything else is not
+// a call this probe's own request could have produced.
+func salvageableCallName(content string) (string, bool) {
+	calls, _, fired := floor.SalvageToolCall(
+		domain.NewResponse(content, "", nil, "", nil),
+		[]string{echoTool.Name},
+	)
+	if !fired || len(calls) == 0 {
+		return "", false
+	}
+	return calls[0].Tool, true
+}
+
 // probeNativeToolCall offers exactly one tool and asks for it by name. A model that answers in
 // prose ("I would call probe_echo...") fails the probe, which is the point: the question is
 // whether the STRUCTURED channel carries the call, because that is what the loop reads.
@@ -192,6 +212,11 @@ func probeNativeToolCall(ctx context.Context, chat Chat) (Finding, provider.RawR
 	if len(calls) == 0 {
 		if len(resp.ToolCalls) > 0 {
 			f.Detail = malformedToolCallsDetail(resp.ToolCalls, resp.Content)
+			return f, resp
+		}
+		if name, ok := salvageableCallName(resp.Content); ok {
+			f.Detail = "the reply carried no tool_calls entry, but its content carried a JSON call for " +
+				name + " — the tool-call salvage guard runs it"
 			return f, resp
 		}
 		f.Detail = "the reply carried no tool_calls entry — " + firstWords(resp.Content)

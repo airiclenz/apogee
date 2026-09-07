@@ -106,7 +106,7 @@ NOTES (2026-09-07): ADR 0071's body counts ("the six that pass it", "Six catalog
 **Acceptance:** `grep -rniw 'six' README.md CONTEXT.md docs/manual internal/floor/doc.go | grep -viE 'targets?|archives|builds|spinner|snake|seconds|combinations|nested structures|catalogue rows|rows every model'; test $? -eq 1 && go build ./... && go test ./internal/floor/ -run DocMap`
 **Commit:** `docs(floor): admit the tool-call salvage guard (ADR 0071 amendment, CONTEXT, manual)`
 
-## 5. Probe reports a salvageable reply
+## 5. Probe reports a salvageable reply — ✅ DONE (2026-09-07)
 
 **What:** in `probeNativeToolCall` (`internal/probe/battery.go:177-203`), when the reply carried no `tool_calls` but `floor.SalvageToolCall` over its content (offered = the canary tool name) fires, the Finding's `Detail` becomes `the reply carried no tool_calls entry, but its content carried a JSON call for <name> — the tool-call salvage guard runs it`; otherwise `:197` stays. Detail-only: no new `Capability`, no `BatteryVersion` change (`battery.go:22-24`). Depends on item 2.
 **Regression guard.** `floor.SalvageToolCall` takes `*domain.Response`; the probe wraps its `provider.RawResponse` via `domain.NewResponse(resp.Content, "", nil, "", nil)`.
