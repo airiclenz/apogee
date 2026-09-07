@@ -9,6 +9,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // The Console family's shared floor (ADR 0059): the id argument three of the four tools take,
@@ -247,8 +248,7 @@ func capConsoleOutput(output string) string {
 	if len(output) <= maxSubprocessOutputBytes {
 		return output
 	}
-	var capped cappedBuffer
-	capped.limit = maxSubprocessOutputBytes
+	capped := subprocess.CappedBuffer{Limit: maxSubprocessOutputBytes}
 	_, _ = capped.Write([]byte(output))
 	return capped.String()
 }

@@ -230,18 +230,17 @@
 // and hands back the tail nobody read. All four ship DEFAULT-OFF (ADR 0057).
 //
 // The subprocess plumbing. exec_common.go is the single runSubprocess every execution tool
-// above calls — the environment scrub, the denial labels, this package's own spec and result
-// shapes, and the capped output buffer the Console family truncates with — plus
-// RunHookSubprocess, the one exported door onto that funnel, so a HOOK that must spawn (a lab
-// hook registered through internal/mechanisms) gets the same exec fence on its argv[0], scrub,
-// teardown, cap and clamp instead of an exec.Command of its own. Neither the §2.4 teardown
-// contract nor the spawn itself is this package's to own any more: planTreeKill, the
-// ProcessTeardown seam, the POSIX process group and the Windows Job Object live in
-// internal/platform (teardown.go and its two per-OS halves), and the run — the ceilings, the
-// default timeout, the confinement handoff, the kill-on-denial watch and the raw Windows command
-// line — lives in internal/subprocess, which internal/gitexec spawns through too. What stays
-// here is runSubprocess itself: the seam that converts this package's spec into the core's and
-// the core's result back, so every tool and test goes on naming the fields it always named.
+// above calls — the environment scrub, the denial labels, and this package's own spec and
+// result shapes — plus RunHookSubprocess, the one exported door onto that funnel, so a HOOK
+// that must spawn (a lab hook registered through internal/mechanisms) gets the same exec fence
+// on its argv[0], scrub, teardown, cap and clamp instead of an exec.Command of its own. Neither
+// the §2.4 teardown contract nor the spawn itself is this package's to own any more:
+// planTreeKill, the ProcessTeardown seam, the POSIX process group and the Windows Job Object
+// live in internal/platform (teardown.go and its two per-OS halves), and the run — the ceilings,
+// the default timeout, the confinement handoff, the kill-on-denial watch and the raw Windows
+// command line — lives in internal/subprocess, which internal/gitexec spawns through too. What
+// stays here is runSubprocess itself: the seam that converts this package's spec into the core's
+// and the core's result back, so every tool and test goes on naming the fields it always named.
 //
 // Network. network.go is the funnel itself — networkTool.do, the single path from a tool to
 // the network — carrying the URLGuard pre-flight and dial-time checks, the one per-call

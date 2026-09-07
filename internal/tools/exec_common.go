@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -415,41 +414,6 @@ func diagnosticsExcerpt(diagnostics string) string {
 		trimmed = "…" + strings.ToValidUTF8(trimmed[len(trimmed)-maxSubprocessErrorExcerptBytes:], "")
 	}
 	return ": " + trimmed
-}
-
-// cappedBuffer is an io.Writer that accumulates up to limit bytes and silently discards the
-// rest, so a runaway subprocess cannot exhaust memory through its output. The discarded tail
-// is summarised by the caller via Truncated.
-type cappedBuffer struct {
-	buf       bytes.Buffer
-	limit     int
-	discarded int
-}
-
-// Write accepts bytes up to the buffer's limit, counting (but not storing) any overflow.
-func (b *cappedBuffer) Write(p []byte) (int, error) {
-	if remaining := b.limit - b.buf.Len(); remaining > 0 {
-		if len(p) <= remaining {
-			b.buf.Write(p)
-		} else {
-			b.buf.Write(p[:remaining])
-			b.discarded += len(p) - remaining
-		}
-	} else {
-		b.discarded += len(p)
-	}
-	// Always report the full length written so the process is never blocked on a short write.
-	return len(p), nil
-}
-
-// String returns the captured output, with a truncation marker appended when output was
-// discarded so the model knows the tail is missing.
-func (b *cappedBuffer) String() string {
-	s := b.buf.String()
-	if b.discarded > 0 {
-		s += fmt.Sprintf("\n… [output truncated: %d more bytes]", b.discarded)
-	}
-	return s
 }
 
 // shellHost is the platform shell/path facility the terminal tool wraps a command line with
