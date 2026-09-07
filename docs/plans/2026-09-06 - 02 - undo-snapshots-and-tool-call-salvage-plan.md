@@ -157,7 +157,19 @@ NOTES (2026-09-07): consequential edit — internal/platform/teardown.go: made n
 **Acceptance:** `go build ./... && go test ./internal/subprocess/ ./internal/tools/`
 **Commit:** `refactor(subprocess): one subprocess core shared by the tools and the git runner`
 
-## 8. Extract the hardened git runner into `internal/gitexec`
+## 8. Extract the hardened git runner into `internal/gitexec` — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): the item's `Run` gained a sibling `Query` (Run minus the resolution) so `tools.RunGitQuery` can keep resolving through its own `lookGit` var — the regression guard's requirement that `withFakeGit` keep working — while `Run`/`RunTo` resolve through the exported `gitexec.LookPath` seam.
+
+NOTES (2026-09-07): `gitexec` carries its own `probeTimeout` (15s, the old `gitTimeout` value) for the command-config probe; `tools`' `gitTimeout`/`gitDiffTimeout` are untouched, since they bound the git TOOLS' calls and stay tool-side.
+
+NOTES (2026-09-07): moved hardening tests = `TestRunGit_AppliesHardeningToEveryInvocation` and `TestRunGit_MemoisesTheFilterDriverProbePerRoot` (now `TestCapture_*` in `internal/gitexec`). The three `TestRunGitQuery_*` stayed in `internal/tools`: `tools.RunGitQuery` is still the exported engine entry with its own lookup seam, so they are wrapper coverage rather than runner coverage, and `gitexec` got its own `Run` equivalents.
+
+NOTES (2026-09-07): consequential edit — internal/tools/doc.go: made necessary by the funnel moving out of git.go, whose package-map role line said it held the hardened funnel.
+
+NOTES (2026-09-07): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the move, the §2.4 line cited `gitHardeningOptions`, a symbol this item removed from internal/tools.
+
+NOTES (2026-09-07): fix-retry — deleted the dead `gitUnavailableMessage` const from internal/tools/git.go (was left behind unreferenced after the move); `gitexec.UnavailableMessage` is now the single copy, and `git_test.go:209` pins the sentence through the wrapper's behaviour rather than the const.
 
 **What:** Recast at the regression check (2026-09-06). Move the program-resolution and hardened-run core of `internal/tools/git.go` (`:66-410`: `lookGit`, `gitProgram`, `resolveGit`, `runGit`, `gitRunSpec`, `safeEnvKeys`/`safeGitEnv`, the hardening options/env/args, the repo-local command-config refusal, `RunGitQuery`) into `internal/gitexec`, built on `internal/subprocess`; `gitexec` imports `security`, `domain`, `platform`, `subprocess` and stdlib. Add `gitexec.Run(ctx, dir string, env []string, timeout time.Duration, args ...string) (string, error)` — `RunGitQuery` with `env` appended to the hardening env, nothing removed — and `gitexec.RunTo(ctx, dir, env, timeout, w io.Writer, args...)`, its uncapped streaming sibling on item 7's streaming variant. `internal/tools/git.go` keeps `RunGitQuery` and every tool-facing symbol as thin wrappers so `internal/agent/treesnapshot.go:116` and every existing test are untouched. Depends on item 7.
 **Regression guard.** `Run` passes `env` to `probeCommandConfig` (`git.go:343`) and the memo key (`commandConfigProbes`, `:318-335`, today `gitPath+root`) includes the effective `GIT_DIR` (or the env). `gitexec` exports the look-up seam (`gitexec.LookPath` var, or `Resolve(ctx, root, look)`) and `tools.resolveGit` passes `tools.lookGit` through, so `withFakeGit` (`git_test.go:23-32`) keeps working. `Run` = `RunGitQuery` (`git.go:254-284`; it screens nothing but `len(args)==0`) plus `env` after `gitHardeningEnv` (`:227-228`). `gitexec` carries `gitUnavailableMessage` (`git.go:1236`, pinned by `git_test.go:209`) verbatim — tools re-uses that const — and reads the box via `domain.ConfinementFromContext` (`confinementBox`, `path_safety.go:40`, stays in tools).

@@ -407,7 +407,7 @@ so in the ONE cell where a subprocess call would be **Confined** — Auto · `co
 and `executeRun` installs the Confinement handle, so that child confines exactly as a `git_status`
 call's would. Nothing about classification, gating or the lower rungs changes: on every other rung
 the child's bound is its **hardened argv** — apogee's own fixed `git add -A -- :(literal)<path>`,
-with the repository's command-valued config refused (§ `gitHardeningOptions`, `runGit`) — which is
+with the repository's command-valued config refused (`internal/gitexec`) — which is
 the blast radius `classWorkspaceWrite` already declares, so D5's "no Confine in the lower modes"
 stands. The runtime demote (D4) stays **Confine-only**: an unconfinable child here is the staging's
 own best-effort skip (a `(git staging skipped: …)` note), never a demote, because the file operation
