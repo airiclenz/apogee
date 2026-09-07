@@ -19,20 +19,23 @@ import (
 // The git tools (P3.9) — branch / commit / diff-range / status / log over the system git
 // ----------------------------------------------------------------------------
 //
-// Five one-shot tools shell out to the system `git` (§3a — a convenience dep,
-// detected on PATH and degrading gracefully when absent, never a hard
-// dependency). They are SubprocessTools (domain.SubprocessTool): the dispatch
-// disposition runs all of them under Confiner.Confine in Auto and gates them when
+// Five one-shot tools shell out to the system `git` (§3a — a convenience dep, detected on
+// PATH and degrading gracefully when absent, never a hard dependency). All five are
+// SubprocessTools (domain.SubprocessTool): the dispatch disposition runs the write pair —
+// git_branch and git_commit — under Confiner.Confine in Auto and gates them when
 // fs-confinement is unavailable ("confine if you can, gate if you can't").
-// git_diff_range, git_status and git_log also declare ReadOnly(), but the unfakeable
-// subprocess marker outranks that self-declaration
-// (confinement-execution-contract §4, amended 2026-07-26) — and since 2026-08-02
-// the Plan tool menu keys on the same class the ladder does, so none of them is offered
-// nor run in Plan. All of them are
-// stateless across Turns (ADR 0008 — a fresh git
-// process per call), path-scope their inputs to the workspace root, and run with
-// a scrubbed, allowlisted environment so a stray inherited variable cannot change
-// git's behaviour.
+//
+// git_diff_range, git_status and git_log also declare ReadOnly(), and since 2026-09-06 they
+// carry the unexported readOnlySubprocess marker (readonly_subprocess.go) — that marker is
+// what classifies them: RO-subproc, a class the ladder gives the READ-ONLY row in EVERY mode
+// (confinement-execution-contract §4, amended 2026-09-06). So Plan offers and runs the read
+// trio, and Auto runs it unconfined like read_file. Their Subprocess() declaration is
+// unchanged and still drives the execution mechanics — the scoped environment, the argv
+// fence, the §2.4 process-group teardown.
+//
+// All five are stateless across Turns (ADR 0008 — a fresh git process per call), path-scope
+// their inputs to the workspace root, and run with a scrubbed, allowlisted environment so a
+// stray inherited variable cannot change git's behaviour.
 //
 // The environment is only half of that: git also runs programs the REPOSITORY names — hooks,
 // filesystem monitors, filter, diff, merge and credential drivers, editors, pagers — which on an
@@ -520,15 +523,21 @@ func NewGitDiffRange(root string) *GitDiffRange {
 
 // ReadOnly reports that git_diff_range performs no writes (a diff is harmless
 // inspection) — an honest statement about the tool, read by self-regulation's
-// read/write tally. It is NOT what classifies the call, and (since 2026-08-02) NOT
-// what the Plan menu filters on: the Subprocess marker below outranks it in both.
+// read/write tally. On its own it does not classify the call; what does is the
+// readOnlySubprocess marker below, which the ladder reads as the read-only row in
+// every mode (confinement-execution-contract §4, amended 2026-09-06).
 func (t *GitDiffRange) ReadOnly() bool { return true }
 
 // Subprocess reports that git_diff_range launches an OS subprocess (the system
-// git). The unfakeable marker OUTRANKS the read-only self-declaration in the
-// per-call classification (confinement-execution-contract §4, amended 2026-07-26),
-// so the call takes the subprocess row: confined in Auto, gated below it.
+// git). The marker still drives the execution MECHANICS — the scoped environment,
+// the argv fence, the §2.4 process-group teardown — but no longer the class: the
+// readOnlySubprocess marker below classifies the call RO-subproc.
 func (t *GitDiffRange) Subprocess() bool { return true }
+
+// readOnlySubprocess mints the RO-subproc marker for git_diff_range: every invocation
+// goes through runGit, carries gitDiffHardeningArgs, validates both refs with validRef
+// plus looksLikeOption, and writes nothing (readonly_subprocess.go).
+func (t *GitDiffRange) readOnlySubprocess() {}
 
 // Execute runs the three-dot diff between the validated refs through the system
 // git. A missing git, an invalid/missing ref, a path escape, or a git failure are
@@ -644,15 +653,19 @@ func NewGitStatus(root string) *GitStatus { return &GitStatus{toolSpec: gitStatu
 
 // ReadOnly reports that git_status performs no writes (reading the index and working tree
 // changes nothing) — an honest statement about the tool, read by self-regulation's read/write
-// tally. As with git_diff_range it is NOT what classifies the call: the Subprocess marker
-// below outranks it in both the disposition and the Plan menu.
+// tally. As with git_diff_range it does not classify the call on its own: the
+// readOnlySubprocess marker below does, and the ladder reads that as the read-only row in
+// every mode (confinement-execution-contract §4, amended 2026-09-06).
 func (t *GitStatus) ReadOnly() bool { return true }
 
-// Subprocess reports that git_status launches an OS subprocess (the system git) — the
-// unfakeable marker that OUTRANKS the read-only declaration above
-// (confinement-execution-contract §4, amended 2026-07-26), so the call takes the subprocess
-// row: confined in Auto, gated below it.
+// Subprocess reports that git_status launches an OS subprocess (the system git). The marker
+// still drives the execution mechanics — the scoped environment, the argv fence, the §2.4
+// teardown — while the readOnlySubprocess marker below classifies the call RO-subproc.
 func (t *GitStatus) Subprocess() bool { return true }
+
+// readOnlySubprocess mints the RO-subproc marker for git_status: its one invocation goes
+// through runGit, takes no ref from the model, and writes nothing (readonly_subprocess.go).
+func (t *GitStatus) readOnlySubprocess() {}
 
 // Execute runs `git status` in porcelain v2 form and renders it for the model. A missing git
 // or a git failure (not a repository, most often) is surfaced as a result; only ctx
@@ -899,14 +912,20 @@ func NewGitLog(root string) *GitLog { return &GitLog{toolSpec: gitLogSpec, root:
 
 // ReadOnly reports that git_log performs no writes (reading history changes nothing) — an
 // honest statement about the tool, read by self-regulation's read/write tally. As with
-// git_diff_range and git_status it is NOT what classifies the call: the Subprocess marker
-// below outranks it in both the disposition and the Plan menu.
+// git_diff_range and git_status it does not classify the call on its own: the
+// readOnlySubprocess marker below does, and the ladder reads that as the read-only row in
+// every mode (confinement-execution-contract §4, amended 2026-09-06).
 func (t *GitLog) ReadOnly() bool { return true }
 
-// Subprocess reports that git_log launches an OS subprocess (the system git) — the unfakeable
-// marker that OUTRANKS the read-only declaration above (confinement-execution-contract §4,
-// amended 2026-07-26), so the call takes the subprocess row: confined in Auto, gated below it.
+// Subprocess reports that git_log launches an OS subprocess (the system git). The marker still
+// drives the execution mechanics — the scoped environment, the argv fence, the §2.4 teardown —
+// while the readOnlySubprocess marker below classifies the call RO-subproc.
 func (t *GitLog) Subprocess() bool { return true }
+
+// readOnlySubprocess mints the RO-subproc marker for git_log: its one invocation goes through
+// runGit, carries gitDiffHardeningArgs, validates its ref with validRef plus looksLikeOption,
+// and writes nothing (readonly_subprocess.go).
+func (t *GitLog) readOnlySubprocess() {}
 
 // Execute runs `git log` over the validated ref and renders one line per commit. A missing
 // git, an invalid ref, or a git failure (an unknown ref, a repository with no commits yet, or
@@ -984,10 +1003,13 @@ var (
 	_ domain.Tool           = (*GitDiffRange)(nil)
 	_ domain.ReadOnlyTool   = (*GitDiffRange)(nil)
 	_ domain.SubprocessTool = (*GitDiffRange)(nil)
+	_ readOnlySubprocess    = (*GitDiffRange)(nil)
 	_ domain.Tool           = (*GitStatus)(nil)
 	_ domain.ReadOnlyTool   = (*GitStatus)(nil)
 	_ domain.SubprocessTool = (*GitStatus)(nil)
+	_ readOnlySubprocess    = (*GitStatus)(nil)
 	_ domain.Tool           = (*GitLog)(nil)
 	_ domain.ReadOnlyTool   = (*GitLog)(nil)
 	_ domain.SubprocessTool = (*GitLog)(nil)
+	_ readOnlySubprocess    = (*GitLog)(nil)
 )

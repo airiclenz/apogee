@@ -170,10 +170,11 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // git_branch, git_commit, git_diff_range, joined 2026-08-10 by git_status and git_log)
 // follow; they are SubprocessTools the
 // disposition confines in Auto (or gates when confinement is unavailable), not
-// workspace-scoped writers (git_diff_range, git_status and git_log declare ReadOnly(), but the
-// subprocess marker outranks the declaration — they too are confined or gated, and since
-// 2026-08-02 Plan neither offers nor runs them, because the menu keys on the same
-// class the ladder does). The
+// workspace-scoped writers — except the read trio: git_diff_range, git_status and git_log
+// declare ReadOnly() and carry the readOnlySubprocess marker (readonly_subprocess.go), which
+// classifies them RO-subproc, so they take the read-only row in every mode — offered and run in
+// Plan, unconfined in Auto — while their subprocess marker still drives the execution
+// mechanics. The
 // diagnostics tool (P3.10) closes the file/exec set: a read-only SubprocessTool that checks
 // Go in-process (plus optional go vet) and degrades gracefully for other languages, joined
 // 2026-08-10 by run_tests — the same verification question asked of the whole project rather

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,6 +119,9 @@ func TestGit_Markers(t *testing.T) {
 	if IsWorkspaceScopedWriter(br) {
 		t.Error("git_branch must NOT carry the workspaceScopedWriter marker (it is OS-confined)")
 	}
+	if IsReadOnlySubprocess(br) {
+		t.Error("git_branch must NOT carry the readOnlySubprocess marker (it writes the repository)")
+	}
 
 	co := NewGitCommit(root)
 	if co.ReadOnly() {
@@ -126,11 +130,16 @@ func TestGit_Markers(t *testing.T) {
 	if !domain.IsSubprocessTool(co) {
 		t.Error("git_commit must be a SubprocessTool")
 	}
+	if IsReadOnlySubprocess(co) {
+		t.Error("git_commit must NOT carry the readOnlySubprocess marker (it writes the repository)")
+	}
 
-	// git_diff_range carries BOTH: the read-only declaration (what keeps it in Plan mode's
-	// menu) and the subprocess marker (what classifies the call). The marker outranks the
-	// declaration — confinement-execution-contract §4, amended 2026-07-26 — so dropping
-	// either one moves the call's class; the agent-side pin is TestClassifyTool.
+	// git_diff_range carries THREE markers: the read-only declaration (self-regulation's tally),
+	// the subprocess marker (the execution mechanics — scoped env, argv fence, teardown), and
+	// since 2026-09-06 the unexported readOnlySubprocess marker, which is what CLASSIFIES the
+	// call: RO-subproc, the class the ladder gives the read-only row in every mode
+	// (confinement-execution-contract §4, amended 2026-09-06). Dropping any of the three moves
+	// the call's class or its mechanics; the agent-side pin is TestClassifyTool.
 	dr := NewGitDiffRange(root)
 	if !domain.IsReadOnly(dr) {
 		t.Error("git_diff_range must be ReadOnly (a diff is harmless inspection)")
@@ -138,9 +147,15 @@ func TestGit_Markers(t *testing.T) {
 	if !domain.IsSubprocessTool(dr) {
 		t.Error("git_diff_range must still be a SubprocessTool (it launches the system git)")
 	}
+	if !IsReadOnlySubprocess(dr) {
+		t.Error("git_diff_range must carry the readOnlySubprocess marker (it is a hardened git read)")
+	}
+	if IsWorkspaceScopedWriter(dr) {
+		t.Error("git_diff_range must NOT carry the workspaceScopedWriter marker (it writes nothing)")
+	}
 
-	// git_status carries the same pair as git_diff_range: an honest read-only declaration and
-	// the subprocess marker that outranks it.
+	// git_status carries the same three as git_diff_range: an honest read-only declaration, the
+	// subprocess marker for the mechanics, and the readOnlySubprocess marker that classifies it.
 	st := NewGitStatus(root)
 	if st.Name() != "git_status" {
 		t.Errorf("status Name() = %q", st.Name())
@@ -152,11 +167,14 @@ func TestGit_Markers(t *testing.T) {
 		t.Error("git_status must be a SubprocessTool (it launches the system git)")
 	}
 	if IsWorkspaceScopedWriter(st) {
-		t.Error("git_status must NOT carry the workspaceScopedWriter marker (it is OS-confined)")
+		t.Error("git_status must NOT carry the workspaceScopedWriter marker (it writes nothing)")
+	}
+	if !IsReadOnlySubprocess(st) {
+		t.Error("git_status must carry the readOnlySubprocess marker (it is a hardened git read)")
 	}
 
-	// git_log carries the same pair for the same reason: reading history writes nothing, but
-	// the subprocess marker is what classifies the call.
+	// git_log carries the same three for the same reason: reading history writes nothing, the
+	// subprocess marker drives the mechanics, and readOnlySubprocess classifies the call.
 	lg := NewGitLog(root)
 	if lg.Name() != "git_log" {
 		t.Errorf("log Name() = %q", lg.Name())
@@ -168,7 +186,17 @@ func TestGit_Markers(t *testing.T) {
 		t.Error("git_log must be a SubprocessTool (it launches the system git)")
 	}
 	if IsWorkspaceScopedWriter(lg) {
-		t.Error("git_log must NOT carry the workspaceScopedWriter marker (it is OS-confined)")
+		t.Error("git_log must NOT carry the workspaceScopedWriter marker (it writes nothing)")
+	}
+	if !IsReadOnlySubprocess(lg) {
+		t.Error("git_log must carry the readOnlySubprocess marker (it is a hardened git read)")
+	}
+
+	// diagnostics is the deliberate NON-member: it is a read-only SubprocessTool too, but the
+	// go vet half shells out to a program the marker's minting conditions say nothing about, so
+	// it keeps the bare subprocess class (the plan's out-of-scope line).
+	if IsReadOnlySubprocess(NewDiagnostics(root)) {
+		t.Error("diagnostics must NOT carry the readOnlySubprocess marker (it is not a hardened git read)")
 	}
 }
 
@@ -1016,6 +1044,182 @@ func TestGitStatus_PassesIgnoreSubmodulesDirty(t *testing.T) {
 	if gotArgv != wantArgv {
 		t.Errorf("status argv = %q, want %q (record: %q)", gotArgv, wantArgv, string(logged))
 	}
+}
+
+// TestGitReadTrio_ArgvCarriesTheHardening pins the argv of ALL THREE reads the readOnlySubprocess
+// marker is minted for. The marker's own doc names the conditions a tool must keep to carry it —
+// runGit, gitDiffHardeningArgs on every diff-producing path, the ref guards — and the first two of
+// those are visible in the command line, so this is where a refactor that quietly drops one is
+// caught. Without it the marker could go on taking the read-only row for a git that no longer
+// refuses the repository's own textconv and ext-diff drivers.
+//
+// It reads the real command line through a fake git that records it (the shape
+// TestGitCommit_PassesNoGpgSign uses), so it asserts what git was LAUNCHED with rather than what
+// the rendered result happens to look like.
+func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
+	posixScriptHost(t)
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		exec   func(root string) (domain.ToolResult, error)
+		verb   string
+		assert func(t *testing.T, argv []string)
+	}{
+		{
+			// git_status takes no ref and produces no diff, so its whole line is pinned
+			// literally — the same list TestGitStatus_PassesIgnoreSubmodulesDirty asserts.
+			name: "git_status",
+			verb: "status",
+			exec: func(root string) (domain.ToolResult, error) {
+				return NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+			},
+			assert: func(t *testing.T, argv []string) {
+				t.Helper()
+				const want = "status --porcelain=v2 --branch --ignore-submodules=dirty -z"
+				if got := strings.Join(argv, " "); got != want {
+					t.Errorf("status argv = %q, want %q", got, want)
+				}
+			},
+		},
+		{
+			// git_log's line ends in "--": `git log <name>` on a tracked PATH is a pathspec log
+			// that answers a different question with exit 0, so the terminator is what turns a
+			// typo'd ref into a loud failure rather than a plausible wrong history.
+			name: "git_log",
+			verb: "log",
+			exec: func(root string) (domain.ToolResult, error) {
+				return NewGitLog(root).Execute(context.Background(), logCall("c1", `{"ref":"HEAD"}`))
+			},
+			assert: func(t *testing.T, argv []string) {
+				t.Helper()
+				if !hasHardeningPair(argv) {
+					t.Errorf("log argv = %q, want it to carry --no-textconv --no-ext-diff", argv)
+				}
+				if argv[len(argv)-1] != "--" {
+					t.Errorf("log argv = %q, want it to end with the \"--\" ref terminator", argv)
+				}
+			},
+		},
+		{
+			// With no paths there is nothing to terminate, so git_diff_range's line ends at the
+			// three-dot range itself — a "--" asserted here would be asserting a bug.
+			name: "git_diff_range without paths",
+			verb: "diff",
+			exec: func(root string) (domain.ToolResult, error) {
+				return NewGitDiffRange(root).Execute(context.Background(), diffCall("c1", `{"base":"main","head":"HEAD"}`))
+			},
+			assert: func(t *testing.T, argv []string) {
+				t.Helper()
+				if !hasHardeningPair(argv) {
+					t.Errorf("diff argv = %q, want it to carry --no-textconv --no-ext-diff", argv)
+				}
+				if got := argv[len(argv)-1]; got != "main...HEAD" {
+					t.Errorf("diff argv ends with %q, want the range %q", got, "main...HEAD")
+				}
+				for _, arg := range argv {
+					if arg == "--" {
+						t.Errorf("diff argv = %q, want no \"--\" when no paths are passed", argv)
+					}
+				}
+			},
+		},
+		{
+			// With paths the "--" appears exactly once and IMMEDIATELY before them, so a path
+			// that looks like an option can never be read as one.
+			name: "git_diff_range with paths",
+			verb: "diff",
+			exec: func(root string) (domain.ToolResult, error) {
+				return NewGitDiffRange(root).Execute(context.Background(), diffCall("c1", `{"base":"main","head":"HEAD","paths":["a.txt"]}`))
+			},
+			assert: func(t *testing.T, argv []string) {
+				t.Helper()
+				if !hasHardeningPair(argv) {
+					t.Errorf("diff argv = %q, want it to carry --no-textconv --no-ext-diff", argv)
+				}
+				sep := -1
+				for i, arg := range argv {
+					if arg == "--" {
+						if sep >= 0 {
+							t.Fatalf("diff argv = %q, want exactly one \"--\"", argv)
+						}
+						sep = i
+					}
+				}
+				if sep < 0 {
+					t.Fatalf("diff argv = %q, want a \"--\" before the resolved paths", argv)
+				}
+				if sep != len(argv)-2 {
+					t.Errorf("diff argv = %q, want \"--\" immediately before the one resolved path", argv)
+				}
+				if !strings.HasSuffix(argv[len(argv)-1], "a.txt") {
+					t.Errorf("diff argv last element = %q, want the resolved a.txt", argv[len(argv)-1])
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Not parallel: withFakeGit swaps the package-level lookGit var.
+			argv := recordGitArgv(t, tc.verb, func() (domain.ToolResult, error) { return tc.exec(root) })
+			tc.assert(t, argv)
+		})
+	}
+}
+
+// hasHardeningPair reports whether argv carries gitDiffHardeningArgs as adjacent elements — the
+// two drivers (--no-textconv, --no-ext-diff) a repository could otherwise make git execute on a
+// read path.
+func hasHardeningPair(argv []string) bool {
+	for i := 0; i+len(gitDiffHardeningArgs) <= len(argv); i++ {
+		if slices.Equal(argv[i:i+len(gitDiffHardeningArgs)], gitDiffHardeningArgs) {
+			return true
+		}
+	}
+	return false
+}
+
+// recordGitArgv runs one tool call against a fake git that appends every invocation it receives
+// to a record file, and returns the argv from the first line carrying verb — the repo-local
+// command-config probe's own `config … --get-regexp` invocations are recorded first, so the
+// subcommand is what identifies the line the tool itself chose.
+func recordGitArgv(t *testing.T, verb string, run func() (domain.ToolResult, error)) []string {
+	t.Helper()
+
+	dir := t.TempDir()
+	record := filepath.Join(dir, "record")
+	fakeGit := filepath.Join(dir, "fake-git")
+	script := "#!/bin/sh\necho \"$*\" >> \"" + record + "\"\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	withFakeGit(t, true, fakeGit)
+
+	res, err := run()
+	if err != nil {
+		t.Fatalf("%s err = %v", verb, err)
+	}
+	if res.IsError {
+		t.Fatalf("%s = %q, want the fake git's success", verb, res.Content)
+	}
+
+	logged, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	for _, line := range strings.Split(string(logged), "\n") {
+		fields := strings.Fields(line)
+		for i, field := range fields {
+			if field == verb {
+				return fields[i:]
+			}
+		}
+	}
+	t.Fatalf("no %s invocation in the record: %q", verb, string(logged))
+	return nil
 }
 
 func TestGitStatus_DetachedHead(t *testing.T) {

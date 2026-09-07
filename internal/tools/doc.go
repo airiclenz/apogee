@@ -44,8 +44,9 @@
 // tools (git_branch, git_commit, git_diff_range) — SubprocessTools that shell out to a
 // detected program (the system shell/interpreter, the system git) and degrade gracefully
 // when it is absent (§3a). The disposition confines the write-capable ones in Auto (or
-// gates them when fs-confinement is unavailable); git_diff_range is read-only and runs
-// freely.
+// gates them when fs-confinement is unavailable); git_diff_range carries the
+// readOnlySubprocess marker (readonly_subprocess.go), so it is classified RO-subproc and runs
+// freely in every mode, Plan included.
 //
 // Phase 3 (P3.10) adds the diagnostics tool — a read-only SubprocessTool that checks Go
 // in-process (go/parser for syntax, always available) plus an optional go vet, and
@@ -87,8 +88,9 @@
 // because git's default of none makes git status run `git status --porcelain=2` inside every
 // submodule, whose own config (.git/modules/<name>/config) repoLocalCommandConfig never scans —
 // dirty drops that child spawn while still reporting a submodule whose recorded commit moved.
-// Like git_diff_range it declares
-// ReadOnly() and still carries the subprocess marker, which is what classifies the call.
+// Like git_diff_range it declares ReadOnly() and still carries the subprocess marker for the
+// execution mechanics, while the readOnlySubprocess marker is what classifies the call:
+// RO-subproc, which the ladder gives the read-only row in every mode.
 //
 // git_log (2026-08-10) is the family's fifth member and the history half of git_status's
 // working-tree half: one line per commit — short hash, iso-strict date, subject — for an
@@ -98,7 +100,8 @@
 // leading-"-" rejection), and its argv ends in "--" for the reason buildBranchArgs does:
 // `git log <name>` on a name that is a tracked PATH rather than a ref is a pathspec log, which
 // answers a different question with exit 0 — a wrong history reported as success. Like
-// git_diff_range and git_status it declares ReadOnly() over the outranking subprocess marker.
+// git_diff_range and git_status it declares ReadOnly() and carries the readOnlySubprocess marker
+// that classifies it RO-subproc, the class the ladder runs on the read-only row in every mode.
 //
 // copy_file and move_file (2026-08-10) are the P3.7 family's move-bytes-that-already-exist half:
 // two write tools taking a source and a destination instead of a path and a payload. Both refuse
@@ -307,7 +310,11 @@
 // bare sentence to the byte.
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
-// argument a given writer lands on. regions.go is the one Edit-region builder the four writing
+// argument a given writer lands on. readonly_subprocess.go is its sibling on the READ side: the
+// unexported readOnlySubprocess marker and IsReadOnlySubprocess, which say that a subprocess call
+// is one of apogee's own hardened read-side git reads — and with it the minting conditions a tool
+// must keep to carry it (contract §4, amended 2026-09-06).
+// regions.go is the one Edit-region builder the four writing
 // tools share — editRegions, which cuts diff.go's line-diff operations into the changed regions
 // with their line numbers and up to three context lines each side, tiled so neighbouring regions
 // never claim the same line twice (ADR 0052) — kept here rather than in any one tool's file

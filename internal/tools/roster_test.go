@@ -290,6 +290,35 @@ func TestDefaultToolsLiftTheConsoleFamily(t *testing.T) {
 	}
 }
 
+// TestReadOnlySubprocessNamesTheGitReadTrio walks the WHOLE shipped roster — every host hook set
+// and the default-off family lifted, so no tool can hide from it — and pins the marker's
+// membership by name. It is the guard against silent drift in both directions: a new subprocess
+// tool that quietly mints the marker without meeting readonly_subprocess.go's conditions, and a
+// refactor that drops it from one of the three git reads and puts that read back behind the
+// subprocess row in Plan.
+func TestReadOnlySubprocessNamesTheGitReadTrio(t *testing.T) {
+	t.Parallel()
+
+	want := map[string]bool{"git_status": true, "git_log": true, "git_diff_range": true}
+
+	lifted := HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}, Enabled: consoleFamilyNames}
+	seen := make(map[string]bool, len(want))
+	for _, tool := range DefaultToolsWithHost(t.TempDir(), lifted) {
+		name := tool.Name()
+		if got := IsReadOnlySubprocess(tool); got != want[name] {
+			t.Errorf("IsReadOnlySubprocess(%q) = %v, want %v", name, got, want[name])
+		}
+		if want[name] {
+			seen[name] = true
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("%q is missing from the roster the marker is pinned over", name)
+		}
+	}
+}
+
 // rosterProbes returns the three-tool probe set the ladder tests walk: a plain tool, one that
 // declares itself default-off, and one that implements DefaultOffTool returning false (the
 // degraded-build carve-out, which is on the menu like a tool that never implemented it).
