@@ -76,8 +76,10 @@ func (c *fakeConfiner) lastConfinedBox() domain.ConfinementBox {
 type subprocTool struct {
 	name string
 	// readOnly is the SELF-DECLARATION a tool makes about itself. A subprocess launcher may
-	// honestly declare it (git_diff_range and diagnostics do — a diff and a vet write
-	// nothing), which is exactly the case classifyTool must not let outrank the marker.
+	// honestly declare it (diagnostics does — a vet writes nothing), which is exactly the case
+	// classifyTool must not let outrank the marker. Apogee's own hardened git reads are the
+	// narrow exception, and they earn it with the unexported readOnlySubprocess marker rather
+	// than with the declaration this field carries.
 	readOnly bool
 
 	mu         sync.Mutex
@@ -195,10 +197,16 @@ func TestClassifyTool(t *testing.T) {
 		{"read-only + network declaration", externalTool{name: "ro-net", kind: domain.EffectNetwork, readOnly: true}, classThirdPartyNetwork},
 		{"read-only + mcp declaration", externalTool{name: "ro-mcp", kind: domain.EffectMCP, readOnly: true}, classMCP},
 		{"read-only + subprocess marker", &subprocTool{name: "ro-subproc", readOnly: true}, classSubprocess},
-		// The two shipped built-ins that carry the pair, through the real tools: a read-only
-		// declaration plus an OS-subprocess launch (git, the Go toolchain).
-		{"git_diff_range (real)", tools.NewGitDiffRange(ws), classSubprocess},
+		// The shipped built-in that carries the pair, through the real tool: a read-only
+		// declaration plus an OS-subprocess launch Apogee cannot vouch for (the Go toolchain).
 		{"diagnostics (real)", tools.NewDiagnostics(ws), classSubprocess},
+		// Apogee's OWN hardened git read trio carries the unexported readOnlySubprocess marker
+		// (contract §4 amendment 2026-09-06), which is consulted BEFORE the bare subprocess
+		// marker and puts them on the read-only row of the ladder in every mode. The fake above
+		// cannot mint that marker, which is the whole point of leaving it unexported.
+		{"git_status (real)", tools.NewGitStatus(ws), classReadOnlySubprocess},
+		{"git_log (real)", tools.NewGitLog(ws), classReadOnlySubprocess},
+		{"git_diff_range (real)", tools.NewGitDiffRange(ws), classReadOnlySubprocess},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

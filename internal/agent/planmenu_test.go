@@ -15,8 +15,8 @@ import (
 // The Plan tool menu (loop.go's toolMenu) and the Plan row of the autonomy ladder
 // (resolution.go's resolveLadder) once keyed on DIFFERENT facts — the menu on the bare
 // ReadOnly() self-declaration, the ladder on the blast-radius class — so Plan offered
-// git_diff_range and diagnostics and then refused the call (contract §4 fn 2). Both now key on
-// planAdmits. These tests pin the agreement over the WHOLE registry rather than over the pair
+// diagnostics and then refused the call (contract §4 fn 2). Both now key on
+// planAdmits. These tests pin the agreement over the WHOLE registry rather than over the tools
 // that drifted, so a future tool cannot re-open the gap: a new class, or a new built-in that
 // declares itself read-only while carrying a marker, fails here the moment it is registered.
 
@@ -39,7 +39,8 @@ func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.Pre
 // host delegates supplied, so ask_user and present_document are in it too) plus fakes for the
 // classes no built-in occupies — a third-party network tool, an MCP tool, a third-party
 // in-process writer — and the two RO-declaring-marker-carrying shapes a host could register.
-// Together they span all seven toolClass values.
+// Together they span all eight toolClass values — the RO-subproc one is occupied by the
+// shipped git read trio, whose marker is unexported and therefore unfakeable here.
 func planMenuTools(ws string) []domain.Tool {
 	all := tools.DefaultToolsWithHost(ws, tools.HostTools{
 		Asker:     stubAsker{},
@@ -84,7 +85,7 @@ func offeredNames(menu []domain.ToolDef) map[string]bool {
 
 // TestPlanToolMenuAgreesWithTheLadder is the invariant this item exists for: for EVERY
 // registered tool, Plan offers it in the menu exactly when the Plan ladder would actually run
-// it. Offered-but-refused is the drift that shipped (git_diff_range, diagnostics); refused-but-
+// it. Offered-but-refused is the drift that shipped (diagnostics); refused-but-
 // hidden would be the opposite hole — a tool Plan can run that the model is never shown.
 //
 // The verdict side calls the real resolve() rather than re-deriving anything, so the two sides
@@ -120,18 +121,19 @@ func TestPlanToolMenuAgreesWithTheLadder(t *testing.T) {
 	}
 }
 
-// TestPlanToolMenuDropsTheDriftedPair names the two shipped built-ins the resolution explicitly
-// moves: git_diff_range and diagnostics declare ReadOnly() and launch an OS subprocess, so their
-// class is subproc and Plan neither offers nor runs them. The named assertion sits beside the
-// property test because the pair IS the documented drift (contract §4 fn 2) — a regression here
-// should read as itself, not as one row of a table.
-func TestPlanToolMenuDropsTheDriftedPair(t *testing.T) {
+// TestPlanToolMenuDropsDiagnosticsAndTheUnmarkedFakes names what the resolution explicitly
+// moves off the Plan menu: diagnostics declares ReadOnly() and launches an OS subprocess Apogee
+// cannot vouch for, and so do the two host-registered fakes, so their class is subproc / 3p-net
+// and Plan neither offers nor runs them. The named assertion sits beside the property test
+// because this IS the documented drift (contract §4 fn 2) — a regression here should read as
+// itself, not as one row of a table.
+func TestPlanToolMenuDropsDiagnosticsAndTheUnmarkedFakes(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	toolset := planMenuTools(ws)
 	offered := offeredNames(planMenuAgent(t, domain.ModePlan, toolset).toolMenu())
 
-	for _, name := range []string{"git_diff_range", "diagnostics", "ro_declared_subproc", "ro_declared_net"} {
+	for _, name := range []string{"diagnostics", "ro_declared_subproc", "ro_declared_net"} {
 		if offered[name] {
 			t.Errorf("Plan menu offers %s; it declares ReadOnly() but carries a marker, so the ladder refuses it", name)
 		}
@@ -147,6 +149,30 @@ func TestPlanToolMenuDropsTheDriftedPair(t *testing.T) {
 	for _, name := range []string{"write_file", "edit_existing_file", "terminal", "web_fetch"} {
 		if offered[name] {
 			t.Errorf("Plan menu offers %s, which Plan refuses", name)
+		}
+	}
+}
+
+// TestPlanToolMenuOffersTheGitReadTrio is the other half of the same named assertion: the three
+// hardened git read tools ARE on the Plan menu, by exact name, because they carry the
+// readOnlySubprocess marker and the Plan ladder runs them (contract §4 amendment 2026-09-06).
+// The write-side git tools and the two other subprocess surfaces stay off it, so the assertion
+// pins the boundary rather than just the addition — a marker minted one tool too widely fails
+// here by name.
+func TestPlanToolMenuOffersTheGitReadTrio(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	toolset := planMenuTools(ws)
+	offered := offeredNames(planMenuAgent(t, domain.ModePlan, toolset).toolMenu())
+
+	for _, name := range []string{"git_status", "git_log", "git_diff_range"} {
+		if !offered[name] {
+			t.Errorf("Plan menu is missing %s; it is read-only by construction and Plan runs it", name)
+		}
+	}
+	for _, name := range []string{"diagnostics", "git_branch", "git_commit", "terminal"} {
+		if offered[name] {
+			t.Errorf("Plan menu offers %s; only the hardened git READ trio crosses into Plan", name)
 		}
 	}
 }

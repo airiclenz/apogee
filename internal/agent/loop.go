@@ -1400,9 +1400,13 @@ func (a *Agent) maxOutputTokens() int {
 //
 // The filter keys on planAdmits (resolution.go) — the SAME blast-radius classification the
 // ladder's Plan row keys on — not on the bare ReadOnly() self-declaration it read until
-// 2026-08-02. A declaration-based filter offered git_diff_range and diagnostics (read-only
-// declaration + OS-subprocess marker) in Plan and the ladder refused them on the call; keying
-// both on one fact means the menu can never offer what the ladder refuses (contract §4 fn 2).
+// 2026-08-02. A declaration-based filter offered diagnostics (read-only declaration +
+// OS-subprocess marker) in Plan and the ladder refused it on the call; keying both on one fact
+// means the menu can never offer what the ladder refuses (contract §4 fn 2).
+//
+// Two classes pass the filter: classReadOnly, and classReadOnlySubprocess — RO-subproc, i.e.
+// read-only by construction, subprocess by mechanism (the git read trio: git_status, git_log,
+// git_diff_range), which Plan offers and runs (contract §4 amendment 2026-09-06).
 //
 // The mode is read ONCE, before the loop: a mid-build tighten must not compose a menu from two
 // different modes (Mode() is live — agent.go).

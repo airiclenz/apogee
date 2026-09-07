@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -50,12 +51,14 @@ func TestResolve_LadderTable(t *testing.T) {
 	// The RO-plus-marker pair: a tool that DECLARES itself read-only while carrying an
 	// unfakeable marker. The marker outranks the declaration (§4 amended 2026-07-26), so these
 	// ride the subproc / 3p-net rows in every column — never the RO row's five runs.
-	roSub := &subprocTool{name: "git_diff_range", readOnly: true}
+	roSub := &subprocTool{name: "ro_declared_subproc", readOnly: true}
 	roNet := externalTool{name: "ro_net", kind: domain.EffectNetwork, readOnly: true}
 
 	const badMode = domain.Mode("bogus") // an off-ladder mode ⇒ Ask-Before default
 
-	cases := []struct {
+	// ladderCase is named rather than anonymous so the RO-subproc block below can APPEND its
+	// generated cross-product rows to the same table the literal rows feed.
+	type ladderCase struct {
 		name       string
 		tool       domain.Tool
 		mode       domain.Mode
@@ -65,7 +68,9 @@ func TestResolve_LadderTable(t *testing.T) {
 		wantKind   resolutionKind
 		wantReason string // gate/refuse reason ("" = do not assert)
 		wantAudit  security.AuditDecision
-	}{
+	}
+
+	cases := []ladderCase{
 		// read-only — runs in every mode, independent of confine/caps.
 		{"RO/plan", ro, domain.ModePlan, true, true, true, resolveRun, "", security.AuditAllowed},
 		{"RO/ask-before", ro, domain.ModeAskBefore, true, true, true, resolveRun, "", security.AuditAllowed},
@@ -130,10 +135,13 @@ func TestResolve_LadderTable(t *testing.T) {
 		{"3p/auto-noconfine", tpw, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
 		{"3p/unknown-mode", tpw, badMode, true, true, true, resolveGate, "write", security.AuditAllowed},
 
-		// read-only DECLARATION + subprocess MARKER (git_diff_range / diagnostics) — the marker
-		// wins in all five columns: Plan refuses it (and since 2026-08-02 the menu does not offer
-		// it either — planmenu_test.go), the middle rungs gate it, Auto confines it (or gates it
-		// when the caps are insufficient), and "I am the sandbox" still runs everything.
+		// read-only DECLARATION + bare subprocess MARKER (diagnostics, and any host-registered
+		// tool of that shape) — the marker wins in all five columns: Plan refuses it (and since
+		// 2026-08-02 the menu does not offer it either — planmenu_test.go), the middle rungs gate
+		// it, Auto confines it (or gates it when the caps are insufficient), and "I am the
+		// sandbox" still runs everything. Apogee's OWN hardened git reads are the exception and
+		// get their own block below: they carry the readOnlySubprocess marker, which this fake
+		// (unexported by design, unfakeable) cannot.
 		{"RO+subproc/plan", roSub, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
 		{"RO+subproc/ask-before", roSub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed},
 		{"RO+subproc/allow-edits", roSub, domain.ModeAllowEdits, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed},
@@ -151,6 +159,32 @@ func TestResolve_LadderTable(t *testing.T) {
 		{"RO+3p-net/auto-confine", roNet, domain.ModeAuto, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
 		{"RO+3p-net/auto-noconfine", roNet, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
 		{"RO+3p-net/unknown-mode", roNet, badMode, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
+	}
+
+	// The RO-subproc row: Apogee's OWN hardened git read trio, which carries the unexported
+	// readOnlySubprocess marker (contract §4 amendment 2026-09-06) and therefore takes the
+	// read-only row in EVERY cell — Plan included, Auto unconfined. The cross-product is
+	// exhaustive on purpose: neither confine-to-workspace nor the backend's fs-confine capability
+	// may move these tools off resolveRun, because there is no subprocess reach for a box to
+	// bound. Contrast the roSub FAKE above, which declares ReadOnly() without the marker and
+	// keeps its refuse/gate/confine rows.
+	for _, tool := range []domain.Tool{tools.NewGitStatus(ws), tools.NewGitLog(ws), tools.NewGitDiffRange(ws)} {
+		for _, mode := range []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto, badMode} {
+			for _, confine := range []bool{true, false} {
+				for _, fsConfine := range []bool{true, false} {
+					cases = append(cases, ladderCase{
+						name:      fmt.Sprintf("RO-subproc/%s/%s/confine=%v/fsconfine=%v", tool.Name(), mode, confine, fsConfine),
+						tool:      tool,
+						mode:      mode,
+						confine:   confine,
+						fsConfine: fsConfine,
+						writeIn:   true,
+						wantKind:  resolveRun,
+						wantAudit: security.AuditAllowed,
+					})
+				}
+			}
+		}
 	}
 
 	for _, tc := range cases {
@@ -249,7 +283,7 @@ func TestResolve_GateRemedy(t *testing.T) {
 	ws := t.TempDir()
 
 	sub := &subprocTool{name: "terminal"}
-	roSub := &subprocTool{name: "git_diff_range", readOnly: true}
+	roSub := &subprocTool{name: "ro_declared_subproc", readOnly: true}
 	tpn := externalTool{name: "3p-net", kind: domain.EffectNetwork}
 
 	cases := []struct {
