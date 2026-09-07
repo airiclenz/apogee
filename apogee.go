@@ -56,10 +56,21 @@ type Agent = agent.Agent
 
 // New constructs an Agent from cfg, validating the Auto/Confinement gate (ADR 0004)
 // and the Mechanism ordering graph (ADR 0003) before returning a ready-to-Step Agent.
+//
+// The Agent it returns records undo in memory, for this process only (ADR 0051). A Driver that
+// wants `/undo` to survive a relaunch — and to cover subprocess and MCP writes — opens the
+// session's snapshot store and injects the journal with Agent.SetJournal before the first
+// Submit (ADR 0074); an engine nobody hands one keeps the in-memory journal, which is a
+// supported configuration rather than a degraded one.
 func New(cfg Config) (*Agent, error) { return agent.New(cfg) }
 
 // Resume reconstructs an Agent from a prior Session snapshot; cfg re-supplies the
 // live delegates and state roots, snap supplies the serializable conversation state.
+//
+// The undo journal is NOT part of the snapshot — it is host state keyed by session id, outside
+// the session record (ADR 0022 §8) — so a resumed Agent starts on the same in-memory journal New
+// gives, and a Driver re-opens the resumed session's store and injects it with Agent.SetJournal
+// exactly as it does at a fresh start (ADR 0074).
 func Resume(cfg Config, snap Session) (*Agent, error) { return agent.Resume(cfg, snap) }
 
 // RebindSpec carries the per-model bindings Agent.Rebind swaps in when the Upstream starts

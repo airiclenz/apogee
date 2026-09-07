@@ -269,6 +269,15 @@ type Agent struct {
 	// group on it (loop.go).
 	journal *undo.Journal
 
+	// undoNote says WHY the journal is the journal it is: "" when the session's snapshot store is
+	// open and undo reaches every workspace write, or the reason it does not — no git,
+	// `undo-snapshots: false`, a store imaging a different workspace (ADR 0074 decision 2). It is
+	// set with the journal itself (SetJournal) and read back through UndoNote, so a Driver can say
+	// what undo can still reach in the same breath as why the wider coverage is not in force. Like
+	// the journal it is live host state and is never serialized: a resumed session's note describes
+	// the store THIS process opened.
+	undoNote string
+
 	// consoles is the set of interactive processes the model drives across Turns — the Console
 	// family's live state (ADR 0059). Like the journal it is LIVE HOST STATE, not session state
 	// (ADR 0022 §8) — in-memory, for this process only, never serialized — because what it holds
@@ -823,6 +832,43 @@ func (a *Agent) SetScratchDir(dir string) {
 	a.scratchMu.Unlock()
 }
 
+// undoCloseTimeout bounds the capture an Exchange's close takes. It is the ceiling on the WHOLE
+// close — one capture, one diff and two tree listings — and it is generous on purpose: the
+// alternative to waiting is a workspace whose undo step silently has no post image. The store
+// bounds each git call it makes on its own, so this is the outer fence rather than the only one.
+const undoCloseTimeout = 2 * time.Minute
+
+// SetJournal installs the undo journal this Agent records into, together with the NOTE that says
+// why it is the journal it is ("git not found", "workspace mismatch", "" when snapshots are in
+// force). A Driver opens one per session — snapshot.OpenJournal — and hands it here; an engine
+// nobody hands one keeps construction's in-memory funnel journal, which is ADR 0051 exactly and a
+// supported configuration rather than a degraded one (ADR 0074 decision 2).
+//
+// It is valid at a QUIESCENT boundary only, and for the same reason SetScratchDir is not: the
+// journal is not a per-call read but the thing an open Exchange's group is accumulating into, so
+// swapping it mid-Step would split one instruction's writes across two records. The boundaries
+// are the session's own — before the first Submit, and where a Driver re-opens a session
+// (ClearContext, RestoreSession) — which is where a Driver mints a new session id and so a new
+// store to open. A nil journal is refused rather than installed: an engine that records nothing
+// is what construction already provides, and clearing the field would take `/undo` away mid-run.
+//
+// A delegated child is never given one of its own — it shares the parent's instance
+// (newChildAgent), so one instruction's writes stay one undo step however deep the delegation.
+func (a *Agent) SetJournal(j *undo.Journal, note string) {
+	if j == nil {
+		return
+	}
+	a.journal = j
+	a.undoNote = note
+}
+
+// UndoNote reports why undo covers what it covers: "" when the session's snapshot store is open
+// and `/undo` reaches every workspace write, or the reason it does not — no git, the key off, a
+// store imaging a different tree, an index that would not load. It is a phrase for a Driver to
+// put in a sentence, never a sentence of its own, and it is what keeps a thinner answer from
+// reading as a broken one (ADR 0074 decision 2).
+func (a *Agent) UndoNote() string { return a.undoNote }
+
 // UndoPreview describes what the human's next undo would put back: the top un-undone Exchange
 // group, classified against the files as they are NOW (restore / delete / skip, with resolved
 // paths — the disclosure the human authorises the revert from), together with the journal
@@ -878,6 +924,70 @@ func (a *Agent) WroteFiles() []string {
 		return nil
 	}
 	return a.journal.Wrote()
+}
+
+// RedoPreview describes what the human's next redo would re-apply: the exchange the last
+// `/undo` took away, classified against the files as they are NOW and inverted — it puts back
+// what the agent wrote where the undo restored the pre-image, and removes what the agent had
+// created. It reports false when there is nothing to redo, which is also what an engine built
+// without a journal, and one whose last write cleared the stack, both answer.
+//
+// It is [Agent.UndoPreview]'s mirror in every respect, boundary rule included: a Step in flight
+// is writing into the very journal this reads, and the Driver's idle-only command gate is the
+// enforcement (ADR 0074 decision 6, which puts `/redo` under `/undo`'s own protocol).
+func (a *Agent) RedoPreview() (undo.Step, bool) {
+	if a.journal == nil {
+		return undo.Step{}, false
+	}
+	return a.journal.RedoPreview()
+}
+
+// RedoRevert re-applies the exchange [Agent.RedoPreview] just described and reports what it put
+// back, removed and skipped. generation is the stamp that preview carried, and a journal that has
+// moved since refuses with [undo.ErrStaleGeneration] having touched nothing, so a human always
+// confirms the step they were shown. An empty redo stack answers [undo.ErrNothingToRedo].
+//
+// The generation check lives in the journal for this call rather than here — a redo has no second
+// reader between the preview and the act — which is the one shape it does not share with
+// [Agent.UndoRevert]. Everything else it does: quiescent boundary only, a path the human has
+// edited since is SKIPPED with its reason rather than overwritten, and the group moves either way.
+func (a *Agent) RedoRevert(generation uint64) (undo.Report, error) {
+	if a.journal == nil {
+		return undo.Report{}, undo.ErrNothingToRedo
+	}
+	return a.journal.Redo(generation)
+}
+
+// closeUndoGroup takes the closing image of the Exchange that is ending — the post half of ADR
+// 0074's capture pair — and is the func turnLifecycle.closeExchange fires through its onClose
+// seam (construct.go). It runs on every row that ENDS an Exchange (a final reply, a faulted Turn,
+// a step-capped delegation, the host's AbortExchange) and on no row that leaves one open: a
+// cancelled Turn is re-attempted inside the same Exchange, so its group stays open for the
+// re-attempt's writes.
+//
+// Depth 0 only, exactly as loop.go's BeginGroup is: a delegated child shares the parent's journal,
+// and its Exchange ends inside the parent's, so closing there would cut one instruction's writes
+// into two undo steps.
+//
+// The context is a BOUNDED background one rather than the Step's: an Exchange abandoned after a
+// cancel closes with its own ctx already dead, and the image has to be taken anyway or the step
+// the human is about to be offered has no post half. A capture that fails is reported as an
+// ErrorEvent from "undo" and NEVER fails the Exchange — the group falls back to what the write
+// funnel recorded, which is the coverage ADR 0051 shipped.
+func (a *Agent) closeUndoGroup() {
+	if a.journal == nil || a.depth != 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), undoCloseTimeout)
+	defer cancel()
+
+	if err := a.journal.Close(ctx); err != nil {
+		a.cfg.Events.Emit(domain.ErrorEvent{
+			EventBase: a.base(a.turns.index),
+			Source:    "undo",
+			Err:       err.Error(),
+		})
+	}
 }
 
 // SetBypass switches Bypass — Mechanisms off, structure on (ADR 0006) — on or off for the rest

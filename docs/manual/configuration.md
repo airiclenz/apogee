@@ -868,6 +868,21 @@ as the first line of its task, which is what apogee did before the key existed. 
 ladder — what a failed or unusable answer falls back to, what `/rename` does later, and where a
 generated delegation name is shown — is on the [sessions page](sessions.md).
 
+**Snapshotting the workspace for `/undo` — `undo-snapshots:`.** Another root key beside the block,
+for the same reason `auto-title:` is: it is keyed to a session without being part of a session
+record. It is a bool that defaults to **true** and is config-file only (no flag, no environment
+variable). With it on, apogee images your workspace around each exchange in a small object database
+of that session's own under `~/.apogee/snapshots/`, so `/undo` survives a relaunch and takes back
+every write the exchange made — including the ones apogee never routed itself, such as a command
+`terminal` ran or a file an MCP server wrote. Nothing is ever written inside your workspace, and
+your own repository, index and branches are neither read nor written.
+
+The store needs `git` on your PATH. Where git is missing, `undo-snapshots: false` behaves exactly
+the same way — apogee keeps the in-memory record of its own writes that it has always kept, `/undo`
+still works on those, and it names the reason so a thinner answer never reads as a broken one. An
+edit through `/settings` takes effect at the next start, because the store is opened while the
+session is being built.
+
 ## The servers you run models on
 
 The `servers:` list is the **single definition** of what apogee can talk to — one

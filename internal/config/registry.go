@@ -468,6 +468,13 @@ var KeyRegistry = []Key{
 		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxSteps) },
 	},
 	{
+		Path: "undo-snapshots", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc: "Snapshot the workspace around each exchange so /undo survives a relaunch and " +
+			"covers subprocess and MCP writes; takes effect at the next start.",
+		Read: func(o Options) string { return boolValue(o.UndoSnapshots) },
+	},
+	{
 		Path: "auto-title", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc: "Name a new session from its first prompt, and an unnamed delegation from its " +

@@ -10,11 +10,16 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
 )
@@ -161,4 +166,281 @@ func TestDelegationWritesJoinTheParentGroup(t *testing.T) {
 	assertChangedPaths(t, step.Changes,
 		[]string{filepath.Join(root, "parent.txt"), filepath.Join(root, "child.txt")},
 		"the delegating Exchange")
+}
+
+// ---------------------------------------------------------------------------
+// The snapshot capture points (ADR 0074): the pre image taken at the tool choke
+// point, and the post image taken at the one owner of Exchange end.
+// ---------------------------------------------------------------------------
+
+// snapshotAgent builds an Agent over a fresh workspace with a real snapshot-backed journal —
+// the wiring a Driver does at start-up (snapshot.OpenJournal + SetJournal) — and returns both.
+// The workspace root is symlink-resolved for the reason the tests above resolve it.
+func snapshotAgent(t *testing.T) (*Agent, string) {
+	t.Helper()
+	requireGit(t)
+
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temp root: %v", err)
+	}
+	home, root := filepath.Join(base, "home"), filepath.Join(base, "workspace")
+	for _, dir := range []string{home, root} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+
+	a := newWorkspaceAgent(t, root)
+	journal, note, err := snapshot.OpenJournal(context.Background(), home, "session-1", root, true)
+	if err != nil {
+		t.Fatalf("OpenJournal: %v", err)
+	}
+	a.SetJournal(journal, note)
+	if a.UndoNote() != "" {
+		t.Fatalf("UndoNote = %q, want none: this workspace has snapshots", a.UndoNote())
+	}
+	return a, root
+}
+
+// writeThrough returns the fake subprocess tool that writes one file the write funnel never sees —
+// the coverage gap the snapshot pair exists to close.
+func writeThrough(root, name, content string) mutatingSubprocessTool {
+	return mutatingSubprocessTool{
+		subprocess: true,
+		run:        func() error { return os.WriteFile(filepath.Join(root, name), []byte(content), 0o644) },
+		result:     domain.ToolResult{Content: "ok"},
+	}
+}
+
+// readingFakeTool is a read-only stand-in: dispatch must take no pre image for it, so an Exchange
+// that only looks at the workspace costs no git and leaves no step to walk past.
+type readingFakeTool struct{ ran *bool }
+
+func (r readingFakeTool) Name() string            { return "fake_read" }
+func (r readingFakeTool) Description() string     { return "test read-only stand-in" }
+func (r readingFakeTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (r readingFakeTool) ReadOnly() bool          { return true }
+
+func (r readingFakeTool) Execute(context.Context, domain.ToolCall) (domain.ToolResult, error) {
+	*r.ran = true
+	return domain.ToolResult{CallID: "call-1", Content: "read"}, nil
+}
+
+// TestSnapshotsCoverAWriteTheFunnelNeverSaw: a subprocess writes a file through no seam of
+// apogee's, and `/undo` still names it and puts it back. This is the whole promise of ADR 0074 —
+// the funnel journal, which is what ADR 0051 shipped, records nothing at all for this call.
+func TestSnapshotsCoverAWriteTheFunnelNeverSaw(t *testing.T) {
+	a, root := snapshotAgent(t)
+	created := filepath.Join(root, "by-the-subprocess.txt")
+
+	a.turns.openExchange()
+	a.journal.BeginGroup()
+	executeFake(t, a, writeThrough(root, "by-the-subprocess.txt", "written outside the funnel\n"))
+	a.turns.closeExchange()
+
+	step, ok := a.UndoPreview()
+	if !ok {
+		t.Fatal("the Exchange left no undo step; the closing capture did not run")
+	}
+	assertChangedPaths(t, step.Changes, []string{created}, "the subprocess write")
+
+	if _, err := a.UndoRevert(step.Generation); err != nil {
+		t.Fatalf("UndoRevert: %v", err)
+	}
+	if _, err := os.Stat(created); !os.IsNotExist(err) {
+		t.Errorf("the created file survived the revert (stat err %v)", err)
+	}
+}
+
+// TestReadOnlyCallTakesNoPreImage: the pre image is owed by the first WRITE-capable call, not by
+// the first call. A read-only tool leaves the group unopened, so an Exchange that only looked at
+// the workspace never becomes a step.
+func TestReadOnlyCallTakesNoPreImage(t *testing.T) {
+	a, _ := snapshotAgent(t)
+
+	ran := false
+	a.turns.openExchange()
+	a.journal.BeginGroup()
+	call := domain.ToolCall{ID: "call-1", Tool: "fake_read"}
+	if _, outcome := a.executeTool(context.Background(), 0, readingFakeTool{ran: &ran}, call, nil); outcome != dispatchDone {
+		t.Fatalf("outcome = %v, want dispatchDone", outcome)
+	}
+	if !ran {
+		t.Fatal("the read-only tool did not run")
+	}
+	a.turns.closeExchange()
+
+	if step, ok := a.UndoPreview(); ok {
+		t.Errorf("a read-only Exchange left an undo step: %+v", step.Changes)
+	}
+}
+
+// TestExchangeEndClosesTheGroupOnEveryRowThatEndsOne: the closing capture hangs off the ONE owner
+// of Exchange end, so the host scrapping an Exchange and the delegate step cap both take the image
+// — and a cancelled Turn, which leaves the Exchange open for its re-attempt, does not.
+func TestExchangeEndClosesTheGroupOnEveryRowThatEndsOne(t *testing.T) {
+	tests := []struct {
+		name       string
+		end        func(a *Agent)
+		wantClosed bool
+	}{
+		{
+			name:       "the host scraps the Exchange",
+			end:        func(a *Agent) { a.AbortExchange() },
+			wantClosed: true,
+		},
+		{
+			name:       "the delegate step cap ends it",
+			end:        func(a *Agent) { a.turns.end(&turnRun{}, endStepCapped) },
+			wantClosed: true,
+		},
+		{
+			name:       "a faulted Turn ends it",
+			end:        func(a *Agent) { a.turns.end(&turnRun{}, endAbandoned) },
+			wantClosed: true,
+		},
+		{
+			name:       "a cancelled Turn leaves it open for the re-attempt",
+			end:        func(a *Agent) { a.turns.end(&turnRun{}, endCancelled) },
+			wantClosed: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, root := snapshotAgent(t)
+			created := filepath.Join(root, "written.txt")
+
+			a.turns.openExchange()
+			a.journal.BeginGroup()
+			executeFake(t, a, writeThrough(root, "written.txt", "one write\n"))
+			tt.end(a)
+
+			step, ok := a.UndoPreview()
+			if !ok {
+				t.Fatal("the group vanished entirely; MarkPre opened one")
+			}
+			if tt.wantClosed {
+				assertChangedPaths(t, step.Changes, []string{created}, tt.name)
+				return
+			}
+			if len(step.Changes) != 0 {
+				t.Errorf("a cancelled Turn closed the group: %+v; the re-attempt writes into it",
+					step.Changes)
+			}
+		})
+	}
+}
+
+// TestChildExchangeEndLeavesTheParentGroupOpen: a delegated child shares the parent's journal, and
+// its Exchange runs INSIDE the parent's, so the child's end must not take the closing image. If it
+// did, a parent write made AFTER the delegation would fall outside the step the human is offered —
+// one instruction, two `/undo` presses.
+func TestChildExchangeEndLeavesTheParentGroupOpen(t *testing.T) {
+	a, root := snapshotAgent(t)
+
+	a.turns.openExchange()
+	a.journal.BeginGroup()
+	executeFake(t, a, writeThrough(root, "parent.txt", "p\n"))
+
+	// The child: an Agent of its own at depth 1 holding the PARENT's journal instance, which is
+	// what newChildAgent hands it, and an Exchange of its own that ends.
+	child := newWorkspaceAgent(t, root)
+	child.depth = 1
+	child.SetJournal(a.journal, a.UndoNote())
+	child.turns.openExchange()
+	executeFake(t, child, writeThrough(root, "child.txt", "c\n"))
+	child.turns.closeExchange()
+
+	if step, _ := a.UndoPreview(); len(step.Changes) != 0 {
+		t.Fatalf("the child's Exchange end closed the parent's group: %+v", step.Changes)
+	}
+
+	// …and the parent's own later write joins the same step when the parent's Exchange ends.
+	executeFake(t, a, writeThrough(root, "after.txt", "a\n"))
+	a.turns.closeExchange()
+
+	step, ok := a.UndoPreview()
+	if !ok {
+		t.Fatal("the parent Exchange left no undo step")
+	}
+	if step.Ordinal != 1 {
+		t.Errorf("step ordinal = %d, want 1: one instruction is one step", step.Ordinal)
+	}
+	assertChangedPaths(t, step.Changes,
+		[]string{filepath.Join(root, "after.txt"), filepath.Join(root, "child.txt"), filepath.Join(root, "parent.txt")},
+		"the delegating Exchange")
+}
+
+// failingSnapshotter is an image source whose captures fail after the first n of them — the
+// wedged-git case, which must cost a warning and never an Exchange.
+type failingSnapshotter struct {
+	ok   int
+	took int
+}
+
+func (f *failingSnapshotter) Capture(context.Context) (string, error) {
+	f.took++
+	if f.took > f.ok {
+		return "", errors.New("git is wedged")
+	}
+	return strings.Repeat("a", 40), nil
+}
+
+func (f *failingSnapshotter) Diff(context.Context, string, string) ([]string, error) { return nil, nil }
+
+func (f *failingSnapshotter) ListBlobs(context.Context, string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (f *failingSnapshotter) Content(string, string) ([]byte, bool, error) { return nil, false, nil }
+
+// TestACaptureFailureIsReportedAndNeverFailsTheExchange: both capture points report through
+// ErrorEvent{Source: "undo"} and neither turns a working call, or a finished Exchange, into a
+// failure. The group falls back to what the funnel recorded, which is the coverage ADR 0051
+// shipped — a thinner undo, never a broken run.
+func TestACaptureFailureIsReportedAndNeverFailsTheExchange(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		ok   int
+	}{
+		{name: "the pre image fails", ok: 0},
+		{name: "the closing image fails", ok: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatalf("resolve the temp root: %v", err)
+			}
+			sink := &recordingSink{}
+			cfg := baseConfig(sink)
+			cfg.WorkspaceDir = root
+			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.SetJournal(undo.New(
+				undo.WithSnapshotter(&failingSnapshotter{ok: tt.ok}),
+				undo.WithWorkspace(root),
+			), "")
+
+			a.turns.openExchange()
+			a.journal.BeginGroup()
+			result := executeFake(t, a, writeThrough(root, "written.txt", "one write\n"))
+			if result.IsError {
+				t.Errorf("the tool result was faulted by apogee's own bookkeeping: %+v", result)
+			}
+			a.turns.closeExchange()
+
+			var reported bool
+			for _, event := range sink.events {
+				if e, ok := event.(domain.ErrorEvent); ok && e.Source == "undo" {
+					reported = true
+				}
+			}
+			if !reported {
+				t.Errorf("no ErrorEvent{Source: \"undo\"} for a failed capture; events = %+v", sink.events)
+			}
+		})
+	}
 }

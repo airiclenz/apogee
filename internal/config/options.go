@@ -297,6 +297,12 @@ type Options struct {
 	// ReadCache keeps the cap on a re-read of a file unchanged since apogee last read it.
 	ReadCache bool
 
+	// UndoSnapshots keeps the snapshot-backed undo store: the workspace imaged around each
+	// exchange in a git object database of the session's own, so `/undo` survives a relaunch and
+	// covers writes that never passed through apogee's write funnel (ADR 0074). Off leaves ADR
+	// 0051's in-memory funnel journal, which is what a machine with no git runs anyway.
+	UndoSnapshots bool
+
 	// delegateMaxSteps bounds a CHILD agent's one Exchange, in Turns (default 80; 0 = unbounded),
 	// loaded from the config file only. ApplyConfig sets it from settings; the composition root
 	// folds it into apogee.Config.Delegation.MaxSteps. It never bounds the main loop, which is the

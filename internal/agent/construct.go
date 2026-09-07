@@ -134,7 +134,14 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	a.reloadContextFiles()
 	// Wire the Turn lifecycle owner AFTER the literal so conv points at the Agent's field: a later
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
-	a.turns = &turnLifecycle{conv: &a.conv, tracker: a.tracker, compactFailed: &a.compactFailed}
+	// onClose rides here for the same reason: the lifecycle owns the moment an Exchange ends, the
+	// Agent owns what an ending Exchange costs — the undo journal's closing capture (ADR 0074).
+	a.turns = &turnLifecycle{
+		conv:          &a.conv,
+		tracker:       a.tracker,
+		compactFailed: &a.compactFailed,
+		onClose:       a.closeUndoGroup,
+	}
 	return a, nil
 }
 

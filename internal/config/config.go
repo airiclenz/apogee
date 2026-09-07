@@ -748,6 +748,12 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		row: mustKey("undo-snapshots"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.UndoSnapshots = fc.UndoSnapshots == nil || *fc.UndoSnapshots
+		},
+	},
+	{
 		row: mustKey("auto-title"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.AutoTitle = fc.AutoTitle == nil || *fc.AutoTitle
@@ -1373,6 +1379,14 @@ type fileConfig struct {
 	// It feeds domain.Config.Delegation.MaxSteps; the `sub_agent` tool can lower it for one
 	// delegation but never raise it.
 	DelegateMaxSteps *int `yaml:"delegate-max-steps"`
+	// UndoSnapshots gates the SNAPSHOT-backed undo store (ADR 0074): with it on, apogee images the
+	// workspace around each exchange in a git object database of the session's own, outside the
+	// workspace, so `/undo` survives a relaunch and reaches writes that never went through apogee's
+	// write funnel — a subprocess, an MCP server, a checkout. File-only (no flag/env), and a pointer
+	// for auto-compact's reason: absent ⇒ on. An explicit `undo-snapshots: false` behaves exactly as
+	// a machine with no git does — ADR 0051's in-memory funnel journal, and `/undo` naming the
+	// reason — which is a supported configuration, not a degraded one.
+	UndoSnapshots *bool `yaml:"undo-snapshots"`
 	// AutoTitle gates the AUTOMATIC session-naming call: on the first prompt of a new session an
 	// out-of-band completion names the Session record from that prompt, applied through the same
 	// Rename path the session browser uses. File-only (no flag/env), and a pointer so an explicit

@@ -33,11 +33,15 @@
 //
 // Restoration is NOT here. This package reads and writes objects; putting bytes back on disk
 // — the conflict check, the skip-and-report, the fenced writes — is internal/undo's, which
-// reaches this package through an interface of its own rather than importing it. The package
-// is a leaf over internal/gitexec and imports nothing else of apogee's.
+// reaches this package through an interface of its own rather than importing it. The
+// dependency runs the other way: [OpenJournal] is the assembly seam, so this package imports
+// internal/undo to hand a Driver a journal already wired to a store, and internal/undo still
+// knows nothing of git.
 //
 // Files:
 //   - doc.go — this map and the package's rationale.
 //   - store.go — the Tree id type, Open/Remove/Available, and the capture, diff, listing and
 //     blob-read calls that make up the store's surface.
+//   - journal.go — the store path, the Snapshotter adapter, and OpenJournal: the one call a
+//     Driver makes for a session's snapshot-backed journal, with the reasons it falls back.
 package snapshot

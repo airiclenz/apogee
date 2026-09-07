@@ -1121,6 +1121,27 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		})
 	}
 
+	// The undo journal's PRE image, taken lazily on the first write-capable call of the Exchange
+	// and skipped entirely for a read (ADR 0074 decision 3): an Exchange that only looks at the
+	// workspace costs no git and leaves no step the human has to walk past. The journal itself
+	// takes the image once per open group, so the test here is only "could this call write",
+	// never "has one written yet".
+	//
+	// No depth gate, unlike the group's opening and closing: a delegated child shares the parent's
+	// journal (newChildAgent), and its writes belong inside the parent's Exchange pair, so a
+	// child's first write is exactly when the pair's pre image is owed. It rides floorCtx for the
+	// reason the tree floor below does — apogee's own bookkeeping git is not the model's command
+	// and must never run inside the call's box.
+	//
+	// A capture that fails is reported and nothing else: the group stays funnel-only, which is the
+	// coverage ADR 0051 shipped, and the call proceeds. Failing the tool call over apogee's own
+	// bookkeeping is the one thing this must never do.
+	if a.journal != nil && !domain.IsReadOnly(tool) {
+		if err := a.journal.MarkPre(floorCtx); err != nil {
+			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "undo", Err: err.Error()})
+		}
+	}
+
 	// Tracked-file mutation floor (treesnapshot.go — structural, every mode including
 	// Bypass, ADR 0006 class): snapshot the git tree around a subprocess run so the
 	// result can name the workspace files the command changed. Best-effort by contract:

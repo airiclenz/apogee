@@ -248,6 +248,13 @@ type liveSettings struct {
 	// on it: a Firing builds its own client, so a capture armed mid-session is armed for the runs the
 	// session raises even though the session itself keeps the client it opened with.
 	inspector bool
+
+	// undoSnapshots mirrors `undo-snapshots:`, whose live apply is the WRITE alone — the session's
+	// undo store is opened while the session id is minted and there is no seam to re-open one under
+	// a running Agent (ADR 0074). It is mirrored for the one reader that can still act on it: a
+	// Firing opens a store of its own for the session it records under, so a human who turned
+	// snapshots off mid-session turns them off for the runs this session raises.
+	undoSnapshots bool
 }
 
 // newLiveSettings seeds the holder with what THIS run resolved. manualIDs is passed in rather than
@@ -287,8 +294,9 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		modelProfiles:      opts.ModelProfiles,
 		rememberModel:      opts.RememberModel,
 		// And the keys this holder only MIRRORS — the tool set's four, the engine's two toggles, the
-		// seven Floor-guard gates and the inspector — seeded from the same snapshot for the reason the
-		// rest are: a session nobody edits must hand back exactly the configuration it launched with.
+		// seven Floor-guard gates, the inspector and the undo store — seeded from the same snapshot
+		// for the reason the rest are: a session nobody edits must hand back exactly the
+		// configuration it launched with.
 		searchEndpoint:   opts.WebSearchEndpoint,
 		disabledTools:    opts.ToolsDisabled,
 		hooks:            opts.Hooks,
@@ -298,6 +306,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		autoCompact:      opts.AutoCompact,
 		pruneToolResults: opts.PruneToolResults,
 		inspector:        opts.UI.Inspector,
+		undoSnapshots:    opts.UndoSnapshots,
 
 		toolUseEnforcer:       opts.ToolUseEnforcer,
 		emptyResponseRecovery: opts.EmptyResponseRecovery,
@@ -824,6 +833,16 @@ func (s *liveSettings) setInspector(on bool) {
 	s.inspector = on
 }
 
+// setUndoSnapshots mirrors `undo-snapshots:`. Like setInspector above there is no engine seam this
+// shadows — the session's undo store is opened once, while the session id is minted, and the
+// journal is injected into an Agent that then records into it — so the store is the whole of what
+// the value can reach in this process, and what it reaches is the next Firing's own store.
+func (s *liveSettings) setUndoSnapshots(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.undoSnapshots = on
+}
+
 // options reports this session's configuration as it stands NOW: the Options this run launched with,
 // with every key a `/settings` commit has since applied written back over them. It is what an
 // unattended run raised INSIDE the session composes from (ADR 0037's promise carried into the runs a
@@ -873,6 +892,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.ToolResultCap = s.toolResultCap
 	next.ReadCache = s.readCache
 	next.UI.Inspector = s.inspector
+	next.UndoSnapshots = s.undoSnapshots
 	next.DelegateMaxSteps = s.delegateMaxSteps
 
 	// And the keys that are re-RESOLVED rather than pushed — the same values rebindInputs projects
@@ -1410,6 +1430,11 @@ var settingsTable = []settingsEntry{
 		apply:   applyDelegateMaxSteps,
 	},
 	{
+		key:     "undo-snapshots",
+		reaches: reachesWithoutAMember,
+		apply:   applyUndoSnapshots,
+	},
+	{
 		key: "remember-model",
 		// The holder alone, and for once that is the literal whole of the apply: the toggle reaches no
 		// engine seam and rides no rebind — the seams it gates read it back out of this holder.
@@ -1850,6 +1875,27 @@ func applyInspector(a settingsApplier, key, value string) (string, error) {
 	}
 	if a.live != nil {
 		a.live.setInspector(on)
+	}
+	return "", nil
+}
+
+// applyUndoSnapshots is `undo-snapshots:`, which is the write alone for THIS session and not for the
+// runs it raises. The session's undo store is opened while the session id is minted and the journal
+// is injected into the Agent then (ADR 0074), so nothing here can open — or close — the store of a
+// session already running; mirroring the flip onto the holder is what lets the next Firing open its
+// own store the way the human has just asked for.
+//
+// It answers exactly as applyInspector does — success, no note, the Description's "takes effect at
+// the next start" carrying the promise — while parsing the value, for that apply's reason: a value
+// that is to be recorded has to be read. The holder is optional in the same sense too: a Driver that
+// composed none has no Firing to compose either.
+func applyUndoSnapshots(a settingsApplier, key, value string) (string, error) {
+	on, err := settingBool(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.setUndoSnapshots(on)
 	}
 	return "", nil
 }

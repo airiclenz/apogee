@@ -362,6 +362,21 @@ type Config struct {
 	// structural — they stay on under Bypass — and, being Disable… bools, the ZERO value keeps
 	// every one of them ON: an embedder that constructs a bare Config gets the floor.
 	Floor FloorConfig
+
+	// UndoSnapshots is the human's `undo-snapshots:` answer carried to the Driver that opens the
+	// session's undo store — the snapshot-backed journal that makes `/undo` survive a relaunch and
+	// reach every write, not only the ones that went through apogee's own funnel (ADR 0074).
+	//
+	// The ENGINE never reads it: it records into whatever journal it was handed (Agent.SetJournal)
+	// and knows nothing of git or of where the objects live. It rides on the Config because that is
+	// what an unattended Firing is composed from — a headless or daemon run resolves its own home
+	// and session id and opens the store itself, and a flag it could not read there would make the
+	// key silently a TUI-only one.
+	//
+	// The zero value is FALSE, unlike the Floor gates above, and honestly so: a Driver that wires
+	// no store gets ADR 0051's in-memory journal, which is what an engine constructed bare has
+	// always had. The default-on lives in the config key, where the human can see it.
+	UndoSnapshots bool
 }
 
 // FloorConfig switches the Floor guards off one at a time (ADR 0071). A Floor guard changes only

@@ -95,6 +95,8 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// Exchange is not one the human opened — it runs INSIDE the parent's. Letting it mark a
 		// boundary would split one instruction's writes across two undo steps, so the human would
 		// have to `/undo` twice to take back work they asked for once (ADR 0051, ratified call 8).
+		// The closing half of the pair carries the same gate for the same reason, at the one owner
+		// of Exchange end (Agent.closeUndoGroup, reached through turnLifecycle.onClose).
 		if a.journal != nil && a.depth == 0 {
 			a.journal.BeginGroup()
 		}

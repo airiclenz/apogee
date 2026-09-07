@@ -31,6 +31,18 @@ type turnLifecycle struct {
 	// value, this type owns the moment it resets, and construct.go wires the two together. nil is
 	// inert, never an error — a bare lifecycle in a unit test has no Agent behind it.
 	compactFailed *bool
+
+	// onClose is fired by closeExchange, once per Exchange END — the seam the undo journal's
+	// closing capture hangs off (Agent.closeUndoGroup, agent.go). It is a bare func for the same
+	// reason compactFailed is a pointer: this type owns the MOMENT an Exchange ends and knows
+	// nothing of what an Agent wants to do about it, and closeExchange carries neither a context
+	// nor an Agent to hand one. nil is inert, never an error — a bare lifecycle in a unit test has
+	// no Agent behind it, and an engine that records nothing simply hangs nothing here.
+	//
+	// It fires on every row that ends an Exchange and on none that leaves one open, which is
+	// exactly closeExchange's own contract: endCancelled is not a caller, so a Turn that will be
+	// re-attempted never closes the group its re-attempt writes into.
+	onClose func()
 }
 
 // turnRun is the working state of one Turn attempt — the values step() used to thread as five
@@ -183,10 +195,19 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 // Exchange ends: end()'s endExchangeDone row (a final no-tool reply), its endAbandoned row (a
 // faulted Turn), and AbortExchange (the host scrapping the Exchange). endCancelled is
 // deliberately NOT one — a cancelled Turn leaves the Exchange open for the resume re-attempt
-// and truncates-then-restores the deferred queue instead (F6(b)).
+// and truncates-then-restores the deferred queue instead (F6(b)). Being the one owner is what
+// lets the undo journal hang its closing capture here through onClose: four Exchange ends, one
+// capture point, and the row that does not end an Exchange does not take an image either.
 func (l *turnLifecycle) closeExchange() {
 	l.inExchange = false
 	l.conv.ClearDeferred()
+	// And the one thing an Exchange's END means outside this type: the undo journal's closing
+	// capture (ADR 0074 decision 3). It runs AFTER the state flips so an observer reached from it
+	// sees a closed Exchange, and it is the last word here for the same reason — whatever it does,
+	// the Exchange is already over.
+	if l.onClose != nil {
+		l.onClose()
+	}
 }
 
 // restoreDeferred re-queues deferred corrections drained by buildRequest when the Turn did not
