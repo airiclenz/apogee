@@ -46,7 +46,9 @@
 // written since, capped to a header-only slice so the copy already in the conversation stands.
 // resultcap.go is the tool-result cap — every older tool result that has outgrown its fraction of
 // the Budget trimmed to the shared head/tail elision in the projected request, the conversation
-// itself untouched.
+// itself untouched. salvage.go is the tool-call salvage guard — a reply that carries no wire call
+// but wrote one out as JSON in its text read back as the call the model meant, and the text handed
+// on without the block it salvaged.
 //
 // And doc.go this map.
 package floor

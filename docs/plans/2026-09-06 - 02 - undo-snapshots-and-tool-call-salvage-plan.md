@@ -50,7 +50,11 @@ NOTES (2026-09-07): the plan header's Base is 5359e90e but HEAD is 8c3dc9ae — 
 **Acceptance:** `test -f "docs/plans/archived/2026-09-06 - 01 - hooks-plan.md" && ! test -f "docs/plans/2026-09-06 - 01 - hooks-plan.md" && test -z "$(git status --porcelain -- internal/agent internal/config cmd/apogee internal/tui)"`
 **Commit:** none (a gate, no change).
 
-## 2. `floor.SalvageToolCall` — the pure guard
+## 2. `floor.SalvageToolCall` — the pure guard — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): the `six`-count sentence in `internal/floor/doc.go` was left as it stands — item 4's regression guard names `internal/floor/doc.go:18` as its own site; this item touched doc.go only to add salvage.go to the file map, as its text says.
+
+NOTES (2026-09-07): the guard cannot import `internal/processing` (doc.go's one-direction rule), so "shaped as `processing.ParseNativeToolCalls` shapes a native call" is reproduced locally in `normalizeSalvagedArguments` — object taken as written, string decoded, empty normalised to `{}` — rather than by calling it.
 
 **What:** add `internal/floor/salvage.go`: `func SalvageToolCall(resp *domain.Response, offered []string) (calls []domain.ToolCall, text string, fired bool)`. Fires only when `len(resp.ToolCalls()) == 0` and `resp.Text()` holds at least one JSON object whose `name` is exactly one of `offered` and which carries `arguments` / `parameters` / `input` (an object, or a string holding JSON), in any of the three ratified containers. Every match becomes a call in document order, shaped as `processing.ParseNativeToolCalls` shapes a native call; IDs left empty. `text` is the response text with each matched block removed and trimmed. Unoffered names, prose mentions and malformed JSON never fire. Pure function (`internal/floor/doc.go:6-15`); add the file to `doc.go`'s file map. Depends on item 1.
 **Files:** `internal/floor/{salvage.go,salvage_test.go,doc.go}`.
