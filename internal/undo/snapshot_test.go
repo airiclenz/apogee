@@ -131,7 +131,7 @@ func fakeTreeID(image map[string][]byte) string {
 
 	sum := sha1.New()
 	for _, path := range paths {
-		fmt.Fprintf(sum, "%s\x00%s\n", path, blobID(image[path], 2*sha1.Size))
+		sum.Write(fmt.Appendf(nil, "%s\x00%s\n", path, blobID(image[path], 2*sha1.Size)))
 	}
 	return hex.EncodeToString(sum.Sum(nil))
 }

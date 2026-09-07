@@ -332,11 +332,13 @@ func (r resolver) targetTree(d direction) string {
 // header is git's own (`blob <length>\0`), which is what makes the result comparable to an
 // id that came out of a tree listing without ever hashing the file through git.
 func blobID(data []byte, idWidth int) string {
-	var sum hash.Hash = sha1.New()
+	var sum hash.Hash
 	if idWidth == sha256HexLen {
 		sum = sha256.New()
+	} else {
+		sum = sha1.New()
 	}
-	fmt.Fprintf(sum, "blob %d\x00", len(data))
+	sum.Write(fmt.Appendf(nil, "blob %d\x00", len(data)))
 	sum.Write(data)
 	return hex.EncodeToString(sum.Sum(nil))
 }

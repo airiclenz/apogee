@@ -203,7 +203,7 @@ func TestConfigCarriesBothGlobalRosterLists(t *testing.T) {
 
 // TestFloorConfigZeroValueKeepsEveryGuardOn pins the polarity the whole Floor rests on: every
 // field is a Disable… bool, so a zero FloorConfig — the one an embedder gets from a bare Config,
-// and the one a config.yaml that names none of the six keys produces — leaves all six guards ON.
+// and the one a config.yaml that names none of the seven keys produces — leaves all seven guards ON.
 // A field spelled the other way round (an Enable…, or a guard whose off state is the zero value)
 // would silently drop the floor for every caller that never mentioned it, which is exactly the
 // regression ADR 0070's empty-list semantics survive by not having.
@@ -214,7 +214,7 @@ func TestFloorConfigZeroValueKeepsEveryGuardOn(t *testing.T) {
 
 	value := reflect.ValueOf(zero.Floor)
 	if value.NumField() == 0 {
-		t.Fatal("FloorConfig carries no fields — the six guards have no opt-out")
+		t.Fatal("FloorConfig carries no fields — the seven guards have no opt-out")
 	}
 	for i := range value.NumField() {
 		field := value.Type().Field(i)

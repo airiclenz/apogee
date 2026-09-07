@@ -420,7 +420,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	}
 
 	// --no-verify refuses the pre-commit and commit-msg hooks explicitly, on top of the
-	// emptied core.hooksPath every invocation already carries (gitHardeningOptions). The
+	// emptied core.hooksPath every invocation already carries (gitexec's hardening options). The
 	// belt-and-braces is deliberate: this is the one path where a hook both runs an
 	// attacker-authored script AND can rewrite or veto the message the operator approved.
 	//

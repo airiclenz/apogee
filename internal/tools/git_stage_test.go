@@ -216,7 +216,7 @@ func (c *stagingConfiner) subcommands() []string {
 }
 
 // gitSubcommandOf picks the subcommand out of a git argv, stepping over the `-c <name=value>`
-// hardening pairs gitRunSpec puts ahead of it.
+// hardening pairs gitexec puts ahead of it.
 func gitSubcommandOf(argv []string) string {
 	for i := 1; i < len(argv); i++ {
 		if argv[i] == "-c" {
