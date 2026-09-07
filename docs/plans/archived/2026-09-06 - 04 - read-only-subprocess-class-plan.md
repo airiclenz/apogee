@@ -2,7 +2,7 @@
 
 **Goal:** `git_status`, `git_log` and `git_diff_range` are refused in Plan and gated in Ask-Before / Allow-Edits because their `Subprocess()` marker outranks their `ReadOnly()` declaration (contract §4, amended 2026-07-26/2026-08-02). Every hardening that closed "a subprocess is unbounded" for these three landed after that rule (hooks/fsmonitor off, repo-local program-key refusal, `--no-textconv --no-ext-diff`, ref guards, argv[0] fence, scrubbed child PATH), and the engine already runs the same hardened read-side git unattended in every mode for its tree-snapshot floor (`tools.RunGitQuery`). Give the trio an unexported read-only-subprocess marker and a class that takes the RO row everywhere.
 **Date:** 2026-09-06
-**Status:** unexecuted
+**Status:** complete — all four items (1–4) landed 2026-09-07 and shipped in v0.20.9; archived in `99ff4b4c`.
 **Sized for:** ~200k-context host
 **Base commit:** f5315fc2
 
