@@ -2040,6 +2040,282 @@ func TestHeadlessExitCodes(t *testing.T) {
 	})
 }
 
+// jsonEventLines parses a `--format json` stdout into one map per line, failing the test on
+// anything that is not a JSON object per line — that shape IS the contract's promise to a consumer
+// (ADR 0075), so a stray prose line is a failure rather than something to skip past.
+func jsonEventLines(t *testing.T, out string) []map[string]any {
+	t.Helper()
+	var parsed []map[string]any
+	for _, raw := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+		if raw == "" {
+			continue
+		}
+		var line map[string]any
+		if err := json.Unmarshal([]byte(raw), &line); err != nil {
+			t.Fatalf("stdout carried a line that is not a JSON object: %q (%v)", raw, err)
+		}
+		parsed = append(parsed, line)
+	}
+	return parsed
+}
+
+// finishedFrame returns the single run_finished envelope and its data object, failing unless there
+// is exactly one: "exactly one on every exit path" is the promise the funnel exists to keep, and a
+// second one would be as broken as none.
+func finishedFrame(t *testing.T, lines []map[string]any) (envelope, data map[string]any) {
+	t.Helper()
+	var found []map[string]any
+	for _, line := range lines {
+		if line["event"] == "run_finished" {
+			found = append(found, line)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("stdout carried %d run_finished lines; want exactly 1", len(found))
+	}
+	data, ok := found[0]["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("the closing frame carried no data object: %v", found[0])
+	}
+	return found[0], data
+}
+
+// wantExitCode asserts the closing frame's exit code, which is the one number a script driving the
+// stream actually branches on.
+func wantExitCode(t *testing.T, data map[string]any, want int) {
+	t.Helper()
+	if got := data["exit_code"]; got != float64(want) {
+		t.Errorf("exit_code = %v; want %d", got, want)
+	}
+}
+
+// The contract's central promise: EXACTLY ONE run_finished on every path out of the command, so a
+// consumer never faces a stdout that simply stopped (ADR 0075 decision 5). The never-started
+// refusals differ in where they happen — two before the run has an id at all, one after the id but
+// before any sink, one after the sink is installed — and the frame has to land on each of them,
+// which is what makes the funnel worth its own function rather than a frame per return.
+func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
+	t.Run("an empty prompt refuses before the id is minted", func(t *testing.T) {
+		stub := &stubRunner{}
+		out, _, err := headlessRun(t, stub, "--format", "json")
+		if err == nil {
+			t.Fatal("an empty prompt was accepted")
+		}
+		lines := jsonEventLines(t, out)
+		if len(lines) != 1 {
+			t.Fatalf("stdout carried %d lines; a refusal ahead of the opening frame is the closing "+
+				"frame alone: %q", len(lines), out)
+		}
+		envelope, data := finishedFrame(t, lines)
+		wantExitCode(t, data, exitNotStarted)
+		if envelope["session"] != nil {
+			t.Errorf("session = %v; the run had no id when it was refused", envelope["session"])
+		}
+		if data["error"] == nil {
+			t.Error("the closing frame of a refusal carries no error text")
+		}
+	})
+
+	t.Run("a mode with nobody to ask refuses before the id is minted", func(t *testing.T) {
+		stub := &stubRunner{}
+		out, _, err := headlessRun(t, stub, "--format", "json", "--mode", "ask-before", "a prompt")
+		if err == nil {
+			t.Fatal("--mode ask-before was accepted")
+		}
+		lines := jsonEventLines(t, out)
+		if len(lines) != 1 {
+			t.Fatalf("stdout carried %d lines; want the closing frame alone: %q", len(lines), out)
+		}
+		_, data := finishedFrame(t, lines)
+		wantExitCode(t, data, exitNotStarted)
+	})
+
+	t.Run("the offline gate refuses with the id already minted", func(t *testing.T) {
+		// The one never-started class that happens AFTER the id exists and BEFORE any sink does:
+		// the frame therefore names the session and still reports that nothing was saved.
+		const boundServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
+			"\nserver: testbox\n"
+		beats := &stubBeat{beat: heartbeat.Beat{Failure: "connection refused"}}
+		swapBeat(t, beats.discover)
+
+		stub := &stubRunner{}
+		out, _, err := headlessRunOn(t, stub, fenceableHost, testConfigHome(t, boundServer),
+			"--format", "json", "a prompt")
+		if err == nil {
+			t.Fatal("a run whose server answered nothing was allowed to start")
+		}
+		lines := jsonEventLines(t, out)
+		if len(lines) != 1 {
+			t.Fatalf("stdout carried %d lines; want the closing frame alone: %q", len(lines), out)
+		}
+		envelope, data := finishedFrame(t, lines)
+		wantExitCode(t, data, exitNotStarted)
+		if envelope["session"] == nil {
+			t.Error("session is null; the id was minted before the gate refused")
+		}
+		if data["saved"] != false {
+			t.Errorf("saved = %v; a refused run wrote no record", data["saved"])
+		}
+	})
+
+	t.Run("a run.Once pre-run exit refuses after the sink exists", func(t *testing.T) {
+		// run.Once's own never-started shape: an error with ZERO turns behind it. It lands after
+		// the opening frame has been written, so the stream is the two frames and nothing between.
+		stub := &stubRunner{err: errors.New("apogee: construct the firing's agent: apogee: Config.Endpoint is required")}
+		out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+		if err == nil {
+			t.Fatal("a construction refusal was reported as a success")
+		}
+		lines := jsonEventLines(t, out)
+		if len(lines) != 2 || lines[0]["event"] != "run_started" {
+			t.Fatalf("stdout = %q; want the opening frame then the closing one", out)
+		}
+		_, data := finishedFrame(t, lines)
+		wantExitCode(t, data, exitNotStarted)
+	})
+
+	t.Run("a completed run brackets its outcome", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			SessionID: "s-1",
+			FinalText: "the answer",
+			Turns:     2,
+			Wrote:     []string{"main.go"},
+		}}
+		out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+		if err != nil {
+			t.Fatalf("a completed run returned an error: %v", err)
+		}
+		lines := jsonEventLines(t, out)
+		if len(lines) != 2 || lines[0]["event"] != "run_started" {
+			t.Fatalf("stdout = %q; want the opening frame then the closing one", out)
+		}
+		opened, ok := lines[0]["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("the opening frame carried no data object: %v", lines[0])
+		}
+		if opened["session"] == "" || opened["session"] == nil {
+			t.Error("the opening frame names no session")
+		}
+		if opened["mode"] != string(domain.ModePlan) {
+			t.Errorf("mode = %v; want the default %q", opened["mode"], domain.ModePlan)
+		}
+		if opened["version"] != apogee.Version() {
+			t.Errorf("version = %v; want the build string %q", opened["version"], apogee.Version())
+		}
+		_, data := finishedFrame(t, lines)
+		wantExitCode(t, data, 0)
+		if data["final_text"] != "the answer" {
+			t.Errorf("final_text = %v; want the run's answer", data["final_text"])
+		}
+		if wrote, _ := data["wrote"].([]any); len(wrote) != 1 || wrote[0] != "main.go" {
+			t.Errorf("wrote = %v; want the one path the run changed", data["wrote"])
+		}
+		if data["saved"] != true {
+			t.Errorf("saved = %v; the run wrote a record", data["saved"])
+		}
+		if data["error"] != nil {
+			t.Errorf("error = %v; a completed run failed at nothing", data["error"])
+		}
+	})
+
+	t.Run("a failed run brackets the failure", func(t *testing.T) {
+		stub := &stubRunner{
+			res: run.Result{SessionID: "s-2", FinalText: "half an answer", Turns: 1},
+			err: errors.New("apogee: the firing was cancelled"),
+		}
+		out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+		if err == nil {
+			t.Fatal("a failed run returned no error")
+		}
+		_, data := finishedFrame(t, jsonEventLines(t, out))
+		wantExitCode(t, data, exitRunFailed)
+		text, _ := data["error"].(string)
+		if !strings.Contains(text, "the firing was cancelled") {
+			t.Errorf("error = %v; want the failure the run reported", data["error"])
+		}
+	})
+
+	t.Run("a faulted run brackets the fault", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			SessionID: "s-3",
+			FinalText: "the run's last words",
+			Turns:     2,
+			Faulted:   true,
+			Fault:     "the model returned an empty reply",
+		}}
+		out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+		if err == nil {
+			t.Fatal("a faulted run was reported as a success")
+		}
+		_, data := finishedFrame(t, jsonEventLines(t, out))
+		wantExitCode(t, data, exitRunFaulted)
+		if data["faulted"] != true {
+			t.Errorf("faulted = %v; the final turn was abandoned", data["faulted"])
+		}
+		if data["fault"] != "the model returned an empty reply" {
+			t.Errorf("fault = %v; want the reason the engine reported", data["fault"])
+		}
+	})
+}
+
+// --format json replaces stdout and NOTHING else: every line this command narrates in its own voice
+// still goes to stderr, exactly as it does on the text path, and the answer that used to be printed
+// raw is now only in the stream (ADR 0075 decision 6).
+func TestHeadlessFormatJSONKeepsStderrProse(t *testing.T) {
+	stub := &stubRunner{res: run.Result{
+		SessionID: "s-1",
+		FinalText: "the answer",
+		Turns:     2,
+		Denied:    1,
+		Wrote:     []string{"main.go"},
+		Usage:     run.Usage{Calls: 1, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+	}}
+	out, errOut, err := headlessRun(t, stub, "--format", "json", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+	for _, want := range []string{
+		"session: s-1 · turns: 2 · denied: 1",
+		"changed — 1 file(s) this run:",
+		"usage: calls 1 · prompt 10 · completion 5 · total 15",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr lost %q; the prose path is unchanged under --format json:\n%s", want, errOut)
+		}
+	}
+	for _, line := range jsonEventLines(t, out) {
+		if line["event"] == nil {
+			t.Fatalf("stdout carried a line that is not an Event line: %v", line)
+		}
+	}
+	if strings.Contains(out, "\nthe answer\n") || strings.HasPrefix(out, "the answer\n") {
+		t.Errorf("the raw answer was printed into the JSONL stream:\n%s", out)
+	}
+}
+
+// A --format value this command does not know is a usage mistake, refused in TEXT mode: no stream
+// has been opened yet, so the refusal reads as prose like every other never-started refusal and
+// stdout stays empty rather than carrying a single JSON line saying "that is not a format".
+func TestHeadlessFormatRejectsUnknownValue(t *testing.T) {
+	stub := &stubRunner{}
+	out, _, err := headlessRun(t, stub, "--format", "yaml", "a prompt")
+	if err == nil {
+		t.Fatal("--format yaml was accepted")
+	}
+	if code := exitCodeFor(err); code != exitNotStarted {
+		t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+	}
+	if !strings.Contains(err.Error(), "--format") {
+		t.Errorf("the refusal does not name the flag: %q", err.Error())
+	}
+	if out != "" {
+		t.Errorf("stdout carried %q; nothing was ever opened on it", out)
+	}
+	if stub.called {
+		t.Error("the runner ran for an invocation the command refused")
+	}
+}
+
 // Cobra validates flags and the argument count BEFORE it calls RunE, so the exit convention has to
 // reach those refusals from outside the command body or they leave as bare errors and exit 1 —
 // telling a script the model ran and failed when nothing was ever sent.

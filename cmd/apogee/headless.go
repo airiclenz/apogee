@@ -16,8 +16,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
@@ -179,6 +181,14 @@ var discoverDelegationBeat = func(ctx context.Context, endpoint, model, apiKey s
 	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx)
 }
 
+// The two values `--format` accepts, and the whole of what this command offers a caller who is not
+// a human: text is the prose path this command has always had, and json is the versioned JSONL
+// Event lines of ADR 0075, which replace stdout entirely rather than decorating it.
+const (
+	formatText = "text"
+	formatJSON = "json"
+)
+
 // errHeadlessNoPrompt is the usage refusal when neither the argument nor stdin carries anything.
 // A headless run cannot ask what the user meant, so an empty prompt is refused rather than sent.
 var errHeadlessNoPrompt = errors.New(
@@ -197,6 +207,7 @@ var errHeadlessNoPrompt = errors.New(
 func newHeadlessCommand() *cobra.Command {
 	var opts config.Options
 	var noSave bool
+	var outputFormat string
 
 	cmd := &cobra.Command{
 		Use:   "headless [prompt]",
@@ -218,7 +229,9 @@ func newHeadlessCommand() *cobra.Command {
 			"The answer goes to stdout and everything else to stderr, so a pipeline reads\n" +
 			"only the model's text. A run that delegated states each sub-agent's context\n" +
 			"fill on a stderr line of its own, ahead of the closing summary — each child\n" +
-			"fills a window the run's own figures say nothing about. Exit codes: 0 the run\n" +
+			"fills a window the run's own figures say nothing about. Pass --format json to\n" +
+			"make stdout the versioned JSONL Event lines instead — one object per engine\n" +
+			"event, bracketed by a run_started/run_finished pair. Exit codes: 0 the run\n" +
 			"completed, 1 the run started and failed (model or tool error, cancellation, a\n" +
 			"record that would not save), 2 the run never started (usage, configuration, a\n" +
 			"refused mode).",
@@ -226,7 +239,7 @@ func newHeadlessCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHeadless(cmd, args, &opts, noSave)
+			return runHeadless(cmd, args, &opts, noSave, outputFormat)
 		},
 	}
 
@@ -257,6 +270,8 @@ func newHeadlessCommand() *cobra.Command {
 		"run with the lab Mechanisms off; Floor guards and structural reducers stay on (ADR 0071)")
 	flags.BoolVar(&noSave, "no-save", false,
 		"run the prompt and print the answer, but record no session")
+	flags.StringVar(&outputFormat, "format", formatText,
+		"what stdout carries: text (the answer) | json (the JSONL Event lines, ADR 0075)")
 
 	return cmd
 }
@@ -273,7 +288,116 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runHeadless is the command's body: resolve the prompt and the bindings, compose the Config the
+// runHeadless is the command's exit funnel: it reads the requested format, drives the body once,
+// and — under json — writes the closing frame on whichever path the body left by.
+//
+// The funnel exists because ADR 0075 decision 5 promises EXACTLY ONE `run_finished` on every exit
+// path, and the body has fifteen of them: eleven `notStarted` refusals, a failed run, an abandoned
+// final Turn and a success. Writing the frame at each would be fifteen chances to forget one, and
+// a consumer would meet the omission as an empty stdout it has to interpret. Funnelling makes the
+// promise structural instead, and leaves the body's own control flow — and therefore the text
+// path's every byte — exactly as it was.
+//
+// An unknown format is refused in TEXT mode: no stream exists yet to carry the refusal, and a
+// JSONL stream whose single line said "that is not a format" would be a worse answer than the
+// prose every other usage mistake gets. Cobra has already parsed the flag by the time this runs,
+// so this is the only point that can judge its VALUE (an unknown flag NAME is the FlagErrorFunc's).
+func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave bool, outputFormat string) error {
+	switch outputFormat {
+	case formatText:
+		_, err := runHeadlessBody(cmd, args, opts, noSave, nil)
+		return err
+	case formatJSON:
+		lines := eventjson.New(cmd.OutOrStdout(), eventjson.Options{})
+		res, err := runHeadlessBody(cmd, args, opts, noSave, lines)
+		lines.RunFinished(runFinishedFrame(res, err))
+		return err
+	default:
+		return notStarted(fmt.Errorf(
+			"apogee headless: --format %s is not an output format (use --format text or --format json)",
+			outputFormat))
+	}
+}
+
+// runFinishedFrame composes the closing frame from what the run reached and the error it left by.
+// It is the one place the stream's exit code is decided, and it deliberately does NOT ask
+// exitCodeFor on a nil error: that helper answers 1 for "an error carrying no code", which is the
+// right default for an error and the exact opposite of the truth for a run that succeeded.
+func runFinishedFrame(res run.Result, err error) eventjson.RunFinished {
+	frame := eventjson.RunFinished{
+		Turns:        res.Turns,
+		Denied:       res.Denied,
+		Faulted:      res.Faulted,
+		Fault:        res.Fault,
+		Title:        res.Title,
+		FinalText:    res.FinalText,
+		Wrote:        res.Wrote,
+		ContextFiles: contextFilesFrame(res.ContextFiles),
+		UndoNote:     res.UndoNote,
+		// The RECORD, not the run: --no-save leaves SessionID empty on a run that carried an id
+		// all along, and this is what a consumer reads before it feeds an id to `apogee undo`.
+		Saved:     res.SessionID != "",
+		Usage:     usageFrame(res.Usage),
+		SubAgents: subAgentFrames(res.SubAgents),
+	}
+	if err != nil {
+		frame.ExitCode = exitCodeFor(err)
+		text := err.Error()
+		frame.Error = &text
+	}
+	return frame
+}
+
+// contextFilesFrame restates run.Result.ContextFiles in the frame's own types. The mapping is
+// mechanical and lives here rather than in internal/eventjson because that package renders the
+// engine's Events and must not reach into internal/run to compose a frame (ADR 0075: the frames
+// are the Driver's to fill).
+func contextFilesFrame(report domain.ContextFilesReport) eventjson.ContextFiles {
+	var files []eventjson.ContextFileNote
+	for _, note := range report.Files {
+		files = append(files, eventjson.ContextFileNote{Name: note.Name, Bytes: note.Bytes, Err: note.Err})
+	}
+	return eventjson.ContextFiles{
+		Files:          files,
+		StandingTokens: report.StandingTokens,
+		SystemShare:    report.SystemShare,
+	}
+}
+
+// usageFrame restates the Firing's own cumulative token accounting for the frame.
+func usageFrame(u run.Usage) eventjson.Usage {
+	return eventjson.Usage{
+		Calls:              u.Calls,
+		PromptTokens:       u.PromptTokens,
+		CompletionTokens:   u.CompletionTokens,
+		TotalTokens:        u.TotalTokens,
+		CachedPromptTokens: u.CachedPromptTokens,
+	}
+}
+
+// subAgentFrames restates each finished sub-agent run's fill and spend for the frame, in the
+// finish order the Result already carries. A Firing that delegated nothing composes nothing, so
+// the member is null rather than an empty list.
+func subAgentFrames(runs []run.SubAgentUsage) []eventjson.SubAgentUsage {
+	var frames []eventjson.SubAgentUsage
+	for _, r := range runs {
+		frames = append(frames, eventjson.SubAgentUsage{
+			Used:               r.Used,
+			Limit:              r.Limit,
+			Task:               r.Task,
+			Name:               r.Name,
+			Model:              r.Model,
+			Calls:              r.Calls,
+			PromptTokens:       r.PromptTokens,
+			CompletionTokens:   r.CompletionTokens,
+			TotalTokens:        r.TotalTokens,
+			CachedPromptTokens: r.CachedPromptTokens,
+		})
+	}
+	return frames
+}
+
+// runHeadlessBody is the command's body: resolve the prompt and the bindings, compose the Config the
 // runner is handed, run it once, and route what came back — the answer to stdout, everything else
 // to stderr. It is split out of RunE so the whole path is one testable function.
 //
@@ -283,7 +407,16 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 // decides — the prompt, the mode gate, the confinement backend and its eligibility ruling, the
 // scratch sweep, the notices this command prints in its own voice, and the store the record lands
 // in.
-func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave bool) error {
+//
+// lines is the Event-line stream when the caller asked for one and nil under `--format text`, which
+// is the whole of what this function does differently for the two formats: it stamps the session id
+// on the stream once the run has one, writes the opening frame at the moment the run is committed
+// to, and withholds the plain-text answer from stdout that the frame will carry. The CLOSING frame
+// is never written here — runHeadless above owns it, on every path out of this function.
+//
+// It returns the Result beside the error because that funnel needs both: a refusal that never
+// started a run still carries what the session had already loaded, and the frame reports it.
+func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, noSave bool, lines *eventjson.Writer) (run.Result, error) {
 	// Every line this command narrates leaves through ONE lock from here on. The Hook Runner built
 	// below reports a Hook's trouble on a Hook worker's goroutine (internal/hooks), while this
 	// function is still writing its own notices and its closing summary on the goroutine it was
@@ -296,13 +429,13 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// Before anything is resolved or constructed: with no prompt there is no run to configure.
 	prompt, err := resolveHeadlessPrompt(args, cmd.InOrStdin())
 	if err != nil {
-		return notStarted(err)
+		return run.Result{}, notStarted(err)
 	}
 
 	// The same resolution a session performs (flag > env > file > default), so a headless run
 	// talks to the server, and runs with the Mechanisms, a session on this host would.
 	if err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
-		return notStarted(err)
+		return run.Result{}, notStarted(err)
 	}
 	// This command's own BOTTOM layer is plan. ApplyConfig's is the interactive ladder's
 	// ask-before — a mode that consults a human — so leaving it in place would make the bare
@@ -314,20 +447,20 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	}
 	mode, err := domain.ParseMode(opts.Mode)
 	if err != nil {
-		return notStarted(err)
+		return run.Result{}, notStarted(err)
 	}
 	// The refusal happens HERE, before a Confiner is built or a model is bound: run.Once's own
 	// ErrMode is the library's backstop, and a CLI that let the composition run first would spend
 	// the work only to report a decision it could have made from the flag alone.
 	if mode != domain.ModePlan && mode != domain.ModeAuto {
-		return notStarted(fmt.Errorf(
+		return run.Result{}, notStarted(fmt.Errorf(
 			"apogee headless: --mode %s consults a human and an unattended run has none "+
 				"(use --mode plan or --mode auto)", mode))
 	}
 
 	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 	if err != nil {
-		return notStarted(err)
+		return run.Result{}, notStarted(err)
 	}
 
 	// This run's own Hook Runner (ADR 0073), built as soon as the workspace it is rooted in is
@@ -348,7 +481,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// all ran.
 	hookRunner, err := firingHooks(opts.Hooks, roots.workspace, nil, func(line string) { cmd.PrintErrln(line) })
 	if err != nil {
-		return notStarted(err)
+		return run.Result{}, notStarted(err)
 	}
 
 	// The scratch sweep, run once here for the reason runRoot runs it at boot (wire.go): this run
@@ -418,7 +551,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	if mode == domain.ModeAuto {
 		if blocked := probe.AutoUnattendedBlocked(
 			"a headless run", probe.BackendName(confiner), confiner.Capabilities(), opts.ConfineToWorkspace); blocked != "" {
-			return notStarted(fmt.Errorf(
+			return run.Result{}, notStarted(fmt.Errorf(
 				"apogee headless: --mode auto cannot run on this host — %s (use --mode plan, or "+
 					"run unconfined with `confine-to-workspace: false` in ~/.apogee/config.yaml, "+
 					"which is safe only on a disposable machine)", blocked))
@@ -469,7 +602,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// otherwise never be reported at all (ADR 0015 §1).
 	manualIDs, retiredNotices, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
-		return notStarted(err)
+		return run.Result{}, notStarted(err)
 	}
 	// A key naming a RETIRED Mechanism is tolerated rather than refused — it was valid at the
 	// release before the removal — and this is where this Driver says so. Without the line the run
@@ -487,6 +620,14 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// scratch inside the box and put its working files wherever else it could reach — the workspace
 	// itself, under an Auto fence.
 	recordID := session.NewID(time.Now())
+	// The stream's identity, stamped the moment the run acquires one. Every line written from here
+	// on carries it and every line before it carries null — a refusal that happened before the id
+	// existed reports honestly that the run had none, rather than being back-dated into one. The
+	// source is this Driver's own recordID and never run.Result.SessionID, which --no-save leaves
+	// empty on a run that had an id all along (ADR 0075 decision 5).
+	if lines != nil {
+		lines.SetSession(recordID)
+	}
 
 	// The construction surface every unattended run shares (wire_firing.go), reached from this
 	// Driver's own inputs: the startup selection as the bound entry, this invocation's roots and
@@ -508,7 +649,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		hooks:     hookRunner,
 	})
 	if err != nil {
-		return notStarted(err)
+		return run.Result{}, notStarted(err)
 	}
 	for _, n := range notices {
 		cmd.PrintErrln(n)
@@ -538,7 +679,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// internal/notice. The test below still pins the exact sentence, which is what catches a drift
 	// the composer cannot.
 	if !routing.Beat.Answered {
-		return notStarted(errors.New(notice.ServerOffline(entry.Endpoint, routing.Beat.Failure)))
+		return run.Result{}, notStarted(errors.New(notice.ServerOffline(entry.Endpoint, routing.Beat.Failure)))
 	}
 
 	// The shared sessions store, built whatever --no-save says: the sweep below is about the
@@ -577,6 +718,26 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// prune notice → Hooks → nothing: the renderer sees every Event first, and installing Hooks
 	// cannot change what this command prints.
 	cfg.Events = pruneNoticeSink{inner: cfg.Events, out: cmd.ErrOrStderr()}
+
+	// The opening frame, written HERE and not a line earlier: everything above this point can still
+	// refuse the run, and a `run_started` ahead of those refusals would announce a run that never
+	// happened. What it states is what the run was asked to BE — the bindings and the posture it
+	// was composed with — before it has done anything at all. The model is the one the composer
+	// actually bound (a per-model rebind may have moved it off the entry's own `model:`), and the
+	// version is the full build string `apogee --version` prints, so a consumer can tell which
+	// binary produced a stream it is reading back later.
+	if lines != nil {
+		lines.RunStarted(eventjson.RunStarted{
+			Session:   recordID,
+			Workspace: roots.workspace,
+			Model:     cfg.Model,
+			Server:    entry.Name,
+			Mode:      string(mode),
+			Bypass:    opts.Bypass,
+			Confined:  opts.ConfineToWorkspace,
+			Version:   apogee.Version(),
+		})
+	}
 
 	// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a
 	// headless run delegates to the `sub-agents-server:` entry exactly as a session does, and both
@@ -621,7 +782,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// line would report a run that never happened. friendlyConstructErr names the rungs still open
 	// for the Auto case and passes every other refusal through untouched.
 	if runErr != nil && res.Turns == 0 {
-		return notStarted(friendlyConstructErr(runErr))
+		return res, notStarted(friendlyConstructErr(runErr))
 	}
 
 	// The product, first and alone on stdout — before the summary, before any error — so a
@@ -638,8 +799,15 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// invocation (the fallback only differs when a caller has wired an out writer, which is
 	// tests and nothing else). The product goes to real stdout; notices and the summary below
 	// travel by PrintErrln, which does target the err stream.
-	if text := sanitize.StripEscapes(res.FinalText); text != "" {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), text)
+	//
+	// It is skipped entirely under `--format json`: there stdout IS the Event lines and nothing
+	// else (ADR 0075 decision 6), the answer already rides them twice over — every `message` line
+	// and the closing frame's `final_text` — and a raw line printed into the middle of a JSONL
+	// stream would break every consumer of it.
+	if lines == nil {
+		if text := sanitize.StripEscapes(res.FinalText); text != "" {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), text)
+		}
 	}
 	// What the run CHANGED on disk, ahead of the readings: a header naming the count and one
 	// indented path per entry (writtenFilesLines composes; the daemon logs the same block). A run
@@ -681,9 +849,9 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		// it stopped, and naming that record is what lets a human open the interrupted run rather
 		// than guess at it (the wording scheduleWiring.fire uses for the same partial).
 		if res.SessionID != "" {
-			return runFailed(fmt.Errorf("%w (partial run saved as %s)", runErr, res.SessionID))
+			return res, runFailed(fmt.Errorf("%w (partial run saved as %s)", runErr, res.SessionID))
 		}
-		return runFailed(runErr)
+		return res, runFailed(runErr)
 	}
 	// An abandoned final Turn is exit 3, and it is decided AFTER the failure branch above on
 	// purpose: a run that errored is exit 1 whether or not it also faulted, because the error is
@@ -695,9 +863,9 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		if res.SessionID != "" {
 			err = fmt.Errorf("%w (partial run saved as %s)", err, res.SessionID)
 		}
-		return exitError{code: exitRunFaulted, err: err}
+		return res, exitError{code: exitRunFaulted, err: err}
 	}
-	return nil
+	return res, nil
 }
 
 // serialWriter guards one io.Writer with a mutex, so goroutines that narrate at the same time can
