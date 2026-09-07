@@ -143,7 +143,12 @@ go build ./... && go test -race -count=1 ./cmd/apogee/ -run 'TestHeadless|TestPr
 ```
 **Commit:** `feat(headless): stream the engine's Events as Event lines under --format json`
 
-## 6. Headless: SIGPIPE and the hard second interrupt
+## 6. Headless: SIGPIPE and the hard second interrupt — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): consequential edit — cmd/apogee/doc.go: made necessary by the two new files (TestDocMapNamesEveryFile fails until the package file map names sigpipe_unix.go and sigpipe_windows.go).
+NOTES (2026-09-07): the unit test models the FIRST press by cancelling the command's own context and delivering the same signal on the injected channel — a real SIGTERM at this process would end the test binary — so `interruptSignals` is the seam and `signal.NotifyContext`'s half is stood in for by the cancel. The second press is a plain send on that channel.
+NOTES (2026-09-07): the "one value only → no hard exit" case is a SUBTEST of TestHeadlessSecondInterruptExitsHard rather than a test of its own, so the item's own `-run 'TestHeadlessSecondInterrupt|TestE2EEventLines'` acceptance covers both halves.
+NOTES (2026-09-07): the e2e claim was negative-controlled — with `ignoreSIGPIPE` stubbed to a no-op the run dies with `signal: broken pipe` (exit -1) and the test fails, so it is not passing by accident.
 
 **What:** New `cmd/apogee/sigpipe_unix.go` (`//go:build !windows`): `func ignoreSIGPIPE() { signal.Ignore(syscall.SIGPIPE) }`; `cmd/apogee/sigpipe_windows.go` (`//go:build windows`): no-op. Called in `runHeadless` only when `--format json`, before the first stdout write. Second interrupt: beside `signal.NotifyContext` at `:569-570`, under `json` register `signal.Notify(ch, os.Interrupt, syscall.SIGTERM)`; a goroutine that sees a **second** signal after the context is cancelled prints `apogee headless: second interrupt — exiting without waiting for the run` on stderr and calls `hardExit(exitRunFailed)`, where `var hardExit = os.Exit` is a package seam beside `runOnce` (`:96`). The goroutine stops with the run. Text mode gains neither. Depends on item 5.
 

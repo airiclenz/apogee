@@ -59,6 +59,12 @@ const (
 // like any other error — main's error path reads the code back off it — so a deferred teardown
 // (the Confiner's Close, above all) still runs; calling os.Exit inside a command body would skip
 // every one of them.
+//
+// The hard SECOND interrupt (hardExit, watchSecondInterrupt) is the one deliberate exception in
+// this command, and it is not a hole in the rule: a human pressing Ctrl-C twice is asking for the
+// wind-down ITSELF to stop, so that path skips the deferred teardown on purpose — no confinement
+// Close, no Hook drain, no closing frame — and every other exit in this file still travels as an
+// error through here.
 type exitError struct {
 	code int
 	err  error
@@ -96,6 +102,60 @@ func exitCodeFor(err error) int {
 // is the single point a test replaces, so prompt resolution, composition, output routing and exit
 // codes are all provable without a live model. Production never reassigns it.
 var runOnce = run.Once
+
+// hardExit is the seam onto os.Exit, and the only place in this binary's headless path that may
+// reach it (the exitError rule above says why). It exists so the second-interrupt watch is
+// provable: a test that could not replace it would end the test binary instead of asserting on
+// the code it asked for. Production never reassigns it.
+var hardExit = os.Exit
+
+// interruptSignals is the seam onto the SECOND-interrupt registration: the same two signals
+// signal.NotifyContext already watches, delivered a second time to a channel of this command's
+// own, because the context can only be cancelled once and the second press has to be visible as
+// an event rather than as a state.
+//
+// It is a variable for the reason runOnce is: a test cannot raise a real SIGTERM at this process
+// without ending the suite it runs in, so the whole watch — count to two, print, exit hard —
+// would otherwise be unassertable. Replacing it hands the test the very channel the watch reads.
+// Production never reassigns it.
+var interruptSignals = func(ch chan<- os.Signal) (stop func()) {
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	return func() { signal.Stop(ch) }
+}
+
+// secondInterruptNotice is the whole of what a hard exit says on its way out. It goes to stderr,
+// never to the stream: the exit writes no `run_finished` — there is no run left to finish — so the
+// one honest place to say what happened is the channel the human is watching.
+const secondInterruptNotice = "apogee headless: second interrupt — exiting without waiting for the run"
+
+// watchSecondInterrupt ends the PROCESS on a second interrupt, and does nothing at all on the
+// first: that one is already the polite stop, cancelling the run's context so the Firing unwinds
+// with its record saved, its stderr prose printed and its closing frame written.
+//
+// The second press is a different request. Under `--format json` the wind-down can take real time
+// — a Turn that has to notice the cancellation, a record to write, Hooks draining on their five
+// second grace — and a human watching a stream that has stopped moving has no way to tell a slow
+// teardown from a wedged one. So the second press is taken literally: one line on stderr and
+// [hardExit], skipping every deferred teardown in this command (ADR 0075 decision 9). Nothing is
+// half-done that was not already half-done by the first interrupt; what is lost is the tidying.
+//
+// It ends with the run — done is closed as [runHeadlessBody] returns — so a run that finishes
+// normally leaves no goroutine listening for a signal nobody will send. Text mode registers none
+// of this: its stdout is prose a reader can simply stop reading, and a second Ctrl-C there has
+// always been the terminal's own affair.
+func watchSecondInterrupt(sigs <-chan os.Signal, done <-chan struct{}, errOut io.Writer) {
+	select {
+	case <-sigs:
+	case <-done:
+		return
+	}
+	select {
+	case <-sigs:
+		_, _ = fmt.Fprintln(errOut, secondInterruptNotice)
+		hardExit(exitRunFailed)
+	case <-done:
+	}
+}
 
 // prewarmLabelWalk is the seam onto the Windows label-walk pre-warm, for the same reason runOnce
 // and newConfiner are seams: platform.PrewarmLabelWalk is an empty function off Windows
@@ -316,6 +376,11 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		_, err := runHeadlessBody(cmd, args, opts, noSave, nil)
 		return err
 	case formatJSON:
+		// Disarmed BEFORE the first line is written, and only on this branch: from here on a
+		// consumer that walks away breaks the STREAM rather than the process (sigpipe_unix.go).
+		// The text path keeps the default disposition it has always had, where dying at a closed
+		// pipe is the right and expected behaviour for a program whose stdout is its prose.
+		ignoreSIGPIPE()
 		// Report is the stream's only word about its own failure, and it is spent on stderr rather
 		// than on the stream: whatever broke is the stdout the lines were being written to, so the
 		// stream is precisely the channel that cannot carry the news. The Writer calls it once —
@@ -533,6 +598,11 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// needs to put the disk back (ADR 0020 §2) — the same optional-interface assertion runRoot
 	// makes, for the same reason. It is deferred, which is why every failure below travels as a
 	// returned error: an os.Exit in this function would leave the labels on the disk.
+	//
+	// The hard second interrupt (watchSecondInterrupt) is the one exit that does exactly that, and
+	// leaves them there deliberately: the human asked for the process to stop, not for it to tidy
+	// up first, and a label walk is exactly the tidying that would hold the shell for seconds. The
+	// labels are not lost — a later session reverts them (winlabel.TeardownNotice's own remedy).
 	confiner := newConfiner()
 	if closer, ok := confiner.(interface{ Close() error }); ok {
 		defer func() {
@@ -728,6 +798,19 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// its partial answer and still saves its record.
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// The second press, under `--format json` alone: the escape hatch a stream consumer needs when
+	// the polite stop above is taking longer than the human is willing to wait
+	// ([watchSecondInterrupt] carries the reasoning). The channel is buffered for the two presses
+	// it counts, because signal.Notify drops what a full channel cannot take; the registration and
+	// the watch both end with this function, so a run nobody interrupts leaves nothing behind.
+	if lines != nil {
+		sigs := make(chan os.Signal, 2)
+		defer interruptSignals(sigs)()
+		done := make(chan struct{})
+		defer close(done)
+		go watchSecondInterrupt(sigs, done, cmd.ErrOrStderr())
+	}
 
 	// The one Event this Driver renders live. Everything else a headless run reports comes back on
 	// Result, but a prune happens MID-run and leaves no trace on the answer, so a human watching an

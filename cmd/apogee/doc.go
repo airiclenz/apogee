@@ -103,7 +103,10 @@
 // by name, and the unattended run composed over the pair (ADR 0034, ADR 0055).
 //
 // The subcommands: headless.go is `apogee headless`, one prompt run to completion with
-// nobody watching, and the binary's only distinct exit codes; daemon.go `apogee daemon`,
+// nobody watching, and the binary's only distinct exit codes — with sigpipe_unix.go
+// disarming SIGPIPE for its `--format json` Event stream, so a consumer that stops reading
+// breaks the stream rather than the run (ADR 0075), and sigpipe_windows.go the no-op twin
+// on the OS that has no such signal; daemon.go `apogee daemon`,
 // the standing process behind the schedules file — seed, single-instance lock, load,
 // adopt, live-reload, shut down — plus the timestamped stdout log that is its whole user
 // interface (ADR 0034); daemoninstall.go `apogee daemon install`, which renders the host

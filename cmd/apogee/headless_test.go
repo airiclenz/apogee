@@ -2514,6 +2514,149 @@ func TestHeadlessFormatJSONCancelledRunWritesTheFrame(t *testing.T) {
 	}
 }
 
+// The SECOND interrupt ends the PROCESS, not the run. The first is the polite stop this command
+// has always had — the run unwinds, its record is saved and the funnel writes the closing frame —
+// but under `--format json` that wind-down is exactly what a human pressing Ctrl-C again is asking
+// to escape, so the watch says one line on stderr and exits hard: exit 1, no `run_finished`, no
+// deferred teardown (ADR 0075 decision 9). One press is not two, which the second case pins.
+//
+// The runner is a direct swap rather than stubRunner because the claim is about behaviour DURING a
+// run that is still going, and stubRunner returns the moment it is called.
+func TestHeadlessSecondInterruptExitsHard(t *testing.T) {
+	t.Run("a second interrupt takes the process down", func(t *testing.T) {
+		got := driveInterruptedHeadless(t, 2)
+
+		if !got.exited {
+			t.Fatalf("the second interrupt did not exit hard; stderr:\n%s", got.errOut)
+		}
+		if got.code != exitRunFailed {
+			t.Errorf("hard exit code = %d; want %d — the run was interrupted, not never started",
+				got.code, exitRunFailed)
+		}
+		if n := strings.Count(got.errOut, secondInterruptNotice); n != 1 {
+			t.Errorf("the second interrupt was announced %d times, want exactly once:\n%s",
+				n, got.errOut)
+		}
+		// The snapshot is stdout as it stood INSIDE the exit, which is the only honest place to
+		// assert the omission: production ends the process there, and it is the test's own stub
+		// returning that lets the released runner reach the funnel afterwards.
+		if strings.Contains(got.snapshot, `"run_finished"`) {
+			t.Errorf("the hard exit wrote a closing frame; the run never finished:\n%s", got.snapshot)
+		}
+		if !strings.Contains(got.snapshot, `"run_started"`) {
+			t.Errorf("the stream had not even opened when the process was taken down:\n%s", got.snapshot)
+		}
+	})
+
+	t.Run("one interrupt leaves the run to finish", func(t *testing.T) {
+		got := driveInterruptedHeadless(t, 1)
+
+		if got.exited {
+			t.Fatalf("one interrupt exited hard with code %d", got.code)
+		}
+		if strings.Contains(got.errOut, secondInterruptNotice) {
+			t.Errorf("the hard-exit line was printed for a single interrupt:\n%s", got.errOut)
+		}
+		if got.err == nil {
+			t.Fatal("a cancelled run returned no error")
+		}
+		_, data := finishedFrame(t, jsonEventLines(t, got.out))
+		wantExitCode(t, data, exitRunFailed)
+	})
+}
+
+// interruptedHeadless is what one driven `--format json` run left behind: what the hard-exit stub
+// saw (never called ⇒ exited false), and what the whole run wrote once it was let go.
+type interruptedHeadless struct {
+	exited   bool
+	code     int
+	snapshot string
+	out      string
+	errOut   string
+	err      error
+}
+
+// driveInterruptedHeadless runs one `apogee headless --format json` whose runner blocks until its
+// context is cancelled and then blocks again, delivers interrupts through the interruptSignals
+// seam, and returns what the exit stub and the finished run saw.
+//
+// The signals are injected rather than raised: a real SIGTERM at this process would end the test
+// binary, so the seam hands the test the very channel the watch reads while the FIRST press is
+// modelled where the production first press lands — on the command's context, which is what
+// signal.NotifyContext cancels. The second press then meets a run that is already winding down,
+// which is the whole case.
+//
+// It swaps package-level seams, so nothing that calls it runs in parallel.
+func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless {
+	t.Helper()
+
+	blocked := make(chan struct{})
+	released := make(chan struct{})
+	exited := make(chan struct{})
+	registered := make(chan struct{})
+
+	var outBuf, errBuf bytes.Buffer
+	var got interruptedHeadless
+	var sigs chan<- os.Signal
+
+	prevRunner, prevConfiner := runOnce, newConfiner
+	prevExit, prevSignals := hardExit, interruptSignals
+	t.Cleanup(func() {
+		runOnce, newConfiner = prevRunner, prevConfiner
+		hardExit, interruptSignals = prevExit, prevSignals
+	})
+	// The runner the real one stands in for: it notices the cancellation, then holds — the state a
+	// run is in while it saves its record and drains its Hooks, and the only state in which a
+	// second press means anything.
+	runOnce = func(ctx context.Context, _ run.Spec) (run.Result, error) {
+		<-ctx.Done()
+		close(blocked)
+		<-released
+		return run.Result{SessionID: "s-9", FinalText: "half an answer", Turns: 1},
+			fmt.Errorf("apogee: the firing was cancelled: %w", context.Canceled)
+	}
+	newConfiner = func() apogee.Confiner { return fenceableHost }
+	hardExit = func(code int) {
+		got.exited, got.code, got.snapshot = true, code, outBuf.String()
+		close(released)
+		close(exited)
+	}
+	interruptSignals = func(ch chan<- os.Signal) func() {
+		sigs = ch
+		close(registered)
+		return func() {}
+	}
+	swapAnsweringBeat(t)
+	t.Setenv(config.EnvMode, "")
+
+	cmd := newHeadlessCommand()
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&errBuf)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", testConfigHome(t, ""), "--workspace", t.TempDir(),
+		"--format", "json", "a prompt"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- cmd.ExecuteContext(ctx) }()
+
+	<-registered
+	// The first press: the context ends, and the same signal reaches the watch's own channel —
+	// signal.Notify delivers to every registered channel, NotifyContext's included.
+	cancel()
+	sigs <- os.Interrupt
+	<-blocked
+	if interrupts > 1 {
+		sigs <- os.Interrupt
+		<-exited
+	} else {
+		close(released)
+	}
+	got.err = <-done
+	got.out, got.errOut = outBuf.String(), errBuf.String()
+	return got
+}
+
 // A --format value this command does not know is a usage mistake, refused in TEXT mode: no stream
 // has been opened yet, so the refusal reads as prose like every other never-started refusal and
 // stdout stays empty rather than carrying a single JSON line saying "that is not a format".
