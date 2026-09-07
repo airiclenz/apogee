@@ -203,3 +203,38 @@ rejected. Six booleans are cheap, and they keep the floor an opinion rather than
 - A future intervention still has a route in: arm it as an experimental hook, measure it under ADR
   0009, and bring a record. What it may **not** do is join a frozen shipped catalogue on the
   strength of a port.
+
+## Amendment (2026-09-07) — a seventh guard: tool-call salvage
+
+**Tool-call salvage is admitted as a Floor guard under Decision 1's test, and Decision 5's six keys
+become seven.** The guard reads a tool call a native-profile model wrote out as JSON in its own
+text — a fenced block, a `<tool_call>…</tool_call>` pair, or the whole trimmed content — puts it
+back on the response as a real call, and hands the text on without the block it salvaged. Its key
+is `tool-call-salvage`: top-level, file-only, defaulting to `true` like the other six, and
+`domain.FloorConfig`'s `DisableToolCallSalvage` keeps the zero value on. Decision 5's "six
+`Disable…` booleans" reads as seven; nothing else in it changes.
+
+It passes the test. **(a)** It fires only after the model has already failed to put the call on the
+wire, and it changes only what the engine reads back out of a reply the model has finished
+producing — it says nothing to the model and steers nothing. **(b)** The shapes it reads are JSON,
+not a per-model dialect, so there is nothing per-model to prove. **(c)** It cannot regress Bypass:
+with the guard off, a reply whose only call sits in its text is an empty or narrating Turn, and
+dispatching the call the model meant is strictly more than that.
+
+**It differs from the promoted six in one respect, and Decision 1's ordering rule is extended for
+it.** Each of the six answers a failed Turn with a correction, so among them the first to fire wins
+and the rest do not run. Salvage does not correct a response — it **completes** one — so it runs
+**first in the post-response chain and does not short-circuit**: it returns no retry, and the four
+correcting guards below it then judge the response the model *meant*, rather than answering a Turn
+that only looked empty or narrating. A firing surfaces as an ordinary `FloorGuardEvent` keyed by
+`tool-call-salvage` with `Detail` naming the salvaged tools; under Decision 4's rendering rule the
+notice is debug-view only.
+
+**It is a new guard, not a promoted catalogue row.** Decision 3's per-row verdicts stand unchanged
+and the catalogue stays empty and frozen. The archived catalogue's finding that the campaign rig
+is native-profile only, so apogee "deliberately renders no tool text and parses none from content"
+([mechanism-catalogue.md:429-449](../design/archived/mechanism-catalogue.md)), describes the
+**native profile's parse seam** — the OpenAI `tools` array offered and structured `tool_calls`
+expected back — and not the floor. That seam is exactly what this guard sits behind: it leaves the
+parse seam alone and recovers the call the server passed through as visible content, which is the
+failure that entry recorded.

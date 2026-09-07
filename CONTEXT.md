@@ -2,7 +2,7 @@
 
 Apogee is a terminal **coding agent** built for smaller local models — while working
 even better with bigger ones — that owns the full agentic loop — provider, tools,
-context, and sessions — and runs six **Floor guards** inside that loop: engine behaviour
+context, and sessions — and runs seven **Floor guards** inside that loop: engine behaviour
 every model runs with, above which a gated, self-regulating **Mechanism** lab surface can be
 armed for measurement.
 The hard constraint, inherited unchanged from the predecessor projects: **nothing Apogee puts in
@@ -701,7 +701,7 @@ shapes the request **without steering it** — so it needs no per-model proof an
 Bypass ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)).
 A Floor guard is **not a Mechanism**: no catalogue row, no `MechanismID`, no descriptor, no
 Capability, no strikes and no Turn-Budget throttle — the per-Turn `maxPostResponseRetries` bound
-is the only limiter the post-response guards share. **Six ship, on in every arm** — Bypass
+is the only limiter the post-response guards share. **Seven ship, on in every arm** — Bypass
 included — each switched off by exactly one top-level, **file-only** boolean (no flag, no env;
 editable live in `/settings`) whose key names it:
 - **tool-call repair** (`tool-call-repair`) — an unknown tool, malformed arguments or a missing
@@ -709,6 +709,12 @@ editable live in `/settings`) whose key names it:
   engine *has* but this request's menu **withdrew** (Plan's filtered menu, a delegate's wrap-up Turn)
   is left alone: that call belongs to the mode, and the mode's own refusal is the answer that reaches
   the model.
+- **tool-call salvage** (`tool-call-salvage`) — a reply from a **native-profile** model that carries
+  no wire call but wrote one out as JSON in its own text — fenced, wrapped in `<tool_call>` tags, or
+  as the whole trimmed content — read back as the call the model meant, and the text handed on
+  without the block it salvaged. Alone among the seven it **completes** a response rather than
+  correcting one, so it runs **first** and does not short-circuit: the four repair guards below it
+  judge the response the model meant rather than a Turn that only looked empty.
 - **tool-loop breaker** (`tool-loop-breaker`) — a response repeating the previous Turn's exact
   calls answered with a directive that names the repeat and steers at the remaining work.
   **[Exchange](#turns-and-stepping)-scoped**, scan and recap both: a human re-asking for the same
@@ -723,7 +729,7 @@ editable live in `/settings`) whose key names it:
   the Budget trimmed in the **request projection**, the conversation itself untouched (see
   [Tool-result capping](#tool-result-capping)).
 The decision logic is **pure policy** in `internal/floor`; the seams that call it, the live on/off
-gate and the events a firing emits are `internal/agent`'s. `domain.FloorConfig` spells the six as
+gate and the events a firing emits are `internal/agent`'s. `domain.FloorConfig` spells the seven as
 `Disable…` bools, so an embedder handing `New` a bare `Config` gets the **whole floor**. A firing
 reaches every Driver as a **`FloorGuardEvent`** keyed by the guard's config key
 (`MechanismFiredEvent` stays for the lab rows).

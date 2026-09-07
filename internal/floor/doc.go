@@ -15,7 +15,7 @@
 // internal/agent, never internal/tools, never the root module path (ADR 0010).
 //
 // Every guard is opted out of individually through domain.FloorConfig, whose ZERO VALUE keeps all
-// six ON: the fields are Disable… bools, so an embedder that constructs a bare Config still gets
+// seven ON: the fields are Disable… bools, so an embedder that constructs a bare Config still gets
 // the floor, and only a deliberate `<key>: false` in config.yaml takes one away.
 //
 // # The files, one line each

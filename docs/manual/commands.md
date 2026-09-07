@@ -404,9 +404,9 @@ than as a blank box: the catalogue retired in v0.20.0
 ([ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)), and
 rows come back the moment a bench Driver registers experimental ones of its own.
 
-The six **[Floor guards](configuration.md)** that row points at are not in that list, because they
+The seven **[Floor guards](configuration.md)** that row points at are not in that list, because they
 are not switches you arm — they are on already. Each is an ordinary `on`/`off` row in the pane's
 **Session** section, edited in place like any other boolean and applied to the running session:
-`tool-call-repair`, `tool-loop-breaker`, `empty-response-recovery`, `tool-use-enforcer`,
-`read-cache` and `tool-result-cap`.
+`tool-call-repair`, `tool-call-salvage`, `tool-loop-breaker`, `empty-response-recovery`,
+`tool-use-enforcer`, `read-cache` and `tool-result-cap`.
 

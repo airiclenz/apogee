@@ -89,7 +89,15 @@ NOTES (2026-09-07): the TUI already renders `FloorGuardEvent.Detail` in the hidd
 **Acceptance:** `go build ./... && go test ./internal/floor/ ./internal/agent/ ./internal/processing/ ./internal/config/ && go test ./cmd/apogee/ -run 'SettingsRows|Salvage|EveryEditableSettingKey|ManualDocumentsEverySettingsKey'`
 **Commit:** `feat(agent): tool-call salvage floor guard runs a JSON call a native-profile model left in its text`
 
-## 4. Document the seventh Floor guard
+## 4. Document the seventh Floor guard — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): the plan's `README.md:241` cite is stale — at BASE and at HEAD that line is the Documentation table's Configuration row ("the floor guards"), which carries no count and no enumeration and needs no edit. README's only guard enumeration is the "Why apogee" floor bullet the regression guard names as `README.md:35`; the seventh one-liner and the count went there.
+
+NOTES (2026-09-07): the item's regression guard says "The Go-comment sites belong to item 3", but item 3's own site list did not name `internal/floor/doc.go` and its commit left `doc.go:18`'s "keeps all six ON" standing. The file is in this item's `Files:` list and inside its acceptance grep, so the count was fixed here.
+
+NOTES (2026-09-07): `docs/manual/configuration.md:78` ("every row it once carried either became one of the six guards above or retired outright") counts *catalogue rows*, and tool-call salvage was never one — it is a new guard, not a promotion. Rewritten to "one of the guards above" rather than bumped to seven, so the sentence stays true about what the catalogue became.
+
+NOTES (2026-09-07): ADR 0071's body counts ("the six that pass it", "Six catalogued rows pass the test", "Six config keys", "holds six `Disable…` booleans", "A stock install runs six Floor guards") were left as written and corrected by the appended amendment, following the repo's ADR convention that a decision's text stands as ratified and an amendment restates the changed fact (ADR 0002's 2026-08-20 amendment is the precedent). The amendment states explicitly that Decision 5's "six" reads as seven.
 
 **What:** append an amendment to ADR 0071 admitting tool-call salvage under test (a)(b)(c) with the chain rule (first, non-short-circuiting), and record that the archived catalogue's "deliberately … parses none from content" (`mechanism-catalogue.md:429-449`) describes the native profile's parse seam, not the floor. Add the seventh one-liner to the Floor guard entry (`CONTEXT.md:707-724`), the Session row in `docs/manual/commands.md:407-411`, and `README.md:241`; the `configuration.md` key line landed in item 3. Depends on item 3.
 **Regression guard.** Rule: every sentence that counts the guards or their keys is updated. Check: `grep -rniw 'six' README.md CONTEXT.md docs/manual internal/floor/doc.go` — floor sites at BASE: `CONTEXT.md:5,704,726`, `docs/manual/configuration.md:12,52,68-69,77,194,796`, `docs/manual/daemon.md:107`, `docs/manual/commands.md:407`, `README.md:35`, `internal/floor/doc.go:18`. The Go-comment sites belong to item 3.

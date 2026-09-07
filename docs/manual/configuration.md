@@ -9,7 +9,7 @@ apogee already recommends. Three keys carry all four layers —
 `server:` (`--server`, `APOGEE_SERVER`), `mode:` and `bypass:`. Every other key
 is **file-only** (no flag or env): the `servers:` list, the system prompt, the
 model profile, [MCP servers](#external-mcp-servers--mcp-servers), [the web-search
-endpoint](#where-web_search-looks--web-search-endpoint) and the six Floor-guard
+endpoint](#where-web_search-looks--web-search-endpoint) and the seven Floor-guard
 switches among them. Two raw overrides are not config keys at all — `--endpoint`
 / `APOGEE_ENDPOINT` runs one session against a server the file does not list,
 while `APOGEE_API_KEY` and `--model` / `APOGEE_MODEL` carry that server's token
@@ -49,7 +49,7 @@ says so in the transcript, in one line naming the keys that landed. The watcher 
 file's timestamp and size on a one-second ticker — no daemon, no filesystem-notification
 dependency (ADR 0041).
 
-Six **Floor guards** are the help every model gets whatever it is. They are engine behaviour rather
+Seven **Floor guards** are the help every model gets whatever it is. They are engine behaviour rather
 than settings you switch on: each ships **on**, and each is turned off by exactly one top-level
 boolean named after it.
 
@@ -66,8 +66,8 @@ tool-result-cap: true          # trim an older oversized tool result in the outg
 
 Each of them changes only what the model sees **after its own mistake**, or shapes the request
 without steering it, so none needs a per-model bench run and none is withdrawn by `--bypass` — the
-floor is what Bypass is measured *against*, not something Bypass takes away. All six are **file-only**
-(no flag, no environment variable) and all six are live on the [settings
+floor is what Bypass is measured *against*, not something Bypass takes away. All seven are **file-only**
+(no flag, no environment variable) and all seven are live on the [settings
 screen](commands.md#the-settings-screen--settings), as Session rows: an edit applies to the session
 you are in. Only an explicit `<key>: false` takes one away, and the Go API's `apogee.FloorConfig`
 spells them as `Disable…` fields, so an embedder handing `New` a bare `Config` gets the whole floor.
@@ -75,7 +75,7 @@ spells them as `Disable…` fields, so an embedder handing `New` a bare `Config`
 why they are behaviour rather than catalogued rows.
 
 The `mechanisms:` block is the lab surface above that floor, and in a shipped build its catalogue is
-**empty**: every row it once carried either became one of the six guards above or retired outright,
+**empty**: every row it once carried either became one of the guards above or retired outright,
 with the per-row verdicts in the [archived catalogue](../design/archived/mechanism-catalogue.md).
 The block stays because a bench Driver registers experimental rows of its own through the Go API,
 and naming an ID under `mechanisms:` is how one is enabled — from the Go API, `Config.EnableMechanisms`
@@ -192,7 +192,7 @@ rows of its own.
 Bypass is the honest "Mechanisms-off" floor every Mechanism is measured against on the bench
 ([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code path
 you can run yourself. What it never touches is the agent's structure and its floor — context
-compaction, the Budget, all six Floor guards, the rest of the
+compaction, the Budget, all seven Floor guards, the rest of the
 loop — so the floor is a working agent rather than a naked model. The same switch is
 the `bypass` row in `/settings`, and it is live: flip it mid-session and the next hook evaluation
 already sees it. [**Bypass mode**](../../CONTEXT.md) in `CONTEXT.md` is the full definition.
@@ -826,7 +826,7 @@ applied over the top of what you asked for. `--bypass` turns the surface off out
 
 **The roster apogee ships is empty**, and has been since v0.20.0: the one curated entry retired
 with the fourteen catalogue rows it had been measured over, so a stock install matches nothing and
-runs the six Floor guards at the top of this page and nothing above them. The surface itself is
+runs the seven Floor guards at the top of this page and nothing above them. The surface itself is
 untouched, and it is yours to fill — an entry of your own under `~/.apogee/validated/` still
 resolves and still applies, and a member id this build has since retired is **shed** from the set
 rather than disqualifying the entry whole.

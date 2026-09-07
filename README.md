@@ -32,8 +32,9 @@ terminal, including the one inside VS Code, Zed, or your own IDE.
 Three things set it apart from other AI coding assistants.
 
 - **Small local models do real work here.** Most agents quietly assume a frontier
-  model. apogee gives every model a *floor*: six always-on guards that catch what a
-  model gets wrong on its own. A malformed tool call is repaired and retried, a call
+  model. apogee gives every model a *floor*: seven always-on guards that catch what a
+  model gets wrong on its own. A malformed tool call is repaired and retried, a tool call
+  the model wrote out as JSON in its text instead of calling is run anyway, a call
   the model keeps repeating is broken out of, an empty reply is retried, a model that
   narrates instead of acting is told to act, a pointless re-read of a file it already
   read is cut short, and a huge stale tool result is trimmed on its way back to the
