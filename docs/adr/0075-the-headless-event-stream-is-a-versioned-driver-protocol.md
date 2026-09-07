@@ -146,8 +146,8 @@ ignore unknown names, members and enum values (`StepStatus`, `ApprovalPhase` and
 open sets today, `apogee.go:35-36`). A removal, rename or changed meaning bumps `v` and is a CHANGELOG
 entry.
 
-**11. Full fidelity, and not secret-scrubbed.** `tool_call.data.arguments` is the model's raw
-argument JSON and `tool_result.data.content` is the full result — which the capped-tool-outputs Floor
+**11. Full fidelity, and not secret-scrubbed.** `tool_call.data.call.arguments` is the model's raw
+argument JSON and `tool_result.data.result.content` is the full result — which the capped-tool-outputs Floor
 guard has already bounded before the model saw it, so "full" means exactly the bytes the model got.
 Bounding it would make the live lines strictly worse than the on-disk transcript for no security
 gain. Same trust posture ADR 0073 §6 accepted: it goes to the user's own pipe. The manual carries the

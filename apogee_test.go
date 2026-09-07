@@ -298,7 +298,7 @@ func TestFacadeExportsEventLines(t *testing.T) {
 		Session: "sess-1",
 		Now:     func() time.Time { return time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC) },
 	})
-	var sink apogee.EventSink = lines.Wrap(nopSink{})
+	sink := lines.Wrap(nopSink{})
 	lines.RunStarted(apogee.RunStarted{Session: "sess-1", Mode: "plan"})
 	sink.Emit(apogee.MessageEvent{Text: "hi"})
 	lines.RunFinished(apogee.RunFinished{ExitCode: 0, Turns: 1, Saved: true})

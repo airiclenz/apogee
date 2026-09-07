@@ -135,7 +135,7 @@ func (a runActivities) drop(run runRef) {
 // dropChildren closes every DELEGATE's slot, leaving the top-level one alone. A child runs
 // atomically inside its parent's Turn (ADR 0013 D5), so the parent being heard from at depth 0 is
 // proof every child of that Turn is over — including one whose SubAgentFinished the view never saw
-// (a child whose run ended before it emitted anything, so its slot was never opened by a phase).
+// (a child whose run ended before it emitted anything, so it never opened a slot at all).
 func (a runActivities) dropChildren() {
 	for run := range a {
 		if run.depth > 0 {

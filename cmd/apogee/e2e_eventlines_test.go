@@ -55,7 +55,7 @@ func TestE2EEventLinesSurviveAClosedPipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("make the stdout pipe: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	cmd := exec.Command(e2eBinary,
 		"--config", home, "--workspace", e2eWorkspace(t),
@@ -68,7 +68,7 @@ func TestE2EEventLinesSurviveAClosedPipe(t *testing.T) {
 		t.Fatalf("start the headless run: %v", err)
 	}
 	// The child holds the only writer from here, so the read side sees EOF if it ever exits.
-	writer.Close()
+	_ = writer.Close()
 
 	// The opening frame is written before the run makes its first request, so it is on the pipe
 	// while the reply is still held.
