@@ -80,6 +80,7 @@
 //   - journal.go — the Journal and its record, preview, and revert surface.
 //   - snapshot.go — the Snapshotter seam, the two capture points, and the diff-only paths.
 //   - redo.go — the redo stack: RedoPreview and Redo, Revert's mirror.
+//   - notes.go — the rendered listing of a step or a report, the wording every Driver shares.
 //   - persist.go — journal.json: the Index, Save's atomic write and Load's materialisation.
 //   - context.go — the context seam the engine hands the journal to the write funnel through.
 package undo

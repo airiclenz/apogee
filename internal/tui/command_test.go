@@ -61,7 +61,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	}
 	wantParsed := []string{
 		"clear", "color-scheme", "compact", "confine", "continue", "effort", "inspect", "model",
-		"new", "rename", "schedule", "schedule-stop", "server", "sessions", "settings", "skills",
+		"new", "redo", "rename", "schedule", "schedule-stop", "server", "sessions", "settings", "skills",
 		"stop-server", "sub-agents-server", "thinking", "undo", "unload-model", "usage", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
@@ -438,7 +438,7 @@ func TestOnlyTheGrammarVerbsCarryAParseArgsHook(t *testing.T) {
 		}
 	}
 
-	if want := []string{"color-scheme", "confine", "skills", "undo"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"color-scheme", "confine", "redo", "skills", "undo"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("verbs with a grammar of their own = %v, want exactly %v", got, want)
 	}
 }

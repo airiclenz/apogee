@@ -213,6 +213,12 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // reason none of the reporting verbs are: it mutates the workspace, and the group it would revert
 // is the one a running Step is still writing into.
 //
+// /redo is /undo's mirror over the stack a revert fills (undo.go, ADR 0074): bare it PREVIEWS what
+// putting the last `/undo confirm` back would do, `confirm` executes exactly that preview. It reads
+// /undo's grammar, carries /undo's idle-only rule for /undo's reason, and holds only until the next
+// exchange writes — a redo across newer work would re-apply an old tree over what was just asked
+// for, so that exchange clears the stack.
+//
 // /settings opens the configuration pane (settings.go): every config key with the value this run
 // resolved for it, over the binary's declarative key registry (ADR 0035). Idle-only and modal like
 // /sessions, and noRecall like the reset pair — it opens a surface rather than saying anything to the
@@ -257,6 +263,7 @@ var commandSpecs = []commandSpec{
 	{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
+	{name: "redo", summary: "put back what the last /undo removed (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseRedo)},
 	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
 	{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true},
 	{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true},
@@ -591,10 +598,11 @@ func parseColorScheme(args []string) (colorSchemeArgs, error) {
 }
 
 // ----------------------------------------------------------------------------
-// /undo — the revert command's argument grammar
+// /undo and /redo — the revert commands' argument grammar
 // ----------------------------------------------------------------------------
 
-// undoAction is the subcommand of a parsed /undo line. The zero value is undoPreviewOnly, so a bare
+// undoAction is the subcommand of a parsed /undo — or /redo — line, one type because the two verbs
+// read one grammar. The zero value is undoPreviewOnly, so a bare
 // "/undo" describes what it WOULD put back and changes nothing — the /confine and /color-scheme
 // posture, sharpened by what this verb does: the only line that touches the human's files
 // is the one they spelled out (ADR 0051, ratified call 4).
@@ -614,24 +622,38 @@ func (a undoAction) String() string {
 	return "preview"
 }
 
-// undoUsage is the one-line grammar every /undo argument error carries, so a mistyped confirmation
-// teaches the syntax instead of being read as one.
-const undoUsage = "usage: /undo | /undo confirm"
+// undoUsage and redoUsage are the one-line grammars a /undo or /redo argument error carries, so a
+// mistyped confirmation teaches the syntax instead of being read as one.
+const (
+	undoUsage = "usage: /undo | /undo confirm"
+	redoUsage = "usage: /redo | /redo confirm"
+)
 
-// parseUndo parses the argument tokens that followed an "/undo" verb. No arguments means the
-// preview. "confirm" is the ONLY word that executes, and it must stand alone: anything else is an
-// error carrying undoUsage rather than a guess, because the two mistakes this grammar can make are
-// reverting files nobody asked to revert and silently not reverting files somebody did.
+// parseUndo parses the argument tokens that followed an "/undo" verb, and parseRedo those of the
+// mirror verb. Both read the same two-step grammar over their own stack — which is why they share
+// one action type — and each teaches its own usage line.
 func parseUndo(args []string) (undoAction, error) {
+	return parseRevert("/undo", undoUsage, args)
+}
+
+func parseRedo(args []string) (undoAction, error) {
+	return parseRevert("/redo", redoUsage, args)
+}
+
+// parseRevert is the grammar both revert verbs read. No arguments means the preview. "confirm" is
+// the ONLY word that executes, and it must stand alone: anything else is an error carrying the
+// verb's usage rather than a guess, because the two mistakes this grammar can make are moving files
+// nobody asked to move and silently not moving files somebody did.
+func parseRevert(verb, usage string, args []string) (undoAction, error) {
 	switch {
 	case len(args) == 0:
 		return undoPreviewOnly, nil
 	case len(args) > 1:
-		return undoPreviewOnly, fmt.Errorf("/undo takes at most one argument. %s", undoUsage)
+		return undoPreviewOnly, fmt.Errorf("%s takes at most one argument. %s", verb, usage)
 	case args[0] == "confirm":
 		return undoConfirm, nil
 	default:
-		return undoPreviewOnly, fmt.Errorf("unknown /undo argument %q. %s", args[0], undoUsage)
+		return undoPreviewOnly, fmt.Errorf("unknown %s argument %q. %s", verb, args[0], usage)
 	}
 }
 

@@ -730,6 +730,29 @@ type Engine interface {
 	// so like ClearContext it is called only at idle (no worker running) — the idle-only command
 	// gate is what makes the read-then-revert pair safe.
 	UndoRevert(generation uint64) (undo.Report, error)
+	// RedoPreview describes what `/redo` would put back: the exchange group the last confirmed undo
+	// took away, classified against the files as they are now exactly as UndoPreview classifies its
+	// own — restore, delete, or skip with a reason, at the journal's recorded absolute addresses. It
+	// reports false when the redo stack is empty, which is what an engine that has reverted nothing
+	// answers and also what the first exchange to write again leaves behind: a redo across newer
+	// work would re-apply an old tree over what was just asked for, so that write clears the stack
+	// (ADR 0074 decision 6). It touches no file, does not move the journal, and is called only at
+	// idle for UndoPreview's reason.
+	RedoPreview() (undo.Step, bool)
+	// RedoRevert re-applies the group RedoPreview described and reports what it put back, removed,
+	// and skipped. generation is that preview's stamp, handed back as proof the human is confirming
+	// the step they were shown: a journal that moved since refuses with undo.ErrStaleGeneration and
+	// touches nothing, an empty stack answers undo.ErrNothingToRedo, and a path the human has edited
+	// since the undo restored it is skipped with its reason rather than overwritten. It MUTATES the
+	// workspace, so like UndoRevert it is called only at idle.
+	RedoRevert(generation uint64) (undo.Report, error)
+	// UndoNote reports WHY undo covers what it covers: "" when the session's snapshot store is open
+	// and `/undo` reaches every workspace write of every process this session has had, or the reason
+	// it does not — no git, `undo-snapshots` off, a store imaging a different tree, an index that
+	// would not load (ADR 0074 decision 2). It is a phrase for the Driver to put in a sentence, not
+	// a sentence of its own, and it is what keeps the thinner funnel-only answer from reading as a
+	// broken one. Goroutine-safe and stable for the life of a session's journal.
+	UndoNote() string
 	// SetEffortOverride states THIS session's Thinking effort (CONTEXT: Thinking effort) — the level
 	// layered ABOVE the bound model profile's own `thinking.effort:` (ADR 0050), and the engine half
 	// of the /effort command. The zero value CLEARS the override, so the profile's setting stands

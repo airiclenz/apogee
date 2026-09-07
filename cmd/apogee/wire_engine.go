@@ -596,6 +596,17 @@ func (e *lateEngine) RedoRevert(generation uint64) (undo.Report, error) {
 	return agent.RedoRevert(generation)
 }
 
+// UndoNote reports why undo covers what it covers — the reason the bound Agent was given at
+// SetJournal. Unbound it answers "": a holder with no Agent has no journal whose coverage could
+// need explaining, and `/undo` on it reports nothing to undo for that reason alone.
+func (e *lateEngine) UndoNote() string {
+	agent := e.bound()
+	if agent == nil {
+		return ""
+	}
+	return agent.UndoNote()
+}
+
 // SetEffortOverride states the session's Thinking effort (the /effort command, ADR 0050), remembered
 // while unbound for SetMode's reason — /effort is safe to run before a server is chosen, and a level
 // the human set there must reach the Agent the bind constructs. The zero value clears the override

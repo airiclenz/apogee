@@ -144,6 +144,13 @@ type fakeEngine struct {
 	undoReport  undo.Report // the report a permitted UndoRevert returns
 	undoErr     error       // the refusal UndoRevert returns instead (a stale generation, an empty journal)
 	undoReverts []uint64    // records the generations UndoRevert was called with, in order
+	undoNote    string      // the reason UndoNote reports ("" ⇒ snapshots in force, the widest coverage)
+
+	redoStep    undo.Step   // the step RedoPreview answers with; the zero value plus redoStepOK false is "nothing to redo"
+	redoStepOK  bool        // whether RedoPreview reports a step at all
+	redoReport  undo.Report // the report a permitted RedoRevert returns
+	redoErr     error       // the refusal RedoRevert returns instead (a stale generation, an empty stack)
+	redoReverts []uint64    // records the generations RedoRevert was called with, in order
 
 	submitFn         func(domain.UserInput) error
 	stepFn           func(ctx context.Context, call int) (domain.StepResult, error)
@@ -363,6 +370,30 @@ func (f *fakeEngine) UndoRevert(generation uint64) (undo.Report, error) {
 	defer f.mu.Unlock()
 	f.undoReverts = append(f.undoReverts, generation)
 	return f.undoReport, f.undoErr
+}
+
+// UndoNote answers with the scripted reason, so the note an empty journal earns can be asserted
+// both ways: snapshot-backed (empty) and funnel-only (a reason to name).
+func (f *fakeEngine) UndoNote() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.undoNote
+}
+
+// RedoPreview answers with the step the test scripted, UndoPreview's mirror over the redo stack.
+func (f *fakeEngine) RedoPreview() (undo.Step, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.redoStep, f.redoStepOK
+}
+
+// RedoRevert records the generation the confirm quoted and answers with the scripted report or
+// refusal, exactly as UndoRevert does for the other stack.
+func (f *fakeEngine) RedoRevert(generation uint64) (undo.Report, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.redoReverts = append(f.redoReverts, generation)
+	return f.redoReport, f.redoErr
 }
 
 // SetEffortOverride records the level the /effort command drove and swaps the live override, so a

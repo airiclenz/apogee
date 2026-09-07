@@ -228,7 +228,8 @@ func (m *Model) resetSessionView() {
 // reports or swaps Auto's blast radius the same synchronous way (confine.go), /effort opens the
 // thinking-effort picker over the levels the model reports the same synchronous way (effort.go),
 // and /undo previews
-// or executes the revert of the last exchange's file writes the same synchronous way (undo.go).
+// or executes the revert of the last exchange's file writes — /redo putting that revert back — the
+// same synchronous way (undo.go).
 //
 // It is reached at stateIdle — where the engine is quiescent and ClearContext/Compact are safe to
 // launch — OR, for a reporting line alone, while a worker runs. Its callers own that gate
@@ -468,6 +469,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// upstream and no worker — but idle-only where /confine's report is not: it WRITES to the
 		// workspace, and the group it reverts is the one a running Step is still filling.
 		return m.runUndo(verbArgsOf[undoAction](parsed))
+
+	case "redo":
+		// Preview, or execute, putting back what the last /undo took away (undo.go, ADR 0074).
+		// Idle-only and synchronous for /undo's reasons, which it mirrors exactly: it writes to the
+		// workspace, and the stack it reads is the one a running Step's first write clears.
+		return m.runRedo(verbArgsOf[undoAction](parsed))
 	}
 	return m, nil
 }

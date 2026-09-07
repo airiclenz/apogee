@@ -164,6 +164,15 @@ type Model struct {
 	// Model (ADR 0011).
 	undoGeneration uint64
 
+	// redoGeneration is the same stamp for `/redo` (undo.go, ADR 0074 decision 6), kept as its own
+	// field rather than shared with undoGeneration: one field would let the stamp an /undo preview
+	// left standing authorise a `/redo confirm` the human never previewed, since both quote the one
+	// journal generation. Separate, a cold `/redo confirm` quotes zero, meets the stale guard and
+	// earns a fresh preview — and neither verb has to clear the other's stamp, because any revert
+	// moves the generation both are checked against. A plain uint64, so it rides the value-copied
+	// Model (ADR 0011).
+	redoGeneration uint64
+
 	// picker is the shared single-select overlay's state (picker.go): which offering it lists and
 	// which row is highlighted. Its rows are derived at render time from the state they describe —
 	// the /model picker reads hb.models live, the /server picker opts.Server — so the value itself

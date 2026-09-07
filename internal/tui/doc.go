@@ -175,18 +175,23 @@
 // the override is session intent, the config key is the durable door, and the verb is safe
 // mid-Exchange because the value is read when the next request is built.
 //
-// undo.go is the routing half of `/undo`, the human end of the engine's per-exchange pre-image
-// journal (ADR 0051): [Model.runUndo] reads the top un-undone group off [Engine.UndoPreview] and
-// records the note that DISCLOSES it — every recorded path at its resolved spelling, classified
-// restore / delete / skip-with-reason — then `/undo confirm` hands [Engine.UndoRevert] the
-// generation that preview carried, so a journal which moved in between refuses and earns a fresh
-// preview instead of reverting a step nobody read ([Model.undoGeneration] is where that stamp
-// waits). It is the one command verb that writes to the human's files, which is what makes it
-// idle-only where /confine's report is not: the group it would revert is the one a running Step is
-// still filling. The notes are built by the pure [undoPreviewNote], [undoReportNote] and
-// [undoNothingNote] — the last of which states the journal's LIFETIME as well as its emptiness,
-// because it is memory and not storage, so a resumed session can never reach an earlier process's
-// writes.
+// undo.go is the routing half of `/undo` and `/redo`, the human end of the engine's per-exchange
+// undo journal (ADR 0051, widened to whole-tree snapshots by ADR 0074): [Model.runUndo] reads the
+// top un-undone group off [Engine.UndoPreview] and records the note that DISCLOSES it — every
+// recorded path at its resolved spelling, classified restore / delete / skip-with-reason — then
+// `/undo confirm` hands [Engine.UndoRevert] the generation that preview carried, so a journal which
+// moved in between refuses and earns a fresh preview instead of reverting a step nobody read
+// ([Model.undoGeneration] is where that stamp waits). [Model.runRedo] is the same two steps over
+// the stack a confirmed undo fills, with [Model.redoGeneration] as its own stamp. They are the two
+// command verbs that write to the human's files, which is what makes them idle-only where
+// /confine's report is not: the group they move is the one a running Step is still filling.
+//
+// The listing itself is NOT worded here — [undo.PreviewLines], [undo.ReportLines] and
+// [undo.NothingLines] render it, so the TUI's two verbs and the unattended `apogee undo` show one
+// set of rows. What this file words is the verb heading each note ([revertNote]) and the line that
+// applies it, plus the reason [Engine.UndoNote] gives for a journal that is the funnel's alone:
+// named in the same breath as "nothing to undo", because a narrower answer must not read as a
+// broken one.
 //
 // The skill flow (post-v1 apogee-code feature-parity) is the mini-language's second half, and it
 // is TEXT rather than state beside it: a skill is invoked by naming its id as a "/token" at a word

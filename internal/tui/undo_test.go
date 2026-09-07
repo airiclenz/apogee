@@ -27,18 +27,22 @@ func scriptedStep(generation uint64) undo.Step {
 	}
 }
 
-// runUndoLine drives one /undo line through the real key path and returns the model plus the
-// plain-text View, so a test asserts on what the human actually sees. It takes the model rather
+// unwrapped folds the frame's soft wraps away — every run of whitespace becomes one space — so a
+// note longer than the transcript's width is asserted as the single line its builder wrote.
+func unwrapped(view string) string { return strings.Join(strings.Fields(view), " ") }
+
+// runUndoLine drives one /undo or /redo line through the real key path and returns the model plus
+// the plain-text View, so a test asserts on what the human actually sees. It takes the model rather
 // than building one, because the two-step grammar only means anything across two lines.
 func runUndoLine(t *testing.T, m Model, line string) (Model, string) {
 	t.Helper()
 	m.input.SetValue(line)
 	m, cmd := stepCmd(t, m, keyEnter())
 	if cmd != nil {
-		t.Error("/undo returned a Cmd; it is synchronous and must not launch a worker")
+		t.Errorf("%s returned a Cmd; it is synchronous and must not launch a worker", line)
 	}
 	if m.state != stateIdle {
-		t.Errorf("state = %v, want idle (/undo must not launch a worker)", m.state)
+		t.Errorf("state = %v, want idle (%s must not launch a worker)", m.state, line)
 	}
 	return m, plain(m.View())
 }
@@ -181,23 +185,26 @@ func TestUndoConfirmOnAStaleGenerationRePreviewsInsteadOfReverting(t *testing.T)
 	}
 }
 
-func TestUndoWithNothingRecordedSaysSoAndNamesTheJournalsLifetime(t *testing.T) {
+func TestUndoWithNothingRecordedSaysSoAndNamesTheEnginesReason(t *testing.T) {
 	for _, line := range []string{"/undo", "/undo confirm"} {
-		t.Run(line, func(t *testing.T) {
-			// The empty journal answers both surfaces: a preview reports no step, a revert refuses.
-			eng := &fakeEngine{undoStepOK: false, undoErr: undo.ErrNothingToUndo}
+		for _, reason := range []string{"", "git not found"} {
+			t.Run(line+" "+reason, func(t *testing.T) {
+				// The empty journal answers both surfaces: a preview reports no step, a revert refuses.
+				eng := &fakeEngine{undoStepOK: false, undoErr: undo.ErrNothingToUndo, undoNote: reason}
 
-			m, view := runUndoLine(t, newTestModelEng(t, eng, testOpts), line)
+				m, view := runUndoLine(t, newTestModelEng(t, eng, testOpts), line)
 
-			if m.undoGeneration != 0 {
-				t.Errorf("stashed generation = %d, want 0 — there is no step to confirm", m.undoGeneration)
-			}
-			for _, want := range []string{"nothing to undo", "starts empty each run"} {
-				if !strings.Contains(view, want) {
-					t.Errorf("note missing %q — an empty journal must not read as a lost one:\n%s", want, view)
+				if m.undoGeneration != 0 {
+					t.Errorf("stashed generation = %d, want 0 — there is no step to confirm", m.undoGeneration)
 				}
-			}
-		})
+				// The line the human reads is the builder's, whole: with snapshots in force the
+				// emptiness stands alone, and without them the engine's reason rides with it in
+				// parentheses, so a narrower journal never reads as a lost one.
+				if want := undoNothingNote(reason); !strings.Contains(unwrapped(view), want) {
+					t.Errorf("note is not %q:\n%s", want, view)
+				}
+			})
+		}
 	}
 }
 
@@ -235,60 +242,174 @@ func TestUndoIsRefusedWhileTheModelWorks(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The note builders (pure)
+// /redo — the same two steps over the stack a confirmed undo fills
 // ----------------------------------------------------------------------------
 
-func TestUndoPreviewNoteDisclosesEveryPathAndTheWayToApplyIt(t *testing.T) {
+func TestRedoParsesItsTwoForms(t *testing.T) {
 	t.Parallel()
 
-	got := undoPreviewNote(scriptedStep(7))
+	cases := []struct {
+		line    string
+		want    undoAction
+		wantErr bool
+	}{
+		{line: "/redo", want: undoPreviewOnly},
+		{line: "/redo confirm", want: undoConfirm},
+		{line: "/redo yes", wantErr: true},
+		{line: "/redo confirm please", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.line, func(t *testing.T) {
+			parsed := parseInput(c.line, nil)
 
-	for _, want := range []string{
-		"/undo — exchange 3",
-		"  restore /w/a.go",
-		"  delete  /w/new.go",
-		"  skip    /w/b.go — edited since",
-		undoConfirmHint,
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("preview missing %q:\n%s", want, got)
+			if parsed.kind != kindCommand || parsed.command != "redo" {
+				t.Fatalf("parse = %v/%q, want a kindCommand named redo", parsed.kind, parsed.command)
+			}
+			if (parsed.err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", parsed.err, c.wantErr)
+			}
+			if c.wantErr {
+				// The error teaches /redo's own grammar, never the verb it mirrors.
+				if !strings.Contains(parsed.err.Error(), redoUsage) {
+					t.Errorf("the error does not teach the grammar: %v", parsed.err)
+				}
+				return
+			}
+			if action := verbArgsOf[undoAction](parsed); action != c.want {
+				t.Errorf("action = %v, want %v", action, c.want)
+			}
+		})
+	}
+}
+
+// /redo writes to the human's files exactly as /undo does, so it carries /undo's registry flags.
+func TestRedoIsAnIdleOnlyArgumentTakingVerb(t *testing.T) {
+	t.Parallel()
+
+	spec, ok := commandByName("redo")
+	if !ok {
+		t.Fatal("commandSpecs carries no redo row")
+	}
+	if spec.whileRunning || !spec.takesArgs {
+		t.Errorf("commandSpec = %+v, want an idle-only verb that reads its arguments", spec)
+	}
+}
+
+func TestRedoPreviewsTheStepAndStashesItsOwnGeneration(t *testing.T) {
+	eng := &fakeEngine{redoStep: scriptedStep(7), redoStepOK: true}
+
+	m, view := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/redo")
+
+	if m.redoGeneration != 7 {
+		t.Errorf("stashed generation = %d, want 7 — the confirm has nothing to quote", m.redoGeneration)
+	}
+	if m.undoGeneration != 0 {
+		t.Errorf("undo stamp = %d, want 0 — a redo preview must not authorise an undo", m.undoGeneration)
+	}
+	if len(eng.redoReverts) != 0 {
+		t.Errorf("RedoRevert calls = %v, want none: a preview must touch no file", eng.redoReverts)
+	}
+	for _, want := range []string{"/redo — exchange 3", "restore", "/w/a.go", "delete", "/w/new.go",
+		"skip", "/w/b.go", "edited since", "/redo confirm"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("preview missing %q:\n%s", want, view)
 		}
 	}
 }
 
-func TestUndoReportNoteCountsTheOutcomeAndNamesEverySkip(t *testing.T) {
-	t.Parallel()
-
-	got := undoReportNote(undo.Report{
-		Ordinal:  2,
-		Restored: []string{"/w/a.go", "/w/c.go"},
-		Deleted:  []string{"/w/new.go"},
-		Skipped: []undo.Skipped{
-			{Path: "/w/b.go", Reason: "edited since"},
-			{Path: "/w/d.go", Reason: "permission denied"},
+func TestRedoConfirmRePlaysAtThePreviewedGeneration(t *testing.T) {
+	eng := &fakeEngine{
+		redoStep:   scriptedStep(7),
+		redoStepOK: true,
+		redoReport: undo.Report{
+			Ordinal:  1,
+			Restored: []string{"/w/a.go"},
+			Deleted:  []string{"/w/new.go"},
+			Skipped:  []undo.Skipped{{Path: "/w/b.go", Reason: "edited since"}},
 		},
-	})
+	}
 
-	for _, want := range []string{
-		"undone — exchange 2: 2 restored, 1 removed, 2 skipped",
-		"  skip    /w/b.go — edited since",
-		"  skip    /w/d.go — permission denied",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("report missing %q:\n%s", want, got)
+	m, _ := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/redo")
+	m, view := runUndoLine(t, m, "/redo confirm")
+
+	if len(eng.redoReverts) != 1 || eng.redoReverts[0] != 7 {
+		t.Fatalf("RedoRevert calls = %v, want exactly [7] — the confirm must quote the preview", eng.redoReverts)
+	}
+	if len(eng.undoReverts) != 0 {
+		t.Errorf("UndoRevert calls = %v, want none — /redo drives its own door", eng.undoReverts)
+	}
+	for _, want := range []string{"redone", "exchange 1", "1 restored", "1 removed", "1 skipped",
+		"/w/b.go", "edited since"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("report missing %q:\n%s", want, view)
+		}
+	}
+	if m.redoGeneration != 0 {
+		t.Errorf("stashed generation = %d, want 0 — a spent preview authorises nothing", m.redoGeneration)
+	}
+}
+
+func TestRedoConfirmOnAStaleGenerationRePreviewsInsteadOfReplaying(t *testing.T) {
+	eng := &fakeEngine{redoStep: scriptedStep(7), redoStepOK: true}
+
+	m, _ := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/redo")
+
+	// The journal moved between the preview and the confirmation, so the engine refuses the stamp
+	// the human is quoting and offers what is on top of the redo stack NOW.
+	eng.redoErr = fmt.Errorf("%w: previewed at generation 7, journal is at 9", undo.ErrStaleGeneration)
+	eng.redoStep = scriptedStep(9)
+	m, view := runUndoLine(t, m, "/redo confirm")
+
+	if len(eng.redoReverts) != 1 || eng.redoReverts[0] != 7 {
+		t.Fatalf("RedoRevert calls = %v, want exactly [7]: the refusal must not be retried", eng.redoReverts)
+	}
+	if m.redoGeneration != 9 {
+		t.Errorf("stashed generation = %d, want 9 — the re-preview must be the one confirmable now", m.redoGeneration)
+	}
+	if !strings.Contains(view, "nothing was redone") {
+		t.Errorf("the note does not say the redo did not happen:\n%s", view)
+	}
+	for _, want := range []string{"exchange 3", "/w/a.go", "/redo confirm"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("re-preview missing %q:\n%s", want, view)
 		}
 	}
 }
 
-func TestUndoNothingNoteSaysTheJournalIsPerProcess(t *testing.T) {
-	t.Parallel()
+func TestRedoWithNothingUndoneSaysSoAndStashesNothing(t *testing.T) {
+	for _, line := range []string{"/redo", "/redo confirm"} {
+		t.Run(line, func(t *testing.T) {
+			// The empty stack answers both surfaces: a preview reports no step, a redo refuses.
+			eng := &fakeEngine{redoStepOK: false, redoErr: undo.ErrNothingToRedo}
 
-	got := undoNothingNote()
+			m, view := runUndoLine(t, newTestModelEng(t, eng, testOpts), line)
 
-	// "nothing to undo" on a resumed session must not read as a journal that lost what it held.
-	for _, want := range []string{"nothing to undo", "memory, not storage", "before this process"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("note missing %q:\n%s", want, got)
-		}
+			if m.redoGeneration != 0 {
+				t.Errorf("stashed generation = %d, want 0 — there is no step to confirm", m.redoGeneration)
+			}
+			if !strings.Contains(view, "nothing to redo") {
+				t.Errorf("note missing the answer itself:\n%s", view)
+			}
+		})
+	}
+}
+
+// A stamp left by an /undo preview must not travel to the other stack: a `/redo confirm` typed
+// after it quotes zero, which the engine's stale guard refuses, so the human previews first.
+func TestRedoConfirmDoesNotSpendTheUndoStamp(t *testing.T) {
+	eng := &fakeEngine{
+		undoStep: scriptedStep(7), undoStepOK: true,
+		redoStep: scriptedStep(7), redoStepOK: true,
+		redoErr: fmt.Errorf("%w: previewed at generation 0, journal is at 7", undo.ErrStaleGeneration),
+	}
+
+	m, _ := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/undo")
+	_, view := runUndoLine(t, m, "/redo confirm")
+
+	if len(eng.redoReverts) != 1 || eng.redoReverts[0] != 0 {
+		t.Fatalf("RedoRevert calls = %v, want exactly [0] — the undo preview stamps only /undo", eng.redoReverts)
+	}
+	if !strings.Contains(view, "nothing was redone") {
+		t.Errorf("the stale confirmation did not earn a re-preview:\n%s", view)
 	}
 }

@@ -273,7 +273,19 @@ NOTES (2026-09-07): consequential edit — internal/run/doc.go: made necessary b
 **Acceptance:** `go build ./... && go test ./internal/run/ && go test ./cmd/apogee/ -run 'Snapshot|Scratch|Wire|Delete|Session|Firing'`
 **Commit:** `feat(cmd): open the session's undo snapshots for the TUI, headless and daemon Drivers`
 
-## 14. `/undo` reads the persistent journal; `/redo` joins it
+## 14. `/undo` reads the persistent journal; `/redo` joins it — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): `PreviewLines`/`ReportLines` head their listing with a verb-free line (`exchange 3:`, `exchange 2: 1 restored, …`) and the Driver supplies the verb and the applying line (`revertNote` in internal/tui/undo.go); `/undo`'s old head clause "the most recent one that wrote files" was dropped, because it is false of a redo step and of item 15's `apogee undo <session-id>`, which share this listing.
+
+NOTES (2026-09-07): `NothingLines` parenthesises the engine's reason verbatim — `… for this session (git not found)` — rather than the item's illustrative `(undo snapshots off: git not found)`: snapshot.OpenJournal's reasons already read as the cause, and its `undo-snapshots is off` would otherwise be doubled by the prefix.
+
+NOTES (2026-09-07): `parseUndo` and the new `parseRedo` are two lines over one shared `parseRevert(verb, usage, args)`, and `/redo` reuses `undoAction` rather than declaring a second identical type — the two verbs read one grammar, and nothing existing was renamed.
+
+NOTES (2026-09-07): consequential edit — internal/undo/doc.go: made necessary by adding internal/undo/notes.go (the package map enumerates every non-test file).
+
+NOTES (2026-09-07): the pure note-builder table tests moved to internal/undo/notes_test.go with the builders, as the item directed; the TUI's verb heading and confirm hint stay covered by the `/undo` and `/redo` routing tests, which read them off `plain(m.View())`.
+
+NOTES (2026-09-07): `internal/tui/tui.go:720` still says the journal is "memory, not storage" in `UndoPreview`'s doc comment — left as is, because item 16 names that exact line among the code-prose fixes it owns.
 
 **What:** move the pure note builders in `internal/tui/undo.go` (`:112-136`) into `internal/undo/notes.go` as Driver-neutral `PreviewLines(Step) []string` / `ReportLines(Report) []string` / `NothingLines(reason string) []string`, called from the TUI. Add `/redo` with the grammar of `/undo` (`command.go:594-635`): bare = preview, `confirm` applies, idle-only, generation stamp (`model.go:159` gains `redoGeneration` or the stamp is shared — one field, documented), summary `put back what the last /undo removed (bare = preview)`, usage `usage: /redo | /redo confirm`. Rewrite `undoNothingNote` (`undo.go:147-150`): it names the engine's `UndoNote` reason when one exists (`nothing to undo — no agent file writes are recorded for this session (undo snapshots off: git not found)`), else the plain first line. The `Engine` interface (`tui.go:723-732`) gains `RedoPreview`/`RedoRevert`/`UndoNote`. Depends on item 13.
 **Regression guard.** `fakeEngine` (`internal/tui/seam_test.go:115`) gains the three methods with scripted redo step/report/err/note fields beside `undoStep`/`undoReport` (`:142-146`). `/redo` is routed in the idle-only switch at `internal/tui/commandrun.go:465-470` with a `case "redo"` beside `"undo"` calling `runRedo`. `UndoNote() string` is a METHOD on the interface, on `Agent` (item 12) and on `lateEngine` (`wire_engine.go:516`), so `var _ tui.Engine = (*apogee.Agent)(nil)` (`wire.go:69`, `wire_engine.go:120`) keeps compiling.
