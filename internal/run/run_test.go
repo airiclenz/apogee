@@ -2096,20 +2096,88 @@ func TestOnceImagesTheWorkspaceIntoTheRecordsSnapshotStore(t *testing.T) {
 
 // TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal pins the fallback an embedder and the bench both
 // run in: a Config that injects no apogee home names no store, so the run keeps ADR 0051's
-// in-memory journal and nothing at all is written outside the workspace. A missing home is a
-// supported configuration, never a failed Firing.
+// in-memory journal, REPORTS why in the note a Driver renders, and writes nothing at all outside
+// the workspace. A missing home is a supported configuration, never a failed Firing.
 func TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal(t *testing.T) {
 	t.Parallel()
 
+	// The process's working directory is watched from here on, before any home-less call is made:
+	// it is where a store named under an empty home would land, since "snapshots/<id>" resolves
+	// against it.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("read the working directory: %v", err)
+	}
+	beforeCWD := dirNames(t, cwd)
+
+	// The reason is taken from the snapshot package rather than spelled out again here: it is
+	// OpenJournal that words a home-less call, and Once's whole job with it is to pass that
+	// wording on to the Driver untouched. A copied literal would keep agreeing with itself after
+	// the announced phrase had changed.
+	_, wantNote, err := snapshot.OpenJournal(context.Background(), "", "firing-2", t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("OpenJournal for a home-less call: %v", err)
+	}
+	if wantNote == "" {
+		t.Fatal("OpenJournal announced no reason for a home-less call, so there is nothing for the note to carry")
+	}
+
+	// The workspace gets a directory of its own, so anything written BESIDE it shows up as a new
+	// sibling.
+	outside := t.TempDir()
+	workspace := filepath.Join(outside, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("make the workspace: %v", err)
+	}
+
 	up := newUpstream(t, alwaysFinal("nothing to do"))
 	spec := planSpec(up.url, "look around")
-	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.WorkspaceDir = workspace
 	spec.Config.UndoSnapshots = true
 	spec.RecordID = "firing-2"
 
-	if _, err := Once(context.Background(), spec); err != nil {
+	res, err := Once(context.Background(), spec)
+	if err != nil {
 		t.Fatalf("Once: %v", err)
 	}
+
+	if res.UndoNote != wantNote {
+		t.Errorf("UndoNote = %q, want the reason a home-less call earns, %q", res.UndoNote, wantNote)
+	}
+	if added := addedNames(beforeCWD, dirNames(t, cwd)); len(added) > 0 {
+		t.Errorf("a home-less run created %v in the working directory, want nothing written outside the workspace", added)
+	}
+	if added := addedNames([]string{"workspace"}, dirNames(t, outside)); len(added) > 0 {
+		t.Errorf("the run created %v beside the workspace, want nothing written outside the workspace", added)
+	}
+}
+
+// dirNames returns the names directly inside dir, sorted as os.ReadDir sorts them, so two
+// listings of the same directory compare entry for entry.
+func dirNames(t *testing.T, dir string) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
+}
+
+// addedNames returns the entries present in after that before did not have — what a run created,
+// reported on its own so a failure names the new paths rather than two whole listings.
+func addedNames(before, after []string) []string {
+	var added []string
+	for _, name := range after {
+		if !slices.Contains(before, name) {
+			added = append(added, name)
+		}
+	}
+	return added
 }
 
 // requireSnapshots skips a test on a machine that cannot open a snapshot store — the store is a

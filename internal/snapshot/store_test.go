@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -223,9 +224,7 @@ func TestCaptureIgnoresTheOperatorsGlobalExcludesFile(t *testing.T) {
 
 func TestListBlobsReturnsSHA1IDsUnderASHA256DefaultObjectFormat(t *testing.T) {
 	requireGit(t)
-	home := t.TempDir()
-	writeFile(t, home, ".gitconfig", "[init]\n\tdefaultObjectFormat = sha256\n")
-	t.Setenv("HOME", home)
+	requireSHA256DefaultingGit(t)
 
 	store, workspace := newStore(t)
 	const content = "hashed\n"
@@ -241,6 +240,51 @@ func TestListBlobsReturnsSHA1IDsUnderASHA256DefaultObjectFormat(t *testing.T) {
 	}
 	if got, want := blobs["a.txt"], blobID([]byte(content)); got != want {
 		t.Fatalf("ListBlobs[a.txt] = %q, want the sha1 blob id %q", got, want)
+	}
+}
+
+// requireSHA256DefaultingGit makes the host's git default to sha256 object ids for the rest of the
+// test, so the store's own --object-format=sha1 is the only thing that can keep its ids sha1 —
+// and skips the test where that default cannot be installed, because a test that cannot tell the
+// flag from the host's default asserts nothing.
+//
+// Two spellings of the default go in, because git changed which one it reads: the config key an
+// operator's own ~/.gitconfig carries (ignored by gits that predate it — 2.43 parses it and keeps
+// sha1) and GIT_DEFAULT_HASH, which every hash-agnostic git honours. The environment variable has
+// to travel WITH THE BINARY rather than in this process's environment: gitexec hands the child an
+// allowlisted environment that GIT_DEFAULT_HASH is deliberately not on, so a wrapper on PATH is
+// the only way an operator's git can reach the store already defaulting to sha256 — which is
+// exactly the host this test is about.
+//
+// The probe at the end is what keeps the whole thing honest: unless a plain `git init` really
+// produces a sha256 repository here, the test is skipped rather than passed.
+func requireSHA256DefaultingGit(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("the sha256-defaulting git is delivered as a POSIX shell wrapper")
+	}
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not available on PATH")
+	}
+
+	home := t.TempDir()
+	writeFile(t, home, ".gitconfig", "[init]\n\tdefaultObjectFormat = sha256\n")
+	t.Setenv("HOME", home)
+
+	binDir := t.TempDir()
+	wrapper := "#!/bin/sh\nGIT_DEFAULT_HASH=sha256\nexport GIT_DEFAULT_HASH\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(wrapper), 0o755); err != nil {
+		t.Fatalf("write the sha256-defaulting git wrapper: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	probe := t.TempDir()
+	mustGit(t, probe, "init", "--bare", "-q")
+	if got := strings.TrimSpace(mustGit(t, probe, "rev-parse", "--show-object-format")); got != "sha256" {
+		t.Skipf("this git still defaults to %s with init.defaultObjectFormat and GIT_DEFAULT_HASH both set: "+
+			"the store's --object-format=sha1 cannot be told from the default here", got)
 	}
 }
 
