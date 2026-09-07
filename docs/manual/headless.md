@@ -47,11 +47,15 @@ approval, and an unattended run has nobody to approve (see
 action is refused rather than parked — the refusals are the `denied:` count — `ask_user`
 and `present_document` are not registered, and no MCP server is contacted.
 
-Only the model's answer goes to **stdout**; resolution notices — including one line per
+Under the default `--format text`, only the model's answer goes to **stdout**; resolution
+notices — including one line per
 `mechanisms:` key naming a Mechanism this release retired, which is ignored rather than
 refused and, where the row became a Floor guard, names the top-level key that governs it
 now — and the one-line summary go to **stderr**, so a pipeline reads the text and
-nothing else. Where the workspace carries context files, that
+nothing else. `--format json` replaces that stdout wholesale with the machine-readable
+Event lines; the section at the foot of this page is their contract, and everything said
+about stderr here holds under both formats bar the one line that section names as
+suppressed. Where the workspace carries context files, that
 stderr stream opens with what they contributed: one `context:` line naming every file that
 loaded and its size, one `context: <name> unreadable — <reason>` line per file that is present
 but could not be read, and — when the standing system content has outgrown its share of the
@@ -74,7 +78,8 @@ A server that reports how much of a prompt it answered from its own prefix cache
 `· cached 12k` column to that agent's line — a subset of the prompt count, never a
 replacement for it; a server that says nothing about caching leaves the column off rather
 than printing a zero that would read as a cache miss.
-A run that **changed files** says which, just below the answer: a
+A run that **changed files** says which — on **stderr**, like every other narration on this
+Driver, just below the answer: a
 `changed — 2 file(s) this run:` header and one indented path per file, in the order the run
 first touched each. The list names everything the run's writes touched — files it deleted and
 the source side of a move as much as files it created — which is why the header says *changed*
@@ -110,3 +115,136 @@ thing happened:
 | `2` | the run never started — usage, configuration, a refused mode, a server that did not answer |
 | `3` | the run started and reached its boundary, but its final turn was abandoned (a model or upstream fault the loop could not recover) — stdout holds the run's last text, not an answer; the record is saved |
 
+## Machine-readable output — `--format json`
+
+`--format` decides what **stdout** carries, and nothing else about the run: `text` is the default
+and is exactly the output described above, byte for byte. `--format json` replaces that stdout with
+the **Event lines** — the engine's own event stream rendered one JSON object per line, JSONL, no
+answer and no prose among them. stderr keeps every notice, warning and summary it prints under
+`text`, with one exception: the prune notice goes quiet, because the `prune` line on stdout already
+carries the same fact. The contract is
+[ADR 0075](../adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md).
+
+```json
+{"event":"tool_call","v":1,"seq":3,"time":"2026-09-07T14:12:33.884201Z","session":"20260907-141233-7f2a","turn":0,"depth":0,"call_id":null,"data":{"call":{"id":"call_1","tool":"read_file","arguments":{"path":"a.txt"}},"resolved_path":""}}
+```
+
+### The envelope
+
+Every line is that same envelope — nine members, the variant's own content nested under `data`
+rather than flattened beside it:
+
+| Member | What it carries |
+|---|---|
+| `event` | the line kind: one of the nineteen names below |
+| `v` | the contract version — `1` today, on **every** line |
+| `seq` | 1-based, counting every line the run wrote, the two frames included |
+| `time` | RFC3339Nano, stamped as the line is written |
+| `session` | the run's session id, `null` on a line written before the run had one |
+| `turn` | the Turn the event belongs to, `null` on the frames |
+| `depth` | `0` for the run itself, `1` and deeper for a delegated run, `null` on the frames |
+| `call_id` | the delegating call the event came from, `null` when there is none |
+| `data` | the kind's own members, snake_case, an object on every line |
+
+Every member is **always present**, and is `null` where the line has no value for it, so a consumer
+never has to test for a missing key. `depth` is what separates the run's own events from a
+sub-agent's: the lines carry every depth, not just the top.
+
+### The nineteen line kinds
+
+Seventeen of them are engine events, and the two frames are not. The names are snake_case on
+purpose — a [Hook event](hooks.md)'s kebab-case name for a neighbouring moment is a *different*
+moment, and the case difference is the signal.
+
+| `event` | What it marks |
+|---|---|
+| `token` | one streamed chunk of the assistant's text |
+| `reasoning` | one newly revealed chunk of the model's reasoning channel |
+| `stream_reset` | the text streamed so far was discarded — an accumulator starts again here |
+| `message` | a completed assistant message |
+| `tool_call` | a tool call the model requested, with its arguments and any resolved path |
+| `tool_result` | that call's outcome after execution |
+| `sub_agent_phase` | one delegation crossing a lifecycle boundary; `data.cancelled` marks a `finished` that closes a rolled-back bracket rather than reporting a result |
+| `sub_agent_named` | the name a delegated run was given |
+| `child_interjection` | input steered into a running delegation, and whether it landed |
+| `approval` | an approval request: its phase, the request, the decision |
+| `turn` | a Turn boundary, at every depth: its status, whether it faulted, whether it hit the step cap |
+| `mechanism_fired` | a lab Mechanism acted, and on what |
+| `floor_guard` | a Floor guard acted, and on what |
+| `error` | something failed, named by its source |
+| `prune` | the context was pruned: how many results, how many tokens |
+| `usage` | one model call's token accounting and the run's cumulative totals |
+| `audit` | a tool call's allow/deny decision and its reason |
+| `run_started` | the opening frame — not an event |
+| `run_finished` | the closing frame — not an event |
+
+The Inspector's raw provider protocol is the one thing never written here: putting a wire format on
+a documented stdout contract would make it a public surface.
+
+### The two frames
+
+`run_started` says what the run was asked to **be**, once every refusal is behind it and before it
+has done anything: `session`, `workspace`, `model`, `server`, `mode`, `bypass`, `confined`,
+`version` (the full build string `apogee --version` prints, so a stream read back later names the
+binary that wrote it).
+
+`run_finished` is the whole outcome: `exit_code`, `turns`, `denied`, `faulted`, `fault`, `error`
+(the run's error text, `null` when there was none), `title`, `final_text`, `wrote`,
+`context_files`, `undo_note`, `saved`, `usage` and `sub_agents`.
+
+The rule is **exactly one `run_finished` on every exit path** — so stdout is never empty for a
+consumer to interpret. A run refused before it started writes that frame **alone**, with the exit
+code the prose path would have given it; a run cancelled by Ctrl-C writes it too, with exit `1`.
+
+Two members are worth reading together with `apogee undo` above: `session` is present exactly
+when the run minted an id — which `--no-save` does as well — and `saved` says whether a record was
+actually written. Feed `apogee undo` the id of a run whose `saved` is `false` and there is nothing
+behind it.
+
+`final_text` duplicates the last top-level `message` on purpose. A consumer reading `message` lines
+needs no accumulator; but the simplest consumer of all reads `token`s, and that one would otherwise
+have to implement both an accumulator and the `stream_reset` rule to reach the answer.
+
+### `v` is `1`, and growth is additive
+
+The version rides every line, because JSONL is tailed, split, grepped and merged across runs — a
+version living only in a frame is invisible in all four. Within `v:1`, new line kinds and new `data`
+members may appear in any release, and today's enum values (a Turn's status, an approval's phase, a
+delegation's phase) are open sets. **A consumer must ignore names, members and values it does not
+recognise.** A removal, a rename or a changed meaning bumps `v` and is a CHANGELOG entry.
+
+### What is on that stdout
+
+The lines are full fidelity and are **not** scrubbed: `tool_call`'s arguments are the model's own
+argument JSON and `tool_result`'s content is the whole result the model was handed. Bounding either
+would make the live stream strictly worse than the transcript already on disk. It is the same trust
+posture the rest of this Driver takes — the stream goes to your own pipe — but the pipe is the
+thing to watch: **redirect `--format json` into a CI log and that log publishes every file the run
+read.**
+
+### Lossless, blocking, and readers that walk away
+
+A line is written as its event happens and is never dropped: a lost `token` costs a character, a
+lost `tool_result` silently corrupts what the consumer believes the run did. The cost of that
+choice is that a reader which stops draining **stalls the run**, so two behaviours exist to keep
+that survivable:
+
+- A write to stdout that fails — the classic `apogee headless --format json | head -1` — is
+  reported once on stderr as `apogee headless: event lines stopped — <reason>`, after which nothing
+  more is emitted and **the run continues to its own end** with its own exit code. A run that has
+  already edited files is not half-killed because a reader closed the pipe; on Unix `SIGPIPE` is
+  ignored for the duration of a `--format json` run so that the write returns an error instead of
+  ending the process.
+- The first Ctrl-C is the polite stop: the run unwinds, its record is saved and its closing frame
+  is written. A **second** interrupt is taken literally — one stderr line, `apogee headless: second
+  interrupt — exiting without waiting for the run`, and the process ends with exit `1` and **no
+  `run_finished`**. It is the escape hatch for a stream nobody is draining, and the one path on
+  which the closing frame is not written.
+
+### Where `--format` reaches
+
+Here and nowhere else. [`apogee daemon`](daemon.md) keeps its prose log — its stdout multiplexes
+many Firings, which needs a per-stream identity this envelope has no field for — and
+[`apogee probe`](probe.md) stays a prose report; neither takes `--format`. A `--format` value that
+is neither `text` nor `json` is refused in prose, exit `2`: no stream exists yet to carry the news,
+and a JSONL stream whose single line said *that is not a format* would be the worse answer.

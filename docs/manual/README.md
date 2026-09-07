@@ -11,7 +11,7 @@ install it, what it can do. These pages are the full detail:
 | [Configuration](configuration.md) | `~/.apogee/config.yaml` end to end: servers, API keys, model profiles, tools, the Floor guards, the system prompt, llama-launcher, document presentation, Auto mode's confinement, url-safety, web search, and project skills |
 | [Hooks](hooks.md) | Commands and webhooks apogee fires on a session's events: the five events, the payload, the exec posture, the webhook contract |
 | [Diagnosing a host — `apogee probe`](probe.md) | What this machine can enforce, what the model can do, what the terminal really does |
-| [Running one prompt — `apogee headless`](headless.md) | Single unattended runs for scripts and pipelines, and `apogee undo` to put one back |
+| [Running one prompt — `apogee headless`](headless.md) | Single unattended runs for scripts and pipelines, the `--format json` Event lines, and `apogee undo` to put one back |
 | [Standing schedules — `apogee daemon`](daemon.md) | Prompts on a clock that outlive the session |
 | [Building from source](building.md) | Prerequisites, `Makefile` targets, cross-compilation |
 

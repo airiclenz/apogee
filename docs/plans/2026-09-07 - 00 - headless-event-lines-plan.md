@@ -190,7 +190,10 @@ go build ./... && go test -race -count=1 ./internal/tuitest/ && go test -race -c
 ```
 **Commit:** `test(headless): golden Event lines under a scripted upstream and on the not-started paths`
 
-## 8. Manual and docs: the Event lines contract
+## 8. Manual and docs: the Event lines contract — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): the new `## Machine-readable output — --format json` section is placed at the FOOT of the page rather than immediately after the stdout/stderr paragraph as the item's text says. The page carries no other `##` heading, so a heading inserted mid-page would have swallowed the `apogee undo` paragraph, the faulted-run note and the exit-code table into the json section. The reworded stdout/stderr paragraph points forward to it instead.
+NOTES (2026-09-07): `docs/manual/hooks.md:208` verified and left untouched as the item requires — a hook failure still lands on stderr under both formats and never re-enters the stream (ADR 0073 §8).
 
 **What:** `docs/manual/headless.md` — a new `## Machine-readable output — --format json` section after the stdout/stderr paragraph (`:50-53`): the envelope with one example line, the 19 line kinds in one table (name → what it marks), the two frames and their members, `v:1` and the additive rule (ignore unknown names, members, enum values), `session`/`saved` and the `apogee undo` link, `final_text` duplication, lossless-and-blocking with the SIGPIPE and second-interrupt behaviour, the `event lines stopped` stderr line, the CI-redirection warning (full tool arguments and results are on stdout), and that the daemon and `probe` have no `--format`. Fix `:77` so the changed-files block is stated to be on **stderr** (matches `headless.go:653-658` and CHANGELOG `[Unreleased]` `:922`); reword `:50-53` so "only the answer goes to stdout" is scoped to `--format text`. `docs/manual/README.md:14` row mentions `--format json`. `docs/manual/hooks.md:208` stays true — verify, do not edit. Depends on item 3 (`eventjson.Kinds()`).
 
