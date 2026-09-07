@@ -240,3 +240,93 @@ handoff). Cheaper now, but it adds a fourth idiom on top of three and keeps ever
 3. Deadline defaults per class (`advise` and `gate` block the loop).
 4. Whether `mcp:` handlers need their own approval posture or inherit the MCP tool's.
 5. Migration UX for the seven floor booleans and the `hooks:` list — silent, or a one-time notice.
+
+## 9. Seed material for the plan
+
+Recorded 2026-09-07 from a code survey of `v0.20.10` so the plan-writer starts from the map. Line
+numbers drift; names do not.
+
+### 9.1 What collapses into what
+
+| Today | File | Becomes |
+|---|---|---|
+| `hooks.Event` (5 consts), `eventList()` | `internal/hooks/hooks.go` | `Moment` notices |
+| `domain.HookPoint` (5 consts) | `internal/domain/mechanism.go` | `Moment` seams |
+| guard-key consts (7) + actions (4) | `internal/agent/floorguards.go` | builtin `Reaction` ids + `ReactionFiredEvent.Action` |
+| `MechanismFiredEvent`, `FloorGuardEvent` | `internal/domain/events.go` | one `ReactionFiredEvent` |
+| `runHooks[H]` + 5 adapters | `internal/agent/hookrun.go` | the sync-lane dispatcher |
+| `runPostResponseGuards`, `runPreToolExecGuards`, `runPreRequestGuards` | `internal/agent/floorguards.go` | engine-origin reactions on the same dispatcher |
+| double ladder at 5 sites | `loop.go` (pre-request ×2, post-response), `dispatch.go` (pre-tool-exec ×2, post-tool-result ×2) | one `Fire(moment, payload)` per site |
+| `hooks.Runner` (queue, matcher, executors) | `internal/hooks/runner.go`, `match.go`, `command.go`, `webhook.go` | the async lane, unchanged in substance |
+| `SetBypass`/`bypassMu`, `SetFloor`/`floorMu`, `Runner.Replace` | `agent.go`, `floorguards.go`, `runner.go` | one generation swap of the reaction set |
+| `mechanisms.Deps`, `register`, `catalogue`, `SwapCatalogue`, `Build`, `Descriptors` | `internal/mechanisms/catalogue.go` | deleted |
+| `selfreg.go` (strikes, Turn Budget), `skipUnderBypass` | `internal/agent/selfreg.go`, `hookrun.go` | deleted from the core; `--bypass` = builtins only |
+| `retired.go` roll with `Successor` | `internal/mechanisms/retired.go` | the config migration table |
+| `hooks:` list, `mechanisms:` map, 7 floor `*bool` keys, `floorFromOptions` negation seam | `internal/config/hooks.go`, `config.go`, `configwrite_mechanism.go`, `cmd/apogee/wire_settings.go` | one `reactions:` list, one resolver, three layers |
+| `/settings` rows: hooks (read-only), mechanisms (read-only), 7 floor rows | `internal/config/registry.go` | one reactions table |
+
+Stays byte-for-byte: the policy functions in `internal/floor` (`SalvageToolCall`, `ToolLoopBreak`,
+`ToolCallRepair`, `RecoverEmpty`, `EnforceToolUse`, `CacheRead`, `CapToolResults`) and the working
+values in `internal/domain/hooks.go`, `tooledit.go`, `hookview.go`. `tools.RunHookSubprocess` and
+the `SubprocessPermit` remain the sanctioned door for a sync-lane subprocess.
+
+Install sites to rewire: `cmd/apogee/wire_boot.go` (TUI sink chain
+`eventjson.Writer → hooks.Runner → bridge.Sink()`), `cmd/apogee/wire_firing.go` (Firings),
+`cmd/apogee/wire_live.go` (`EnableMechanisms`), `cmd/apogee/wire_settings.go` (live reload).
+
+### 9.2 Type sketches
+
+```go
+// internal/domain
+type Moment string            // "pre-request", "post-response", …, "exchange-finished", …
+type Origin string            // "engine", "user"
+type Class string             // "observe", "advise", "gate", "shape-view", "shape-work"
+
+type Reaction struct {
+    ID      string
+    Origin  Origin
+    Class   Class
+    On      []Moment
+    Handler Handler           // GoHandler | ArgvHandler | WebhookHandler | MCPHandler
+    Timeout time.Duration
+}
+
+// One outcome shape for every seam; the zero value means "did nothing".
+type Outcome struct {
+    Retry  bool              // re-stream the Turn (post-response only)
+    Inject string            // advise text, fenced by the dispatcher with provenance
+    Gate   GateDecision      // allow | deny | ask (pre-tool-exec only)
+    Edited bool              // a shape reaction moved the working value's Revision()
+}
+
+type ReactionFiredEvent struct {
+    EventBase
+    Reaction string; Origin Origin; Moment Moment; Action string; Detail string
+}
+
+// internal/agent — the only dispatcher.
+func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, error)
+```
+
+The Go handler for a seam takes the payload the seam already owns today (`*Request`,
+`*Response`, `*ToolCallEdit`, `*ToolResultEdit`, `*Conversation`). The matrix in §3 is a table the
+config loader consults at resolve time, not a runtime check.
+
+### 9.3 Acceptance for "behaviour-identical" (stage 1)
+
+- Every test in `internal/floor`, `internal/agent`, `internal/hooks` passes with only the
+  event-type renames changed.
+- `go test ./...` goldens in `internal/tuitest` unchanged except the debug-view lines that render
+  the firing event.
+- Bench identity arm: the same task set under `v0.20.10` and under stage 1, same model, produces the
+  same firing sequence per Turn (reaction id + moment + action) — compared from `ReactionFiredEvent`
+  against a mapping of the old two events.
+- `--bypass` on a stock install still switches off nothing.
+- `hooks:` and the seven floor keys still load, with a one-time notice naming the `reactions:` form.
+
+### 9.4 Plan boundaries
+
+- **Plan A (stage 1):** 9.1 rows one to eleven, the type sketches, 9.3. No config change beyond
+  the migration notice; no user cells beyond `observe`.
+- **Plan B (stage 2, gated on A):** `reactions:` config, three layers, adoption pin, `/settings`
+  table, the user cells the grill ratified.
