@@ -5,7 +5,7 @@ the Hooks feature shipped: should apogee's observe-only [Hook](../../CONTEXT.md)
 [Mechanism](../../CONTEXT.md) lab surface become one user-facing surface offering three modes —
 (1) event → external action, (2) event → external action → response to the model, (3) both. Three
 parallel readers produced it: a rival survey, a seam analysis of this repo, and a doctrine check
-against the settled ADRs. **Status: research only.** No decision is taken here, nothing is
+against the settled ADRs. **Status: research only — decided since.** The question was grilled the same day and settled in [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (user advise + gate admitted as cells of one Reaction core; invariant 4 satisfied by construction; the fixed-text machinery arm named). No decision is taken *here*, nothing is
 designed, and no ADR is superseded. The next step, if the owner wants one, is a grill.
 
 **The one-line answer:** the proposal is smaller and more orthodox than it first appears — it is a

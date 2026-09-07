@@ -1,8 +1,19 @@
 ---
-Status: accepted
+Status: accepted; decisions 2, 4, 5 and 7 and the veto and lint rejections superseded by ADR 0076
 ---
 
 # Hooks are observe-only, Driver-side reactions to engine events
+
+> **Superseded in part by [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+> (2026-09-07).** A Hook is now the colloquial alias for a user-origin **Reaction**, and ADR 0076
+> supersedes exactly these: **decision 2** (observe-only — the user row of the policy matrix gains
+> `advise` and `gate`, admitted by a fixed-text machinery arm against Bypass), **decision 4**'s "no
+> `pre-*` event, ever" (seams are Moments; a user gate at `pre-tool-exec` is an Approver stage),
+> **decision 5** (global only — three config layers, a repo layer's execution keys proposed until
+> adopted), **decision 7** for the sync classes (the engine waits on `advise` and `gate` under a
+> deadline; it still never waits on `observe`), and the rejections of **tool-call policy or veto
+> hooks** and **post-edit lint fed back to the model**. Decisions 1 (term, as amended), 3, 6, 8 and
+> 9 and the plugin and Driver-side-feed rejections stand.
 
 ## Context
 

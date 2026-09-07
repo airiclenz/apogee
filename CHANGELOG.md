@@ -8,6 +8,22 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Changed
+
+- **One Reaction core, decided (ADR 0076).** Floor guards, the Mechanism lab layer and Hooks are
+  one abstraction — a **Reaction** `{id, origin, class, on: [Moments], handler}` over an
+  origin × class policy matrix (observe / advise / gate / shape-view / shape-work). Day-one user
+  cells are observe, advise and gate; user shape(view) and `mcp:` handlers are reserved; `continue`
+  is not a class. The advise cell is admitted by one fixed-text machinery arm non-inferior to Bypass,
+  lands as a trailer on the closing tool result (never the system prompt) on a provenance ledger,
+  and fails open; a gate that fails escalates to ask. `--bypass` now means "advise and shape
+  Reactions off"; observe, gate and the seven Floor guards stay. Config becomes a `reactions:` list
+  over three layers where a repo layer's execution keys are proposed until adopted. Supersedes ADR
+  0071 D4/D6-B and ADR 0073 D2/D4/D5/D7; `CONTEXT.md`'s `Reaction surface` entry is the matrix, and
+  **Mechanism**, **Hook point** and **Experimental hook** retire as terms. Doctrine only — no code
+  changes yet; the staged plan (core → config → user cells) is the next session's work. Closes bead
+  `apogee-575`.
+
 ## [0.21.0] — 2026-09-07
 
 ### Added

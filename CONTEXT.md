@@ -7,7 +7,7 @@ every model runs with, above which a gated, self-regulating **Mechanism** lab su
 armed for measurement.
 The hard constraint, inherited unchanged from the predecessor projects: **nothing Apogee puts in
 front of a model may make that model perform worse than the same agent without it.** That floor is
-**Bypass mode** (catalogued Mechanisms off, structure and Floor guards on) —
+**Bypass mode** (advise and shape Reactions off, structure and Floor guards on) —
 **not** a naked model, because Budget, Compaction and Pruning are structural and load-bearing (a
 truly naked model just overflows its context window). The constraint is **proved at bench
 time** as a ground-truth, distributional non-inferiority gate against Bypass (see
@@ -140,7 +140,20 @@ surface is this Driver's composition), "the scheduler" (that names the library b
 share, not this Driver).
 
 **Hook**:
-A user-configured, **observe-only** reaction to one **Hook event**: an entry in the global
+The colloquial alias for a **user**-origin **[Reaction](#mechanism-and-hook-points)** — "what
+other tools call a hook" — offered in the manual's introduction and nowhere else in the glossary
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D12). The
+observe-only Hook of [ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md)
+is the **observe** cell of the user row: an entry naming the **Moment**(s) it fires on and an argv
+`run:` or a `webhook:`, optionally filtered to one `workspace:`, composed by every **Driver** from
+one shared library and run after the fact on the user's own machine, outside confinement, as the
+user's config. A user Reaction that returns text (`advise:`) or a decision (`gate:`) is still a
+Reaction, not a "hook that talks back".
+_Avoid_: "Hook" as a glossary term (say **Reaction**, and name the class), "plugin" (a Reaction
+adds no capability to apogee), "trigger" (that names the `on:` half of a daemon Schedule's
+envelope).
+
+**Hook event**: an entry in the global
 `hooks:` list naming the event(s) it fires on and either an argv `command:` or a `webhook:` URL,
 optionally filtered to one `workspace:`. A Hook is composed by every **Driver** from one shared
 library over the engine's event stream, so the TUI, `apogee headless` and a daemon **Firing** fire
@@ -739,9 +752,9 @@ _Avoid_: "permission level", "trust mode".
 Plain **engine behaviour** that changes only what the model sees **after its own failure**, or
 shapes the request **without steering it** — so it needs no per-model proof and cannot regress
 Bypass ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)).
-It is the first rung of the
-**[Reaction surface](#mechanism-and-hook-points)**. A Floor guard is **not a Mechanism**: no catalogue row, no `MechanismID`, no descriptor, no
-Capability, no strikes and no Turn-Budget throttle — the per-Turn `maxPostResponseRetries` bound
+It is the **engine**-origin **shape (view)** column of the
+**[Reaction surface](#mechanism-and-hook-points)** matrix: a builtin **Reaction** with no catalogue
+row, no descriptor, no Capability, no strikes and no Turn-Budget throttle — the per-Turn `maxPostResponseRetries` bound
 is the only limiter the post-response guards share. **Seven ship, on in every arm** — Bypass
 included — each switched off by exactly one top-level, **file-only** boolean (no flag, no env;
 editable live in `/settings`) whose key names it:
@@ -772,28 +785,31 @@ editable live in `/settings`) whose key names it:
 The decision logic is **pure policy** in `internal/floor`; the seams that call it, the live on/off
 gate and the events a firing emits are `internal/agent`'s. `domain.FloorConfig` spells the seven as
 `Disable…` bools, so an embedder handing `New` a bare `Config` gets the **whole floor**. A firing
-reaches every Driver as a **`FloorGuardEvent`** keyed by the guard's config key
-(`MechanismFiredEvent` stays for the lab rows).
-_Avoid_: "Mechanism" for a guard (a guard is not catalogued, gated or self-regulating, and no bench
-arm switches it on), "off-ramp" (the Capability that named two of them — see
+reaches every Driver as a **Reaction firing** keyed by the guard's config key — `ReactionFiredEvent`
+once [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)'s core
+lands, `FloorGuardEvent` until then.
+_Avoid_: "Mechanism" for a guard (a retired term — a guard is engine behaviour, never gated or
+self-regulating), "off-ramp" (the Capability that named two of them — see
 [Retired terms](#retired-terms)), "always-on Mechanism".
 
 **Bypass mode**:
-A `Config` flag **orthogonal to Agent mode** that turns the catalogued **Mechanisms** — the lab
-rows — off while leaving the agent's structure intact. It says nothing about the
-[Floor guards](#floor-guard), which stay on in **every** arm, so the floor is *functional* — a
-baseline that quit at the first stumble would pass the hard constraint trivially. With the shipped
-catalogue frozen **empty** ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)),
-`--bypass` on a stock install switches nothing off in effect: the honest floor it names is now the
-engine's own — guards on, nothing armed above them — and the control arm and the shipped
-default are literally the same agent unless a bench arm arms something. Budget, Compaction, and the
-rest of the loop still run: Bypass is the honest
-"Mechanisms-off" floor, **not** a naked model. It is also the bench's **aggregate control
-arm** — the same code path users can run — against which the hard-constraint non-inferiority
-gate is proved. See [ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md) and
-ADR 0071 above.
+A `Config` flag **orthogonal to Agent mode** that turns off every **advise** and **shape**
+[Reaction](#mechanism-and-hook-points) of **user** or **bench-armed** origin — exactly what can move
+the floor — while leaving the agent's structure intact
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D9). It says
+nothing about the [Floor guards](#floor-guard), which stay on in **every** arm, so the floor is
+*functional* — a baseline that quit at the first stumble would pass the hard constraint trivially —
+and nothing about **observe** or **gate** Reactions, which change nothing the floor measures: a
+bench run under Bypass keeps the user's notifications and guards. On a stock install with nothing
+configured, `--bypass` switches nothing off in effect: the honest floor it names is the engine's own
+— guards on, nothing armed above them — and the control arm and the shipped default are literally
+the same agent unless a bench arm arms something. Budget, Compaction, and the rest of the loop still
+run: Bypass is the honest "model-shaping Reactions off" floor, **not** a naked model. It is also the
+bench's **aggregate control arm** — the same code path users can run — against which the
+hard-constraint non-inferiority gate is proved. See
+[ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md), ADR 0071 and ADR 0076.
 _Avoid_: "naked model" (Bypass keeps the structural reducers and every Floor guard on), "disabled
-mode", "raw mode".
+mode", "raw mode", "Mechanisms-off" (the term retired; say "advise and shape off").
 
 **Approval**:
 The human-in-the-loop gate on a single tool call — the primary safety guarantee in
@@ -1137,77 +1153,84 @@ _Avoid_: "MCP plugin", "MCP proxy" (it is a client; there is no proxy).
 ### Mechanism and hook points
 
 **Reaction surface**:
-The four homes a new *"apogee should react when X happens"* can take, and the test that picks one.
-Sibling to [ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md)'s placement rule
-for a new sentence of **guidance**; this one places a new **reaction**. Try the rungs in order:
-- **[Floor guard](#floor-guard)** — it changes only what the model sees *after the model's own
-  failure*, or shapes the request without steering it; it needs no per-model proof; it cannot
-  regress **Bypass**. Ships **on**, one top-level file-only boolean, no bench gate
-  ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)
-  D1).
-- **Tool** — the model asks for it by name. Admitted on a **replicated** ask across models, never on
-  one model's request (`docs/design/tool-surface-findings.md`); may ship default-off and be lifted
-  per **Model profile**
-  ([ADR 0057](docs/adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md) D3).
-- **[Mechanism](#mechanism-and-hook-points)** — it changes what the model sees **before** the model
-  has failed. The shipped catalogue is frozen and empty, so the route in is to arm it as an
-  **Experimental hook**, measure it under [ADR 0009](docs/adr/0009-the-ab-decision-rule.md), and
-  bring a record — never a port onto the catalogue
-  ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)
-  D2/D4).
-- **[Hook](#identity-and-shape)** — it changes nothing the model sees. Fires after the fact, on the
-  user's own machine, as the user's config
-  ([ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md)).
+The **origin × class** policy matrix every *"apogee should react when X happens"* is placed in
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D2). Sibling
+to [ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md)'s placement rule for a
+new sentence of **guidance**; this one places a new **[Reaction](#mechanism-and-hook-points)**. One
+reaction takes exactly **one cell**:
 
-The rungs are **exclusive**: one idea takes exactly one home, and the wrong home is a rejection
-rather than a variant. A lint result fed back to the model is a Mechanism and never a Hook (ADR 0073
-rejected it by name); a Hook that could veto a tool call is a Mechanism at a **Hook point**, which
-ADR 0071 closed.
+| origin ↓ / class → | observe | advise | gate | shape (view) | shape (work) |
+|---|---|---|---|---|---|
+| **engine** (builtin or bench-armed) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **user** (configured) | ✓ | ✓ | ✓ | ✓ *reserved* | ✗ |
 
-Two shapes fail the Floor-guard test's clause (a), and — paired with an ADR 0009 gate no row ever
-met — are what retired fourteen catalogue rows: **steering**, deciding the model's next move for it
-(`filehint` scored a freshly listed directory and named which files to read first), and
-**mutation**, changing the model's work behind its back (`autofix` handed a written file to an
-external formatter). The line rungs 1 and 3 share: a reaction may change the model's *view*; it may
-not change the model's *work* or its *choices*.
-_Avoid_: "hook" as the name of this surface (it names rung 4 **and**, as **Hook point**, the seam a
-rung-3 Mechanism attaches at — that collision is why the four blur together).
+- **observe** — no return; nothing the model sees changes. Runs after the fact, off the loop's
+  path, never waited on.
+- **advise** — returns text the model sees: fenced, capped, **fail-open** (no advice is just no
+  advice), landed as a trailer on the closing tool result or at the request's tail, never in the
+  system prompt, **ephemeral** on resume, every span on the **provenance ledger**.
+- **gate** — returns allow / deny / ask at `pre-tool-exec` as a stage of the **Approver**, never
+  as a seam edit; deny text stays engine-authored. A script saying No is the same act as a human
+  saying No. A gate that fails or times out **escalates to ask**.
+- **shape (view)** — edits what the model *sees* (`post-tool-result`, `pre-request`,
+  `history-rewrite`). The seven [Floor guards](#floor-guard) are the engine builtins here. The
+  **user** cell is in the matrix but **reserved** — no case, no ledger design for edits — until its
+  own grill.
+- **shape (work)** — edits what the model *does* (tool-call arguments at `pre-tool-exec`).
+  **Engine only**: once a later reaction can mutate arguments an earlier gate approved, no gate is
+  sound.
+- **continue** is **not a class**; nothing may take the loop's next step for it.
+
+The line the user row draws: a user Reaction may change the model's **view** and may say **No**; it
+may never change the model's **work** or make its **choices**. **Bypass** switches off the advise
+and shape classes of user and bench-armed origin and nothing else. A **Tool** is not a cell: the
+model asks for it by name, and it is admitted on a **replicated** ask across models
+(`docs/design/tool-surface-findings.md`,
+[ADR 0057](docs/adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md) D3).
+_Avoid_: "rung" / "the four homes" (the exclusive ladder this matrix replaced), "hook" as the name
+of this surface, "Mechanism" (retired — see [Retired terms](#retired-terms)).
+
+**Reaction**:
+One `{id, origin, class, on: [Moments], handler}` — the single thing apogee does when the loop
+passes a **Moment**. Its **origin** is **engine** (a builtin such as a [Floor guard](#floor-guard),
+or a Go reaction the bench arms in-process through the facade) or **user** (an entry in the
+`reactions:` list); its **class** is one column of the **Reaction surface** matrix; its handler is
+a Go func, an argv list (`run:` / `advise:` / `gate:`) or a `webhook:`. The class picks the lane:
+observe runs on the async lane (one bounded queue per reaction, drop-newest, never waited on);
+advise, gate and shape run on the sync lane at the seam, engine before user, each under a recover
+boundary and its own deadline (`timeout:`). An entry may carry more than one class, and each handler
+runs under **its class's** trust posture: observe outside confinement as the user's config; advise
+and gate inside the workspace exec fence, advise output secret-redacted before the fence and the
+cap. A firing reaches every Driver as one `ReactionFiredEvent` keyed by id. The seven Floor-guard
+booleans stay the canonical switches for the builtins; a `hooks:` list reads as an alias of
+`reactions:` with a one-time notice.
+_Avoid_: "Hook" (the colloquial alias — see [Hook](#identity-and-shape)), "Mechanism" (retired),
+"plugin" (no Reaction adds a capability).
+
+**Moment**:
+A point the loop passes, on which a **Reaction** may fire. A **seam** Moment is in-loop and
+synchronous, its payload an editable working value: `pre-request`, `post-response`,
+`pre-tool-exec`, `post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload
+sealed: `exchange-finished`, `turn-finished`, `file-changed`, `approval-requested`,
+`approval-decided`, `error`, and additively more. Every seam publishes a notice when it closes, so
+observing a seam costs nothing extra; a reaction that must answer runs *before* the notice is
+published, never on the event stream.
+_Avoid_: "Hook point" (retired — a seam Moment is what it named), "Hook event" (a notice Moment),
+"stage", "phase".
 
 **Mechanism**:
-A unit of gated, self-regulating behaviour that fires at a defined **Hook point** in
-the loop to help a small LLM. Since [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) the
-term names the **lab surface**: the hook API, the registry, `Config.EnableMechanisms`, the
-`mechanisms:` key, the `/settings` row and `--bypass` all stand, because they are how a bench arm
-arms an intervention without patching the engine — but the **shipped catalogue is frozen and
-empty**. The six rows every model benefited from became [Floor guards](#floor-guard); the other
-fourteen retired onto the **retired roll** (`internal/mechanisms/retired.go`), which answers an old
-config naming any of them with the release that retired the ID and, for a promoted one, the config
-key that succeeds it. A stock install therefore runs **zero Mechanisms**, and that is the intended
-end state, not a transitional one. Every catalogued Mechanism is *gated* (by conversation state,
-resource pressure, prompt shape, or model output), is subject to self-regulation unless declared
-exempt, and **ships off** until an A/B bench run turns it on (rule D1) — a gate that binds
-catalogued rows alone, never a Floor guard.
-_Avoid_: "intervention" (that is the bench's per-Turn experiment — a different surface,
-see [Intervention](#intervention)), "transform"/"analyzer"/"injector" as a *kind* (these
-were the retired proxy-era taxonomy — see below), "rule", "Mechanism" for a
-[Floor guard](#floor-guard) (a guard is engine behaviour, not a catalogue row).
+**Retired** by [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+D12 — say **Reaction**. It named the gated, self-regulating lab surface (hook API, registry,
+`Config.EnableMechanisms`, `mechanisms:`) that
+[ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) had
+kept beside an empty catalogue; the core deletes that layer, the bench arms an **engine**-origin
+Reaction through the facade instead, and a `mechanisms:` key answers with the **retired roll**'s
+message. See [Retired terms](#retired-terms).
 
 **Hook point**:
-*Where* in the loop a Mechanism fires — the primary classification of a Mechanism.
-Four positions plus a cross-cutting capability:
-- **pre-request** — shape the outgoing request before it is sent (subsumes the old
-  Transforms *and* Pre-pipeline Injectors).
-- **post-response** — inspect the model response and choose an action (see below)
-  before the loop acts on it.
-- **pre-tool-exec** — act between the decision to run a tool and its execution.
-- **post-tool-result** — act on a tool result before the model next sees it
-  (`correct_tool_result` is **deferred** — owner-ratified 2026-07-04, a bench-side experimental
-  hook until a production trigger is found). New to the loop; the proxy could not host it.
-- **history-rewrite** — a capability that edits conversation state; may attach at more than one
-  point. No shipped row attaches here or at post-tool-result: both are lab positions now.
-_Avoid_: "stage" (a pre-request-only, pipeline-era word), "phase", "Hook" (a user-configured,
-observe-only reaction composed by a Driver — see [Hook](#identity-and-shape) — is not a Hook point and
-fires at none).
+**Retired** by ADR 0076 D12 — say **seam [Moment](#mechanism-and-hook-points)**. The five
+positions it listed (`pre-request`, `post-response`, `pre-tool-exec`, `post-tool-result`,
+`history-rewrite`) are the seam Moments, unchanged in meaning.
 
 **Post-response decision**:
 The action a post-response Mechanism chooses: **retry** (re-call the Upstream now, **in
@@ -1776,13 +1799,13 @@ _Avoid_: "the harness" inside Apogee's own docs (there is no harness in Apogee),
 external service" (it's a sibling Go module, not a running service).
 
 **Experimental hook**:
-A temporary hook the bench registers in-process at a [Hook point](#mechanism-and-hook-points)
-to test a behaviour that is **not (yet) a Mechanism**. It never ships in the binary; if it
-earns its place on the evidence, it is promoted to a gated Mechanism in Apogee. The
-in-process heir to the bench's portable-tier Interventions (`system_addendum`,
-`inject_message`, `tool_filter`).
-_Avoid_: "intervention" (that is the bench's term for its own experiment surface), calling
-it a Mechanism (it is a candidate, not a catalogued one).
+**Retired** by [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+D12 — say **bench-armed Reaction**: an **engine**-origin
+[Reaction](#mechanism-and-hook-points) the bench registers in-process through the facade to
+measure a behaviour before anyone argues about shipping it. It never ships in the binary; the
+in-process heir to the bench's portable-tier Interventions (`system_addendum`, `inject_message`,
+`tool_filter`).
+_Avoid_: "intervention" (the bench's term for its own experiment surface).
 
 **Validated set**:
 A **per-model** enable set of catalogued Mechanisms that has passed the aggregate
@@ -1839,6 +1862,15 @@ vocabulary can map forward:
   *kinds* of Mechanism) → retired as the taxonomy; Mechanisms are now classified by
   [Hook point](#mechanism-and-hook-points). The distinctions that still matter survive
   as attributes (post-response decisions; Deferred-Action vs Request-prep-Hint).
+
+Three more were canonical here and retired by
+[ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md), which folds
+Floor guards, the Mechanism lab layer and Hooks into one **Reaction** core over **Moments** with an
+origin × class policy matrix: **Mechanism** → [Reaction](#mechanism-and-hook-points) (the lab layer
+is deleted; the bench arms an engine-origin Reaction through the facade); **Hook point** → seam
+[Moment](#mechanism-and-hook-points); **Experimental hook** → bench-armed Reaction. **Hook** is
+not retired but demoted to the colloquial alias for a user-origin Reaction, and **Bypass** now reads
+"advise and shape Reactions off" rather than "Mechanisms off".
 
 The rest were canonical in **this** glossary and retired with the mechanism wave of
 [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md),

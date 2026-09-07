@@ -1,10 +1,20 @@
 ---
-Status: accepted
+Status: accepted; decision 4 and rejected alternative B superseded by ADR 0076
 Supersedes: ADR 0009 for structural behaviour; ADR 0070 Option C
 Amends: ADR 0006, ADR 0014, ADR 0015 D1, ADR 0016 (2026-08-29 amendment)
 ---
 
 # Floor guards are engine behaviour; the nudge catalogue retires
+
+> **Superseded in part by [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+> (2026-09-07).** ADR 0076 folds Floor guards, the Mechanism lab layer and Hooks into one Reaction
+> core over Moments, and supersedes exactly two things here: **decision 4** (the lab machinery —
+> hook API, registry, `Config.EnableMechanisms`, `mechanisms:`, the `/settings` row — no longer
+> stays as the bench's instrument; the bench arms an engine-origin Reaction through the facade,
+> and `--bypass` now switches off the advise and shape classes) and rejected alternative **B**
+> under *Decision 6* (the layer is deleted after all, because the core replaces rather than removes
+> the bench's route in). Decisions 1, 2, 3 and 5, the seventh-guard amendment and the guards'
+> ratified order stand.
 
 ## Context
 

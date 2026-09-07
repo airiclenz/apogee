@@ -1,7 +1,9 @@
 # Reaction core — a greenfield design for one hook/mechanism/floor-guard surface
 
-**Date:** 2026-09-07 · **Status:** 🧪 **Thought experiment** — no decision taken, nothing designed
-for implementation, no ADR superseded. · **Companion:**
+**Date:** 2026-09-07 · **Status:** ✅ **Decided** — grilled the same day; §3 and §8 resolved in
+[ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (day-one user
+cells observe + advise + gate; user shape(view) and `mcp:` reserved; Bypass = advise + shape off).
+Implementation plan not yet written. · **Companion:**
 [hook-talkback-findings.md](hook-talkback-findings.md) (research; the doctrine map) · **Open bead:**
 `apogee-575`.
 
