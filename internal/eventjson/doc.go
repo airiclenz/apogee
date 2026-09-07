@@ -22,4 +22,8 @@
 // encode.go is the per-variant mapping: Encode turns one domain.Event into its kind, its
 // EventBase and the `data` value that marshals to the line's object, and Kinds names the whole
 // vocabulary including the two frames that are not Events.
+//
+// writer.go is the line itself: the Writer that stamps the envelope, counts seq, writes and
+// flushes one line per Event, forwards to the sink it wraps, and writes the two frames — plus the
+// frame structs a Driver fills.
 package eventjson

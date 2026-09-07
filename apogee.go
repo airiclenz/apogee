@@ -37,8 +37,11 @@
 package apogee
 
 import (
+	"io"
+
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 )
@@ -645,6 +648,34 @@ type HookRunner = hooks.Runner
 // NewHookRunner builds a HookRunner over a Hook list, keeping the entries active at the given
 // workspace and starting one worker per survivor. See internal/hooks for the contract.
 func NewHookRunner(list []Hook, o HookOptions) (*HookRunner, error) { return hooks.New(list, o) }
+
+// ----------------------------------------------------------------------------
+// Event lines (internal/eventjson) — the versioned JSONL rendering (ADR 0075)
+// ----------------------------------------------------------------------------
+
+// EventLines is the EventSink that renders the engine's Event stream as the Event lines: one
+// versioned JSON line per Event on an io.Writer the Driver owns, bracketed by a run_started /
+// run_finished frame pair. It is what `apogee headless --format json` writes to stdout, and it is
+// re-exported so any Driver can produce the same documented stream. Wrap gives it the sink it
+// displaces — every Event is forwarded on, whether or not a line was written for it — and it
+// belongs OUTSIDE a HookRunner, never inside one: writing is lossless and therefore blocking.
+type EventLines = eventjson.Writer
+
+// EventLinesOptions are the facts an EventLines cannot derive: the run's session id (empty until
+// SetSession, so the lines carry null), the clock its `time` stamps come from, and where the one
+// report of a failed write goes.
+type EventLinesOptions = eventjson.Options
+
+// RunStarted is the data of the opening frame — what the run was asked to be. The Driver fills it;
+// the engine composes no frame of its own.
+type RunStarted = eventjson.RunStarted
+
+// RunFinished is the data of the closing frame — the whole outcome, written on every exit path so
+// a consumer never has to interpret a stream that simply stopped.
+type RunFinished = eventjson.RunFinished
+
+// NewEventLines builds an EventLines over w. See internal/eventjson for the line contract.
+func NewEventLines(w io.Writer, o EventLinesOptions) *EventLines { return eventjson.New(w, o) }
 
 // ----------------------------------------------------------------------------
 // Sentinel errors (internal/domain)

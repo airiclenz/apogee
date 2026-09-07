@@ -8,9 +8,12 @@ package apogee_test
 // white-box harness (harness_internal_test.go).
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -280,5 +283,34 @@ func TestInterjectChild_NoSuchChildMatchableThroughRoot(t *testing.T) {
 	err = a.InterjectChild("no-such-call-id", apogee.UserInput{Text: "hello"})
 	if !errors.Is(err, apogee.ErrNoSuchChild) {
 		t.Errorf("InterjectChild(unknown id) err = %v, want ErrNoSuchChild", err)
+	}
+}
+
+// TestFacadeExportsEventLines drives the Event lines through the ROOT package alone: an embedder
+// that never imports internal/* must be able to build the same documented JSONL an
+// `apogee headless --format json` run writes. It asserts the whole re-export — the type, its
+// options, both frame structs and the forwarding constructor — by producing a real bracketed
+// stream, which no compile-time alias reference on its own would prove.
+func TestFacadeExportsEventLines(t *testing.T) {
+	var out bytes.Buffer
+
+	lines := apogee.NewEventLines(&out, apogee.EventLinesOptions{
+		Session: "sess-1",
+		Now:     func() time.Time { return time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC) },
+	})
+	var sink apogee.EventSink = lines.Wrap(nopSink{})
+	lines.RunStarted(apogee.RunStarted{Session: "sess-1", Mode: "plan"})
+	sink.Emit(apogee.MessageEvent{Text: "hi"})
+	lines.RunFinished(apogee.RunFinished{ExitCode: 0, Turns: 1, Saved: true})
+
+	got := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	wantKinds := []string{"run_started", "message", "run_finished"}
+	if len(got) != len(wantKinds) {
+		t.Fatalf("wrote %d lines, want %d:\n%s", len(got), len(wantKinds), out.String())
+	}
+	for i, kind := range wantKinds {
+		if !strings.HasPrefix(got[i], `{"event":"`+kind+`","v":1,`) {
+			t.Errorf("line %d is not a v:1 %s line: %s", i+1, kind, got[i])
+		}
 	}
 }
