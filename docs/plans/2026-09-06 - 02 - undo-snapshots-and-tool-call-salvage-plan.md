@@ -294,7 +294,19 @@ NOTES (2026-09-07): `internal/tui/tui.go:720` still says the journal is "memory,
 **Acceptance:** `go build ./... && go vet ./cmd/apogee/ && go test ./internal/undo/ ./internal/tui/ -run 'Undo|Redo|Command|NoBuilder'`
 **Commit:** `feat(tui): /redo, and /undo speaks for the persistent journal`
 
-## 15. `apogee undo <session-id> [confirm]` and the Firing report line
+## 15. `apogee undo <session-id> [confirm]` and the Firing report line — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): deviation — the new tests live in `cmd/apogee/undo_test.go` rather than being split across `headless_test.go` and `daemonfire_test.go` as the item's Files line lists; the `undo with:` line, the verb and the end-to-end "the report names a command that works" claim are one subject and read as one file. Neither existing test file was touched.
+
+NOTES (2026-09-07): deviation — the verb is registered in `cmd/apogee/subcommands.go`, not `cmd/apogee/root.go`: root.go's `AddCommand` takes the set subcommands() composes, so the list the item pointed at lives in that file.
+
+NOTES (2026-09-07): consequential edit — cmd/apogee/doc.go: made necessary by adding cmd/apogee/undo.go (TestDocMapNamesEveryFile requires every non-test file in the package map).
+
+NOTES (2026-09-07): the verb resolves the apogee home as `--config` > `APOGEE_CONFIG` > `~/.apogee`, spelling the env read itself because it loads no config file and so never reaches `config.ApplyConfig`. Resolving through `resolveRoots` alone (the item's regression guard) would have ignored the variable, so a human whose home is set that way would have been told a session they can see has nothing to undo.
+
+NOTES (2026-09-07): `--workspace` is refused by not being registered at all — Cobra rejects it as an unknown flag, which is the unconditional form of the refusal. Pinned by TestUndoVerbRefusesAWorkspaceFlag.
+
+NOTES (2026-09-07): the two comments that now read falsely beside the new offer — `cmd/apogee/headless.go:771` ("the journal died with the process") and `cmd/apogee/daemonfire.go:482` ("no revert is offered here or anywhere") — were left for item 16, which names both line ranges explicitly in its Files list and its Acceptance grep.
 
 **What:** new top-level cobra verb `undo` in `cmd/apogee/undo.go`: `apogee undo <session-id>` previews, `… confirm` applies; it validates the id as a single clean path component, opens `~/.apogee/snapshots/<id>/` via `snapshot.OpenJournal` with the workspace read from `journal.json`, prints `undo.PreviewLines`/`ReportLines`, and exits non-zero with `nothing to undo for session <id>` / `undo snapshots unavailable: <reason>` otherwise; `--workspace` is refused. `run.Result` (`internal/run/run.go:82`) gains `UndoNote string` (the reason `run.Once` opened the journal with; empty = snapshot-backed). The two `writtenFilesLines` callers (`headless.go:609`, `daemonfire.go:457`) append `  undo with: apogee undo <session-id>` when `res.SessionID != "" && res.UndoNote == ""`. Fix for bead apogee-kk0.7. Depends on item 14.
 **Regression guard.** `writtenFilesLines(paths []string)` (`headless.go:708`) keeps its signature — `daemonfire_test.go:773` calls it with `[]string`. The verb registers `--config` exactly as `headless.go:253` does and resolves the home through `resolveRoots` (`wire.go:388`), never bare `config.ApogeeHome("")` (`internal/config/config.go:3380`, no env fallback).

@@ -656,6 +656,11 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	for _, line := range writtenFilesLines(res.Wrote) {
 		cmd.PrintErrln(line)
 	}
+	// And the command that puts those changes back, when this run left a journal that outlives it:
+	// the report is only half an account if the human who reads it has no way to act on it.
+	if line := undoVerbLine(res); line != "" {
+		cmd.PrintErrln(line)
+	}
 	// Each delegated run's own context fill, one line apiece and ahead of the summary: the summary
 	// speaks for the Firing as a whole, and a sub-agent fills a window of its OWN, which no
 	// top-level figure stands in for. A run that delegated nothing prints none of these lines.
@@ -777,6 +782,25 @@ func writtenFilesLines(paths []string) []string {
 		lines = append(lines, "  "+sanitize.StripEscapesToLine(path))
 	}
 	return lines
+}
+
+// undoVerbLine offers the revert this Firing's writes can still have: the exact
+// `apogee undo <session-id>` command, indented under the written-files block both unattended
+// Drivers print above it. It is the other half of ADR 0074's persistence — the journal now outlives
+// the process that wrote it, so a human reading a report after the fact has somewhere to go — and
+// it is composed once here for the same reason the block above it is: the daemon's log and the
+// headless stderr must name one command, not two spellings of it.
+//
+// Three conditions, all of them necessary. There is a block to hang it under (the run changed
+// something), a record to name (an unsaved run's store is nameless and was swept), and
+// run.Result.UndoNote is EMPTY — the note is why the journal was the in-memory funnel one, whose
+// records this process alone ever held, so offering a verb against it would send a human to a
+// command that answers "nothing to undo". Any one of the three missing composes nothing at all.
+func undoVerbLine(res run.Result) string {
+	if len(res.Wrote) == 0 || res.SessionID == "" || res.UndoNote != "" {
+		return ""
+	}
+	return "  undo with: apogee undo " + sanitize.StripEscapesToLine(res.SessionID)
 }
 
 // headlessSubAgentLines renders what each delegated run did to its own context: one line per

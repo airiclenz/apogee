@@ -115,7 +115,9 @@
 // probeterminal.go `apogee probe terminal`, which measures the terminal by painting on
 // it and reading the cursor back, with probeterminal_windows.go putting the console
 // into the mode a bubbletea session runs it in and probeterminal_other.go its POSIX
-// no-op twin.
+// no-op twin; undo.go `apogee undo <session-id> [confirm]`, the revert an unattended
+// Firing has nobody to offer — it opens one saved session's snapshot store from a fresh
+// process and shows `/undo`'s own listing (ADR 0074).
 //
 // The platform helper: confined_exec_linux.go intercepts the __confined-exec sentinel
 // before Cobra, so the landlock backend can confine a subprocess by re-invoking this

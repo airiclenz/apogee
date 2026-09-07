@@ -146,6 +146,18 @@ type Result struct {
 	// no undo state and offers no revert. Nothing here is rendered by this library: how the list
 	// reads belongs to the Driver.
 	Wrote []string
+	// UndoNote is WHY this Firing's undo journal is the in-memory funnel one of ADR 0051 rather
+	// than the snapshot-backed store of ADR 0074: snapshot.OpenJournal's own reason
+	// ("undo-snapshots is off", "git not found", "workspace mismatch"), or the text of the error
+	// a store that would not open reported. It is EMPTY when snapshots ARE in force, and that is
+	// the one state in which anything can be reverted after the process has gone: only a
+	// persisted journal outlives the run that wrote it.
+	//
+	// A Driver reads it as the gate on offering `apogee undo <session-id>` beside Wrote — the
+	// verb is offered when this is empty and a record was saved — and as the reason to name when
+	// it cannot. Like every other field here it is a REPORT: nothing is rendered by this library,
+	// and the wording of the offer belongs to the Driver.
+	UndoNote string
 	// Err is the run's own error — the loop's failure, or the cancellation that stopped it
 	// before an answer. It is nil on a Firing that reached its answer, even one whose
 	// record then failed to save (that failure is the returned error only).
@@ -351,6 +363,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		Usage:        tap.totals(),
 		ContextFiles: contextFiles,
 		Wrote:        a.WroteFiles(),
+		UndoNote:     reason,
 		Err:          runErr,
 	}
 	if spec.Store == nil {

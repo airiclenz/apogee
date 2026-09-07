@@ -488,6 +488,12 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	for _, line := range writtenFilesLines(res.Wrote) {
 		w.log.line("%s", line)
 	}
+	// And the command that puts them back, on the same terms the headless Driver offers it: a
+	// supervisor reading this log days later is exactly the reader ADR 0074's persistent journal
+	// was for, and the log is the only place the Firing's session id and its writes appear together.
+	if line := undoVerbLine(res); line != "" {
+		w.log.line("%s", line)
+	}
 
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once saves whatever completed before
