@@ -77,9 +77,13 @@ what loaded stays off the log; it is in the record.
 
 Afterwards the log names what the firing **changed**: a `changed — 2 file(s) this run:` header and
 one indented path per file, in the order the run first touched each — everything its writes touched,
-deletions and the source side of a move included, which is why the header says *changed*. It is a
-record and never an offer: nothing can be reverted from it, since the undo journal lives only as
-long as the run. A `plan` firing changes nothing and logs no such block.
+deletions and the source side of a move included, which is why the header says *changed*. Under it,
+on the same terms the headless Driver offers it, the log names the command that puts the firing's
+last exchange back — `  undo with: apogee undo <session-id>` — so a supervisor reading the log days
+later has somewhere to go: the session's snapshots outlive the process that wrote them, and the
+[verb](headless.md) previews before it reverts. The offer is left off where there is nothing behind
+it — an unsaved record, or a firing whose undo was the narrower in-memory one. A `plan` firing
+changes nothing and logs no such block.
 
 An `auto` firing running with `confine-to-workspace: false` says so too, in the same words an
 unconfined interactive launch prints: switching confinement off is the one blanket loosen in the

@@ -1083,7 +1083,10 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// unconditionally is what makes the coverage boundary the FUNNEL rather than a list kept
 	// here — a tool that writes through it is journalled, and a tool that reaches the
 	// filesystem some other way (a subprocess, an MCP server, a third-party tool) records
-	// nothing precisely because it never asks. A nil journal installs nothing.
+	// nothing HERE precisely because it never asks — those writes are reached instead by the
+	// whole-tree images the journal takes around the Exchange (ADR 0074), which is what puts
+	// them back within `/undo`'s reach without widening what rides this context. A nil journal
+	// installs nothing.
 	ctx = undo.WithJournal(ctx, a.journal)
 
 	// Install the console registry for EVERY call too (ADR 0059), and for the same reason the

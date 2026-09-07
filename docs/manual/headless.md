@@ -78,8 +78,24 @@ A run that **changed files** says which, just below the answer: a
 `changed — 2 file(s) this run:` header and one indented path per file, in the order the run
 first touched each. The list names everything the run's writes touched — files it deleted and
 the source side of a move as much as files it created — which is why the header says *changed*
-rather than *wrote*. It is a record, not an offer: nothing can be reverted from it, because the
-undo journal lives only as long as the process. A run that changed nothing prints no such line.
+rather than *wrote*. A run that changed nothing prints no such line. The block ends with the
+offer — `  undo with: apogee undo <session-id>` — naming the exact command that puts the run's
+last exchange back. That line is printed only when there is something behind it: the run changed
+files, its record was saved, and the session's snapshots were taken. A run whose undo was the
+narrower in-memory one — `undo-snapshots: false`, or no `git` on the host — prints the changed
+list and no offer, because nothing outlived the process to revert from.
+
+**`apogee undo <session-id>` is that revert, from any directory and long after the run.** It is
+the same two steps as `/undo` inside a session: `apogee undo <session-id>` previews, listing
+every recorded path with what the revert would do to it — *restore*, *delete*, or *skip* with
+the reason — and `apogee undo <session-id> confirm` applies exactly that step and reports what
+it did. Run it again to walk further back; each `confirm` takes one more exchange. A file that
+no longer holds what the agent left is skipped rather than overwritten, so your own edits since
+the run are safe. There is no `--workspace` flag and it is refused as unknown: the tree the
+revert belongs to is recorded in the session's own snapshot index, and a workspace given on the
+command line could only disagree with it. A session recorded without snapshots has nothing to
+revert here and says so. The full account of what undo covers is on the
+[commands page](commands.md#undoing-the-agents-file-writes--undo-and-redo).
 
 A run whose final turn was **abandoned** says so on that same summary line — the stats
 segment ends `· faulted` — so the one line a script greps reports it even where the exit

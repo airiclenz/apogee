@@ -53,8 +53,9 @@ Three things set it apart from other AI coding assistants.
   file edits, shell, git, tests, web, MCP servers, skills, parallel sub-agents — inside
   a terminal UI built with care: type your next message while the model streams and
   queue it into the running task, recall any prompt you have sent, fold away what you
-  are done reading, click every path it prints, and undo the agent's file writes one
-  exchange at a time.
+  are done reading, click every path it prints, and undo an exchange's file changes one
+  at a time — snapshot-backed, so a shell command's writes are in reach too, and it
+  survives a relaunch.
 
 Under the hood apogee is an embeddable Go engine, and the terminal UI is its first
 front-end rather than its identity: `apogee headless`, `apogee daemon` and the eval
@@ -187,8 +188,12 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
   the path a call really resolves to before you answer.
 - **Allow and deny lists for anything that reaches the network** — the web tools, MCP
   endpoints, and the model endpoint itself. Subprocesses never see your API key.
-- **`/undo`** — put back the files the agent wrote, one exchange at a time, with a
-  preview before anything is touched.
+- **`/undo` and `/redo`** — put back everything an exchange changed in your workspace,
+  one exchange at a time, with a preview before anything is touched and a skip for any
+  file you edited since. apogee images the workspace around each exchange, so a write by
+  a shell command or an MCP server is as reversible as one of its own file tools, and the
+  record outlives the process — a resumed session still reaches it, and
+  `apogee undo <session-id>` reverts an unattended run from a fresh one.
 
 ### The terminal UI
 
@@ -240,7 +245,7 @@ The [manual](docs/manual/README.md) carries the full reference:
 
 | Page | Covers |
 |---|---|
-| [Commands](docs/manual/commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo`, `/settings` |
+| [Commands](docs/manual/commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, `/settings` |
 | [Sessions](docs/manual/sessions.md) | Saving, resuming, browsing, renaming conversations |
 | [Configuration](docs/manual/configuration.md) | `config.yaml` end to end: servers, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
 | [Hooks](docs/manual/hooks.md) | Commands and webhooks fired on a session's events: payload, exec posture, webhooks |

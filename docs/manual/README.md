@@ -6,12 +6,12 @@ install it, what it can do. These pages are the full detail:
 
 | Page | Covers |
 |---|---|
-| [Commands](commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo`, and the `/settings` screen |
+| [Commands](commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, and the `/settings` screen |
 | [Sessions](sessions.md) | How conversations are saved, resumed, browsed, renamed |
 | [Configuration](configuration.md) | `~/.apogee/config.yaml` end to end: servers, API keys, model profiles, tools, the Floor guards, the system prompt, llama-launcher, document presentation, Auto mode's confinement, url-safety, web search, and project skills |
 | [Hooks](hooks.md) | Commands and webhooks apogee fires on a session's events: the five events, the payload, the exec posture, the webhook contract |
 | [Diagnosing a host — `apogee probe`](probe.md) | What this machine can enforce, what the model can do, what the terminal really does |
-| [Running one prompt — `apogee headless`](headless.md) | Single unattended runs for scripts and pipelines |
+| [Running one prompt — `apogee headless`](headless.md) | Single unattended runs for scripts and pipelines, and `apogee undo` to put one back |
 | [Standing schedules — `apogee daemon`](daemon.md) | Prompts on a clock that outlive the session |
 | [Building from source](building.md) | Prerequisites, `Makefile` targets, cross-compilation |
 

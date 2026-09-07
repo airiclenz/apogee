@@ -767,8 +767,8 @@ func headlessSummary(res run.Result) string {
 //
 // Paths only, and no verb column: the TUI's undo lines (internal/tui/undo.go) describe UNDOING a
 // change — a created file reads `delete`, a modified one `restore`, and a file touched since reads
-// `skip` — which is the opposite account of the one this block gives, and neither Driver here can
-// offer a revert anyway: the journal died with the process. These lines say what happened.
+// `skip` — which is the opposite account of the one this block gives. These lines say what
+// happened; the revert both Drivers can offer is its own line beneath them (undoVerbLine).
 //
 // Escape-stripped to a single line apiece: a path traces to a model-chosen tool argument, and both
 // sinks are one-line-per-entry — the daemon log by contract (daemon.go), a stderr list by shape.

@@ -205,10 +205,11 @@ func (g *group) snapshotted() bool { return g.pre != "" && g.post != "" }
 // journal from their own goroutines (ADR 0039) — and every method takes the same lock,
 // so a preview or a revert never observes a half-written group.
 //
-// Without a [Snapshotter] the stack is per process and in memory only, exactly as ADR 0051
-// built it. With one ([WithSnapshotter] and [WithWorkspace] together) each group also carries
-// the pair of whole-tree images taken around its exchange, which is what lets a revert reach
-// the writes the funnel never saw and what gives `/redo` something to re-apply (ADR 0074).
+// Without a [Snapshotter] the stack holds this process's own funnel records, in memory and
+// nowhere else, exactly as ADR 0051 built it. With one ([WithSnapshotter] and [WithWorkspace]
+// together) each group also carries the pair of whole-tree images taken around its exchange,
+// which is what lets a revert reach the writes the funnel never saw and what gives `/redo`
+// something to re-apply (ADR 0074).
 // Reverted groups move to a redo stack, which the next exchange that writes clears. Given an
 // index path beside those images ([WithIndexPath]) the stack outlives the process too: the
 // journal writes journal.json after every close, revert and redo, and [Load] reads it back.

@@ -262,7 +262,7 @@ type Agent struct {
 	// what every write replaced, grouped by the Exchange that caused it. It is LIVE HOST STATE,
 	// not session state (ADR 0022 §8) — it is never part of the Session snapshot, and the Agent
 	// never reads or writes a file for it. What it can REACH is the Driver's call: construction
-	// supplies ADR 0051's in-memory funnel journal, which lives and dies with the process, and a
+	// supplies ADR 0051's funnel journal, which this process alone ever holds, and a
 	// Driver that opened the session's own snapshot store hands that one over instead
 	// (SetJournal), which is what lets a resumed session revert an earlier process's writes
 	// (ADR 0074). A nil journal is the honest encoding of an

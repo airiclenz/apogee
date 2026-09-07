@@ -38,7 +38,8 @@ a typo is visible before you send.
 | `/clear` (or `/new`) | Close this session into history and start a fresh one | — |
 | `/compact` | Summarise the conversation to reclaim context | — |
 | `/continue` | Ask the model to keep going | — |
-| `/undo` | Put back the files the agent wrote in the last exchange — bare previews it, `/undo confirm` applies it — see [below](#undoing-the-agents-file-writes--undo) | — |
+| `/undo` | Put back what the last exchange changed — every write to your workspace, apogee's own file tools and a `terminal`, Python or MCP write alike; bare previews it, `/undo confirm` applies it, and the record survives a relaunch — see [below](#undoing-the-agents-file-writes--undo-and-redo) | — |
+| `/redo` | Put back what the last `/undo confirm` took away — same two steps, bare previews, `/redo confirm` applies it — see [below](#undoing-the-agents-file-writes--undo-and-redo) | — |
 | `/sessions` | Browse saved sessions — resume, rename, or delete | — |
 | `/rename` | Rename this session — `/rename <name>` sets it, bare `/rename` asks the model for one | — |
 | `/model` | Switch model — the Launch profiles [llama-launcher](configuration.md#local-servers--llama-launcher) defines when one is configured, what this server serves when not; picker, or `/model <name>` | — |
@@ -169,8 +170,8 @@ identity now, and the price is a prompt you will sometimes answer twice for what
 off the approver a parent and all its delegates share, so an allow granted inside a sub-agent clears
 that same call for its parent and its siblings, and outlives the child that earned it. The memory
 lives in the process and is never written to disk — it survives a `/clear`, but a session you resume
-from the store starts with an empty one. The direction that costs you is always the safe one: a
-prompt too many, never an unapproved call.
+from the store starts with an empty memory of its own. The direction that costs you is always the
+safe one: a prompt too many, never an unapproved call.
 
 **An MCP grant is server-grain.** Approving one tool of an [MCP
 server](configuration.md#external-mcp-servers--mcp-servers) clears its siblings on that same server
@@ -295,9 +296,9 @@ from the next scan on that copy is what `/<id>` resolves to, since your library 
 shipped source. It never overwrites: if the folder is already there apogee says so and changes
 nothing, so a copy you have been editing is safe.
 
-## Undoing the agent's file writes — `/undo`
+## Undoing the agent's file writes — `/undo` and `/redo`
 
-`/undo` takes back the files the agent wrote, **one exchange at a time** — one instruction
+`/undo` takes back what the agent changed, **one exchange at a time** — one instruction
 you gave, however many tool calls it took, sub-agents included. Bare `/undo` only
 **previews**: it names the exchange and every file the revert would touch, at its full
 resolved path, each marked *restore*, *delete* (the agent created it, so putting things
@@ -305,17 +306,40 @@ back means removing it) or *skip*; `/undo confirm` then applies exactly the step
 read, and anything else leaves your files alone. Repeat it to walk further back. A file
 you edited yourself after the agent wrote it is **skipped**, not overwritten — your edit
 wins, the rest of the exchange is still put back, and the note says which files were left
-and why. There is no redo.
+and why.
 
-Two limits are worth knowing before you rely on it. The journal is **memory, not storage**:
-it starts empty each time apogee launches, so a resumed session cannot put back writes made
-before that run — `/undo` says so rather than pretending there was nothing to undo. And it
-covers only the writes apogee's own file tools make (`write_file`, the edit and
-find-and-replace verbs, `copy_file`, `move_file`, `delete_file`). Everything else that can
-change your workspace is **not** undone: whatever a `terminal`, Python or test-runner
-command wrote, git working-tree changes from a branch checkout, and writes by MCP servers
-or other tools an embedder added. `/undo` is idle-only — it waits until the model has
-finished.
+**`/redo` puts back what an undo took away.** It is `/undo`'s mirror in every respect —
+bare previews, `/redo confirm` applies it, and a file you have edited in between is
+skipped the same way. The stack holds exactly what `/undo confirm` has taken back, and
+the next exchange that actually changes a file clears it: a redo reaching across newer
+work would lay an old tree over the work you just asked for.
+
+**It covers the whole workspace, not just apogee's own writes.** Around every exchange
+apogee images your workspace into a small object database of that session's own under
+`~/.apogee/snapshots/`, and the revert reaches every path those two images disagree on.
+So a file a `terminal` command wrote, what a `python_exec` script left behind, the
+working-tree changes a git checkout made and a write by an MCP server are all inside
+`/undo`'s reach, alongside the writes apogee's own file tools make. Three kinds of change
+are the residue: paths your workspace's own `.gitignore` excludes and anything else git's
+own `add` will not take (a nested repository, a path a filter driver rewrites); a write
+outside the workspace that you approved, which stays covered only for the run that made
+it; and everything that never was a file — a `terminal` command that dropped a database
+table dropped it for real, and no revert here brings it back.
+
+**It survives a relaunch.** The images and the small index beside them live on disk under
+the session's own id, so a session you resume can still put back what an earlier process
+wrote, and an unattended run can be reverted from a fresh process with [`apogee
+undo`](headless.md). The store is keyed to the workspace it imaged: resume the same
+session against a different tree and apogee loads none of it and says so.
+
+**Without the store, undo is narrower — and says which.** With
+[`undo-snapshots: false`](configuration.md#keeping-the-session-store-bounded--sessions),
+or on a host with no `git` on its PATH, apogee keeps the record of its own file tools'
+writes that it has always kept — this process's alone, held in memory — and `/undo` still
+works on those. When there is nothing to take back it names the reason in the same breath,
+so the narrower answer never reads as a broken one.
+
+Both verbs are **idle only** — they wait until the model has finished.
 
 ## The settings screen — `/settings`
 

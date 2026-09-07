@@ -757,8 +757,8 @@ func TestDaemonFireLogsContextFileAnomaliesAlone(t *testing.T) {
 
 // An `auto:` schedule's deliverable IS the state of the workspace afterwards, and the daemon's log
 // is the only place a supervisor sees what moved: the same block runHeadless prints on stderr, in
-// the same wording, because both Drivers compose it once (writtenFilesLines, headless.go). No
-// revert is offered here either — the journal behind the list died with the run.
+// the same wording, because both Drivers compose it once (writtenFilesLines, headless.go). The
+// revert that follows the block is its own line, with its own test (undo_test.go).
 func TestDaemonFireLogsTheFilesTheFiringWrote(t *testing.T) {
 	t.Run("the header and one indented path per entry reach the log", func(t *testing.T) {
 		harness := newDaemonFireHarness(t, config.Options{

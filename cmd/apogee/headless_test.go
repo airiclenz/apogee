@@ -1626,9 +1626,9 @@ func TestHeadlessSaysWhenTheContextWindowIsUnknown(t *testing.T) {
 
 // TestHeadlessReportsTheFilesTheRunWrote pins the end-of-run account of what a Firing CHANGED on
 // disk: the header, one indented path per entry, on stderr and nowhere else. The block is what
-// replaces the interactive /undo pane on a Driver that has nobody to offer a revert to — the
-// journal behind run.Result.Wrote died with the process — so it reads as a record of what happened
-// and carries no verb column.
+// replaces the interactive /undo pane on a Driver that has no pane: it reads as a record of what
+// happened and carries no verb column, and the revert it can offer rides a separate line with its
+// own test (undo_test.go).
 func TestHeadlessReportsTheFilesTheRunWrote(t *testing.T) {
 	t.Run("the header and one indented path per entry reach stderr, and none of it stdout", func(t *testing.T) {
 		stub := &stubRunner{res: run.Result{

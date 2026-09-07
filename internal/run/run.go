@@ -142,9 +142,10 @@ type Result struct {
 	// a human needs to see. An empty slice means the run recorded no write.
 	//
 	// It is a REPORT, never a handle: paths only, so nothing can revert from it, and taking it
-	// costs no filesystem work. The journal behind it stays memory-only — this library persists
-	// no undo state and offers no revert. Nothing here is rendered by this library: how the list
-	// reads belongs to the Driver.
+	// costs no filesystem work. The revert itself lives elsewhere: where the Driver opened the
+	// session's snapshot store, the journal behind this list outlives the Firing and `apogee undo`
+	// can reach it (ADR 0074), and UndoNote below says when it could not. Nothing here is rendered
+	// by this library: how the list reads belongs to the Driver.
 	Wrote []string
 	// UndoNote is WHY this Firing's undo journal is the in-memory funnel one of ADR 0051 rather
 	// than the snapshot-backed store of ADR 0074: snapshot.OpenJournal's own reason

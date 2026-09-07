@@ -315,7 +315,13 @@ NOTES (2026-09-07): the two comments that now read falsely beside the new offer 
 **Acceptance:** `go build ./... && go test ./cmd/apogee/ -run 'Undo|Headless|Daemon'`
 **Commit:** `feat(cmd): apogee undo <session-id> reverts a headless or daemon Firing`
 
-## 16. Manual, README and index prose for persistent undo
+## 16. Manual, README and index prose for persistent undo — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): `internal/undo/doc.go` and `internal/tui/doc.go` — both cited by the item — were already fully rewritten for ADR 0074 by earlier items in this plan and needed no edit; they are not in FILES.
+
+NOTES (2026-09-07): the Acceptance grep's `starts with an empty (journal|one)` alternative is not journal-scoped and matched two unrelated pre-existing sentences — `docs/manual/commands.md` (the approval memory) and `docs/manual/configuration.md` (a sub-agent's `task_list`). Both were reworded meaning-for-meaning ("an empty memory of its own", "an empty list of its own") so the item's Acceptance can be green; no semantic change to either.
+
+NOTES (2026-09-07): the `/undo` section's link to the `undo-snapshots:` key points at `configuration.md#keeping-the-session-store-bounded--sessions`, the heading that section lives under — the key is documented as a bolded paragraph there, with no anchor of its own. The `apogee undo` link points at `headless.md` with no anchor, because that page carries a single H1 and no subheadings to anchor to.
 
 **What:** Recast at the regression check (2026-09-06). Rewrite the `/undo` section (`docs/manual/commands.md:298-320`) and its table row (`:41`) for snapshots, coverage (workspace tree incl. subprocess/MCP writes; `.gitignore`d paths and out-of-workspace approved writes are the residue), `/redo`, persistence and the git-absent fallback; fix `docs/manual/configuration.md:1599` (the key line landed in item 12); replace `docs/manual/headless.md:80-82` with the `undo with:` line and the verb; update `README.md:55,189`, `docs/manual/README.md:9`; update the code prose stating the old limit (`internal/undo/doc.go:33-42`, `internal/agent/dispatch.go:1075-1081`, `internal/agent/loop.go:88-97`, `internal/run/run.go:140-144`, `cmd/apogee/headless.go:697-703`, `internal/tui/doc.go:186-190`, `internal/tui/tui.go:720`, `cmd/apogee/daemonfire.go:451`, `cmd/apogee/daemonfire_test.go:760`, `cmd/apogee/headless_test.go:1627`). Depends on item 15.
 **Regression guard.** Rule: every sentence stating the journal is per-process or memory-only goes; the rule and the Acceptance share one scope (`README.md CONTEXT.md docs/manual internal/ cmd/`) and one journal-scoped pattern (below); ADRs and archived plans are historical and stay. Also covered: `docs/manual/daemon.md:81-82` (`lives only as`), `internal/agent/state.go:60`, `agent.go:264`, `internal/undo/journal.go:153`; the `internal/tui/undo.go:149` and `undo_test.go:195,289` hits are item 14's `undoNothingNote` rewrite — this Acceptance is green only after it.

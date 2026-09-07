@@ -1644,8 +1644,9 @@ one restored on another machine — comes back with no Consoles at all, and an i
 from before is simply an id this process does not know (`no console 3 (open consoles: 1, 2)`).
 `/clear` — and its `/new` alias — closes every open Console along with the history that named them,
 quitting apogee closes them, and the Consoles a sub-agent opened close when its delegation ends.
-Nothing here is undone by `/undo` either — a Console that dropped your database table dropped it
-for real.
+What a Console wrote into your *workspace* is inside `/undo`'s reach like any other write, since
+the exchange's snapshots image the tree however it changed. What it did anywhere else is not — a
+Console that dropped your database table dropped it for real.
 
 **Four at a time.** One apogee process holds at most **4** open Consoles — a fixed number, not a
 setting — and a fifth open is refused, naming the ids that could be closed instead. A program that
@@ -1697,6 +1698,6 @@ The one cost worth knowing about: because the block changes whenever the list ch
 `task_list` call invalidates your server's prefix cache from that point in the prompt onward. That
 is a re-encode the model chose to spend, and a run that never touches the list never pays it.
 
-**A sub-agent keeps its own list.** A delegation starts with an empty one, cannot see the parent's
-and cannot write to it, and its list disappears when the delegation ends. What comes back from a
-delegation is its final reply, exactly as before.
+**A sub-agent keeps its own list.** A delegation starts with an empty list of its own, cannot see
+the parent's and cannot write to it, and its list disappears when the delegation ends. What comes
+back from a delegation is its final reply, exactly as before.

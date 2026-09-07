@@ -57,8 +57,11 @@ import (
 // than any of the above: it is LIVE HOST STATE, not session state (ADR 0022 §8). Its records
 // describe files as this process left them, and a snapshot restored on another machine — or
 // on this one after the workspace moved on — would hand the human pre-images to write over
-// bytes that are no longer the agent's. So a resumed Session starts with an empty journal and
-// `/undo` reaches back no further than the current process.
+// bytes that are no longer the agent's. What a resumed Session reverts from is therefore never
+// read out of the record: the Driver reopens the session's own snapshot store — keyed by session
+// id, and checked against the workspace it imaged — and hands the journal it loaded over
+// (SetJournal), so `/undo` reaches an earlier process's writes without the record ever carrying
+// them (ADR 0074). Where no store opens, the journal holds this process's writes and no others.
 //
 // The console registry (Agent.consoles, ADR 0059) is withheld on that same ground, taken to its
 // limit: what it holds are RUNNING PROCESSES, which cannot be written into a file at all. A

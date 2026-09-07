@@ -716,9 +716,10 @@ type Engine interface {
 	// each, at the journal's recorded absolute addresses (a root-joined named path for an ordinary
 	// write, the permit-pinned resolved target for an approved escape), since that listing is the
 	// disclosure the human authorises the revert from (ADR 0051). It reports false when there is
-	// nothing to undo, which an engine whose process made no writes also answers — the journal is
-	// memory, not storage, so a resumed session cannot reach an earlier process's writes. It
-	// touches no file and does not move the journal. Called only at idle: the command is idle-only
+	// nothing to undo, which an engine whose process made no writes also answers — as does a
+	// resumed session whose snapshot store would not open, whose journal reaches this process's
+	// own funnel writes and no further (UndoNote says why). It touches no file and does not move
+	// the journal. Called only at idle: the command is idle-only
 	// precisely because a running Step is writing into the group this describes.
 	UndoPreview() (undo.Step, bool)
 	// UndoRevert executes the group UndoPreview described and reports what it restored, removed,
