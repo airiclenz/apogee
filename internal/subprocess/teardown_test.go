@@ -1,4 +1,4 @@
-package tools
+package subprocess
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 )
 
 // fakeTeardown is a platform.ProcessTeardown that records its own lifecycle and nothing else, so
-// the ownership rule — runSubprocess releases the teardown on EVERY exit path, including the two
+// the ownership rule — RunSubprocess releases the teardown on EVERY exit path, including the two
 // that never reach Wait, and reaps the tree on the one that completes — is provable on every OS
 // instead of only where a Job Object exists.
 type fakeTeardown struct {
@@ -54,9 +54,9 @@ func (t *fakeTeardown) counts() (contained, reaped, released int) {
 func installFakeTeardown(t *testing.T) *fakeTeardown {
 	t.Helper()
 	td := &fakeTeardown{}
-	prev := newProcessTeardown
-	newProcessTeardown = func(*exec.Cmd) platform.ProcessTeardown { return td }
-	t.Cleanup(func() { newProcessTeardown = prev })
+	prev := NewProcessTeardown
+	NewProcessTeardown = func(*exec.Cmd) platform.ProcessTeardown { return td }
+	t.Cleanup(func() { NewProcessTeardown = prev })
 	return td
 }
 
@@ -73,9 +73,9 @@ func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 			Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
 		})
 
-		_, err := runSubprocess(ctx, subprocessSpec{argv: []string{os.Args[0], "-test.list=^$"}})
+		_, err := RunSubprocess(ctx, SubprocessSpec{Argv: []string{os.Args[0], "-test.list=^$"}})
 		if !errors.Is(err, domain.ErrConfinementUnavailable) {
-			t.Fatalf("runSubprocess err = %v, want ErrConfinementUnavailable", err)
+			t.Fatalf("RunSubprocess err = %v, want ErrConfinementUnavailable", err)
 		}
 		contained, reaped, released := td.counts()
 		if contained != 0 || reaped != 0 {
@@ -90,12 +90,12 @@ func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 		td := installFakeTeardown(t)
 		missing := filepath.Join(t.TempDir(), "no-such-binary")
 
-		res, err := runSubprocess(context.Background(), subprocessSpec{argv: []string{missing}})
+		res, err := RunSubprocess(context.Background(), SubprocessSpec{Argv: []string{missing}})
 		if err != nil {
-			t.Fatalf("runSubprocess err = %v, want nil (a failed start is a result, not a Go error)", err)
+			t.Fatalf("RunSubprocess err = %v, want nil (a failed start is a result, not a Go error)", err)
 		}
-		if res.exitCode != -1 {
-			t.Errorf("exitCode = %d, want -1 for a process that never started", res.exitCode)
+		if res.ExitCode != -1 {
+			t.Errorf("exitCode = %d, want -1 for a process that never started", res.ExitCode)
 		}
 		contained, reaped, released := td.counts()
 		if contained != 0 || reaped != 0 {
@@ -111,12 +111,12 @@ func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 
 		// The test binary itself is the one executable every host is guaranteed to have;
 		// -test.list with a regexp matching nothing prints nothing and exits 0.
-		res, err := runSubprocess(context.Background(), subprocessSpec{argv: []string{os.Args[0], "-test.list=^$"}})
+		res, err := RunSubprocess(context.Background(), SubprocessSpec{Argv: []string{os.Args[0], "-test.list=^$"}})
 		if err != nil {
-			t.Fatalf("runSubprocess err = %v, want nil", err)
+			t.Fatalf("RunSubprocess err = %v, want nil", err)
 		}
-		if res.exitCode != 0 {
-			t.Fatalf("exitCode = %d, want 0 (output %q)", res.exitCode, res.combinedOutput)
+		if res.ExitCode != 0 {
+			t.Fatalf("exitCode = %d, want 0 (output %q)", res.ExitCode, res.CombinedOutput)
 		}
 		contained, reaped, released := td.counts()
 		if contained != 1 {

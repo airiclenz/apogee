@@ -48,7 +48,7 @@ func chainedClobberLine(Shell, string) (string, bool) { return "", false }
 func truncateLine(Shell, string) (string, bool) { return "", false }
 
 // setRawCommandLine hands raw to CreateProcess verbatim, bypassing os/exec's EscapeArg
-// joining, which mangles the redirect's quotes (internal/tools/exec_cmdline_other.go carries
+// joining, which mangles the redirect's quotes (internal/subprocess/cmdline_other.go carries
 // the full reasoning; this is the same fix for the harness). It only sets the command line:
 // SysProcAttr is shared with the Confiner, which appends its Token, so the struct is created
 // if absent and never replaced.

@@ -130,7 +130,25 @@ NOTES (2026-09-07): the rewritten term states the decided design (workspace-tree
 **Acceptance:** `ADR="docs/adr/0074-undo-is-a-per-exchange-snapshot-pair-in-a-session-owned-git-object-database.md"; test -f "$ADR" && grep -q "0074" docs/adr/0051-undo-is-a-per-exchange-in-memory-pre-image-journal.md && grep -q "excludesFile" "$ADR" && grep -qi "nested repositor" "$ADR" && grep -qi "lfs" "$ADR" && grep -qi "one session's Exchanges" "$ADR" && ! sed -n '672,675p' CONTEXT.md | grep -q snapshot`
 **Commit:** `docs(adr): 0074 — undo is a per-Exchange snapshot pair in a session-owned git object database`
 
-## 7. Extract the subprocess core into `internal/subprocess`
+## 7. Extract the subprocess core into `internal/subprocess` — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): `setRawCommandLine` and `exitCodeOf` moved as the item says but stay UNEXPORTED in `internal/subprocess` — nothing outside the package calls either, and the item's "exported under the same names" clause names only `runSubprocess`/`subprocessSpec`/`subprocessResult`/`cappedBuffer` and the teardown seam.
+
+NOTES (2026-09-07): the streaming variant is `RunSubprocessTo(ctx, spec, io.Writer)` rather than a spec field, so a caller cannot silently ask for uncapped output by setting a struct field; it implies split-stdout (CombinedOutput holds the diagnostics alone, Stdout is empty) and a nil writer discards.
+
+NOTES (2026-09-07): five core tests moved from `internal/tools/exec_common_test.go` into `internal/subprocess/subprocess_test.go` (nil-Confiner fail-closed, wedged drain, confined flag, both denial-watch cases). `TestRunSubprocessReapsTheProcessGroupOnACleanExit` stayed in `internal/tools`: it needs `waitForPIDFile`/`pidAlive`/`killPID`, which live in test files the item's Files list does not cover, and it still exercises the core through the wrapper.
+
+NOTES (2026-09-07): `internal/tools`' `maxSubprocessOutputBytes` is kept under its own name as required, defined as `= subprocess.MaxSubprocessOutputBytes` so the Console family's separate truncation is measured against the one ceiling rather than a second copy of the number.
+
+NOTES (2026-09-07): consequential edit — internal/tools/doc.go: made necessary by the move of exec_cmdline_{unix,other}.go and the teardown seam out of the package
+
+NOTES (2026-09-07): consequential edit — internal/tools/terminal.go: made necessary by the rename of exec_cmdline_other.go to internal/subprocess/cmdline_other.go
+
+NOTES (2026-09-07): consequential edit — internal/platform/platform.go: made necessary by the rename of exec_cmdline_other.go to internal/subprocess/cmdline_other.go
+
+NOTES (2026-09-07): consequential edit — internal/platform/confinetest/lines_windows.go: made necessary by the rename of exec_cmdline_other.go to internal/subprocess/cmdline_other.go
+
+NOTES (2026-09-07): consequential edit — internal/platform/teardown.go: made necessary by the teardown owner moving from internal/tools' runSubprocess to internal/subprocess' run
 
 **What:** a pure move of `runSubprocess` (`internal/tools/exec_common.go:309`), `subprocessSpec` (`:35`), `subprocessResult` (`:177`), `cappedBuffer` (`:549`) and the teardown logic (`platform.RunWithTeardown`, `:405`) into a new `internal/subprocess`, exported under the same names; it imports `security`, `domain`, `platform` and stdlib only (cycle-free). `internal/tools` keeps its unexported names as thin wrappers so every tool and test is untouched. One new capability only: a streaming variant that writes stdout uncapped to an `io.Writer` (same spec, confinement handoff and teardown; stderr still capped). Depends on item 6.
 **Regression guard.** `internal/tools` KEEPS `subprocessSpec`, `subprocessResult`, `cappedBuffer` and `maxSubprocessOutputBytes` with today's fields (tests and `console_common.go:247-251` build them by field name); `runSubprocess` converts at the seam, no type alias. `subprocess` exports the teardown seam `var NewProcessTeardown` (`exec_common.go:282`; `exec_teardown_test.go` moves whole), and the move includes `setRawCommandLine` (`exec_cmdline_{unix,other}.go`) and `exitCodeOf` (`:530`).

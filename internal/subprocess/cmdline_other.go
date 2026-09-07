@@ -1,6 +1,6 @@
 //go:build windows
 
-package tools
+package subprocess
 
 import (
 	"os/exec"

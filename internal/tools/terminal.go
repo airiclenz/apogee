@@ -134,7 +134,7 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// (shellArgv): a refusal names the resolved path, so the operator reads which PATH entry
 	// to fix and the model reads a refusal rather than "not available". The Windows raw
 	// command line is unaffected — argv[0] is now the absolute cmd.exe and the verbatim line
-	// is still what cmd reads (exec_cmdline_other.go).
+	// is still what cmd reads (internal/subprocess/cmdline_other.go).
 	argv, err := shellArgv(ctx, t.root, command)
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
@@ -165,7 +165,7 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // The gate is POSIX-only, and posix says which shell the line is bound for: it is derived
 // from platform.Shell.CommandLine, which is empty exactly where the platform hands the
 // shell a real argv (sh -c) and non-empty where the line is delivered verbatim to cmd.exe
-// (exec_cmdline_other.go). shlex is the POSIX splitter — it is a parser for a DIFFERENT
+// (internal/subprocess/cmdline_other.go). shlex is the POSIX splitter — it is a parser for a DIFFERENT
 // language than cmd's, and running it over a cmd line rejects ordinary, valid input:
 // `echo don't panic` reads as an unterminated single quote, and `dir "C:\Program Files\"`
 // as an escaped quote that never closes. cmd.exe has no stable quoting grammar worth

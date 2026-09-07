@@ -3,30 +3,22 @@ package tools
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
-// Ceilings for a single subprocess call, bounding what one execution tool call can do so
-// it cannot exhaust memory or run unbounded.
-const (
-	// maxSubprocessOutputBytes caps the combined stdout+stderr a subprocess call surfaces
-	// to the model — a noisy command cannot flood the context window.
-	maxSubprocessOutputBytes = 256 * 1024
-	// defaultSubprocessTimeout bounds a subprocess call when the caller names no timeout;
-	// the §2.4 teardown reaps the process group when it fires.
-	defaultSubprocessTimeout = 120 * time.Second
-	// maxSubprocessTimeout is the hard ceiling on a caller-named timeout.
-	maxSubprocessTimeout = 600 * time.Second
-)
+// maxSubprocessOutputBytes caps the combined stdout+stderr a subprocess call surfaces to the
+// model — a noisy command cannot flood the context window. It is the core's ceiling under this
+// package's own name, so the Console family's separate truncation (console_common.go) is measured
+// against the very same number the funnel enforces rather than a second copy of it.
+const maxSubprocessOutputBytes = subprocess.MaxSubprocessOutputBytes
 
 // subprocessSpec is the platform-agnostic description of one subprocess execution: the argv
 // to run, the working directory, the per-call timeout, and the optional stdin. The execution
@@ -38,7 +30,7 @@ type subprocessSpec struct {
 	argv []string
 	// dir is the working directory; empty means the process inherits the caller's.
 	dir string
-	// timeout bounds the run; zero means defaultSubprocessTimeout.
+	// timeout bounds the run; zero means subprocess.DefaultSubprocessTimeout.
 	timeout time.Duration
 	// stdin, when non-empty, is fed to the process on its standard input.
 	stdin string
@@ -63,7 +55,7 @@ type subprocessSpec struct {
 	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
 	// POSIX and for any argv that is a real argv; a tool handing a SHELL LINE to
 	// cmd.exe on Windows sets it, because os/exec's argv joining mangles the quotes the
-	// shell needs (exec_cmdline_other.go).
+	// shell needs (internal/subprocess/cmdline_other.go).
 	cmdline string
 	// failFast reports that the caller prepended platform.FailFastPreamble to the line it is
 	// running, so a non-zero exit may be the preamble aborting the script at its first failed
@@ -275,154 +267,57 @@ func resolveWorkdirInRoot(workdir, root string) (string, error) {
 	return resolveInRoot(workdir, root)
 }
 
-// newProcessTeardown builds the per-run process-tree teardown for cmd. It is this package's seam
-// onto the platform constructor (platform.NewProcessTeardown, one per build tag) — a package var
-// so a test can substitute a fake platform.ProcessTeardown and observe the release lifecycle on
-// every OS, the same idiom as shellHost. Production code never reassigns it.
-var newProcessTeardown = platform.NewProcessTeardown
-
-// runSubprocess runs spec as a one-shot subprocess (ADR 0008 — fresh process per call, no
-// persistent shell/REPL) and captures its combined output and exit code. It is the single
-// place the §2.4 confinement-and-teardown contract is honoured for every execution tool:
+// runSubprocess runs spec as a one-shot subprocess through internal/subprocess, the shared core
+// that owns the §2.4 confinement-and-teardown contract for every spawner apogee has: the
+// process-tree teardown, the confinement handoff that fails CLOSED, the live kill-on-denial watch
+// on a confined run, the output cap and the timeout clamp
+// (docs/design/confinement-execution-contract.md).
 //
-//   - It builds an idiomatic *exec.Cmd with exec.CommandContext, owning all I/O (the
-//     contract's tool-builds-and-runs-the-cmd model, §2.2).
-//   - It wires the process-tree teardown (Setpgid + a negative-PID kill on POSIX, a Job
-//     Object terminated on cancel on Windows, plus WaitDelay on both) so a cancelled or
-//     timed-out command takes down every descendant that has not deliberately left the
-//     container. The one documented escape is POSIX's: a descendant that calls
-//     setsid/setpgid(0,0) is outside the group and outside the kill, so it survives the call
-//     unsupervised — still inside whatever fence the Confiner installed, an accepted residual
-//     rather than an enforcement gap (platform.NewProcessTeardown states it in full). Windows'
-//     Job Object denies breakaway and has no counterpart.
-//   - If a Confinement handle is on ctx (the dispatch disposition installed it for an
-//     Auto/confine subprocess call), it asks the Confiner to wrap the cmd before running.
-//     A backend that cannot establish the box returns ErrConfinementUnavailable, which this
-//     function propagates verbatim (wrapped) so dispatch can demote the call to Approval —
-//     the "confine if you can, gate if you can't" runtime net (carried finding #2). The
-//     subprocess is NOT run unconfined when confinement was required and failed — a handle
-//     whose Confiner is nil is that same failure, reported rather than run around.
+// This package keeps its own spec and result shapes and converts at the seam rather than aliasing
+// the core's, so the execution tools and their tests go on building the spec they always built by
+// field name; the two shapes are the same values under this package's spelling.
 //
-// The returned error is non-nil only for ctx cancellation (so the loop rolls the Turn back)
-// or a confinement-unavailable demotion; a clean non-zero process exit is a normal result
-// (exitCode set), not a Go error — the model reads it and routes around it.
+// The returned error is non-nil only for ctx cancellation (so the loop rolls the Turn back) or a
+// confinement-unavailable demotion; a clean non-zero process exit is a normal result (exitCode
+// set), not a Go error — the model reads it and routes around it.
 func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, error) {
-	if err := ctx.Err(); err != nil {
+	res, err := subprocess.RunSubprocess(ctx, spec.core())
+	if err != nil {
 		return subprocessResult{}, err
 	}
-	if len(spec.argv) == 0 {
-		return subprocessResult{}, fmt.Errorf("apogee: runSubprocess: empty argv")
-	}
+	return fromCore(res), nil
+}
 
-	timeout := spec.timeout
-	if timeout <= 0 {
-		timeout = defaultSubprocessTimeout
+// core renders the spec in the shared core's shape. It is a field-for-field rename and nothing
+// else: a field added here without a line added there would be silently dropped, so the two
+// structs are edited together.
+func (s subprocessSpec) core() subprocess.SubprocessSpec {
+	return subprocess.SubprocessSpec{
+		Argv:        s.argv,
+		Dir:         s.dir,
+		Timeout:     s.timeout,
+		Stdin:       s.stdin,
+		Env:         s.env,
+		SplitStdout: s.splitStdout,
+		Cmdline:     s.cmdline,
+		FailFast:    s.failFast,
 	}
-	if timeout > maxSubprocessTimeout {
-		timeout = maxSubprocessTimeout
-	}
+}
 
-	// The run is governed by its own context (a child of the caller's, so a model-side
-	// cancel still propagates) carrying the per-call timeout. The §2.4 teardown reaps the
-	// process group when either fires.
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(runCtx, spec.argv[0], spec.argv[1:]...)
-	cmd.Dir = spec.dir
-	if spec.env != nil {
-		cmd.Env = spec.env
+// fromCore renders the core's result in this package's shape, the other half of the same
+// field-for-field rename.
+func fromCore(res subprocess.SubprocessResult) subprocessResult {
+	return subprocessResult{
+		combinedOutput: res.CombinedOutput,
+		stdout:         res.Stdout,
+		exitCode:       res.ExitCode,
+		timedOut:       res.TimedOut,
+		drainWedged:    res.DrainWedged,
+		confined:       res.Confined,
+		box:            res.Box,
+		denialStopped:  res.DenialStopped,
+		failFast:       res.FailFast,
 	}
-	if spec.stdin != "" {
-		cmd.Stdin = strings.NewReader(spec.stdin)
-	}
-	// One capped buffer takes everything the child prints, so a runaway command cannot exhaust
-	// memory through its output. A spec that split the streams gets a second one: stdout becomes
-	// the caller's payload and `out` is left holding the diagnostics alone.
-	var out, stdoutOnly cappedBuffer
-	out.limit = maxSubprocessOutputBytes
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	if spec.splitStdout {
-		stdoutOnly.limit = maxSubprocessOutputBytes
-		cmd.Stdout = &stdoutOnly
-	}
-
-	// Wire the process-tree teardown BEFORE confining: the Confiner only appends to
-	// SysProcAttr (Setpgid on POSIX, Token on Windows) and never touches cmd.Cancel, so the
-	// two compose. The returned handle is what the teardown needs once the process exists —
-	// nothing on POSIX, the Job Object assignment on Windows (internal/platform/teardown.go).
-	teardown := newProcessTeardown(cmd)
-	// The teardown owns an OS resource from the moment it is built (the Windows Job Object
-	// handle), so this function owns releasing it: the confine refusal below and a cmd.Start()
-	// failure both return without ever reaching Wait, and neither may leak the handle. release
-	// is idempotent, so the normal path pays nothing for the guarantee.
-	defer teardown.Release()
-	// A shell line on Windows must reach the shell verbatim; every other platform and
-	// every real argv leaves this empty and the cmd untouched.
-	setRawCommandLine(cmd, spec.cmdline)
-
-	// Confine the command if the disposition installed a handle. ErrConfinementUnavailable
-	// is propagated so dispatch demotes to Approval rather than running unconfined. An
-	// installed handle carrying no Confiner is broken wiring, not permission to run free: it
-	// fails closed the same way, so the escape surfaces as the truthful demote instead of a
-	// silent unconfined run.
-	confined := false
-	var box domain.ConfinementBox
-	if conf, ok := domain.ConfinementFromContext(ctx); ok {
-		if conf.Confiner == nil {
-			return subprocessResult{}, fmt.Errorf("confine %s: %w: the installed handle carries no Confiner",
-				spec.argv[0], domain.ErrConfinementUnavailable)
-		}
-		if err := conf.Confiner.Confine(runCtx, conf.Box, cmd); err != nil {
-			return subprocessResult{}, fmt.Errorf("confine %s: %w", spec.argv[0], err)
-		}
-		confined = true
-		// The box the run was fenced by rides along on the result: it is what the denial
-		// labels name the writable roots from, and this is the only place it is in hand.
-		box = conf.Box
-	}
-
-	// A CONFINED run's output is watched live for an OS-denial signature; the first match
-	// cancels runCtx, which fires cmd.Cancel — the §2.4 process-group kill — so a script
-	// whose command the fence denied is stopped there instead of running its remaining
-	// lines against a half-done state (fix A of the 2026-08-22 workspace-clobber
-	// incident). `set -e` cannot do this alone: POSIX exempts every command of an AND-OR
-	// list but the last, so a denied `mkdir d && cd d` chain does not abort the script and
-	// the unguarded lines after it run with the cwd unchanged — the incident's clobber.
-	// The watch wraps the SAME capped buffer the streams already feed (one instance on
-	// both keeps exec's single interleaved copier); on a split-stdout run only stderr is
-	// watched, stdout being the caller's payload. Unconfined runs are never watched.
-	var denialWatch *platform.DenialKillWriter
-	if confined {
-		denialWatch = platform.NewDenialKillWriter(&out, cancel)
-		cmd.Stderr = denialWatch
-		if !spec.splitStdout {
-			cmd.Stdout = denialWatch
-		}
-	}
-
-	runErr := platform.RunWithTeardown(cmd, teardown)
-
-	// A ctx cancellation is the one case surfaced as a Go error (the loop rolls back).
-	if ctx.Err() != nil {
-		return subprocessResult{}, ctx.Err()
-	}
-
-	res := subprocessResult{combinedOutput: out.String(), stdout: stdoutOnly.String(), confined: confined, box: box}
-	res.timedOut = runCtx.Err() == context.DeadlineExceeded
-	res.exitCode = exitCodeOf(cmd, runErr)
-	// exec.ErrWaitDelay is not an *exec.ExitError, so exitCodeOf falls through to the leader's
-	// own status — 0 whenever the leader exited cleanly and only its descendants wedged the
-	// drain. Reporting that as a success hides exactly the case the operator needs to see:
-	// something was still holding the pipe and had to be killed.
-	res.drainWedged = errors.Is(runErr, exec.ErrWaitDelay)
-	if res.drainWedged && res.exitCode == 0 {
-		res.exitCode = -1
-	}
-	res.denialStopped = denialWatch != nil && denialWatch.Detected()
-	res.failFast = spec.failFast
-	return res, nil
 }
 
 // maxSubprocessErrorExcerptBytes caps how much of a failed command's diagnostics RunHookSubprocess
@@ -520,27 +415,6 @@ func diagnosticsExcerpt(diagnostics string) string {
 		trimmed = "…" + strings.ToValidUTF8(trimmed[len(trimmed)-maxSubprocessErrorExcerptBytes:], "")
 	}
 	return ": " + trimmed
-}
-
-// exitCodeOf extracts the process exit code from a finished cmd: the child's code on a clean
-// exit (zero or non-zero), and -1 when the process was killed by a signal (a timeout or the
-// teardown kill), which exec reports without an ExitCode. A wedged drain (exec.ErrWaitDelay) is
-// deliberately NOT decided here — it is not a process status at all, so runSubprocess reads it
-// off the run error itself.
-func exitCodeOf(cmd *exec.Cmd, runErr error) int {
-	if runErr == nil {
-		return 0
-	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		return exitErr.ExitCode() // -1 if signalled, the child's code otherwise
-	}
-	// A non-ExitError (e.g. the program could not be started) — report -1 and let the
-	// caller surface the message from combined output / the error itself.
-	if cmd.ProcessState != nil {
-		return cmd.ProcessState.ExitCode()
-	}
-	return -1
 }
 
 // cappedBuffer is an io.Writer that accumulates up to limit bytes and silently discards the

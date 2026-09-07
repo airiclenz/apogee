@@ -78,7 +78,7 @@ type ProcessTeardown interface {
 	// moment the teardown was built, which is before the process does, so Release runs on
 	// every exit from the run — after Wait has returned on the normal path, and equally on
 	// the confine-refusal and Start-failure paths that never reach Wait. It is deferred once
-	// by the caller that built the teardown (internal/tools' runSubprocess), and stays
+	// by the caller that built the teardown (internal/subprocess' run), and stays
 	// idempotent so a second call could never double-free.
 	Release()
 }
@@ -118,7 +118,7 @@ func (NoTeardown) Release() {}
 //
 // It does NOT release td: the resource exists from the moment the teardown was built, which is
 // before this function is reached, so releasing it belongs to the caller that built it
-// (internal/tools' runSubprocess). That is the only placement a Start failure — or a Confine
+// (internal/subprocess' run). That is the only placement a Start failure — or a Confine
 // failure, which never gets here at all — also drops.
 func RunWithTeardown(cmd *exec.Cmd, td ProcessTeardown) error {
 	if err := cmd.Start(); err != nil {

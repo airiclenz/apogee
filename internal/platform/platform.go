@@ -37,7 +37,7 @@ type Shell interface {
 	// embedded quote as \" — a form cmd.exe does not understand, so `echo "hi"`
 	// reaches the shell as `echo \"hi\"` and a quoted path with a space fails
 	// outright. Handing this string to syscall.SysProcAttr.CmdLine delivers the
-	// line verbatim instead (internal/tools/exec_cmdline_other.go).
+	// line verbatim instead (internal/subprocess/cmdline_other.go).
 	CommandLine(line string) string
 
 	// Quote returns arg quoted so the platform shell reads it as one argument, and

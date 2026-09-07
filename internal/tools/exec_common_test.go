@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -14,38 +13,8 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 )
-
-// TestRunSubprocessNilConfinerFailsClosed pins the §2.2 posture on the one handle shape the
-// confine guard used to wave through: a Confinement installed with no Confiner behind it. That
-// is broken wiring, not permission to run free — it must surface as ErrConfinementUnavailable,
-// which dispatch turns into the truthful demote to Approval, and the command must never run.
-func TestRunSubprocessNilConfinerFailsClosed(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell canary; the guard it pins is platform-independent")
-	}
-	t.Parallel()
-
-	// The canary is a file the command would create: its absence is the proof that nothing
-	// ran, which an error alone cannot give.
-	canary := filepath.Join(t.TempDir(), "ran")
-	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
-		Confiner: nil,
-		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
-	})
-
-	_, err := runSubprocess(ctx, subprocessSpec{
-		argv: []string{"/bin/sh", "-c", fmt.Sprintf("touch %s", strconv.Quote(canary))},
-	})
-	if !errors.Is(err, domain.ErrConfinementUnavailable) {
-		t.Fatalf("runSubprocess err = %v, want ErrConfinementUnavailable (a handle with no Confiner must fail closed)", err)
-	}
-	if _, statErr := os.Stat(canary); !errors.Is(statErr, os.ErrNotExist) {
-		t.Errorf("stat %s = %v, want not-exist — the command must not have run unconfined", canary, statErr)
-	}
-}
 
 // TestRunSubprocessReapsTheProcessGroupOnACleanExit pins the half of the §2.4 teardown that
 // cmd.Cancel cannot reach: a command that BACKGROUNDS something and then exits normally. Nothing
@@ -79,36 +48,6 @@ func TestRunSubprocessReapsTheProcessGroupOnACleanExit(t *testing.T) {
 
 	if pidAlive(pid, 3*time.Second) {
 		t.Errorf("backgrounded PID %d survived a CLEAN exit; the process group was reaped only on cancellation", pid)
-	}
-}
-
-// TestRunSubprocessReportsAWedgedDrain pins the second half of the same finding: when something
-// the command left running still holds the output pipe, exec cuts the drain off at
-// platform.ProcessWaitDelay and returns exec.ErrWaitDelay — which is not an *exec.ExitError, so
-// the exit code falls through to the leader's own status. The leader exited 0, so the call used
-// to render as a green tick with a silently truncated tail.
-func TestRunSubprocessReportsAWedgedDrain(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell; the exit-code mapping it pins is platform-independent")
-	}
-	// platform.ProcessWaitDelay is a package var, so this test cannot run in parallel;
-	// shrinking it is what keeps a five-second drain out of the suite.
-	prev := platform.ProcessWaitDelay
-	platform.ProcessWaitDelay = 250 * time.Millisecond
-	t.Cleanup(func() { platform.ProcessWaitDelay = prev })
-
-	// The sleep INHERITS the captured pipes and outlives the shell, so the output copy cannot
-	// finish: Wait blocks until the delay expires. The sleep is short enough that a failed
-	// reap cannot leave a process around for long.
-	res, err := runSubprocess(context.Background(), subprocessSpec{argv: []string{"/bin/sh", "-c", `sleep 10 &`}})
-	if err != nil {
-		t.Fatalf("runSubprocess err = %v, want nil (a wedged drain is a result, not a Go error)", err)
-	}
-	if !res.drainWedged {
-		t.Fatalf("drainWedged = false, want true — the pipe was still held when the delay expired (exit code %d)", res.exitCode)
-	}
-	if res.exitCode == 0 {
-		t.Errorf("exitCode = 0 for a run whose descendants held the pipe and were killed; the operator would read that as a clean success")
 	}
 }
 
@@ -292,105 +231,6 @@ func TestRunHookSubprocessFailsOnANonZeroExit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot parse input") {
 		t.Errorf("err = %v, want the command's diagnostics quoted", err)
-	}
-}
-
-// TestRunSubprocessRecordsConfined pins the confined flag on the result: true exactly when a
-// Confinement handle wrapped the run, false on a plain unconfined run — the structural half
-// the terminal's denial label keys on, so an unconfined EPERM can never be blamed on the box.
-func TestRunSubprocessRecordsConfined(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell canary; the flag it pins is platform-independent")
-	}
-	t.Parallel()
-
-	spec := subprocessSpec{argv: []string{"/bin/sh", "-c", "true"}}
-
-	res, err := runSubprocess(context.Background(), spec)
-	if err != nil {
-		t.Fatalf("unconfined runSubprocess err = %v, want nil", err)
-	}
-	if res.confined {
-		t.Error("unconfined run reported confined = true")
-	}
-
-	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
-		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
-		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
-	})
-	res, err = runSubprocess(ctx, spec)
-	if err != nil {
-		t.Fatalf("confined runSubprocess err = %v, want nil", err)
-	}
-	if !res.confined {
-		t.Error("confined run reported confined = false")
-	}
-}
-
-// TestRunSubprocessDenialWatchKillsConfinedRun proves fix A of the 2026-08-22
-// workspace-clobber incident at the funnel: a CONFINED run whose stream carries an
-// OS-denial signature is killed by the live watch before its later, unguarded write line
-// runs — the job `set -e` cannot do for an AND-OR list, since POSIX exempts every command
-// of one but the last. The script mimics the incident: the "denial", intervening work
-// (the sleep, which the incident's own commands stood in for — the kill is asynchronous),
-// then the destructive write that must never land.
-func TestRunSubprocessDenialWatchKillsConfinedRun(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell script; the watch keys on POSIX EPERM spellings only")
-	}
-	t.Parallel()
-
-	dir := t.TempDir()
-	clobber := filepath.Join(dir, "clobber.txt")
-	script := `echo "mkdir: cannot create directory: Operation not permitted" >&2` + "\n" +
-		"sleep 5\n" +
-		"echo clobbered > " + clobber + "\n"
-	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
-		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
-		Box:      domain.ConfinementBox{WorkspaceRoot: dir},
-	})
-
-	res, err := runSubprocess(ctx, subprocessSpec{argv: []string{"/bin/sh", "-c", script}})
-
-	if err != nil {
-		t.Fatalf("runSubprocess err = %v, want nil (a denial kill is a result, not a Go error)", err)
-	}
-	if !res.denialStopped {
-		t.Error("denialStopped = false, want the watch to have matched and killed the run")
-	}
-	if res.exitCode == 0 {
-		t.Error("exitCode = 0, want non-zero for the killed run")
-	}
-	if res.timedOut {
-		t.Error("timedOut = true, want the denial kill reported as a kill, not a timeout")
-	}
-	if _, statErr := os.Stat(clobber); !errors.Is(statErr, os.ErrNotExist) {
-		t.Errorf("stat %q = %v, want not-exist — the kill must land before the unguarded write", clobber, statErr)
-	}
-}
-
-// TestRunSubprocessDenialWatchNeverWatchesUnconfined pins the watch's structural gate: the
-// identical denial-shaped output on an UNCONFINED run is not scanned, not killed, and not
-// flagged — an unconfined EPERM can never be blamed on the box (the same gate the confined
-// flag itself pins above).
-func TestRunSubprocessDenialWatchNeverWatchesUnconfined(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell script; the gate it pins is platform-independent")
-	}
-	t.Parallel()
-
-	script := `echo "mkdir: cannot create directory: Operation not permitted" >&2`
-
-	res, err := runSubprocess(context.Background(), subprocessSpec{argv: []string{"/bin/sh", "-c", script}})
-
-	if err != nil {
-		t.Fatalf("runSubprocess err = %v, want nil", err)
-	}
-	if res.denialStopped {
-		t.Error("denialStopped = true on an unconfined run")
-	}
-	if res.exitCode != 0 {
-		t.Errorf("exitCode = %d, want 0 — the run must complete untouched", res.exitCode)
 	}
 }
 
