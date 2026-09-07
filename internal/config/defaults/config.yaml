@@ -643,6 +643,25 @@ tool-call-salvage: true
 # delegate-max-steps: 80
 
 # =============================================================================
+# Snapshot the workspace for /undo. With this on, apogee images your whole workspace around each
+# exchange — once immediately before the exchange's first write-capable tool call, once when the
+# exchange ends — into a small object database of that session's own under ~/.apogee/snapshots/.
+# That widens /undo twice over. It takes back every write the exchange made rather than only the
+# ones apogee routed itself, so a file written by a command the terminal tool ran, a file an MCP
+# server wrote and a checkout are all inside its reach; and the record lives on disk, so /undo
+# still reaches back through a relaunch instead of starting empty. Nothing is ever written inside
+# your workspace, and your own repository — its objects, its index, its branches — is neither read
+# nor written. A path your own .gitignore excludes is never imaged, so it stays outside what /undo
+# can reverse.
+#
+# The store needs git on your PATH. Where git is missing, undo-snapshots: false behaves exactly
+# the same way — apogee keeps the in-memory record of its own writes that it has always kept,
+# /undo still works on those, and it names the reason so a narrower answer never reads as a broken
+# one. An edit through /settings takes effect at the NEXT start, because the store is opened while
+# the session is being built. Config-file only (no flag or env). Default: true.
+undo-snapshots: true
+
+# =============================================================================
 # Name new sessions from their first prompt. On the first thing you say in a fresh session, apogee
 # sends one small extra completion — the prompt, your workspace name and the date — and uses the
 # reply as that session's title, so the session browser lists "fix the escape handling in the
