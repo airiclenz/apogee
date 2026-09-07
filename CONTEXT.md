@@ -678,11 +678,16 @@ stack" for the record itself (the stack is how `/undo` walks it; the journal is 
 **Agent mode**:
 The autonomy level governing which tool calls need human approval — a **monotonic
 privilege ladder**. Four:
-- **Plan** — read-only; no writes or command execution (explore and propose, touch nothing).
-- **Ask-Before** — workspace reads run free; every write, command, and external reach
-  requires an Approval (the human is the gate).
+- **Plan** — read-only — including the hardened git read tools (`git_status`, `git_log`,
+  `git_diff_range`), which are read-only by construction and so take the read-only row in every
+  mode (the **RO-subproc** class, ADR 0012 amendment 2026-09-06); no writes, no other command
+  execution (explore and propose, touch nothing).
+- **Ask-Before** — workspace reads run free, the hardened git reads above included; every
+  write, every other command, and every external reach requires an Approval (the human is
+  the gate).
 - **Allow-Edits** — Apogee's own **workspace-scoped edits** (path-safety-bounded) run
-  without asking; shell/exec, network, MCP, and anything out-of-workspace still gate.
+  without asking; shell/exec other than those reads, network, MCP, and anything
+  out-of-workspace still gate.
   Needs **no Confinement** — path-safety bounds the auto-approved writes and the human
   backstops the unbounded surface, so it is **identical on every OS**.
 - **Auto** — adds the unbounded **shell/subprocess** surface to the auto-approved set, so it
@@ -786,9 +791,12 @@ surface (Linux **landlock** applied pre-`execve` on the child; macOS **`sandbox-
 the child; Windows a restricted **low-integrity token** handed to process creation, with the box
 expressed as a mandatory label on the disk and reverted on teardown — one clean subprocess
 granularity on all three), **or** by Apogee's own
-**path-safety-to-workspace** for its own in-process write tools **and url-safety for its own
-network tools** (a third-party tool of either kind, whose scoping Apogee cannot vouch for, gates
-instead of running unsupervised). It is a **capability
+**path-safety-to-workspace** for its own in-process write tools, **url-safety for its own
+network tools**, **and the argv Apogee builds itself for its own read-side git tools** (`git_status`,
+`git_log`, `git_diff_range` — the **RO-subproc** class: hooks and fsmonitor off, a repository whose
+config names a program git would run refused outright, a scrubbed child environment, nothing
+written, so the call is bounded without a box). A third-party tool of any of those kinds, whose
+scoping Apogee cannot vouch for, gates instead of running unsupervised. It is a **capability
 matrix, not a one-bit flag**: each backend reports what it can enforce (`fs-write`, `network-egress`,
 …). In **Auto** the network is **open by default**, so **`AutoEligible()` requires filesystem
 confinement only** — Linux Auto needs landlock ABI ≥1 (kernel ≥5.13), not ABI v4. The unbounded

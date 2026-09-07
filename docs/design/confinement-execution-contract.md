@@ -465,6 +465,10 @@ one level down (D2), for free, with no threading.
 > with the caps-insufficient `gate` fallback, `gate` on the middle rungs, `refuse` in Plan (they
 > stay in Plan's read-only menu, which is a UX affordance; the class is the boundary). Tighten-only
 > in every cell; `confine=false` is unaffected.
+> **Superseded in part 2026-09-06 (see that block below):** the rule stands for every other marker
+> carrier, but `git_diff_range` — with `git_status` and `git_log` — now carries the
+> `readOnlySubprocess` marker and takes the **RO-subproc** row, run in every mode; `diagnostics`
+> keeps the **subproc** row this block gave it.
 
 > **Amended 2026-08-02 (one classification: the Plan menu keys on the ladder's fact).** The
 > amendment above left the Plan **menu filter** reading `ReadOnly()` while the Plan **row** read the
@@ -522,6 +526,44 @@ one level down (D2), for free, with no threading.
 > reported absent, so the settings editor announces a refusal where it used to announce an install
 > hint, and the OS opener refuses loudly where it used to degrade silently.
 
+> **Amended 2026-09-06 (a subprocess that is read-only by construction takes the RO row; ADR 0012
+> amendment 2026-09-06).** The 2026-07-26 rule above — an unfakeable marker outranks a tool's own
+> `ReadOnly()` declaration — **stands for every other marker carrier** and is superseded for **one**
+> class only. `git_status`, `git_log` and `git_diff_range` carry an unexported `readOnlySubprocess`
+> marker (`internal/tools/readonly_subprocess.go`, minted the way `workspaceScopedWriter` is and
+> read by the resolver through `tools.IsReadOnlySubprocess`), and that marker is the new
+> **RO-subproc** class: read-only **by construction**, a subprocess only by **mechanism**. It takes
+> the **RO row in every mode, Auto included** — Plan offers and runs the trio, the middle rungs no
+> longer gate it, and Auto runs it **unconfined**, exactly as it runs `read_file`. This is a
+> **LOOSEN**, the first in §4, and what bounds it is the mint: the marker is spellable only inside
+> `internal/tools`, and only for a tool that on every reachable path spawns git through `runGit`,
+> passes `gitDiffHardeningArgs` on every diff-producing invocation, validates each ref it accepts,
+> and writes nothing to the tree, the index or the repository. A tool that grows a path missing any
+> of those loses the marker in the same change.
+>
+> **Why the premise no longer holds.** The 2026-07-26 rule was written when "a subprocess is
+> unbounded" was true of these three. Every hardening that closed that gap landed after it: the
+> per-invocation hooks/fsmonitor switches and `GIT_CONFIG_NOSYSTEM` that neutralise the programs a
+> repository names (`internal/gitexec`, reached through `runGit`), the `argv[0]` fence (2026-08-12)
+> and the PATH-scrubbed child environment (2026-08-13) the blocks above record, the outright
+> refusal of a repository whose own config names a program git would execute (2026-08-14, widened
+> 2026-08-26), `gitDiffHardeningArgs`' `--no-textconv --no-ext-diff` on every diff-producing path,
+> and the two-part ref guard (`validRef` plus `looksLikeOption`). The engine, meanwhile, already
+> runs that same hardened read-side git **unattended in every mode** for its tree-snapshot floor
+> (`tools.RunGitQuery`, `internal/agent/treesnapshot.go`), so refusing the model the identical read
+> in Plan was a rule outliving its reason. ADR 0012's core invariant is untouched: the call is
+> bounded by construction, so "unsupervised" is no longer paired with "unbounded".
+>
+> **What does not move.** `classifyTool` consults the marker AFTER the workspace-write and
+> external-effect markers and BEFORE the bare subprocess marker, so a tool that also writes the
+> workspace or reaches the network still takes the outranking class — the marker narrows a
+> subprocess call, it never widens one. The trio keeps its `Subprocess()` declaration, which still
+> drives the execution mechanics (the scoped environment, the process-group teardown, the argv
+> fence); only the classification changes. The scope is exactly those three tools: `diagnostics`
+> stays **subproc** (the Go toolchain's argv is not Apogee's), so footnote ² below now applies to
+> `diagnostics` alone, and MCP, network and every other tool are untouched. `confine=false` is
+> unaffected — it returns before the class switch and already ran everything.
+
 A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
 computed in a fixed, load-bearing order:
 
@@ -557,7 +599,10 @@ computed in a fixed, load-bearing order:
    every `Confine` takes its box + a precomputed runtime `fallback` (both detailed after the table).
 
 Tool-classes: **RO** = `IsReadOnly` **and no other marker** — the terminal floor (a tool that also
-carries a marker below takes that class's row, amendment 2026-07-26); **WS-write** =
+carries a marker below takes that class's row, amendment 2026-07-26); **RO-subproc** =
+`readOnlySubprocess` (read-only by construction, a subprocess only by mechanism — the marker is
+obtainable only inside `internal/tools` and is minted for the hardened git read trio alone,
+amendment 2026-09-06); **WS-write** =
 `workspaceScopedWriter` (§3); **subproc** =
 shell/exec subprocess tool (`terminal`/`python-exec`/`git`); **net** = `ExternalEffectTool` of kind
 `network` carrying the `urlFilteredNetworker` marker (Apogee's own — the marker is obtainable only by
@@ -573,6 +618,7 @@ Ladder-leaf outcomes: **run** = execute directly, no gate, no `Confine`; **confi
 | tool-class | Plan | Ask-Before | Allow-Edits | Auto · `confine=true` | Auto · `confine=false` |
 |---|---|---|---|---|---|
 | **RO** (and no other marker) | run | run | run | run | run |
+| **RO-subproc** (git read trio) | run | run | run | run | run |
 | **WS-write**, target **in** workspace | refuse | gate | **run** | **run** (path-safety-bounded) | run |
 | **WS-write**, target **out** of workspace | refuse | gate | gate | **gate** | run |
 | **subproc** (caps sufficient) | refuse² | gate | gate | **confine** | run |
@@ -589,6 +635,9 @@ declaration while the ladder read the class — so Plan advertised two tools it 
 key on one predicate (`planAdmits`, `internal/agent/resolution.go`), which is the class: Plan **neither
 offers nor runs** them. The menu is no longer a UX affordance with its own rule; the class is the boundary
 on both sides, and `internal/agent/planmenu_test.go` pins the agreement over the whole registry.
+**Scoped 2026-09-06 (the RO-subproc class):** this covers `diagnostics` alone now — `git_diff_range`,
+with `git_status` and `git_log`, carries the `readOnlySubprocess` marker and takes the **RO-subproc**
+row, so Plan both offers and runs it.
 `confine=false` is global-config-only, VM-only, prints a per-session startup warning, and **never**
 escapes the dangerous-action floor.
 

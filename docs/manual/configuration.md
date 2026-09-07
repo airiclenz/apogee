@@ -1518,6 +1518,15 @@ each shell call instead of running it unbounded ("confine if you can, gate if yo
 can't"). That is not a fault, so Apogee says so at startup rather than letting Auto
 look broken.
 
+**The hardened git reads run free in every mode, and no fence applies to them.**
+`git_status`, `git_log` and `git_diff_range` build every argument themselves, run with
+hooks and fsmonitor off, refuse a repository whose own config names a program git would
+run, and write nothing to your tree, index or repository — so they are read-only by
+construction and behave like `read_file` on every rung: offered and run in Plan, no
+prompt in Ask-Before or Allow-Edits, and no box in Auto. What the prompts and the fence
+above are for is the rest — `terminal`, `python_exec`, `run_tests`, `diagnostics`, the
+Console four, and the writing git tools `git_branch` and `git_commit`.
+
 One Linux fence is real but incomplete: on a kernel older than **6.2** (landlock ABI 1–2 —
 Ubuntu 22.04, Debian 12, RHEL 9) the kernel has no way to restrict *truncation*, so a confined
 command still cannot create or write a file outside the workspace but can empty one that is

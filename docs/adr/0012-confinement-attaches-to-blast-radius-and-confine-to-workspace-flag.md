@@ -311,3 +311,58 @@ Implementation lives in [`docs/plans/archived/2026-07-26 - 03 - url-safety-live-
 (item 14); the client shape is in
 [`docs/design/mcp-client.md`](../design/mcp-client.md), and `internal/mcp`'s package
 documentation carries the trust boundary in prose.
+
+## Amendment (2026-09-06) — a subprocess that is read-only by construction takes the read-only row
+
+**Why now.** The 2026-07-26 rule in the execution contract (§4, *"the RO row is a floor, not a trump
+card"*) says an unfakeable marker outranks a tool's own `ReadOnly()` declaration, so `git_status`,
+`git_log` and `git_diff_range` rode the **subproc** row: refused in Plan, gated in Ask-Before and
+Allow-Edits, confined in Auto. That rule was written when *"a subprocess is unbounded"* was true of
+these three, and every hardening that closed that gap landed **after** it — the hooks/fsmonitor and
+`GIT_CONFIG_NOSYSTEM` switches and the refusal of a repository whose own config names a program git
+would execute (2026-08-14, widened 2026-08-26), the `argv[0]` fence (2026-08-12), the PATH-scrubbed
+child environment (2026-08-13), `--no-textconv --no-ext-diff` on every diff-producing invocation,
+and the two-part ref guard. Apogee builds every argv for these three itself and passes no user
+string to a shell. Meanwhile the engine already runs that same hardened read-side git **unattended
+in every mode** for its tree-snapshot floor (`tools.RunGitQuery`), so the model was refused in Plan
+the exact read the program performs for itself — a rule outliving its reason, and one that reads to
+a small model as a broken tool.
+
+**(a) A new class: read-only by construction, a subprocess only by mechanism.** The three tools
+carry an unexported `readOnlySubprocess` marker (`internal/tools`), minted exactly the way
+`workspaceScopedWriter` (contract §3) is: no type outside that package — and no third-party tool in
+another module — can spell it. `classifyTool` reads it through `tools.IsReadOnlySubprocess` as the
+**RO-subproc** class, which takes the **read-only row in every mode, Auto included**: Plan offers
+and runs the trio, the middle rungs do not gate it, and Auto runs it **unconfined**, exactly as it
+runs `read_file`. The marker may be minted only for a tool that on every reachable path spawns git
+through the hardened `runGit`, passes the diff-hardening arguments, validates each ref it accepts,
+and writes nothing to the tree, the index or the repository; a tool that grows a path missing any of
+those loses the marker in the same change. The tools keep their `Subprocess()` declaration — it
+still drives the execution mechanics (the scoped environment, the process-group teardown, the argv
+fence). Only the classification moves.
+
+**(b) This is a LOOSEN — the first in the ladder — and the core invariant still holds.** Every
+amendment before this one was tighten-only; this one is not, and saying so is the point. A call that
+used to be refused in Plan now runs, and a call that used to be confined in Auto now runs
+unconfined. The invariant it must answer to is *"never both unsupervised and unbounded"* — and
+"unbounded" is the half that stopped being true. These calls are bounded **by construction**, at the
+same standing as the path-safety and url-safety bounds this ADR already accepts in place of OS
+confinement for Apogee's own in-process tools: the argv is Apogee's, the repository cannot name a
+program the child will run, the child's `PATH` and environment are scrubbed, nothing is written.
+Confinement would add nothing a `read_file` does not already do without it. The 2026-07-26 rule is
+**not** withdrawn: it stands for every other marker carrier, and is superseded for this one class.
+
+**(c) Scope, and what an embedder gets.** Exactly `git_status`, `git_log` and `git_diff_range`.
+`diagnostics` keeps the **subproc** row — it launches the Go toolchain, whose argv and plugins
+Apogee does not build or vouch for — so contract §4's footnote ² now covers `diagnostics` alone.
+`git_branch` and `git_commit` write and were never candidates; MCP, the network classes and
+`confine-to-workspace: false` are untouched, and the dangerous-action guard floor still applies
+first, in every mode, as it does to every other class. The marker being unexported, a host-registered
+read-only subprocess tool cannot claim the class — the same second-class standing the write and
+network axes already have (amendment 2026-07-25(c)), and the safe direction: an embedder's tool
+gates rather than running unattended.
+
+Implementation lives in [`docs/plans/2026-09-06 - 04 - read-only-subprocess-class-plan.md`](../plans/2026-09-06%20-%2004%20-%20read-only-subprocess-class-plan.md);
+the class definition, the ladder row and the dated record are in
+[`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) §4,
+and CONTEXT.md's **Agent mode** and **Confinement** entries carry the prose.
