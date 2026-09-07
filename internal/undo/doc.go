@@ -30,16 +30,33 @@
 // human protocol: `/undo` previews and stamps the generation, `/undo confirm`
 // executes only if the journal has not moved since (ADR 0051).
 //
-// What this package deliberately is NOT. It is memory, not storage: the journal
-// lives on the engine and dies with the process, so a resumed session cannot revert
-// an earlier process's writes (ADR 0022 §8 — live host state is never session state),
-// and the pre-images it holds are the cost of that choice. It has no redo. It knows
+// The second capture path. Given a [Snapshotter] and the workspace it images
+// ([WithSnapshotter], [WithWorkspace]), a group also carries the pair of whole-tree
+// images taken around its Exchange — [Journal.MarkPre] before the first write-capable
+// tool call, [Journal.Close] at the Exchange's end — and the diff between them is the
+// scope a revert may reach beyond the funnel's own records (ADR 0074). That is what
+// puts the writes the funnel never sees — subprocesses, MCP servers, git checkouts —
+// back within reach of `/undo`. The two paths never contest a path: where both saw one
+// file the funnel's pre-image wins, because it was read at the mutation site, so the
+// diff only ever ADDS. An approved out-of-workspace write is outside the work-tree and
+// stays the funnel's alone, per process (ADR 0074 decision 9), and a journal given no
+// snapshotter — no git, or `undo-snapshots` off — is exactly the ADR 0051 journal
+// described above, which is a supported configuration and not a broken one.
+//
+// Redo. A reverted group moves to a redo stack, and [Journal.Redo] re-applies it under
+// the same two-step protocol with the two images swapped: it writes what the agent left
+// and expects to find what the undo put back, skipping and reporting a path the human has
+// edited since. The next Exchange that actually writes clears the stack — at the first
+// record, or at a Close whose diff is non-empty — because a redo across a newer write
+// would re-apply an old tree over work just asked for (ADR 0074 decision 6).
+//
+// What this package deliberately is NOT. It is memory, not storage: the journal lives on
+// the engine and dies with the process, so a resumed session cannot revert an earlier
+// process's writes (ADR 0022 §8 — live host state is never session state). It knows
 // nothing about the engine, the tools, or the TUI — it imports internal/security and
 // the standard library and nothing else, which is what keeps it reachable from a
-// headless Driver (ADR 0031, ADR 0033). And it covers only what the funnel hands it:
-// subprocess writes (terminal, python, test runners), git checkouts, MCP and
-// third-party tools mutate the workspace without passing through here and are
-// documented as not undone (ADR 0002, ADR 0008).
+// headless Driver (ADR 0031, ADR 0033), and the object store behind a Snapshotter reaches
+// it through an interface rather than the other way round.
 //
 // Restores and removals go through internal/security's fenced primitives —
 // SafeWriteFile and SafeRemove, the very ones the funnel wrote through — so an undo
@@ -49,5 +66,7 @@
 // Files:
 //   - doc.go — this map and the package's rationale.
 //   - journal.go — the Journal and its record, preview, and revert surface.
+//   - snapshot.go — the Snapshotter seam, the two capture points, and the diff-only paths.
+//   - redo.go — the redo stack: RedoPreview and Redo, Revert's mirror.
 //   - context.go — the context seam the engine hands the journal to the write funnel through.
 package undo
