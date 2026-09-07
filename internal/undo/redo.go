@@ -47,7 +47,8 @@ func (j *Journal) RedoPreview() (Step, bool) {
 // undo takes them away — so a file lands after the directory its sibling created. Skipped
 // paths are reported and the group moves anyway, for the same reason [Journal.Revert] pops
 // one it could not fully carry out. It returns [ErrNothingToRedo], and does nothing, when
-// the stack is empty.
+// the stack is empty, and — on a journal with an index path — reports a save that failed
+// alongside the report it could not record, exactly as [Journal.Revert] does.
 func (j *Journal) Redo(generation uint64) (Report, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -67,5 +68,5 @@ func (j *Journal) Redo(generation uint64) (Report, error) {
 	j.groups = append(j.groups, top)
 	j.pending = true
 	j.generation++
-	return report, nil
+	return report, j.persist()
 }

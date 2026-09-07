@@ -50,9 +50,21 @@
 // record, or at a Close whose diff is non-empty — because a redo across a newer write
 // would re-apply an old tree over work just asked for (ADR 0074 decision 6).
 //
-// What this package deliberately is NOT. It is memory, not storage: the journal lives on
-// the engine and dies with the process, so a resumed session cannot revert an earlier
-// process's writes (ADR 0022 §8 — live host state is never session state). It knows
+// Persistence. Given an index path beside those images ([WithIndexPath]) the journal writes
+// journal.json after every Close, Revert and Redo, and [Load] reads it back, so `/undo` still
+// reaches the exchanges of the process before this one (ADR 0074 decision 5). The file is an
+// INDEX and holds no bytes: the ordinals, the generation, each exchange's pair of tree ids and
+// the workspace they were taken of, which is checked on the way in — a session resumed against
+// a different tree loads nothing and says so ([ErrWorkspaceMismatch]). A group with no trees,
+// or whose two trees are equal, is only this process's to take and stays in memory: that is the
+// funnel-only group and the approved out-of-workspace write, whose pre-images the store never
+// holds (ADR 0074 decision 9). The store itself is host state keyed by session id and lives
+// outside the session record, so ADR 0022 §8 holds — the session record still carries no live
+// host state.
+//
+// What this package deliberately is NOT. It is not the object store: it persists tree IDS and
+// reads bytes back out through the [Snapshotter], which is what keeps whole-tree images out of
+// its own reach. It knows
 // nothing about the engine, the tools, or the TUI — it imports internal/security and
 // the standard library and nothing else, which is what keeps it reachable from a
 // headless Driver (ADR 0031, ADR 0033), and the object store behind a Snapshotter reaches
@@ -68,5 +80,6 @@
 //   - journal.go — the Journal and its record, preview, and revert surface.
 //   - snapshot.go — the Snapshotter seam, the two capture points, and the diff-only paths.
 //   - redo.go — the redo stack: RedoPreview and Redo, Revert's mirror.
+//   - persist.go — journal.json: the Index, Save's atomic write and Load's materialisation.
 //   - context.go — the context seam the engine hands the journal to the write funnel through.
 package undo

@@ -179,14 +179,20 @@ type entry struct {
 // the bytes on disk against; touched is the diff between the two trees, workspace-relative
 // and in git's own order, and it is the whole scope a revert of this group may reach beyond
 // its funnel entries (ADR 0074 decision 4).
+//
+// generation is the journal's state stamp at the moment the group closed. Nothing in a step
+// reads it; it is carried into journal.json ([GroupRecord]) so a reloaded stack still says
+// which generation each of its exchanges was taken at, and it does not change when the group
+// moves between the undo and redo stacks.
 type group struct {
-	entries   []*entry
-	index     map[string]*entry
-	pre       string
-	post      string
-	preBlobs  map[string]string
-	postBlobs map[string]string
-	touched   []string
+	entries    []*entry
+	index      map[string]*entry
+	generation uint64
+	pre        string
+	post       string
+	preBlobs   map[string]string
+	postBlobs  map[string]string
+	touched    []string
 }
 
 // snapshotted reports whether both of this group's images were taken, which is what makes
@@ -203,7 +209,9 @@ func (g *group) snapshotted() bool { return g.pre != "" && g.post != "" }
 // built it. With one ([WithSnapshotter] and [WithWorkspace] together) each group also carries
 // the pair of whole-tree images taken around its exchange, which is what lets a revert reach
 // the writes the funnel never saw and what gives `/redo` something to re-apply (ADR 0074).
-// Reverted groups move to a redo stack, which the next exchange that writes clears.
+// Reverted groups move to a redo stack, which the next exchange that writes clears. Given an
+// index path beside those images ([WithIndexPath]) the stack outlives the process too: the
+// journal writes journal.json after every close, revert and redo, and [Load] reads it back.
 //
 // The zero value is not usable; call [New].
 type Journal struct {
@@ -214,6 +222,7 @@ type Journal struct {
 	generation uint64
 	snap       Snapshotter
 	workspace  string
+	indexPath  string
 }
 
 // Option configures a [Journal] at construction. The options are independent of one another
@@ -396,6 +405,9 @@ func (j *Journal) runStep(g *group, ordinal int, d direction) Report {
 // overwritten. A path whose restore or removal FAILS is reported the same way, so a
 // partial revert is a full report rather than a lost one.
 //
+// A journal given an index path writes it before returning, and a save that fails is reported
+// alongside the report it could not record: the revert itself stands (see [Journal.persist]).
+//
 // The group is popped whether or not every path was reverted — skipped paths are not
 // retried by a later undo, which would otherwise revive an edit the human made on
 // purpose. Reverting also closes the current group: the next record starts a new one.
@@ -418,7 +430,7 @@ func (j *Journal) Revert() (Report, error) {
 	j.redo = append(j.redo, top)
 	j.pending = true
 	j.generation++
-	return report, nil
+	return report, j.persist()
 }
 
 // Wrote lists every path this journal has a record for, across ALL groups and in the order

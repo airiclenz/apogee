@@ -110,6 +110,9 @@ func (j *Journal) MarkPre(ctx context.Context) error {
 // A funnel-only group — no snapshotter, or a [Journal.MarkPre] that failed — is kept exactly
 // as ADR 0051 kept it, with its funnel entries and nothing else. A failure of the closing
 // capture or of either read is returned and leaves the group in that same state.
+//
+// This is where a group becomes durable: a journal given an index path ([WithIndexPath]) writes
+// journal.json here, and a save that fails is returned without disturbing the closed group.
 func (j *Journal) Close(ctx context.Context) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -152,7 +155,8 @@ func (j *Journal) Close(ctx context.Context) error {
 		j.redo = nil
 		j.generation++
 	}
-	return nil
+	current.generation = j.generation
+	return j.persist()
 }
 
 // dropIfEmpty removes a group that never became a step — opened by [Journal.MarkPre] for an
