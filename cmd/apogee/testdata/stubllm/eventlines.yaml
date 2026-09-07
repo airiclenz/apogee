@@ -1,0 +1,30 @@
+# The upstream the Event lines goldens talk to (ADR 0075 §14): the shortest conversation that still
+# produces every SHAPE the stream has to get right at Depth 0 — a streamed reply, a tool call, the
+# result that comes back, a second Turn, and usage on both calls.
+#
+# The numbers and the chunking are the fixture. `chunk_runes` pins how many `token` lines each reply
+# becomes, and the two `usage` blocks pin what the `usage` lines carry: a golden that is compared
+# byte for byte can hold nothing a server is free to vary, so nothing here is left to a default.
+# There is deliberately no delegation and no approval — those are Depth-1 and interactive shapes,
+# and this file is the Depth-0 contract.
+model: eventlines-model
+turns:
+    # Turn 1 — one read of the workspace's only file. The call id is left unset, so the server
+    # numbers it `call_1` by position, which is what the golden's `call_id` holds.
+    - when:
+        last_message: ^Read the workspace file
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+      usage:
+        prompt: 420
+        completion: 18
+    # Turn 2 — the answer, streamed in fixed-width chunks so the run's `token` lines are the same
+    # lines on every host.
+    - when:
+        tool_result: read_file
+      text: The file says hello.
+      chunk_runes: 5
+      usage:
+        prompt: 470
+        completion: 9

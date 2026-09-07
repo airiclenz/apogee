@@ -18,13 +18,20 @@ import (
 
 // updateGolden rewrites goldens instead of comparing against them: `go test ./cmd/apogee -update`.
 // It is registered here, once, so every package that takes goldens gets the same flag spelled the
-// same way.
-var updateGolden = flag.Bool("update",
-	false, "rewrite the golden frames under testdata/frames/ instead of comparing against them")
+// same way — and it drives BOTH kinds: the frames under testdata/frames/ that [Golden] records and
+// the text goldens [GoldenText] records wherever their caller puts them.
+var updateGolden = flag.Bool("update", false,
+	"rewrite the golden frames under testdata/frames/ and the text goldens under their own "+
+		"directories instead of comparing against them")
 
 // goldenDir is where a package's goldens live, relative to the package directory — which is what
 // `go test` makes the working directory.
 var goldenDir = filepath.Join("testdata", "frames")
+
+// frameExt is the extension a recorded frame takes. A frame is plain text a human reads in a diff,
+// so it is `.txt`; [GoldenText] names its own, which is why this is a constant here rather than
+// hard-coded inside compareGolden.
+const frameExt = ".txt"
 
 // Redaction replaces everything Pattern matches with With, before a frame is compared or written.
 // A frame carries a temp home, today's date and an age in minutes; without redaction a golden
@@ -101,16 +108,37 @@ func padToWidth(s string, width int) string {
 func Golden(t testing.TB, name string, frame Frame, redact ...Redaction) {
 	t.Helper()
 
-	compareGolden(t, goldenDir, name, frame.String(), *updateGolden, redact)
+	compareGolden(t, goldenDir, name, frameExt, frame.String(), *updateGolden, redact)
 }
 
-// compareGolden is Golden's body with its two ambient inputs — the directory and the flag — passed
-// in, so the golden machinery can be tested without a golden of its own.
-func compareGolden(t testing.TB, dir, name, text string, update bool, redact []Redaction) {
+// GoldenText compares plain text — redacted — against the golden at path, relative to the calling
+// package's directory, and fails with a diff when they differ. With -update it rewrites that file
+// instead, redactions and all, exactly as [Golden] does. path carries the golden's own directory
+// and its own extension, which is the whole difference from [Golden]: a stream contract's goldens
+// are `testdata/eventlines/*.jsonl`, and neither the frames directory nor `.txt` is right for them.
+//
+// The rendering-surfaces-only rule at the top of this file (ADR 0062) is SUPERSEDED for one
+// contract by ADR 0075 §14: `apogee headless --format json` promises a byte-level stdout protocol
+// — key order, `null` where a line has no value, one `run_finished` on every path — and a golden
+// is the only assertion that reads the bytes a consumer will actually parse. That warrant is
+// narrow: it covers a documented machine-readable format, never prose, a log line or a summary,
+// which stay semantic assertions for the reason the rule gives.
+func GoldenText(t testing.TB, path, text string, redact ...Redaction) {
+	t.Helper()
+
+	dir, file := filepath.Split(path)
+	ext := filepath.Ext(file)
+	compareGolden(t, filepath.Clean(dir), strings.TrimSuffix(file, ext), ext, text, *updateGolden, redact)
+}
+
+// compareGolden is Golden's body with its ambient inputs — the directory, the extension and the
+// flag — passed in, so the golden machinery can be tested without a golden of its own and so a
+// caller whose goldens are not `.txt` files under testdata/frames/ can reach it at all.
+func compareGolden(t testing.TB, dir, name, ext, text string, update bool, redact []Redaction) {
 	t.Helper()
 
 	got := ApplyRedactions(text, redact...)
-	path := filepath.Join(dir, name+".txt")
+	path := filepath.Join(dir, name+ext)
 	if update {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("create %s: %v", dir, err)
@@ -123,14 +151,14 @@ func compareGolden(t testing.TB, dir, name, text string, update bool, redact []R
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("golden frame %s: %v — run the package's tests with -update to record it", path, err)
+		t.Fatalf("golden %s: %v — run the package's tests with -update to record it", path, err)
 		return
 	}
 	want := strings.TrimSuffix(string(raw), "\n")
 	if got == want {
 		return
 	}
-	t.Errorf("frame %q does not match %s:\n%s", name, path, unifiedDiff(want, got))
+	t.Errorf("golden %q does not match %s:\n%s", name, path, unifiedDiff(want, got))
 }
 
 // unifiedDiff is a line diff of want against got, marked the way a patch is. It is a small

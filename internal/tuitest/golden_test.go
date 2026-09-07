@@ -23,7 +23,7 @@ func TestGoldenComparesTheRedactedFrame(t *testing.T) {
 	}
 	home := t.TempDir()
 	redact := []Redaction{Redact(regexp.QuoteMeta(home), "<ws>")}
-	compareGolden(t, dir, "pane", "workspace "+home, false, redact)
+	compareGolden(t, dir, "pane", ".txt", "workspace "+home, false, redact)
 }
 
 // TestGoldenUpdateRecordsTheRedactedText: -update writes what a comparison will later read —
@@ -34,7 +34,7 @@ func TestGoldenUpdateRecordsTheRedactedText(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "frames")
 	home := t.TempDir()
 	redact := []Redaction{Redact(regexp.QuoteMeta(home), "<ws>")}
-	compareGolden(t, dir, "pane", "workspace "+home, true, redact)
+	compareGolden(t, dir, "pane", ".txt", "workspace "+home, true, redact)
 
 	raw, err := os.ReadFile(filepath.Join(dir, "pane.txt"))
 	if err != nil {
@@ -44,7 +44,34 @@ func TestGoldenUpdateRecordsTheRedactedText(t *testing.T) {
 		t.Errorf("recorded golden = %q, want %q", got, want)
 	}
 	// And what was recorded compares clean on the next run.
-	compareGolden(t, dir, "pane", "workspace "+home, false, redact)
+	compareGolden(t, dir, "pane", ".txt", "workspace "+home, false, redact)
+}
+
+// TestGoldenTextRoundTrips: a golden that is neither under testdata/frames/ nor a `.txt` file
+// records and compares through the same machinery. The Event lines contract's goldens are
+// `testdata/eventlines/*.jsonl` (ADR 0075 §14), and before GoldenText the directory and the
+// extension were hard-coded — a caller could reach neither.
+func TestGoldenTextRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "eventlines")
+	session := "s-20260907-120000"
+	line := `{"event":"run_finished","session":"` + session + `"}`
+	redact := []Redaction{Redact(regexp.QuoteMeta(session), "<session>")}
+
+	compareGolden(t, dir, "run", ".jsonl", line, true, redact)
+
+	raw, err := os.ReadFile(filepath.Join(dir, "run.jsonl"))
+	if err != nil {
+		t.Fatalf("the update did not write the golden: %v", err)
+	}
+	if got, want := string(raw), `{"event":"run_finished","session":"<session>"}`+"\n"; got != want {
+		t.Errorf("recorded golden = %q, want %q", got, want)
+	}
+	// And a second run, with a session id of its own, compares clean against what was recorded.
+	other := "s-20260908-093000"
+	compareGolden(t, dir, "run", ".jsonl", `{"event":"run_finished","session":"`+other+`"}`, false,
+		[]Redaction{Redact(regexp.QuoteMeta(other), "<session>")})
 }
 
 // TestUnifiedDiffMarksBothSides: a mismatch prints a diff, not two screens for the reader to

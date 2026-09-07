@@ -377,6 +377,15 @@ whose whole point is how they look. Everything else is asserted semantically wit
 because a golden that pins behaviour fails on every unrelated wording change and is then updated
 without being read, which is worse than no test.
 
+`GoldenText(t, path, text, redactions...)` is the same machinery for text that is not a frame: the
+golden's path carries its own directory and its own extension, so it reaches files the frames
+directory and `.txt` cannot name. It exists for one superseding case (ADR 0075 §14): the Event
+lines of `apogee headless --format json` are a documented machine-readable protocol whose key
+order, `null` members and per-line member set a consumer parses byte for byte, and
+`cmd/apogee/testdata/eventlines/*.jsonl` is what pins them. The warrant is that narrow — a
+documented wire format, never prose, a log line or a summary, which stay semantic assertions for
+the reason above.
+
 Redactions are not optional for a frame that carries a `t.TempDir()` path, the build version, a
 session title with today's date in it, or a relative age: without them the golden churns on every
 run. `Redact(pattern, with)` builds one; `-update` records the **redacted** text, so what is on
