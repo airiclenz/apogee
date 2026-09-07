@@ -148,7 +148,8 @@ the same list. It is strictly one-way: nothing a Hook prints, returns or answers
 the conversation or the Session record, and a Hook can neither veto nor delay the loop — the runner
 queues per Hook, in order, off the engine's path, and drops under overload rather than block. It is
 **not a Mechanism** and fires at no **Hook point**: it runs after the fact on the user's own machine,
-outside confinement, as the user's config rather than a model action. See
+outside confinement, as the user's config rather than a model action. It is the
+fourth rung of the **[Reaction surface](#mechanism-and-hook-points)**. See
 [ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md).
 _Avoid_: "plugin" (a Hook adds no capability to apogee), "trigger" (that names the `on:` half of
 a daemon Schedule's envelope), "hook" for a **Mechanism** or an **Experimental hook** (those fire
@@ -738,7 +739,8 @@ _Avoid_: "permission level", "trust mode".
 Plain **engine behaviour** that changes only what the model sees **after its own failure**, or
 shapes the request **without steering it** — so it needs no per-model proof and cannot regress
 Bypass ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)).
-A Floor guard is **not a Mechanism**: no catalogue row, no `MechanismID`, no descriptor, no
+It is the first rung of the
+**[Reaction surface](#mechanism-and-hook-points)**. A Floor guard is **not a Mechanism**: no catalogue row, no `MechanismID`, no descriptor, no
 Capability, no strikes and no Turn-Budget throttle — the per-Turn `maxPostResponseRetries` bound
 is the only limiter the post-response guards share. **Seven ship, on in every arm** — Bypass
 included — each switched off by exactly one top-level, **file-only** boolean (no flag, no env;
@@ -1133,6 +1135,43 @@ fresh** — no server-side state is restored (ADR 0008). The *client shape* is
 _Avoid_: "MCP plugin", "MCP proxy" (it is a client; there is no proxy).
 
 ### Mechanism and hook points
+
+**Reaction surface**:
+The four homes a new *"apogee should react when X happens"* can take, and the test that picks one.
+Sibling to [ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md)'s placement rule
+for a new sentence of **guidance**; this one places a new **reaction**. Try the rungs in order:
+- **[Floor guard](#floor-guard)** — it changes only what the model sees *after the model's own
+  failure*, or shapes the request without steering it; it needs no per-model proof; it cannot
+  regress **Bypass**. Ships **on**, one top-level file-only boolean, no bench gate
+  ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)
+  D1).
+- **Tool** — the model asks for it by name. Admitted on a **replicated** ask across models, never on
+  one model's request (`docs/design/tool-surface-findings.md`); may ship default-off and be lifted
+  per **Model profile**
+  ([ADR 0057](docs/adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md) D3).
+- **[Mechanism](#mechanism-and-hook-points)** — it changes what the model sees **before** the model
+  has failed. The shipped catalogue is frozen and empty, so the route in is to arm it as an
+  **Experimental hook**, measure it under [ADR 0009](docs/adr/0009-the-ab-decision-rule.md), and
+  bring a record — never a port onto the catalogue
+  ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)
+  D2/D4).
+- **[Hook](#identity-and-shape)** — it changes nothing the model sees. Fires after the fact, on the
+  user's own machine, as the user's config
+  ([ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md)).
+
+The rungs are **exclusive**: one idea takes exactly one home, and the wrong home is a rejection
+rather than a variant. A lint result fed back to the model is a Mechanism and never a Hook (ADR 0073
+rejected it by name); a Hook that could veto a tool call is a Mechanism at a **Hook point**, which
+ADR 0071 closed.
+
+Two shapes fail the Floor-guard test's clause (a), and — paired with an ADR 0009 gate no row ever
+met — are what retired fourteen catalogue rows: **steering**, deciding the model's next move for it
+(`filehint` scored a freshly listed directory and named which files to read first), and
+**mutation**, changing the model's work behind its back (`autofix` handed a written file to an
+external formatter). The line rungs 1 and 3 share: a reaction may change the model's *view*; it may
+not change the model's *work* or its *choices*.
+_Avoid_: "hook" as the name of this surface (it names rung 4 **and**, as **Hook point**, the seam a
+rung-3 Mechanism attaches at — that collision is why the four blur together).
 
 **Mechanism**:
 A unit of gated, self-regulating behaviour that fires at a defined **Hook point** in
