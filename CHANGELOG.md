@@ -10,6 +10,50 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A cancelled delegation now closes its lifecycle bracket.** `SubAgentPhaseEvent` gained a
+  `Cancelled` flag, and both dispatch paths — the fan-out pool and the serial one — emit a
+  `finished` phase carrying it when the human cancels a delegation, instead of emitting nothing at
+  all. A Driver reading the Event stream no longer sees a delegation that never ends (ADR 0075
+  decision 12). The phase carries no result, and the TUI is unchanged by it: a cancelled finished
+  neither ticks the done ✓ nor folds a report, and fires no progress save — the interrupted verdict
+  a reopened session shows is still written by `closeInterruptedCalls`.
+
+- Added `internal/eventjson`, the per-variant encoder behind the coming `apogee headless --format json` Event lines (ADR 0075). `Encode` maps one `domain.Event` to its snake_case line kind, the `EventBase` the envelope is stamped from, and the `data` value that marshals to the line's object — all seventeen serialized variants at every depth, with `WireEvent` (the Inspector's raw provider protocol) deliberately excluded. Every `data` member carries an explicit snake_case tag and no `omitempty`, so a consumer never tests for a missing key; `ToolCall`, `ToolResult`, `ApprovalRequest` and `UserInput` get their own tagged mirrors (`ToolResult.Summary`, a view-facing sealed interface, is dropped), raw argument JSON is embedded verbatim and encodes as `null` when empty, and an `AuditEvent`'s envelope carries the *spawning* delegation's call id while `data.call_id` carries the audited call. `Kinds()` names the whole nineteen-kind vocabulary, the two run frames included.
+
+- **The Event lines have a Writer.** `internal/eventjson` gained the `Writer` that renders the engine's Event stream as ADR 0075's JSONL: one envelope per Event (`event, v, seq, time, session, turn, depth, call_id, data`, every member present and `null` where the line has no value) through a `bufio.Writer` flushed per line, bracketed by a `run_started` / `run_finished` frame pair whose typed structs a Driver fills. It is a `domain.EventSink` that forwards every Event to the sink it wraps — a `WireEvent` is forwarded only, never written, and consumes no `seq` — and the first write error costs one `Report` call and silences the stream while the run finishes. Re-exported on the facade as `EventLines`, `EventLinesOptions`, `RunStarted`, `RunFinished` and `NewEventLines`.
+
+- `apogee headless --format json` now brackets a run with the ADR 0075 frames: `run_started`
+  (session, workspace, model, server, mode, bypass, confined, version) on stdout the moment the run
+  is committed to, and exactly one `run_finished` (exit code, turns, denied, faulted, fault, error,
+  title, final text, written files, context files, undo note, saved, usage, sub-agents) on every
+  path out of the command — the eleven never-started refusals, a failed run, an abandoned final
+  Turn and a success alike. Under `json` the answer is no longer printed raw on stdout (it rides
+  the closing frame's `final_text`); every stderr line the command narrates is unchanged.
+  `--format text` stays the default and is byte-identical to before, and a `--format` value the
+  command does not know is refused as a usage mistake (exit 2) in text mode, with stdout untouched.
+
+- **`apogee headless --format json` streams the run live.** Every engine Event now leaves as its own
+  JSONL line between the `run_started` and `run_finished` frames, in emission order and with an
+  unbroken `seq` — a delegation's events at their own depth, and the Inspector's raw `WireEvent`
+  excluded as the contract promises. The encoder sits as the outermost sink the command composes,
+  above the prune-notice sink and the Hook Runner, so a lossless blocking write never lands inside a
+  callback documented not to block. The prune notice goes quiet under `json` (the pruning pass is
+  already a `prune` line on stdout) while still forwarding to every observer behind it, and a stdout
+  that stops accepting writes costs one stderr line — `apogee headless: event lines stopped — …` —
+  and silences the stream without touching the run, its files or its exit code.
+
+- **`apogee headless --format json` survives a closed pipe, and a second Ctrl-C exits at once.**
+  SIGPIPE is ignored for the life of a `--format json` run, so a consumer that stops reading (a
+  `| head`, a script that walked away) breaks the Event STREAM rather than the run: the first write
+  error is reported once on stderr, the stream goes silent, and the run finishes with its record
+  saved and its own exit code — where before the process was killed by the signal, mid-run and
+  without a word. A second interrupt, arriving while the run is already winding down from the
+  first, now prints `apogee headless: second interrupt — exiting without waiting for the run` and
+  exits 1 immediately; it is the one path that deliberately skips the deferred teardown and writes
+  no `run_finished` frame. `--format text` gains neither and is unchanged.
+
+- The manual now documents the headless Event lines: `docs/manual/headless.md` gains a **Machine-readable output — `--format json`** section covering the envelope and its nine always-present members, all nineteen line kinds in one table, the two frames and their members, the `v:1` additive rule, `session`/`saved` beside `apogee undo`, why `final_text` is duplicated, the lossless-and-blocking posture with its SIGPIPE and second-interrupt behaviour and the `event lines stopped` stderr line, the warning that a stream redirected into a CI log publishes every file the run read, and that `--format` reaches headless alone. Two standing claims on the same page are corrected: the stdout/stderr paragraph is now scoped to `--format text`, and the changed-files block is stated to be on stderr, which is where it has always been printed. `TestManualListsEveryEventLineKind` holds the table of kinds to `eventjson.Kinds()`, so a kind added to the encoder cannot ship without its row.
+
 - **The hardened git read trio carries a read-only-subprocess marker.** `git_status`, `git_log`
   and `git_diff_range` now carry an unexported `readOnlySubprocess` marker (minted only inside
   `internal/tools`, exposed as `tools.IsReadOnlySubprocess`), on the model of the
