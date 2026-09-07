@@ -1,8 +1,19 @@
 ---
-Status: accepted
+Status: accepted; decisions 3 and 8 and the rejected git-based revert superseded by ADR 0074
 ---
 
 # Undo is a per-exchange in-memory pre-image journal
+
+> **Superseded in part by [ADR 0074](0074-undo-is-a-per-exchange-snapshot-pair-in-a-session-owned-git-object-database.md)
+> (2026-09-06).** ADR 0074 makes undo a pair of tree snapshots per Exchange in a session-owned git
+> object database outside the workspace, and supersedes exactly three things here: **decision 3**
+> (capture at the funnel IS the coverage boundary — the funnel stays a capture path and the
+> authority for the paths it sees, but the boundary is now the workspace tree), **decision 8** (in
+> memory, per process, no redo — the journal persists per session, `/redo` exists, and `/clear`
+> reopens it under the new session id instead of carrying it across), and the rejected
+> **"A git-based revert"** alternative under *Rejected alternatives* below, whose four objections
+> 0074 answers one by one. Everything else stands: **decisions 1, 2, 4, 5, 6 and 7** and both
+> amendments are unchanged, and are restated as kept by 0074.
 
 ## Context
 

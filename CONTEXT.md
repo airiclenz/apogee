@@ -655,24 +655,23 @@ the three things recorded, not the point), "the buffer" (the box's live text is 
 what has already left it).
 
 **Undo journal**:
-The engine's record of what the agent's file writes **replaced** — one **pre-image** (the bytes
-that were at the path, or the fact that nothing was) plus the hash of what the mutation left, per
-path, grouped per [Exchange](#turns-and-stepping). It is what the human-facing `/undo` puts back:
-one Exchange per step, most recent first, previewed before it applies. Capture sits at the shared
-write funnel (`internal/tools`' `safeWriteFile` and the copy/move/delete sites), so the covered
-set is exactly the workspace-scoped write tools and nothing else — subprocess, git-checkout, MCP
-and embedder-registered writes are outside it by construction. Groups materialize **lazily** (an
-Exchange that wrote nothing is never a step to walk past), an [Interjection](#turns-and-stepping)
-opens none, and a delegated sub-agent writes into its parent's group, so one undo takes back one
-instruction. A path whose content no longer matches what the agent left is **skipped and
-reported** — the human's own later edit outranks the undo. The journal lives on the engine
-(`internal/undo`), is **live host state, never [Session](#identity-and-shape) state** (ADR 0022
-§8): it is per process, dies with it, and holds no redo. See
-[ADR 0051](docs/adr/0051-undo-is-a-per-exchange-in-memory-pre-image-journal.md).
+The engine's per-[Exchange](#turns-and-stepping) record of what the agent's writes **replaced**,
+and what `/undo` puts back — one Exchange per step, most recent first, previewed before it applies,
+`/redo` beside it. Two capture paths feed it: a **pair** of workspace-tree snapshots, one before an
+Exchange's first write-capable tool call and one at its close, into a git object database the
+session owns under `~/.apogee/`, outside the workspace; and the shared write funnel
+(`safeWriteFile` and the copy/move/delete sites in `internal/tools`, ADR 0051), whose **pre-image**
+wins wherever both see a path. Coverage is therefore the workspace tree, `terminal`, `python_exec`,
+MCP and git-checkout writes included; without git only the funnel remains. A revert touches only
+the paths that Exchange changed, and one whose content no longer matches what the agent left is
+**skipped and reported**: the human's own later edit outranks the undo. Groups materialize
+**lazily**, an [Interjection](#turns-and-stepping) opens none, and a sub-agent writes into its
+parent's. It is **persisted host state, never [Session](#identity-and-shape) state** (ADR 0022 §8):
+kept per session id, reopened under the id `/new`, `/clear` or a resume puts in force. See
+[ADR 0074](docs/adr/0074-undo-is-a-per-exchange-snapshot-pair-in-a-session-owned-git-object-database.md).
 _Avoid_: "undo history" (it is a stack of Exchange groups, not a per-keystroke history), "undo
 stack" for the record itself (the stack is how `/undo` walks it; the journal is what is written),
-"snapshot" (nothing whole-tree is copied — only the paths a write touched), "rollback" (that word
-belongs to the abort-rollback boundary in [Exchange](#turns-and-stepping)).
+"rollback" (that word belongs to the abort-rollback boundary in [Exchange](#turns-and-stepping)).
 
 ### Safety and autonomy
 
