@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-09-07
+
 ### Added
 
 - **A cancelled delegation now closes its lifecycle bracket.** `SubAgentPhaseEvent` gained a
