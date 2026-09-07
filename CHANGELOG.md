@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The hardened git read trio carries a read-only-subprocess marker.** `git_status`, `git_log`
+  and `git_diff_range` now carry an unexported `readOnlySubprocess` marker (minted only inside
+  `internal/tools`, exposed as `tools.IsReadOnlySubprocess`), on the model of the
+  `workspaceScopedWriter` marker. It says these three are Apogee's own hardened read-side git:
+  every invocation goes through `runGit` (allowlisted PATH-scoped environment, per-invocation
+  hardening, the repo-local program-key refusal, the argv[0] fence), every diff-producing path
+  carries `--no-textconv --no-ext-diff`, every ref is guarded, and nothing is written. They keep
+  their `ReadOnly()` and `Subprocess()` declarations unchanged — the subprocess marker still
+  drives the execution mechanics — and the marker is what classifies them.
+
+- The hardened git read tools (`git_status`, `git_log`, `git_diff_range`) are documented as their own **RO-subproc** class: read-only by construction, a subprocess only by mechanism, so they run free in every agent mode — offered and run in Plan, no prompt in Ask-Before or Allow-Edits, no confinement box in Auto. Recorded in the confinement execution contract §4 (class definition, ladder row, dated amendment), a new ADR 0012 amendment, CONTEXT.md's **Agent mode** and **Confinement** entries, and the manual's *Auto mode's blast radius*.
+
 - Added `floor.SalvageToolCall`, the pure tool-call salvage guard: when a model answers with no tool call on the wire but writes one out as JSON in its text — in a fenced block, inside `<tool_call>…</tool_call>` tags, or as the whole trimmed reply — the guard reads every such block back, in document order, as the calls the model meant and hands back the text stripped of them. Only names the model was actually offered fire, and only objects carrying `arguments` / `parameters` / `input` (an object, or a string holding one).
 
 - **Seventh Floor guard — tool-call salvage.** A model on a native profile that answers with the
@@ -272,6 +284,18 @@ point is a **minor** bump, not a breaking change.
   re-recorded with `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
 
 ### Changed
+
+- **The hardened git read trio now runs in every agent mode.** `git_status`, `git_log` and
+  `git_diff_range` take a new blast-radius class, RO-subproc — read-only by construction,
+  a subprocess only by mechanism — so they run like `read_file` on every rung of the autonomy
+  ladder: Plan offers them on the tool menu and runs them, Ask-Before and Allow-Edits no longer
+  interrupt for approval, and Auto runs them unconfined instead of inside a confinement box.
+  Planning a change can finally read the repository's own history and working state without
+  leaving Plan mode. Nothing else moved: `diagnostics`, `git_branch`, `git_commit`, `terminal`,
+  `python_exec`, `run_tests` and the Console pair still gate on the middle rungs, are still
+  refused in Plan, and Auto still confines them — a tool reaches the new class only by carrying
+  the unexported `readOnlySubprocess` marker, and only after the workspace-write and
+  external-effect markers have declined it.
 
 - The facade completeness guard in `example_test.go` now names every exported symbol
   `apogee.go` re-exports: 18 previously unguarded type aliases (`ApprovalPhase`,
@@ -914,6 +938,14 @@ point is a **minor** bump, not a breaking change.
   closing epic and parked at P3 as top-level work.
 
 ### Fixed
+
+- **`git_status` no longer spawns a child git inside every submodule.** With git's default of
+  `--ignore-submodules=none`, `git status` runs its own `git status --porcelain=2` inside each
+  submodule, and that child reads the submodule's own config
+  (`.git/modules/<name>/config`) — a config the repo-local program-key refusal never scans, so
+  the guard that protects the repository did not protect the child. The tool now passes
+  `--ignore-submodules=dirty`: a submodule whose recorded commit moved is still reported as a
+  modified entry; only work-tree dirt inside a submodule goes unreported.
 
 - **`apogee headless` no longer races on its own error stream.** A Hook's failure line is reported
   from a Hook worker's goroutine while the run is still writing its notices and closing summary,
