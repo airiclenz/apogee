@@ -967,6 +967,33 @@ point is a **minor** bump, not a breaking change.
   literally would have reverted the widened literal. Its quoted string now matches what the TUI
   actually emits.
 
+- **The undo journal's on-disk index can no longer lag the journal in memory.** `undo.Journal.Close`
+  had six ways out — a funnel-only group, a dropped group, a failed capture, a failed diff and two
+  failed image reads — that returned before saving, so a `journal.json` written by an earlier revert
+  kept offering a redo step the running session had already discarded. `Close` is now a single exit
+  that saves on every path and reports a close error and a save error together. A no-diff Exchange
+  now writes the (tiny, atomically replaced) index where it previously wrote nothing.
+
+- **The seeded `config.yaml` documents `undo-snapshots`.** The template that a first run writes
+  described `tool-call-salvage` but not its sibling key, so the setting that decides whether undo
+  survives the process was discoverable only from the manual. It now carries a stanza in registry
+  order, at its real default of `true`.
+
+- `internal/tools` no longer carries its own copy of the capped output buffer: the Console family
+  truncates with `subprocess.CappedBuffer`, and the byte-identical duplicate left behind by the
+  `internal/subprocess` extraction is gone. `previewUndo` also stopped asking the Engine for the
+  undo note on the path that discards it.
+
+- **Three tests that could not fail now bite.** The salvage end-to-end test covered only the fenced
+  container shape; it is now a table over all three — fenced block, `<tool_call>` tags and the whole
+  reply — each proven to fail when its own branch in `floor.SalvageToolCall` is broken.
+  `TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal` asserted only that the Firing survived, and now
+  checks the announced `no apogee home` reason against the value the snapshot package itself
+  returns, plus that nothing lands outside the workspace. The SHA-256 `ListBlobs` test passed
+  vacuously on git 2.43, which honours only `GIT_DEFAULT_HASH` — a variable `gitexec` deliberately
+  scrubs from the child environment; it now arranges a genuinely SHA-256-defaulting git and skips
+  rather than passing when it cannot.
+
 ## [0.20.0] — 2026-09-03
 
 ### Added
