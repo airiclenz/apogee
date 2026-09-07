@@ -122,7 +122,9 @@ go build ./... && go test -race -count=1 ./cmd/apogee/ -run 'TestHeadless'
 ```
 **Commit:** `feat(headless): --format json writes run_started/run_finished frames on every exit path`
 
-## 5. Headless: the live Event lines, prune-line suppression, cancellation
+## 5. Headless: the live Event lines, prune-line suppression, cancellation — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): `TestHeadlessFormatJSONEncoderIsOutermost` reads the type inside `eventjson.Writer`'s unexported `inner` field through `reflect` (type only, never the value): Wrap's field has no accessor, and adding one to the package for a single test would be worse than the inspection.
 
 **What:** `cmd/apogee/headless.go:579`: under `json`, `cfg.Events = lines.Wrap(pruneNoticeSink{inner: cfg.Events, out: stderr, quiet: true})` — the encoder is the **outermost** wrapper (engine → `serialEventSink` → `eventTap` → encoder → `pruneNoticeSink` → `hooks.Runner`); it is never placed inside `hooks.Runner` (`internal/hooks/runner.go:66-70`). `pruneNoticeSink` (`:124-140`) gains `quiet bool`: forwards but prints nothing. `Options.Report` prints exactly once on stderr: `apogee headless: event lines stopped — <err>` (via `cmd.PrintErrln`). A Ctrl-C-cancelled run reaches the item-4 funnel as today (`runFailed`, exit 1) and its `run_finished` is written. Update the sink-order comment at `:576-578`. Depends on item 4.
 

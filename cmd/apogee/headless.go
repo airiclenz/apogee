@@ -122,18 +122,26 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 // stderr, exactly as a Mechanism firing already does (ADR 0071). It is still forwarded, like every
 // other Event.
 //
+// quiet switches the printing half off and leaves the forwarding half exactly as it was. It is what
+// `--format json` asks for: there the same pruning pass is already on stdout as a `prune` Event
+// line, and the stderr sentence would be the one fact told twice in two vocabularies (ADR 0075
+// decision 6). The sink is still WRAPPED under json rather than dropped, because dropping it would
+// drop the forward every observer behind it depends on — the Hook Runner included.
+//
 // Emit is never called concurrently: the engine serializes emission on its side ([domain.EventSink]).
 type pruneNoticeSink struct {
 	inner domain.EventSink
 	out   io.Writer
+	quiet bool
 }
 
-// Emit prints the prune notice, then forwards. The two numbers are rendered verbatim, worded as
+// Emit prints the prune notice — unless quiet, which forwards and says nothing — then forwards to
+// the sink it wraps whatever it printed. The two numbers are rendered verbatim, worded as
 // every other Driver words them (internal/tui's transcript.addPrune, internal/run's
 // transcriptFold.fold), so one pruning pass reads the same on a terminal, in a session record and
 // in a scrollback.
 func (s pruneNoticeSink) Emit(e domain.Event) {
-	if pe, ok := e.(domain.PruneEvent); ok {
+	if pe, ok := e.(domain.PruneEvent); ok && !s.quiet {
 		_, _ = fmt.Fprintf(s.out, "pruned %d tool results (~%d tokens)\n", pe.Results, pe.Tokens)
 	}
 	if s.inner != nil {
@@ -308,7 +316,18 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		_, err := runHeadlessBody(cmd, args, opts, noSave, nil)
 		return err
 	case formatJSON:
-		lines := eventjson.New(cmd.OutOrStdout(), eventjson.Options{})
+		// Report is the stream's only word about its own failure, and it is spent on stderr rather
+		// than on the stream: whatever broke is the stdout the lines were being written to, so the
+		// stream is precisely the channel that cannot carry the news. The Writer calls it once —
+		// the FIRST write error and nothing after it (internal/eventjson) — so a consumer that
+		// closed the pipe early sees one line, not one per Event the run had left to emit. The run
+		// itself continues to its own end and keeps its own exit code: a run that has already
+		// edited files is not half-killed because a reader walked away.
+		lines := eventjson.New(cmd.OutOrStdout(), eventjson.Options{
+			Report: func(err error) {
+				cmd.PrintErrln("apogee headless: event lines stopped — " + err.Error())
+			},
+		})
 		res, err := runHeadlessBody(cmd, args, opts, noSave, lines)
 		lines.RunFinished(runFinishedFrame(res, err))
 		return err
@@ -717,7 +736,23 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// it, exactly as run.Once's own tap wraps this one in turn (run.Spec). The order that leaves is
 	// prune notice → Hooks → nothing: the renderer sees every Event first, and installing Hooks
 	// cannot change what this command prints.
-	cfg.Events = pruneNoticeSink{inner: cfg.Events, out: cmd.ErrOrStderr()}
+	//
+	// Under `--format json` the encoder goes on TOP of that and never inside it, so the whole chain
+	// reads engine → serialEventSink → eventTap → encoder → prune notice → Hooks. Outermost is the
+	// only place it can correctly sit: writing an Event line is lossless and therefore BLOCKING
+	// (ADR 0075 decision 9), while a hooks.Runner's Report callback is documented must-not-block
+	// (internal/hooks), so an encoder installed inside the Runner would put a blocking stdout write
+	// on the one path that promises not to block — and a reader that stopped reading would stall the
+	// Hooks. Outermost also makes the stream complete: it sees every Event before any wrapper below
+	// it can decide to render, swallow or fail on one.
+	//
+	// The prune notice goes quiet in the same breath, for the reason on the type: the prune is
+	// already a `prune` line on stdout under json, and the stderr sentence would be the same fact
+	// told twice.
+	cfg.Events = pruneNoticeSink{inner: cfg.Events, out: cmd.ErrOrStderr(), quiet: lines != nil}
+	if lines != nil {
+		cfg.Events = lines.Wrap(cfg.Events)
+	}
 
 	// The opening frame, written HERE and not a line earlier: everything above this point can still
 	// refuse the run, and a `run_started` ahead of those refusals would announce a run that never

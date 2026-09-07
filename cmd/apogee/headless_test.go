@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/hooks"
@@ -2290,6 +2292,225 @@ func TestHeadlessFormatJSONKeepsStderrProse(t *testing.T) {
 	}
 	if strings.Contains(out, "\nthe answer\n") || strings.HasPrefix(out, "the answer\n") {
 		t.Errorf("the raw answer was printed into the JSONL stream:\n%s", out)
+	}
+}
+
+// Every Event the engine emits reaches the stream, once, in the order it was emitted and with the
+// sequence unbroken — the promise a consumer reads a run back by. The emission order below IS the
+// order ADR 0075 §4 lists the kinds in, which is why the expectation can be built from Kinds()
+// rather than restated: a variant added to the contract without a line here fails this test.
+//
+// The delegation's phase event is emitted at Depth 1 because a child's events are the only ones
+// that arrive from a nesting level this Driver never opened; they must reach the stream at their
+// own depth rather than being flattened or dropped. The WireEvent is here for the opposite reason:
+// it is excluded from the contract (decision 2) and consumes no seq, so its presence in the
+// emission proves the exclusion instead of merely not testing it.
+func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
+	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1},
+		emit: func(sink domain.EventSink) {
+			for _, e := range []domain.Event{
+				domain.TokenEvent{Text: "hel"},
+				domain.ReasoningEvent{Text: "weighing it"},
+				domain.StreamResetEvent{},
+				domain.MessageEvent{Text: "done"},
+				domain.ToolCallEvent{Call: domain.ToolCall{ID: "call-1", Tool: "read_file"}},
+				domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call-1", Content: "ok"}},
+				domain.SubAgentPhaseEvent{
+					EventBase: domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9"},
+					Phase:     domain.SubAgentStarted,
+				},
+				domain.SubAgentNamedEvent{Name: "docs sweep"},
+				domain.ChildInterjectionEvent{Input: domain.UserInput{Text: "stop"}},
+				domain.ApprovalEvent{Phase: domain.ApprovalRequested},
+				domain.TurnEvent{},
+				domain.MechanismFiredEvent{Mechanism: "plan-first", Action: "suppressed"},
+				domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
+				domain.ErrorEvent{Source: "loop", Err: "a tool panicked"},
+				domain.PruneEvent{Results: 3, Tokens: 1200},
+				domain.UsageEvent{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+				domain.AuditEvent{Tool: "terminal", CallID: "call-1", Decision: "allowed"},
+				domain.WireEvent{Direction: domain.WireDirectionRequest, Payload: "{}"},
+			} {
+				sink.Emit(e)
+			}
+		}}
+
+	out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+
+	// The two frames bracket the seventeen variants, in the contract's own order.
+	kinds := eventjson.Kinds()
+	want := append([]string{"run_started"}, kinds[:len(kinds)-2]...)
+	want = append(want, "run_finished")
+
+	lines := jsonEventLines(t, out)
+	var got []string
+	for _, line := range lines {
+		kind, _ := line["event"].(string)
+		got = append(got, kind)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("the stream carried\n%v\nwant\n%v", got, want)
+	}
+
+	for i, line := range lines {
+		if line["seq"] != float64(i+1) {
+			t.Errorf("line %d (%v) has seq %v; the sequence starts at 1 and never skips — a gap "+
+				"means a lost line, and the excluded WireEvent must not consume one",
+				i, line["event"], line["seq"])
+		}
+	}
+
+	// The child's line is stamped with the child's identity; every other line with the run's own.
+	for _, line := range lines[1 : len(lines)-1] {
+		wantDepth := float64(0)
+		if line["event"] == "sub_agent_phase" {
+			wantDepth = 1
+		}
+		if line["depth"] != wantDepth {
+			t.Errorf("%v carries depth %v; want %v", line["event"], line["depth"], wantDepth)
+		}
+	}
+}
+
+// The prune is reported ONCE under json, on the stream, in the stream's vocabulary. The stderr
+// sentence the text path prints is the same fact in a second vocabulary, and a consumer reading a
+// machine stream has no use for it (ADR 0075 decision 6) — but the sink is still WRAPPED, not
+// dropped, which is what keeps the Hook Runner behind it fed.
+func TestHeadlessFormatJSONSuppressesThePruneNotice(t *testing.T) {
+	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1},
+		emit: func(sink domain.EventSink) {
+			sink.Emit(domain.PruneEvent{Results: 3, Tokens: 1200})
+		}}
+
+	out, errOut, err := headlessRun(t, stub, "--format", "json", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+
+	var pruned map[string]any
+	for _, line := range jsonEventLines(t, out) {
+		if line["event"] == "prune" {
+			pruned = line
+		}
+	}
+	if pruned == nil {
+		t.Fatalf("the stream carries no prune line:\n%s", out)
+	}
+	data, ok := pruned["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("the prune line carried no data object: %v", pruned)
+	}
+	if data["results"] != float64(3) || data["tokens"] != float64(1200) {
+		t.Errorf("prune data = %v; want the 3 results and 1200 tokens the pass freed", data)
+	}
+	if strings.Contains(errOut, "pruned 3 tool results") {
+		t.Errorf("the prune notice was printed as well as streamed:\n%s", errOut)
+	}
+}
+
+// The encoder is the OUTERMOST sink the command composes and the prune-notice sink is what it
+// wraps. Both halves matter: outermost is the only place a lossless, blocking write may sit —
+// inside the Hook Runner it would block a callback documented not to block (ADR 0075 decision 9) —
+// and the wrap is what keeps every observer beneath it, the Hooks included, receiving Events.
+func TestHeadlessFormatJSONEncoderIsOutermost(t *testing.T) {
+	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1}}
+	if _, _, err := headlessRun(t, stub, "--format", "json", "a prompt"); err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+
+	writer, ok := stub.spec.Config.Events.(*eventjson.Writer)
+	if !ok {
+		t.Fatalf("Config.Events = %T; want the Event-line encoder outermost", stub.spec.Config.Events)
+	}
+	// Wrap's field is the Writer's own business, so what is read here is the TYPE inside the
+	// interface and never the value — reflect gives that without the package having to expose an
+	// accessor that exists for one test.
+	inner := reflect.ValueOf(writer).Elem().FieldByName("inner")
+	if !inner.IsValid() || inner.IsNil() {
+		t.Fatal("the encoder wraps nothing; the prune-notice sink was displaced rather than wrapped")
+	}
+	if got := inner.Elem().Type(); got != reflect.TypeOf(pruneNoticeSink{}) {
+		t.Errorf("the encoder wraps %s; want the headless prune-notice sink beneath it", got)
+	}
+}
+
+// A consumer that stops reading breaks the stream, not the run: the first write error is reported
+// once on stderr — the one channel that still works — the stream goes silent, and the run continues
+// to its own end with its own exit code. Anything else would half-kill a run that has already
+// edited files because a reader walked away.
+func TestHeadlessFormatJSONWriteErrorStopsLinesNotTheRun(t *testing.T) {
+	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 2},
+		emit: func(sink domain.EventSink) {
+			sink.Emit(domain.MessageEvent{Text: "done"})
+			sink.Emit(domain.PruneEvent{Results: 1, Tokens: 10})
+		}}
+
+	// The stdout writer is the point of this test, so the command is built here rather than through
+	// headlessRun — which owns both buffers — with the same seams swapped that helper swaps.
+	prevRunner, prevConfiner := runOnce, newConfiner
+	runOnce, newConfiner = stub.once, func() apogee.Confiner { return fenceableHost }
+	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
+	swapAnsweringBeat(t)
+	t.Setenv(config.EnvMode, "")
+
+	cmd := newHeadlessCommand()
+	var errBuf bytes.Buffer
+	cmd.SetOut(failingStdout{})
+	cmd.SetErr(&errBuf)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", testConfigHome(t, ""), "--workspace", t.TempDir(),
+		"--format", "json", "a prompt"})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("a stdout that refused every write killed the run: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("the run never happened")
+	}
+	const want = "apogee headless: event lines stopped — broken pipe"
+	if got := strings.Count(errBuf.String(), want); got != 1 {
+		t.Errorf("the stream reported its own failure %d times, want exactly once:\n%s",
+			got, errBuf.String())
+	}
+}
+
+// failingStdout refuses every write, the way a pipe does once its reader is gone. It is the whole
+// of the case the Writer's stop-on-first-error rule exists for.
+type failingStdout struct{}
+
+func (failingStdout) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+// A Ctrl-C-cancelled run reaches the funnel exactly as it does on the text path — a failed run,
+// exit 1, whatever it had reached — and its closing frame is written like any other. The stream
+// never simply stops because the human interrupted it.
+func TestHeadlessFormatJSONCancelledRunWritesTheFrame(t *testing.T) {
+	stub := &stubRunner{
+		res: run.Result{SessionID: "s-4", FinalText: "half an answer", Turns: 1},
+		err: fmt.Errorf("apogee: the firing was cancelled: %w", context.Canceled),
+	}
+
+	out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+	if err == nil {
+		t.Fatal("a cancelled run returned no error")
+	}
+	if code := exitCodeFor(err); code != exitRunFailed {
+		t.Errorf("exit code = %d; want %d — a cancelled run STARTED", code, exitRunFailed)
+	}
+
+	_, data := finishedFrame(t, jsonEventLines(t, out))
+	wantExitCode(t, data, exitRunFailed)
+	text, _ := data["error"].(string)
+	if !strings.Contains(text, "cancelled") {
+		t.Errorf("error = %v; the frame does not say what ended the run", data["error"])
+	}
+	if data["turns"] != float64(1) {
+		t.Errorf("turns = %v; want the one Turn the run had reached", data["turns"])
+	}
+	if data["final_text"] != "half an answer" {
+		t.Errorf("final_text = %v; a cancelled run still reports what it salvaged", data["final_text"])
 	}
 }
 
