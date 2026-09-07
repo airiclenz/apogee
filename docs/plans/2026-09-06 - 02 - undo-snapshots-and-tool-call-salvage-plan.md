@@ -38,7 +38,11 @@
 
 **Out of scope:** the hooks plan (`docs/plans/2026-09-06 - 01 - hooks-plan.md`) and ADR 0073; XML function-call dialects; a pure-Go snapshot store; persisting out-of-workspace pre-images; snapshots of paths the workspace's own `.gitignore` excludes; an undo tool for the model; `IDEAS.md`; any version bump.
 
-## 1. Verify the hooks plan is archived
+## 1. Verify the hooks plan is archived — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): gate verified — `docs/plans/archived/2026-09-06 - 01 - hooks-plan.md` exists, `docs/plans/2026-09-06 - 01 - hooks-plan.md` is gone, and `git status --porcelain -- internal/agent internal/config cmd/apogee internal/tui` is empty (the whole tree is clean at 8c3dc9ae). The hooks plan's last commit a2863f5a is an ancestor of HEAD, so its edits have landed rather than being in flight.
+
+NOTES (2026-09-07): the plan header's Base is 5359e90e but HEAD is 8c3dc9ae — every later item must re-verify its cited line ranges against this tree, exactly as the plan's regression-check note requires.
 
 **What:** this plan touches `internal/agent`, `internal/config`, `cmd/apogee/wire*.go` and `internal/tui`, the files the hooks plan `docs/plans/2026-09-06 - 01 - hooks-plan.md` is landing in concurrently (commits 458a7b19..a2863f5a and a dirty tree at write time); no item of this plan runs until that plan has been archived under `docs/plans/archived/` and the working tree is clean of its edits.
 **Files:** none.
