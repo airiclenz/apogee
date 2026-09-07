@@ -23,11 +23,13 @@ import (
 // ----------------------------------------------------------------------------
 
 type fakeSnapshotter struct {
-	mu     sync.Mutex
-	root   string
-	trees  map[string]map[string][]byte
-	ignore map[string]bool // rel paths the "add pipeline" leaves out (ADR 0074 decision 12)
-	fail   error           // when set, every Capture refuses
+	mu        sync.Mutex
+	root      string
+	trees     map[string]map[string][]byte
+	ignore    map[string]bool // rel paths the "add pipeline" leaves out (ADR 0074 decision 12)
+	fail      error           // when set, every Capture refuses
+	failDiff  error           // when set, every Diff refuses
+	failBlobs error           // when set, every ListBlobs refuses
 }
 
 func newFakeSnapshotter(root string) *fakeSnapshotter {
@@ -75,6 +77,9 @@ func (f *fakeSnapshotter) Diff(_ context.Context, a, b string) ([]string, error)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.failDiff != nil {
+		return nil, f.failDiff
+	}
 	before, after := f.trees[a], f.trees[b]
 	seen := map[string]bool{}
 	var changed []string
@@ -97,6 +102,9 @@ func (f *fakeSnapshotter) ListBlobs(_ context.Context, tree string) (map[string]
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.failBlobs != nil {
+		return nil, f.failBlobs
+	}
 	image, ok := f.trees[tree]
 	if !ok {
 		return nil, fmt.Errorf("no such tree %q", tree)

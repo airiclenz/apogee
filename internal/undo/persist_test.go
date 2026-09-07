@@ -320,3 +320,84 @@ func TestClose_SaveThatCannotComplete_IsReportedAndLeavesNoPartialFile(t *testin
 		t.Fatalf("the failed save left %d entries behind: %+v", len(left), left)
 	}
 }
+
+// TestClose_EarlyExitAfterARecordClearedTheRedoStack_StillWritesTheIndex pins the rule that no
+// way out of Close may leave journal.json holding a redo stack the journal has discarded. The
+// record that opens an exchange clears the stack in memory and writes nothing, so a close that
+// skipped the save would leave the next process a `/redo` that re-applies an old tree over the
+// write which discarded it — exactly what ADR 0074 decision 6 forbids.
+func TestClose_EarlyExitAfterARecordClearedTheRedoStack_StillWritesTheIndex(t *testing.T) {
+	cases := []struct {
+		name    string
+		markPre bool
+		arm     func(snap *fakeSnapshotter)
+		wantErr bool
+	}{
+		{
+			name: "the group is funnel-only",
+		},
+		{
+			name:    "the closing capture fails",
+			markPre: true,
+			arm:     func(snap *fakeSnapshotter) { snap.fail = errors.New("git is wedged") },
+			wantErr: true,
+		},
+		{
+			name:    "the diff fails",
+			markPre: true,
+			arm:     func(snap *fakeSnapshotter) { snap.failDiff = errors.New("git is wedged") },
+			wantErr: true,
+		},
+		{
+			name:    "reading an image fails",
+			markPre: true,
+			arm:     func(snap *fakeSnapshotter) { snap.failBlobs = errors.New("git is wedged") },
+			wantErr: true,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			journal, snap, root, path := persistJournal(t)
+
+			// One exchange, reverted: the index on disk now carries a redo stack.
+			exchange(t, journal, func() { subprocessWrite(t, root, "one.txt", "first") })
+			if _, err := journal.Revert(); err != nil {
+				t.Fatalf("Revert: %v", err)
+			}
+			if before := readIndex(t, path); len(before.Redo) != 1 {
+				t.Fatalf("the reverted exchange is not on the index's redo stack: %+v", before)
+			}
+
+			// A second exchange that writes: the record discards that stack in memory, and this
+			// close leaves by the path under test.
+			journal.BeginGroup()
+			if testCase.markPre {
+				if err := journal.MarkPre(context.Background()); err != nil {
+					t.Fatalf("MarkPre: %v", err)
+				}
+			}
+			funnelWrite(t, journal, root, "two.txt", "second")
+			if testCase.arm != nil {
+				testCase.arm(snap)
+			}
+
+			err := journal.Close(context.Background())
+			if testCase.wantErr && err == nil {
+				t.Fatal("Close reported no error although the capture path refused")
+			}
+			if !testCase.wantErr && err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			if _, ok := journal.RedoPreview(); ok {
+				t.Fatal("the record left a redo stack in memory: this test's premise no longer holds")
+			}
+			after := readIndex(t, path)
+			if len(after.Redo) != 0 {
+				t.Fatalf("journal.json still offers %d redo step(s) memory has discarded: %+v",
+					len(after.Redo), after.Redo)
+			}
+		})
+	}
+}

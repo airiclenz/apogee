@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"path/filepath"
@@ -113,10 +114,23 @@ func (j *Journal) MarkPre(ctx context.Context) error {
 //
 // This is where a group becomes durable: a journal given an index path ([WithIndexPath]) writes
 // journal.json here, and a save that fails is returned without disturbing the closed group.
+//
+// EVERY path out of it saves, including the ones that end the exchange early. The exchange that
+// just ran may already have discarded the redo stack in memory — [Journal.Record] clears it at its
+// first record, and records nothing on disk — so a close that skipped the save would leave
+// journal.json offering the next process a `/redo` this journal has thrown away, re-applying an
+// old tree over the very write that discarded it (ADR 0074 decision 6). A failure of the close and
+// a failure of the save are reported together, and neither disturbs the closed group.
 func (j *Journal) Close(ctx context.Context) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	return errors.Join(j.closeGroup(ctx), j.persist())
+}
+
+// closeGroup is the closing work itself, with the save left to [Journal.Close] so that every way
+// out of here — the four early ones included — is followed by one. Callers hold the lock.
+func (j *Journal) closeGroup(ctx context.Context) error {
 	if len(j.groups) == 0 {
 		return nil
 	}
@@ -156,7 +170,7 @@ func (j *Journal) Close(ctx context.Context) error {
 		j.generation++
 	}
 	current.generation = j.generation
-	return j.persist()
+	return nil
 }
 
 // dropIfEmpty removes a group that never became a step — opened by [Journal.MarkPre] for an
