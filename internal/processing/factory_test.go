@@ -76,6 +76,47 @@ func TestNewToolCallParser_RoundTripsAFencedCall(t *testing.T) {
 	}
 }
 
+// IsNative separates the format that leaves its calls on the wire from the two that write them into
+// the visible text — the question the tool-call salvage Floor guard asks before it reads that text
+// back as a call. The empty format is native's own spelling, and a nil parser is not native: nothing
+// is resolved, so nothing licenses the read.
+func TestIsNative_SeparatesTheWireFormatFromTheTextFormats(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		format ToolCallFormat
+		want   bool
+	}{
+		{"native", FormatNative, true},
+		{"the empty format defaults to native", "", true},
+		{"markdown-fenced", FormatMarkdownFenced, false},
+		{"custom-regex", FormatCustomRegex, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parser, err := NewToolCallParser(ToolCallingConfig{
+				Format:      tc.format,
+				CustomRegex: CustomRegexConfig{Pattern: `<call>(?<name>\w+)(?<args>\{.*?\})</call>`},
+			})
+			if err != nil {
+				t.Fatalf("NewToolCallParser(%q): %v", tc.format, err)
+			}
+
+			if got := IsNative(parser); got != tc.want {
+				t.Errorf("IsNative(%s) = %v, want %v", typeName(parser), got, tc.want)
+			}
+		})
+	}
+
+	if IsNative(nil) {
+		t.Error("IsNative(nil) = true, want false: an unresolved parser is not the native one")
+	}
+}
+
 // typeName returns the dynamic type name of v as Go prints it with %T — used to assert which
 // concrete parser the factory selected.
 func typeName(v any) string {

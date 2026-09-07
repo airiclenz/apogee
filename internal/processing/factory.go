@@ -61,3 +61,17 @@ func (nativeTextParser) ParseToolCall(string) (domain.ToolCall, bool) {
 
 // StripToolCall returns raw unchanged — there is no inline markup to remove for native calls.
 func (nativeTextParser) StripToolCall(raw string) string { return raw }
+
+// IsNative reports whether p is the native format's no-op text parser — the one NewToolCallParser
+// returns for FormatNative and for an unset format. It is the question the tool-call salvage Floor
+// guard has to ask before it reads a call back out of the visible text: a markdown-fenced or
+// custom-regex profile already extracts its calls from that text at the parse seam, so salvaging
+// there would dispatch the same call twice, while a native profile extracts nothing from text at
+// all and a call written into it is otherwise lost.
+//
+// A nil parser reports false: no profile is resolved, so nothing licenses reading the text as a
+// call.
+func IsNative(p ToolCallParser) bool {
+	_, native := p.(nativeTextParser)
+	return native
+}

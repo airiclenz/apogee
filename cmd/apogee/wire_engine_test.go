@@ -110,7 +110,7 @@ func TestLateEngineReplaysThePruneGateAtTheBind(t *testing.T) {
 
 // The Floor gates ride the same remember-then-install contract, with one difference worth pinning:
 // the seam takes the WHOLE FloorConfig rather than a gate at a time, so what the holder remembers is
-// where all six stand — and a second edit made before the bind must not lose the first one's.
+// where all seven stand — and a second edit made before the bind must not lose the first one's.
 func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 	t.Parallel()
 

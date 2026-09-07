@@ -713,6 +713,12 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		row: mustKey("tool-call-salvage"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ToolCallSalvage = fc.ToolCallSalvage == nil || *fc.ToolCallSalvage
+		},
+	},
+	{
 		row: mustKey("tool-loop-breaker"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.ToolLoopBreaker = fc.ToolLoopBreaker == nil || *fc.ToolLoopBreaker
@@ -1336,7 +1342,7 @@ type fileConfig struct {
 	// is distinguishable from an absent key (default true). Pruning is structural like Compaction
 	// (it stays on under Bypass), so this key is the only way to turn it off.
 	PruneToolResults *bool `yaml:"prune-tool-results"`
-	// The six FLOOR GUARDS (ADR 0071), each a file-only pointer for auto-compact's reason: an
+	// The seven FLOOR GUARDS (ADR 0071), each a file-only pointer for auto-compact's reason: an
 	// explicit `<key>: false` is distinguishable from an absent key, and absent is the default
 	// true. They are the engine's own behaviour rather than Mechanisms — they stay on under
 	// Bypass and a `mechanisms:` entry can no longer turn one off — so these keys are the only
@@ -1349,6 +1355,9 @@ type fileConfig struct {
 	EmptyResponseRecovery *bool `yaml:"empty-response-recovery"`
 	// ToolCallRepair gates the correction and retry of an unknown or malformed tool call.
 	ToolCallRepair *bool `yaml:"tool-call-repair"`
+	// ToolCallSalvage gates the dispatch of a tool call a native-profile model wrote as JSON in
+	// its text instead of on the wire.
+	ToolCallSalvage *bool `yaml:"tool-call-salvage"`
 	// ToolLoopBreaker gates the directive that answers a turn repeating the previous turn's calls.
 	ToolLoopBreaker *bool `yaml:"tool-loop-breaker"`
 	// ToolResultCap gates trimming older oversized tool results in the PROJECTED request; the

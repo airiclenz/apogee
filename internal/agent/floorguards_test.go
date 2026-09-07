@@ -824,3 +824,184 @@ func TestFloorGuard_LoopBreakerDoesNotFireOnARepeatedRequest(t *testing.T) {
 		t.Errorf("read_file ran %d times, want 2 (once per Exchange)", ran)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The tool-call salvage guard (tool-call-salvage)
+// ---------------------------------------------------------------------------
+
+// fencedCallReply is a reply that narrates and then writes the call out as JSON in a fenced block
+// instead of sending it on the wire — the exact failure the salvage guard exists for.
+func fencedCallReply(name, args string) string {
+	return "I will do that now.\n\n```json\n{\"name\": \"" + name + "\", \"arguments\": " + args + "}\n```"
+}
+
+// firstAssistantMessage returns the FIRST committed assistant message — the one the salvaged call
+// and the stripped text were written onto, which a later Turn's plain reply would otherwise hide.
+func firstAssistantMessage(t *testing.T, a *Agent) domain.Message {
+	t.Helper()
+	for _, m := range a.conv.Messages() {
+		if m.Role == domain.RoleAssistant {
+			return m
+		}
+	}
+	t.Fatal("no assistant message committed")
+	return domain.Message{}
+}
+
+// guardDetailFor returns the Detail of the first FloorGuardEvent attributed to guard, or "".
+func guardDetailFor(events []domain.Event, guard string) string {
+	for _, e := range events {
+		if ge, ok := e.(domain.FloorGuardEvent); ok && ge.Guard == guard {
+			return ge.Detail
+		}
+	}
+	return ""
+}
+
+// A native-profile model that wrote its call out as a fenced JSON object gets that call DISPATCHED:
+// the guard puts it back on the response, the loop runs it, and the committed assistant message
+// carries the call beside the narration with the fence gone. The Turn is NOT re-streamed — salvage
+// completes a response rather than correcting one — so the model is asked exactly twice: the draft
+// and the answer to the tool result.
+func TestFloorGuard_ToolCallSalvageRunsAFencedCallWrittenInText(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "hello"})
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		contentScript(fencedCallReply("read_file", `{"path": "a.txt"}`)),
+		contentScript("the file says hello"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	res := runExchange(t, a, "read a.txt")
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("status = %q, want exchange-complete", res.Status)
+	}
+	if len(responder.got) != 2 {
+		t.Fatalf("provider was called %d times, want 2 (draft, answer to the tool result): salvage must not re-stream",
+			len(responder.got))
+	}
+	if ran != 1 {
+		t.Errorf("read_file ran %d times, want 1 (the salvaged call dispatches)", ran)
+	}
+
+	msg := firstAssistantMessage(t, a)
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("committed assistant ToolCalls = %d, want 1", len(msg.ToolCalls))
+	}
+	call := msg.ToolCalls[0]
+	if call.Tool != "read_file" {
+		t.Errorf("Tool = %q, want read_file", call.Tool)
+	}
+	if call.ID != "text_call_0_0" {
+		t.Errorf("ID = %q, want text_call_0_0 (Turn-derived, position-suffixed)", call.ID)
+	}
+	if string(call.Arguments) != `{"path": "a.txt"}` {
+		t.Errorf("Arguments = %s, want the object the model wrote", call.Arguments)
+	}
+	if strings.Contains(msg.Content, "```") || strings.Contains(msg.Content, "read_file") {
+		t.Errorf("committed content still carries the salvaged block: %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "I will do that now.") {
+		t.Errorf("committed content lost the narration around the call: %q", msg.Content)
+	}
+
+	if !hasGuardFire(sink.events, guardToolCallSalvage, guardActionSalvage) {
+		t.Errorf("no FloorGuardEvent{Guard: %q, Action: %q}", guardToolCallSalvage, guardActionSalvage)
+	}
+	if detail := guardDetailFor(sink.events, guardToolCallSalvage); detail != "salvaged read_file from content" {
+		t.Errorf("Detail = %q, want %q", detail, "salvaged read_file from content")
+	}
+}
+
+// The three cases the guard must stay OUT of, each ending the Exchange exactly as it did before the
+// guard existed: the JSON stands as text, nothing is dispatched, and no guard event is booked.
+//
+// The other post-response guards are opted out throughout so the subject is salvage alone — a
+// narrating reply with no call is the tool-use enforcer's own trigger, and its retry would answer
+// the question this table is not asking.
+func TestFloorGuard_ToolCallSalvageStaysOutWhereItMust(t *testing.T) {
+	cases := []struct {
+		name    string
+		shape   func(cfg *domain.Config)
+		written string
+	}{
+		{
+			// A markdown-fenced profile already recovers calls from the visible text at the parse
+			// seam, so salvaging the same text would dispatch the call twice.
+			name: "a markdown-fenced profile owns its own text",
+			shape: func(cfg *domain.Config) {
+				cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
+			},
+			written: "read_file",
+		},
+		{
+			name:    "the guard is opted out",
+			shape:   func(cfg *domain.Config) { cfg.Floor.DisableToolCallSalvage = true },
+			written: "read_file",
+		},
+		{
+			// An unoffered name is a hallucination the repair guard owns, not a call to run.
+			name:    "the name was never offered",
+			shape:   func(cfg *domain.Config) {},
+			written: "delete_everything",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			ran := 0
+			cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "hello"})
+			cfg.Floor.DisableToolUseEnforcer = true
+			cfg.Floor.DisableEmptyResponseRecovery = true
+			tc.shape(&cfg)
+			responder := &captureAllResponder{scripts: [][]provider.Delta{
+				contentScript(fencedCallReply(tc.written, `{"path": "a.txt"}`)),
+			}}
+
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			res := runExchange(t, a, "read a.txt")
+
+			if res.Status != domain.StatusExchangeComplete {
+				t.Fatalf("status = %q, want exchange-complete (the JSON stands as text)", res.Status)
+			}
+			if ran != 0 {
+				t.Errorf("read_file ran %d times, want 0", ran)
+			}
+			if n := guardFireCountFor(sink.events, guardToolCallSalvage); n != 0 {
+				t.Errorf("salvage fired %d times, want 0", n)
+			}
+			if msg := firstAssistantMessage(t, a); !strings.Contains(msg.Content, "```") {
+				t.Errorf("committed content lost the block nothing salvaged: %q", msg.Content)
+			}
+		})
+	}
+}
+
+// The WRAP-UP Turn (Agent.wrapUp) is the fourth case, and it needs the delegate's own harness: a
+// delegate stopped at its step cap is offered no menu at all and owes its parent a closing report,
+// so a call salvaged out of that report would be a call the delegation had already been refused.
+func TestFloorGuard_ToolCallSalvageIsSilentOnTheWrapUpTurn(t *testing.T) {
+	a, _, sink, ran := wrapUpAgent(t, true,
+		contentScript(fencedCallReply("read_thing", `{"path": "a.txt"}`)))
+
+	res := runWrapUpAgent(t, a)
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("status = %q, want exchange-complete (the wrap-up Turn ends the Exchange)", res.Status)
+	}
+	if *ran != 0 {
+		t.Errorf("read_thing ran %d times, want 0 on the wrap-up Turn", *ran)
+	}
+	if n := guardFireCountFor(sink.events, guardToolCallSalvage); n != 0 {
+		t.Errorf("salvage fired %d times on the wrap-up Turn, want 0", n)
+	}
+}

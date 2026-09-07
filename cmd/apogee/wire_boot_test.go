@@ -745,10 +745,10 @@ func TestBootConfigCarriesThePruneToolResultsToggle(t *testing.T) {
 	}
 }
 
-// The six Floor-guard keys reach the engine the same way, negated once on the trip (ADR 0071): they
-// are positive in the file and Disable… at the engine, so a key left at its `true` default has to
-// arrive as a FALSE gate. The case that proves the negation is not a blanket one is a single key
-// switched off while the other five stand.
+// The seven Floor-guard keys reach the engine the same way, negated once on the trip (ADR 0071):
+// they are positive in the file and Disable… at the engine, so a key left at its `true` default has
+// to arrive as a FALSE gate. The case that proves the negation is not a blanket one is a single key
+// switched off while the other six stand.
 func TestBootConfigCarriesTheFloorGuardKeys(t *testing.T) {
 	t.Parallel()
 	opts := config.Options{
@@ -759,6 +759,7 @@ func TestBootConfigCarriesTheFloorGuardKeys(t *testing.T) {
 		ToolUseEnforcer:       true,
 		EmptyResponseRecovery: true,
 		ToolCallRepair:        true,
+		ToolCallSalvage:       true,
 		ToolLoopBreaker:       true,
 		ToolResultCap:         false,
 		ReadCache:             true,
@@ -774,7 +775,7 @@ func TestBootConfigCarriesTheFloorGuardKeys(t *testing.T) {
 	}
 	want := apogee.FloorConfig{DisableToolResultCap: true}
 	if w.cfg.Floor != want {
-		t.Errorf("Config.Floor = %+v; want %+v — one key off, the other five guards standing",
+		t.Errorf("Config.Floor = %+v; want %+v — one key off, the other six guards standing",
 			w.cfg.Floor, want)
 	}
 }

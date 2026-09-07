@@ -250,10 +250,10 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	}
 }
 
-// A Firing runs the FLOOR the session it was raised from runs (ADR 0071). The six keys are positive
-// in the session's Options and Disable… at the engine, and floorFromOptions is the one seam that
-// negates them — so a run nobody watches must arrive with exactly the guard the human took away and
-// the five they did not.
+// A Firing runs the FLOOR the session it was raised from runs (ADR 0071). The seven keys are
+// positive in the session's Options and Disable… at the engine, and floorFromOptions is the one seam
+// that negates them — so a run nobody watches must arrive with exactly the guard the human took away
+// and the six they did not.
 func TestFiringConfigCarriesTheFloorGuardKeys(t *testing.T) {
 	t.Parallel()
 
@@ -261,7 +261,7 @@ func TestFiringConfigCarriesTheFloorGuardKeys(t *testing.T) {
 	opts := config.Options{
 		// Bypass keeps the Validated-set surface off, so this composition resolves with no probe
 		// record to match against — and says the second half of the claim besides: Bypass takes the
-		// lab rows away and leaves every Floor guard exactly where the six keys put it.
+		// lab rows away and leaves every Floor guard exactly where the seven keys put it.
 		Bypass: true,
 		Servers: []config.ServerEntry{
 			{Name: "box", Endpoint: "http://box.example/v1"},
@@ -270,6 +270,7 @@ func TestFiringConfigCarriesTheFloorGuardKeys(t *testing.T) {
 		ToolUseEnforcer:       true,
 		EmptyResponseRecovery: true,
 		ToolCallRepair:        true,
+		ToolCallSalvage:       true,
 		ToolLoopBreaker:       true,
 		ToolResultCap:         false,
 		ReadCache:             true,

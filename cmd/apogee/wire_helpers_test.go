@@ -74,7 +74,7 @@ type applySettingSpy struct {
 	compaction []bool
 	prune      []bool
 	// floors records the WHOLE FloorConfig each Floor-guard apply pushed, which is the only way the
-	// "one key moved, the other five stood still" claim can be asserted: the seam takes all six.
+	// "one key moved, the other six stood still" claim can be asserted: the seam takes all seven.
 	floors       []apogee.FloorConfig
 	contextFiles []contextFileChoice
 	swaps        []*apogee.ToolRegistry

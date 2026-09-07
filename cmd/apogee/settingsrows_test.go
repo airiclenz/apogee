@@ -44,11 +44,12 @@ func fabricatedSettings() config.Options {
 		UseDefaultPrompt:   false,
 		AutoCompact:        true,
 		PruneToolResults:   true,
-		// The six Floor guards as a resolved session actually carries them: on, bar the one this
+		// The seven Floor guards as a resolved session actually carries them: on, bar the one this
 		// fixture opts out of, so the pane is asserted to report the VALUE rather than the default.
 		ToolUseEnforcer:       true,
 		EmptyResponseRecovery: true,
 		ToolCallRepair:        true,
+		ToolCallSalvage:       true,
 		ToolLoopBreaker:       true,
 		ToolResultCap:         true,
 		ReadCache:             false,
@@ -400,6 +401,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"tool-use-enforcer":       "true",
 		"empty-response-recovery": "true",
 		"tool-call-repair":        "true",
+		"tool-call-salvage":       "true",
 		"tool-loop-breaker":       "true",
 		"tool-result-cap":         "true",
 		"read-cache":              "false", // opted out in the fixture: a guard row reports the value, never the floor

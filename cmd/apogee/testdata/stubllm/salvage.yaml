@@ -1,0 +1,41 @@
+# The upstream the tool-call salvage tests talk to: a model on a NATIVE profile that answers a
+# request for work by writing the call out as JSON in its visible text instead of sending it on the
+# wire your server understands. That is the failure the `tool-call-salvage` Floor guard exists for
+# (ADR 0071), and no unit test can make the claim this file makes — that the call the guard read
+# back out of the text reaches the SERVER on the next request, as a real assistant `tool_calls`
+# entry with a real tool result answering it.
+#
+# The reply is deliberately narration PLUS a fenced block, because both halves are under test: the
+# block is what becomes the call, and the narration is what has to survive as the visible reply.
+model: salvage-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: A call written out in text
+    # The wrap-up once the salvaged call has come back. Matched BEFORE the prompt turn below so a
+    # tool result can never be answered as a fresh request.
+    - when:
+        tool_result: read_file
+      repeat: true
+      text: The file holds one line, and it says hello.
+      token_delay: 1ms
+      chunk_runes: 6
+    # The turn under test. No `tool_calls:` at all — the call is JSON in the CONTENT, fenced, with
+    # the narration the reply must keep once the fence has been cut out of it.
+    - when:
+        last_message: ^Read a.txt
+      repeat: true
+      text: |-
+        I will read that file now.
+
+        ```json
+        {"name": "read_file", "arguments": {"path": "a.txt"}}
+        ```
+      token_delay: 1ms
+      chunk_runes: 6
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: OK.

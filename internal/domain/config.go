@@ -370,9 +370,9 @@ type Config struct {
 // Bypass, and the fields below are the only way to take one away.
 //
 // Every field is a Disable… bool ON PURPOSE: the guards are the floor, so the zero value is the
-// full floor and only a deliberate opt-out removes one. The host folds in the six file-only config
-// keys by negation (tool-use-enforcer, empty-response-recovery, tool-call-repair, tool-loop-breaker,
-// tool-result-cap, read-cache); an embedder sets the fields directly.
+// full floor and only a deliberate opt-out removes one. The host folds in the seven file-only config
+// keys by negation (tool-use-enforcer, empty-response-recovery, tool-call-repair, tool-call-salvage,
+// tool-loop-breaker, tool-result-cap, read-cache); an embedder sets the fields directly.
 type FloorConfig struct {
 	// DisableToolUseEnforcer stops the engine retrying a Turn that narrated where the user asked
 	// for an action, letting the prose stand as the reply.
@@ -385,6 +385,10 @@ type FloorConfig struct {
 	// DisableToolCallRepair stops the engine correcting a malformed or unknown tool call before
 	// it is dispatched, letting the bad call reach the tool path and fail there.
 	DisableToolCallRepair bool
+
+	// DisableToolCallSalvage stops the engine running a tool call a native-profile model wrote
+	// out as JSON in its text instead of on the wire, letting that text stand as the reply.
+	DisableToolCallSalvage bool
 
 	// DisableToolLoopBreaker stops the engine breaking an identical repeated tool call with a
 	// directive naming the repeat, letting the loop run to the Turn budget.

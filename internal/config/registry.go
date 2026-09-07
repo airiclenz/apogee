@@ -436,6 +436,12 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return boolValue(o.ToolCallRepair) },
 	},
 	{
+		Path: "tool-call-salvage", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Floor guard: run a tool call the model wrote as JSON in its text instead of on the wire.",
+		Read:     func(o Options) string { return boolValue(o.ToolCallSalvage) },
+	},
+	{
 		Path: "tool-loop-breaker", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: break an identical repeated tool call with a directive naming the repeat.",

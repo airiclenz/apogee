@@ -300,7 +300,7 @@ func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
 	}
 }
 
-// The six Floor-guard keys are ONE engine seam and six rows, so every apply has to carry the five
+// The seven Floor-guard keys are ONE engine seam and seven rows, so every apply has to carry the six
 // gates its own row does not name — the same shape of problem the context-files pair has, and the
 // reason both families need the holder as well as the engine. The failure this pins is the one a
 // row that composed a fresh FloorConfig from its own key alone would ship: a second flip that
@@ -312,12 +312,13 @@ func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
 func TestApplySettingFloorGuardKeysCarryTheOtherFiveGates(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
-	// A session running the whole floor, which is what every start resolves to: the six keys default
-	// to true and nothing in this fixture opts out.
+	// A session running the whole floor, which is what every start resolves to: the seven keys
+	// default to true and nothing in this fixture opts out.
 	live := newLiveSettings(config.Options{
 		ToolUseEnforcer:       true,
 		EmptyResponseRecovery: true,
 		ToolCallRepair:        true,
+		ToolCallSalvage:       true,
 		ToolLoopBreaker:       true,
 		ToolResultCap:         true,
 		ReadCache:             true,
@@ -329,7 +330,7 @@ func TestApplySettingFloorGuardKeysCarryTheOtherFiveGates(t *testing.T) {
 	}
 	want := apogee.FloorConfig{DisableReadCache: true}
 	if len(spy.floors) != 1 || spy.floors[0] != want {
-		t.Fatalf("SetFloor = %+v, want one call carrying %+v — the other five guards stand",
+		t.Fatalf("SetFloor = %+v, want one call carrying %+v — the other six guards stand",
 			spy.floors, want)
 	}
 

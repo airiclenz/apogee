@@ -270,7 +270,7 @@ type Options struct {
 	// Firings alike.
 	PruneToolResults bool
 
-	// The six FLOOR GUARDS (ADR 0071), each default true and loaded from the config file only.
+	// The seven FLOOR GUARDS (ADR 0071), each default true and loaded from the config file only.
 	// ApplyConfig sets them from the resolved settings; the composition root negates them into
 	// apogee.Config.Floor's Disable… fields — this package states a guard POSITIVELY, the domain
 	// states its absence, and that one negation is the whole of the translation.
@@ -283,6 +283,10 @@ type Options struct {
 
 	// ToolCallRepair keeps the correction and retry of an unknown or malformed tool call.
 	ToolCallRepair bool
+
+	// ToolCallSalvage keeps the dispatch of a tool call a native-profile model wrote as JSON in
+	// its text instead of on the wire.
+	ToolCallSalvage bool
 
 	// ToolLoopBreaker keeps the directive that answers a turn repeating the previous turn's calls.
 	ToolLoopBreaker bool

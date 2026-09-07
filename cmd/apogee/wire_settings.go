@@ -221,7 +221,7 @@ type liveSettings struct {
 	autoCompact      bool
 	pruneToolResults bool
 
-	// And the six Floor-guard keys beside them (ADR 0071), mirrored for the same reason and held
+	// And the seven Floor-guard keys beside them (ADR 0071), mirrored for the same reason and held
 	// POSITIVE — the spelling the file and the pane use — because domain.FloorConfig's negation is
 	// the engine's own contract and belongs at the seam alone (floorFromOptions below). The engine
 	// holds the live gates and nothing re-resolves them here, so an unattended run raised from this
@@ -229,6 +229,7 @@ type liveSettings struct {
 	toolUseEnforcer       bool
 	emptyResponseRecovery bool
 	toolCallRepair        bool
+	toolCallSalvage       bool
 	toolLoopBreaker       bool
 	toolResultCap         bool
 	readCache             bool
@@ -286,7 +287,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		modelProfiles:      opts.ModelProfiles,
 		rememberModel:      opts.RememberModel,
 		// And the keys this holder only MIRRORS — the tool set's four, the engine's two toggles, the
-		// six Floor-guard gates and the inspector — seeded from the same snapshot for the reason the
+		// seven Floor-guard gates and the inspector — seeded from the same snapshot for the reason the
 		// rest are: a session nobody edits must hand back exactly the configuration it launched with.
 		searchEndpoint:   opts.WebSearchEndpoint,
 		disabledTools:    opts.ToolsDisabled,
@@ -301,6 +302,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		toolUseEnforcer:       opts.ToolUseEnforcer,
 		emptyResponseRecovery: opts.EmptyResponseRecovery,
 		toolCallRepair:        opts.ToolCallRepair,
+		toolCallSalvage:       opts.ToolCallSalvage,
 		toolLoopBreaker:       opts.ToolLoopBreaker,
 		toolResultCap:         opts.ToolResultCap,
 		readCache:             opts.ReadCache,
@@ -760,10 +762,10 @@ func (s *liveSettings) setPruneToolResults(on bool) {
 
 // setFloorGuard flips ONE Floor-guard key on the holder and hands back the WHOLE FloorConfig the
 // engine must be re-seeded with. The read and the write are one locked act on purpose: the engine
-// seam takes all six values at once (SetFloor), so an apply that read the other five outside the
+// seam takes all seven values at once (SetFloor), so an apply that read the other six outside the
 // lock could re-arm a guard a concurrent apply had just taken away.
 //
-// An unknown key is a programming error the six table rows cannot make, so it changes nothing and
+// An unknown key is a programming error the seven table rows cannot make, so it changes nothing and
 // the projection is handed back as it stands.
 func (s *liveSettings) setFloorGuard(key string, on bool) apogee.FloorConfig {
 	s.mu.Lock()
@@ -775,6 +777,8 @@ func (s *liveSettings) setFloorGuard(key string, on bool) apogee.FloorConfig {
 		s.emptyResponseRecovery = on
 	case "tool-call-repair":
 		s.toolCallRepair = on
+	case "tool-call-salvage":
+		s.toolCallSalvage = on
 	case "tool-loop-breaker":
 		s.toolLoopBreaker = on
 	case "tool-result-cap":
@@ -785,7 +789,7 @@ func (s *liveSettings) setFloorGuard(key string, on bool) apogee.FloorConfig {
 	return floorFromOptions(s.optionsLocked())
 }
 
-// floorFromOptions is the ONE negation seam between the six positive config keys and the engine's
+// floorFromOptions is the ONE negation seam between the seven positive config keys and the engine's
 // Disable… gates (ADR 0071: the zero FloorConfig is the full floor). Both composition roots and
 // every `/settings` apply go through it, so "off in the file" and "off in the pane" cannot come to
 // mean two different things.
@@ -794,6 +798,7 @@ func floorFromOptions(o config.Options) apogee.FloorConfig {
 		DisableToolUseEnforcer:       !o.ToolUseEnforcer,
 		DisableEmptyResponseRecovery: !o.EmptyResponseRecovery,
 		DisableToolCallRepair:        !o.ToolCallRepair,
+		DisableToolCallSalvage:       !o.ToolCallSalvage,
 		DisableToolLoopBreaker:       !o.ToolLoopBreaker,
 		DisableToolResultCap:         !o.ToolResultCap,
 		DisableReadCache:             !o.ReadCache,
@@ -863,6 +868,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.ToolUseEnforcer = s.toolUseEnforcer
 	next.EmptyResponseRecovery = s.emptyResponseRecovery
 	next.ToolCallRepair = s.toolCallRepair
+	next.ToolCallSalvage = s.toolCallSalvage
 	next.ToolLoopBreaker = s.toolLoopBreaker
 	next.ToolResultCap = s.toolResultCap
 	next.ReadCache = s.readCache
@@ -1356,8 +1362,8 @@ var settingsTable = []settingsEntry{
 			return "", nil
 		},
 	},
-	// The six Floor-guard gates (ADR 0071). They share one apply and one engine seam: SetFloor takes
-	// the WHOLE FloorConfig, so a row that knows only its own key has to read the other five back off
+	// The seven Floor-guard gates (ADR 0071). They share one apply and one engine seam: SetFloor takes
+	// the WHOLE FloorConfig, so a row that knows only its own key has to read the other six back off
 	// the holder — which is why these are the one bool family that needs the holder as well as the
 	// engine. Nothing else about them is special: each is an ordinary editable bool, on by default,
 	// in force the moment its apply returns.
@@ -1373,6 +1379,11 @@ var settingsTable = []settingsEntry{
 	},
 	{
 		key:     "tool-call-repair",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyFloorGuard,
+	},
+	{
+		key:     "tool-call-salvage",
 		reaches: reachesTheEngineAndTheHolder,
 		apply:   applyFloorGuard,
 	},
@@ -1843,8 +1854,8 @@ func applyInspector(a settingsApplier, key, value string) (string, error) {
 	return "", nil
 }
 
-// applyFloorGuard is the shared apply behind all six Floor-guard keys. It writes the one key onto
-// the holder and pushes the projection that read hands back at the single engine seam, so the five
+// applyFloorGuard is the shared apply behind all seven Floor-guard keys. It writes the one key onto
+// the holder and pushes the projection that read hands back at the single engine seam, so the six
 // keys this row does not name keep the values they had — the whole reason the write and the read are
 // one locked act inside setFloorGuard.
 func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
@@ -1863,8 +1874,8 @@ func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
 // reachesTheEngineAndTheHolder reports whether the engine and the startup snapshot's mutable half
 // are BOTH composed — the pair the two `context-files.` rows need, since either row installs the
 // switch and the names together and only the holder remembers the half the row did not carry, and
-// the pair the six Floor-guard rows need for the same shape of reason: SetFloor takes all six gates
-// and only the holder remembers the five the row did not carry.
+// the pair the seven Floor-guard rows need for the same shape of reason: SetFloor takes all seven
+// gates and only the holder remembers the six the row did not carry.
 func reachesTheEngineAndTheHolder(a settingsApplier) bool { return a.engine != nil && a.live != nil }
 
 // reachesTheHolder reports whether the live holder is composed. It is the whole of what two keys

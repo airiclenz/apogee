@@ -62,7 +62,25 @@ NOTES (2026-09-07): the guard cannot import `internal/processing` (doc.go's one-
 **Acceptance:** `go build ./... && go test ./internal/floor/`
 **Commit:** `feat(floor): SalvageToolCall reads a fenced JSON tool call out of a wire-less reply`
 
-## 3. Wire the salvage guard into the loop, gated by `tool-call-salvage`
+## 3. Wire the salvage guard into the loop, gated by `tool-call-salvage` — ✅ DONE (2026-09-07)
+
+NOTES (2026-09-07): the plan cites `cmd/apogee/wire_settings.go:957` among the floor's Go-comment counts; at this tree (`:988`) that sentence counts `settingsApplier`'s own members, not Floor guards, so it was left alone. It is stale on its own terms — the struct has thirteen members, not six — but that predates this item and is not a floor count.
+
+NOTES (2026-09-07): the plan's `Files:` list did not name `cmd/apogee/{wire_boot_test.go,wire_engine_test.go,wire_firing_test.go,wire_helpers_test.go}`; each carries a comment counting the Floor guards as six and, in two cases, an `Options` fixture described as "the whole floor". Folded in under the item's own "every sentence that counts the guards is updated" rule (the enumeration is a floor, not a ceiling).
+
+NOTES (2026-09-07): consequential edit — cmd/apogee/wire_boot_test.go: made necessary by the seventh Floor-guard key
+
+NOTES (2026-09-07): consequential edit — cmd/apogee/wire_engine_test.go: made necessary by the seventh Floor-guard key
+
+NOTES (2026-09-07): consequential edit — cmd/apogee/wire_firing_test.go: made necessary by the seventh Floor-guard key
+
+NOTES (2026-09-07): consequential edit — cmd/apogee/wire_helpers_test.go: made necessary by the seventh Floor-guard key
+
+NOTES (2026-09-07): consequential edit — internal/processing/factory_test.go: made necessary by the new exported `processing.IsNative`
+
+NOTES (2026-09-07): salvaged-call IDs are `text_call_<turn>_<n>` with n 0-based, matching the 0-based Turn in the loop's existing `text_call_<turn>` spelling; the plan fixed the shape but not the base.
+
+NOTES (2026-09-07): the TUI already renders `FloorGuardEvent.Detail` in the hidden debug view (transcript.addFloorGuard), so the ratified "debug view only, with Detail set" notice needed no Driver change.
 
 **What:** Recast at the regression check (2026-09-06). `domain.FloorConfig` (`internal/domain/config.go:376`) gains `DisableToolCallSalvage bool`; register `tool-call-salvage` (`KindBool`, default `true`, Editable, Desc `Floor guard: run a tool call the model wrote as JSON in its text instead of on the wire.`) beside `tool-call-repair` (`internal/config/registry.go:409-444`) and its config/options/apply plumbing. In `internal/agent/floorguards.go` add `guardToolCallSalvage` / `guardActionSalvage`; the guard runs FIRST in `runPostResponseGuards` (`:69`) and does not return: on fire it calls `resp.SetText(text)` and `resp.AppendToolCall(call)` per call (IDs `text_call_<turn>_<n>`) and emits the event. Gate: `processing.IsNative(ToolCallParser) bool` (new; `nativeTextParser`, `factory.go:52-64`). `emitFloorGuard` (`:164`) gains `detail string`; salvage detail = `salvaged <name>[, <name>…] from content`. Rewrite the order comment (`:58-64`). Add the key line to `docs/manual/configuration.md:52-76` and a `tool-call-salvage: true` stanza beside `read-cache` in `internal/config/defaults/config.yaml:579`. Depends on item 2.
 **Regression guard.** The guard salvages against the request's menu — `resp.View().Tools()` (internal/domain/hooks.go:312), the tools actually offered on that request — not the registry, and is skipped when `a.wrapUp`. `detail` is threaded through every existing `emitFloorGuard` call site (six: floorguards.go:74,80,86,92,137,157). `TestApplyConfigFloorGuardKeys` (internal/config/config_test.go:1598) gains the key. The Go-comment counts of the floor in this item's own files are updated here: `internal/domain/config.go:373`, `internal/agent/floorguards.go:35-36`, `cmd/apogee/wire_settings.go:214,279,739-764,957,1315,1802-1822`, `internal/config/defaults/config.yaml:541,547`.

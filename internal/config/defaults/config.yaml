@@ -581,14 +581,15 @@ auto-compact: true
 prune-tool-results: true
 
 # =============================================================================
-# Floor guards. Six pieces of engine behaviour that catch a model's own stumbles: a reply that
+# Floor guards. Seven pieces of engine behaviour that catch a model's own stumbles: a reply that
 # narrates where you asked for an action, a reply that carries nothing at all, a tool call apogee
-# cannot dispatch, the same call made twice in a row, a tool result too big to afford, and a file
-# read again unchanged. None of them steers your model — each one either changes what the model
-# sees AFTER a failure of its own, or shapes the request without telling the model what to think —
-# so they are on for every model and stay on under --bypass. They are NOT Mechanisms: a row of the
-# catalogue block further down can no longer turn one off, and the six keys below are the only way
-# to take one away. Config-file only (no flag or env). Default: true.
+# cannot dispatch, a tool call written out as JSON in the reply instead of made, the same call made
+# twice in a row, a tool result too big to afford, and a file read again unchanged. None of them
+# steers your model — each one either changes what the model sees AFTER a failure of its own, or
+# shapes the request without telling the model what to think — so they are on for every model and
+# stay on under --bypass. They are NOT Mechanisms: a row of the catalogue block further down can no
+# longer turn one off, and the seven keys below are the only way to take one away. Config-file only
+# (no flag or env). Default: true.
 
 # Retry a turn that narrated where you asked for an action: when the model answers "fix this" or
 # "run that" with another paragraph of prose and no tool call, apogee hands it the tool menu back
@@ -620,6 +621,14 @@ tool-result-cap: true
 # written to it since, apogee returns a short marker pointing at the copy already in the
 # conversation instead of the whole file a second time. Set this to false to send it every time.
 read-cache: true
+
+# Run a tool call the model wrote out instead of making. Some models answer with the JSON of the
+# call — in a fenced block, in <tool_call> tags, or on its own — rather than sending it on the wire
+# your server understands. apogee reads that JSON back as the call the model meant, runs it, and
+# leaves the surrounding prose as the reply. It only ever runs a tool the turn was offered, and only
+# for a model whose profile says its calls arrive on the wire. Set this to false to let the JSON
+# stand as text.
+tool-call-salvage: true
 
 # =============================================================================
 # How far a delegated sub-agent may run. A sub-agent works its task in one exchange of its own, and
