@@ -5,8 +5,11 @@
 # back out of the text reaches the SERVER on the next request, as a real assistant `tool_calls`
 # entry with a real tool result answering it.
 #
-# The reply is deliberately narration PLUS a fenced block, because both halves are under test: the
-# block is what becomes the call, and the narration is what has to survive as the visible reply.
+# One prompt per CONTAINER the guard reads, because a container is a wire shape and not a unit-test
+# detail: a fenced block, a <tool_call> tag pair, and a reply that is nothing but the call. The
+# first two are deliberately narration PLUS the container, because both halves are under test —
+# the container is what becomes the call, and the narration is what has to survive as the visible
+# reply; the third carries no narration at all, since a reply that IS the call has none to keep.
 model: salvage-model
 turns:
     # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
@@ -23,8 +26,8 @@ turns:
       text: The file holds one line, and it says hello.
       token_delay: 1ms
       chunk_runes: 6
-    # The turn under test. No `tool_calls:` at all — the call is JSON in the CONTENT, fenced, with
-    # the narration the reply must keep once the fence has been cut out of it.
+    # The first turn under test. No `tool_calls:` at all — the call is JSON in the CONTENT, fenced,
+    # with the narration the reply must keep once the fence has been cut out of it.
     - when:
         last_message: ^Read a.txt
       repeat: true
@@ -34,6 +37,26 @@ turns:
         ```json
         {"name": "read_file", "arguments": {"path": "a.txt"}}
         ```
+      token_delay: 1ms
+      chunk_runes: 6
+    # The same mistake in the <tool_call> tag pair several instruct-tuned families reach for when
+    # their native channel is gone. Narration again, so the tags are proven to be cut out of the
+    # visible reply rather than merely parsed.
+    - when:
+        last_message: ^Show a.txt
+      repeat: true
+      text: |-
+        Reading it with the tag shape.
+
+        <tool_call>{"name": "read_file", "arguments": {"path": "a.txt"}}</tool_call>
+      token_delay: 1ms
+      chunk_runes: 6
+    # And the barest shape of all: the whole reply is the call object, with no container around it
+    # and no narration beside it. There is nothing left to show once the guard has taken it.
+    - when:
+        last_message: ^Fetch a.txt
+      repeat: true
+      text: '{"name": "read_file", "arguments": {"path": "a.txt"}}'
       token_delay: 1ms
       chunk_runes: 6
     # Anything apogee asks on its own account.
