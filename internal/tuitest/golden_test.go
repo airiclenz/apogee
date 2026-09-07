@@ -1,6 +1,7 @@
 package tuitest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -72,6 +73,129 @@ func TestGoldenTextRoundTrips(t *testing.T) {
 	other := "s-20260908-093000"
 	compareGolden(t, dir, "run", ".jsonl", `{"event":"run_finished","session":"`+other+`"}`, false,
 		[]Redaction{Redact(regexp.QuoteMeta(other), "<session>")})
+}
+
+// setUpdateGolden swaps the package-level -update flag for one test and puts it back afterwards.
+// GoldenText reads that flag rather than taking it as an argument — which is why the tests below
+// cannot run in parallel — and pinning it here also makes them independent of a run that was itself
+// invoked with -update, where an unpinned comparison would silently rewrite its fixture instead.
+func setUpdateGolden(t *testing.T, update bool) {
+	t.Helper()
+
+	prev := *updateGolden
+	t.Cleanup(func() { *updateGolden = prev })
+	*updateGolden = update
+}
+
+// errorRecorder stands in for the *testing.T a real caller hands [GoldenText], so a MISMATCH can be
+// asserted: a real T would fail the very test that is pinning the failure.
+type errorRecorder struct {
+	// The embedded TB is nil on purpose. GoldenText's comparison path calls only Helper, Errorf and
+	// Fatalf; a call to any other one should panic here rather than quietly do nothing.
+	testing.TB
+
+	msg string
+}
+
+// Helper is a no-op: there is no real test frame to attribute failures to.
+func (r *errorRecorder) Helper() {}
+
+// Errorf records the message instead of failing.
+func (r *errorRecorder) Errorf(format string, args ...any) {
+	r.msg = fmt.Sprintf(format, args...)
+}
+
+// Fatalf records the message and returns, which testing.T would not: compareGolden returns of its
+// own accord right after the one Fatalf a comparison can reach, so nothing runs on past it here
+// either — and a golden the split sent to the wrong path is then a readable assertion failure
+// rather than a nil-TB panic that takes the rest of the package's run with it.
+func (r *errorRecorder) Fatalf(format string, args ...any) {
+	r.msg = fmt.Sprintf(format, args...)
+}
+
+// TestGoldenTextReadsTheNamedDirectoryAndExtension: the golden [GoldenText] compares against is the
+// file the caller named — its own directory, its own extension — and not testdata/frames/<name>.txt.
+// Those two are ambient inside compareGolden, so a GoldenText that dropped either would still find
+// a golden in every package that also takes frames, and the split it does itself is exercised by
+// nothing that drives compareGolden directly (apogee-70d).
+func TestGoldenTextReadsTheNamedDirectoryAndExtension(t *testing.T) {
+	setUpdateGolden(t, false)
+
+	dir := filepath.Join(t.TempDir(), "eventlines")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(dir, "run.jsonl")
+	if err := os.WriteFile(path, []byte(`{"event":"run_finished","session":"<session>"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	session := "s-20260907-120000"
+	GoldenText(t, path, `{"event":"run_finished","session":"`+session+`"}`,
+		Redact(regexp.QuoteMeta(session), "<session>"))
+}
+
+// TestGoldenTextFailsWithADiffNamingTheGolden: a mismatch reports the path the caller named and the
+// diff, and it names the golden by the stem with the extension taken off — a name that still carried
+// its `.jsonl` would read as a file beside the one the message points at.
+func TestGoldenTextFailsWithADiffNamingTheGolden(t *testing.T) {
+	setUpdateGolden(t, false)
+
+	dir := filepath.Join(t.TempDir(), "eventlines")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(dir, "run.jsonl")
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	rec := &errorRecorder{}
+	GoldenText(rec, path, "one\nTWO")
+
+	for _, want := range []string{path, `"run"`, "- two", "+ TWO"} {
+		if !strings.Contains(rec.msg, want) {
+			t.Errorf("the mismatch message does not carry %q:\n%s", want, rec.msg)
+		}
+	}
+}
+
+// TestGoldenTextUpdateWritesTheNamedPath: -update records to the same path a comparison then reads,
+// creating the caller's directory on the way — and writes NOTHING beside it, which is what catches
+// a split that kept the frame extension or left the stem's own one on the end.
+func TestGoldenTextUpdateWritesTheNamedPath(t *testing.T) {
+	setUpdateGolden(t, true)
+
+	dir := filepath.Join(t.TempDir(), "eventlines")
+	path := filepath.Join(dir, "run.jsonl")
+	session := "s-20260907-120000"
+	redact := []Redaction{Redact(regexp.QuoteMeta(session), "<session>")}
+	line := `{"event":"run_finished","session":"` + session + `"}`
+
+	GoldenText(t, path, line, redact...)
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the update did not write the golden at the path GoldenText was handed: %v", err)
+	}
+	if got, want := string(raw), `{"event":"run_finished","session":"<session>"}`+"\n"; got != want {
+		t.Errorf("recorded golden = %q, want %q", got, want)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 || names[0] != "run.jsonl" {
+		t.Errorf("the update left %v in the golden's directory, want only run.jsonl", names)
+	}
+
+	// And what was recorded compares clean through GoldenText itself, with the flag back down.
+	*updateGolden = false
+	GoldenText(t, path, line, redact...)
 }
 
 // TestUnifiedDiffMarksBothSides: a mismatch prints a diff, not two screens for the reader to

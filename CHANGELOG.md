@@ -327,6 +327,21 @@ point is a **minor** bump, not a breaking change.
   HELD like every other golden — compared on every `make check`, with no opt-in flag — and
   re-recorded with `go test ./cmd/apogee -run TestE2EPopupFrames -update`.
 
+- **The Event lines contract is pinned by tests, not by trust.** Four coverage gaps the Event-lines
+  wave left behind are closed with test-only additions. `internal/eventjson` now pins the
+  marshal-failure fallback: a variant whose `data` cannot marshal still lands as a well-formed
+  envelope with `"data":null`, spends its `seq` exactly as a marshalable line would, reports
+  nothing and never leaks the malformed bytes. `apogee headless --format json` now pins the
+  `run_started` frame's `workspace` — the resolved root, cross-checked against the Config the
+  runner was actually handed — and covers the composition refusal (a `system-prompt-text` that
+  fails to resolve) as its own never-started class: id already minted, exit 2, one `run_finished`,
+  `saved:false`. The hard second interrupt now pins the literal notice a user sees — em dash
+  included, no longer asserted through the production constant a reword would carry with it — and
+  proves the deliberately skipped Confiner teardown by contrast: a recording Confiner that closes
+  exactly once on the ordinary wind-down and not at all before the hard exit. `internal/tuitest`
+  pins `GoldenText`'s own path split, so the caller's directory and extension are the ones read,
+  diffed and written under `-update`.
+
 ### Changed
 
 - **The hardened git read trio now runs in every agent mode.** `git_status`, `git_log` and

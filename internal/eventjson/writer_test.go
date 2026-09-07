@@ -2,6 +2,7 @@ package eventjson
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -197,5 +198,86 @@ func TestWriterSessionNullUntilSet(t *testing.T) {
 	}
 	if !strings.Contains(got[1], `"session":"sess-2",`) {
 		t.Errorf("line 2 does not carry the session that was set: %s", got[1])
+	}
+}
+
+// TestWriterMalformedDataFallsBackToNullData pins the fallback the losslessness rule rests on: a
+// `data` value that refuses to marshal costs THIS line's data and nothing else. The envelope still
+// lands with `"data":null`, its seq is spent exactly as a marshalable line would have spent it, the
+// Driver is told nothing, and the stream keeps writing. The two variants that can carry a model's
+// verbatim argument blob (ADR 0075 decision 11) are the two that can reach it, so both are pinned.
+func TestWriterMalformedDataFallsBackToNullData(t *testing.T) {
+	t.Parallel()
+
+	// What a small model's truncated tool arguments look like by the time a ToolCallEvent is
+	// emitted: nothing has parsed those bytes yet, so json.RawMessage carries them verbatim into
+	// json.Marshal, which refuses them.
+	malformed := json.RawMessage(`{"truncated":`)
+
+	tests := []struct {
+		name  string
+		event domain.Event
+		want  string
+	}{
+		{
+			name: "tool_call",
+			event: domain.ToolCallEvent{
+				EventBase: domain.EventBase{Turn: 1, Depth: 2, CallID: "call-1"},
+				Call:      domain.ToolCall{ID: "call-1", Tool: "read_file", Arguments: malformed},
+			},
+			want: `{"event":"tool_call","v":1,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
+				`"turn":1,"depth":2,"call_id":"call-1","data":null}`,
+		},
+		{
+			name: "approval",
+			event: domain.ApprovalEvent{
+				EventBase: domain.EventBase{Turn: 5},
+				Phase:     domain.ApprovalRequested,
+				Request:   domain.ApprovalRequest{Tool: "terminal", Arguments: malformed},
+			},
+			want: `{"event":"approval","v":1,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
+				`"turn":5,"depth":0,"call_id":null,"data":null}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			var reported []error
+			inner := &recordingSink{}
+			w := New(&out, Options{
+				Session: "sess-3",
+				Now:     fixedClock,
+				Report:  func(err error) { reported = append(reported, err) },
+			})
+			sink := w.Wrap(inner)
+
+			sink.Emit(tt.event)
+			sink.Emit(domain.TokenEvent{EventBase: domain.EventBase{Turn: 6}, Text: "next"})
+
+			got := lines(t, &out)
+			if len(got) != 2 {
+				t.Fatalf("wrote %d lines, want 2 — the unmarshalable line must still land:\n%s", len(got), out.String())
+			}
+			if got[0] != tt.want {
+				t.Errorf("line 1:\n got %s\nwant %s", got[0], tt.want)
+			}
+			wantNext := `{"event":"token","v":1,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
+				`"turn":6,"depth":0,"call_id":null,"data":{"text":"next"}}`
+			if got[1] != wantNext {
+				t.Errorf("line 2:\n got %s\nwant %s", got[1], wantNext)
+			}
+			if len(reported) != 0 {
+				t.Errorf("Report called for a dropped data value: %v", reported)
+			}
+			if strings.Contains(out.String(), "truncated") {
+				t.Errorf("the unmarshalable blob reached the stream:\n%s", out.String())
+			}
+			if len(inner.events) != 2 {
+				t.Errorf("inner sink saw %d events, want 2", len(inner.events))
+			}
+		})
 	}
 }

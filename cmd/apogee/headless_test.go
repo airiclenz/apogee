@@ -2132,6 +2132,40 @@ func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
 		wantExitCode(t, data, exitNotStarted)
 	})
 
+	t.Run("a composition refusal refuses with the id already minted", func(t *testing.T) {
+		// firingConfig failing is the never-started class that sits BETWEEN the two above and the
+		// offline gate below: the id has been minted and stamped on the stream, but the opening
+		// frame is not written until the composition has come back, so the stream is the closing
+		// frame alone and it still names the session. An unknown placeholder in `system-prompt-text`
+		// is the cheapest way into it — the per-model half of the Config is what resolves the
+		// prompt, and nothing earlier in the command reads that key at all.
+		stub := &stubRunner{}
+		home := testConfigHome(t, "system-prompt-text: \"hi {{bogus}}\"\n")
+		out, _, err := headlessRunOn(t, stub, fenceableHost, home, "--format", "json", "a prompt")
+		if err == nil {
+			t.Fatal("a config whose system prompt would not resolve was allowed to start")
+		}
+		if stub.called {
+			t.Error("the runner ran; the composition never produced a Config to run it with")
+		}
+		lines := jsonEventLines(t, out)
+		if len(lines) != 1 {
+			t.Fatalf("stdout carried %d lines; a refusal ahead of the opening frame is the closing "+
+				"frame alone: %q", len(lines), out)
+		}
+		envelope, data := finishedFrame(t, lines)
+		wantExitCode(t, data, exitNotStarted)
+		if envelope["session"] == nil {
+			t.Error("session is null; the id was minted before the Config was composed")
+		}
+		if data["saved"] != false {
+			t.Errorf("saved = %v; a refused run wrote no record", data["saved"])
+		}
+		if text, _ := data["error"].(string); !strings.Contains(text, "system-prompt-text") {
+			t.Errorf("error = %v; want the config key the composition refused on", data["error"])
+		}
+	})
+
 	t.Run("the offline gate refuses with the id already minted", func(t *testing.T) {
 		// The one never-started class that happens AFTER the id exists and BEFORE any sink does:
 		// the frame therefore names the session and still reports that nothing was saved.
@@ -2176,6 +2210,35 @@ func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
 		wantExitCode(t, data, exitNotStarted)
 	})
 
+	t.Run("the opening frame names the resolved workspace", func(t *testing.T) {
+		// `workspace` is what a consumer resolves every path in the stream against, so it is the
+		// root resolveRoots settled on and not the string the flag carried: the flag may be
+		// relative or unclean, and a frame that echoed it back would hand the consumer a path that
+		// means something else in its own working directory.
+		workspace := t.TempDir()
+		stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1}}
+		out, _, err := headlessRun(t, stub, "--format", "json",
+			"--workspace", workspace+string(filepath.Separator)+".", "a prompt")
+		if err != nil {
+			t.Fatalf("a completed run returned an error: %v", err)
+		}
+		lines := jsonEventLines(t, out)
+		if len(lines) != 2 || lines[0]["event"] != "run_started" {
+			t.Fatalf("stdout = %q; want the opening frame then the closing one", out)
+		}
+		opened, ok := lines[0]["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("the opening frame carried no data object: %v", lines[0])
+		}
+		if opened["workspace"] != workspace {
+			t.Errorf("workspace = %v; want the resolved root %q", opened["workspace"], workspace)
+		}
+		if stub.spec.Config.WorkspaceDir != workspace {
+			t.Errorf("the run was fenced to %q; want %q — the frame and the run must state one root",
+				stub.spec.Config.WorkspaceDir, workspace)
+		}
+	})
+
 	t.Run("a completed run brackets its outcome", func(t *testing.T) {
 		stub := &stubRunner{res: run.Result{
 			SessionID: "s-1",
@@ -2200,6 +2263,13 @@ func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
 		}
 		if opened["mode"] != string(domain.ModePlan) {
 			t.Errorf("mode = %v; want the default %q", opened["mode"], domain.ModePlan)
+		}
+		// The workspace the frame states is the root the run was actually driven in, read back off
+		// the Config the runner was handed rather than recomposed here: one run has one workspace
+		// for life (ADR 0075 decision 7), so the frame and the Config cannot be allowed to name two.
+		if opened["workspace"] == "" || opened["workspace"] != stub.spec.Config.WorkspaceDir {
+			t.Errorf("workspace = %v; want the root the run ran in, %q",
+				opened["workspace"], stub.spec.Config.WorkspaceDir)
 		}
 		if opened["version"] != apogee.Version() {
 			t.Errorf("version = %v; want the build string %q", opened["version"], apogee.Version())
@@ -2514,6 +2584,43 @@ func TestHeadlessFormatJSONCancelledRunWritesTheFrame(t *testing.T) {
 	}
 }
 
+// secondInterruptLine is the whole stderr line a hard exit prints, spelled out here as the bytes a
+// human reads rather than referred to through the production secondInterruptNotice: a line apogee
+// announces is contract (AGENTS.md, "regressions are never deferred"), and an assertion that went
+// through the constant would let a silent reword pass unfailed. The dash is an em dash, U+2014 —
+// written as an escape so a reviewer can see WHICH dash is pinned. The manual quotes the same
+// sentence (docs/manual/headless.md).
+const secondInterruptLine = "apogee headless: second interrupt \u2014 exiting without waiting for the run"
+
+// closingConfiner is a fenceable backend that also carries the optional `Close() error` the
+// headless command tears confinement down through (ADR 0020 §2, the newConfiner block in
+// headless.go) and counts the times that teardown ran. It is what makes the hard exit's deliberate
+// SKIP of the teardown observable at all: fakeConfiner has no Close, so the command's optional
+// interface assertion finds nothing there and "the teardown did not run" would be asserted against
+// a path that never had one to skip.
+type closingConfiner struct {
+	fakeConfiner
+
+	mu     sync.Mutex
+	closed int
+}
+
+// Close records one teardown. The command runs it from a defer on its own goroutine while the
+// second-interrupt watch reads the count from another, so the counter is guarded.
+func (c *closingConfiner) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed++
+	return nil
+}
+
+// closes reports how many times the confinement teardown has run so far.
+func (c *closingConfiner) closes() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 // The SECOND interrupt ends the PROCESS, not the run. The first is the polite stop this command
 // has always had — the run unwinds, its record is saved and the funnel writes the closing frame —
 // but under `--format json` that wind-down is exactly what a human pressing Ctrl-C again is asking
@@ -2533,9 +2640,9 @@ func TestHeadlessSecondInterruptExitsHard(t *testing.T) {
 			t.Errorf("hard exit code = %d; want %d — the run was interrupted, not never started",
 				got.code, exitRunFailed)
 		}
-		if n := strings.Count(got.errOut, secondInterruptNotice); n != 1 {
-			t.Errorf("the second interrupt was announced %d times, want exactly once:\n%s",
-				n, got.errOut)
+		if n := strings.Count(got.errOut, secondInterruptLine+"\n"); n != 1 {
+			t.Errorf("the second interrupt was announced %d times as %q, want exactly once:\n%s",
+				n, secondInterruptLine, got.errOut)
 		}
 		// The snapshot is stdout as it stood INSIDE the exit, which is the only honest place to
 		// assert the omission: production ends the process there, and it is the test's own stub
@@ -2546,6 +2653,22 @@ func TestHeadlessSecondInterruptExitsHard(t *testing.T) {
 		if !strings.Contains(got.snapshot, `"run_started"`) {
 			t.Errorf("the stream had not even opened when the process was taken down:\n%s", got.snapshot)
 		}
+		// The confinement teardown the hard exit walks out on (ADR 0012 / the confinement execution
+		// contract, and ADR 0075 decision 9 for why this one exit is allowed to). It is counted
+		// INSIDE the exit for the reason the stdout snapshot is taken there: production never
+		// returns from hardExit, so the deferred Close that the test's returning stub lets run
+		// afterwards is the harness's, never production's.
+		if got.closedAtExit != 0 {
+			t.Errorf("confinement was torn down %d times before the hard exit; the second interrupt "+
+				"skips the teardown on purpose", got.closedAtExit)
+		}
+		// ...and the same seam says the assertion above is not vacuous: the Close DOES run once the
+		// stubbed exit lets the command unwind, so a backend whose teardown never ran at all could
+		// not have passed it.
+		if got.closes != 1 {
+			t.Errorf("confinement closed %d times once the command unwound; want 1 — the skip "+
+				"asserted above would pass against a backend that never tears down at all", got.closes)
+		}
 	})
 
 	t.Run("one interrupt leaves the run to finish", func(t *testing.T) {
@@ -2554,7 +2677,7 @@ func TestHeadlessSecondInterruptExitsHard(t *testing.T) {
 		if got.exited {
 			t.Fatalf("one interrupt exited hard with code %d", got.code)
 		}
-		if strings.Contains(got.errOut, secondInterruptNotice) {
+		if strings.Contains(got.errOut, secondInterruptLine) {
 			t.Errorf("the hard-exit line was printed for a single interrupt:\n%s", got.errOut)
 		}
 		if got.err == nil {
@@ -2562,6 +2685,11 @@ func TestHeadlessSecondInterruptExitsHard(t *testing.T) {
 		}
 		_, data := finishedFrame(t, jsonEventLines(t, got.out))
 		wantExitCode(t, data, exitRunFailed)
+		// The other half of the teardown claim: one press keeps every deferred teardown, so the
+		// skip the case above pins is the hard exit's own doing and not something no run does.
+		if got.closes != 1 {
+			t.Errorf("confinement closed %d times on the ordinary wind-down; want exactly 1", got.closes)
+		}
 	})
 }
 
@@ -2574,6 +2702,11 @@ type interruptedHeadless struct {
 	out      string
 	errOut   string
 	err      error
+	// closedAtExit is how many times the Confiner's teardown had run at the instant the hard exit
+	// fired — the only place the SKIP is observable, since production ends the process there.
+	closedAtExit int
+	// closes is how many times that teardown had run by the time the command returned.
+	closes int
 }
 
 // driveInterruptedHeadless runs one `apogee headless --format json` whose runner blocks until its
@@ -2615,9 +2748,14 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 		return run.Result{SessionID: "s-9", FinalText: "half an answer", Turns: 1},
 			fmt.Errorf("apogee: the firing was cancelled: %w", context.Canceled)
 	}
-	newConfiner = func() apogee.Confiner { return fenceableHost }
+	// A backend that CAN be torn down, unlike the fenceableHost the rest of this file installs:
+	// the command only defers a Close for a Confiner that has one, so counting the teardown needs
+	// a backend that carries it.
+	confiner := &closingConfiner{fakeConfiner: fakeConfiner{caps: apogee.ConfinementCaps{FSWrite: true}}}
+	newConfiner = func() apogee.Confiner { return confiner }
 	hardExit = func(code int) {
 		got.exited, got.code, got.snapshot = true, code, outBuf.String()
+		got.closedAtExit = confiner.closes()
 		close(released)
 		close(exited)
 	}
@@ -2654,6 +2792,7 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 	}
 	got.err = <-done
 	got.out, got.errOut = outBuf.String(), errBuf.String()
+	got.closes = confiner.closes()
 	return got
 }
 
