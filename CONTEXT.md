@@ -54,6 +54,41 @@ webhooks) is always composed by a Driver — the engine itself is wire-silent. S
 _Avoid_: "embedder" (names the linking, not the responsibility of pacing the loop),
 "frontend" / "client" (a Driver owns the loop's pace and state roots, not just a view).
 
+**Event**:
+The unit of everything the loop reports: a value the engine emits on its `EventSink`, a **sealed**
+sum type — the variant set is Apogee-owned and grows only additively, so a consumer switches on the
+variants it knows and ignores the rest. Every variant carries the emitting agent's nesting Depth,
+its **Turn** index and, for a **Sub-agent**, the call id of the delegation that spawned it. Emission
+is serialized by the engine, so a **Driver** sees one linear stream even under a concurrent depth-0
+fan-out — but a linear stream is not a serial one, and the events of one agent are recognised by that
+identity, never by contiguity. Events are Go values and nothing more: the engine attaches no
+timestamp, no sequence number and no session identity, and a Driver stamps those itself if its
+surface needs them. See
+[ADR 0001](docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md) and
+[ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md).
+_Avoid_: "message" (that is a conversation message, the `Role`/`Content` kind), "notification",
+"**Hook event**" (that names the five-moment vocabulary a **Hook** fires on — a lossy projection of
+five of these variants, not this).
+
+**Event lines**:
+The one-line-per-**Event** JSON rendering `apogee headless --format json` writes to stdout. The
+**Event stream** it renders is the engine's sequence of Events on `EventSink`, in emission order,
+whichever **Driver** reads it — that term means only that, and the lines are one rendering of it.
+They are a Driver's protocol, not the engine's surface: the engine stays wire-silent and hands out
+Go values, and headless composes the bytes. They carry every Event variant except the **Inspector**'s
+raw-protocol one, each as one object with a shared envelope (`event`, `v`, `seq`, `time`, `session`,
+`turn`, `depth`, `call_id`) and the variant's own members under `data`; its event names are
+snake_case, deliberately distinct from a **Hook event**'s kebab-case vocabulary, because the same
+moment is not filtered the same way in both. They are bracketed by two frames that are *not* Events —
+`run_started` and `run_finished`, the latter carrying the run's summary and exit code and written on
+every exit path, including one whose run never started. Lossless and ordered: they never drop, the
+deliberate contrast with a **Hook**, which does — a stalled reader stalls the loop instead. Versioned
+`v:1` and additive within it. See
+[ADR 0075](docs/adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md).
+_Avoid_: "Event stream" for the lines (that is the engine's sequence these render), "log" (apogee
+owns no log files or retention policy — this is a contract), "API" / "server mode" (a wire surface
+would be `apogee serve`, a separate **Driver**).
+
 **Schedule**:
 A standing instruction a **Driver** holds for its lifetime — a prompt, a cycle (how often it
 re-runs) and an Agent mode — created in the TUI with `/schedule` and ended with

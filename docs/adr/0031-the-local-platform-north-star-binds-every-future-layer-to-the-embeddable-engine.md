@@ -106,3 +106,28 @@ launches with ADR 0033's deny-and-record posture.
   visibly breaks the headless path instead of silently accreting — the architectural
   analogue of the Builder guard test. No schedule is implied; sequencing lives in plans.
 - `CONTEXT.md` gains **Driver** as a canonical term.
+
+## Amendment (2026-09-07) — the Driver list, refreshed
+
+The Context and Decision above were written when two Drivers existed, and name them as "TUI
+today, bench today, a scheduling/workflow daemon tomorrow". That was a snapshot of the day, not a
+closed list, and it has been overtaken. **Four Drivers ship today** — the TUI, the bench, `apogee
+headless` and `apogee daemon`
+([ADR 0034](0034-the-daemon-is-an-in-repo-subcommand-over-a-declarative-trigger-action-file.md)) —
+and [ADR 0062](0062-test-drivers-are-drivers.md) admitted test drivers as Drivers in their own
+right rather than as test scaffolding. `CONTEXT.md`'s **Driver** entry is the live list; this
+ADR's prose is not, and a future reader should not take its two-Driver framing as current.
+
+Nothing else changes. The four invariants and the tiebreaker force are untouched, and no door has
+moved. What the refresh records is that this ADR's own deferred consequence — "the first
+mechanical consequence of invariants 1–4 is the deferred **`apogee headless`** runner" — landed
+and did its job: headless is now the surface against which a TUI-only capability visibly breaks.
+
+One Driver-side surface built on top of it is worth naming here, because a reader will otherwise
+wonder whether it crossed invariant 1: the **Event lines**, the versioned JSONL rendering of the
+engine's Event stream that `apogee headless --format json` writes to stdout
+([ADR 0075](0075-the-headless-event-stream-is-a-versioned-driver-protocol.md)). It does not cross
+it. The engine still hands out Go values on `EventSink` and owns no protocol; headless composes
+bytes on a file descriptor it owns, which is what invariant 1 prescribes. A genuine wire surface —
+`apogee serve` over HTTP — remains unbuilt, and would be a Driver composing its own protocol, never
+an endpoint on the engine.
