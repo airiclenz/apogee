@@ -10,6 +10,134 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Added `floor.SalvageToolCall`, the pure tool-call salvage guard: when a model answers with no tool call on the wire but writes one out as JSON in its text — in a fenced block, inside `<tool_call>…</tool_call>` tags, or as the whole trimmed reply — the guard reads every such block back, in document order, as the calls the model meant and hands back the text stripped of them. Only names the model was actually offered fire, and only objects carrying `arguments` / `parameters` / `input` (an object, or a string holding one).
+
+- **Seventh Floor guard — tool-call salvage.** A model on a native profile that answers with the
+  JSON of a tool call written into its visible text — in a fenced block, inside `<tool_call>` tags,
+  or as the whole reply — now has that call read back out and dispatched, with the block cut from
+  the text it leaves behind. It runs first in the post-response chain and does not short-circuit the
+  guards after it, salvages only against the tools the turn was actually offered, is skipped for a
+  text-format profile that already parses its own calls and for a delegate's wrap-up turn, and is
+  taken away by `tool-call-salvage: false` (or `apogee.FloorConfig.DisableToolCallSalvage`). The
+  firing is booked as a `FloorGuardEvent` naming the salvaged tools, shown in the hidden debug view.
+
+- **The probe says when a reply is salvageable.** A model that answers the native tool-call probe
+  with nothing on the wire but the JSON of the call written into its visible text now gets a
+  finding that names it — "the reply carried no tool_calls entry, but its content carried a JSON
+  call for probe_echo — the tool-call salvage guard runs it" — instead of the bare "no tool_calls
+  entry". The capability itself is still not observed, the battery version is unchanged and the
+  behavioral fingerprint does not move: the probe asks `floor.SalvageToolCall` the same question
+  the loop asks, so the report stops describing a session the user never has.
+
+- ADR 0074 records that **undo is a per-Exchange snapshot pair in a session-owned git object
+  database**: a bare `GIT_DIR` and private index under `~/.apogee/snapshots/<session-id>/` with the
+  workspace as work-tree, so nothing is ever written inside the workspace and the user's own
+  repository, index, stash and branches are neither touched nor read. A pre snapshot is taken
+  lazily before a depth-0 Exchange's first write-capable tool call and a post snapshot at its
+  close; a no-diff Exchange leaves no step; a revert is diff-scoped and keeps ADR 0051's
+  skip-and-report conflict policy. A `journal.json` beside the objects holds one session's
+  Exchanges (ordinals, generation, pre/post tree ids, workspace) and is opened on resume only when
+  the workspace matches; `/redo` joins `/undo` under the same two-step confirm, generation stamp
+  and idle-only rule, cleared by the next Exchange that writes; `apogee undo <session-id>
+  [confirm]` gives headless and daemon runs a revert verb, and their written-files reports end
+  with that command (bead `apogee-kk0.7`). Coverage never narrows — the funnel journal stays and
+  stays authoritative for every path it sees, the snapshot diff only adds the `terminal`,
+  `python_exec`, MCP and git-checkout writes ADR 0051 could not reach — while capture ignores the
+  operator's global `core.excludesFile` and a stated residue rule puts whatever git's add pipeline
+  transforms or refuses (git-lfs pointers, nested repositories, workspace `.gitignore` matches)
+  outside the snapshot with the funnel pre-image authoritative. The store is persisted host state
+  keyed by session id and outside the session record (ADR 0022 §8 unchanged), GC'd by the scratch
+  sweep's age rule and with its session record; missing git — or `undo-snapshots: false` — falls
+  back to today's in-memory journal and says so (ADR 0042 §2). It supersedes ADR 0051's decision 3,
+  its decision 8 and its rejected git-based revert, keeps decisions 1, 2, 4, 5, 6, 7 and both
+  amendments, and yields to ADR 0059 §1 — a Console keeps its own per-process class.
+
+- Refactor: the one-shot subprocess core — the spec and result shapes, the capped output buffer,
+  the §2.4 process-tree teardown, the confinement handoff and the live kill-on-denial watch — moved
+  out of `internal/tools` into a new leaf package `internal/subprocess`, so a spawner added later
+  (the hardened git runner, the snapshot store) inherits the whole contract instead of hand-rolling
+  an `exec.Command` that has none. `internal/tools` keeps its own spec, result and capped-buffer
+  shapes and converts at the seam, so every execution tool and its tests are untouched. One new
+  capability: `subprocess.RunSubprocessTo` streams the child's stdout UNCAPPED to a caller's
+  `io.Writer` — same spec, same fence, same teardown, stderr still capped — for the caller whose
+  payload is the output rather than a report of it.
+
+- **`internal/gitexec` — the hardened git runner, extracted.** The exec fence on the resolved
+  `git`, the allowlisted PATH-scoped environment, the per-invocation hardening options,
+  `GIT_CONFIG_NOSYSTEM` and the repo-local command-config refusal now live in one leaf package
+  over `internal/subprocess`, instead of inside the git tools. `Capture` returns the captured
+  outcome a tool renders; `Run`/`Query` return the child's stdout as data; `RunTo` streams that
+  payload uncapped for output a truncation would corrupt. Every entry takes an extra environment
+  the caller appends (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`), and the command-config probe
+  runs — and is memoised — under that same environment, so a run redirected into an object
+  database of apogee's own is judged by that store's config rather than by the workspace's.
+  `internal/tools/git.go` keeps `RunGitQuery` and every tool-facing symbol as thin wrappers, so
+  the git tools and `internal/agent/treesnapshot.go` are unchanged.
+
+- **Session-owned snapshot store.** New `internal/snapshot` package: a bare git object database, kept outside the workspace under the session's own directory, that captures a whole-tree image of the workspace (`Capture`), scopes a revert to the paths two images differ on (`Diff`), records each image's per-path blob ids (`ListBlobs`) and reads a file's bytes back out of one (`Content`). Nothing is ever written inside the workspace, the user's own repository, index and stash are neither read nor written, and the operator's global `core.excludesFile` is disabled during a capture so what undo covers is a property of the workspace rather than of a dotfile in their home directory (ADR 0074).
+
+- Undo: `internal/undo` can now be backed by whole-tree snapshots. A journal given a
+  `Snapshotter` (and the workspace it images) captures a pre image at `MarkPre` — the engine calls
+  it before an Exchange's first write-capable tool call — and a post image at `Close`, and the diff
+  between the two becomes the scope a revert may reach beyond the write funnel's own records. That
+  puts the writes the funnel never sees — `terminal`, `python_exec`, MCP servers, git checkouts —
+  back within reach of an undo, with the funnel's pre-image still winning wherever both capture
+  paths saw one file, and with approved out-of-workspace writes staying funnel-journaled and
+  per-process. An Exchange whose two images are identical and whose funnel recorded nothing leaves
+  no step. Conflict handling is unchanged in kind: a diff-only path whose current git blob id no
+  longer matches the post image is skipped and reported, never overwritten.
+
+- Undo: a reverted Exchange now moves to a redo stack. `RedoPreview` and `Redo` mirror the
+  preview-and-confirm pair with the two images swapped — restoring what the agent left, expecting
+  to find what the undo put back, and skipping a path the human edited in between — under the same
+  generation stamp, and `ErrNothingToRedo` when the stack is empty. The next Exchange that actually
+  writes clears the stack. A journal built without a snapshotter behaves exactly as before.
+
+- `internal/undo` keeps its stack in a `journal.json` index beside the session's snapshot objects: `Save` writes it atomically (temp+rename, 0600) after every exchange close, revert and redo, and `Load` reads it back — ordinals, generation and both stacks — refusing an index taken of a different workspace. An exchange whose two tree images are equal, whose capture failed, or that only wrote approved out-of-workspace paths stays in memory as before.
+
+- The engine now takes ADR 0074's snapshot pair around each Exchange. `snapshot.OpenJournal` opens a session's own object store under `~/.apogee/snapshots/<session-id>/`, loads whatever `journal.json` the last process left beside it, and hands back a journal plus the reason it is the journal it is — `undo-snapshots is off`, `git not found`, `workspace mismatch` — which `Agent.SetJournal` injects and `Agent.UndoNote` reads back. Dispatch takes the **pre** image immediately before the first write-capable tool call of a depth-0 Exchange (a read-only call costs nothing), and `turnLifecycle.closeExchange` — the one owner of Exchange end — takes the **post** image on every row that ends an Exchange and on none that leaves one open. A capture that fails arrives as `ErrorEvent{Source: "undo"}` and never fails the call or the Exchange. `Agent.RedoPreview`/`RedoRevert` join `UndoPreview`/`UndoRevert` at the same seam.
+- New setting `undo-snapshots:` (bool, default **true**, file-only): snapshot the workspace around each exchange so `/undo` survives a relaunch and covers subprocess and MCP writes. Editable on the settings screen and applied at the next start, since the store is opened while the session is being built; `undo-snapshots: false` behaves exactly as a machine with no git does.
+
+- **Persistent undo reaches every Driver.** The TUI opens the session's own undo snapshot store as
+  soon as the session id is minted and re-opens it under the new id at every identity boundary (a
+  `/clear` or `/new` rotate, a `/sessions` resume), so one `journal.json` holds one session's
+  Exchanges. `apogee headless` and the daemon's scheduled Firings open the same store under the
+  record id they save as, which is what will give an unattended run something to revert. A store
+  that cannot be opened — no git, `undo-snapshots: false`, an unreadable index — never fails a start
+  or a Firing: the run keeps the in-memory journal and carries the reason. Deleting a session in
+  `/sessions` removes its snapshot store with it, and a boot sweep collects the stores whose session
+  record is gone (after a day) or that nothing has touched in fourteen days.
+
+- `/redo` joins `/undo` in the TUI: it puts back what the last `/undo confirm` took away, under the
+  same two steps (bare previews, `confirm` applies), the same generation stamp — so a journal that
+  moved earns a fresh preview instead of replaying a step nobody read — and the same idle-only rule.
+  Its own stack holds only until the next exchange writes.
+
+- `/undo` now speaks for the journal it actually has. When there is nothing to undo it names the
+  reason its reach is the narrow one — `git not found`, `undo-snapshots is off`, a store imaging a
+  different tree — instead of claiming the journal is memory that dies with the run, so a
+  snapshot-backed session's honest "nothing was written" no longer reads like a journal that lost
+  what it held. The listing both verbs show — every recorded path, classified restore / delete /
+  skip-with-reason — is now rendered by `internal/undo` itself, so every Driver shows one listing.
+
+- `apogee undo <session-id>` is the revert an unattended run has nobody to offer. It opens one
+  saved session's snapshot store from a fresh process — any directory, any time after the run —
+  and walks the same two steps `/undo` does: `apogee undo <session-id>` previews every recorded
+  path with what the revert would do to it, `apogee undo <session-id> confirm` applies exactly
+  that step and reports what it did. The listing is internal/undo's own, so the verb, `/undo` and
+  `/redo` cannot drift. It takes no `--workspace`: the store images one tree and the session's
+  `journal.json` says which. A session that ran without snapshots (`undo-snapshots` off, no git)
+  is answered with the reason rather than a bare failure, and an unknown id neither opens a store
+  nor creates one.
+
+- The written-files report both unattended Drivers print now ends with the command that puts those
+  changes back — `  undo with: apogee undo <session-id>` — on `apogee headless`'s stderr and in the
+  daemon's log. It is offered only when the run actually changed something, saved a record, and
+  left a journal that outlived it; `run.Result` gained `UndoNote` (empty when snapshots were in
+  force, else why they were not) as the field that decides.
+
+- The manual and README now describe `/undo` as it is: snapshot-backed and persistent. The commands page gains a `/redo` row and a rewritten undo section — whole-workspace coverage (a `terminal` or `python_exec` write, a git checkout, an MCP server's write), the residue that stays outside it (`.gitignore`d paths and anything git's own `add` will not take, an approved out-of-workspace write, anything that never was a file), survival across a relaunch, and the narrower in-memory answer a host without `git` or with `undo-snapshots: false` gets, which names its own reason. The headless and daemon pages document the `undo with: apogee undo <session-id>` line their reports end with and the `apogee undo` verb behind it; the Console section says what a Console's workspace writes are now inside `/undo`'s reach. Package and Driver comments that still said the journal died with the process were rewritten to match.
+
 - Every Turn boundary is now an event. `TurnEvent` reports the Turn that just ended — its status,
   and whether it was abandoned (`Faulted`) or ended by the delegate step cap (`StepCapped`) — once
   per boundary, on the same stream everything else travels, and at the delegate's own depth for a
