@@ -83,14 +83,19 @@ func (m Model) runRedo(action undoAction) (tea.Model, tea.Cmd) {
 //
 // Nothing is stashed when there is nothing to undo: a preview that describes no step authorises no
 // revert, and leaving the old stamp standing would let a confirmation typed after it slip through.
+//
+// The engine's coverage note is read on that path alone — it is only ever part of the sentence an
+// empty journal earns — which is why the note is built inside the branches here while previewRedo,
+// whose empty answer is a constant, can seed it before them.
 func (m Model) previewUndo(lead string) (tea.Model, tea.Cmd) {
 	step, ok := m.eng.UndoPreview()
-	note := undoNothingNote(m.eng.UndoNote())
+	var note string
 	if ok {
 		m.undoGeneration = step.Generation
 		note = undoPreviewNote(step)
 	} else {
 		m.undoGeneration = 0
+		note = undoNothingNote(m.eng.UndoNote())
 	}
 	return m.noteRevert(lead, note)
 }
