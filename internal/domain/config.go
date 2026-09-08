@@ -145,6 +145,22 @@ type Config struct {
 	// semantics are the stable surface (locked decisions 1–2, 6).
 	EnableMechanisms []MechanismID
 
+	// Reactions are the Reactions armed BESIDE the engine's own builtins (ADR 0076 D1): the
+	// seven Floor guards fire first at every seam, then these, in registration order. A host
+	// arms a Go reaction here to observe or shape a Turn without touching the engine — which is
+	// what the bench does with an experimental hook today.
+	//
+	// Each entry must pass Reaction.Validate at construction, and no entry may reuse a builtin's
+	// ID or another entry's: the ReactionFiredEvent, the identity projector and the provenance
+	// ledger all key on the ID, so two reactions answering to one name make every attribution
+	// ambiguous. A failure here fails construction — an invalid or shadowed reaction never
+	// silently does nothing.
+	//
+	// Every entry is inherited by each sub-agent this Agent spawns, exactly as an armed
+	// Mechanism is; Reaction.TopLevelOnly is the per-entry opt-out. Nil/empty arms nothing
+	// beyond the builtins, which is what a stock install runs.
+	Reactions []Reaction
+
 	// Skills resolves the user's attached skill IDs (UserInput.SkillIDs) to their injectable
 	// bodies; nil ⇒ no skills are wired and any attached ID is reported and dropped. It is an
 	// interface defined here (not the concrete internal/skills catalog) so the loop fulfils the

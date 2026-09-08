@@ -129,6 +129,18 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
 		now:                time.Now,                             // the request-render clock for the system prompt's {{datetime}}
 	}
+	// The engine's own Reactions — the seven Floor guards — are built HERE, after the literal,
+	// because each handler closes over this Agent to read its live Floor gates at fire time
+	// (SetFloor). The host's own Reactions are validated against them: an ill-formed entry, or
+	// one reusing a builtin's or a sibling's ID, fails construction rather than firing under a
+	// name something else already answers to.
+	a.builtins = a.buildBuiltins()
+	armed, err := armReactions(a.builtins, cfg.Reactions)
+	if err != nil {
+		return nil, err
+	}
+	a.armed = armed
+
 	// Fill the context-file cache for this session's first boundary: construction. Every later
 	// refill goes through the same seam at a session boundary (contextfiles.go).
 	a.reloadContextFiles()

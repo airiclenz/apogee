@@ -158,41 +158,6 @@ func (a *Agent) salvageToolCallFromText(turn int, resp *domain.Response) {
 		fmt.Sprintf("salvaged %s from content", strings.Join(names, ", ")))
 }
 
-// offeredToolNames lists the tool names THIS request's menu carried, in the order the model was
-// shown them. It is the salvage guard's admissible-name set, for the reason its own doc gives, and
-// it is read off the Response's LoopView rather than the registry so that a mode that narrowed the
-// menu narrows what can be salvaged with it.
-func offeredToolNames(view domain.LoopView) []string {
-	tools := view.Tools()
-	names := make([]string, 0, len(tools))
-	for _, t := range tools {
-		names = append(names, t.Name)
-	}
-	return names
-}
-
-// registeredToolNames lists every tool name the resolved registry holds, WHATEVER the current
-// menu shows. It is the fact the tool-call repair guard needs to tell a hallucinated tool from one
-// this request's menu withdrew — Plan mode offers only what Plan can run (toolMenu), and a
-// delegate's wrap-up Turn is offered nothing at all — because a withdrawn tool's call belongs to
-// the mode that withdrew it: the Plan refusal (resolution.go) or the wrap-up drop (step) is the
-// answer the model must get, not a correction retry that pre-empts it.
-//
-// It reads a.tools on the worker goroutine, exactly as toolMenu does, and needs no lock for the
-// same reason: a tool-set swap is idle-only (SwapTools). A tool-less Agent lists nothing, which
-// leaves the guard its pre-2026-09-03 behaviour — every off-menu name reads as unknown.
-func (a *Agent) registeredToolNames() []string {
-	if a.tools == nil {
-		return nil
-	}
-	all := a.tools.All()
-	names := make([]string, 0, len(all))
-	for _, t := range all {
-		names = append(names, t.Name())
-	}
-	return names
-}
-
 // runPreToolExecGuards runs the pre-tool-exec Floor guards against the call the loop is about to
 // dispatch, reshaping it in place. Like the post-response guards it runs BEFORE the lab hooks at
 // this seam (runPreToolExecHooks), so a catalogued Mechanism sees the call the floor left behind.

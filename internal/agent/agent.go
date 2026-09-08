@@ -55,8 +55,19 @@ type Agent struct {
 	cfg      domain.Config
 	upstream provider.Responder        // provider seam (Decision C): fake in tests, real HTTP via New
 	registry *domain.MechanismRegistry // catalogued + experimental hooks driving the loop
-	tools    *domain.ToolRegistry      // resolved tool set (Config.Tools, or the default registry composed over the roster ladder)
-	guards   security.Guards           // always-on, mode-independent guardrails (dangerous-action + circuit-breaker + audit, D6)
+
+	// builtins are the engine's OWN Reactions — the seven Floor guards (builtins.go) — which
+	// fire first at every seam Moment and are never switched off by Bypass (ADR 0076 D1/D9).
+	// armed are the Reactions Config.Reactions arms beside them, validated at construction and
+	// fired after every builtin, in registration order. The two are held apart rather than
+	// concatenated because the split IS the ladder: which leg a reaction is in decides whether
+	// Bypass may skip it and whether a post-response Retry takes the Turn away from the leg
+	// below.
+	builtins []armedReaction
+	armed    []armedReaction
+
+	tools  *domain.ToolRegistry // resolved tool set (Config.Tools, or the default registry composed over the roster ladder)
+	guards security.Guards      // always-on, mode-independent guardrails (dangerous-action + circuit-breaker + audit, D6)
 
 	// ownsUpstream says whether THIS Agent dialled the client in upstream and is therefore the one
 	// allowed to tear it down. New, Resume, SwitchUpstream and a ROUTED spawn each build a client of

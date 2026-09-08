@@ -546,6 +546,14 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// rejection and fail every sub-agent spawn.
 	childCfg.Mechanisms = a.registry.ForSubAgent()
 	childCfg.EnableMechanisms = nil
+	// The armed Reactions are inherited the same way and by the same rule — unconditionally,
+	// because a reaction the parent runs with is part of the posture the delegation inherits —
+	// with Reaction.TopLevelOnly as the one opt-out (ADR 0076). They are filtered HERE rather
+	// than at the child's dispatcher so the child's own construction re-validates exactly the
+	// set it will fire, and so a nested delegation inherits what its own parent kept. The
+	// engine's builtins are not carried at all: the child builds its own from its own
+	// Config.Floor, which the LIVE parent value above just seeded.
+	childCfg.Reactions = inheritedReactions(a.cfg.Reactions)
 
 	// ROUTING (ADR 0045). The latch is snapshotted ONCE, here, and everything below reads that one
 	// value: a beat landing mid-spawn must never build half a child from each target. A nil

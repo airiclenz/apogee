@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-eight files: the handle and its lifecycle, the loop proper, the tool path, and the
+// Thirty files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
@@ -35,7 +35,11 @@
 // hooks — each under one recover boundary and attributed by MechanismID. floorguards.go is the
 // engine half of the Floor guards (ADR 0071): the live per-guard opt-outs the settings surface
 // swaps, the seams that run internal/floor's decisions ahead of the hooks at each hook point, and
-// the FloorGuardEvent a firing books. wire.go is the
+// the FloorGuardEvent a firing books. reactions.go is the Reaction dispatcher that succeeds
+// both of those ladders (ADR 0076): the one fire the seams call, its two legs, the Bypass gate,
+// the recover boundary, the revision bracket and the ReactionFiredEvent a firing books.
+// builtins.go is the engine's own Reactions — the seven Floor guards as domain.Reaction values,
+// each reading its live gate and calling the unchanged internal/floor policy. wire.go is the
 // translation onto the provider seam: the domain request drained into a domain-free
 // provider.Request (ADR 0010). compact.go is conversation compaction — the explicit Compact,
 // the auto-compaction trigger and its allocation arithmetic, the emergency fold, the user bridge
