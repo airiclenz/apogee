@@ -612,17 +612,11 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// The entries are mapped across one by one like the block above it. A mapping FAILURE leaves
-		// the list empty rather than half-applied: parseConfigFile has already refused any file this
-		// could fail on (validateHooks), so the only way to reach it is a fileConfig built in code,
-		// and a partially fired Hook set is a worse answer there than none.
-		row: mustKey("hooks"),
-		fromFile: func(o *Options, fc fileConfig) {
-			o.Hooks = nil
-			if mapped, err := toHooks(fc.Hooks); err == nil {
-				o.Hooks = mapped
-			}
-		},
+		// The entries are mapped across one by one like the block above it, through the projection
+		// this row SHARES with `reactions:` below — the two blocks are one lane, so each row writes
+		// the whole of it (projectReactions).
+		row:      mustKey("hooks"),
+		fromFile: projectReactions,
 	},
 	{
 		// Each half of the `tools:` block projects on its own, the way the `url-safety:` pair below
@@ -889,6 +883,14 @@ var keyAccessors = []keyAccessor{
 			return nil
 		},
 		fromFlag: func(o *Options, flags Options) { o.Bypass = flags.Bypass },
+	},
+	{
+		// The user-origin observe lane, projected by the same closure the `hooks:` row above uses:
+		// the two blocks resolve into ONE Options field, so each row writes the whole of it rather
+		// than its own half — the shared-carrier idiom, and the reason the table's order stays
+		// irrelevant to the outcome.
+		row:      mustKey("reactions"),
+		fromFile: projectReactions,
 	},
 	{
 		// The ONE accessor with no registry row behind it. `mechanisms:` keeps parsing — an existing
@@ -1447,6 +1449,13 @@ type fileConfig struct {
 	// Nothing a Hook does reaches the model, the conversation or the Session record, so an entry is
 	// never part of what a run produces — only of what a machine is told about it.
 	Hooks []hookConfig `yaml:"hooks"`
+	// Reactions is the global list of user-origin observe Reactions (ADR 0076) — the successor
+	// spelling of the `hooks:` block above it, and the one this schema documents: each entry names
+	// the Moments it fires on under `on:` and the one action it takes under `run:`, an argv list run
+	// out of confinement or a webhook mapping the JSON payload is POSTed to. Absent/empty ⇒ the
+	// feature is dormant (nothing runs, no error). Both blocks resolve into the one
+	// [Options.Reactions] lane; the migration folds `hooks:` into this key and deletes it.
+	Reactions []reactionConfig `yaml:"reactions"`
 	// Tools is the GLOBAL roster block (ADR 0057): `disabled:`, the built-in tools this config takes
 	// off the menu, and `enabled:`, the ones it puts back on it. A pointer so an absent block falls
 	// through to the default (every tool the build offers) rather than reading as an explicit empty
@@ -2749,7 +2758,7 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
 		return fileConfig{}, err
 	}
-	if err := validateHooks(fc.Hooks); err != nil {
+	if err := validateReactionBlocks(fc.Hooks, fc.Reactions); err != nil {
 		return fileConfig{}, err
 	}
 	if err := validateResponseReserveFraction(fc.ResponseReserve); err != nil {

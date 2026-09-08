@@ -186,7 +186,7 @@ func (w *rootWiring) resolveConfig() error {
 	// reconnect swaps it afterwards. Reading it through liveTools.lookup at call time is what makes
 	// the `file-changed` derivation follow the set the session is actually running, and what keeps
 	// the read off an unlocked pointer the Update goroutine writes.
-	runner, err := reactions.New(w.opts.Hooks, reactions.Options{
+	runner, err := reactions.New(w.opts.Reactions, reactions.Options{
 		Inner:     w.bridge.Sink(),
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
@@ -265,7 +265,7 @@ func (w *rootWiring) resolveConfig() error {
 		// A webhook Hook's `headers-env:` names variables holding a token too (ADR 0073 §6), and they
 		// are scrubbed beside the key sources for exactly the same reason: a token readable out of a
 		// `terminal` child is a token the model can read.
-		SecretEnvVars: append(config.APIKeyEnvNames(w.opts), config.HookEnvNames(w.opts)...),
+		SecretEnvVars: append(config.APIKeyEnvNames(w.opts), config.ReactionEnvNames(w.opts)...),
 		// The Model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
 		// resolved above for THIS model out of the `model-profiles:` map and the shipped shape
 		// table. A model neither tier knows gets the zero profile: native tool calls with no inline

@@ -287,7 +287,7 @@ func newLiveSettings(opts config.Options) *liveSettings {
 		// configuration it launched with.
 		searchEndpoint:   opts.WebSearchEndpoint,
 		disabledTools:    opts.ToolsDisabled,
-		hooks:            opts.Hooks,
+		hooks:            opts.Reactions,
 		allowHosts:       opts.URLAllowHosts,
 		denyHosts:        opts.URLDenyHosts,
 		bypass:           opts.Bypass,
@@ -855,7 +855,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	// The keys that are PUSHED at a seam and are in force the moment their apply returns. Nothing
 	// re-reads them from here; they are mirrored so this projection can answer for them at all.
 	next.WebSearchEndpoint = s.searchEndpoint
-	next.Hooks = slices.Clone(s.hooks)
+	next.Reactions = slices.Clone(s.hooks)
 	next.ToolsDisabled = slices.Clone(s.disabledTools)
 	next.URLAllowHosts = slices.Clone(s.allowHosts)
 	next.URLDenyHosts = slices.Clone(s.denyHosts)
@@ -2113,10 +2113,10 @@ func (a settingsApplier) reloadHooks() error {
 	if err != nil {
 		return err
 	}
-	if err := a.hooks.Replace(file.Hooks); err != nil {
+	if err := a.hooks.Replace(file.Reactions); err != nil {
 		return err
 	}
-	a.live.setHooks(file.Hooks)
+	a.live.setHooks(file.Reactions)
 	return nil
 }
 

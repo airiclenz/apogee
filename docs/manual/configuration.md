@@ -362,37 +362,53 @@ opens your editor because no row can write a list this shape — and apogee reco
 new set up before swapping the tools over, so a server that will not come back leaves the old
 connections serving and says why on the row.
 
-## Hooks — `hooks:`
+## Reactions — `reactions:`
 
-`hooks:` is the list of **observe-only** reactions apogee runs when something happens in a session:
-each entry names the events it fires on and the one action it takes — a `command:` argv list run
-directly (no shell; write `["sh", "-c", "…"]` when you want one) or a `webhook:` the JSON payload is
-POSTed to. It is **empty by default**. A hook is told what already happened and can change nothing:
-it cannot veto a tool call or an approval, and nothing it prints reaches the model, the conversation
-or the saved session. The five events are `exchange-finished`, `turn-finished`, `file-changed`,
-`approval-waiting` (raised, before you answer) and `error`.
+`reactions:` is the list of **observe-only** reactions apogee runs when a moment closes in a
+session: each entry gives itself an `id:`, lists the moments it fires on under `on:`, and takes one
+action under `run:` — an argv list run directly (no shell; write `["sh", "-c", "…"]` when you want
+one) or a mapping naming a `url:` the JSON payload is POSTed to. It is **empty by default**. A
+reaction is told what already happened and can change nothing: it cannot veto a tool call or an
+approval, and nothing it prints reaches the model, the conversation or the saved session. The six
+moments are `exchange-finished`, `turn-finished`, `file-changed`, `approval-requested` (raised,
+before you answer), `approval-decided` (its verdict) and `error`. The five in-loop seams are not
+open to this list: they take the `advise:` and `gate:` actions, which are not shipped yet, and an
+entry naming one is refused at startup.
 
 ```yaml
 # ~/.apogee/config.yaml
-hooks:
-  - name: notify
-    events: [approval-waiting]
-    command: ["notify-send", "apogee is waiting for an answer"]
+reactions:
+  - id: notify
+    on: [approval-requested]
+    run: ["notify-send", "apogee is waiting for an answer"]
     timeout: 10s
-  - name: ci-bell
-    events: [file-changed, exchange-finished]
-    webhook: https://hooks.example.com/apogee
-    headers-env:
-      Authorization: APOGEE_HOOK_TOKEN
+  - id: ci-bell
+    on: [file-changed, exchange-finished]
+    run:
+      url: https://hooks.example.com/apogee
+      headers:
+        X-Source: apogee
+      headers-env:
+        Authorization: APOGEE_REACTION_TOKEN
     workspace: ~/code/apogee
+    enabled: true
 ```
 
+`timeout:` bounds the command and the POST alike and defaults to 30s; `workspace:` scopes an entry
+to one workspace, leaving it inactive at every other; `enabled: false` parks an entry without
+deleting it. Header values are literal (`headers:`) or read at send time from the environment
+variable a `headers-env:` entry NAMES, so a token never has to sit in this file. Ids must be unique,
+and an id that is one of the seven Floor-guard keys is refused — a guard is switched off with its
+own top-level key, never with an entry here. `hooks:` is this key's earlier name, with
+`name:`/`events:`/`command:`/`webhook:` where this block writes `id:`/`on:`/`run:`; a file that
+still carries it keeps loading.
+
 The block is file-only (no flag, no environment variable) and it is **live in the interactive TUI**:
-save the file — or use `⏎` on the `hooks:` row in [`/settings`](commands.md#the-settings-screen--settings),
+save the file — or use `⏎` on the `reactions:` row in [`/settings`](commands.md#the-settings-screen--settings),
 which opens your editor because no row can write a list this shape — and the running session swaps
-its hooks over. A headless run and the daemon read the list once, at start. The full reference —
+its reactions over. A headless run and the daemon read the list once, at start. The full reference —
 every payload field, the exec posture, the webhook contract, `workspace:` matching, and what happens
-when a hook fails or falls behind — is on the [Hooks](hooks.md) page.
+when a reaction fails or falls behind — is on the [Hooks](hooks.md) page.
 
 ## Skills a repository ships — `use-project-skills:`
 

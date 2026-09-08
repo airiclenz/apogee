@@ -289,7 +289,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// The drain is deferred here rather than after the composition below, so a Firing refused by the
 	// offline gate — or by a composition that failed — takes its workers down with it. A daemon runs
 	// for weeks; a Runner leaked per refused tick is a leak that accumulates.
-	hookRunner, err := firingHooks(w.opts.Hooks, roots.workspace,
+	hookRunner, err := firingHooks(w.opts.Reactions, roots.workspace,
 		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName},
 		func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) })
 	if err != nil {

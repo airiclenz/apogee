@@ -812,15 +812,15 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		// this test owes it is the other half — a holder nobody edited hands back the list the run
 		// launched with, so a Firing raised before any `/settings` commit fires the session's Hooks
 		// rather than none at all.
-		Hooks: []domain.Reaction{hookEntry("boot", reactions.TurnFinished)},
+		Reactions: []domain.Reaction{hookEntry("boot", reactions.TurnFinished)},
 	}
 
 	// The unedited case, asserted around every apply below: seeded from the snapshot, handed back as
 	// a COPY, and left alone by every other key's apply.
 	assertBootHooks := func(t *testing.T, opts config.Options) {
 		t.Helper()
-		if len(opts.Hooks) != 1 || opts.Hooks[0].ID != "boot" {
-			t.Errorf("options().Hooks = %+v, want the one hook the run launched with", opts.Hooks)
+		if len(opts.Reactions) != 1 || opts.Reactions[0].ID != "boot" {
+			t.Errorf("options().Reactions = %+v, want the one hook the run launched with", opts.Reactions)
 		}
 	}
 	// The list the `servers:` apply re-reads. Its second entry names a key SOURCE rather than a key,
@@ -1011,8 +1011,8 @@ func clobberOptions(opts config.Options) {
 	for i := range opts.ModelProfiles {
 		opts.ModelProfiles[i] = profiles.Entry{}
 	}
-	for i := range opts.Hooks {
-		opts.Hooks[i] = domain.Reaction{ID: "clobbered"}
+	for i := range opts.Reactions {
+		opts.Reactions[i] = domain.Reaction{ID: "clobbered"}
 	}
 	clear(opts.ValidatedSetsAlias)
 	clear(opts.SystemPrompt.Models)
@@ -2942,7 +2942,7 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	live := newLiveSettings(config.Options{Hooks: boot})
+	live := newLiveSettings(config.Options{Reactions: boot})
 	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
 	// The value is not read for this key — a list of blocks is a shape no single string spells — so
 	// what the pane persisted is the row's own summary.
@@ -2952,8 +2952,8 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 
 	// The projection a Firing composes from now names the re-read entry, not the boot one.
 	handed := live.options()
-	if len(handed.Hooks) != 1 || handed.Hooks[0].ID != "reloaded" {
-		t.Fatalf("options().Hooks = %+v, want the one entry the re-read file lists", handed.Hooks)
+	if len(handed.Reactions) != 1 || handed.Reactions[0].ID != "reloaded" {
+		t.Fatalf("options().Reactions = %+v, want the one entry the re-read file lists", handed.Reactions)
 	}
 
 	// And the RUNNER fires it: a Turn boundary reaches the new generation's worker, never the
@@ -2988,13 +2988,13 @@ func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) 
 		t.Fatalf("write config: %v", err)
 	}
 
-	live := newLiveSettings(config.Options{Hooks: boot})
+	live := newLiveSettings(config.Options{Reactions: boot})
 	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
 	if _, err := apply("hooks", "1 hook"); err == nil {
 		t.Fatal("a hooks: block naming an unknown event applied silently; want a refusal")
 	}
-	if got := live.options().Hooks; len(got) != 1 || got[0].ID != "boot" {
-		t.Errorf("options().Hooks = %+v, want the boot list a refused edit leaves standing", got)
+	if got := live.options().Reactions; len(got) != 1 || got[0].ID != "boot" {
+		t.Errorf("options().Reactions = %+v, want the boot list a refused edit leaves standing", got)
 	}
 }
 
@@ -3092,7 +3092,7 @@ func TestRootHookWriteTargetIsRaceSafeAcrossARosterSwap(t *testing.T) {
 	workspace := t.TempDir()
 	w := newRootWiring(config.Options{
 		Workspace: workspace,
-		Hooks:     []domain.Reaction{hookEntry("watcher", reactions.FileChanged)},
+		Reactions: []domain.Reaction{hookEntry("watcher", reactions.FileChanged)},
 	}, domain.ModeAskBefore, stateRoots{config: t.TempDir(), workspace: workspace})
 	if err := w.resolveConfig(); err != nil {
 		t.Fatalf("resolveConfig: %v", err)
@@ -3162,7 +3162,7 @@ func TestRootWiringScrubsHookHeaderVariables(t *testing.T) {
 	w := newRootWiring(config.Options{
 		Workspace: workspace,
 		Servers:   []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111", APIKeyEnv: "SERVER_KEY"}},
-		Hooks: []domain.Reaction{{
+		Reactions: []domain.Reaction{{
 			ID:     "notify",
 			Origin: domain.OriginUser,
 			Class:  domain.ClassObserve,

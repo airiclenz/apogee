@@ -354,6 +354,7 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 		"present.host":          "Presentation",
 		"cursor-shape":          "Interface",
 		"editor":                "Interface",
+		"reactions":             "Reactions",
 		"validated-sets.enable": "Reactions",
 		"validated-sets.alias":  "Reactions",
 		"model-profiles":        "Model profiles",
@@ -429,6 +430,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"cursor-shape":          "block", // unset, so the declared default is what is in force
 		"editor":                "code -w",
 		"bypass":                "true",
+		"reactions":             noneSettingValue, // unset in the fixture: the lane is dormant by default
 		"validated-sets.enable": "true",
 		"validated-sets.alias":  "1 alias",
 		"model-profiles":        "1 model profile",
@@ -541,7 +543,7 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	// while this one fails when a new read-only key reaches the pane without anyone naming it here.
 	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
 		"system-prompt-layers", "model-profiles", "sub-agents-server", "hooks", "tools.enabled",
-		"validated-sets.alias"} {
+		"reactions", "validated-sets.alias"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}

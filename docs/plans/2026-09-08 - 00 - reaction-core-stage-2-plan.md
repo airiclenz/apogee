@@ -259,7 +259,23 @@ go test ./internal/reactions/ -run 'SeamClosed|Payload|Match'
 
 **Commit:** `feat(reactions): the five seam-closing notices reach observe reactions with the full working value`
 
-## 8. Config: the `reactions:` key, additive
+## 8. Config: the `reactions:` key, additive — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the item's What spells the reserved-action refusal only in its `advise:` form; the implementation names whichever key is present, so `gate:` earns `reaction %q: gate: is not yet shipped (ADR 0076 stage 3)`. Both texts are pinned by the refusal table test.
+
+NOTES (2026-09-08): one refusal the item did not spell is new — an entry with no `id:` earns `reactions: an entry has no id: every reaction needs an `id:` to be reported by`. Without it the message a user meets is internal/reactions' own `hooks: an entry has no name`, which names the wrong key.
+
+NOTES (2026-09-08): the `hooks` and `reactions` registry rows SHARE one keyAccessor projection (`projectReactions`) rather than each writing its own half of the field. `keyAccessors`' own contract is that a row's position in the table cannot affect the outcome, which two rows appending to one Options field would break; the shared-carrier idiom (the three system-prompt keys, the four present keys) is what the table already documents for this shape.
+
+NOTES (2026-09-08): `validateHooks` is folded into `validateReactionBlocks(fc.Hooks, fc.Reactions)`, which is what the item's "ids unique across `hooks:`+`reactions:`" requires — the uniqueness check has to see both blocks at once.
+
+NOTES (2026-09-08): `HookEnvNames` → `ReactionEnvNames` MOVED from `hooks.go` to `reactions.go` (and its test from `hooks_test.go` to `reactions_test.go` as `TestReactionEnvNamesDeduplicatesAndSorts`): it now reads `Options.Reactions`, which is reactions.go's field, and item 9 deletes hooks.go and its test wholesale. For the same reason `defaultHookTimeout` becomes `defaultReactionTimeout` in reactions.go and `toHook` reads it, rather than the package carrying two 30s constants.
+
+NOTES (2026-09-08): the `hooks` registry row's `Read`/`Structure` now project `o.Reactions` — the field it named was renamed — so while both rows exist they summarize the same lane under two counts ("N hook" / "N reaction"). Item 9 deletes the `hooks` row.
+
+NOTES (2026-09-08): consequential edit — internal/config/config_test.go: made necessary by the `Options.Hooks` → `Options.Reactions` rename and the new schema key — `TestEveryConfigKeyReachesTheOptions` enumerates the Options field names config owns, and `everyKeyFileConfig` enumerates every fileConfig key, so both had to gain the renamed field and the `reactions:` block.
+
+NOTES (2026-09-08): internal/reactions' own refusal wordings still say `hooks:` (the no-name message) and "hook names must be unique" (the duplicate message a cross-block id collision earns). Pre-existing wording, not touched here — item 21's emitted-string sweep owns it.
 
 **What:** Recast at the regression check (2026-09-08). Depends on item 4. Add `Reactions []reactionConfig \`yaml:"reactions"\`` to `fileConfig` beside the still-parsed `hooks:`; `reactionConfig{ID string \`yaml:"id"\`; On []string \`yaml:"on"\`; Run yaml.Node \`yaml:"run"\`; Timeout, Workspace string; Enabled *bool; Advise, Gate yaml.Node}` in a new `internal/config/reactions.go` (named in `doc.go`; `hooks.go` stays until item 9). Resolution into `Options.Reactions []domain.Reaction` (the old `Options.Hooks` field renamed — its producers are `toHook` and the new resolver, its consumers `wire_boot.go`, `wire_firing.go`, `wire_settings.go`, `headless.go`, `HookEnvNames`): `run:` sequence → `ArgvHandler`, mapping `{url, headers, headers-env}` → `WebhookHandler`, anything else → `reaction %q: run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`; `advise:`/`gate:` present → `reaction %q: advise: is not yet shipped (ADR 0076 stage 3)`; an id equal to a Floor-guard key → `reaction %q: that is the Floor guard %s: — set the top-level key, not a reactions: entry`; a seam in `on:` → the domain error from item 3; `enabled: false` → dropped at resolve; `timeout:` default 30s; ids unique across `hooks:`+`reactions:`. `HookEnvNames` → `ReactionEnvNames`. `KeyRegistry` gains `{Path: "reactions", Kind: KindStructured, Editable: false, Desc: "Commands and webhooks run when a Moment closes; observe-only, never seen by the model.", Read: countSummary(len(o.Reactions), "reaction"), Structure: o.Reactions}` placed after `bypass` (call: row placement); the `hooks` row stays until item 9. `defaults/config.yaml` gains the `reactions:` block (two entries mirroring today's `hooks:` examples) beside the old one. `docs/manual/configuration.md`'s `## Hooks — hooks:` section (:365-395) is rewritten as `## Reactions — reactions:` documenting the schema above — `docs_settings_test.go` requires the row's key documented.
 

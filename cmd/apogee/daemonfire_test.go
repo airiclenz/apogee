@@ -897,7 +897,7 @@ func TestDaemonFireStampsTheScheduleOnItsHookPayload(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fired.json")
 	harness := newDaemonFireHarness(t, config.Options{
 		Endpoint: "http://box.invalid",
-		Hooks: []domain.Reaction{{
+		Reactions: []domain.Reaction{{
 			ID:      "record",
 			Origin:  domain.OriginUser,
 			Class:   domain.ClassObserve,
@@ -932,7 +932,7 @@ func TestDaemonFireLogsAFailingHookAsOneSanitisedLine(t *testing.T) {
 
 	harness := newDaemonFireHarness(t, config.Options{
 		Endpoint: "http://box.invalid",
-		Hooks: []domain.Reaction{{
+		Reactions: []domain.Reaction{{
 			ID:      "record",
 			Origin:  domain.OriginUser,
 			Class:   domain.ClassObserve,

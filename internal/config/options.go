@@ -325,11 +325,12 @@ type Options struct {
 	// the config file only (default-empty ⇒ MCP dormant). ApplyConfig sets it from settings.
 	MCPServers []mcp.ServerConfig
 
-	// hooks is the resolved global `hooks:` list (ADR 0073) — the observe-only reactions a root
-	// composes over its event sink — loaded from the config file only (default-empty ⇒ no Runner
-	// fires anything). ApplyConfig sets it from settings; every root builds its Hook Runner from it,
-	// and the TUI re-reads it in place when the file changes.
-	Hooks []domain.Reaction
+	// reactions is the resolved global user-origin observe list (ADR 0076) — the reactions a root
+	// composes over its Moment sink — loaded from the config file only (default-empty ⇒ no Runner
+	// fires anything). It is the ONE lane both user-origin blocks resolve into: the `reactions:`
+	// list and the `hooks:` block it succeeds. ApplyConfig sets it from settings; every root builds
+	// its Runner from it, and the TUI re-reads it in place when the file changes.
+	Reactions []domain.Reaction
 
 	// toolsDisabled and toolsEnabled are the resolved GLOBAL roster deltas (ADR 0057) — the built-in
 	// tools this config takes off the menu, and the ones it puts back on it. Loaded from the config

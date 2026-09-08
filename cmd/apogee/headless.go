@@ -563,7 +563,7 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// file is parsed, so what is left to fail here is a `workspace:` this host cannot resolve — and
 	// an unattended run that quietly fired nothing would be indistinguishable from one whose Hooks
 	// all ran.
-	hookRunner, err := firingHooks(opts.Hooks, roots.workspace, nil, func(line string) { cmd.PrintErrln(line) })
+	hookRunner, err := firingHooks(opts.Reactions, roots.workspace, nil, func(line string) { cmd.PrintErrln(line) })
 	if err != nil {
 		return run.Result{}, notStarted(err)
 	}

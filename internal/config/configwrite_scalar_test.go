@@ -345,6 +345,54 @@ func TestSpliceScalarSettingWritesTheValidatedSetsOffSwitch(t *testing.T) {
 	}
 }
 
+// A scalar written ABOVE a `reactions:` block, which is the shape that makes the verify step's
+// job hard: the entries carry position-free values (`run:` is either a sequence or a mapping), so
+// the write's own check that nothing but the one key moved — sameApartFrom, a reflect.DeepEqual
+// over two parses — has to compare those values rather than the nodes they were read from. A
+// yaml.Node in the schema would carry the line each entry was read at, and every insert above the
+// block would look like an edit to it.
+func TestSpliceScalarSettingWritesAboveAReactionsBlock(t *testing.T) {
+	t.Parallel()
+
+	const content = `mode: auto
+reactions:
+  - id: notify
+    on: [approval-requested]
+    run: ["notify-send", "waiting"]
+  - id: bell
+    on: [file-changed]
+    run:
+      url: https://hooks.example.com/apogee
+      headers-env:
+        Authorization: MY_WEBHOOK_TOKEN
+`
+	k := mustKey("editor")
+	updated, err := setScalarSetting([]byte(content), k, "hx")
+	if err != nil {
+		t.Fatalf("splice %s: %v", k.Path, err)
+	}
+	if updated == nil {
+		t.Fatalf("splice %s reported nothing to write", k.Path)
+	}
+	assertOnlyKeyChanged(t, content, string(updated), k.Path)
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, updated, 0o600); err != nil {
+		t.Fatalf("write the spliced config: %v", err)
+	}
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("load the spliced config: %v", err)
+	}
+	if len(opts.Reactions) != 2 {
+		t.Fatalf("the write left %d reactions, want the 2 the block states: %+v",
+			len(opts.Reactions), opts.Reactions)
+	}
+	if opts.Editor != "hx" {
+		t.Errorf("editor reads %q after the write, want %q", opts.Editor, "hx")
+	}
+}
+
 // The block-scalar writer, against the file it will actually meet: the seeded template, whose
 // `system-prompt-text:` block is the only multi-line value the schema has. Since ADR 0064 the
 // template states the key COMMENTED — a fresh install runs on the embedded default and this is the

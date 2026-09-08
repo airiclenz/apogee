@@ -344,8 +344,8 @@ var KeyRegistry = []Key{
 		// take the row out of the live reload diff that keeps a session's Hooks following the file.
 		Path: "hooks", Kind: KindStructured,
 		Desc:      "Commands and webhooks run when an engine event fires; observe-only, never seen by the model.",
-		Read:      func(o Options) string { return countSummary(len(o.Hooks), "hook") },
-		Structure: func(o Options) any { return o.Hooks },
+		Read:      func(o Options) string { return countSummary(len(o.Reactions), "hook") },
+		Structure: func(o Options) any { return o.Reactions },
 	},
 	{
 		// The roster switch, a name list on one line like context-files.names — so the pane edits it
@@ -658,6 +658,19 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Desc:     "Run with advise and shape Reactions of user or bench origin off; Floor guards and structural reducers stay on.",
 		Read:     func(o Options) string { return boolValue(o.Bypass) },
+	},
+	{
+		// Structured for the `hooks:` reason — an entry is a block of its own, and no field on a
+		// one-line row could write it — so the row counts what is armed and ⏎ opens the file. It sits
+		// directly under `bypass`, which opens the pane's Reactions section: the off-switch first,
+		// then the list it switches off. Read-only, and NOT GlobalOnly: apogee has one config file,
+		// and the flag would take the row out of the live reload diff that keeps a session's
+		// Reactions following the file.
+		Path: "reactions", Kind: KindStructured,
+		Editable:  false,
+		Desc:      "Commands and webhooks run when a Moment closes; observe-only, never seen by the model.",
+		Read:      func(o Options) string { return countSummary(len(o.Reactions), "reaction") },
+		Structure: func(o Options) any { return o.Reactions },
 	},
 	{
 		// The block's off-switch is a row of its own, for the `context-files.*` reason: it is a bool

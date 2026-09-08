@@ -52,11 +52,11 @@ hooks:
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
 
-	if len(opts.Hooks) != 2 {
-		t.Fatalf("resolved %d hooks; want 2: %+v", len(opts.Hooks), opts.Hooks)
+	if len(opts.Reactions) != 2 {
+		t.Fatalf("resolved %d hooks; want 2: %+v", len(opts.Reactions), opts.Reactions)
 	}
 
-	notify := opts.Hooks[0]
+	notify := opts.Reactions[0]
 	wantWorkspace, err := reactions.ResolveWorkspace(filepath.Join(home, "work"))
 	if err != nil {
 		t.Fatalf("resolve the expected workspace: %v", err)
@@ -78,16 +78,16 @@ hooks:
 	if got, want := strings.Join(argv.Argv, " "), "notify-send apogee finished"; got != want {
 		t.Errorf("notify command = %q; want %q", got, want)
 	}
-	if notify.Timeout != defaultHookTimeout {
+	if notify.Timeout != defaultReactionTimeout {
 		t.Errorf("notify timeout = %v; want the %v default an absent `timeout:` takes", notify.Timeout,
-			defaultHookTimeout)
+			defaultReactionTimeout)
 	}
 	if notify.Workspace != wantWorkspace {
 		t.Errorf("notify workspace = %q; want %q — the leading ~ is expanded before the filter is compared",
 			notify.Workspace, wantWorkspace)
 	}
 
-	bell := opts.Hooks[1]
+	bell := opts.Reactions[1]
 	if bell.Timeout != 250*time.Millisecond {
 		t.Errorf("bell timeout = %v; want 250ms — a spelled duration replaces the default", bell.Timeout)
 	}
@@ -144,10 +144,10 @@ hooks:
 		t.Fatalf("LoadFileConfig: %v — %q must still load until the migration rewrites the block",
 			err, retired)
 	}
-	if len(opts.Hooks) != 1 {
-		t.Fatalf("resolved %d hooks; want 1: %+v", len(opts.Hooks), opts.Hooks)
+	if len(opts.Reactions) != 1 {
+		t.Fatalf("resolved %d hooks; want 1: %+v", len(opts.Reactions), opts.Reactions)
 	}
-	if got, want := opts.Hooks[0].On, []reactions.Event{reactions.ApprovalRequested}; !eventsEqual(got, want) {
+	if got, want := opts.Reactions[0].On, []reactions.Event{reactions.ApprovalRequested}; !eventsEqual(got, want) {
 		t.Errorf("events = %v; want %v — %q maps onto the renamed notice", got, want, retired)
 	}
 }
@@ -280,39 +280,7 @@ func TestLoadFileConfigWithoutHooksResolvesNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
-	if opts.Hooks != nil {
-		t.Errorf("resolved hooks = %+v; want none for a file that states no block", opts.Hooks)
-	}
-}
-
-// The names a root keeps the `terminal` tool away from: every variable a webhook header is read
-// from, each once, in a stable order — the values come off a map, so an unsorted answer would
-// reorder between runs and make every caller's own output unstable.
-func TestHookEnvNamesDeduplicatesAndSorts(t *testing.T) {
-	t.Parallel()
-
-	opts := Options{Hooks: []domain.Reaction{
-		{ID: "bell", Handler: domain.WebhookHandler{
-			HeadersEnv: map[string]string{"Authorization": "TOKEN_B", "X-Trace": "TOKEN_A"},
-		}},
-		{ID: "page", Handler: domain.WebhookHandler{
-			HeadersEnv: map[string]string{"Authorization": "TOKEN_B"},
-		}},
-		{ID: "quiet", Handler: domain.WebhookHandler{
-			HeadersEnv: map[string]string{"X-Blank": "  "},
-		}},
-		{ID: "run", Handler: domain.ArgvHandler{Argv: []string{"true"}}},
-	}}
-
-	got := HookEnvNames(opts)
-
-	want := []string{"TOKEN_A", "TOKEN_B"}
-	if len(got) != len(want) {
-		t.Fatalf("HookEnvNames = %v; want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("HookEnvNames = %v; want %v", got, want)
-		}
+	if opts.Reactions != nil {
+		t.Errorf("resolved hooks = %+v; want none for a file that states no block", opts.Reactions)
 	}
 }

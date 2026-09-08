@@ -1384,7 +1384,7 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prevRunner })
 
-	live := newLiveSettings(config.Options{Hooks: []domain.Reaction{recorder("boot", bootMarker)}})
+	live := newLiveSettings(config.Options{Reactions: []domain.Reaction{recorder("boot", bootMarker)}})
 	live.setHooks([]domain.Reaction{recorder("reloaded", reloadedMarker)})
 
 	w := scheduleWiring{

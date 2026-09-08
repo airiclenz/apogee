@@ -1112,7 +1112,7 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts: config.Options{
 			Bypass:    true,
-			Hooks:     list,
+			Reactions: list,
 			APIKeyEnv: "STARTUP_KEY",
 		},
 		entry:    config.ServerEntry{Endpoint: "http://box.example/v1"},

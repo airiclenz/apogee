@@ -2,19 +2,12 @@ package config
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/reactions"
 )
-
-// defaultHookTimeout bounds an entry that spells no `timeout:`. Every Hook is bounded, because an
-// unbounded one could hold a root's shutdown grace open on a command that never returns; thirty
-// seconds is long enough for a notifier or a webhook round trip and short enough that a wedged one
-// is noticed rather than waited on (ADR 0073, ratified call B).
-const defaultHookTimeout = 30 * time.Second
 
 // hookConfig is the on-disk schema for one entry of the global `hooks:` list. It mirrors the
 // user-origin observe [domain.Reaction] with yaml tags and the three spellings only a FILE has — an
@@ -47,8 +40,8 @@ type hookConfig struct {
 // The two rules about the SIBLING keys live here — exactly one of `command:`/`webhook:`, and
 // headers belonging to a webhook — because this is the only place both fields still coexist: a
 // domain.Reaction carries one Handler and cannot express either fault. Everything else about the
-// entry shape is [reactions.Validate]'s, and validateHooks runs it over the mapped value so those
-// rules live in one place for every root.
+// entry shape is [reactions.Validate]'s, and validateReactionBlocks runs it over the mapped value
+// so those rules live in one place for every root.
 func (h hookConfig) toHook() (domain.Reaction, error) {
 	var events []reactions.Event
 	for _, name := range h.Events {
@@ -72,7 +65,7 @@ func (h hookConfig) toHook() (domain.Reaction, error) {
 		return domain.Reaction{}, err
 	}
 
-	timeout := defaultHookTimeout
+	timeout := defaultReactionTimeout
 	if spelled := strings.TrimSpace(h.Timeout); spelled != "" {
 		parsed, err := time.ParseDuration(spelled)
 		if err != nil {
@@ -157,46 +150,6 @@ func toHooks(list []hookConfig) ([]domain.Reaction, error) {
 		mapped = append(mapped, hook)
 	}
 	return mapped, nil
-}
-
-// validateHooks refuses a `hooks:` block that cannot be run, at PARSE time — beside
-// validateModelProfiles — so a mistyped event or a Hook with two actions is a startup refusal
-// naming the entry rather than a Hook that silently never fires. It is the mapping (which owns the
-// sibling-key rules) plus the two shape checks the reactions package owns: [reactions.Validate] per
-// entry, and [reactions.ValidateAll] for the uniqueness of the names every failure notice and
-// payload keys on.
-func validateHooks(list []hookConfig) error {
-	mapped, err := toHooks(list)
-	if err != nil {
-		return err
-	}
-	return reactions.ValidateAll(mapped)
-}
-
-// HookEnvNames is every environment variable name the resolved Hooks read a webhook header out of,
-// sorted and deduplicated. A root appends it to the names APIKeyEnvNames already contributes to
-// [domain.Config.SecretEnvVars], so the `terminal` tool cannot read a webhook token back out of the
-// environment it inherits. Sorted because the names come off a map, and a set that reordered
-// between runs would make every caller's own output unstable.
-func HookEnvNames(o Options) []string {
-	var names []string
-	seen := make(map[string]bool)
-	for _, hook := range o.Hooks {
-		handler, ok := hook.Handler.(domain.WebhookHandler)
-		if !ok {
-			continue
-		}
-		for _, envName := range handler.HeadersEnv {
-			name := strings.TrimSpace(envName)
-			if name == "" || seen[name] {
-				continue
-			}
-			seen[name] = true
-			names = append(names, name)
-		}
-	}
-	slices.Sort(names)
-	return names
 }
 
 // hookError prefixes a message with the entry it is about, in the wording the hooks package uses

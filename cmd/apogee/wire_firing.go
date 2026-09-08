@@ -315,10 +315,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		UndoSnapshots: in.opts.UndoSnapshots,
 		// Both halves of what the `terminal` tool may not read back out of the environment it
 		// inherits: the names an API key is resolved from, and the names a Hook's webhook header is
-		// (config.HookEnvNames). A Firing runs the same `hooks:` list a session does, so it has to
+		// (config.ReactionEnvNames). A Firing runs the same `reactions:` list a session does, so it has to
 		// scrub the same variables — a token the session hides would otherwise be readable by a
 		// model the moment the same configuration ran unattended.
-		SecretEnvVars: append(config.APIKeyEnvNames(in.opts), config.HookEnvNames(in.opts)...),
+		SecretEnvVars: append(config.APIKeyEnvNames(in.opts), config.ReactionEnvNames(in.opts)...),
 		// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
 		// rather than off opts, so the run reads responses in the same shape a session on the same
 		// model would, and a built-in match has already narrated itself through the notices.

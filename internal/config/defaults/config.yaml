@@ -478,6 +478,32 @@ context-files:
 #     workspace: ~/code/apogee           # optional; fires in this workspace only
 
 # =============================================================================
+# Reactions: the same lane as hooks: above, under the name it keeps. `hooks:` is the earlier
+# spelling and still loads; reactions: is what to write now. An entry gives itself an `id:`, lists
+# the moments it fires on under `on:` (the six names above), and takes ONE action under `run:` — an
+# argv LIST, run directly with no shell (write ["sh", "-c", "…"] when you want one), or a MAPPING
+# {url:, headers:, headers-env:} the JSON payload is POSTed to. `timeout:` (default 30s),
+# `workspace:` and the payload, environment and exec posture are exactly the hooks: ones. Two extra
+# spellings are its own: `enabled: false` parks an entry without deleting it, and an id that is one
+# of the seven Floor-guard keys is refused — those are switched with their own top-level key, not
+# with a reactions: entry. `advise:` and `gate:` are reserved for a later release and refused today.
+#
+# reactions:
+#   - id: notify                         # unique across reactions: and hooks: together
+#     on: [approval-requested]           # one or more of the six moments above
+#     run: ["notify-send", "apogee is waiting for an answer"]
+#     timeout: 10s                       # optional; default 30s
+#   - id: ci-bell
+#     on: [file-changed, exchange-finished]
+#     run:
+#       url: https://hooks.example.com/apogee
+#       headers:
+#         X-Source: apogee               # a literal header value
+#       headers-env:
+#         Authorization: MY_WEBHOOK_TOKEN # the NAME of the variable holding the value
+#     workspace: ~/code/apogee           # optional; fires in this workspace only
+
+# =============================================================================
 # The tool roster: which of Apogee's BUILT-IN tools this configuration offers the model. Almost all
 # of them are on by default; list a name under disabled: and it is taken off the menu entirely — the
 # model is never shown it, and a call naming it is refused as a tool that does not exist. The other

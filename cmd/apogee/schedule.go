@@ -128,7 +128,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// this one stamps the Schedule the run belongs to onto every payload, so a Hook can tell a
 	// scheduled run from the conversation it was raised beneath. The session's Runner keeps
 	// observing the session; the two never see each other's events.
-	hookRunner, err := firingHooks(opts.Hooks, w.roots.workspace,
+	hookRunner, err := firingHooks(opts.Reactions, w.roots.workspace,
 		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.notifyHook)
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: build the firing's hooks: %w", err)
