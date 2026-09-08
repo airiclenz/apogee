@@ -656,7 +656,7 @@ var KeyRegistry = []Key{
 		Path: "bypass", Kind: KindBool, Default: "false",
 		EnvVar: EnvBypass, FlagName: "bypass",
 		Editable: true,
-		Desc:     "Run with Mechanisms off; the structural context reducers stay on.",
+		Desc:     "Run with advise and shape Reactions of user or bench origin off; Floor guards and structural reducers stay on.",
 		Read:     func(o Options) string { return boolValue(o.Bypass) },
 	},
 	{

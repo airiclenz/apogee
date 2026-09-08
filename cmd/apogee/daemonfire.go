@@ -57,11 +57,6 @@ type daemonWiring struct {
 	// the `servers:` list a schedule binds into by name, and every file-only key an unattended run
 	// must honour for the one-configuration reason headless honours them (ADR 0031).
 	opts config.Options
-	// manualIDs is the enable list an explicit `mechanisms:` block spells, validated once at
-	// startup — enabled keys AND disabled ones, exactly as a session validates them, because the
-	// engine only ever sees the enabled IDs and a typo'd disabled key would otherwise never be
-	// reported (ADR 0015 §1).
-	manualIDs []apogee.MechanismID
 	// keys resolves an entry's key SOURCE into the token its Firings send. One resolver for the
 	// daemon's lifetime, so a `api-key-cmd:` runs once per entry rather than once per Firing — it
 	// is goroutine-safe, which is what lets Firings on different Schedules share it.
@@ -122,7 +117,7 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, []stri
 	if err != nil {
 		return nil, nil, err
 	}
-	manualIDs, retiredNotices, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
+	retiredNotices, err := mechanisms.RetiredNotices(opts.Mechanisms)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,8 +135,7 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, []stri
 	gcSessions(store, opts.Sessions)
 
 	return &daemonWiring{
-		opts:      opts,
-		manualIDs: manualIDs,
+		opts: opts,
 		// The key resolver is built with an EMPTY workspace root, so its `api-key-cmd:` exec
 		// fence refuses nothing: the daemon's workspace is the SCHEDULE ENTRY's, minted per
 		// Firing (wire_firing.go passes its own roots.workspace), so there is no one root the
@@ -365,16 +359,15 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults
 	// answer with.
 	cfg, routing, notices, err := firingConfig(ctx, firingInputs{
-		opts:      w.opts,
-		entry:     server,
-		keys:      w.keys,
-		roots:     roots,
-		manualIDs: w.manualIDs,
-		confiner:  w.confiner,
-		model:     entry.Run.Model,
-		mode:      f.Mode,
-		recordID:  recordID,
-		hooks:     hookRunner,
+		opts:     w.opts,
+		entry:    server,
+		keys:     w.keys,
+		roots:    roots,
+		confiner: w.confiner,
+		model:    entry.Run.Model,
+		mode:     f.Mode,
+		recordID: recordID,
+		hooks:    hookRunner,
 	})
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)

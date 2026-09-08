@@ -148,7 +148,7 @@ func TestRebindSpecForCarriesThePerModelProfile(t *testing.T) {
 			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
 			opts := config.Options{ModelProfiles: tt.user}
 
-			spec, notices, err := rebindSpecFor(opts, roots, nil, tt.model, 8192, 0, 0)
+			spec, notices, err := rebindSpecFor(opts, roots, tt.model, 8192, 0, 0)
 			if err != nil {
 				t.Fatalf("rebindSpecFor: %v", err)
 			}
@@ -187,7 +187,7 @@ func TestApplySettingModelProfilesResolvesForTheBoundModel(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{}, nil)
+	live := newLiveSettings(config.Options{})
 	apply := applySettingFor(settingsApplier{
 		engine:     spy,
 		live:       live,
@@ -208,7 +208,7 @@ func TestApplySettingModelProfilesResolvesForTheBoundModel(t *testing.T) {
 
 	// And the map lands in the holder, so the NEXT model the session switches to is resolved against
 	// the file as edited rather than as launched.
-	base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+	base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
 	if len(base.ModelProfiles) != 1 || base.ModelProfiles[0].Pattern != "minimax" {
 		t.Errorf("rebindInputs carries %+v, want the re-read map", base.ModelProfiles)
 	}
@@ -235,7 +235,7 @@ func TestApplySettingModelProfilesRecomposesTheToolSet(t *testing.T) {
 	live := rosterEditTools(t.TempDir(), []string{"view_diff"})
 	apply := applySettingFor(settingsApplier{
 		engine:     spy,
-		live:       newLiveSettings(config.Options{}, nil),
+		live:       newLiveSettings(config.Options{}),
 		binding:    func() upstreamBinding { return upstreamBinding{Model: "minimax-m3"} },
 		configPath: path,
 		tools:      live,
@@ -280,7 +280,7 @@ func TestApplySettingModelProfilesWithNothingBoundHoldsOnly(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{}, nil)
+	live := newLiveSettings(config.Options{})
 	apply := applySettingFor(settingsApplier{
 		engine:     spy,
 		live:       live,
@@ -295,7 +295,7 @@ func TestApplySettingModelProfilesWithNothingBoundHoldsOnly(t *testing.T) {
 	if spy.drove() != 0 {
 		t.Errorf("an unbound session drove the engine: %+v", spy.profiles)
 	}
-	base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+	base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
 	if len(base.ModelProfiles) != 1 {
 		t.Errorf("rebindInputs carries %+v, want the edit held for the first bind", base.ModelProfiles)
 	}
@@ -429,7 +429,7 @@ func TestRebindSpecForAnnouncesRosterDeltas(t *testing.T) {
 			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
 			opts := config.Options{ModelProfiles: tt.user}
 
-			spec, notices, err := rebindSpecFor(opts, roots, nil, tt.model, 8192, 0, 0)
+			spec, notices, err := rebindSpecFor(opts, roots, tt.model, 8192, 0, 0)
 			if err != nil {
 				t.Fatalf("rebindSpecFor: %v", err)
 			}

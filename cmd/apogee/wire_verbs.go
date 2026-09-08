@@ -39,8 +39,8 @@ func (w *rootWiring) rebind(model string, window int, effortDialect provider.Eff
 	// cleared window pin binds the discovered window rather than unbinding it (ADR 0024), and a
 	// dialled server stays dialled.
 	w.live.observe(window, effortDialect)
-	base, manualIDs, pinnedWindow, outputCap := w.live.rebindInputs(w.opts, w.holder.Binding())
-	spec, notices, err := rebindSpecFor(base, w.roots, manualIDs, model, window, pinnedWindow, outputCap)
+	base, pinnedWindow, outputCap := w.live.rebindInputs(w.opts, w.holder.Binding())
+	spec, notices, err := rebindSpecFor(base, w.roots, model, window, pinnedWindow, outputCap)
 	if err != nil {
 		return tui.RebindResult{}, err
 	}

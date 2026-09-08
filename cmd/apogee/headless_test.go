@@ -2959,7 +2959,7 @@ func TestHeadlessRefusesEveryUndeterminedStartup(t *testing.T) {
 }
 
 // The two flags a session has and an unattended run used to lack. `--server` names the `servers:`
-// entry to start on and `--bypass` runs with the lab Mechanisms off, both resolved exactly as the
+// entry to start on and `--bypass` runs with the user- and bench-armed Reactions off, both resolved exactly as the
 // root command resolves them — same run, different Driver (ADR 0031) — which is why their help
 // strings are root.go's verbatim rather than reworded here. Registering `--server` is also what
 // turns the startup refusal's remedy into the flag, pinned in

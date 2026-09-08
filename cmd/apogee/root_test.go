@@ -127,17 +127,19 @@ func TestRootCommandHelp(t *testing.T) {
 	}
 }
 
-// --bypass is the one flag whose help line is a CLAIM about what stays on, and since ADR 0071 the
-// answer has two halves: the lab Mechanisms go, the Floor guards and the structural reducers stay.
-// A human reading "run with Mechanisms off" alone would read the flag as a way to take the floor
-// away, which is exactly what it is not, so the sentence is pinned rather than left to drift.
+// --bypass is the one flag whose help line is a CLAIM about what stays on, and since ADR 0076 the
+// answer has two halves: the advise and shape Reactions a user or the bench armed go, the Floor
+// guards and the structural reducers stay. A human reading "run with Reactions off" alone would
+// read the flag as a way to take the floor away, which is exactly what it is not, so the sentence
+// is pinned rather than left to drift.
 func TestRootCommandBypassHelpNamesWhatStaysOn(t *testing.T) {
 	t.Parallel()
 	flag := newRootCommand((&recordingLauncher{}).launch).Flags().Lookup("bypass")
 	if flag == nil {
 		t.Fatal("the root command registers no --bypass flag")
 	}
-	const want = "run with the lab Mechanisms off; Floor guards and structural reducers stay on (ADR 0071)"
+	const want = "run with advise and shape Reactions of user or bench origin off; " +
+		"Floor guards and structural reducers stay on (ADR 0076)"
 	if flag.Usage != want {
 		t.Errorf("--bypass help = %q; want %q", flag.Usage, want)
 	}

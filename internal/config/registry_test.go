@@ -313,6 +313,27 @@ func TestSkillSuggestionsRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 	}
 }
 
+// The `bypass` row's description is a CLAIM about what a session keeps when the flag is on, and it
+// is the sentence /settings renders beside the toggle — the one statement of Bypass a human meets
+// without reading a manual. Since ADR 0076 the answer has two halves: the advise and shape
+// Reactions a user or the bench armed go, the Floor guards and the structural reducers stay. It is
+// pinned word for word because a description that drifts into "Reactions off" would read as a way
+// to take the floor away, which is exactly what the flag is not.
+func TestBypassRowDescribesWhatStaysOn(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("bypass")
+	if !ok {
+		t.Fatal("no registry row for bypass; /settings could not show the key at all")
+	}
+
+	const want = "Run with advise and shape Reactions of user or bench origin off; " +
+		"Floor guards and structural reducers stay on."
+	if row.Desc != want {
+		t.Errorf("bypass Desc = %q, want %q", row.Desc, want)
+	}
+}
+
 // TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse pins each row's validate hook (Key.Validate
 // — the write path's guard) to one value it must refuse. It calls the hooks directly rather than through
 // SaveConfigSetting because three of them cannot be reached from there: an enum's vocabulary is checked

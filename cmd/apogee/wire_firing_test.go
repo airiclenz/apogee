@@ -105,22 +105,17 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		TotalSlots:    9,
 		EffortSupport: apiprovider.EffortSupport{Dialect: apiprovider.EffortDialectOpenAI},
 	}}
-	// The shipped catalogue is empty since v0.20.0 (ADR 0071), so the manual `mechanisms:` list a
-	// host can validate and hand over is the empty one.
-	var manual []apogee.MechanismID
-
 	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
-		opts:      opts,
-		entry:     entry,
-		apiKey:    "sk-handed-over",
-		roots:     roots,
-		manualIDs: manual,
-		confiner:  fenceableHost,
-		model:     "overlay-model",
-		mode:      domain.ModeAuto,
-		skills:    provider,
-		beat:      beats.discover,
-		recordID:  "2026-08-24T09-00-00-firing",
+		opts:     opts,
+		entry:    entry,
+		apiKey:   "sk-handed-over",
+		roots:    roots,
+		confiner: fenceableHost,
+		model:    "overlay-model",
+		mode:     domain.ModeAuto,
+		skills:   provider,
+		beat:     beats.discover,
+		recordID: "2026-08-24T09-00-00-firing",
 	})
 	if err != nil {
 		t.Fatalf("firingConfig: %v", err)
@@ -205,10 +200,6 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if !slices.Equal(cfg.ExtraReadRoots(), provider.ReadRoots()) {
 		t.Errorf("Config.ExtraReadRoots() = %v; want the provider's own resolved mounts %v", cfg.ExtraReadRoots(), provider.ReadRoots())
 	}
-	if !slices.Equal(cfg.EnableMechanisms, manual) {
-		t.Errorf("Config.EnableMechanisms = %v; want the validated manual list %v", cfg.EnableMechanisms, manual)
-	}
-
 	// The three bounds the BOUND entry carries outrank the top-level keys, and a pin answers the
 	// fan-out width without spending a round trip on a question already settled.
 	if cfg.Context.MaxContextTokens != int(entry.ContextWindow) {

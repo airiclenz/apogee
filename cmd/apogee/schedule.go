@@ -116,7 +116,7 @@ type scheduleWiring struct {
 // rather than the session's MCP-augmented one, and reaches no external server at all.
 func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Outcome, error) {
 	binding := w.binding()
-	opts, entry, manualIDs := w.live.firingSources(binding)
+	opts, entry := w.live.firingSources(binding)
 
 	// This Firing's own Hook Runner (ADR 0073), built from the `hooks:` list the SESSION is running
 	// now — the one firingSources hands over, which the config-watcher's reload arm keeps current
@@ -160,15 +160,14 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// The rebind notices are dropped — they are a launch's narration, and a Firing's narration is the
 	// session record it leaves behind.
 	cfg, routing, _, err := firingConfig(ctx, firingInputs{
-		opts:      opts,
-		entry:     entry,
-		apiKey:    binding.APIKey,
-		keys:      w.keys,
-		roots:     w.roots,
-		manualIDs: manualIDs,
-		confiner:  w.confiner,
-		mode:      f.Mode,
-		skills:    w.skills,
+		opts:     opts,
+		entry:    entry,
+		apiKey:   binding.APIKey,
+		keys:     w.keys,
+		roots:    w.roots,
+		confiner: w.confiner,
+		mode:     f.Mode,
+		skills:   w.skills,
 		// The session's OWN observation of the server it is bound to, handed over as the seam the
 		// composer would otherwise probe through, so no Firing raised here spends a round trip on
 		// facts this session is already holding (design call 4). The endpoint, model and key it is

@@ -153,19 +153,15 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		Global: config.PromptSource{Text: "the global prompt"},
 		Models: map[string]config.PromptSource{"model-b": {Text: "the model-b prompt"}},
 	}
-	manual := []apogee.MechanismID{"validate"}
-
 	tests := []struct {
 		name         string
 		opts         config.Options
-		manualIDs    []apogee.MechanismID
 		model        string
 		window       int
 		pinnedWindow int
 		outputCap    int
 		wantPrompt   string
 		wantWindow   int
-		wantEnable   func(t *testing.T, got []apogee.MechanismID)
 		// seedEntryKey writes one synthetic user-local Validated-set entry under this key before
 		// the rebind runs. The shipped roster is empty since v0.20.0 (ADR 0071), so a case that
 		// needs an entry to match brings its own — which is the only kind a user has now.
@@ -190,8 +186,8 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		},
 		{
 			// The Validated-set surface is re-consulted for the model being bound, not carried
-			// over from the old one: the notice names the entry keyed to THIS model. What the
-			// entry then meets is the catalogue, empty since v0.20.0 (ADR 0071), so nothing arms.
+			// over from the old one: the notice names the entry keyed to THIS model. What it
+			// resolves to arms nothing (ADR 0076 D11) — the notice IS the whole observable now.
 			name: "the validated-set surface is re-resolved for the new model",
 			opts: config.Options{
 				ValidatedSetsEnable: true,
@@ -201,12 +197,6 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 			model:        labKey,
 			window:       8192,
 			wantWindow:   8192,
-			wantEnable: func(t *testing.T, got []apogee.MechanismID) {
-				t.Helper()
-				if len(got) != 0 {
-					t.Errorf("EnableMechanisms = %v; the empty catalogue can assemble no set", got)
-				}
-			},
 			wantNotices: func(t *testing.T, got []string) {
 				t.Helper()
 				if !noticeContains(got, "skipping validated-set entry "+strconv.Quote(labKey)) {
@@ -215,21 +205,20 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 			},
 		},
 		{
-			name: "an explicit mechanisms: block is manual control and suppresses the matched set",
+			name: "an explicit mechanisms: block still suppresses the matched set",
 			opts: config.Options{
 				ValidatedSetsEnable: true,
 				ValidatedSetsAlias:  map[string]string{labKey: labKey},
 				Mechanisms:          map[string]bool{"lab_row": true},
 			},
-			manualIDs:    manual,
 			seedEntryKey: labKey,
 			model:        labKey,
 			window:       8192,
 			wantWindow:   8192,
-			wantEnable: func(t *testing.T, got []apogee.MechanismID) {
+			wantNotices: func(t *testing.T, got []string) {
 				t.Helper()
-				if !slices.Equal(got, manual) {
-					t.Errorf("EnableMechanisms = %v; want the manual list %v carried through untouched", got, manual)
+				if !noticeContains(got, "your explicit mechanisms: config takes precedence") {
+					t.Errorf("notices = %v; want the suppression line a manual block still earns", got)
 				}
 			},
 		},
@@ -275,7 +264,7 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 				writeLabEntry(t, roots.validated, tt.seedEntryKey, labSet)
 			}
 
-			spec, notices, err := rebindSpecFor(tt.opts, roots, tt.manualIDs, tt.model, tt.window,
+			spec, notices, err := rebindSpecFor(tt.opts, roots, tt.model, tt.window,
 				tt.pinnedWindow, tt.outputCap)
 			if err != nil {
 				t.Fatalf("rebindSpecFor: %v", err)
@@ -299,9 +288,6 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 				t.Errorf("spec.MaxContextTokens = %d; want %d (observed %d, pin %d)",
 					spec.MaxContextTokens, tt.wantWindow, tt.window, tt.pinnedWindow)
 			}
-			if tt.wantEnable != nil {
-				tt.wantEnable(t, spec.EnableMechanisms)
-			}
 			if tt.wantNotices != nil {
 				tt.wantNotices(t, notices)
 			}
@@ -315,10 +301,10 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 func TestRebindInputsOverlayTheBoundUpstream(t *testing.T) {
 	t.Parallel()
 	launchOpts := config.Options{Endpoint: "http://launch.invalid", APIKey: "launch-key"}
-	live := newLiveSettings(launchOpts, nil)
+	live := newLiveSettings(launchOpts)
 	bound := upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model", APIKey: "bound-key"}
 
-	base, _, _, _ := live.rebindInputs(launchOpts, bound)
+	base, _, _ := live.rebindInputs(launchOpts, bound)
 
 	if base.Endpoint != bound.Endpoint {
 		t.Errorf("endpoint = %q; want the bound %q, not the launch snapshot's", base.Endpoint, bound.Endpoint)
@@ -354,27 +340,23 @@ func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
 
 	// The launch snapshot names a server this session has since left.
 	launchOpts := config.Options{Endpoint: "http://launch.invalid", ValidatedSetsEnable: true}
-	live := newLiveSettings(launchOpts, nil)
+	live := newLiveSettings(launchOpts)
 
 	// The rebind closure the composition root wires, reconstructed as the other rebind tests do.
-	var spec apogee.RebindSpec
 	var notices []string
 	rebind := func(model string, window int, _ provider.EffortDialect) (tui.RebindResult, error) {
 		bound := upstreamBinding{Endpoint: boundEndpoint, Model: model}
-		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, bound)
-		got, ns, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
+		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, bound)
+		got, ns, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
-		spec, notices = got, ns
+		notices = ns
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
 
 	if _, err := rebind(labKey, 8192, provider.EffortDialectNone); err != nil {
 		t.Fatalf("rebind: %v", err)
-	}
-	if len(spec.EnableMechanisms) != 0 {
-		t.Fatalf("EnableMechanisms = %v; the empty catalogue can assemble no set", spec.EnableMechanisms)
 	}
 	if !noticeContains(notices, "skipping validated-set entry "+strconv.Quote(labKey)) {
 		t.Errorf("the entry was not carried past the offer gate, so the resolution missed the record "+
@@ -630,7 +612,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	wiring := launcherWiring{
 		sessionMover: sessionMover{
 			agent: agent, holder: holder, host: host,
-			live: newLiveSettings(config.Options{ContextWindow: 16384}, nil),
+			live: newLiveSettings(config.Options{ContextWindow: 16384}),
 			keys: config.NewKeyResolver(""),
 			caps: newParallelAgentsCap(widths),
 		},
@@ -1484,7 +1466,7 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	holder := newUpstreamHolder()
 	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
-	live := newLiveSettings(config.Options{ContextWindow: 16384}, nil)
+	live := newLiveSettings(config.Options{ContextWindow: 16384})
 	mover := sessionMover{agent: agent, holder: holder, host: host, live: live,
 		keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{})}
 
@@ -1523,13 +1505,13 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	// The pin outlives the move by more than one beat: the rebind that the new server's first
 	// observation drives resolves its window through this same holder, so it binds the entry's 65,536
 	// rather than the top-level 16,384 or whatever that server happens to advertise.
-	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the moved-to entry's 65536", pin)
 	}
 	// And so does the ceiling beside it, for the same span and the same reason: a rebind now re-states
 	// the reply cap on its spec, so a latch left behind on the retired entry's number would have the
 	// first beat after a move un-bound — or wrongly bound — a reply on the server just arrived at.
-	if _, _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != 8192 {
+	if _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != 8192 {
 		t.Errorf("the next rebind's ceiling = %d; want the moved-to entry's 8192", outputCap)
 	}
 
@@ -1548,12 +1530,12 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	if want := (tui.ServerSwitchResult{Endpoint: bare.Endpoint, HostAlias: "laptop", ContextWindow: 16384}); result != want {
 		t.Errorf("move = %+v; want %+v — the top-level pin survives a move", result, want)
 	}
-	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
+	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
 		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back", pin)
 	}
 	// The ceiling has no top-level key to fall back to (ADR 0046), so an entry that pins none hands
 	// the next rebind the 0 that means "derive it" — never the retired entry's 8,192.
-	if _, _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != 0 {
+	if _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != 0 {
 		t.Errorf("the next rebind's ceiling = %d; want 0 — the retired entry's pin must not follow", outputCap)
 	}
 }
@@ -1574,7 +1556,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 	holder := newUpstreamHolder()
 	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
-	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2}, nil)
+	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2})
 	mover := sessionMover{
 		agent: agent, holder: holder, host: &fakeStamper{}, live: live, keys: config.NewKeyResolver(""),
 		caps: newParallelAgentsCap(&parallelAgentsSpy{}),
@@ -1591,7 +1573,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 		t.Errorf("SwitchUpstream specs = %+v; want the first to carry the entry's own 0.35 share",
 			agent.specs)
 	}
-	if base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); base.ResponseReserve != 0.35 {
+	if base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); base.ResponseReserve != 0.35 {
 		t.Errorf("the next re-resolution's share = %v; want the moved-to entry's 0.35 — the latch went stale",
 			base.ResponseReserve)
 	}
@@ -1604,7 +1586,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 		t.Errorf("SwitchUpstream specs = %+v; want the second to fall back to the top-level 0.2, "+
 			"never the retired entry's 0.35", agent.specs)
 	}
-	if base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); base.ResponseReserve != 0.2 {
+	if base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); base.ResponseReserve != 0.2 {
 		t.Errorf("the next re-resolution's share = %v; want the top-level 0.2 back once the entry states none",
 			base.ResponseReserve)
 	}

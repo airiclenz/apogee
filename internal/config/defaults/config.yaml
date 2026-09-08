@@ -935,7 +935,8 @@ ui:
 # editor: code -w
 
 # =============================================================================
-# Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
+# Run with advise and shape Reactions of user or bench origin off; Floor guards and
+# structural reducers stay on (ADR 0076).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false
 

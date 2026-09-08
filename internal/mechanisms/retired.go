@@ -274,6 +274,23 @@ func ResolveEnabled(
 	return resolved, notices, nil
 }
 
+// RetiredNotices is ResolveEnabled over a roster that is now permanently EMPTY: it validates a
+// `mechanisms:` map, hands back the retired-ID lines it earns, and resolves NO ids at all, because
+// there is nothing left for the key to arm (ADR 0076 D11 — the block parses, notices, and drives
+// nothing). It is the door every Driver reaches this package through since the enable fold left the
+// wiring: the key survives so a saved configuration is never refused, and the notices survive so a
+// configuration still asking for a removed Mechanism says so once instead of going quiet.
+//
+// It is deliberately a call INTO ResolveEnabled rather than a second walk of the same map: the three
+// notice strings and the unknown-key error are the ones a user read yesterday, and a re-implementation
+// is how the two spellings of one sentence start to drift. A nil roster is exactly what the shipped
+// catalogue hands over today (KnownIDs over an empty table), so the unknown-key error still names
+// "(none)" as the known list.
+func RetiredNotices(enabled map[string]bool) (notices []string, err error) {
+	_, notices, err = ResolveEnabled(enabled, nil)
+	return notices, err
+}
+
 // knownIDList renders the catalogue ResolveEnabled was handed as a comma-separated string for its
 // unknown-key error, matching the engine's own unknown-ID error tail (an empty catalogue renders
 // "(none)" rather than a dangling tail). It takes the ID slice the caller passed, where knownList

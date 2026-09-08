@@ -422,12 +422,11 @@ func TestFiringConfigCarriesTheDelegationNamer(t *testing.T) {
 					AutoTitle: tc.autoTitle,
 					Servers:   []config.ServerEntry{entry},
 				},
-				entry:     entry,
-				apiKey:    "sk-firing",
-				roots:     firingRoots(t),
-				manualIDs: nil, // the shipped catalogue is empty (v0.20.0, ADR 0071): no key to spell out
-				confiner:  fenceableHost,
-				mode:      domain.ModePlan,
+				entry:    entry,
+				apiKey:   "sk-firing",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
 				// This Firing's own beat, handed over so the composition spends no round trip on a
 				// question this test does not ask: the fixture's server answers naming calls, not
 				// discovery.
@@ -499,12 +498,11 @@ func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 			Servers:         []config.ServerEntry{entry, gruntEntry},
 			SubAgentsServer: "grunt",
 		},
-		entry:     entry,
-		apiKey:    "sk-firing",
-		roots:     firingRoots(t),
-		manualIDs: nil, // the shipped catalogue is empty (v0.20.0, ADR 0071): no key to spell out
-		confiner:  fenceableHost,
-		mode:      domain.ModePlan,
+		entry:    entry,
+		apiKey:   "sk-firing",
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
 		// The run's own beat, handed over for the reason above: this fixture's servers answer naming
 		// calls, and the Sub-agent server's separate observation is the stub below.
 		beat: func(context.Context, string, string, string) heartbeat.Beat {

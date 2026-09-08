@@ -178,11 +178,13 @@ func startupSetDecision(opts config.Options, userDir, probeDir string) setDecisi
 // (ADR 0071) — and a bench arm can never be contaminated by a matching set: the guards are
 // identical in every arm, Bypass included.
 //
-// It returns the enable set to fold into Config.EnableMechanisms (nil when nothing
-// applies), the per-session stderr notices to print, and an error ONLY for the one loud
-// case: a dangling alias, which is the user's own config referencing nothing (the ADR
-// 0015 removed-ID posture). Every data defect is soft — a skip notice, never a blocked
-// startup — because auto-enable is a convenience layer above a safe floor.
+// It returns the set an applying entry names (nil when nothing applies), the per-session
+// stderr notices to print, and an error ONLY for the one loud case: a dangling alias,
+// which is the user's own config referencing nothing (the ADR 0015 removed-ID posture).
+// Every data defect is soft — a skip notice, never a blocked startup — because auto-enable
+// is a convenience layer above a safe floor. The set itself now arms NOTHING: no caller
+// folds it anywhere since the Reaction core landed (ADR 0076 D11), so this surface runs
+// for its notices alone until stage 2 re-homes or removes it.
 //
 // The decision itself is startupSetDecision's; this function only renders it in the
 // startup voice and enacts the one applying case.

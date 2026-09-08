@@ -45,9 +45,6 @@ type firingInputs struct {
 	// the workspace the file tools are fenced to. Resolving them stays the Driver's, because the
 	// workspace is exactly the root a Driver decides (the daemon's is the schedule entry's).
 	roots stateRoots
-	// manualIDs are the validated `mechanisms:` keys this host spelled out. Validation stays the
-	// Driver's for the same reason: it reports a typo'd key at the surface the human typed it on.
-	manualIDs []apogee.MechanismID
 	// confiner is the OS confinement backend the run is fenced by — the session's own, so an Auto
 	// Firing sits in the same box an Auto session would. Whether this host may run Auto unattended
 	// at ALL is the eligibility gate, which belongs to the surface that offered the mode (ADR 0033
@@ -165,7 +162,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	pinnedWindow := config.ResolveContextWindow(int(in.entry.ContextWindow), in.opts.ContextWindow)
 	specOpts.ContextWindow = pinnedWindow
 	specOpts.ResponseReserve = config.ResolveResponseReserve(in.entry.ResponseReserve, in.opts.ResponseReserve)
-	spec, notices, err := rebindSpecFor(specOpts, in.roots, in.manualIDs, model, 0, pinnedWindow, in.entry.MaxOutputTokens)
+	spec, notices, err := rebindSpecFor(specOpts, in.roots, model, 0, pinnedWindow, in.entry.MaxOutputTokens)
 	if err != nil {
 		return apogee.Config{}, firingRouting{}, nil, err
 	}
@@ -344,7 +341,6 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		// reads the `shipped:<id>` address its own injected block announces exactly as a session
 		// does (ADR 0031's Driver parity).
 		VirtualReadRoots: skillProvider.VirtualReadRoots,
-		EnableMechanisms: spec.EnableMechanisms,
 		ParallelAgents:   config.ResolveParallelAgents(in.entry.ParallelAgents, slots),
 		Context: apogee.ContextConfig{
 			MaxContextTokens: spec.MaxContextTokens,

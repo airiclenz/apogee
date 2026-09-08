@@ -160,7 +160,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	}
 	w := scheduleWiring{
 		roots: roots,
-		live:  newLiveSettings(launchOpts, nil),
+		live:  newLiveSettings(launchOpts),
 		// The binding the session has MOVED to since launch (a /server switch, a rebind). The Firing
 		// must follow it rather than the launch values the holder was seeded with.
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: url, Model: "bound-model"} },
@@ -224,15 +224,14 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	// launch snapshot's `http://launch.invalid` the probe record is missed, the identity is name-only,
 	// and the very same entry earns the low-confidence OFFER line instead — so the pair below is the
 	// two endpoints told apart, not a value read back from the field that was written from it.
-	opts, entry, manualIDs := w.live.firingSources(w.binding())
+	opts, entry := w.live.firingSources(w.binding())
 	_, _, notices, err := firingConfig(context.Background(), firingInputs{
-		opts:      opts,
-		entry:     entry,
-		roots:     roots,
-		manualIDs: manualIDs,
-		mode:      domain.ModePlan,
-		beat:      (&stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}).discover,
-		recordID:  "sch-1-abcd-resolution",
+		opts:     opts,
+		entry:    entry,
+		roots:    roots,
+		mode:     domain.ModePlan,
+		beat:     (&stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}).discover,
+		recordID: "sch-1-abcd-resolution",
 	})
 	if err != nil {
 		t.Fatalf("firingConfig: %v", err)
@@ -265,7 +264,7 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 	}}
 	w := scheduleWiring{
 		roots: roots,
-		live:  newLiveSettings(launchOpts, nil),
+		live:  newLiveSettings(launchOpts),
 		binding: func() upstreamBinding {
 			return upstreamBinding{Endpoint: "http://unused.invalid", Model: "bound-model"}
 		},
@@ -298,7 +297,7 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 
 	w := scheduleWiring{
 		roots:   roots,
-		live:    newLiveSettings(config.Options{}, nil),
+		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
 		width:   func() int { return 6 },
 	}
@@ -340,7 +339,7 @@ func TestScheduleFiringReportsWhatTheRunCost(t *testing.T) {
 
 	w := scheduleWiring{
 		roots:   roots,
-		live:    newLiveSettings(config.Options{}, nil),
+		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
 		width:   func() int { return 1 },
 	}
@@ -372,7 +371,7 @@ func TestScheduleFiringReportsNoSpendWhenThereWasNone(t *testing.T) {
 
 	w := scheduleWiring{
 		roots:   roots,
-		live:    newLiveSettings(config.Options{}, nil),
+		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
 		width:   func() int { return 1 },
 	}
@@ -424,7 +423,7 @@ func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 
 		w := scheduleWiring{
 			roots:   roots,
-			live:    newLiveSettings(config.Options{}, nil),
+			live:    newLiveSettings(config.Options{}),
 			binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
 			width:   func() int { return 1 },
 		}
@@ -492,7 +491,7 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 
 	w := scheduleWiring{
 		roots:   roots,
-		live:    newLiveSettings(config.Options{}, nil),
+		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
 		width:   func() int { return 1 },
 	}
@@ -560,7 +559,7 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 			// The session as it LAUNCHED: bound to an entry pinning launchCap, which is what the
 			// settings holder's own latch was seeded with.
 			launchOpts := config.Options{HostAlias: "launch", StartupMaxOutputTokens: launchCap}
-			live := newLiveSettings(launchOpts, nil)
+			live := newLiveSettings(launchOpts)
 			// ...and the move: the one call `/server` makes once the engine's own switch committed
 			// (sessionMover.move), which is what makes the moved-onto entry's pins this session's.
 			live.followEntry(tt.moved)
@@ -640,7 +639,7 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 			// settings holder's own latch was seeded with. The top-level key states nothing, so the
 			// entry the session moves onto is the only thing that can answer.
 			launchOpts := config.Options{HostAlias: "launch", StartupResponseReserve: launchShare}
-			live := newLiveSettings(launchOpts, nil)
+			live := newLiveSettings(launchOpts)
 			// ...and the move `/server` makes once the engine's own switch committed (sessionMover.move).
 			live.followEntry(tt.moved)
 
@@ -713,7 +712,7 @@ func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	live := newLiveSettings(launchOpts, nil)
+	live := newLiveSettings(launchOpts)
 	set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{
 		disabled: launchOpts.ToolsDisabled, denyHosts: launchOpts.URLDenyHosts,
 	}, func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
@@ -788,7 +787,7 @@ func TestScheduleFiringKeepsTheBootFenceAfterConfineOff(t *testing.T) {
 	t.Cleanup(func() { runOnce = prevRunner })
 
 	// The session as it LAUNCHED: fenced, which is the value the assertion below wants back.
-	live := newLiveSettings(config.Options{ConfineToWorkspace: true}, nil)
+	live := newLiveSettings(config.Options{ConfineToWorkspace: true})
 
 	// The human's `/confine off`, on the live engine, exactly as the command drives it.
 	engine := newLateEngine(domain.ModeAskBefore, true)
@@ -844,7 +843,7 @@ func TestScheduleFiringSharesTheSessionsSkillsProvider(t *testing.T) {
 	provider := skills.NewProvider(skills.Sources{Home: t.TempDir(), Workspace: t.TempDir()})
 	w := scheduleWiring{
 		roots:   roots,
-		live:    newLiveSettings(config.Options{}, nil),
+		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
 		width:   func() int { return 1 },
 		skills:  provider,
@@ -939,7 +938,7 @@ func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
 	store := session.NewStore(roots.sessions)
 	w := scheduleWiring{
 		roots:   roots,
-		live:    newLiveSettings(config.Options{}, nil),
+		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },
 		width:   func() int { return 1 },
 		store:   store,
@@ -1329,7 +1328,7 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 	runOnce, discoverBeat = stub.once, beats.discover
 	t.Cleanup(func() { runOnce, discoverBeat = prevRunner, prevBeat })
 
-	live := newLiveSettings(config.Options{}, nil)
+	live := newLiveSettings(config.Options{})
 	live.observe(32768, provider.EffortDialectOpenAI)
 	w := scheduleWiring{
 		roots:   roots,
@@ -1383,7 +1382,7 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prevRunner })
 
-	live := newLiveSettings(config.Options{Hooks: []hooks.Hook{recorder("boot", bootMarker)}}, nil)
+	live := newLiveSettings(config.Options{Hooks: []hooks.Hook{recorder("boot", bootMarker)}})
 	live.setHooks([]hooks.Hook{recorder("reloaded", reloadedMarker)})
 
 	w := scheduleWiring{

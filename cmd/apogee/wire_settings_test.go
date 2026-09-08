@@ -246,7 +246,7 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			live := newLiveSettings(config.Options{ContextFiles: names}, nil)
+			live := newLiveSettings(config.Options{ContextFiles: names})
 			note, err := applySettingFor(settingsApplier{engine: spy, live: live})(tt.key, tt.value)
 			if err != nil {
 				t.Fatalf("apply %s=%s: %v", tt.key, tt.value, err)
@@ -267,7 +267,7 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{}, nil) // a session that launched with the block off
+	live := newLiveSettings(config.Options{}) // a session that launched with the block off
 	apply := applySettingFor(settingsApplier{engine: spy, live: live})
 
 	if _, err := apply("context-files.enable", "true"); err != nil {
@@ -322,7 +322,7 @@ func TestApplySettingFloorGuardKeysCarryTheOtherFiveGates(t *testing.T) {
 		ToolLoopBreaker:       true,
 		ToolResultCap:         true,
 		ReadCache:             true,
-	}, nil)
+	})
 	apply := applySettingFor(settingsApplier{engine: spy, live: live})
 
 	if _, err := apply("read-cache", "false"); err != nil {
@@ -587,7 +587,7 @@ func fullyComposedApplier(t *testing.T) settingsApplier {
 
 	return settingsApplier{
 		engine:     &applySettingSpy{},
-		live:       newLiveSettings(config.Options{}, nil),
+		live:       newLiveSettings(config.Options{}),
 		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
 		rebind:     (&rebindProbe{}).rebind,
 		configPath: path,
@@ -614,7 +614,7 @@ func fullyComposedApplier(t *testing.T) settingsApplier {
 func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{}, nil)
+	live := newLiveSettings(config.Options{})
 	apply := applySettingFor(settingsApplier{engine: spy, live: live})
 
 	if live.remember() {
@@ -665,7 +665,7 @@ func TestApplySettingSubAgentsChoiceSwapsTheSeatGate(t *testing.T) {
 	workspace := t.TempDir()
 	var built []bool
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed}, nil)
+	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed})
 	set := newLiveTools(tools.NewDefaultRegistry(workspace), toolSetSpec{},
 		func(spec toolSetSpec) *apogee.ToolRegistry {
 			built = append(built, spec.seatChoice)
@@ -746,7 +746,7 @@ func TestApplySettingSubAgentsChoiceSwapRefusalKeepsTheGate(t *testing.T) {
 	t.Parallel()
 	old := apogee.NewToolRegistry()
 	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
-	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed}, nil)
+	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed})
 	set := newLiveTools(old, toolSetSpec{}, func(spec toolSetSpec) *apogee.ToolRegistry {
 		return tools.NewDefaultRegistryWithHost(t.TempDir(),
 			tools.HostTools{SubAgentSeatChoice: spec.seatChoice})
@@ -965,7 +965,7 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 			if err := os.WriteFile(path, []byte(serversFile), 0o600); err != nil {
 				t.Fatalf("write config: %v", err)
 			}
-			live := newLiveSettings(boot, nil)
+			live := newLiveSettings(boot)
 			set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{
 				endpoint:   boot.WebSearchEndpoint,
 				disabled:   boot.ToolsDisabled,
@@ -1061,7 +1061,7 @@ func TestApplySettingRefusesEveryKeyItCannotReach(t *testing.T) {
 // beat reported, which is what keeps `0` meaning discover-live (ADR 0024) rather than "unknown".
 func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(config.Options{ContextWindow: 4096}, nil)
+	live := newLiveSettings(config.Options{ContextWindow: 4096})
 	live.observe(8192, provider.EffortDialectNone) // what the last landed beat could name about the server's own window
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
@@ -1105,7 +1105,7 @@ func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 // it in — and the row is told nothing, because nothing failed.
 func TestApplySettingRideIsSilentBeforeAServerIsBound(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(config.Options{}, nil)
+	live := newLiveSettings(config.Options{})
 	probe := &rebindProbe{}
 	apply := applySettingFor(settingsApplier{
 		engine:  &applySettingSpy{},
@@ -1131,7 +1131,7 @@ func TestApplySettingRideIsSilentBeforeAServerIsBound(t *testing.T) {
 // taken it yet. The holder keeps the edit, which is what makes a re-committed edit a retry.
 func TestApplySettingReportsARefusedRebind(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(config.Options{}, nil)
+	live := newLiveSettings(config.Options{})
 	probe := &rebindProbe{err: errors.New("input pending")}
 	apply := applySettingFor(settingsApplier{
 		engine:  &applySettingSpy{},
@@ -1163,14 +1163,14 @@ func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
 	launchOpts := config.Options{SystemPrompt: config.SystemPromptSettings{
 		Global: config.PromptSource{Text: "the launch prompt"},
 	}}
-	live := newLiveSettings(launchOpts, nil)
+	live := newLiveSettings(launchOpts)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so what the
 	// dispatcher installed there is what the spec carries.
 	var spec apogee.RebindSpec
 	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
-		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: "bound-model"})
-		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
+		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: "bound-model"})
+		got, _, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
@@ -2052,7 +2052,7 @@ func TestApplySettingServersReResolvesTheParallelAgentsCap(t *testing.T) {
 
 	apply := applySettingFor(settingsApplier{
 		engine:     &applySettingSpy{},
-		live:       newLiveSettings(config.Options{}, nil),
+		live:       newLiveSettings(config.Options{}),
 		configPath: path,
 		caps:       caps,
 	})
@@ -2094,7 +2094,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	// top-level 16,384.
 	live := newLiveSettings(config.Options{
 		ContextWindow: 16384, HostAlias: "here", StartupContextWindow: 32768,
-	}, nil)
+	})
 	if got := live.window(); got != 32768 {
 		t.Fatalf("the bound window = %d; want the startup entry's 32768", got)
 	}
@@ -2104,7 +2104,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers: %v", err)
 	}
-	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the edited 65536 — the latch went stale", pin)
 	}
 
@@ -2112,7 +2112,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers with the pin removed: %v", err)
 	}
-	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
+	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
 		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back once the entry pins nothing", pin)
 	}
 
@@ -2125,7 +2125,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers naming another entry: %v", err)
 	}
-	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the bound entry's 65536 kept", pin)
 	}
 }
@@ -2156,7 +2156,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) 
 	// The holder as a startup bind onto `here` leaves it: the entry's own 32,768 over the top-level
 	// 16,384, and a beat that has since reported what the server itself advertises.
 	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupContextWindow: 32768}
-	live := newLiveSettings(launchOpts, nil)
+	live := newLiveSettings(launchOpts)
 	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec
@@ -2165,8 +2165,8 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) 
 	drives := 0
 	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
-		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
-		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
+		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		got, _, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
@@ -2254,7 +2254,7 @@ func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T
 			}
 			live := newLiveSettings(config.Options{
 				ContextWindow: 16384, HostAlias: "here", StartupContextWindow: tt.entryPin,
-			}, nil)
+			})
 			probe := &rebindProbe{}
 			apply := applySettingFor(settingsApplier{
 				engine:     &applySettingSpy{},
@@ -2279,7 +2279,7 @@ func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T
 				t.Errorf("installed list = %v, want %v: the list applies whether or not a ride does",
 					names, tt.wantNames)
 			}
-			if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != tt.wantPin {
+			if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != tt.wantPin {
 				t.Errorf("the next rebind's pin = %d; want the unchanged %d", pin, tt.wantPin)
 			}
 		})
@@ -2313,7 +2313,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysReplyCap(t *testing.T
 	// The holder as a startup bind onto `here` leaves it: that entry's own 2,048-token ceiling, the
 	// top-level window key, and a beat that has since reported what the server advertises.
 	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupMaxOutputTokens: 2048}
-	live := newLiveSettings(launchOpts, nil)
+	live := newLiveSettings(launchOpts)
 	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec it
@@ -2322,8 +2322,8 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysReplyCap(t *testing.T
 	drives := 0
 	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
-		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
-		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
+		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		got, _, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
@@ -2416,7 +2416,7 @@ func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.
 			}
 			live := newLiveSettings(config.Options{
 				HostAlias: "here", StartupMaxOutputTokens: tt.entryCap,
-			}, nil)
+			})
 			probe := &rebindProbe{}
 			apply := applySettingFor(settingsApplier{
 				engine:     &applySettingSpy{},
@@ -2436,7 +2436,7 @@ func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.
 			if len(live.serverList()) == 0 {
 				t.Error("the re-read list was not installed: the list applies whether or not a ride does")
 			}
-			if _, _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != tt.wantCap {
+			if _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != tt.wantCap {
 				t.Errorf("the next rebind's ceiling = %d; want the unchanged %d", outputCap, tt.wantCap)
 			}
 		})
@@ -2470,7 +2470,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysResponseReserve(t *te
 	// The holder as a startup bind onto `here` leaves it: that entry's own quarter-window share, the
 	// top-level window key, and a beat that has since reported what the server advertises.
 	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupResponseReserve: 0.25}
-	live := newLiveSettings(launchOpts, nil)
+	live := newLiveSettings(launchOpts)
 	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec it
@@ -2479,8 +2479,8 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysResponseReserve(t *te
 	drives := 0
 	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
-		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
-		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
+		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		got, _, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
@@ -2575,7 +2575,7 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 			}
 			live := newLiveSettings(config.Options{
 				HostAlias: "here", StartupResponseReserve: tt.entryReserve,
-			}, nil)
+			})
 			probe := &rebindProbe{}
 			apply := applySettingFor(settingsApplier{
 				engine:     &applySettingSpy{},
@@ -2595,7 +2595,7 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 			if len(live.serverList()) == 0 {
 				t.Error("the re-read list was not installed: the list applies whether or not a ride does")
 			}
-			base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+			base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
 			if base.ResponseReserve != tt.wantReserve {
 				t.Errorf("the next rebind's share = %v; want the unchanged %v",
 					base.ResponseReserve, tt.wantReserve)
@@ -2618,7 +2618,7 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *testing.T) {
 	t.Parallel()
 
-	live := newLiveSettings(config.Options{HostAlias: "here", StartupResponseReserve: 0.25}, nil)
+	live := newLiveSettings(config.Options{HostAlias: "here", StartupResponseReserve: 0.25})
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
 	apply := applySettingFor(settingsApplier{
@@ -2642,7 +2642,7 @@ func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *t
 	if spy.drove() != 0 {
 		t.Errorf("a start-up-only key still drove an engine seam: %+v", spy)
 	}
-	base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+	base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
 	if base.ResponseReserve != 0.25 {
 		t.Errorf("the next rebind's share = %v; want the launch share 0.25, which no write can move",
 			base.ResponseReserve)
@@ -2735,7 +2735,7 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 			live := newLiveSettings(config.Options{
 				SystemPrompt:     c.prompt,
 				UseDefaultPrompt: c.useDefault,
-			}, nil)
+			})
 
 			got := live.promptEditorSeed(bound, t.TempDir())
 
@@ -2747,7 +2747,7 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 
 	// The answer is the SESSION's, not the launch snapshot's: a prompt installed mid-session stops
 	// the seeding from the moment it lands, which is what makes the row feed safe to re-ask per paint.
-	live := newLiveSettings(config.Options{UseDefaultPrompt: true}, nil)
+	live := newLiveSettings(config.Options{UseDefaultPrompt: true})
 	live.setSystemPrompt(config.SystemPromptSettings{Global: config.PromptSource{File: "prompt.md"}}, true)
 	if got := live.promptEditorSeed(bound, t.TempDir()); got != "" {
 		t.Errorf("after a mid-session prompt file the seed is %q; want none", got)
@@ -2755,7 +2755,7 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 
 	// Layers installed mid-session stop it for the layers' own reason: the run stops sending the
 	// default the moment the first one lands.
-	layered := newLiveSettings(config.Options{UseDefaultPrompt: true}, nil)
+	layered := newLiveSettings(config.Options{UseDefaultPrompt: true})
 	layered.setSystemPrompt(config.SystemPromptSettings{
 		Layers: []config.SystemPromptLayer{{Text: "a layer\n"}},
 	}, true)
@@ -2776,7 +2776,7 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 			Models: map[string]config.PromptSource{bound: {File: "prompt.md"}},
 		},
 		UseDefaultPrompt: true,
-	}, nil)
+	})
 	if got := perModel.promptEditorSeed(bound, home); got != "" {
 		t.Errorf("a per-model prompt file was read on the render path and seeded %q; want none", got)
 	}
@@ -2820,7 +2820,7 @@ func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
 		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
 		{Name: "other-grunt", Endpoint: "http://127.0.0.1:3333"},
 	}
-	live := newLiveSettings(config.Options{Servers: entries, SubAgentsServer: "grunt"}, nil)
+	live := newLiveSettings(config.Options{Servers: entries, SubAgentsServer: "grunt"})
 	wiring, err := newDelegationWiring(
 		"grunt", staticServerList(entries), validCfg(t), &delegationSpy{}, noProfiles, nil,
 		config.NewKeyResolver(""))
@@ -2829,14 +2829,14 @@ func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
 	}
 	host := delegationHost{w: &rootWiring{live: live, delegation: wiring}}
 
-	if opts, _, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "grunt" {
+	if opts, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "grunt" {
 		t.Fatalf("firingSources at launch names %q; want the key the file carried", opts.SubAgentsServer)
 	}
 
 	if err := host.Retarget("other-grunt"); err != nil {
 		t.Fatalf("Retarget: %v", err)
 	}
-	if opts, _, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "other-grunt" {
+	if opts, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "other-grunt" {
 		t.Errorf("firingSources after the retarget names %q; want the entry the pick moved to — a Firing "+
 			"raised now would delegate to the box the human just moved off", opts.SubAgentsServer)
 	}
@@ -2846,7 +2846,7 @@ func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
 	if err := host.Retarget(""); err != nil {
 		t.Fatalf("Retarget to the opt-out: %v", err)
 	}
-	if opts, _, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "" {
+	if opts, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "" {
 		t.Errorf("firingSources after the opt-out names %q; want no Sub-agent server at all", opts.SubAgentsServer)
 	}
 }
@@ -2940,7 +2940,7 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	live := newLiveSettings(config.Options{Hooks: boot}, nil)
+	live := newLiveSettings(config.Options{Hooks: boot})
 	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
 	// The value is not read for this key — a list of blocks is a shape no single string spells — so
 	// what the pane persisted is the row's own summary.
@@ -2986,7 +2986,7 @@ func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) 
 		t.Fatalf("write config: %v", err)
 	}
 
-	live := newLiveSettings(config.Options{Hooks: boot}, nil)
+	live := newLiveSettings(config.Options{Hooks: boot})
 	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
 	if _, err := apply("hooks", "1 hook"); err == nil {
 		t.Fatal("a hooks: block naming an unknown event applied silently; want a refusal")
@@ -3005,7 +3005,7 @@ func TestApplySettingHooksRefusesWithoutTheRunnerOrTheHolder(t *testing.T) {
 	if !ok {
 		t.Fatal("the settings table has no `hooks` arm; a hooks: edit could never reach the session")
 	}
-	if entry.reaches(settingsApplier{live: newLiveSettings(config.Options{}, nil)}) {
+	if entry.reaches(settingsApplier{live: newLiveSettings(config.Options{})}) {
 		t.Error("the arm claims to reach a Driver with no Runner")
 	}
 	if entry.reaches(settingsApplier{hooks: &hooks.Runner{}}) {

@@ -431,6 +431,98 @@ func TestResolveEnabledUnknownKeyReturnsNoNotices(t *testing.T) {
 	}
 }
 
+// RetiredNotices is the door every Driver reaches this package through now that the `mechanisms:`
+// key arms nothing (ADR 0076 D11), so the three notice strings a user actually reads are pinned
+// here against literals rather than against RetiredRelease lookups: the whole point of the key
+// surviving is that yesterday's configuration gets yesterday's sentence, and a literal is the only
+// assertion that catches a reworded one.
+func TestRetiredNoticesArePinnedWordForWord(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		enabled map[string]bool
+		want    []string
+	}{
+		{
+			name:    "retired outright and asked for",
+			enabled: map[string]bool{"grammar": true},
+			want: []string{
+				`apogee: mechanism "grammar" was retired in v0.18.7 and is ignored; remove it from mechanisms:`,
+			},
+		},
+		{
+			name:    "promoted and asked for",
+			enabled: map[string]bool{"validate": true},
+			want: []string{
+				`apogee: mechanism "validate" is the "tool-call-repair" floor guard since v0.20.0 and is on by default; remove it from mechanisms:`,
+			},
+		},
+		{
+			name:    "promoted and switched off",
+			enabled: map[string]bool{"validate": false},
+			want: []string{
+				`apogee: mechanism "validate" is the "tool-call-repair" floor guard since v0.20.0; ` +
+					`"validate: false" under mechanisms: no longer turns it off — set tool-call-repair: false at the top level`,
+			},
+		},
+		{
+			name:    "retired outright and switched off earns no line",
+			enabled: map[string]bool{"grammar": false},
+			want:    nil,
+		},
+		{
+			name:    "every asked-for id speaks, in sorted spelling",
+			enabled: map[string]bool{"validate": true, "grammar": true},
+			want: []string{
+				`apogee: mechanism "grammar" was retired in v0.18.7 and is ignored; remove it from mechanisms:`,
+				`apogee: mechanism "validate" is the "tool-call-repair" floor guard since v0.20.0 and is on by default; remove it from mechanisms:`,
+			},
+		},
+		{
+			name:    "no block at all",
+			enabled: nil,
+			want:    nil,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := RetiredNotices(tt.enabled)
+
+			if err != nil {
+				t.Fatalf("RetiredNotices(%v): %v", tt.enabled, err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("RetiredNotices(%v) = %q, want %q", tt.enabled, got, tt.want)
+			}
+		})
+	}
+}
+
+// A key that is neither live nor retired is still a loud refusal, and with the roster now
+// permanently empty the error names "(none)" as the known list — the exact tail the empty shipped
+// catalogue already printed through ResolveEnabled, so a typo'd key fails startup with the sentence
+// it failed with before the enable fold left the wiring.
+func TestRetiredNoticesUnknownKeyErrorNamesAnEmptyRoster(t *testing.T) {
+	t.Parallel()
+
+	notices, err := RetiredNotices(map[string]bool{"grammar": true, "nope": true})
+
+	if err == nil {
+		t.Fatal("an unknown key beside a retired one: want an error, got nil")
+	}
+	const want = `apogee: unknown mechanism "nope"; known: (none)`
+	if err.Error() != want {
+		t.Errorf("RetiredNotices error = %q, want %q", err, want)
+	}
+	if notices != nil {
+		t.Errorf("RetiredNotices notices = %q on a refused block, want none", notices)
+	}
+}
+
 // captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to
 // stderr. The caller must NOT be a parallel test: os.Stderr is a process-global, so this is only
 // race-free during the sequential test phase (the internal/library and cmd/apogee precedent).

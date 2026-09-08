@@ -335,7 +335,8 @@ func newHeadlessCommand() *cobra.Command {
 	flags.StringVar(&opts.ConfigDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
 	flags.BoolVar(&opts.Bypass, "bypass", false,
-		"run with the lab Mechanisms off; Floor guards and structural reducers stay on (ADR 0071)")
+		"run with advise and shape Reactions of user or bench origin off; "+
+			"Floor guards and structural reducers stay on (ADR 0076)")
 	flags.BoolVar(&noSave, "no-save", false,
 		"run the prompt and print the answer, but record no session")
 	flags.StringVar(&outputFormat, "format", formatText,
@@ -687,9 +688,10 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	}
 
 	// Every `mechanisms:` key is validated here — enabled AND disabled — exactly as startup
-	// validates them: the engine only ever sees the enabled IDs, so a typo'd disabled key would
-	// otherwise never be reported at all (ADR 0015 §1).
-	manualIDs, retiredNotices, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
+	// validates them: the key arms nothing since the Reaction core landed (ADR 0076 D11), but a
+	// typo'd key is still a loud refusal at the surface the human typed it on, whichever value it
+	// carries.
+	retiredNotices, err := mechanisms.RetiredNotices(opts.Mechanisms)
 	if err != nil {
 		return run.Result{}, notStarted(err)
 	}
@@ -728,14 +730,13 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// It goes to stderr, where it cannot contaminate the answer.
 	entry := startupEntry(*opts)
 	cfg, routing, notices, err := firingConfig(cmd.Context(), firingInputs{
-		opts:      *opts,
-		entry:     entry,
-		roots:     roots,
-		manualIDs: manualIDs,
-		confiner:  confiner,
-		mode:      mode,
-		recordID:  recordID,
-		hooks:     hookRunner,
+		opts:     *opts,
+		entry:    entry,
+		roots:    roots,
+		confiner: confiner,
+		mode:     mode,
+		recordID: recordID,
+		hooks:    hookRunner,
 	})
 	if err != nil {
 		return run.Result{}, notStarted(err)

@@ -283,7 +283,7 @@ func promptSeedFor(t *testing.T, opts config.Options) func() string {
 	t.Helper()
 
 	home := t.TempDir()
-	live := newLiveSettings(opts, nil)
+	live := newLiveSettings(opts)
 	return func() string { return live.promptEditorSeed(opts.Model, home) }
 }
 

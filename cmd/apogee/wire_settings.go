@@ -154,10 +154,6 @@ type liveSettings struct {
 	// the entry the process launched with however often the human re-pointed the key.
 	subAgentsServer string
 
-	// manualIDs is the validated enabled half of the `mechanisms:` block — an INPUT to the per-model
-	// resolution rather than a value the engine keeps, which is why it is held here at all.
-	manualIDs []apogee.MechanismID
-
 	// validatedEnable and validatedAlias are the `validated-sets:` block's own two keys — the surface's
 	// off-switch and its carry-over map — the other inputs resolveValidatedSet keys a match on.
 	validatedEnable bool
@@ -253,14 +249,12 @@ type liveSettings struct {
 	undoSnapshots bool
 }
 
-// newLiveSettings seeds the holder with what THIS run resolved. manualIDs is passed in rather than
-// re-derived because runRoot has already validated the block against the catalogue and holds the
-// answer — deriving it twice is how the two spellings of the same list start to drift.
+// newLiveSettings seeds the holder with what THIS run resolved.
 //
 // The context-file PAIR is seeded from the resolved name list, which is the very read the pane's own
 // two rows are formatted from (settingsrows.go): the two spellings of "off" collapse into an empty
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
-func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveSettings {
+func newLiveSettings(opts config.Options) *liveSettings {
 	return &liveSettings{
 		boot:          opts,
 		pinnedWindow:  opts.ContextWindow,
@@ -279,7 +273,6 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		servers:            opts.Servers,
 		seatChoice:         opts.SubAgentsChoice,
 		subAgentsServer:    opts.SubAgentsServer,
-		manualIDs:          manualIDs,
 		validatedEnable:    opts.ValidatedSetsEnable,
 		validatedAlias:     opts.ValidatedSetsAlias,
 		systemPrompt:       opts.SystemPrompt,
@@ -911,11 +904,11 @@ func (s *liveSettings) optionsLocked() config.Options {
 }
 
 // firingSources hands out everything a Firing raised inside this session composes from that lives in
-// this holder: the live Options (options above), the `servers:` entry the session is bound to as the
-// holder latches it, and the validated `mechanisms:` ids the per-model resolution arms. Three values
-// from one call under ONE read lock, for rebindInputs' reason — read separately they could describe
-// two different instants of a configuration the human is editing as the Scheduler reads it, and a
-// run composed half from one instant and half from the next is a configuration nobody ever had.
+// this holder: the live Options (options above) and the `servers:` entry the session is bound to as
+// the holder latches it. Both from one call under ONE read lock, for rebindInputs' reason — read
+// separately they could describe two different instants of a configuration the human is editing as
+// the Scheduler reads it, and a run composed half from one instant and half from the next is a
+// configuration nobody ever had.
 //
 // The entry is BUILT rather than looked up. The wire is the Upstream binding's, which this holder
 // deliberately does not own (options above), and the four per-entry pins are the ones followEntry
@@ -927,7 +920,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 // instead (schedule.go); repeating the pin here would give the composer two answers to one question.
 // The key SOURCE fields are left empty for the mirror-image reason: the session already resolved its
 // key, and a Firing is handed that value rather than asking the source a second time.
-func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, config.ServerEntry, []apogee.MechanismID) {
+func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, config.ServerEntry) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	entry := config.ServerEntry{
@@ -939,7 +932,7 @@ func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, con
 		MaxOutputTokens: s.entryCap,
 		ResponseReserve: s.entryReserve,
 	}
-	return s.optionsLocked(), entry, s.manualIDs
+	return s.optionsLocked(), entry
 }
 
 // rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the
@@ -956,7 +949,7 @@ func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, con
 // input that is keyed on the endpoint — the probe record behind the identity ladder's middle rung,
 // and so the Validated-set decision above it — would be resolved against a server the session left.
 // Both live callers run only after the startup bind, so the snapshot is always a real binding.
-func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) (config.Options, []apogee.MechanismID, int, int) {
+func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) (config.Options, int, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	base.Endpoint = bound.Endpoint
@@ -983,7 +976,7 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	// travels beside the window because the spec the caller builds carries it beside the window, and
 	// it is handed back rather than written onto the copy because `config.Options` spells this number
 	// as the STARTUP entry's — a session that has moved since is bound to the entry it is on now.
-	return base, s.manualIDs, pin, s.entryCap
+	return base, pin, s.entryCap
 }
 
 // settingsApplier is everything a committed key can have to reach, in one value rather than in a
@@ -2203,13 +2196,10 @@ func settingBool(key, value string) (bool, error) {
 //
 // What it re-resolves:
 //   - the system-prompt template, because `system-prompt-models:` keys on the model name (ADR 0023);
-//   - the validated Mechanism set, because a set is matched against the model's identity fingerprint
-//     (ADR 0016) — the opts copy carries the new id so the fingerprint re-keys on it;
-//   - the enable list, applying the same precedence startup applies: an explicit `mechanisms:` block
-//     is manual control and suppresses any matched set (whole-set-or-nothing, never a merge), which
-//     is why manualIDs is passed in rather than re-derived from the map here — and, when a set DOES
-//     apply, it becomes the enable list exactly as startup makes it one, no catalogued row being on
-//     by default and the Floor guards being Config.Floor's rather than any set's;
+//   - the validated set, because a set is matched against the model's identity fingerprint
+//     (ADR 0016) — the opts copy carries the new id so the fingerprint re-keys on it. The match is
+//     re-run for its NOTICES alone: the set arms nothing since the Reaction core landed (ADR 0076
+//     D11), so what it resolves to is discarded here exactly as startup discards it;
 //   - the context window, applying the pin: pinnedWindow > 0 is the user's `context-window:` key and
 //     outranks whatever the server reports (decision 9), else the observed window is bound as-is;
 //   - the reply ceiling, which is not per-model at all and is re-stated here anyway: outputCap is the
@@ -2224,7 +2214,7 @@ func settingBool(key, value string) (bool, error) {
 //     override arriving as the stated 0 that hands the split back to apogee's own default;
 //   - the Model profile, because `model-profiles:` keys on the model name and the shipped shape
 //     table matches on it too (ADR 0044) — the shape a model speaks the wire in travels with the
-//     model, so it rides the same atomic Rebind as the prompt and the Mechanisms. Its THIRD axis,
+//     model, so it rides the same atomic Rebind as the prompt. Its THIRD axis,
 //     the tool roster, travels with it (ADR 0057 decision 7) and is announced here when it moves.
 //
 // What it deliberately does NOT touch: the endpoint, the mode, the approvals and the conversation,
@@ -2236,7 +2226,6 @@ func settingBool(key, value string) (bool, error) {
 func rebindSpecFor(
 	opts config.Options,
 	roots stateRoots,
-	manualIDs []apogee.MechanismID,
 	model string,
 	window, pinnedWindow, outputCap int,
 ) (apogee.RebindSpec, []string, error) {
@@ -2248,13 +2237,9 @@ func rebindSpecFor(
 		return apogee.RebindSpec{}, nil, err
 	}
 
-	vset, notices, err := resolveValidatedSet(next, roots.validated, roots.probe)
+	_, notices, err := resolveValidatedSet(next, roots.validated, roots.probe)
 	if err != nil {
 		return apogee.RebindSpec{}, nil, err
-	}
-	enable := manualIDs
-	if len(vset) > 0 {
-		enable = vset
 	}
 
 	bound := window
@@ -2290,7 +2275,6 @@ func rebindSpecFor(
 		MaxContextTokens:        bound,
 		MaxOutputTokens:         &outputCap,
 		ResponseReserveFraction: &reserve,
-		EnableMechanisms:        enable,
 		Profile:                 profile,
 	}, notices, nil
 }

@@ -151,25 +151,16 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		return registryWithMCP(w.roots.workspace, host, spec.seatChoice, w.mcpSet.tools())
 	})
 
-	// Resolve the catalogued Mechanisms enabled in config.yaml to the sorted ID list the engine arms
-	// (ADR 0015 §1: wire.go collapses to a YAML→ID-list producer). Startup validates EVERY
-	// `mechanisms:` key here — enabled AND disabled — and hands only the enabled IDs to
-	// Config.EnableMechanisms; apogee.New/Resume then build them, merge them into
-	// Config.Mechanisms, and run the ordering / incompatibility / requirements gates. The disabled-key
-	// validation must stay here because the engine only ever sees the enabled IDs, so a typo'd DISABLED
-	// key — never constructed — must still fail loudly at this startup boundary. No catalogued row is
-	// on by default: a config without a mechanisms block arms nothing, every Capability staying off
-	// until it is named, and the Floor guards it still runs are Config.Floor's, not this list's.
-	//
-	// The list is hoisted into a local because it outlives this assignment: it is the MANUAL
-	// choice, model-independent by construction, and the rebind seam re-runs the
-	// "an explicit mechanisms: block suppresses a validated set" rule against it for every new
-	// model — so it must survive the validated-set overwrite two blocks down.
-	manualIDs, retiredNotices, err := mechanisms.ResolveEnabled(w.opts.Mechanisms, mechanisms.KnownIDs())
+	// Validate the `mechanisms:` block and take what it earns the human to say — which is now the
+	// notices and nothing else (ADR 0076 D11: the key parses, speaks, and arms nothing). Startup
+	// validates EVERY key here, enabled AND disabled, exactly as it always did: a typo'd key is a
+	// loud refusal at the surface the human typed it on, and it stays loud whichever value it
+	// carries. What the block no longer does is decide anything the engine runs — a Reaction is
+	// armed from `Config.Reactions`, and the Floor guards are engine behaviour under Config.Floor.
+	retiredNotices, err := mechanisms.RetiredNotices(w.opts.Mechanisms)
 	if err != nil {
 		return err
 	}
-	w.cfg.EnableMechanisms = manualIDs
 
 	// A `mechanisms:` key naming a RETIRED Mechanism is tolerated rather than refused (the id was
 	// valid at the release before the removal), and this is the one caller that says so: startup runs
@@ -180,22 +171,18 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		fmt.Fprintln(os.Stderr, n)
 	}
 
-	// The Validated-set runtime surface (ADR 0016): match the resolved model fingerprint
-	// against the shipped + user-local entries and fold an applying set into
-	// EnableMechanisms — HERE at wire time, never in the engine, so ADR 0015's single
-	// enable path stands and bench arms cannot be contaminated. When a set applies,
-	// opts.mechanisms was empty (manual control suppresses the apply), so the assignment
-	// replaces an empty list, never a user's choice. The notices are the ADR's visible
-	// per-session notice, on stderr pre-TUI like the unconfined-Auto warning above.
-	vset, vnotices, err := resolveValidatedSet(w.opts, w.roots.validated, w.roots.probe)
+	// The Validated-set runtime surface (ADR 0016), now INERT: the match still runs and still
+	// narrates, and the set it resolves arms nothing — there is no enable list left for it to fold
+	// into (ADR 0076 D11; the surface is re-homed or removed in stage 2). The match is kept rather
+	// than skipped because its refusals are the user's own config being wrong — a dangling alias is
+	// still an error worth failing on — and its notices are the ADR's visible per-session line, on
+	// stderr pre-TUI like the unconfined-Auto warning above.
+	_, vnotices, err := resolveValidatedSet(w.opts, w.roots.validated, w.roots.probe)
 	if err != nil {
 		return err // a dangling validated-sets alias — the user's own config, loud by design
 	}
 	for _, n := range vnotices {
 		fmt.Fprintln(os.Stderr, n)
-	}
-	if len(vset) > 0 {
-		w.cfg.EnableMechanisms = vset
 	}
 
 	// The id-addressed session store under this run's sessions root, and the record a --resume or
@@ -305,7 +292,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// from a raw override and is therefore in no entry (upstreamChoices), so the way back is always
 	// offered. The verbs in wire_verbs.go resolve a name against THAT list (they need the key and the
 	// hint); the TUI is handed the display-and-identity projection of the same list, in the same order.
-	w.live = newLiveSettings(w.opts, manualIDs)
+	w.live = newLiveSettings(w.opts)
 
 	// The Sub-agent server (ADR 0045): the `servers:` entry the root `sub-agents-server:` key names,
 	// the second heartbeat that discovers what it is serving, and the Delegation target every beat

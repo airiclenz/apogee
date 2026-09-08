@@ -359,7 +359,7 @@ func TestApplySettingServersInstallsTheReReadList(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	launchOpts := config.Options{Servers: []config.ServerEntry{{Name: "local", Endpoint: "http://127.0.0.1:1111"}}}
-	live := newLiveSettings(launchOpts, nil)
+	live := newLiveSettings(launchOpts)
 	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, live: live, configPath: path})
 
 	writeSettingsFixture(t, path, "servers:\n"+
@@ -393,7 +393,7 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
-	live := newLiveSettings(config.Options{ValidatedSetsEnable: true}, nil)
+	live := newLiveSettings(config.Options{ValidatedSetsEnable: true})
 	probe := &rebindProbe{}
 	apply := applySettingFor(settingsApplier{
 		engine:     &applySettingSpy{},
@@ -407,7 +407,7 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 	if _, err := apply("validated-sets.enable", "false"); err != nil {
 		t.Fatalf("apply validated-sets.enable: %v", err)
 	}
-	base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+	base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
 	if base.ValidatedSetsEnable {
 		t.Error("validated-sets stayed on; the re-read block must reach the resolution inputs")
 	}
@@ -422,7 +422,7 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 	if _, err := apply("validated-sets.alias", "1 alias"); err != nil {
 		t.Fatalf("apply validated-sets.alias: %v", err)
 	}
-	base, _, _, _ = live.rebindInputs(config.Options{}, upstreamBinding{})
+	base, _, _ = live.rebindInputs(config.Options{}, upstreamBinding{})
 	if base.ValidatedSetsAlias["my-gemma"] != "gemma-4" {
 		t.Errorf("alias map = %v, want the re-read carry-over", base.ValidatedSetsAlias)
 	}
