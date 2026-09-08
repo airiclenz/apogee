@@ -2393,8 +2393,6 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 				domain.ChildInterjectionEvent{Input: domain.UserInput{Text: "stop"}},
 				domain.ApprovalEvent{Phase: domain.ApprovalRequested},
 				domain.TurnEvent{},
-				domain.MechanismFiredEvent{Mechanism: "plan-first", Action: "suppressed"},
-				domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
 				domain.ReactionFiredEvent{
 					Reaction: "tool-call-repair",
 					Origin:   domain.OriginEngine,
@@ -2416,7 +2414,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 		t.Fatalf("a completed run returned an error: %v", err)
 	}
 
-	// The two frames bracket the eighteen variants, in the contract's own order.
+	// The two frames bracket the sixteen variants, in the contract's own order.
 	kinds := eventjson.Kinds()
 	want := append([]string{"run_started"}, kinds[:len(kinds)-2]...)
 	want = append(want, "run_finished")
@@ -3079,8 +3077,8 @@ func TestHeadlessPrintsThePruneNotice(t *testing.T) {
 // one (run.Spec), so a sink that swallowed what it rendered would cost the Firing's record the very
 // entry the notice is about.
 //
-// The FloorGuardEvent is here to pin the silence: a Floor guard firing is forwarded like anything
-// else and prints NO stderr line, since a guard repairing the model's own failure is engine
+// The ReactionFiredEvent is here to pin the silence: a Reaction firing is forwarded like anything
+// else and prints NO stderr line, since a Floor guard repairing the model's own failure is engine
 // behaviour rather than news for an unattended run (ADR 0071).
 func TestPruneNoticeSinkForwardsEveryEvent(t *testing.T) {
 	t.Parallel()
@@ -3090,7 +3088,12 @@ func TestPruneNoticeSinkForwardsEveryEvent(t *testing.T) {
 	sink := pruneNoticeSink{inner: inner, out: &errOut}
 
 	sink.Emit(domain.PruneEvent{Results: 2, Tokens: 800})
-	sink.Emit(domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"})
+	sink.Emit(domain.ReactionFiredEvent{
+		Reaction: "tool-call-repair",
+		Origin:   domain.OriginEngine,
+		Moment:   domain.MomentPostResponse,
+		Action:   "retry",
+	})
 	sink.Emit(domain.MessageEvent{Text: "done"})
 
 	if len(inner.events) != 3 {

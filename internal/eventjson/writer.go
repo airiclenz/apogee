@@ -13,9 +13,10 @@ import (
 // lineVersion is the `v` every line carries (ADR 0075 decision 10). It is stamped per LINE rather
 // than announced once in the opening frame because JSONL is tailed, split, grepped and merged
 // across runs: in all four cases a version living in a frame the consumer never saw is no version
-// at all. New kinds and new `data` members are additive within v:1; a removal, a rename or a
-// changed meaning bumps it.
-const lineVersion = 1
+// at all. New kinds and new `data` members are additive within a version; a removal, a rename or a
+// changed meaning bumps it — v:2 is that bump, folding the two retired firing kinds into the one
+// reaction_fired kind (ADR 0076 D1).
+const lineVersion = 2
 
 // Options are the facts a Writer cannot derive from the stream it renders.
 //

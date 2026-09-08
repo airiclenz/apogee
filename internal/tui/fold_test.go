@@ -260,19 +260,6 @@ func foldCases() []foldCase {
 			},
 		},
 		{
-			name: "MechanismFiredEvent is folded by nothing at all",
-			// The Reaction core emits ReactionFiredEvent for every firing (ADR 0076 D1), so this
-			// variant reaches no Driver any more; the row survives only because the variant is
-			// still declared, and it goes with the variant when the protocol bumps to v2.
-			event: domain.MechanismFiredEvent{Mechanism: "m", Hook: "h", Action: "a"},
-		},
-		{
-			name: "FloorGuardEvent is folded by nothing at all",
-			// Retired beside MechanismFiredEvent above and for the same reason: a Floor guard is a
-			// builtin Reaction now, and its firing arrives as a ReactionFiredEvent.
-			event: domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
-		},
-		{
 			name:        "ErrorEvent appends a recovered-fault notice and leaves the phrase alone",
 			event:       domain.ErrorEvent{Source: "loop", Err: "recovered"},
 			wantEntries: 1,

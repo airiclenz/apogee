@@ -126,7 +126,7 @@ carries the same fact. The contract is
 [ADR 0075](../adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md).
 
 ```json
-{"event":"tool_call","v":1,"seq":3,"time":"2026-09-07T14:12:33.884201Z","session":"20260907-141233-7f2a","turn":0,"depth":0,"call_id":null,"data":{"call":{"id":"call_1","tool":"read_file","arguments":{"path":"a.txt"}},"resolved_path":""}}
+{"event":"tool_call","v":2,"seq":3,"time":"2026-09-07T14:12:33.884201Z","session":"20260907-141233-7f2a","turn":0,"depth":0,"call_id":null,"data":{"call":{"id":"call_1","tool":"read_file","arguments":{"path":"a.txt"}},"resolved_path":""}}
 ```
 
 ### The envelope
@@ -136,8 +136,8 @@ rather than flattened beside it:
 
 | Member | What it carries |
 |---|---|
-| `event` | the line kind: one of the twenty names below |
-| `v` | the contract version — `1` today, on **every** line |
+| `event` | the line kind: one of the eighteen names below |
+| `v` | the contract version — `2` today, on **every** line |
 | `seq` | 1-based, counting every line the run wrote, the two frames included |
 | `time` | RFC3339Nano, stamped as the line is written |
 | `session` | the run's session id, `null` on a line written before the run had one |
@@ -150,9 +150,9 @@ Every member is **always present**, and is `null` where the line has no value fo
 never has to test for a missing key. `depth` is what separates the run's own events from a
 sub-agent's: the lines carry every depth, not just the top.
 
-### The twenty line kinds
+### The eighteen line kinds
 
-Eighteen of them are engine events, and the two frames are not. The names are snake_case on
+Sixteen of them are engine events, and the two frames are not. The names are snake_case on
 purpose — a [Hook event](hooks.md)'s kebab-case name for a neighbouring moment is a *different*
 moment, and the case difference is the signal.
 
@@ -169,8 +169,6 @@ moment, and the case difference is the signal.
 | `child_interjection` | input steered into a running delegation, and whether it landed |
 | `approval` | an approval request: its phase, the request, the decision |
 | `turn` | a Turn boundary, at every depth: its status, whether it faulted, whether it hit the step cap |
-| `mechanism_fired` | a lab Mechanism acted, and on what |
-| `floor_guard` | a Floor guard acted, and on what |
 | `reaction_fired` | a Reaction acted: builtin Floor guard or armed Reaction, at which Moment, and what it did |
 | `error` | something failed, named by its source |
 | `prune` | the context was pruned: how many results, how many tokens |
@@ -206,13 +204,14 @@ behind it.
 needs no accumulator; but the simplest consumer of all reads `token`s, and that one would otherwise
 have to implement both an accumulator and the `stream_reset` rule to reach the answer.
 
-### `v` is `1`, and growth is additive
+### `v` is `2`, and growth is additive
 
 The version rides every line, because JSONL is tailed, split, grepped and merged across runs — a
-version living only in a frame is invisible in all four. Within `v:1`, new line kinds and new `data`
-members may appear in any release, and today's enum values (a Turn's status, an approval's phase, a
-delegation's phase) are open sets. **A consumer must ignore names, members and values it does not
-recognise.** A removal, a rename or a changed meaning bumps `v` and is a CHANGELOG entry.
+version living only in a frame is invisible in all four. Within a version, new line kinds and new
+`data` members may appear in any release, and today's enum values (a Turn's status, an approval's
+phase, a delegation's phase) are open sets. **A consumer must ignore names, members and values it
+does not recognise.** A removal, a rename or a changed meaning bumps `v` and is a CHANGELOG entry.
+v 2 (this release) folded `mechanism_fired` and `floor_guard` into `reaction_fired`.
 
 ### What is on that stdout
 

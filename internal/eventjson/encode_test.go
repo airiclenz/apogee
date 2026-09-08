@@ -208,30 +208,6 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"status":"exchange-complete","faulted":true,"step_capped":true}`,
 		},
 		{
-			name: "mechanism_fired",
-			event: domain.MechanismFiredEvent{
-				EventBase: domain.EventBase{Turn: 2},
-				Mechanism: "codeinfo",
-				Hook:      "post-tool-result",
-				Action:    "suppressed",
-			},
-			wantKind: "mechanism_fired",
-			wantBase: domain.EventBase{Turn: 2},
-			wantData: `{"mechanism":"codeinfo","hook":"post-tool-result","action":"suppressed"}`,
-		},
-		{
-			name: "floor_guard",
-			event: domain.FloorGuardEvent{
-				EventBase: domain.EventBase{Turn: 2},
-				Guard:     "tool-call-repair",
-				Action:    "retry",
-				Detail:    "unparsable arguments",
-			},
-			wantKind: "floor_guard",
-			wantBase: domain.EventBase{Turn: 2},
-			wantData: `{"guard":"tool-call-repair","action":"retry","detail":"unparsable arguments"}`,
-		},
-		{
 			name: "reaction_fired",
 			event: domain.ReactionFiredEvent{
 				EventBase: domain.EventBase{Turn: 2},
@@ -368,16 +344,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwenty pins the vocabulary itself — the eighteen serialized variants plus the two
+// TestKindsAreEighteen pins the vocabulary itself — the sixteen serialized variants plus the two
 // frames — so a kind added to the encoder without a manual entry, or an entry without a kind, is a
 // failing test rather than a documentation drift.
-func TestKindsAreTwenty(t *testing.T) {
+func TestKindsAreEighteen(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 20 {
-		t.Fatalf("len(Kinds()) = %d, want 20: %v", len(kinds), kinds)
+	if len(kinds) != 18 {
+		t.Fatalf("len(Kinds()) = %d, want 18: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

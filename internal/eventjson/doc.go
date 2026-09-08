@@ -10,7 +10,7 @@
 // is what stops a reader assuming the two streams are one.
 //
 // It shares no shape with internal/hooks. hooks.Payload is a flat document for five events and
-// `jq -r .path`; across eighteen variants a flat union becomes some sixty optional keys whose
+// `jq -r .path`; across sixteen variants a flat union becomes some sixty optional keys whose
 // names genuinely collide, so this package nests instead and hooks.Payload is untouched.
 //
 // One direction: it imports internal/domain for the events it reads and nothing else in the tree.

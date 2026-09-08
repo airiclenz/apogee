@@ -57,8 +57,7 @@ var (
 	_ apogee.SubAgentNamedEvent
 	_ apogee.ChildInterjectionEvent
 	_ apogee.SubAgentPhase
-	_ apogee.MechanismFiredEvent
-	_ apogee.FloorGuardEvent
+	_ apogee.ReactionFiredEvent
 	_ apogee.ErrorEvent
 	_ apogee.PruneEvent
 	_ apogee.UsageEvent

@@ -187,7 +187,7 @@ func eventLinesHome(t *testing.T, endpoint, model string) string {
 }
 
 // assertEventLineEnvelopes is the semantic half of every golden below, and the half that survives a
-// re-record: whatever the lines say, the envelope's own promises hold — `v` is 1 on every line,
+// re-record: whatever the lines say, the envelope's own promises hold — `v` is 2 on every line,
 // `seq` starts at 1 and skips nothing, and the last line is the closing frame (ADR 0075
 // decisions 3 and 5). A golden alone would pass a stream that renumbered itself.
 func assertEventLineEnvelopes(t *testing.T, lines []map[string]any) {
@@ -197,8 +197,8 @@ func assertEventLineEnvelopes(t *testing.T, lines []map[string]any) {
 		t.Fatal("the stream carried no lines at all")
 	}
 	for i, line := range lines {
-		if line["v"] != float64(1) {
-			t.Errorf("line %d: v = %v; every line of this contract is version 1", i+1, line["v"])
+		if line["v"] != float64(2) {
+			t.Errorf("line %d: v = %v; every line of this contract is version 2", i+1, line["v"])
 		}
 		if want := float64(i + 1); line["seq"] != want {
 			t.Errorf("line %d: seq = %v; want %v — the sequence starts at 1 and skips nothing",

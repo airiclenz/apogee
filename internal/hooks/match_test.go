@@ -279,7 +279,12 @@ func TestMatchIgnoresEveryOtherVariant(t *testing.T) {
 	for _, ev := range []domain.Event{
 		domain.MessageEvent{Text: "hello"},
 		domain.PruneEvent{},
-		domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
+		domain.ReactionFiredEvent{
+			Reaction: "tool-call-repair",
+			Origin:   domain.OriginEngine,
+			Moment:   domain.MomentPostResponse,
+			Action:   "retry",
+		},
 	} {
 		if got := m.match(ev); len(got) != 0 {
 			t.Errorf("match(%T) = %v, want nothing — it is not a hook event", ev, got)

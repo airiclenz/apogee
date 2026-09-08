@@ -584,7 +584,21 @@ go test -race -count=1 ./internal/tui/ ./internal/run/ && ! grep -n "addMechanis
 ```
 **Commit:** `refactor(tui,run): the debug view renders ReactionFiredEvent`
 
-## 19. Retire the two old events: protocol v2
+## 19. Retire the two old events: protocol v2 — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the three eventlines goldens WERE regenerated once with `-update` (the plan's one permitted regeneration) and changed — `run.jsonl` 14 lines, `not-started-after-sink.jsonl` 2, `not-started.jsonl` 1 — and the item's sign-stripping diff filter reads 0, so the only changed member is `v`. The identity goldens are untouched, and `git diff --quiet bc8b603d -- internal/floor/ ':!internal/floor/*_test.go'` is clean.
+
+NOTES (2026-09-08): consequential edit — internal/tui/fold_test.go: made necessary by deleting `MechanismFiredEvent` and `FloorGuardEvent` — item 17 deliberately KEPT their two `foldCases` rows because `TestFoldEventCoversEveryEventVariant` demands a row per declared variant; with the variants gone the rows no longer compile, so both are deleted here. The file is not in the item's Files list, but its two hits are inside the item's own grep rule.
+
+NOTES (2026-09-08): consequential edit — internal/agent/reactions.go: made necessary by deleting `FloorGuardEvent` — `armedReaction`'s doc comment explained a builtin's action label as "the guard vocabulary its FloorGuardEvent used"; the type no longer exists, so the sentence names the vocabulary without it.
+
+NOTES (2026-09-08): six of the item's Files needed no edit and are not in FILES above — `internal/tui/transcript_test.go`, `internal/run/transcript_test.go`, `cmd/apogee/wire_boot_test.go`, `cmd/apogee/wire_firing_test.go`, `cmd/apogee/wire_settings_test.go` and `internal/config/config_test.go` hold neither a retired type name nor a pinned `"v":1` at this commit (items 17 and 18 already took their sites). The `"v":1` sweep's live pins were `apogee_test.go`, `internal/eventjson/writer_test.go` and `cmd/apogee/e2e_eventlines_test.go` only.
+
+NOTES (2026-09-08): `example_test.go`'s two deleted type pins are replaced by one `_ apogee.ReactionFiredEvent` line in the same position rather than simply removed — the block is a compile-time enumeration of the facade's Event variants, and the one live firing event was missing from it (item 3 added the alias, item 14's rule did not pin it).
+
+NOTES (2026-09-08): `internal/eventjson/writer.go`'s rewritten `lineVersion` comment does NOT spell `mechanism_fired` / `floor_guard` — it says "the two retired firing kinds" — because the item's own acceptance grep runs over `--include=*.go` with only `e2e_reactionidentity_test.go` excepted, so naming them there would fail the gate. The literal names survive where the item allows them: `docs/manual/headless.md`'s version-history sentence.
+
+NOTES (2026-09-08): two references outside this item, each owned elsewhere and left alone — `CONTEXT.md:790` ("`FloorGuardEvent` until then"), which item 20's What names explicitly and which is not yet done; and `docs/design/reaction-core-greenfield.md:31,267`, the design record's own collapse table describing this very fold, which is the same class of source as `docs/adr/` and is outside the acceptance grep's `--exclude-dir=docs`.
 
 **What:** Recast at the regression check (2026-09-07). Depends on items 17, 18. `internal/eventjson/encode.go`: delete `kindMechanismFired`, `kindFloorGuard`, their cases and data structs; `Kinds()` = 18; `writer.go:18` `lineVersion = 2`. `internal/domain/events.go:293-326` (`MechanismFiredEvent`, `FloorGuardEvent`) and `apogee.go:257-258` deleted (`HookPoint` is already gone — item 17, round three). `cmd/apogee/headless.go:179` comment. Goldens: `cmd/apogee/testdata/eventlines/run.jsonl`, `not-started.jsonl`, `not-started-after-sink.jsonl` regenerated ONCE with `-update` — the only permitted regeneration in this plan — and gated by the diff filter in Acceptance (every changed line must pair up once `"v":1` / `"v":2` are normalised). `docs/manual/headless.md:172-173` rows deleted; `:208-214` note gains the sentence "v 2 (this release) folded `mechanism_fired` and `floor_guard` into `reaction_fired`". The sidecar CHANGELOG entry states the bump (ADR 0075 D10). Grep rule: every remaining reference to the two type names in non-archived Go, docs and tests is deleted or reworded — `grep -rn "MechanismFiredEvent\|FloorGuardEvent\|mechanism_fired\|floor_guard" --exclude-dir=archived --exclude-dir=.git .` must be empty except `CHANGELOG.md` and `docs/adr/`.
 

@@ -6,7 +6,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty line kinds of ADR 0075 §4 — eighteen Event variants plus the two frames that
+// The eighteen line kinds of ADR 0075 §4 — sixteen Event variants plus the two frames that
 // bracket a run and are not Events. They are snake_case on purpose: a Hook event's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 const (
@@ -21,8 +21,6 @@ const (
 	kindChildInterjection = "child_interjection"
 	kindApproval          = "approval"
 	kindTurn              = "turn"
-	kindMechanismFired    = "mechanism_fired"
-	kindFloorGuard        = "floor_guard"
 	kindReactionFired     = "reaction_fired"
 	kindError             = "error"
 	kindPrune             = "prune"
@@ -49,8 +47,6 @@ func Kinds() []string {
 		kindChildInterjection,
 		kindApproval,
 		kindTurn,
-		kindMechanismFired,
-		kindFloorGuard,
 		kindReactionFired,
 		kindError,
 		kindPrune,
@@ -115,18 +111,6 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			Status:     string(e.Status),
 			Faulted:    e.Faulted,
 			StepCapped: e.StepCapped,
-		}, true
-	case domain.MechanismFiredEvent:
-		return kindMechanismFired, e.EventBase, mechanismFiredData{
-			Mechanism: string(e.Mechanism),
-			Hook:      string(e.Hook),
-			Action:    e.Action,
-		}, true
-	case domain.FloorGuardEvent:
-		return kindFloorGuard, e.EventBase, floorGuardData{
-			Guard:  e.Guard,
-			Action: e.Action,
-			Detail: e.Detail,
 		}, true
 	case domain.ReactionFiredEvent:
 		return kindReactionFired, e.EventBase, reactionFiredData{
@@ -242,23 +226,8 @@ type turnData struct {
 	StepCapped bool   `json:"step_capped"`
 }
 
-// mechanismFiredData is the mechanism_fired line: a catalogued Mechanism acting at a hook point.
-type mechanismFiredData struct {
-	Mechanism string `json:"mechanism"`
-	Hook      string `json:"hook"`
-	Action    string `json:"action"`
-}
-
-// floorGuardData is the floor_guard line. Guard is the guard's CONFIG KEY, so a reader never has
-// to map an internal name back to the switch that turns the behaviour off.
-type floorGuardData struct {
-	Guard  string `json:"guard"`
-	Action string `json:"action"`
-	Detail string `json:"detail"`
-}
-
 // reactionFiredData is the reaction_fired line: the ONE firing line of the Reaction core (ADR 0076
-// D1), which succeeds mechanism_fired and floor_guard above. Reaction is the reaction's id — for an
+// D1). Reaction is the reaction's id — for an
 // engine builtin, the same config key a user writes in config.yaml — so a reader never has to map
 // an internal name back to the switch that turns the behaviour off.
 type reactionFiredData struct {

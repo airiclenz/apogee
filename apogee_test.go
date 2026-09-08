@@ -219,8 +219,8 @@ func TestFacadeExportsEventLines(t *testing.T) {
 		t.Fatalf("wrote %d lines, want %d:\n%s", len(got), len(wantKinds), out.String())
 	}
 	for i, kind := range wantKinds {
-		if !strings.HasPrefix(got[i], `{"event":"`+kind+`","v":1,`) {
-			t.Errorf("line %d is not a v:1 %s line: %s", i+1, kind, got[i])
+		if !strings.HasPrefix(got[i], `{"event":"`+kind+`","v":2,`) {
+			t.Errorf("line %d is not a v:2 %s line: %s", i+1, kind, got[i])
 		}
 	}
 }

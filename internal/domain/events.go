@@ -290,45 +290,8 @@ type TurnEvent struct {
 	StepCapped bool
 }
 
-// MechanismFiredEvent reports that a Mechanism (or experimental hook) fired at a
-// hook point — the observability spine for self-regulation and bench attribution.
-type MechanismFiredEvent struct {
-	EventBase
-	Mechanism string
-	Hook      string
-	Action    string // e.g. the post-response decision taken, or "suppressed"
-}
-
-// FloorGuardEvent reports that a Floor guard fired — the engine changing what the model sees after
-// its own failure, or shaping the request without steering it (ADR 0071). It is the guards'
-// counterpart to MechanismFiredEvent and deliberately a SEPARATE variant: a guard is not a
-// catalogued Mechanism, carries no Mechanism id, and is never attributed to one in a bench run.
-//
-// Guard is the guard's configuration key — the same spelling a user writes in config.yaml
-// (`tool-call-repair`, `tool-loop-breaker`, …), so an observer never has to map an internal name
-// back to the switch that turns the behaviour off. Action names what the guard did ("retry",
-// "intercept", "cap"), and Detail is optional supporting text a renderer may show verbatim or
-// ignore.
-//
-// It carries no Hook value, unlike MechanismFiredEvent: a guard is not registered at a hook, it is
-// the engine's own behaviour at a seam, and the Guard key already names which seam it runs at.
-//
-// A Driver renders it where it renders a Mechanism firing and nowhere else — the TUI's hidden debug
-// view (internal/tui's transcript.addReaction, which now renders ReactionFiredEvent below) — and
-// NOT where it renders a PruneEvent: a guard
-// firing is the engine correcting the model's own failure, which is not news the human asked for,
-// while a prune changes what the conversation still holds and is. So headless prints no line for it
-// and a session record folds no entry (ADR 0071).
-type FloorGuardEvent struct {
-	EventBase
-	Guard  string // the guard's config key, e.g. "tool-call-repair"
-	Action string // what the guard did, e.g. "retry"
-	Detail string // optional supporting text; may be empty
-}
-
 // ReactionFiredEvent reports that a Reaction acted — the ONE firing event of the Reaction core
-// (ADR 0076 D1), succeeding MechanismFiredEvent and FloorGuardEvent above, which it replaces.
-// A firing is a reaction that did something: an engine builtin such as a Floor guard, or a
+// (ADR 0076 D1). A firing is a reaction that did something: an engine builtin such as a Floor guard, or a
 // reaction armed beside them, at the Moment it fired on.
 //
 // Reaction is the reaction's id — for a builtin, the same config key a user writes in config.yaml

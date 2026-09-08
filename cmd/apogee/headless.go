@@ -176,11 +176,10 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 // stderr on every Firing, for a human who is not watching. The record keeps the same fact either
 // way — transcriptFold folds a Note entry for it — so this sink is the live view alone.
 //
-// It prints for a prune and for NOTHING else — a [domain.FloorGuardEvent] included, and
+// It prints for a prune and for NOTHING else — a [domain.ReactionFiredEvent] included, and
 // deliberately: a Floor guard repairing the model's own failure is engine behaviour rather than
 // news for the human who is not watching, so it stays in the TUI's hidden debug view and off this
-// stderr, exactly as a Mechanism firing already does (ADR 0071). It is still forwarded, like every
-// other Event.
+// stderr (ADR 0071). It is still forwarded, like every other Event.
 //
 // quiet switches the printing half off and leaves the forwarding half exactly as it was. It is what
 // `--format json` asks for: there the same pruning pass is already on stdout as a `prune` Event

@@ -253,8 +253,6 @@ type (
 	SubAgentPhaseEvent     = domain.SubAgentPhaseEvent
 	SubAgentNamedEvent     = domain.SubAgentNamedEvent
 	ChildInterjectionEvent = domain.ChildInterjectionEvent
-	MechanismFiredEvent    = domain.MechanismFiredEvent
-	FloorGuardEvent        = domain.FloorGuardEvent
 	ReactionFiredEvent     = domain.ReactionFiredEvent
 	ErrorEvent             = domain.ErrorEvent
 	PruneEvent             = domain.PruneEvent

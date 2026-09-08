@@ -41,6 +41,35 @@ func lines(t *testing.T, out *bytes.Buffer) []string {
 	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
+// TestEventLinesVersionIsTwo pins the protocol version itself, apart from the whole-line goldens
+// that happen to carry it. The bump to 2 is the fold of the two retired firing kinds into the one
+// reaction_fired kind (ADR 0075 D10, ADR 0076 D1): a removal and a rename, which is exactly what
+// the contract says bumps `v`. A consumer branches on this number, so it moves only deliberately.
+func TestEventLinesVersionIsTwo(t *testing.T) {
+	t.Parallel()
+
+	if lineVersion != 2 {
+		t.Fatalf("lineVersion = %d, want 2 — a bump is a protocol change, not a refactor", lineVersion)
+	}
+
+	var out bytes.Buffer
+	w := New(&out, Options{Session: "sess-v", Now: fixedClock})
+	w.Emit(domain.MessageEvent{Text: "hello"})
+
+	for i, line := range lines(t, &out) {
+		var envelope struct {
+			Version int `json:"v"`
+		}
+		if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+			t.Fatalf("line %d is not JSON: %v", i+1, err)
+		}
+		if envelope.Version != 2 {
+			t.Errorf("line %d: v = %d, want 2 — every line of this contract is version 2",
+				i+1, envelope.Version)
+		}
+	}
+}
+
 // TestWriterEnvelopeOrderAndNulls pins whole lines, byte for byte: the nine envelope members in
 // their contract order, the numbers a line carries for an Event, and the nulls a frame carries in
 // their place. It also pins both frame objects, which are this package's own contract and have no
@@ -65,11 +94,11 @@ func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 	w.RunFinished(RunFinished{ExitCode: 0, Turns: 2, Saved: true, FinalText: "done"})
 
 	want := []string{
-		`{"event":"token","v":1,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"data":{"text":"hel"}}`,
-		`{"event":"token","v":1,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":4,"depth":1,"call_id":"call-9","data":{"text":"lo"}}`,
-		`{"event":"run_started","v":1,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,` +
+		`{"event":"token","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"data":{"text":"hel"}}`,
+		`{"event":"token","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":4,"depth":1,"call_id":"call-9","data":{"text":"lo"}}`,
+		`{"event":"run_started","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,` +
 			`"data":{"session":"sess-1","workspace":"/w","model":"gpt-oss-20b","server":"http://host.internal:1111","mode":"auto","bypass":false,"confined":true,"version":"0.20.9"}}`,
-		`{"event":"run_finished","v":1,"seq":4,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,` +
+		`{"event":"run_finished","v":2,"seq":4,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,` +
 			`"data":{"exit_code":0,"turns":2,"denied":0,"faulted":false,"fault":"","error":null,"title":"","final_text":"done","wrote":null,` +
 			`"context_files":{"files":null,"standing_tokens":0,"system_share":0},"undo_note":"","saved":true,` +
 			`"usage":{"calls":0,"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"cached_prompt_tokens":0},"sub_agents":null}}`,
@@ -107,7 +136,7 @@ func TestWriterSeqCountsFramesAndSkipsWire(t *testing.T) {
 		t.Fatalf("wrote %d lines, want %d:\n%s", len(got), len(wantKinds), out.String())
 	}
 	for i, kind := range wantKinds {
-		wantPrefix := `{"event":"` + kind + `","v":1,"seq":` + strconv.Itoa(i+1) + `,`
+		wantPrefix := `{"event":"` + kind + `","v":2,"seq":` + strconv.Itoa(i+1) + `,`
 		if !strings.HasPrefix(got[i], wantPrefix) {
 			t.Errorf("line %d: got %s\nwant prefix %s", i+1, got[i], wantPrefix)
 		}
@@ -225,7 +254,7 @@ func TestWriterMalformedDataFallsBackToNullData(t *testing.T) {
 				EventBase: domain.EventBase{Turn: 1, Depth: 2, CallID: "call-1"},
 				Call:      domain.ToolCall{ID: "call-1", Tool: "read_file", Arguments: malformed},
 			},
-			want: `{"event":"tool_call","v":1,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
+			want: `{"event":"tool_call","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
 				`"turn":1,"depth":2,"call_id":"call-1","data":null}`,
 		},
 		{
@@ -235,7 +264,7 @@ func TestWriterMalformedDataFallsBackToNullData(t *testing.T) {
 				Phase:     domain.ApprovalRequested,
 				Request:   domain.ApprovalRequest{Tool: "terminal", Arguments: malformed},
 			},
-			want: `{"event":"approval","v":1,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
+			want: `{"event":"approval","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
 				`"turn":5,"depth":0,"call_id":null,"data":null}`,
 		},
 	}
@@ -264,7 +293,7 @@ func TestWriterMalformedDataFallsBackToNullData(t *testing.T) {
 			if got[0] != tt.want {
 				t.Errorf("line 1:\n got %s\nwant %s", got[0], tt.want)
 			}
-			wantNext := `{"event":"token","v":1,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
+			wantNext := `{"event":"token","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
 				`"turn":6,"depth":0,"call_id":null,"data":{"text":"next"}}`
 			if got[1] != wantNext {
 				t.Errorf("line 2:\n got %s\nwant %s", got[1], wantNext)

@@ -60,9 +60,9 @@ const (
 var errReactionSeam = errors.New("apogee: reaction dispatched at the wrong seam")
 
 // armedReaction is one Reaction as the dispatcher holds it: the reaction itself, plus the action
-// label a BUILTIN books its firings under. A builtin carries the guard vocabulary its
-// FloorGuardEvent used ("salvage", "cap", …), which no Outcome can be read back into; an armed
-// Reaction carries none and is labelled from the Outcome it returned.
+// label a BUILTIN books its firings under. A builtin carries its own guard vocabulary
+// ("salvage", "cap", …), which no Outcome can be read back into; an armed Reaction carries none
+// and is labelled from the Outcome it returned.
 type armedReaction struct {
 	spec domain.Reaction
 	// action labels a builtin's firing. Empty for an armed Reaction — reactionAction derives
