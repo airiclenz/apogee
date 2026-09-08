@@ -505,9 +505,9 @@ const (
 // means it did nothing.
 type Outcome = domain.Outcome
 
-// Handler is the behaviour a Reaction runs. It is sealed in internal/domain — only the five
-// per-seam func types below implement it — so external code arms a Reaction with one of them
-// but cannot add a handler kind.
+// Handler is the behaviour a Reaction runs. It is sealed in internal/domain — only the handler
+// types below implement it — so external code arms a Reaction with one of them but cannot add a
+// handler kind of its own.
 type Handler = domain.Handler
 
 // The five Go handler types, one per seam.
@@ -517,6 +517,13 @@ type (
 	PreToolExecFunc    = domain.PreToolExecFunc
 	PostToolResultFunc = domain.PostToolResultFunc
 	HistoryRewriteFunc = domain.HistoryRewriteFunc
+)
+
+// The two async-lane handler types — a command and a webhook. Both run out of process on NOTICE
+// Moments as class observe, so neither names a seam the way the five Go func types above do.
+type (
+	ArgvHandler    = domain.ArgvHandler
+	WebhookHandler = domain.WebhookHandler
 )
 
 // ToolResultMoment is the post-tool-result seam's payload: the originating call paired with the
@@ -530,6 +537,10 @@ type PostResponseMoment = domain.PostResponseMoment
 // Reaction is the single thing apogee does when the loop passes a Moment: one
 // {id, origin, class, on, handler}, validated against the Reaction surface matrix.
 type Reaction = domain.Reaction
+
+// Generation is the whole live shape of the engine at one moment — the Floor enable set, Bypass
+// and the observe list — applied as ONE value, so nothing downstream reads a half-swapped state.
+type Generation = domain.Generation
 
 // ----------------------------------------------------------------------------
 // Hook working values (internal/domain)

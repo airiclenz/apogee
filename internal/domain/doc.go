@@ -53,8 +53,9 @@
 // The Reaction core. reaction.go is the one vocabulary every seam speaks
 // (ADR 0076): the Moment set with its seam and notice halves, the Origin and Class axes of
 // the Reaction surface matrix, the Reaction itself with its Validate, the one Outcome shape every
-// seam folds to, the sealed per-seam Handler funcs, and the two seam payloads that carry a
-// revision the dispatcher can bracket.
+// seam folds to, the sealed Handler in both its kinds — the per-seam Go funcs and the async argv
+// and webhook handlers that react to notices — the Generation one live swap carries, and the two
+// seam payloads that carry a revision the dispatcher can bracket.
 //
 // Tools and confinement. tools.go is the open Tool extension point (ADR 0002) with ToolCall,
 // ToolResult, the ToolRegistry, and the marker interfaces the dispatch disposition reads —

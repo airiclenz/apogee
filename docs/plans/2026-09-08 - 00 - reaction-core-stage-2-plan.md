@@ -98,7 +98,15 @@ go test ./cmd/apogee/ -run 'TestHeadlessFormatJSONStreamsEveryEvent|TestE2EEvent
 
 **Commit:** `feat(domain): five seam-closing notices, approval-decided, and the sink-only SeamClosedEvent`
 
-## 3. Domain: observe handlers, `Reaction.Workspace` and `Generation`
+## 3. Domain: observe handlers, `Reaction.Workspace` and `Generation` — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the item's What says class `observe` requires an argv or webhook handler; its own Regression guard paragraph — the writer's decision, per the plan header's "3: recast" line — inverts that to key on the HANDLER kind. The guard is what shipped: a Go handler is still free to be class observe and keeps the per-seam rule, so the bench's and `internal/agent`'s Go-handler observe reactions keep arming.
+
+NOTES (2026-09-08): two refusal texts the item did not spell are new — an async handler outside class observe (`run: a command or webhook reacts as class "observe", not "advise"`) and an async handler on a spelling in neither half of the vocabulary (`run: reacts to notices; "turn-done" is not one`). The item pinned only the on-a-seam text; both new ones follow the same `%w %q: run: …` shape and are pinned by the new table test.
+
+NOTES (2026-09-08): consequential edit — internal/domain/doc.go: made necessary by the async handlers and Generation joining reaction.go — the package map's line said the file holds "the sealed per-seam Handler funcs", which the second handler kind makes false; it now names both kinds and the Generation. The same sentence in `apogee.go` (:508, the `Handler` alias doc) was corrected in place, that file being one of the item's own.
+
+NOTES (2026-09-08): `CONTEXT.md:1197` still says the Handler seal is "five sealed per-seam Go func types" — not touched here: item 20 owns CONTEXT.md's Reaction entry (which is where `Generation` is scheduled to land) and it is not done.
 
 **What:** Recast at the regression check (2026-09-08). Depends on item 2. In `internal/domain/reaction.go` add two sealed `Handler` variants for the async lane: `ArgvHandler{Argv []string}` and `WebhookHandler{URL string; Headers, HeadersEnv map[string]string}`; their `seam()` returns `""`. Add `Reaction.Workspace string` (scope filter, resolved by the Runner as today). `Validate` gains the observe rules: class `observe` requires an `ArgvHandler` or `WebhookHandler` and every `On` entry `IsNotice()`; a Go handler still requires `On == {Handler.seam()}`; an argv/webhook handler on a seam fails with `ErrInvalidReaction` wrapping `reaction %q: run: reacts to notices; %q is a seam`. Add `Generation{Floor FloorConfig; Bypass bool; Observe []Reaction}` with `Validate()` (every Observe entry validates, ids unique, class observe) — the one value every live swap carries (call: Generation shape). Facade aliases for all four.
 

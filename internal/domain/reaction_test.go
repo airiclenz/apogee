@@ -373,6 +373,262 @@ func TestReactionValidateAcceptsEverySeamHandler(t *testing.T) {
 	}
 }
 
+// TestReactionValidateAppliesTheObserveRulesToAnAsyncHandler walks the rules the argv and
+// webhook handlers brought in. They key on the handler KIND, not the class: an async handler
+// reacts to notices only and takes class observe alone, while a Go handler keeps the per-seam
+// rule for every class — which is why the bench's class-observe Go reactions still validate. The
+// refusals are pinned by their exact text: they are what a user reads when their `run:` entry
+// names the wrong Moment.
+func TestReactionValidateAppliesTheObserveRulesToAnAsyncHandler(t *testing.T) {
+	t.Parallel()
+
+	argv := ArgvHandler{Argv: []string{"/usr/bin/notify", "--quiet"}}
+	webhook := WebhookHandler{
+		URL:        "https://example.test/apogee",
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		HeadersEnv: map[string]string{"Authorization": "APOGEE_WEBHOOK_TOKEN"},
+	}
+
+	cases := []struct {
+		name     string
+		reaction Reaction
+		wantErr  string
+	}{
+		{
+			name: "an argv handler on a notice validates",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentTurnFinished, MomentPostResponseFinished},
+				Handler: argv,
+			},
+		},
+		{
+			name: "a webhook handler on a notice validates",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentFileChanged},
+				Handler: webhook,
+			},
+		},
+		{
+			name: "a Go handler stays on its seam as class observe",
+			reaction: Reaction{
+				ID:      "probe",
+				Origin:  OriginEngine,
+				Class:   ClassObserve,
+				On:      []Moment{MomentPreRequest},
+				Handler: noopPreRequest,
+			},
+		},
+		{
+			name: "an argv handler on a seam is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentPreRequest},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "notify": run: reacts to notices; "pre-request" is a seam`,
+		},
+		{
+			name: "a webhook handler on a seam is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentTurnFinished, MomentHistoryRewrite},
+				Handler: webhook,
+			},
+			wantErr: `apogee: invalid reaction "notify": run: reacts to notices; "history-rewrite" is a seam`,
+		},
+		{
+			name: "an argv handler on a spelling outside the vocabulary is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{"turn-done"},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "notify": run: reacts to notices; "turn-done" is not one`,
+		},
+		{
+			name: "an argv handler outside class observe is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentTurnFinished},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "notify": run: a command or webhook reacts as class "observe", not "advise"`,
+		},
+		{
+			name: "a webhook handler outside class observe is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{MomentTurnFinished},
+				Handler: webhook,
+			},
+			wantErr: `apogee: invalid reaction "notify": run: a command or webhook reacts as class "observe", not "gate"`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := c.reaction.Validate()
+
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate() = nil, want %q", c.wantErr)
+			}
+			if !errors.Is(err, ErrInvalidReaction) {
+				t.Errorf("Validate() = %v, want it to wrap ErrInvalidReaction", err)
+			}
+			if got := err.Error(); got != c.wantErr {
+				t.Errorf("Validate() = %q, want %q", got, c.wantErr)
+			}
+		})
+	}
+}
+
+// TestAsyncHandlersNameNoSeam pins the seal's other half: the two async-lane handlers answer the
+// ZERO Moment, which is what makes "the handler's seam" a question Validate must not ask of
+// them.
+func TestAsyncHandlersNameNoSeam(t *testing.T) {
+	t.Parallel()
+
+	if got := (ArgvHandler{Argv: []string{"true"}}).seam(); got != "" {
+		t.Errorf("ArgvHandler.seam() = %q, want the zero Moment", got)
+	}
+	if got := (WebhookHandler{URL: "https://example.test"}).seam(); got != "" {
+		t.Errorf("WebhookHandler.seam() = %q, want the zero Moment", got)
+	}
+	if got := noopPreRequest.seam(); got != MomentPreRequest {
+		t.Errorf("PreRequestFunc.seam() = %q, want %q", got, MomentPreRequest)
+	}
+}
+
+// TestGenerationValidateRejectsANonObserveEntry pins the one rule a Generation adds beyond what
+// each entry already answers for itself: the observe list is the Runner's lane, so an entry in
+// any other class is refused there even though the entry validates on its own.
+func TestGenerationValidateRejectsANonObserveEntry(t *testing.T) {
+	t.Parallel()
+
+	gen := Generation{
+		Floor:  FloorConfig{DisableReadCache: true},
+		Bypass: true,
+		Observe: []Reaction{{
+			ID:      "shaper",
+			Origin:  OriginEngine,
+			Class:   ClassShapeView,
+			On:      []Moment{MomentPreRequest},
+			Handler: noopPreRequest,
+		}},
+	}
+
+	if err := gen.Observe[0].Validate(); err != nil {
+		t.Fatalf("the entry must validate on its own, got %v", err)
+	}
+
+	err := gen.Validate()
+
+	if err == nil {
+		t.Fatalf("Generation.Validate() = nil, want an error")
+	}
+	if !errors.Is(err, ErrInvalidReaction) {
+		t.Errorf("Generation.Validate() = %v, want it to wrap ErrInvalidReaction", err)
+	}
+	want := `apogee: invalid reaction "shaper": the observe list takes class "observe", not "shape-view"`
+	if got := err.Error(); got != want {
+		t.Errorf("Generation.Validate() = %q, want %q", got, want)
+	}
+}
+
+// TestGenerationValidateAcceptsAnObserveListAndRefusesTheRest covers the generation's remaining
+// answers: an empty generation is well formed — a Driver with no user entries applies one every
+// time — a list of distinct observe entries passes, and both a malformed entry and a repeated ID
+// are refused, since the ID is what a firing is reported under.
+func TestGenerationValidateAcceptsAnObserveListAndRefusesTheRest(t *testing.T) {
+	t.Parallel()
+
+	entry := func(id string) Reaction {
+		return Reaction{
+			ID:      id,
+			Origin:  OriginUser,
+			Class:   ClassObserve,
+			On:      []Moment{MomentTurnFinished},
+			Handler: ArgvHandler{Argv: []string{"/usr/bin/notify"}},
+		}
+	}
+
+	cases := []struct {
+		name    string
+		gen     Generation
+		wantErr string
+	}{
+		{name: "the zero generation", gen: Generation{}},
+		{
+			name: "two distinct observe entries",
+			gen:  Generation{Observe: []Reaction{entry("first"), entry("second")}},
+		},
+		{
+			name:    "a repeated ID",
+			gen:     Generation{Observe: []Reaction{entry("notify"), entry("notify")}},
+			wantErr: `apogee: invalid reaction "notify": listed twice in the observe list`,
+		},
+		{
+			name: "an entry that does not validate",
+			gen: Generation{Observe: []Reaction{{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentPreToolExec},
+				Handler: ArgvHandler{Argv: []string{"/usr/bin/notify"}},
+			}}},
+			wantErr: `apogee: invalid reaction "notify": run: reacts to notices; "pre-tool-exec" is a seam`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := c.gen.Validate()
+
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Generation.Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Generation.Validate() = nil, want %q", c.wantErr)
+			}
+			if !errors.Is(err, ErrInvalidReaction) {
+				t.Errorf("Generation.Validate() = %v, want it to wrap ErrInvalidReaction", err)
+			}
+			if got := err.Error(); got != c.wantErr {
+				t.Errorf("Generation.Validate() = %q, want %q", got, c.wantErr)
+			}
+		})
+	}
+}
+
 // TestSeamPayloadRevisionsForwardToTheWorkingValue pins the two paired payloads: the dispatcher
 // brackets a firing on the payload's Revision(), so each pair must report the revision of the
 // working value it wraps rather than one of its own.

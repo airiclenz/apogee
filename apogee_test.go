@@ -160,8 +160,9 @@ func TestResume_FutureVersion(t *testing.T) {
 // TestNew_InvalidReaction_MatchableThroughRoot proves the Reaction arming refusal is matchable
 // through the root re-export: an embedder outside the module cannot import internal/domain
 // (ADR 0010), so apogee.ErrInvalidReaction must BE the sentinel New wraps when Config.Reactions
-// carries a reaction the engine will not accept. The case is a reaction whose On list names a
-// Moment its sealed handler cannot serve — the mistake a host makes by hand, refused at
+// carries a reaction the engine will not accept. Two cases, one per handler kind: a Go handler
+// whose On list names a Moment it cannot serve, and an argv handler pointed at a seam — the
+// async lane reacts to notices only. Both are the mistake a host makes by hand, refused at
 // construction rather than silently never firing.
 func TestNew_InvalidReaction_MatchableThroughRoot(t *testing.T) {
 	cfg := validConfig()
@@ -177,6 +178,19 @@ func TestNew_InvalidReaction_MatchableThroughRoot(t *testing.T) {
 
 	if _, err := apogee.New(cfg); !errors.Is(err, apogee.ErrInvalidReaction) {
 		t.Errorf("New(mis-seamed reaction) err = %v, want ErrInvalidReaction", err)
+	}
+
+	cfg = validConfig()
+	cfg.Reactions = []apogee.Reaction{{
+		ID:      "notify-on-a-seam",
+		Origin:  apogee.OriginUser,
+		Class:   apogee.ClassObserve,
+		On:      []apogee.Moment{apogee.MomentPreRequest},
+		Handler: apogee.ArgvHandler{Argv: []string{"/usr/bin/notify"}},
+	}}
+
+	if _, err := apogee.New(cfg); !errors.Is(err, apogee.ErrInvalidReaction) {
+		t.Errorf("New(argv reaction on a seam) err = %v, want ErrInvalidReaction", err)
 	}
 }
 

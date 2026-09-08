@@ -217,12 +217,14 @@ type Outcome struct {
 	Detail string
 }
 
-// Handler is the behaviour a Reaction runs. It is SEALED — only the five per-seam Go func types
-// below implement it — so a handler always names exactly one seam, and Validate can check that
-// the reaction's On list agrees with what its handler can actually be called with. Stage 2's
-// argv, webhook and MCP handlers, which span Moments, join the seal here.
+// Handler is the behaviour a Reaction runs. It is SEALED — only the types declared below
+// implement it — so Validate can check that the reaction's On list agrees with what its handler
+// can actually be called with. Two kinds share the seal: the five per-seam Go func types, each
+// naming exactly one seam, and the async-lane handlers ArgvHandler and WebhookHandler, which run
+// out of process on NOTICE Moments and so name no seam at all. Stage 3's MCP handler joins here.
 type Handler interface {
-	// seam reports the one seam Moment this handler serves. Unexported: it is the seal.
+	// seam reports the one seam Moment this handler serves, or the ZERO Moment for an async-lane
+	// handler, which serves notices only. Unexported: it is the seal.
 	seam() Moment
 }
 
@@ -251,6 +253,50 @@ func (PostResponseFunc) seam() Moment   { return MomentPostResponse }
 func (PreToolExecFunc) seam() Moment    { return MomentPreToolExec }
 func (PostToolResultFunc) seam() Moment { return MomentPostToolResult }
 func (HistoryRewriteFunc) seam() Moment { return MomentHistoryRewrite }
+
+// ArgvHandler runs a command out of process when a NOTICE Moment fires — the async lane a user's
+// `run:` argv list arms (ADR 0076 D2). Argv[0] is the executable and the rest its arguments;
+// nothing goes through a shell, so no quoting or expansion happens on the way. The Moment's
+// payload reaches the command through its environment, and whatever it writes is ignored: an
+// observe reaction changes nothing the model sees, which is why this handler takes that class
+// alone.
+type ArgvHandler struct {
+	// Argv is the command and its arguments. Validate seals the KIND only — that an argv handler
+	// reacts to notices as class observe — while the Runner refuses an empty list, since running
+	// it is the Runner's job and the refusal belongs where the attempt is.
+	Argv []string
+}
+
+// WebhookHandler POSTs the Moment's payload to a URL when a NOTICE Moment fires — the other half
+// of the async lane (ADR 0076 D2). The response is discarded exactly as an ArgvHandler's output
+// is: nothing an observe reaction returns reaches the model.
+type WebhookHandler struct {
+	// URL is the endpoint the payload is POSTed to.
+	URL string
+	// Headers are literal request headers, header name → value.
+	Headers map[string]string
+	// HeadersEnv are request headers whose VALUE is read from the named environment variable when
+	// the reaction fires, header name → variable name — so a token never has to be written into
+	// the configuration file to reach the request.
+	HeadersEnv map[string]string
+}
+
+// seam reports the ZERO Moment: an argv handler reacts to notices, and a notice closes no seam.
+func (ArgvHandler) seam() Moment { return "" }
+
+// seam reports the ZERO Moment: a webhook handler reacts to notices, and a notice closes no seam.
+func (WebhookHandler) seam() Moment { return "" }
+
+// isAsyncHandler reports whether the handler is one of the async-lane kinds. Validate keys the
+// observe rules on the handler KIND and not on the class, because class observe is also open to
+// a Go handler — the bench arms those — and a Go handler keeps the per-seam rule (ADR 0076 A6).
+func isAsyncHandler(h Handler) bool {
+	switch h.(type) {
+	case ArgvHandler, WebhookHandler:
+		return true
+	}
+	return false
+}
 
 // ToolResultMoment is the post-tool-result seam's payload: the pair a PostToolResultFunc needs,
 // carried as one value because the dispatcher's revision bracket reads Revision() off the
@@ -301,6 +347,11 @@ type Reaction struct {
 	// Timeout is the deadline a non-Go handler runs under. A Go handler IGNORES it: the engine's
 	// own reactions run without a deadline, exactly as today's Floor guards do.
 	Timeout time.Duration
+	// Workspace narrows a path-bearing notice to one workspace root: set, the reaction fires only
+	// for a path inside that root; empty, it fires for every workspace. Like Timeout it belongs to
+	// the async lane — the Runner resolves it against the firing path — and a Go handler ignores
+	// it.
+	Workspace string
 	// TopLevelOnly opts OUT of sub-agent inheritance. The zero value is inherited by every child
 	// agent — today's unconditional membership inheritance — while true keeps the reaction at
 	// depth 0.
@@ -340,6 +391,14 @@ func (r Reaction) Validate() error {
 		return fmt.Errorf("%w %q: fires on no Moment", ErrInvalidReaction, r.ID)
 	}
 
+	async := isAsyncHandler(r.Handler)
+	if async && r.Class != ClassObserve {
+		return fmt.Errorf(
+			"%w %q: run: a command or webhook reacts as class %q, not %q",
+			ErrInvalidReaction, r.ID, ClassObserve, r.Class,
+		)
+	}
+
 	seen := make(map[Moment]bool, len(r.On))
 	for _, m := range r.On {
 		if seen[m] {
@@ -347,12 +406,67 @@ func (r Reaction) Validate() error {
 		}
 		seen[m] = true
 
+		if async {
+			switch {
+			case m.IsSeam():
+				return fmt.Errorf(
+					"%w %q: run: reacts to notices; %q is a seam",
+					ErrInvalidReaction, r.ID, m,
+				)
+			case !m.IsNotice():
+				return fmt.Errorf(
+					"%w %q: run: reacts to notices; %q is not one",
+					ErrInvalidReaction, r.ID, m,
+				)
+			}
+			continue
+		}
+
 		if m != r.Handler.seam() {
 			return fmt.Errorf(
 				"%w %q: Moment %q is not the handler's seam %q",
 				ErrInvalidReaction, r.ID, m, r.Handler.seam(),
 			)
 		}
+	}
+	return nil
+}
+
+// Generation is the whole live shape of the engine at one moment: the Floor enable set, Bypass,
+// and the user-origin observe list. It is the ONE value a live swap carries (ADR 0076 A8),
+// replacing the three separate swap idioms — each with its own setter and its own lock — that
+// preceded it, so nothing downstream can read a half-swapped state.
+type Generation struct {
+	// Floor is the Floor guard enable set: which of the seven structural guards are switched off.
+	Floor FloorConfig
+	// Bypass switches the model-shaping classes off (ADR 0006). The structural guards above stay
+	// on under it.
+	Bypass bool
+	// Observe is the async-lane observe list the Runner fires. The AGENT ignores it: the observe
+	// lane is the Runner's, and an agent takes only Floor and Bypass out of a generation.
+	Observe []Reaction
+}
+
+// Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what
+// is wrong. Floor and Bypass are booleans and cannot be malformed, so every check is about
+// Observe: each entry validates on its own, each is class observe — the lane takes nothing else —
+// and no two share an ID, which is what a firing is reported under.
+func (g Generation) Validate() error {
+	seen := make(map[string]bool, len(g.Observe))
+	for _, r := range g.Observe {
+		if err := r.Validate(); err != nil {
+			return err
+		}
+		if r.Class != ClassObserve {
+			return fmt.Errorf(
+				"%w %q: the observe list takes class %q, not %q",
+				ErrInvalidReaction, r.ID, ClassObserve, r.Class,
+			)
+		}
+		if seen[r.ID] {
+			return fmt.Errorf("%w %q: listed twice in the observe list", ErrInvalidReaction, r.ID)
+		}
+		seen[r.ID] = true
 	}
 	return nil
 }
