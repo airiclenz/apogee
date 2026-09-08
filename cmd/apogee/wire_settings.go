@@ -162,11 +162,6 @@ type liveSettings struct {
 	// the entry the process launched with however often the human re-pointed the key.
 	subAgentsServer string
 
-	// validatedEnable and validatedAlias are the `validated-sets:` block's own two keys — the surface's
-	// off-switch and its carry-over map — the other inputs resolveValidatedSet keys a match on.
-	validatedEnable bool
-	validatedAlias  map[string]string
-
 	// systemPrompt is the `system-prompt-text` / `system-prompt-file` / `system-prompt-models` trio
 	// (ADR 0023) plus the `system-prompt-layers:` list (ADR 0067). It is held whole rather than per
 	// key because ResolveSystemPrompt collapses the whole block into one template per model at every
@@ -269,8 +264,6 @@ func newLiveSettings(opts config.Options) *liveSettings {
 		servers:            opts.Servers,
 		seatChoice:         opts.SubAgentsChoice,
 		subAgentsServer:    opts.SubAgentsServer,
-		validatedEnable:    opts.ValidatedSetsEnable,
-		validatedAlias:     opts.ValidatedSetsAlias,
 		systemPrompt:       opts.SystemPrompt,
 		useDefaultPrompt:   opts.UseDefaultPrompt,
 		contextFilesEnable: len(opts.ContextFiles) > 0,
@@ -679,15 +672,6 @@ func (s *liveSettings) setSubAgentsServer(name string) {
 	s.subAgentsServer = name
 }
 
-// setValidatedSets installs a re-read `validated-sets:` block — the surface's off-switch and its
-// carry-over map, the two inputs resolveValidatedSet keys a match on, moved together under one lock
-// so a match cannot be keyed half on one instant of the block and half on the next.
-func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.validatedEnable, s.validatedAlias = enable, alias
-}
-
 // generation hands back the Reaction surface as the session is running it — the value a PARTIAL
 // edit modifies one field of, and the base the reload arm hangs a re-read observe list on. The
 // observe list comes back as a COPY, for options()' reason: the value travels to the engine seam and
@@ -938,8 +922,6 @@ func (s *liveSettings) optionsLocked() config.Options {
 	// own bound over (firingSources hands that entry back beside this projection).
 	next.WorkingWindow = s.pinnedWorking
 	next.Servers = slices.Clone(s.servers)
-	next.ValidatedSetsEnable = s.validatedEnable
-	next.ValidatedSetsAlias = maps.Clone(s.validatedAlias)
 	next.SystemPrompt = s.systemPrompt
 	next.SystemPrompt.Models = maps.Clone(s.systemPrompt.Models)
 	next.UseDefaultPrompt = s.useDefaultPrompt
@@ -1001,8 +983,8 @@ func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, con
 // upstreamHolder's snapshot, and it is overlaid unconditionally because the holder — not the launch
 // snapshot — is the authority on where this session is pointed (ADR 0036: one upstream definition).
 // Without it a `/server` switch would leave the resolution keyed on the LAUNCH endpoint, and every
-// input that is keyed on the endpoint — the probe record behind the identity ladder's middle rung,
-// and so the Validated-set decision above it — would be resolved against a server the session left.
+// input that is keyed on the endpoint — the probe record behind the identity ladder's middle rung —
+// would be resolved against a server the session left.
 // Both live callers run only after the startup bind, so the snapshot is always a real binding.
 func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) (config.Options, int, int) {
 	s.mu.RLock()
@@ -1022,8 +1004,6 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	// exactly what a caller reading the copy needs — a Firing composes its Config from it.
 	base.ResponseReserve = config.ResolveResponseReserve(s.entryReserve, s.pinnedReserve)
 	base.Servers = s.servers
-	base.ValidatedSetsEnable = s.validatedEnable
-	base.ValidatedSetsAlias = s.validatedAlias
 	base.SystemPrompt = s.systemPrompt
 	base.UseDefaultPrompt = s.useDefaultPrompt
 	base.ModelProfiles = s.modelProfiles
@@ -1589,14 +1569,18 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
+		// The two `validated-sets.` rows the registry still carries. The surface they used to drive is
+		// gone from this binary, so a committed edit has nothing left to dispatch and the write the
+		// pane already made is the whole of it (applyTheWriteAlone). The keys themselves leave the
+		// schema in the next step of the same removal.
 		key:     "validated-sets.enable",
-		reaches: settingsApplier.rides,
-		apply:   applyValidatedSets,
+		reaches: reachesWithoutAMember,
+		apply:   applyTheWriteAlone,
 	},
 	{
 		key:     "validated-sets.alias",
-		reaches: settingsApplier.rides,
-		apply:   applyValidatedSets,
+		reaches: reachesWithoutAMember,
+		apply:   applyTheWriteAlone,
 	},
 	{
 		key: "model-profiles",
@@ -1810,18 +1794,6 @@ func applyPresentation(a settingsApplier, key, value string) (string, error) {
 	return "", a.present.apply(key, value)
 }
 
-// applyValidatedSets is the one apply behind both `validated-sets.` rows.
-func applyValidatedSets(a settingsApplier, key, value string) (string, error) {
-	// Two rows, one apply: the block's off-switch and its alias map are a single input to the
-	// per-model resolution (ADR 0016 — a set applies whole or not at all), so the re-read
-	// installs both whichever row asked for it. The pane writes only the off-switch; the alias
-	// map arrives from the human's own editor and comes back through this same door.
-	if err := a.reloadValidatedSets(); err != nil {
-		return "", err
-	}
-	return "", a.rideTheRebind()
-}
-
 // applyTheWriteAlone is the apply for a key whose whole live effect IS the write the pane has
 // already made, so there is nothing left here to dispatch.
 func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
@@ -1829,7 +1801,9 @@ func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
 	// the reserve is read straight off the file into the budget the session opens with, and the
 	// retention rules are read while the session is being wired, so the store has already been swept
 	// by the time a pane can edit them. None of the three has a setter anywhere behind it — there is
-	// no seam this build could reach and none they are candidates for.
+	// no seam this build could reach and none they are candidates for. The two `validated-sets.` rows
+	// arrive here for a different reason and only while the schema still carries the retired key: the
+	// surface they used to drive has left this binary, so there is no seam left at all.
 	//
 	// So they take `editor`'s answer rather than the default refusal, for `editor`'s reason turned
 	// around: the write IS everything this session can do about the key, and a refusal would
@@ -2133,18 +2107,6 @@ func (a settingsApplier) reloadServers() (bool, error) {
 	return moved, nil
 }
 
-// reloadValidatedSets re-reads the `validated-sets:` block. An absent off-switch resolves to ON —
-// the loader answers with the key's default where the file states nothing — so a block the human
-// deleted goes back to the surface being available rather than to it being off.
-func (a settingsApplier) reloadValidatedSets() error {
-	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
-	if err != nil {
-		return err
-	}
-	a.live.setValidatedSets(file.ValidatedSetsEnable, file.ValidatedSetsAlias)
-	return nil
-}
-
 // reconnectMCP re-reads the `mcp-servers:` block and moves the session onto it. The dial and the
 // registry swap are liveMCP.reconnect's; what belongs here is the same one thing every structured
 // key's apply does — resolve the file layer exactly as startup resolved it — because only the FILE
@@ -2267,10 +2229,6 @@ func settingBool(key, value string) (bool, error) {
 //
 // What it re-resolves:
 //   - the system-prompt template, because `system-prompt-models:` keys on the model name (ADR 0023);
-//   - the validated set, because a set is matched against the model's identity fingerprint
-//     (ADR 0016) — the opts copy carries the new id so the fingerprint re-keys on it. The match is
-//     re-run for its NOTICES alone: the set arms nothing since the Reaction core landed (ADR 0076
-//     D11), so what it resolves to is discarded here exactly as startup discards it;
 //   - the context window, applying the pin: pinnedWindow > 0 is the user's `context-window:` key and
 //     outranks whatever the server reports (decision 9), else the observed window is bound as-is;
 //   - the reply ceiling, which is not per-model at all and is re-stated here anyway: outputCap is the
@@ -2291,9 +2249,9 @@ func settingBool(key, value string) (bool, error) {
 // What it deliberately does NOT touch: the endpoint, the mode, the approvals and the conversation,
 // none of which a model change has any claim on.
 //
-// A resolution failure is returned rather than swallowed — an unreadable per-model prompt file or a
-// dangling validated-sets alias is the user's own config being wrong about the new model — and the
-// caller then leaves the engine bound to what it had, which is the honest outcome.
+// A resolution failure is returned rather than swallowed — an unreadable per-model prompt file is
+// the user's own config being wrong about the new model — and the caller then leaves the engine
+// bound to what it had, which is the honest outcome.
 func rebindSpecFor(
 	opts config.Options,
 	roots stateRoots,
@@ -2308,10 +2266,7 @@ func rebindSpecFor(
 		return apogee.RebindSpec{}, nil, err
 	}
 
-	_, notices, err := resolveValidatedSet(next, roots.validated, roots.probe)
-	if err != nil {
-		return apogee.RebindSpec{}, nil, err
-	}
+	var notices []string
 
 	bound := window
 	if pinnedWindow > 0 {
@@ -2319,8 +2274,8 @@ func rebindSpecFor(
 	}
 
 	// The shape the NEW model speaks the wire in (ADR 0044). A built-in match announces itself on the
-	// same channel the validated-set lines travel, because to the human they are one kind of fact:
-	// something apogee decided about this model that nobody typed.
+	// per-session notice channel, because to the human this is one kind of fact: something apogee
+	// decided about this model that nobody typed.
 	profile, notice := resolveModelProfile(model, next.ModelProfiles)
 	if notice != "" {
 		notices = append(notices, notice)

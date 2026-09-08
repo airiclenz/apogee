@@ -97,7 +97,7 @@ func TestManualDocumentsEverySettingsKeyRejectsAnUndocumentedKey(t *testing.T) {
 // TestManualDocumentsEverySettingsKeyRejectsALeafBorrowedFromAnotherBlock pins the scope of the
 // leaf arm. Every path here is fabricated, and every one of them has its leaf back-ticked SOMEWHERE
 // on the real page — under a different block. That is the collision the loose arm used to wave
-// through (`context-files.enable` passing off `validated-sets:`' own `enable:`), so the case is a
+// through (`context-files.enable` passing off another block's own `enable:`), so the case is a
 // gate on the scoping and not merely another undocumented-key case: the test first asserts the leaf
 // really is on the page, then that the predicate still says no.
 func TestManualDocumentsEverySettingsKeyRejectsALeafBorrowedFromAnotherBlock(t *testing.T) {
@@ -109,10 +109,10 @@ func TestManualDocumentsEverySettingsKeyRejectsALeafBorrowedFromAnotherBlock(t *
 		path string
 		from string
 	}{
-		{path: "context-files.alias", from: "validated-sets:"},
-		{path: "validated-sets.names", from: "context-files:"},
+		{path: "context-files.max-count", from: "sessions:"},
+		{path: "mcp-servers.names", from: "context-files:"},
 		{path: "ui.max-age", from: "sessions:"},
-		{path: "sessions.enable", from: "validated-sets: and context-files:"},
+		{path: "sessions.enable", from: "context-files:"},
 	} {
 		_, leaf, _ := strings.Cut(borrowed.path, ".")
 		if !backTickedKey(manual.body, leaf) {
@@ -196,7 +196,7 @@ func splitManualSections(body string) []string {
 //
 // The leaf arm is SCOPED to the parent block's own section, which is what stops two blocks that
 // share a leaf name from vouching for each other: `context-files.enable` counts because the
-// `context-files:` paragraph spells `enable:` itself, never because `validated-sets:` spells its
+// `context-files:` paragraph spells `enable:` itself, never because another block spells its
 // own one screen away. The scope follows the page's own structure rather than a table this file
 // would have to maintain — a section documents a block when it names the block back-ticked (`ui:`)
 // or shows it as a block line in one of its fenced examples (`present:`) — so a block documented

@@ -75,22 +75,6 @@ type SaveOutcome struct {
 	// exactly the drift-check scenario --no-save serves. Empty when no usable record preceded
 	// this run, or when this run's write replaced it.
 	Previous string
-	// AutoApply names the Validated-set entries that auto-apply for this model once the record
-	// exists.
-	AutoApply []string
-	// Promoted distinguishes the two ways AutoApply can be non-empty: true when the record is
-	// what made those sets apply (they were merely OFFERED before — the ADR 0021 §4 promotion),
-	// false when the user's own alias already applied them and the record only makes the match
-	// direct. Saying "it was previously only offered" in the second case would be a false claim
-	// about the user's machine.
-	Promoted bool
-	// Suppressed names the reason the next session start will NOT apply what this record would
-	// otherwise unlock: a session-level off-switch (Bypass, validated-sets: enable: false, an
-	// explicit mechanisms: block), or the matched entry failing the catalogue validation startup
-	// runs as its last rung — an unknown mechanism ID or an invalid stacking makes startup skip
-	// the entry whole, carrying that check's own reason. It exists so the report never announces
-	// an effect the next startup will decline to deliver.
-	Suppressed string
 }
 
 // GatherModel runs the model half of `apogee probe`: the live capability battery, then the
@@ -247,15 +231,11 @@ func (m Model) recordSection() string {
 	return strings.Join(lines, "\n")
 }
 
-// effectLine names the automatism this record switches on. Under ADR 0016 §5 a model at low
-// confidence gets an OFFER and the same model at medium gets the set APPLIED, so running this
-// command is the act that makes the promotion — and when a matching set exists, the report
-// names it rather than leaving the user to discover it next session.
+// effectLine names what this record changes about the reader's machine: the confidence the
+// model's identity resolves at on the next session start.
 //
-// Every branch here is a claim about the reader's machine, so each is narrowed until it is true
-// of it: a set already applying through the user's own alias was not promoted by this record,
-// and "none matches today" is stated against the key that would have to match, not in the
-// abstract.
+// Every branch here is a claim about that machine, so each is narrowed until it is true of it —
+// "no record stored" means stored by anyone, not merely by this run.
 func (m Model) effectLine() string {
 	if !m.Save.Requested || !m.Save.Written {
 		// "No record stored" must mean stored by ANYONE: an earlier run's record survives a
@@ -268,18 +248,5 @@ func (m Model) effectLine() string {
 		}
 		return "none — with no record stored, this model's identity stays at the label tier (low confidence)"
 	}
-	if m.Save.Suppressed != "" {
-		return "this model now resolves at medium confidence, but " + m.Save.Suppressed + "."
-	}
-	if len(m.Save.AutoApply) == 0 {
-		return "this model now resolves at medium confidence, so a Validated set keyed " +
-			m.Fingerprint.Label + " would AUTO-APPLY (ADR 0016 §5). No entry carries that key today."
-	}
-	if !m.Save.Promoted {
-		return "Validated set " + strings.Join(m.Save.AutoApply, ", ") +
-			" was already applying through your validated-sets alias; the record makes the match direct " +
-			"(medium confidence), and nothing else about this session changes."
-	}
-	return "Validated set " + strings.Join(m.Save.AutoApply, ", ") +
-		" now AUTO-APPLIES for this model (ADR 0016 §5) — it was previously only offered."
+	return "this model now resolves at medium confidence"
 }

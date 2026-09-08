@@ -39,7 +39,6 @@ func firingRoots(t *testing.T) stateRoots {
 	return stateRoots{
 		config:    home,
 		sessions:  filepath.Join(home, "sessions"),
-		validated: filepath.Join(home, "validated-sets"),
 		probe:     filepath.Join(home, "probe"),
 		prompts:   filepath.Join(home, "prompts"),
 		schemes:   filepath.Join(home, "schemes"),
@@ -66,8 +65,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 
 	roots := firingRoots(t)
 	opts := config.Options{
-		// Bypass doubles as the Mechanisms floor and, here, as what keeps the Validated-set
-		// surface off, so this composition resolves without a probe record to match against.
+		// Bypass doubles as the Mechanisms floor.
 		Bypass:             true,
 		ConfineToWorkspace: true,
 		WebSearchEndpoint:  "https://search.example/v1",
@@ -254,9 +252,8 @@ func TestFiringConfigCarriesTheFloorGuardKeys(t *testing.T) {
 
 	roots := firingRoots(t)
 	opts := config.Options{
-		// Bypass keeps the Validated-set surface off, so this composition resolves with no probe
-		// record to match against — and says the second half of the claim besides: Bypass takes the
-		// lab rows away and leaves every Floor guard exactly where the seven keys put it.
+		// Bypass says the second half of the claim: it takes the lab rows away and leaves every
+		// Floor guard exactly where the seven keys put it.
 		Bypass: true,
 		Servers: []config.ServerEntry{
 			{Name: "box", Endpoint: "http://box.example/v1"},

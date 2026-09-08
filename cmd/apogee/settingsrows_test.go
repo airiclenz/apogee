@@ -62,9 +62,7 @@ func fabricatedSettings() config.Options {
 		Present:               config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
 		UI: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false},
-		Bypass:              true,
-		ValidatedSetsEnable: true,
-		ValidatedSetsAlias:  map[string]string{"gpt-oss-20b": "gpt-oss"},
+		Bypass: true,
 		ModelProfiles: []profiles.Entry{
 			{Pattern: "minimax-m3", Profile: apogee.ModelProfile{
 				Thinking: apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>"},
@@ -424,14 +422,16 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.skill-suggestions":    "false", // turned off in the fixture: a bool row reports the value, never the default
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
-		"sessions.max-age":      "0s",
-		"sessions.max-count":    "0",
-		"cursor-shape":          "block", // unset, so the declared default is what is in force
-		"editor":                "code -w",
-		"bypass":                "true",
-		"reactions":             noneSettingValue, // unset in the fixture: the lane is dormant by default
-		"validated-sets.enable": "true",
-		"validated-sets.alias":  "1 alias",
+		"sessions.max-age":   "0s",
+		"sessions.max-count": "0",
+		"cursor-shape":       "block", // unset, so the declared default is what is in force
+		"editor":             "code -w",
+		"bypass":             "true",
+		"reactions":          noneSettingValue, // unset in the fixture: the lane is dormant by default
+		// The retired `validated-sets:` block, still in the schema and no longer read by anything:
+		// the fixture states neither key, so both rows read the zero value they were left at.
+		"validated-sets.enable": "false",
+		"validated-sets.alias":  noneSettingValue,
 		"model-profiles":        "1 model profile",
 	}
 	for path, wantValue := range want {
@@ -643,20 +643,6 @@ func TestSettingsRowsSummarizeStructuredBlocks(t *testing.T) {
 			mut:  func(o *config.Options) { o.Servers = []config.ServerEntry{{Name: "workstation"}} },
 			path: "servers",
 			want: "1 server",
-		},
-		{
-			// The off-switch is its OWN row now, so it is spelled the way the file spells it rather
-			// than folded into a summary of the block — and it is the one row of the pair the pane writes.
-			name: "the validated-set off-switch is a bool row of its own",
-			mut:  func(o *config.Options) { o.ValidatedSetsEnable = false },
-			path: "validated-sets.enable",
-			want: "false",
-		},
-		{
-			name: "the alias map is counted, and an empty one reads none",
-			mut:  func(o *config.Options) { o.ValidatedSetsAlias = nil },
-			path: "validated-sets.alias",
-			want: noneSettingValue,
 		},
 		{
 			// The count and nothing else: which pattern applies depends on the model that is bound

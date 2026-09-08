@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/session"
@@ -143,9 +141,8 @@ func TestRebindReportsARefusedRosterSwapAsANotice(t *testing.T) {
 
 // rebindSpecFor is the composition root's half of a rebind: everything that is per-model gets
 // resolved again for the model the heartbeat observed, and everything else is left alone. The table
-// walks the four decisions it makes — which system-prompt template (ADR 0023), which validated
-// Mechanism set (ADR 0016), whether an explicit `mechanisms:` block suppresses that set, and which
-// window is bound when the observation and a `context-window:` pin disagree (decision 9).
+// walks the decisions it makes — which system-prompt template (ADR 0023) and which window is bound
+// when the observation and a `context-window:` pin disagree (decision 9).
 func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 	t.Parallel()
 
@@ -162,10 +159,6 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		outputCap    int
 		wantPrompt   string
 		wantWindow   int
-		// seedEntryKey writes one synthetic user-local Validated-set entry under this key before
-		// the rebind runs. The shipped roster is empty since v0.20.0 (ADR 0071), so a case that
-		// needs an entry to match brings its own — which is the only kind a user has now.
-		seedEntryKey string
 		wantNotices  func(t *testing.T, got []string)
 	}{
 		{
@@ -183,44 +176,6 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 			window:     32768,
 			wantPrompt: "the global prompt",
 			wantWindow: 32768,
-		},
-		{
-			// The Validated-set surface is re-consulted for the model being bound, not carried
-			// over from the old one: the notice names the entry keyed to THIS model. What it
-			// resolves to arms nothing (ADR 0076 D11) — the notice IS the whole observable now.
-			name: "the validated-set surface is re-resolved for the new model",
-			opts: config.Options{
-				ValidatedSetsEnable: true,
-				ValidatedSetsAlias:  map[string]string{labKey: labKey}, // the §3 human decision
-			},
-			seedEntryKey: labKey,
-			model:        labKey,
-			window:       8192,
-			wantWindow:   8192,
-			wantNotices: func(t *testing.T, got []string) {
-				t.Helper()
-				if !noticeContains(got, "skipping validated-set entry "+strconv.Quote(labKey)) {
-					t.Errorf("notices = %v; want the surface to have matched the NEW model's entry", got)
-				}
-			},
-		},
-		{
-			name: "an explicit mechanisms: block still suppresses the matched set",
-			opts: config.Options{
-				ValidatedSetsEnable: true,
-				ValidatedSetsAlias:  map[string]string{labKey: labKey},
-				Mechanisms:          map[string]bool{"lab_row": true},
-			},
-			seedEntryKey: labKey,
-			model:        labKey,
-			window:       8192,
-			wantWindow:   8192,
-			wantNotices: func(t *testing.T, got []string) {
-				t.Helper()
-				if !noticeContains(got, "your explicit mechanisms: config takes precedence") {
-					t.Errorf("notices = %v; want the suppression line a manual block still earns", got)
-				}
-			},
 		},
 		{
 			name:         "a context-window: pin outranks the observed window",
@@ -259,10 +214,7 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
-			if tt.seedEntryKey != "" {
-				writeLabEntry(t, roots.validated, tt.seedEntryKey, labSet)
-			}
+			roots := stateRoots{config: t.TempDir(), probe: t.TempDir()}
 
 			spec, notices, err := rebindSpecFor(tt.opts, roots, tt.model, tt.window,
 				tt.pinnedWindow, tt.outputCap)
@@ -312,58 +264,6 @@ func TestRebindInputsOverlayTheBoundUpstream(t *testing.T) {
 	if base.APIKey != bound.APIKey {
 		t.Errorf("apiKey = %q; want the bound %q — a key from before a switch opens the wrong server",
 			base.APIKey, bound.APIKey)
-	}
-}
-
-// What the overlay is FOR, proven through the rebind path rather than at the seam: the identity
-// ladder's middle rung is keyed on (probe dir, endpoint, model id), so a rebind that still carried
-// the launch endpoint would miss the record `apogee probe model` left for the server the session is
-// on now — resolving at low confidence, where a matching Validated set is merely OFFERED. With the
-// bound endpoint the same record promotes the identity to medium and the entry is carried past
-// that gate, to the catalogue check the notice below reports.
-func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
-	t.Parallel()
-	const boundEndpoint = "http://127.0.0.1:65535"
-	roots, err := resolveRoots(t.TempDir(), t.TempDir())
-	if err != nil {
-		t.Fatalf("resolveRoots: %v", err)
-	}
-	writeLabEntry(t, roots.validated, labKey, labSet)
-	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
-		Endpoint:   boundEndpoint,
-		ModelLabel: labKey,
-		ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
-		Behavior:   "probe:1:tools+json+chain",
-	}); err != nil {
-		t.Fatalf("save probe record: %v", err)
-	}
-
-	// The launch snapshot names a server this session has since left.
-	launchOpts := config.Options{Endpoint: "http://launch.invalid", ValidatedSetsEnable: true}
-	live := newLiveSettings(launchOpts)
-
-	// The rebind closure the composition root wires, reconstructed as the other rebind tests do.
-	var notices []string
-	rebind := func(model string, window int, _ provider.EffortDialect) (tui.RebindResult, error) {
-		bound := upstreamBinding{Endpoint: boundEndpoint, Model: model}
-		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, bound)
-		got, ns, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
-		if err != nil {
-			return tui.RebindResult{}, err
-		}
-		notices = ns
-		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
-	}
-
-	if _, err := rebind(labKey, 8192, provider.EffortDialectNone); err != nil {
-		t.Fatalf("rebind: %v", err)
-	}
-	if !noticeContains(notices, "skipping validated-set entry "+strconv.Quote(labKey)) {
-		t.Errorf("the entry was not carried past the offer gate, so the resolution missed the record "+
-			"keyed to the bound endpoint; notices=%v", notices)
-	}
-	if noticeContains(notices, "To apply it") {
-		t.Errorf("the low-confidence OFFER means the launch endpoint was keyed on, not the bound one: %v", notices)
 	}
 }
 

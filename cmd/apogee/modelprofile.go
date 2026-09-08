@@ -11,8 +11,8 @@ package main
 // (ADR 0024), a scheduled Firing, and a `model-profiles:` edit committed while the session runs
 // (ADR 0037).
 //
-// It sits beside validatedsets.go for the same reason that file exists: one small resolution with
-// notices of its own, reached from several wiring points and testable without a session.
+// It lives in a file of its own for what it is: one small resolution with notices of its own,
+// reached from several wiring points and testable without a session.
 
 import (
 	"fmt"

@@ -97,37 +97,13 @@ func TestModelReportRecordSection(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "written with a matching validated set",
-			save: SaveOutcome{Requested: true, Written: true, Path: "/home/.apogee/probe/abc.json", AutoApply: []string{"gemma-3n"}, Promoted: true},
+			name: "written",
+			save: SaveOutcome{Requested: true, Written: true, Path: "/home/.apogee/probe/abc.json"},
 			want: []string{
 				"/home/.apogee/probe/abc.json",
 				"yes — delete the file above to undo",
-				"Validated set gemma-3n now AUTO-APPLIES",
+				"this model now resolves at medium confidence",
 			},
-		},
-		{
-			name: "written with nothing matching",
-			save: SaveOutcome{Requested: true, Written: true, Path: "/p.json"},
-			want: []string{
-				"now resolves at medium confidence",
-				"a Validated set keyed fake-model would AUTO-APPLY",
-				"No entry carries that key today.",
-			},
-		},
-		{
-			// The set was already applying through the user's own alias, so the record
-			// promoted nothing — claiming it "was previously only offered" would be a
-			// false statement about the reader's machine.
-			name: "written where an alias already applied the set",
-			save: SaveOutcome{Requested: true, Written: true, Path: "/p.json", AutoApply: []string{"gemma-3n"}},
-			want: []string{"was already applying through your validated-sets alias"},
-		},
-		{
-			// A session-level off-switch holds whatever the record says: the report names
-			// it rather than announcing an effect the next startup will decline.
-			name: "written while the surface is off",
-			save: SaveOutcome{Requested: true, Written: true, Path: "/p.json", Suppressed: "Bypass suppresses the Validated-set surface entirely"},
-			want: []string{"but Bypass suppresses the Validated-set surface entirely."},
 		},
 		{
 			name: "--no-save",

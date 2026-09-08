@@ -386,51 +386,6 @@ func TestApplySettingServersInstallsTheReReadList(t *testing.T) {
 	}
 }
 
-// `validated-sets:` is an input to the per-model resolution rather than a value the engine holds, so
-// it lands in the holder and is committed by the rebind — the one door a model change and a config
-// change share.
-func TestApplySettingValidatedSetsRideTheRebind(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	path := filepath.Join(home, "config.yaml")
-	live := newLiveSettings(config.Options{ValidatedSetsEnable: true})
-	probe := &rebindProbe{}
-	apply := applySettingFor(settingsApplier{
-		engine:     &applySettingSpy{},
-		live:       live,
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:     probe.rebind,
-		configPath: path,
-	})
-
-	writeSettingsFixture(t, path, "validated-sets:\n  enable: false\n")
-	if _, err := apply("validated-sets.enable", "false"); err != nil {
-		t.Fatalf("apply validated-sets.enable: %v", err)
-	}
-	base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
-	if base.ValidatedSetsEnable {
-		t.Error("validated-sets stayed on; the re-read block must reach the resolution inputs")
-	}
-	if len(probe.calls) != 1 {
-		t.Errorf("rebind drives = %+v, want the one re-drive that commits the block", probe.calls)
-	}
-
-	// The block's two rows are one apply: an alias map edited in the human's own editor comes back as
-	// `validated-sets.alias` and has to reach the same re-read, or a carry-over would sit in the file
-	// until the next launch.
-	writeSettingsFixture(t, path, "validated-sets:\n  alias:\n    my-gemma: gemma-4\n")
-	if _, err := apply("validated-sets.alias", "1 alias"); err != nil {
-		t.Fatalf("apply validated-sets.alias: %v", err)
-	}
-	base, _, _ = live.rebindInputs(config.Options{}, upstreamBinding{})
-	if base.ValidatedSetsAlias["my-gemma"] != "gemma-4" {
-		t.Errorf("alias map = %v, want the re-read carry-over", base.ValidatedSetsAlias)
-	}
-	if len(probe.calls) != 2 {
-		t.Errorf("rebind drives = %+v, want the alias edit to ride the rebind too", probe.calls)
-	}
-}
-
 // The composition root wires both halves of the round trip, and the spec it hands back names the
 // config file this session resolved.
 func TestRunRootWiresTheExternalEditSeams(t *testing.T) {

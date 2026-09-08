@@ -25,8 +25,6 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -111,14 +109,11 @@ const firingStepPrompt = "Build a full parser pipeline.\n" +
 // TestScheduleFiringRunsAgainstTheCurrentBinding is the item's headline: the Fire seam composes one
 // headless run from the binding the session holds AT FIRE TIME, in the Schedule's own mode, and the
 // record it leaves behind is an ordinary session record marked with the Schedule's identity. Both
-// halves of that binding are the holder's: the wire the Firing dials AND the endpoint its spec
-// resolution keys on.
+// halves of that binding are the holder's: the wire the Firing dials AND the model its record is
+// marked with.
 //
-// The run really reaches the stubbed upstream, which is the dialling half. The resolution's own half
-// is re-read one layer down, at firingConfig — the composer this seam calls, whose notices it drops
-// (a Firing's narration is the record it leaves behind), and the only place the two endpoints can
-// still be told apart now that no catalogued row can be armed. It does not call t.Parallel: sibling
-// tests here replace the package-level runner seam.
+// The run really reaches the stubbed upstream, which is the dialling half; the record's model is the
+// other. It does not call t.Parallel: sibling tests here replace the package-level runner seam.
 func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	url, menus := firingUpstream(t, "the build is green")
 
@@ -128,35 +123,8 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	}
 	store := session.NewStore(roots.sessions)
 
-	// The endpoint-keyed half of the resolution, fixtured so a resolution keyed on the WRONG endpoint
-	// is a visibly different run: the identity ladder's behavioral rung is (probe dir, endpoint, model
-	// label), so the record `apogee probe model` left for the server this session MOVED to is found
-	// only when the bound endpoint reaches the resolver. Found, the identity is medium-confidence and
-	// the entry is weighed as one that APPLIES; missed, the bare label resolves at low confidence and
-	// the entry is merely OFFERED — a different rung, and a different line (validatedsets.go).
-	//
-	// The set below names a row no build of this apogee carries, and that is the point rather than an
-	// accident: since the shipped catalogue emptied (v0.20.0, ADR 0071) NO set can validate, so what a
-	// set names can no longer reach the composed roster and the roster stopped being this resolution's
-	// observable. Its rung still speaks — the applying rung, and only it, says out loud that it weighed
-	// the entry and could not use it — which is what the assertion at the end of this test reads.
-	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
-		Endpoint:   url,
-		ModelLabel: "bound-model",
-		ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
-		Behavior:   "probe:1:tools+json+chain",
-	}); err != nil {
-		t.Fatalf("save probe record: %v", err)
-	}
-	writeUserValidatedEntry(t, roots.validated, "bound-model", `{
-		"version": 1,
-		"key": "bound-model",
-		"set": ["a-row-no-build-carries"],
-		"evidence": {"campaign": "schedule-test"}
-	}`)
-
 	launchOpts := config.Options{
-		Endpoint: "http://launch.invalid", Model: "launch-model", ValidatedSetsEnable: true,
+		Endpoint: "http://launch.invalid", Model: "launch-model",
 	}
 	w := scheduleWiring{
 		roots: roots,
@@ -216,36 +184,6 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 			t.Errorf("the firing offered %q — it inherited the session's registry, MCP tools and all",
 				name)
 		}
-	}
-
-	// The endpoint the per-model resolution was KEYED on, read at the composer the seam above calls:
-	// `fire` drops firingConfig's notices, so the same composition is asked again here from the
-	// wiring's own sources, for the one line only the medium-confidence rung emits. Keyed on the
-	// launch snapshot's `http://launch.invalid` the probe record is missed, the identity is name-only,
-	// and the very same entry earns the low-confidence OFFER line instead — so the pair below is the
-	// two endpoints told apart, not a value read back from the field that was written from it.
-	opts, entry := w.live.firingSources(w.binding())
-	_, _, notices, err := firingConfig(context.Background(), firingInputs{
-		opts:     opts,
-		entry:    entry,
-		roots:    roots,
-		mode:     domain.ModePlan,
-		beat:     (&stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}).discover,
-		recordID: "sch-1-abcd-resolution",
-	})
-	if err != nil {
-		t.Fatalf("firingConfig: %v", err)
-	}
-	const weighed = `skipping validated-set entry "bound-model"`
-	const offered = "the model identity is name-only"
-	if !slices.ContainsFunc(notices, func(n string) bool { return strings.Contains(n, weighed) }) {
-		t.Errorf("the firing's notices are %q, want one carrying %q: the entry never reached the "+
-			"medium-confidence rung, so the resolution keyed on the LAUNCH snapshot rather than on "+
-			"the holder", notices, weighed)
-	}
-	if slices.ContainsFunc(notices, func(n string) bool { return strings.Contains(n, offered) }) {
-		t.Errorf("the firing's notices are %q: the entry was merely OFFERED, which is the name-only "+
-			"identity a resolution keyed on the LAUNCH snapshot resolves", notices)
 	}
 }
 

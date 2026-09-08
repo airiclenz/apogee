@@ -165,23 +165,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// A `mechanisms:` key naming a RETIRED id is tolerated rather than refused (the id was
 	// valid at the release before the removal), and this is the one caller that says so: startup runs
 	// before the alt screen, so a stderr line here reaches the human, where the same resolver running
-	// under the live `/settings` apply or per delegate would paint over the TUI. It sits beside the
-	// validated-set notices below for the same reason they do.
+	// under the live `/settings` apply or per delegate would paint over the TUI.
 	for _, n := range retiredNotices {
-		fmt.Fprintln(os.Stderr, n)
-	}
-
-	// The Validated-set runtime surface (ADR 0016), now INERT: the match still runs and still
-	// narrates, and the set it resolves arms nothing — there is no enable list left for it to fold
-	// into (ADR 0076 D11; the surface is re-homed or removed in stage 2). The match is kept rather
-	// than skipped because its refusals are the user's own config being wrong — a dangling alias is
-	// still an error worth failing on — and its notices are the ADR's visible per-session line, on
-	// stderr pre-TUI like the unconfined-Auto warning above.
-	_, vnotices, err := resolveValidatedSet(w.opts, w.roots.validated, w.roots.probe)
-	if err != nil {
-		return err // a dangling validated-sets alias — the user's own config, loud by design
-	}
-	for _, n := range vnotices {
 		fmt.Fprintln(os.Stderr, n)
 	}
 
@@ -291,8 +276,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	}
 
 	// The startup snapshot's MUTABLE half (ADR 0037): the `context-window:` pin, the `servers:` list,
-	// the `mechanisms:` ids the retired roll reads and the `validated-sets:`/`system-prompt-*`
-	// inputs — every value below that a committed `/settings` edit can now move mid-session. The
+	// the `mechanisms:` ids the retired roll reads and the `system-prompt-*` inputs — every value
+	// below that a committed `/settings` edit can now move mid-session. The
 	// seams that used to capture each of them by value read this holder instead, so the next thing
 	// that re-resolves — a rebind, a server switch, a scheduled Firing — sees what the human
 	// changed rather than what the process launched with. Seeded from opts, so a session nobody

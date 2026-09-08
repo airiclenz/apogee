@@ -23,9 +23,9 @@ import (
 
 // rebind is the composition root's half of an observed model change. The TUI decides WHEN (at idle,
 // or at the exchange-terminal boundary), this decides WHAT — because every input to the decision is
-// config the binary owns (the per-model system prompt, ADR 0023; the validated set, ADR 0016; the
-// manual mechanisms list; the window pin) and the engine mutators are the binary's to drive. It runs
-// on the Update goroutine, at a quiescent boundary Agent.Rebind demands, so nothing here needs a
+// config the binary owns (the per-model system prompt, ADR 0023; the manual mechanisms list; the
+// window pin) and the engine mutators are the binary's to drive. It runs on the Update goroutine,
+// at a quiescent boundary Agent.Rebind demands, so nothing here needs a
 // lock of its own. A resolution error returns WITHOUT touching the engine, and Agent.Rebind is
 // itself validate-then-commit, so a refused rebind leaves the session bound exactly where it was.
 //
@@ -53,7 +53,7 @@ func (w *rootWiring) rebind(model string, window int, effortDialect provider.Eff
 	// The model a session runs is now the id the human configured even when the server never
 	// advertised it (provider's trusted-hint resolution), so the binding that lands on such an id
 	// says so — once, here, where the beat that resolved it and the window it actually bound are
-	// both in hand. It joins the validated-set lines rather than printing itself: a notice is
+	// both in hand. It joins the rebind's other notices rather than printing itself: a notice is
 	// something the transcript tells the human, and this seam already has that channel.
 	if notice := hintNotice(spec.Model, w.hints.gradeFor(model), window, spec.MaxContextTokens); notice != "" {
 		notices = append(notices, notice)

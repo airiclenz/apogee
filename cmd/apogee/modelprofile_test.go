@@ -109,8 +109,8 @@ func TestResolveModelProfileMatchesAndNarrates(t *testing.T) {
 
 // The rebind seam is where a model SWITCH picks the shape up (ADR 0044 ratified call 6): the spec
 // carries the profile, so Agent.Rebind installs it atomically with the prompt and the Mechanisms
-// rather than leaving the session parsing the departed model's dialect. The notice rides the same
-// per-session channel the validated-set lines do.
+// rather than leaving the session parsing the departed model's dialect. The notice rides the
+// per-session notice channel.
 func TestRebindSpecForCarriesThePerModelProfile(t *testing.T) {
 	t.Parallel()
 
@@ -145,7 +145,7 @@ func TestRebindSpecForCarriesThePerModelProfile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
+			roots := stateRoots{config: t.TempDir(), probe: t.TempDir()}
 			opts := config.Options{ModelProfiles: tt.user}
 
 			spec, notices, err := rebindSpecFor(opts, roots, tt.model, 8192, 0, 0)
@@ -426,7 +426,7 @@ func TestRebindSpecForAnnouncesRosterDeltas(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
+			roots := stateRoots{config: t.TempDir(), probe: t.TempDir()}
 			opts := config.Options{ModelProfiles: tt.user}
 
 			spec, notices, err := rebindSpecFor(opts, roots, tt.model, 8192, 0, 0)

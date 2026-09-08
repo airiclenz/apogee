@@ -385,7 +385,6 @@ const seatChoiceNote = "applies to the next request"
 type stateRoots struct {
 	config    string
 	sessions  string
-	validated string
 	probe     string
 	prompts   string
 	schemes   string
@@ -437,9 +436,8 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 	}
 
 	return stateRoots{
-		config:    absHome,
-		sessions:  filepath.Join(absHome, "sessions"),
-		validated: filepath.Join(absHome, "validated"),
+		config:   absHome,
+		sessions: filepath.Join(absHome, "sessions"),
 		// The behavioral-probe records `apogee probe model` writes and the fingerprint
 		// resolver reads back (ADR 0021 §3). Named by internal/library rather than joined
 		// here, because the resolver has to find the same directory from the apogee home

@@ -550,10 +550,13 @@ const startupOnlyContract = "takes effect at the next start."
 // the session is being built, and say so in their Descriptions. `ui.inspector`,
 // `delegate-max-steps`, `working-window` and `undo-snapshots` still mirror their value onto the
 // live holder for the Firings a session raises, and do nothing at all where a Driver composed
-// none — which is why they are exempt rather than reaching for one.
+// none — which is why they are exempt rather than reaching for one. The two `validated-sets.` rows
+// are exempt for a third reason, and only until the schema drops them: the surface they drove has
+// left this binary, so the write is all that is left of the key.
 var settingKeysWithNoMemberToReach = []string{
 	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "working-window",
 	"undo-snapshots", "sessions.max-age", "sessions.max-count",
+	"validated-sets.enable", "validated-sets.alias",
 }
 
 // The five START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
@@ -910,16 +913,15 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 	// moves OFF: a value that came back unchanged would be the launch snapshot showing through rather
 	// than the apply landing.
 	boot := config.Options{
-		SubAgentsChoice:    config.SubAgentsChoiceFixed,
-		WebSearchEndpoint:  "https://boot.example.com/s",
-		ToolsDisabled:      []string{"python_exec"},
-		URLAllowHosts:      []string{"boot.example.com"},
-		URLDenyHosts:       []string{"metadata.internal"},
-		AutoCompact:        true,
-		PruneToolResults:   true,
-		ContextFiles:       []string{"AGENTS.md"},
-		Servers:            []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
-		ValidatedSetsAlias: map[string]string{"label": "entry"},
+		SubAgentsChoice:   config.SubAgentsChoiceFixed,
+		WebSearchEndpoint: "https://boot.example.com/s",
+		ToolsDisabled:     []string{"python_exec"},
+		URLAllowHosts:     []string{"boot.example.com"},
+		URLDenyHosts:      []string{"metadata.internal"},
+		AutoCompact:       true,
+		PruneToolResults:  true,
+		ContextFiles:      []string{"AGENTS.md"},
+		Servers:           []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
 		// The `hooks:` list is the one key here that NO case below edits, and it is in the snapshot
 		// for exactly that reason: its own apply is a whole-list swap tested beside the arm, so what
 		// this test owes it is the other half — a holder nobody edited hands back the list the run
@@ -1127,7 +1129,6 @@ func clobberOptions(opts config.Options) {
 	for i := range opts.Reactions {
 		opts.Reactions[i] = domain.Reaction{ID: "clobbered"}
 	}
-	clear(opts.ValidatedSetsAlias)
 	clear(opts.SystemPrompt.Models)
 }
 

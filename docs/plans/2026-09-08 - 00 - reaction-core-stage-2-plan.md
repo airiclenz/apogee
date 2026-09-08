@@ -516,7 +516,37 @@ go test -race ./internal/agent/ && go test ./cmd/apogee/
 
 **Commit:** `refactor(agent,apogee): SetBypass and SetFloor are gone; SetReactions is the one live swap`
 
-## 14. Delete the validated-sets surface — Driver side
+## 14. Delete the validated-sets surface — Driver side — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the item removes the two `validated-sets.` rows from `settingsTable` while item 15 still owns the `KeyRegistry` rows, which leaves `validated-sets.enable` an editable key with no apply — `TestEveryEditableSettingKeyHasAnApply` and `TestApplySettingRefusesEveryKeyItCannotReach` both fail that way, and the item's own acceptance demands `go test ./cmd/apogee/` green. The two rows therefore SURVIVE for one more item, re-pointed at `reachesWithoutAMember` + `applyTheWriteAlone`: no holder field, no re-read, no `ValidatedSets` identifier (the acceptance grep holds), and the pane's write is the whole of the apply now that nothing reads the key. Item 15 deletes the rows with the schema.
+
+NOTES (2026-09-08): the two keys therefore join `settingKeysWithNoMemberToReach` in `cmd/apogee/wire_settings_test.go` (with a sentence saying why and for how long), and `settingsrows_test.go` keeps its section-map and value-map pins for them — the value pins are `"false"` / `noneSettingValue`, since the fixture may no longer set `Options.ValidatedSets*` under this item's acceptance grep.
+
+NOTES (2026-09-08): the item's acceptance grep (`! grep -rn 'ValidatedSets' cmd/apogee/`) reaches `wire_settings_test.go`'s two `Options.ValidatedSetsAlias` sites, which item 15's guard assigns to item 15. Both are dead once the holder stops projecting the field, so they are removed here; item 15 will find nothing left there.
+
+NOTES (2026-09-08): the item lists `daemonfire_test.go` and `wire_live_test.go` in Files; neither names the surface at `d84dd988` (`daemonfire_test.go:107` reads "one validated schedule entry", an unrelated use of the word), so neither is touched.
+
+NOTES (2026-09-08): `schedule_test.go`'s `TestScheduleFiringRunsAgainstTheCurrentBinding` loses its whole endpoint-keyed tail — the probe-record fixture, the user entry and the `firingConfig` re-composition — because the notice pair it read (`skipping validated-set entry` vs "the model identity is name-only") was the surface's. The record's `meta.Model` assertion still holds the "the Firing follows the holder, not the launch snapshot" claim, and the test's doc comment now says so.
+
+NOTES (2026-09-08): `wire_server_test.go` loses `TestRebindResolutionKeysOnTheBoundEndpoint` whole for the same reason — its only observable was the set notice — and `TestRebindSpecForSelectsPerModelBindings` loses its two set cases and the `seedEntryKey` column.
+
+NOTES (2026-09-08): `probemodel_test.go` loses six tests plus `writeUserValidatedEntry` (every one of them drives `resolveValidatedSet` or `autoApplyKeys`). `internal/probe/model_test.go`'s four written-row cases collapse to one that pins the surviving effect line, which is the item's "ends at resolves at medium confidence".
+
+NOTES (2026-09-08): `recordProbeFingerprint` drops its now-unused `opts config.Options` parameter (dead argument once `autoApplyKeys` is gone); one call site.
+
+NOTES (2026-09-08): consequential edit — cmd/apogee/doc.go: made necessary by deleting validatedsets.go (the package map named the file).
+
+NOTES (2026-09-08): consequential edit — cmd/apogee/modelprofile.go: made necessary by deleting validatedsets.go (the file-top comment sited itself beside it).
+
+NOTES (2026-09-08): consequential edit — cmd/apogee/probemodel.go: made necessary by deleting `autoApplyKeys` — `apogee probe model`'s `Long` help text and the command's doc comment promised the promotion this item removes, so the user-facing claim would have shipped false.
+
+NOTES (2026-09-08): consequential edit — cmd/apogee/modelprofile_test.go: made necessary by removing `stateRoots.validated` (two `stateRoots{…}` literals name the field).
+
+NOTES (2026-09-08): the comments at `internal/probe/modelfingerprint.go`, `internal/probe/doc.go` and `internal/probe/battery.go` still name a Validated set; item 15's guard owns that sweep and it is not done.
+
+NOTES (2026-09-08): one of four `go test ./cmd/apogee/` runs on the finished tree reported FAIL with a streaming-TUI frame in the output; the failing test's name was lost to the `tail` in that invocation and three further full runs (two with `-count=1`) are green. Recorded as observed flakiness in the cmd/apogee TUI e2e suite, not attributed to this item — nothing this item touches runs a live spinner.
+
+NOTES (2026-09-08): fix-retry — the unused test helpers `noticeContains` and `mustTime` (orphaned when the six validated-set tests in `probemodel_test.go` went) are deleted with their doc comments; the `time` import stays, still used by the timestamp fixtures.
 
 **What:** Depends on item 9. Remove every consumer of `internal/validated` and `Options.ValidatedSets*` from `cmd/apogee`: `validatedsets.go` and its test whole; `probemodel.go`'s `autoApplyKeys` and the set decision (:250, :272-323); `wire_live.go` (:169-182, :284); `wire_verbs.go` (:26, :56); `wire.go` `roots.validated`; `wire_settings.go` (holders :157-160, :276-277, :686-695, :886-887, :970-971, rows :1531-1541, `reloadValidatedSets` :2070-2080, :2199, :2224, :2240, :2251); the tests naming them (`settingsedit_test.go:389-423`, `settingsrows_test.go`, `schedule_test.go:136-239`, `probemodel_test.go`, `daemonfire_test.go:107`, `wire_live_test.go`) and the `docs_settings_test.go` false-positive rows for `validated-sets.*`. The config package still carries the key until item 15, so `go build` holds.
 
