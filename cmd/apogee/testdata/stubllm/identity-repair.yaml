@@ -1,0 +1,30 @@
+# The upstream the Reaction identity arm's `tool-call-repair` row talks to: a model that calls a
+# tool nobody has — a misspelling of the read it meant.
+#
+# The name matters. floor.ToolCallRepair leaves a call ALONE when it names a tool the engine holds
+# but this request's menu withdrew (internal/floor/repair.go): that call belongs to the mode, not
+# to the guard. `read_fyle` is registered nowhere, so it is the hallucination the guard is for, and
+# it fires with the correction the engine re-streams the Turn with.
+#
+# The second turn answers that correction — the retry injects it as the request's LAST message —
+# with the call the model should have made, and the third answers its result, so the run reaches
+# an ordinary end rather than spending the retry budget.
+model: identity-model
+turns:
+    # Turn 1 — the malformed call: a tool name the engine does not have at all.
+    - when:
+        last_message: ^Read a.txt
+      tool_calls:
+        - name: read_fyle
+          arguments: '{"path":"a.txt"}'
+    # Turn 2 — the corrected call, made against the guard's own words.
+    - when:
+        last_message: Your previous tool call had errors
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    # Turn 3 — the answer the repaired call bought.
+    - when:
+        tool_result: read_file
+      text: The file says hello.
+      chunk_runes: 5

@@ -1,0 +1,32 @@
+# The upstream the Reaction identity arm's `tool-loop-breaker` row talks to: a model that answers
+# the tool result of its own read by asking for the very same read again, byte for byte.
+#
+# That repeat is the whole fixture. floor.ToolLoopBreak compares a response's tool calls against
+# the immediately-previous tool-calling Turn OF THE CURRENT EXCHANGE (internal/floor/loopbreak.go),
+# so the two calls below carry identical `name:arguments` bytes and sit in one Exchange — which is
+# what makes the guard fire, hand back its directive and re-stream the Turn.
+#
+# The third turn answers the directive rather than the prompt: the retry appends the superseded
+# assistant message and injects the correction as the request's LAST message, so `last_message`
+# matches the directive's own opening words (internal/floor/prompts/loop-header.txt). Answering it
+# with plain text is what lets the run finish instead of looping until the retry budget is spent.
+model: identity-model
+turns:
+    # Turn 1 — the read the user asked for. Nothing has been repeated yet, so no guard fires here.
+    - when:
+        last_message: ^Read a.txt
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    # Turn 2 — the same call again, with the result already in the conversation above it. This is
+    # the response `tool-loop-breaker` exists for.
+    - when:
+        tool_result: read_file
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    # Turn 3 — the model takes the steer and answers instead of calling again.
+    - when:
+        last_message: STOP\. You are in a loop
+      text: The file says hello.
+      chunk_runes: 5

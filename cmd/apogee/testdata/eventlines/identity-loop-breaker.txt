@@ -1,0 +1,1 @@
+turn=1 depth=0 reaction=tool-loop-breaker moment=post-response action=retry detail=
