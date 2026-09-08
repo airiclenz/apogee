@@ -259,17 +259,18 @@ func TestE2EHooksReportAFailureAsAnEphemeralNote(t *testing.T) {
 	}
 	stub := stubllm.New(t, script)
 	drv := tuitest.NewDriver(t, e2eSize)
-	// The run starts with a Hook that never fires, so the rewrite below is a CHANGE to the `hooks:`
-	// key rather than its first appearance — which is what the watcher's applied-keys note names.
+	// The run starts with a Reaction that never fires, so the rewrite below is a CHANGE to the
+	// `reactions:` key rather than its first appearance — which is what the watcher's applied-keys
+	// note names.
 	sess := launchTUIConfigured(t, drv, stub, hookBlockOf(
-		"  - name: quiet\n    events: [error]\n    command: [sh, -c, 'exit 0']\n"))
+		"  - id: quiet\n    on: [error]\n    run: [sh, -c, 'exit 0']\n"))
 
 	rewriteHomeHooks(t, sess.Home(),
-		"  - name: failing\n    events: [exchange-finished]\n    command: [sh, -c, 'exit 1']\n")
+		"  - id: failing\n    on: [exchange-finished]\n    run: [sh, -c, 'exit 1']\n")
 	drv.WaitText(appliedNote)
 	drv.WaitQuiet(settled)
-	if note := rowContaining(t, drv.Frame(), appliedNote); !strings.Contains(note, "hooks") {
-		t.Fatalf("the applied-keys note %q does not name the hooks key", note)
+	if note := rowContaining(t, drv.Frame(), appliedNote); !strings.Contains(note, "reactions") {
+		t.Fatalf("the applied-keys note %q does not name the reactions key", note)
 	}
 
 	submit(drv, "What files are in this workspace?")
@@ -334,9 +335,9 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 
 	stub := stubllm.New(t, loadScript(t, "hooks"))
 	stdout, stderr, workspace := headlessHooksAgainst(t, stub, hooksPrompt, hookBlockOf(
-		"  - name: "+hooksSinkName+"\n"+
-			"    events: [exchange-finished]\n"+
-			"    command: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"))
+		"  - id: "+hooksSinkName+"\n"+
+			"    on: [exchange-finished]\n"+
+			"    run: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"))
 
 	if got := strings.TrimSpace(stdout); got != hooksAnswer {
 		t.Errorf("stdout = %q; want the answer alone (%q)", stdout, hooksAnswer)
@@ -410,12 +411,12 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 	runOnce = run.Once
 	t.Cleanup(func() { runOnce = prev })
 	writeConfigHome(t, h.home, hookBlockOf(
-		"  - name: "+hooksSinkName+"\n"+
-			"    events: [turn-finished]\n"+
-			"    command: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"+
-			"  - name: "+hooksFailingName+"\n"+
-			"    events: [turn-finished]\n"+
-			"    command: [sh, -c, 'exit 1']\n")+
+		"  - id: "+hooksSinkName+"\n"+
+			"    on: [turn-finished]\n"+
+			"    run: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"+
+			"  - id: "+hooksFailingName+"\n"+
+			"    on: [turn-finished]\n"+
+			"    run: [sh, -c, 'exit 1']\n")+
 		"servers:\n"+
 		"  - name: stub\n    endpoint: "+stub.URL+"\n    model: "+stub.Model+"\nserver: stub\n")
 	ws := t.TempDir()
@@ -511,34 +512,36 @@ func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfi
 	return outBuf.String(), errBuf.String(), workspace
 }
 
-// hookBlock is the `hooks:` block the first test runs with: the command Hook that appends every
-// payload it receives to $APOGEE_TEST_SINK and every firing's two headline environment facts to
-// $APOGEE_TEST_ENV_SINK, and the webhook Hook whose only header is read from the environment rather
-// than written in the file.
+// hookBlock is the `reactions:` block the first test runs with: the command Reaction that appends
+// every payload it receives to $APOGEE_TEST_SINK and every firing's two headline environment facts
+// to $APOGEE_TEST_ENV_SINK, and the webhook Reaction whose only header is read from the environment
+// rather than written in the file.
 //
 // The script names APOGEE_REACTION_EVENT and APOGEE_REACTION_PATH rather than reading the JSON on
 // its stdin, because those are the EXACT variable names the executor sets: a rename of either would
 // leave the line it writes blank, which is what the assertion in TestE2EHooksFireFromTheTUI reads.
 func hookBlock(webhook string) string {
 	return hookBlockOf(
-		"  - name: " + hooksSinkName + "\n" +
-			"    events: [file-changed, exchange-finished]\n" +
-			"    command: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"; " +
+		"  - id: " + hooksSinkName + "\n" +
+			"    on: [file-changed, exchange-finished]\n" +
+			"    run: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"; " +
 			"echo \"$APOGEE_REACTION_EVENT $APOGEE_REACTION_PATH\" >> \"$APOGEE_TEST_ENV_SINK\"']\n" +
-			"  - name: " + hooksBellName + "\n" +
-			"    events: [approval-requested]\n" +
-			"    webhook: " + webhook + "\n" +
-			"    headers-env:\n" +
-			"      " + hookTokenHeader + ": " + hookTokenEnv + "\n")
+			"  - id: " + hooksBellName + "\n" +
+			"    on: [approval-requested]\n" +
+			"    run:\n" +
+			"      url: " + webhook + "\n" +
+			"      headers-env:\n" +
+			"        " + hookTokenHeader + ": " + hookTokenEnv + "\n")
 }
 
-// hookBlockOf wraps one or more already-indented entries in the `hooks:` key.
-func hookBlockOf(entries string) string { return "hooks:\n" + entries }
+// hookBlockOf wraps one or more already-indented entries in the `reactions:` key — the one spelling
+// the schema has since the migration folded `hooks:` away (ADR 0076 A6).
+func hookBlockOf(entries string) string { return "reactions:\n" + entries }
 
-// rewriteHomeHooks replaces a home's whole `hooks:` block with entries, keeping everything the
-// config said before it. [appendHomeConfig] cannot do this — a second `hooks:` key is a duplicate
-// rather than a change of mind — and the block is the tail of the file by construction, so cutting
-// at it leaves the `servers:` the run is talking through untouched.
+// rewriteHomeHooks replaces a home's whole `reactions:` block with entries, keeping everything the
+// config said before it. [appendHomeConfig] cannot do this — a second `reactions:` key is a
+// duplicate rather than a change of mind — and the block is the tail of the file by construction, so
+// cutting at it leaves the `servers:` the run is talking through untouched.
 func rewriteHomeHooks(t *testing.T, home, entries string) {
 	t.Helper()
 
@@ -547,9 +550,9 @@ func rewriteHomeHooks(t *testing.T, home, entries string) {
 	if err != nil {
 		t.Fatalf("read the run's config: %v", err)
 	}
-	head, _, found := strings.Cut(string(body), "hooks:\n")
+	head, _, found := strings.Cut(string(body), "reactions:\n")
 	if !found {
-		t.Fatalf("the run's config carries no hooks: block to rewrite:\n%s", body)
+		t.Fatalf("the run's config carries no reactions: block to rewrite:\n%s", body)
 	}
 	if err := os.WriteFile(path, []byte(head+hookBlockOf(entries)), 0o600); err != nil {
 		t.Fatalf("write the run's config: %v", err)

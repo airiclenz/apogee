@@ -583,36 +583,6 @@ func TestHeadlessConfinedAutoPrewarmsTheLabelWalk(t *testing.T) {
 	})
 }
 
-// A `mechanisms:` key naming a Mechanism this release retired is tolerated, not refused — and the
-// run says so rather than arming nothing in silence. The line lands on stderr, where the other
-// resolution notices go, so a pipeline still reads only the answer.
-func TestHeadlessReportsARetiredMechanism(t *testing.T) {
-	stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
-	home := testConfigHome(t, "mechanisms:\n  grammar: true\n")
-
-	out, errOut, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt")
-
-	if err != nil {
-		t.Fatalf("headless: %v (stderr: %q)", err, errOut)
-	}
-	if !stub.called {
-		t.Fatal("the run never started; a retired mechanism id is tolerated, never a refusal")
-	}
-	want := retiredMechanismNotice("grammar")
-	if got := strings.Count(errOut, want); got != 1 {
-		t.Errorf("the retired-mechanism notice appeared %d times on stderr; want exactly 1 line\n"+
-			"want: %q\nstderr: %q", got, want, errOut)
-	}
-	if strings.Contains(out, "mechanism") {
-		t.Errorf("the notice reached stdout, where a pipeline reads the answer: %q", out)
-	}
-	// The retired id is dropped and nothing stands in its place: no catalogued row is on by default,
-	// a headless run getting its recovery guarantees from the Floor guards instead (ADR 0071).
-	if got := stub.spec.Config.Reactions; len(got) != 0 {
-		t.Errorf("Config.Reactions = %v, want nothing armed beside the engine builtins", got)
-	}
-}
-
 // What the command hands the runner: the resolved prompt, the roots this invocation was pointed
 // at, and none of the delegates that assume a human — run.Once pins its own, and a Firing reaches
 // no MCP server (ADR 0033/0034).

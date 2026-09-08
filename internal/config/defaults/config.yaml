@@ -434,15 +434,15 @@ context-files:
 #     endpoint: https://mcp.example.com/ # the server URL (http://127.0.0.1:… is fine too)
 
 # =============================================================================
-# Hooks: commands and webhooks Apogee runs when something happens in a session. Default-EMPTY: with
-# no entries listed, nothing runs and nothing is reported. A hook is OBSERVE-ONLY — it is told what
-# already happened, it can change or veto nothing, and nothing it prints ever reaches the model, the
-# conversation or the saved session. Use one to ring a bell for an approval nobody is watching, or
-# to poke a build when a file changed. Config-file only, and live in the interactive TUI: save the
-# file and the running session swaps its hooks over (a headless run and the daemon read the list
-# once, at start).
+# Reactions: commands and webhooks Apogee runs when a moment closes in a session. Default-EMPTY:
+# with no entries listed, nothing runs and nothing is reported. A reaction of this kind is
+# OBSERVE-ONLY — it is told what already happened, it can change or veto nothing, and nothing it
+# prints ever reaches the model, the conversation or the saved session. Use one to ring a bell for
+# an approval nobody is watching, or to poke a build when a file changed. Config-file only, and
+# live in the interactive TUI: save the file and the running session swaps its reactions over (a
+# headless run and the daemon read the list once, at start).
 #
-# The six events are:
+# The six moments are:
 #   exchange-finished  a top-level exchange closed — the model answered, or the loop gave up
 #   turn-finished      every top-level turn boundary, whatever its outcome
 #   file-changed       a workspace write tool succeeded; the payload carries the path it landed on
@@ -450,46 +450,28 @@ context-files:
 #   approval-decided   that same approval reached its verdict; the payload carries the decision
 #   error              a localised, recovered engine fault
 #
-# Each entry takes exactly ONE action: `command:` (an argv list, run DIRECTLY — no shell, so write
-# ["sh", "-c", "…"] when you want one) or `webhook:` (an absolute http(s) URL the payload is POSTed
-# to, once, with no retry). The payload is JSON on the command's stdin, and its headline facts are
-# in the environment too as APOGEE_REACTION_EVENT, APOGEE_REACTION_NAME, APOGEE_REACTION_WORKSPACE
-# and APOGEE_REACTION_PATH. A command runs OUTSIDE the workspace confinement with Apogee's whole
+# An entry gives itself an `id:`, lists the moments it fires on under `on:`, and takes ONE action
+# under `run:` — an argv LIST, run DIRECTLY with no shell (write ["sh", "-c", "…"] when you want
+# one), or a MAPPING {url:, headers:, headers-env:} the JSON payload is POSTed to, once, with no
+# retry. The payload is JSON on the command's stdin, and its headline facts are in the environment
+# too as APOGEE_REACTION_EVENT, APOGEE_REACTION_NAME, APOGEE_REACTION_WORKSPACE and
+# APOGEE_REACTION_PATH. A command runs OUTSIDE the workspace confinement with Apogee's whole
 # environment — it is yours, at the same trust level as an `api-key-cmd:` above — and a program that
-# lives inside the workspace is refused, so the model cannot write the script its own hook runs. Its
-# stdout is ignored; a non-zero exit is reported to you and to nobody else. `timeout:` bounds the
+# lives inside the workspace is refused, so the model cannot write the script its own reaction runs.
+# Its stdout is ignored; a non-zero exit is reported to you and to nobody else. `timeout:` bounds the
 # run and the POST alike (default 30s), and `workspace:` scopes an entry to one workspace, leaving
 # it inactive at every other. Webhook headers are literal (`headers:`) or read from a named
 # environment variable at send time (`headers-env:`, the api-key-env spelling), so a token you send
-# with a hook never has to sit in this file.
+# with a reaction never has to sit in this file. Two more spellings are its own: `enabled: false`
+# parks an entry without deleting it, and an id that is one of the seven Floor-guard keys is refused
+# — those are switched with their own top-level key, not with a reactions: entry. `advise:` and
+# `gate:` are reserved for a later release and refused today.
 #
-# hooks:
-#   - name: notify                       # unique; it is what a failure notice names
-#     events: [approval-requested]       # one or more of the six above
-#     command: ["notify-send", "apogee is waiting for an answer"]
-#     timeout: 10s                       # optional; default 30s
-#   - name: ci-bell
-#     events: [file-changed, exchange-finished]
-#     webhook: https://hooks.example.com/apogee
-#     headers:
-#       X-Source: apogee                 # a literal header value
-#     headers-env:
-#       Authorization: MY_WEBHOOK_TOKEN   # the NAME of the variable holding the value
-#     workspace: ~/code/apogee           # optional; fires in this workspace only
-
-# =============================================================================
-# Reactions: the same lane as hooks: above, under the name it keeps. `hooks:` is the earlier
-# spelling and still loads; reactions: is what to write now. An entry gives itself an `id:`, lists
-# the moments it fires on under `on:` (the six names above), and takes ONE action under `run:` — an
-# argv LIST, run directly with no shell (write ["sh", "-c", "…"] when you want one), or a MAPPING
-# {url:, headers:, headers-env:} the JSON payload is POSTed to. `timeout:` (default 30s),
-# `workspace:` and the payload, environment and exec posture are exactly the hooks: ones. Two extra
-# spellings are its own: `enabled: false` parks an entry without deleting it, and an id that is one
-# of the seven Floor-guard keys is refused — those are switched with their own top-level key, not
-# with a reactions: entry. `advise:` and `gate:` are reserved for a later release and refused today.
+# `hooks:` was this key's earlier name. A config file that still carries one is folded into
+# reactions: at startup, once, and the change is announced with the backup it kept.
 #
 # reactions:
-#   - id: notify                         # unique across reactions: and hooks: together
+#   - id: notify                         # unique; it is what a failure notice names
 #     on: [approval-requested]           # one or more of the six moments above
 #     run: ["notify-send", "apogee is waiting for an answer"]
 #     timeout: 10s                       # optional; default 30s

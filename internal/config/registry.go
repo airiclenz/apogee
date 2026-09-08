@@ -337,17 +337,6 @@ var KeyRegistry = []Key{
 		Structure: func(o Options) any { return o.MCPServers },
 	},
 	{
-		// Structured for the reason its neighbour above is: an entry is a block of its own — an event
-		// list, an argv command or a URL, headers — and no field on a one-line row could write it, so
-		// the row counts what is configured and ⏎ opens the file. Read-only, and NOT GlobalOnly: apogee
-		// has one config file, so ADR 0073's "global list" holds by construction, and the flag would
-		// take the row out of the live reload diff that keeps a session's Hooks following the file.
-		Path: "hooks", Kind: KindStructured,
-		Desc:      "Commands and webhooks run when an engine event fires; observe-only, never seen by the model.",
-		Read:      func(o Options) string { return countSummary(len(o.Reactions), "hook") },
-		Structure: func(o Options) any { return o.Reactions },
-	},
-	{
 		// The roster switch, a name list on one line like context-files.names — so the pane edits it
 		// in a field and the writer renders it back as the flow sequence the template documents. No
 		// validate hook, deliberately: a name matching no tool is a startup NOTICE rather than a
@@ -660,8 +649,9 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return boolValue(o.Bypass) },
 	},
 	{
-		// Structured for the `hooks:` reason — an entry is a block of its own, and no field on a
-		// one-line row could write it — so the row counts what is armed and ⏎ opens the file. It sits
+		// Structured because an entry is a block of its own — a Moment list, an argv command or a URL
+		// with headers — and no field on a one-line row could write it, so the row counts what is
+		// armed and ⏎ opens the file. It sits
 		// directly under `bypass`, which opens the pane's Reactions section: the off-switch first,
 		// then the list it switches off. Read-only, and NOT GlobalOnly: apogee has one config file,
 		// and the flag would take the row out of the live reload diff that keeps a session's

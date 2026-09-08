@@ -322,7 +322,7 @@ func TestSaveServerPlaintextKeyOK_MatchesAPaddedEntryNameCanonically(t *testing.
 		if !strings.Contains(written, "- name: \" box \"") {
 			t.Errorf("the edit rewrote the entry's own name: scalar\n%s", written)
 		}
-		fc, err := parseConfigFile(path, os.ReadFile, noNotify)
+		fc, err := parseConfigFile(path, os.ReadFile, noNotify, true)
 		if err != nil {
 			t.Fatalf("the written config does not load: %v\n%s", err, written)
 		}

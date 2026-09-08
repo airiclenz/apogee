@@ -1262,20 +1262,6 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key: "hooks",
-		// The Runner is the seam and the holder is the mirror, so BOTH are required: an arm that
-		// moved only one of them would leave the session and the Firings it raises on two different
-		// lists (ADR 0073 §9 — one library at every root, composed from one list).
-		reaches: func(a settingsApplier) bool { return a.hooks != nil && a.live != nil },
-		apply: func(a settingsApplier, key, value string) (string, error) {
-			// A list of blocks is a shape no single string spells, so the value the pane persisted
-			// is not read — the file layer is re-resolved exactly as startup resolved it, the
-			// `mcp-servers:` reason. Nothing here is pushed at the engine either: Hooks are
-			// observe-only, and swapping the list is the whole of what a session can do about them.
-			return "", a.reloadHooks()
-		},
-	},
-	{
 		key:     "tools.disabled",
 		reaches: reachesTheSwapDoor,
 		apply: func(a settingsApplier, key, value string) (string, error) {
@@ -1525,6 +1511,21 @@ var settingsTable = []settingsEntry{
 				a.live.setBypass(on)
 			}
 			return "", nil
+		},
+	},
+	{
+		key: "reactions",
+		// The Runner is the seam and the holder is the mirror, so BOTH are required: an arm that
+		// moved only one of them would leave the session and the Firings it raises on two different
+		// lists (ADR 0073 §9 — one library at every root, composed from one list).
+		reaches: func(a settingsApplier) bool { return a.hooks != nil && a.live != nil },
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			// A list of blocks is a shape no single string spells, so the value the pane persisted
+			// is not read — the file layer is re-resolved exactly as startup resolved it, the
+			// `mcp-servers:` reason. Nothing here is pushed at the engine either: observe Reactions
+			// are told what happened, and swapping the list is the whole of what a session can do
+			// about them.
+			return "", a.reloadReactions()
 		},
 	},
 	{
@@ -2094,21 +2095,23 @@ func (a settingsApplier) reconnectMCP() error {
 	return a.mcp.reconnect(file.MCPServers, a.tools, a.engine)
 }
 
-// reloadHooks re-reads the `hooks:` block and moves the session onto it (ADR 0073 §9). It is
-// reconnectMCP's shape for reconnectMCP's reason — only the FILE carries this key, so resolving the
-// file layer as startup resolved it IS most of the apply — and it differs in what it does with the
-// answer: the list is swapped into the running Runner, whose retired generation finishes what it
-// already holds in the background and then stops.
+// reloadReactions re-reads the `reactions:` block and moves the session onto it (ADR 0073 §9, ADR
+// 0076). It is reconnectMCP's shape for reconnectMCP's reason — only the FILE carries this key, so
+// resolving the file layer as startup resolved it IS most of the apply — and it differs in what it
+// does with the answer: the list is swapped into the running Runner, whose retired generation
+// finishes what it already holds in the background and then stops.
 //
 // A file that no longer parses is refused before anything is swapped, and so is a list the Runner
 // will not take (a malformed entry, an unresolvable `workspace:`): a broken edit costs the session
-// nothing, and it keeps firing the Hooks it already had.
+// nothing, and it keeps firing the Reactions it already had. A file that has gone BACK to the
+// retired `hooks:` spelling is refused too, and nothing is written: the fold into `reactions:` is a
+// startup act, because apogee does not rewrite a config file out from under a running session.
 //
 // The holder is written only once the swap has COMMITTED, so a refused edit leaves the session and
 // the runs it raises describing the same list. That is also why nothing here reports: Replace drains
 // the retired generation on a goroutine of its own, and this arm runs on the Update loop — a
 // synchronous Report would deadlock the program against the send it is waiting for (bridge.go).
-func (a settingsApplier) reloadHooks() error {
+func (a settingsApplier) reloadReactions() error {
 	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err

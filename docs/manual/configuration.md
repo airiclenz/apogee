@@ -401,7 +401,9 @@ variable a `headers-env:` entry NAMES, so a token never has to sit in this file.
 and an id that is one of the seven Floor-guard keys is refused — a guard is switched off with its
 own top-level key, never with an entry here. `hooks:` is this key's earlier name, with
 `name:`/`events:`/`command:`/`webhook:` where this block writes `id:`/`on:`/`run:`; a file that
-still carries it keeps loading.
+still carries it is folded into `reactions:` at startup, once, and told so — the previous file is
+kept beside it as a `.bak-<timestamp>` sibling, and comments written inside the old block are only
+in that copy.
 
 The block is file-only (no flag, no environment variable) and it is **live in the interactive TUI**:
 save the file — or use `⏎` on the `reactions:` row in [`/settings`](commands.md#the-settings-screen--settings),

@@ -295,7 +295,78 @@ go vet ./cmd/apogee/ && go test ./cmd/apogee/ -run 'Settings|Docs'
 
 **Commit:** `feat(config): the reactions: list resolves user-origin observe Reactions beside hooks:`
 
-## 9. Config: migrate `hooks:` into `reactions:`, strip `mechanisms:` and `validated-sets:`, delete `hooks:`
+## 9. Config: migrate `hooks:` into `reactions:`, strip `mechanisms:` and `validated-sets:`, delete `hooks:` — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the item's open either/or is resolved as the run's DECISION says — the fold runs
+ONLY at startup. `parseConfigFile` gained a `mayMigrate bool`; `ApplyConfig`'s startup read passes
+`true` and `LoadFileConfig` (the seven live re-reads in `cmd/apogee/wire_settings.go`, and every
+test reader) passes `false`. A live re-read of a file still carrying `hooks:` refuses with
+`liveReactionsRefusal` and writes nothing; the sentence is pinned verbatim by
+`TestLoadFileConfigRefusesTheHooksBlockWithoutRewritingIt`. The migration note therefore never
+surfaces through `reloadReactions`' report string, as the DECISION states.
+
+NOTES (2026-09-08): because the strip is startup-only, a per-server `mechanisms:` map still reaches
+the LIVE apply path, so the round-2 guard's instruction to drop the `libary: true` case of
+`TestApplySettingServersDrivesTheSubAgentServer` (`cmd/apogee/delegation_test.go:1131-1138`) was NOT
+followed — that case still passes and still pins `delegation.go:340-347`'s refusal. Dropping it
+would have deleted live coverage the DECISION keeps alive. `internal/config/config_test.go`'s
+`TestApplyConfigMechanisms` and `TestMechanismsKeyParsesWithoutARegistryRow` WERE replaced (they read
+through the startup path), by one `TestMechanismsKeyIsStrippedAndHasNoRegistryRow`.
+
+NOTES (2026-09-08): `validated-sets:` stripping is NOT in this commit — the item's own Regression
+guard moves it to item 15 — so the note carries no `validated-sets:` fragment and the commit subject
+drops it from the plan's wording.
+
+NOTES (2026-09-08): `migrateLegacyConfig` was restructured to apply BOTH folds (the ADR 0036
+quadruple and this one) to the bytes before writing, so a file carrying two retired shapes is backed
+up once and rewritten once. Two passes would have collided on `backUpConfig`'s O_EXCL backup name,
+which is dated to the second.
+
+NOTES (2026-09-08): the item spells the sniff as a struct with yaml tags, but the item's own
+acceptance forbids `yaml:"hooks"` anywhere in `internal/config/`. `legacyReactionsConfig` therefore
+reads the retired blocks off the node tree (`mappingEntry`) as line SPANS — which the splice needs
+anyway — and `legacyHookConfig` (the private converter the guard asks for) carries only the entry's
+own tags.
+
+NOTES (2026-09-08): the `retired` id → Floor-key table was COPIED into `configmigrate.go` as
+`retiredMechanismSuccessors`, not moved: `internal/mechanisms/retired.go` still serves the three
+`RetiredNotices` callers until item 16 deletes them.
+
+NOTES (2026-09-08): a top level the splice cannot read (a flow mapping, a list, a scalar) in a file
+that still carries `hooks:` is REFUSED rather than left alone — the schema has no `hooks:` field any
+more, so silence would take the block out of service without ever failing (ADR 0036's
+refusal-over-silence posture). Pinned by `TestMigrateLegacyConfigRefusesAFileItCannotSplice`, which
+took the place of the item's "verify failure → no write, no backup" case: the transaction makes a
+genuine verify failure unreachable from a file, so the verify's three refusals are pinned directly
+instead by `TestVerifyReactionsFoldRefusesEachWayTheEditCouldBeWrong`.
+
+NOTES (2026-09-08): the item's "read-only `config.yaml`" refusal test is
+`TestMigrateLegacyConfigRefusesWhenItCannotBackUp` instead — the suite runs as root here, where a
+read-only file is still writable, so the un-writable case is made by taking the backup name.
+
+NOTES (2026-09-08): consequential edit — internal/config/doc.go: made necessary by deleting
+hooks.go — the package map named the file.
+
+NOTES (2026-09-08): consequential edit — internal/config/configwrite_keysource_test.go: made
+necessary by `parseConfigFile` gaining its `mayMigrate` argument.
+
+NOTES (2026-09-08): consequential edit — docs/manual/configuration.md: made necessary by the fold —
+the `## Reactions — reactions:` section's `hooks:` sentence said the old block "keeps loading",
+which is now false; it names the fold, the backup and the lost comments instead. The section keeps
+exactly one back-ticked `hooks:` sentence, as the item's guard requires.
+
+NOTES (2026-09-08): `cmd/apogee/e2e_hooks_test.go`'s helpers now write `reactions:` blocks and the
+applied-keys assertion names `reactions`, but the helper NAMES (`hookBlock`, `hookBlockOf`,
+`rewriteHomeHooks`, `readHookPayloads`, …) are left as they are — item 21 owns that wording pass,
+and renaming three of a dozen would leave the file half-migrated.
+
+NOTES (2026-09-08): `liveSettings.setHooks` and the `settingsApplier.hooks` field keep their names
+for the same reason; only `reloadHooks` → `reloadReactions` was renamed, which the item's guard
+names explicitly.
+
+NOTES (2026-09-08): the template's commented-out `mechanisms:` example block is left in
+`internal/config/defaults/config.yaml` — item 16 owns deleting the key and its documentation, and it
+is not done.
 
 **What:** Recast at the regression check (2026-09-08). Depends on item 8. Extend `migrateLegacyConfig` (ADR 0036 D9 idiom) with a shadow `legacyReactionsConfig{Hooks, Reactions, Mechanisms, ValidatedSets yaml.Node; Servers []struct{Mechanisms yaml.Node}}` read from the bytes. Order: (1) both `hooks:` and `reactions:` present → refuse with no write, in `legacyRefusal`'s shape: `apogee: %s has both hooks: and reactions: — reactions: is the single list (hooks: was its earlier name).\n\napogee did not fold hooks: in for you because reactions: already exists.\n\nMove the hooks: entries into reactions: (name: → id:, events: → on:, command: or webhook: → run:) and delete hooks:.` (2) `hooks:` alone → parse the block with the item-4 converter, render a `reactions:` block from the entries (`name`→`id`, `events`→`on` with `approval-waiting`→`approval-requested`, `command`→`run:` sequence, `webhook`+`headers`+`headers-env`→`run:` mapping, `workspace`/`timeout` kept) and splice it over the old block's line range (call: fold shape). (3) Strip the top-level `mechanisms:` block, every per-server `mechanisms:` block, and the `validated-sets:` block. Verify against the bytes: the folded entries re-parse to the same `[]domain.Reaction` the old block resolved to, the retired keys are gone, `sameApartFrom(before, after, "hooks", "reactions", "mechanisms", "validated-sets")` with servers compared minus their `Mechanisms` map. Then backup, atomic write, one note through `notify`: `apogee: rewrote %s — hooks: became reactions: (%d entries)[; approval-waiting is now approval-requested][; the retired mechanisms: key was dropped][; the inert validated-sets: key was dropped]; comments inside the old block did not survive; backup at %s. Scripts must read APOGEE_REACTION_* (was APOGEE_HOOK_*) and the payload's "reaction" field (was "hook").` — bracketed parts only when they apply, the trailing sentence only when `hooks:` was folded. Then delete `fileConfig.Hooks`, `hookConfig`, `toHook`, `internal/config/hooks.go` (+test), the `hooks` `KeyRegistry` row, the template's `hooks:` block, and the `approval-waiting` compatibility from item 5.
 

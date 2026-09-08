@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -79,8 +81,13 @@ const backupStampLayout = "20060102-150405"
 // `llama-launcher:` and `model-profile:` keys, refused before a single byte is read for the fold,
 // so a config that carries more than one retired shape is stopped rather than half-rewritten.
 //
+// mayFoldReactions says whether this read is the STARTUP one, which may rewrite the file, or a live
+// re-read under a running session, which may not: apogee never mutates a config file out from under
+// a session, so a live re-read of a file still carrying `hooks:` refuses instead of folding it
+// (ADR 0076 A6, the stage-2 plan's item 9 decision).
+//
 // now dates the backup and is injected so a test can name the file it expects.
-func migrateLegacyConfig(path string, data []byte, now time.Time) ([]byte, string, error) {
+func migrateLegacyConfig(path string, data []byte, now time.Time, mayFoldReactions bool) ([]byte, string, error) {
 	if err := refuseRetiredLauncherKey(path, data); err != nil {
 		return nil, "", err
 	}
@@ -91,23 +98,68 @@ func migrateLegacyConfig(path string, data []byte, now time.Time) ([]byte, strin
 	if err := yaml.Unmarshal(data, &lc); err != nil {
 		return nil, "", fmt.Errorf("apogee: parse config %q: %w", path, err)
 	}
-	if lc.isEmpty() {
+	rc, err := readLegacyReactions(data)
+	if err != nil {
+		return nil, "", reactionsRefusal(path, err)
+	}
+	if rc.hasHooks && rc.hasReactions {
+		return nil, "", bothListsRefusal(path)
+	}
+	if !mayFoldReactions {
+		if rc.hasHooks {
+			return nil, "", liveReactionsRefusal(path)
+		}
+		// The retired `mechanisms:` key still parses, so a live re-read simply leaves it where it
+		// is: the strip is a WRITE, and the only thing a session gains by it is a rewritten file.
+		rc = legacyReactionsConfig{}
+	}
+	if lc.isEmpty() && !rc.needsRewrite() {
 		return data, "", nil
 	}
-	updated, entry, err := foldLegacyKeys(data, lc)
-	if err != nil {
-		return nil, "", legacyRefusal(path, lc, err)
+
+	// Both folds are applied to the bytes BEFORE anything is written, so a file carrying two
+	// retired shapes is backed up once and rewritten once — two passes would leave the second
+	// backup colliding with the first on the same second (backUpConfig is O_EXCL).
+	updated, entry := data, ServerEntry{}
+	if !lc.isEmpty() {
+		updated, entry, err = foldLegacyKeys(updated, lc)
+		if err != nil {
+			return nil, "", legacyRefusal(path, lc, err)
+		}
 	}
+	var fold reactionsFold
+	if rc.needsRewrite() {
+		updated, fold, err = foldLegacyReactions(updated)
+		if err != nil {
+			return nil, "", reactionsRefusal(path, err)
+		}
+	}
+
 	// The backup is written only once the fold is verified, so a refusal leaves the apogee home
 	// exactly as it found it — "no write at all" includes the copy.
 	backup, err := backUpConfig(path, data, now)
 	if err != nil {
+		if lc.isEmpty() {
+			return nil, "", reactionsRefusal(path, err)
+		}
 		return nil, "", legacyRefusal(path, lc, err)
 	}
 	if err := writeConfigAtomically(path, updated); err != nil {
-		return nil, "", legacyRefusal(path, lc, fmt.Errorf("the rewrite could not be written (%v)", err))
+		wrapped := fmt.Errorf("the rewrite could not be written (%v)", err)
+		if lc.isEmpty() {
+			return nil, "", reactionsRefusal(path, wrapped)
+		}
+		return nil, "", legacyRefusal(path, lc, wrapped)
 	}
-	return updated, migrationNote(path, backup, entry, lc), nil
+
+	var notes []string
+	if !lc.isEmpty() {
+		notes = append(notes, migrationNote(path, backup, entry, lc))
+	}
+	if rc.needsRewrite() {
+		notes = append(notes, fold.note(path, backup))
+	}
+	return updated, strings.Join(notes, "\n"), nil
 }
 
 // foldLegacyKeys builds the migrated file: the four legacy lines removed, the entry they describe
@@ -870,4 +922,668 @@ func verifySubAgentsMigration(before, after fileConfig, updated []byte, name str
 // serversAppended's reason: a ServerEntry holding a map cannot be `==`d.
 func sameServers(before, after []ServerEntry) bool {
 	return slices.EqualFunc(before, after, func(a, b ServerEntry) bool { return reflect.DeepEqual(a, b) })
+}
+
+// ----------------------------------------------------------------------------
+// The `hooks:` fold and the retired `mechanisms:` key (ADR 0076 A6)
+// ----------------------------------------------------------------------------
+//
+// `hooks:` was the earlier spelling of the user-origin observe lane. ADR 0076 gave that lane one
+// name — `reactions:` — and A6 ruled out carrying the old key as an alias: one list, one spelling,
+// and the file says which. So the block is FOLDED rather than refused, on the ADR 0036 decision 9
+// idiom one key over: the entries are re-rendered under `reactions:` and spliced over the old
+// block's line range, the previous bytes are kept as a timestamped sibling, and the change is
+// announced once at startup.
+//
+// The fold is a rename plus three spelling changes and nothing else — `name:` → `id:`, `events:` →
+// `on:`, `command:`/`webhook:` → `run:`, and the `approval-waiting` Moment under its ADR 0076 name
+// `approval-requested` — so the verify below re-resolves BOTH sides to []domain.Reaction and
+// refuses to write unless they are the same list. Comments written INSIDE the old block do not
+// survive (the block is re-rendered, not edited line by line); the note says so and the backup
+// keeps them.
+//
+// Riding along is the retired `mechanisms:` key, top-level and per-server. The catalogue it named
+// is gone (ADR 0071) and the key arms nothing, so it is STRIPPED rather than refused: a saved
+// configuration must not become a refusal, and a key that drives nothing must not keep looking as
+// if it does. The successor table below turns each stripped id into the Floor key that governs its
+// behaviour now, which is the whole of what the user needs to know.
+//
+// Both halves run ONLY at startup. A live re-read under a running session refuses instead
+// (liveReactionsRefusal): apogee does not rewrite a config file out from under a session.
+
+// retiredMechanismSuccessors maps each retired catalogue id that was PROMOTED to the top-level
+// Floor-guard key that governs its behaviour now. It is the config migration table: a literal here
+// rather than a lookup into internal/mechanisms, because the notice this feeds is the last thing
+// the `mechanisms:` key is read for and it must outlive the package that carried the roll.
+//
+// An id absent from the map retired outright — there is nothing to point the user at, and the note
+// says so once for the whole block rather than row by row.
+var retiredMechanismSuccessors = map[string]string{
+	"tool_loop_interceptor":    "tool-loop-breaker",
+	"validate":                 "tool-call-repair",
+	"empty_response_recovery":  "empty-response-recovery",
+	"tool_use_enforcer":        "tool-use-enforcer",
+	"cached_content_intercept": "read-cache",
+	"tool_result_cap":          "tool-result-cap",
+}
+
+// hooksKey, reactionsKey and mechanismsKey are the three keys this migration reads and writes,
+// spelled once so the sniff, the splice and the notes cannot drift apart. `hooks` is deliberately
+// NOT a fileConfig tag any more — the schema has forgotten it, which is exactly why the sniff below
+// reads it off the node tree instead.
+const (
+	hooksKey      = "hooks"
+	reactionsKey  = "reactions"
+	mechanismsKey = "mechanisms"
+)
+
+// blockSpan is one top-level or per-entry block the migration removes: the 1-based line range from
+// its `key:` line through the last line of its value, and the value node itself for the callers
+// that still need to read it. Ranges rather than single lines because these keys carry BLOCKS — a
+// list of hook entries, a map of catalogue ids — and deleting the key line alone would leave the
+// body behind as a syntax error.
+type blockSpan struct {
+	from  int
+	to    int
+	value *yaml.Node
+}
+
+// legacyReactionsConfig is the retired half of the schema this migration answers — and only that
+// half: the `hooks:` block ADR 0076 renamed and the `mechanisms:` blocks ADR 0071 emptied. It
+// exists for legacyFileConfig's reason one migration over: fileConfig no longer has a `hooks:`
+// field, so the block would be silently unread, and `mechanisms:` still parses but drives nothing.
+//
+// Nothing resolves from it. Its only job is to answer "does this file still carry either shape, and
+// where do those lines start and end" — the two facts the fold and the strip both need.
+type legacyReactionsConfig struct {
+	hasHooks         bool
+	hasReactions     bool
+	hooks            *blockSpan
+	mechanisms       *blockSpan
+	serverMechanisms []blockSpan
+}
+
+// needsRewrite reports whether the file carries anything this migration has to take out of it.
+func (rc legacyReactionsConfig) needsRewrite() bool {
+	return rc.hooks != nil || rc.mechanisms != nil || len(rc.serverMechanisms) > 0
+}
+
+// readLegacyReactions locates the retired blocks in the file's node tree. The error it reports is
+// the one shape a fold cannot be attempted on at all: a top level the splice cannot read — a flow
+// mapping, a list, a scalar — in a file that still carries `hooks:`. Silence is the answer that
+// must not be given there, because fileConfig has no `hooks:` field any more and an unfolded block
+// would simply stop being read (ADR 0036's refusal-over-silence posture).
+//
+// A file that does not parse as YAML at all is left to the decoder: the caller reads it next and
+// reports the parse error in the words every other malformed config gets.
+func readLegacyReactions(data []byte) (legacyReactionsConfig, error) {
+	doc, err := Document(data)
+	if err != nil {
+		return legacyReactionsConfig{}, nil
+	}
+	root, rootErr := rootMapping(doc)
+	if rootErr != nil {
+		if carriesTopLevelKey(data, hooksKey) {
+			return legacyReactionsConfig{}, rootErr
+		}
+		return legacyReactionsConfig{}, nil
+	}
+	if root == nil {
+		return legacyReactionsConfig{}, nil
+	}
+
+	var rc legacyReactionsConfig
+	rc.hooks = spanOf(root, hooksKey)
+	rc.mechanisms = spanOf(root, mechanismsKey)
+	rc.hasHooks = rc.hooks != nil
+	_, reactionsValue := mappingEntry(root, reactionsKey)
+	rc.hasReactions = reactionsValue != nil && !isNullNode(reactionsValue)
+
+	if _, servers := mappingEntry(root, serversKey); servers != nil && servers.Kind == yaml.SequenceNode {
+		for _, entry := range servers.Content {
+			if entry.Kind != yaml.MappingNode {
+				continue
+			}
+			if span := spanOf(entry, mechanismsKey); span != nil {
+				rc.serverMechanisms = append(rc.serverMechanisms, *span)
+			}
+		}
+	}
+	return rc, nil
+}
+
+// carriesTopLevelKey reports whether the file sets key at its top level, read WITHOUT the node tree
+// — the one question still answerable about a file whose shape the splice cannot work in.
+func carriesTopLevelKey(data []byte, key string) bool {
+	var top map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &top); err != nil {
+		return false
+	}
+	_, ok := top[key]
+	return ok
+}
+
+// spanOf is the line range key covers inside mapping, or nil when the mapping does not set it. The
+// end is the last line any part of the value sits on, so a block value is removed whole.
+func spanOf(mapping *yaml.Node, key string) *blockSpan {
+	keyNode, value := mappingEntry(mapping, key)
+	if keyNode == nil {
+		return nil
+	}
+	to := keyNode.Line
+	if value != nil {
+		if last := maxNodeLine(value); last > to {
+			to = last
+		}
+	}
+	return &blockSpan{from: keyNode.Line, to: to, value: value}
+}
+
+// reactionsFold is what one run of this migration did, in the terms the startup note is written
+// from: how many `hooks:` entries were folded, whether any of them named the retired
+// `approval-waiting` spelling, and which retired catalogue ids were stripped.
+type reactionsFold struct {
+	folded          int
+	renamedApproval bool
+	strippedIDs     []string
+}
+
+// foldLegacyReactions builds the migrated file: the `hooks:` block re-rendered as `reactions:` in
+// its own place, and every `mechanisms:` block — the top-level one and each server's — removed. It
+// returns the new bytes and what it did, or an error naming what stopped it.
+//
+// It is the write transaction over bytes already in hand (verifiedEdit, configedit.go) rather than
+// against a path, for foldLegacyKeys' reason: the migration owns the backup and the write around it.
+func foldLegacyReactions(data []byte) ([]byte, reactionsFold, error) {
+	entries, err := readLegacyHooks(data)
+	if err != nil {
+		return nil, reactionsFold{}, err
+	}
+	want, err := toLegacyReactions(entries)
+	if err != nil {
+		return nil, reactionsFold{}, err
+	}
+
+	var fold reactionsFold
+	fold.folded = len(entries)
+	for _, entry := range entries {
+		if slices.Contains(entry.Events, retiredApprovalEvent) {
+			fold.renamedApproval = true
+		}
+	}
+
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		return spliceReactionsFold(data, entries, &fold)
+	}
+	verify := func(before, after fileConfig, updated []byte) error {
+		return verifyReactionsFold(before, after, updated, want)
+	}
+	updated, err := verifiedEdit(data, splice, verify)
+	switch {
+	case err != nil:
+		return nil, reactionsFold{}, err
+	case updated == nil:
+		return nil, reactionsFold{}, errors.New("the edit changed nothing")
+	}
+	return updated, fold, nil
+}
+
+// spliceReactionsFold does the line work in a SINGLE pass over the original lines, so every line
+// number the node tree reported still means what it said — applying the deletions one after another
+// would shift every position the next one was measured against.
+//
+// The rendered `reactions:` block goes in where `hooks:` began, so an entry keeps the place in the
+// file the user put it in and whatever comments they wrote ABOVE the block still introduce it.
+func spliceReactionsFold(data []byte, entries []legacyHookConfig, fold *reactionsFold) ([]byte, error) {
+	rc, err := readLegacyReactions(data)
+	if err != nil {
+		return nil, err
+	}
+	lines := SplitConfigLines(data)
+
+	dropped := make(map[int]bool)
+	drop := func(span *blockSpan) error {
+		if span == nil {
+			return nil
+		}
+		if span.from < 1 || span.to > len(lines) || span.to < span.from {
+			return fmt.Errorf("one of the retired blocks covers lines %d-%d, which is outside it",
+				span.from, span.to)
+		}
+		for line := span.from; line <= span.to; line++ {
+			dropped[line] = true
+		}
+		return nil
+	}
+	if err := drop(rc.hooks); err != nil {
+		return nil, err
+	}
+	if err := drop(rc.mechanisms); err != nil {
+		return nil, err
+	}
+	for i := range rc.serverMechanisms {
+		if err := drop(&rc.serverMechanisms[i]); err != nil {
+			return nil, err
+		}
+	}
+	fold.strippedIDs = strippedMechanismIDs(rc)
+
+	var block []string
+	at := 0
+	if rc.hooks != nil {
+		if block, err = renderReactionsBlock(entries); err != nil {
+			return nil, err
+		}
+		at = rc.hooks.from
+	}
+
+	out := make([]string, 0, len(lines)+len(block))
+	for i, line := range lines {
+		if i+1 == at {
+			out = append(out, block...)
+		}
+		if !dropped[i+1] {
+			out = append(out, line)
+		}
+	}
+	return joinConfigLines(out), nil
+}
+
+// strippedMechanismIDs is every catalogue id the strip took out, from the top-level block and the
+// per-server ones alike, deduplicated and sorted. Sorted because the ids come off maps, and a note
+// that reordered between runs would make the one line a user sees unstable.
+func strippedMechanismIDs(rc legacyReactionsConfig) []string {
+	seen := make(map[string]bool)
+	collect := func(span *blockSpan) {
+		if span == nil || span.value == nil {
+			return
+		}
+		var ids map[string]bool
+		if err := span.value.Decode(&ids); err != nil {
+			return
+		}
+		for id := range ids {
+			seen[id] = true
+		}
+	}
+	collect(rc.mechanisms)
+	for i := range rc.serverMechanisms {
+		collect(&rc.serverMechanisms[i])
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// verifyReactionsFold is the gate this migration passes before anything reaches the disk: the
+// rewritten file must carry neither retired key anywhere, its `reactions:` block must resolve to
+// exactly the list the `hooks:` block resolved to, and it must agree with the original on every
+// OTHER setting.
+//
+// The retired keys are read out of the edited BYTES, because they are what fileConfig has no field
+// for: the parsed after says nothing about a `hooks:` the fold was supposed to take away. The
+// servers are compared with their `mechanisms:` maps blanked on both sides, for the same reason —
+// that map is what the strip removes, and sameApartFrom cannot reach inside a list.
+func verifyReactionsFold(before, after fileConfig, updated []byte, want []domain.Reaction) error {
+	rc, err := readLegacyReactions(updated)
+	if err != nil {
+		return fmt.Errorf("the edited file is no longer a mapping of settings: %w", err)
+	}
+	got, err := toReactions(after.Reactions)
+	if err != nil {
+		return fmt.Errorf("the folded reactions: block would not resolve: %w", err)
+	}
+	switch {
+	case rc.needsRewrite():
+		return errors.New("the edit would have left one of the retired blocks behind")
+	case !reflect.DeepEqual(got, want):
+		return errors.New("the folded reactions: block does not fire what the hooks: block fired")
+	case !sameApartFrom(withoutServerMechanisms(before), withoutServerMechanisms(after),
+		reactionsKey, mechanismsKey):
+		//nolint:staticcheck // ST1005: ends with the mechanisms: key's own colon by design.
+		return errors.New("the edit would have changed more than hooks:, reactions: and mechanisms:")
+	}
+	return nil
+}
+
+// withoutServerMechanisms copies fc with every server entry's `mechanisms:` map blanked, so the
+// whole-file comparison can ask its question about the settings the strip does NOT touch. The
+// copy is deep enough to leave the caller's own parsed config alone: the slice is rebuilt rather
+// than written through.
+func withoutServerMechanisms(fc fileConfig) fileConfig {
+	if len(fc.Servers) == 0 {
+		return fc
+	}
+	servers := make([]ServerEntry, len(fc.Servers))
+	copy(servers, fc.Servers)
+	for i := range servers {
+		servers[i].Mechanisms = nil
+	}
+	fc.Servers = servers
+	return fc
+}
+
+// ----------------------------------------------------------------------------
+// The retired `hooks:` entry shape
+// ----------------------------------------------------------------------------
+
+// retiredApprovalEvent is the spelling the approval notice carried before ADR 0076 A6 renamed it —
+// `approval-` joined to `waiting`, built rather than written whole so the rename's own sweep for
+// the retired name stays clean. It is read here and nowhere else: the fold rewrites it, and after
+// the rewrite nothing in apogee accepts it again.
+var retiredApprovalEvent = "approval-" + "waiting"
+
+// legacyHookConfig is the on-disk shape of one `hooks:` entry, kept alive HERE and only here for
+// legacyFileConfig's reason: the schema has forgotten the key, so the migration is the last reader
+// of it and owns the spellings it has to map across.
+type legacyHookConfig struct {
+	Name       string            `yaml:"name"`
+	Events     []string          `yaml:"events"`
+	Command    []string          `yaml:"command"`
+	Webhook    string            `yaml:"webhook"`
+	Headers    map[string]string `yaml:"headers"`
+	HeadersEnv map[string]string `yaml:"headers-env"`
+	Workspace  string            `yaml:"workspace"`
+	Timeout    string            `yaml:"timeout"`
+}
+
+// readLegacyHooks decodes the `hooks:` block off the file's node tree. It goes through the node
+// rather than a struct tag because fileConfig no longer has that tag and this package's own
+// acceptance forbids reintroducing it — the key exists in exactly one place now, the const above.
+func readLegacyHooks(data []byte) ([]legacyHookConfig, error) {
+	doc, err := Document(data)
+	if err != nil {
+		return nil, err
+	}
+	root, err := rootMapping(doc)
+	if err != nil {
+		return nil, err
+	}
+	if root == nil {
+		return nil, errors.New("it holds no settings at all, so the block is not where the parser found it")
+	}
+	_, value := mappingEntry(root, hooksKey)
+	if value == nil || isNullNode(value) {
+		return nil, nil
+	}
+	var entries []legacyHookConfig
+	if err := value.Decode(&entries); err != nil {
+		return nil, fmt.Errorf("its hooks: block is not a list of hook entries (%v)", err)
+	}
+	return entries, nil
+}
+
+// toLegacyReactions resolves the retired block to the Reactions it fired, which is the BEFORE side
+// of the fold's verify. It maps the one entry shape the old schema had onto the reactionConfig the
+// new one has and lets that mapping do the work, so the two sides of the comparison cannot disagree
+// about what a `timeout:` defaults to or how a `workspace:` is spelled.
+func toLegacyReactions(entries []legacyHookConfig) ([]domain.Reaction, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	mapped := make([]reactionConfig, 0, len(entries))
+	for _, entry := range entries {
+		converted, err := entry.toReactionConfig()
+		if err != nil {
+			return nil, err
+		}
+		mapped = append(mapped, converted)
+	}
+	return toReactions(mapped)
+}
+
+// toReactionConfig is the fold itself, one entry at a time: `name:` becomes `id:`, `events:`
+// becomes `on:` with the retired approval spelling rewritten, and the two sibling action keys
+// become the one `run:` the new schema has. It refuses an entry that spells both actions or
+// neither — the two faults a one-handler value cannot express, and the only rules the old schema
+// had that the new one does not.
+func (h legacyHookConfig) toReactionConfig() (reactionConfig, error) {
+	on := make([]string, 0, len(h.Events))
+	for _, event := range h.Events {
+		if event == retiredApprovalEvent {
+			event = string(domain.MomentApprovalRequested)
+		}
+		on = append(on, event)
+	}
+
+	run, err := h.run()
+	if err != nil {
+		return reactionConfig{}, err
+	}
+	return reactionConfig{
+		ID:        h.Name,
+		On:        on,
+		Run:       run,
+		Workspace: h.Workspace,
+		Timeout:   h.Timeout,
+	}, nil
+}
+
+// run turns the one action the entry spells into the `run:` value that replaces it: the argv list
+// stays a list, and the webhook's URL and its two header maps become the mapping the new schema
+// documents. The shapes are the plain []any / map[string]any the decoder would have produced, so
+// the converted entry is indistinguishable from one the user wrote by hand.
+func (h legacyHookConfig) run() (any, error) {
+	hasCommand, hasWebhook := len(h.Command) > 0, strings.TrimSpace(h.Webhook) != ""
+	switch {
+	case hasCommand && hasWebhook:
+		return nil, fmt.Errorf("its hook %q sets both command: and webhook:, and an entry takes exactly one",
+			h.Name)
+	case !hasCommand && !hasWebhook:
+		return nil, fmt.Errorf("its hook %q sets neither command: nor webhook:, and an entry takes exactly one",
+			h.Name)
+	case hasCommand:
+		if len(h.Headers) > 0 || len(h.HeadersEnv) > 0 {
+			return nil, fmt.Errorf("its hook %q carries headers on a command:, and those belong to a webhook",
+				h.Name)
+		}
+		argv := make([]any, 0, len(h.Command))
+		for _, word := range h.Command {
+			argv = append(argv, word)
+		}
+		return argv, nil
+	default:
+		run := map[string]any{"url": h.Webhook}
+		if len(h.Headers) > 0 {
+			run["headers"] = anyMap(h.Headers)
+		}
+		if len(h.HeadersEnv) > 0 {
+			run["headers-env"] = anyMap(h.HeadersEnv)
+		}
+		return run, nil
+	}
+}
+
+// anyMap widens a header map to the shape the decoder hands the new schema, so the converted entry
+// and a hand-written one are the same value.
+func anyMap(in map[string]string) map[string]any {
+	out := make(map[string]any, len(in))
+	for name, value := range in {
+		out[name] = value
+	}
+	return out
+}
+
+// ----------------------------------------------------------------------------
+// Rendering the `reactions:` block
+// ----------------------------------------------------------------------------
+
+// renderedReaction is what one folded entry looks like written down. The field ORDER is the order
+// the key is documented in — id, on, run, workspace, timeout — because this struct IS the renderer,
+// and the omitempty tags keep an entry saying exactly what the old one said.
+type renderedReaction struct {
+	ID        string    `yaml:"id"`
+	On        flowWords `yaml:"on,flow"`
+	Run       any       `yaml:"run"`
+	Workspace string    `yaml:"workspace,omitempty"`
+	Timeout   string    `yaml:"timeout,omitempty"`
+}
+
+// renderedWebhook is the `run:` mapping written down, with `url:` first because that is the line a
+// reader is looking for. A struct rather than the map the converter builds, so the three keys keep
+// the order the schema documents them in instead of the marshaller's alphabetical one.
+type renderedWebhook struct {
+	URL        string            `yaml:"url"`
+	Headers    map[string]string `yaml:"headers,omitempty"`
+	HeadersEnv map[string]string `yaml:"headers-env,omitempty"`
+}
+
+// flowWords is a word list rendered on one line — `[a, b]` — which is how both the template and the
+// manual write `on:` and an argv `run:`. It is a type rather than the `flow` tag alone because the
+// argv rides an `any` field, where a struct tag has nothing to attach to.
+type flowWords []string
+
+// MarshalYAML renders the list as a flow sequence of STRINGS, tagged so a word like `true` or `on`
+// comes back out of the file as the word the user wrote rather than as a boolean.
+func (w flowWords) MarshalYAML() (any, error) {
+	node := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+	for _, word := range w {
+		node.Content = append(node.Content, &yaml.Node{
+			Kind: yaml.ScalarNode, Tag: "!!str", Value: word,
+		})
+	}
+	return node, nil
+}
+
+// renderReactionsBlock renders the whole block — the `reactions:` key and its entries — through the
+// YAML marshaller, which owns the quoting, so no command word, URL or header value can smuggle a
+// syntax break into the file. An empty block renders as the bare key, which is what an empty
+// `hooks:` block already was.
+func renderReactionsBlock(entries []legacyHookConfig) ([]string, error) {
+	if len(entries) == 0 {
+		return []string{reactionsKey + ":"}, nil
+	}
+	rendered := make([]renderedReaction, 0, len(entries))
+	for _, entry := range entries {
+		converted, err := entry.toReactionConfig()
+		if err != nil {
+			return nil, err
+		}
+		rendered = append(rendered, renderedReaction{
+			ID:        converted.ID,
+			On:        converted.On,
+			Run:       renderedRun(entry, converted.Run),
+			Workspace: converted.Workspace,
+			Timeout:   converted.Timeout,
+		})
+	}
+	out, err := yaml.Marshal(rendered)
+	if err != nil {
+		return nil, fmt.Errorf("render the migrated reactions: block: %w", err)
+	}
+	pad := strings.Repeat(" ", listIndent)
+	lines := []string{reactionsKey + ":"}
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		lines = append(lines, pad+unquoteOnKey(line))
+	}
+	return lines, nil
+}
+
+// renderedRun is the `run:` value in the shape the file is written in: the argv on one line, the
+// webhook as the three-key mapping the schema documents. The CONVERTED value is what the verify
+// compares, so this only ever changes how the same value looks written down.
+func renderedRun(entry legacyHookConfig, run any) any {
+	if _, isWebhook := run.(map[string]any); !isWebhook {
+		return flowWords(entry.Command)
+	}
+	return renderedWebhook{URL: entry.Webhook, Headers: entry.Headers, HeadersEnv: entry.HeadersEnv}
+}
+
+// unquoteOnKey writes `on:` the way the schema documents it. The marshaller quotes that key because
+// YAML 1.1 reads a bare `on` as a boolean; the decoder reads both spellings back as the same key, so
+// this is purely about handing the user a block that matches the one in their own template.
+func unquoteOnKey(line string) string {
+	const quoted = `"on":`
+	trimmed := strings.TrimLeft(line, " ")
+	if !strings.HasPrefix(trimmed, quoted) {
+		return line
+	}
+	indent := len(line) - len(trimmed)
+	return line[:indent] + "on:" + trimmed[len(quoted):]
+}
+
+// ----------------------------------------------------------------------------
+// What the user is told
+// ----------------------------------------------------------------------------
+
+// note is the one startup line this migration announces itself with: what was folded, what was
+// stripped, that the block's own comments are only in the backup now, and where that backup is. It
+// is the user's only notice that a file they own was rewritten, so it names the backup in full —
+// that is the path they need if they disagree with any of it.
+//
+// The closing sentence is for the SCRIPTS an entry runs: the environment names and the payload's
+// own key changed with the rename, and a notifier that reads the old ones would go quiet without
+// ever failing. It is said only when a block was actually folded, since a strip changes nothing a
+// script can see.
+func (f reactionsFold) note(path, backup string) string {
+	var parts []string
+	if f.folded > 0 || f.renamedApproval {
+		parts = append(parts, fmt.Sprintf("hooks: became reactions: (%d entries)", f.folded))
+	}
+	if f.renamedApproval {
+		parts = append(parts, retiredApprovalEvent+" is now "+string(domain.MomentApprovalRequested))
+	}
+	if len(f.strippedIDs) > 0 {
+		parts = append(parts, "the retired mechanisms: key was dropped ("+f.successorHint()+")")
+	}
+	parts = append(parts, "comments inside the old block did not survive")
+
+	note := fmt.Sprintf("apogee: rewrote %s — %s; backup at %s.",
+		path, strings.Join(parts, "; "), backup)
+	if f.folded > 0 {
+		note += ` Scripts must read APOGEE_REACTION_* (was APOGEE_HOOK_*) and the payload's ` +
+			`"reaction" field (was "hook").`
+	}
+	return note
+}
+
+// successorHint names, for each stripped id that was PROMOTED, the top-level Floor key that governs
+// its behaviour now — the one thing a user losing that line actually needs. When none of them was,
+// there is nothing to point at and the hint says so instead of listing nothing.
+func (f reactionsFold) successorHint() string {
+	var moved []string
+	for _, id := range f.strippedIDs {
+		if successor := retiredMechanismSuccessors[id]; successor != "" {
+			moved = append(moved, id+" → "+successor+":")
+		}
+	}
+	if len(moved) == 0 {
+		return "the catalogue is empty; the seven Floor keys are the only switches"
+	}
+	return strings.Join(moved, ", ")
+}
+
+// bothListsRefusal is what a file carrying BOTH lists gets. Nothing has been written when this is
+// returned: two lists under two names is a hand migration in progress, and finishing it for the
+// user would either duplicate an id or reorder a lane they were arranging deliberately.
+func bothListsRefusal(path string) error {
+	return fmt.Errorf("apogee: %s has both hooks: and reactions: — reactions: is the single list "+
+		"(hooks: was its earlier name).\n\n"+
+		"apogee did not fold hooks: in for you because reactions: already exists.\n\n"+
+		"Move the hooks: entries into reactions: (name: → id:, events: → on:, command: or webhook: "+
+		"→ run:) and delete hooks:.", path)
+}
+
+// reactionsRefusal is what the fold gives when it cannot be made safely: nothing has been written,
+// and the paste-able instruction is a complete answer on its own.
+func reactionsRefusal(path string, why error) error {
+	return fmt.Errorf("apogee: %s still uses the retired hooks: or mechanisms: keys — reactions: is "+
+		"the single observe list, and the mechanism catalogue is gone.\n\n"+
+		"apogee did not rewrite it for you because %v.\n\n"+
+		"Move the hooks: entries into reactions: (name: → id:, events: → on:, command: or webhook: "+
+		"→ run:) and delete hooks: and mechanisms: by hand.", path, why)
+}
+
+// liveReactionsRefusal is what a LIVE re-read of a file still carrying `hooks:` gets. The fold is a
+// startup act and only a startup act: apogee does not rewrite a config file out from under a
+// running session, so the re-read refuses, writes nothing, and leaves the session firing the list
+// it already had.
+func liveReactionsRefusal(path string) error {
+	return fmt.Errorf("apogee: %s still has a hooks: block, and apogee does not rewrite a config "+
+		"file while a session is running — hooks: becomes reactions: at startup. Restart apogee to "+
+		"let it fold the block in, or move the entries into reactions: yourself (name: → id:, "+
+		"events: → on:, command: or webhook: → run:).", path)
 }

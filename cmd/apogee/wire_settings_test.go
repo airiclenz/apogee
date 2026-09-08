@@ -1938,9 +1938,9 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	// tests stayed green, so this is where the literal is proved. It is asked for the ABSENCE of that
 	// sentence rather than for success, because runRoot has already returned here and close() ends
 	// the Runner with everything else it opened: reaching a CLOSED Runner is the wiring being right.
-	if _, err := rec.opts.Settings.Apply("hooks", "none"); err != nil &&
+	if _, err := rec.opts.Settings.Apply("reactions", "none"); err != nil &&
 		strings.Contains(err.Error(), "cannot be applied") {
-		t.Errorf("Settings.Apply(hooks): %v; the composition root did not pass its Runner to the applier", err)
+		t.Errorf("Settings.Apply(reactions): %v; the composition root did not pass its Runner to the applier", err)
 	}
 	if _, err := rec.opts.Settings.Apply("model-profiles", "1 model profile"); err != nil {
 		t.Errorf("Settings.Apply(model-profiles): %v", err)
@@ -2921,11 +2921,11 @@ func hookEntry(name string, event reactions.Event) domain.Reaction {
 	}
 }
 
-// The `hooks:` arm is the whole of what a `/settings` commit can do about an observe-only list: it
+// The `reactions:` arm is the whole of what a `/settings` commit can do about an observe-only list: it
 // re-reads the file, swaps the running Runner onto the new set, and mirrors that set into the live
 // Options a Firing raised inside this session composes from. All three, or none — a session firing
 // one list while the runs it raises fire another is exactly the drift ADR 0037 abolished.
-func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
+func TestApplySettingReactionsReplacesTheRunnerAndTheProjection(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
 	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
@@ -2937,7 +2937,7 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 	t.Cleanup(func() { _ = runner.Close(context.Background()) })
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	const reloaded = "hooks:\n  - name: reloaded\n    events: [turn-finished]\n    command: [apogee-test-hook]\n"
+	const reloaded = "reactions:\n  - id: reloaded\n    on: [turn-finished]\n    run: [apogee-test-hook]\n"
 	if err := os.WriteFile(path, []byte(reloaded), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -2946,8 +2946,8 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
 	// The value is not read for this key — a list of blocks is a shape no single string spells — so
 	// what the pane persisted is the row's own summary.
-	if _, err := apply("hooks", "1 hook"); err != nil {
-		t.Fatalf("apply hooks: %v", err)
+	if _, err := apply("reactions", "1 reaction"); err != nil {
+		t.Fatalf("apply reactions: %v", err)
 	}
 
 	// The projection a Firing composes from now names the re-read entry, not the boot one.
@@ -2962,17 +2962,18 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 	select {
 	case name := <-exec.done:
 		if name != "reloaded" {
-			t.Errorf("the runner fired %q; want the hook the reload installed", name)
+			t.Errorf("the runner fired %q; want the reaction the reload installed", name)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("no hook fired after the reload; the runner is still on the boot list")
+		t.Fatal("no reaction fired after the reload; the runner is still on the boot list")
 	}
 }
 
 // A file the session cannot read leaves BOTH halves where they were. The write has already landed —
 // that is what a `/settings` commit is — so the honest answer is that the file changed and the
-// session did not, with the Hooks it is actually firing unchanged and the projection saying the same.
-func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) {
+// session did not, with the Reactions it is actually firing unchanged and the projection saying the
+// same.
+func TestApplySettingReactionsRefusesABrokenFileWithoutMovingAnything(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
 	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
@@ -2984,14 +2985,14 @@ func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) 
 	t.Cleanup(func() { _ = runner.Close(context.Background()) })
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("hooks:\n  - name: broken\n    events: [not-an-event]\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("reactions:\n  - id: broken\n    on: [not-an-event]\n    run: [\"true\"]\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	live := newLiveSettings(config.Options{Reactions: boot})
 	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
-	if _, err := apply("hooks", "1 hook"); err == nil {
-		t.Fatal("a hooks: block naming an unknown event applied silently; want a refusal")
+	if _, err := apply("reactions", "1 reaction"); err == nil {
+		t.Fatal("a reactions: block naming an unknown moment applied silently; want a refusal")
 	}
 	if got := live.options().Reactions; len(got) != 1 || got[0].ID != "boot" {
 		t.Errorf("options().Reactions = %+v, want the boot list a refused edit leaves standing", got)
@@ -3001,11 +3002,11 @@ func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) 
 // The two members the arm dereferences are both required, so a Driver composed without either
 // refuses the key by name on the Update goroutine rather than panicking halfway through an edit the
 // file already carries (ADR 0031).
-func TestApplySettingHooksRefusesWithoutTheRunnerOrTheHolder(t *testing.T) {
+func TestApplySettingReactionsRefusesWithoutTheRunnerOrTheHolder(t *testing.T) {
 	t.Parallel()
-	entry, ok := settingsEntryFor("hooks")
+	entry, ok := settingsEntryFor("reactions")
 	if !ok {
-		t.Fatal("the settings table has no `hooks` arm; a hooks: edit could never reach the session")
+		t.Fatal("the settings table has no `reactions` arm; a reactions: edit could never reach the session")
 	}
 	if entry.reaches(settingsApplier{live: newLiveSettings(config.Options{})}) {
 		t.Error("the arm claims to reach a Driver with no Runner")

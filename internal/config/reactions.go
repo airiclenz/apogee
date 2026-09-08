@@ -285,51 +285,28 @@ func toReactions(list []reactionConfig) ([]domain.Reaction, error) {
 	return mapped, nil
 }
 
-// resolveReactionBlocks maps BOTH user-origin blocks — the `reactions:` list and the `hooks:` list
-// it is the successor to — onto the one observe list a root fires. They resolve into one field
-// because they are one lane: `hooks:` is the earlier name of `reactions:`, and until the migration
-// folds it away (item 9 of the stage-2 plan) a file may carry either.
-func resolveReactionBlocks(hooks []hookConfig, list []reactionConfig) ([]domain.Reaction, error) {
-	mappedHooks, err := toHooks(hooks)
-	if err != nil {
-		return nil, err
-	}
-	mapped, err := toReactions(list)
-	if err != nil {
-		return nil, err
-	}
-	if len(mappedHooks) == 0 {
-		return mapped, nil
-	}
-	return append(slices.Clone(mappedHooks), mapped...), nil
-}
-
 // validateReactionBlocks refuses a user-origin block that cannot be run, at PARSE time — beside
 // validateModelProfiles — so a mistyped Moment or an entry with no action is a startup refusal
 // naming the entry rather than a Reaction that silently never fires. It is the mapping (which owns
 // the on-disk shape rules) plus the two checks the reactions package owns: [reactions.Validate] per
 // entry, and [reactions.ValidateAll] for the uniqueness of the ids every failure notice and payload
-// keys on — run over BOTH blocks at once, so an id written in each of them is caught rather than
-// firing twice under one name.
-func validateReactionBlocks(hooks []hookConfig, list []reactionConfig) error {
-	mapped, err := resolveReactionBlocks(hooks, list)
+// keys on.
+func validateReactionBlocks(list []reactionConfig) error {
+	mapped, err := toReactions(list)
 	if err != nil {
 		return err
 	}
 	return reactions.ValidateAll(mapped)
 }
 
-// projectReactions writes the resolved observe list onto the Options. It is ONE projection shared
-// by the `hooks:` and `reactions:` rows, on the idiom the keys that share a carrier already use
-// (the three system-prompt keys, the four present keys): the Options field is the whole lane, so a
-// row that wrote only its own half would leave the outcome depending on which row ran last.
+// projectReactions writes the resolved observe list onto the Options.
 //
 // A mapping FAILURE leaves the list empty rather than half-applied: parseConfigFile has already
 // refused any file this could fail on (validateReactionBlocks), so the only way to reach it is a
 // fileConfig built in code, and a partially fired reaction set is a worse answer there than none.
 func projectReactions(o *Options, fc fileConfig) {
 	o.Reactions = nil
-	if mapped, err := resolveReactionBlocks(fc.Hooks, fc.Reactions); err == nil {
+	if mapped, err := toReactions(fc.Reactions); err == nil {
 		o.Reactions = mapped
 	}
 }

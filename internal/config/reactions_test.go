@@ -116,36 +116,6 @@ reactions:
 	}
 }
 
-// Both user-origin blocks resolve into ONE lane while `hooks:` is still parsed, in file order:
-// the `hooks:` entries first, then the `reactions:` ones. It is the projection two registry rows
-// share, so what is asserted is the composed field rather than either row's own half.
-func TestLoadFileConfigResolvesBothUserBlocksIntoOneLane(t *testing.T) {
-	t.Parallel()
-
-	path := writeReactionsConfig(t, `
-hooks:
-  - name: old
-    events: [turn-finished]
-    command: ["true"]
-reactions:
-  - id: new
-    on: [turn-finished]
-    run: ["true"]
-`)
-
-	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
-	if err != nil {
-		t.Fatalf("LoadFileConfig: %v", err)
-	}
-	if len(opts.Reactions) != 2 {
-		t.Fatalf("resolved %d reactions; want both blocks' entries: %+v", len(opts.Reactions), opts.Reactions)
-	}
-	if opts.Reactions[0].ID != "old" || opts.Reactions[1].ID != "new" {
-		t.Errorf("resolved ids = %q, %q; want the hooks: entry first and the reactions: one after it",
-			opts.Reactions[0].ID, opts.Reactions[1].ID)
-	}
-}
-
 // An empty or absent block resolves to no Reactions and no error: the lane is dormant by default,
 // exactly as `mcp-servers:` is. A block whose every entry is parked resolves the same way, so a
 // file that keeps its definitions without arming them is indistinguishable from one that has none.
@@ -234,8 +204,8 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 			want: "reaction \"notify\": timeout: \"soon\" is not a duration — write it as `30s` or `2m`",
 		},
 		{
-			name: "an id is spelled in both user blocks",
-			body: "hooks:\n  - name: notify\n    events: [error]\n    command: [\"true\"]\nreactions:\n  - id: notify\n    on: [error]\n    run: [\"true\"]\n",
+			name: "an id is spelled twice",
+			body: "reactions:\n  - id: notify\n    on: [error]\n    run: [\"true\"]\n  - id: notify\n    on: [turn-finished]\n    run: [\"true\"]\n",
 			want: `reaction "notify": a second entry has this name`,
 		},
 	} {

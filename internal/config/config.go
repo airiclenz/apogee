@@ -612,13 +612,6 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// The entries are mapped across one by one like the block above it, through the projection
-		// this row SHARES with `reactions:` below — the two blocks are one lane, so each row writes
-		// the whole of it (projectReactions).
-		row:      mustKey("hooks"),
-		fromFile: projectReactions,
-	},
-	{
 		// Each half of the `tools:` block projects on its own, the way the `url-safety:` pair below
 		// does: a block that names only one of them configures that one and leaves the other empty.
 		row: mustKey("tools.disabled"),
@@ -885,10 +878,8 @@ var keyAccessors = []keyAccessor{
 		fromFlag: func(o *Options, flags Options) { o.Bypass = flags.Bypass },
 	},
 	{
-		// The user-origin observe lane, projected by the same closure the `hooks:` row above uses:
-		// the two blocks resolve into ONE Options field, so each row writes the whole of it rather
-		// than its own half — the shared-carrier idiom, and the reason the table's order stays
-		// irrelevant to the outcome.
+		// The user-origin observe lane. A list of blocks is a shape no scalar row writes, so the
+		// projection is the resolver itself (projectReactions) and the row's own value is a count.
 		row:      mustKey("reactions"),
 		fromFile: projectReactions,
 	},
@@ -1443,18 +1434,16 @@ type fileConfig struct {
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
 	MCPServers []mcpServerConfig `yaml:"mcp-servers"`
-	// Hooks is the global list of observe-only reactions to engine events (ADR 0073): each entry
-	// names the events it fires on and the one action it takes — an argv command run outside
-	// confinement, or a webhook POST. Absent/empty ⇒ the feature is dormant (nothing runs, no error).
-	// Nothing a Hook does reaches the model, the conversation or the Session record, so an entry is
-	// never part of what a run produces — only of what a machine is told about it.
-	Hooks []hookConfig `yaml:"hooks"`
-	// Reactions is the global list of user-origin observe Reactions (ADR 0076) — the successor
-	// spelling of the `hooks:` block above it, and the one this schema documents: each entry names
+	// Reactions is the global list of user-origin observe Reactions (ADR 0076): each entry names
 	// the Moments it fires on under `on:` and the one action it takes under `run:`, an argv list run
 	// out of confinement or a webhook mapping the JSON payload is POSTed to. Absent/empty ⇒ the
-	// feature is dormant (nothing runs, no error). Both blocks resolve into the one
-	// [Options.Reactions] lane; the migration folds `hooks:` into this key and deletes it.
+	// feature is dormant (nothing runs, no error). Nothing a Reaction of this class does reaches the
+	// model, the conversation or the Session record, so an entry is never part of what a run
+	// produces — only of what a machine is told about it.
+	//
+	// The retired `hooks:` block this replaces is FOLDED into this key at startup, once, and the
+	// change is announced (configmigrate.go): the schema no longer has that field, so an unfolded
+	// block would simply stop being read.
 	Reactions []reactionConfig `yaml:"reactions"`
 	// Tools is the GLOBAL roster block (ADR 0057): `disabled:`, the built-in tools this config takes
 	// off the menu, and `enabled:`, the ones it puts back on it. A pointer so an absent block falls
@@ -2719,7 +2708,7 @@ func applyFile(o *Options, fc fileConfig) {
 // notify; a file already in the new schema is never touched, so the write happens at most once per
 // config and the injected readFile stays the only reader on every other launch.
 func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify func(string)) (Options, error) {
-	fc, err := parseConfigFile(path, readFile, notify)
+	fc, err := parseConfigFile(path, readFile, notify, false)
 	if err != nil {
 		return Options{}, err
 	}
@@ -2732,7 +2721,8 @@ func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify f
 // the parsed file itself for the one refusal a resolved value cannot carry (a context-files name
 // under a block that is switched off), so the two halves are separable here rather than folded
 // into one exported call.
-func parseConfigFile(path string, readFile func(string) ([]byte, error), notify func(string)) (fileConfig, error) {
+func parseConfigFile(path string, readFile func(string) ([]byte, error), notify func(string),
+	mayMigrate bool) (fileConfig, error) {
 	if path == "" {
 		return fileConfig{}, nil
 	}
@@ -2743,7 +2733,7 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 		}
 		return fileConfig{}, fmt.Errorf("apogee: read config %q: %w", path, err)
 	}
-	data, note, err := migrateLegacyConfig(path, data, time.Now())
+	data, note, err := migrateLegacyConfig(path, data, time.Now(), mayMigrate)
 	if err != nil {
 		return fileConfig{}, err
 	}
@@ -2758,7 +2748,7 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
 		return fileConfig{}, err
 	}
-	if err := validateReactionBlocks(fc.Hooks, fc.Reactions); err != nil {
+	if err := validateReactionBlocks(fc.Reactions); err != nil {
 		return fileConfig{}, err
 	}
 	if err := validateResponseReserveFraction(fc.ResponseReserve); err != nil {
@@ -2962,7 +2952,10 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 			opts.Workspace = v
 		}
 	}
-	fc, err := parseConfigFile(FilePath(opts.ConfigDir), readFile, notify)
+	// The one reader that may MIGRATE: this is the startup pass, so a config still written in a
+	// retired shape is folded here and announced through notify. Every live re-read goes through
+	// LoadFileConfig, which refuses rather than rewriting a file a session is running on.
+	fc, err := parseConfigFile(FilePath(opts.ConfigDir), readFile, notify, true)
 	if err != nil {
 		return nil, err
 	}

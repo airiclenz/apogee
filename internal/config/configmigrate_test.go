@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // migrationClock is the fixed time the tests date backups with, so the file the migration writes has
@@ -147,7 +149,7 @@ func TestMigrateLegacyConfigFoldsTheQuadruple(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			path := writeMigrationConfig(t, tt.given)
-			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock, true)
 			if err != nil {
 				t.Fatalf("migrate: %v", err)
 			}
@@ -181,7 +183,7 @@ func TestMigrateLegacyConfigBackupKeepsThePermissions(t *testing.T) {
 	t.Parallel()
 	given := "endpoint: http://box:1111\n"
 	path := writeMigrationConfig(t, given)
-	if _, _, err := migrateLegacyConfig(path, []byte(given), migrationClock); err != nil {
+	if _, _, err := migrateLegacyConfig(path, []byte(given), migrationClock, true); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	info, err := os.Stat(path + migrationBackupSuffix)
@@ -199,7 +201,7 @@ func TestMigrateLegacyConfigAnnouncesWhatMoved(t *testing.T) {
 	t.Parallel()
 	given := "endpoint: http://box:1111\napi-key: sk-secret\nhost-alias: the-box\n"
 	path := writeMigrationConfig(t, given)
-	_, note, err := migrateLegacyConfig(path, []byte(given), migrationClock)
+	_, note, err := migrateLegacyConfig(path, []byte(given), migrationClock, true)
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -268,7 +270,7 @@ func TestMigrateLegacyConfigRefusesRatherThanGuess(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			path := writeMigrationConfig(t, tt.given)
-			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock, true)
 			if err == nil {
 				t.Fatalf("a config that cannot be folded was migrated to:\n%s", updated)
 			}
@@ -300,7 +302,7 @@ func TestMigrateLegacyConfigLeavesANewSchemaConfigAlone(t *testing.T) {
 	t.Parallel()
 	given := "servers:\n  - name: box\n    endpoint: http://box:1111\n\nserver: box\nmode: plan\n"
 	path := writeMigrationConfig(t, given)
-	updated, note, err := migrateLegacyConfig(path, []byte(given), migrationClock)
+	updated, note, err := migrateLegacyConfig(path, []byte(given), migrationClock, true)
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -365,7 +367,7 @@ func TestMigrateLegacyConfigRefusesTheRetiredLauncherKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			path := writeMigrationConfig(t, tt.given)
-			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock, true)
 			if err == nil {
 				t.Fatalf("a config still setting the retired launcher key was migrated to:\n%s", updated)
 			}
@@ -420,7 +422,7 @@ func TestMigrateLegacyConfigRefusesTheValuelessLauncherKeyWithoutTheNodeTree(t *
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			path := writeMigrationConfig(t, tt.given)
-			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock, true)
 			if err == nil {
 				t.Fatalf("a valueless retired launcher key went unrefused; the config resolved to:\n%s", updated)
 			}
@@ -549,7 +551,7 @@ func TestMigrateLegacyConfigRefusesTheRetiredProfileKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			path := writeMigrationConfig(t, tt.given)
-			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock, true)
 			if err == nil {
 				t.Fatalf("a config still setting the retired profile key was migrated to:\n%s", updated)
 			}
@@ -584,7 +586,7 @@ func TestMigrateLegacyConfigRefusesTheProfileKeyWithoutTheNodeTree(t *testing.T)
 	t.Parallel()
 	given := "{model-profile: {tool-call-format: markdown-fenced}}\n"
 	path := writeMigrationConfig(t, given)
-	_, _, err := migrateLegacyConfig(path, []byte(given), migrationClock)
+	_, _, err := migrateLegacyConfig(path, []byte(given), migrationClock, true)
 	if err == nil {
 		t.Fatal("a flow-style config still setting the retired profile key was not refused")
 	}
@@ -771,5 +773,439 @@ func TestMigrateSubAgentsServerRefusesANameNoEntryCarries(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if string(data) != given {
 		t.Errorf("the refused edit rewrote the file:\n%s", data)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The `hooks:` fold and the `mechanisms:` strip (ADR 0076 A6)
+// ----------------------------------------------------------------------------
+
+// A `hooks:` block is FOLDED, not refused: the entries come back under `reactions:` in the place the
+// old block stood, spelled the way the schema spells them now, and every other line — comments
+// outside the block, blank lines, unrelated settings, the user's own key order — is exactly where it
+// was. The whole file is compared, because "what else did the splice touch" is the question this
+// write has to answer.
+func TestMigrateLegacyConfigFoldsTheHooksBlock(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		given string
+		want  string
+	}{
+		{
+			name: "an argv entry and a webhook entry, with the retired approval spelling",
+			given: "# apogee configuration\n" +
+				"\n" +
+				"mode: plan\n" +
+				"\n" +
+				"# my own reactions\n" +
+				"hooks:\n" +
+				"  - name: notify\n" +
+				"    events: [approval-waiting]\n" +
+				"    command: [\"notify-send\", \"waiting\"]\n" +
+				"    timeout: 10s\n" +
+				"  - name: ci-bell\n" +
+				"    events: [file-changed]\n" +
+				"    webhook: https://example.com/apogee\n" +
+				"    headers:\n" +
+				"      X-Source: apogee\n" +
+				"    headers-env:\n" +
+				"      Authorization: TOKEN\n" +
+				"    workspace: /tmp\n" +
+				"\n" +
+				"context-window: 8000\n",
+			want: "# apogee configuration\n" +
+				"\n" +
+				"mode: plan\n" +
+				"\n" +
+				"# my own reactions\n" +
+				"reactions:\n" +
+				"  - id: notify\n" +
+				"    on: [approval-requested]\n" +
+				"    run: [notify-send, waiting]\n" +
+				"    timeout: 10s\n" +
+				"  - id: ci-bell\n" +
+				"    on: [file-changed]\n" +
+				"    run:\n" +
+				"      url: https://example.com/apogee\n" +
+				"      headers:\n" +
+				"          X-Source: apogee\n" +
+				"      headers-env:\n" +
+				"          Authorization: TOKEN\n" +
+				"    workspace: /tmp\n" +
+				"\n" +
+				"context-window: 8000\n",
+		},
+		{
+			name: "the retired mechanisms: key, top-level and per-server, goes with it",
+			given: "mechanisms:\n" +
+				"  tool_use_enforcer: false\n" +
+				"  decompose: true\n" +
+				"servers:\n" +
+				"  - name: box\n" +
+				"    endpoint: http://box:1111\n" +
+				"    mechanisms:\n" +
+				"      validate: true\n" +
+				"  - name: other\n" +
+				"    endpoint: http://other:1111\n" +
+				"server: box\n",
+			want: "servers:\n" +
+				"  - name: box\n" +
+				"    endpoint: http://box:1111\n" +
+				"  - name: other\n" +
+				"    endpoint: http://other:1111\n" +
+				"server: box\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, tt.given)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock, true)
+			if err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			if string(updated) != tt.want {
+				t.Errorf("migrated config:\n%s\nwant:\n%s", updated, tt.want)
+			}
+			onDisk, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read the migrated config: %v", err)
+			}
+			if string(onDisk) != tt.want {
+				t.Errorf("the file on disk is not what the migration returned:\n%s", onDisk)
+			}
+			if note == "" {
+				t.Error("a rewritten config was not announced")
+			}
+			backup, err := os.ReadFile(path + migrationBackupSuffix)
+			if err != nil {
+				t.Fatalf("read the backup: %v", err)
+			}
+			if string(backup) != tt.given {
+				t.Errorf("the backup is not the file as it was:\n%s", backup)
+			}
+		})
+	}
+}
+
+// The folded block resolves to the SAME Reactions the old one did, read back through the loader a
+// session actually starts from — which is the whole claim the fold makes, and the one a byte golden
+// alone cannot prove.
+func TestMigrateLegacyConfigFoldResolvesTheSameReactions(t *testing.T) {
+	t.Parallel()
+	given := "hooks:\n" +
+		"  - name: notify\n" +
+		"    events: [approval-waiting, turn-finished]\n" +
+		"    command: [\"true\"]\n" +
+		"    timeout: 10s\n"
+	path := writeMigrationConfig(t, given)
+	if _, _, err := migrateLegacyConfig(path, []byte(given), migrationClock, true); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig on the migrated file: %v", err)
+	}
+	if len(opts.Reactions) != 1 {
+		t.Fatalf("resolved %d reactions; want the one the hooks: block described: %+v",
+			len(opts.Reactions), opts.Reactions)
+	}
+	got := opts.Reactions[0]
+	if got.ID != "notify" {
+		t.Errorf("id = %q; want the old name:", got.ID)
+	}
+	if len(got.On) != 2 || got.On[0] != domain.MomentApprovalRequested ||
+		got.On[1] != domain.MomentTurnFinished {
+		t.Errorf("on = %v; want the retired approval spelling rewritten and the order kept", got.On)
+	}
+	if got.Timeout != 10*time.Second {
+		t.Errorf("timeout = %v; want the 10s the entry spelled", got.Timeout)
+	}
+}
+
+// The one startup line is the user's only notice that a file they own was rewritten, so it names
+// what was folded, what was stripped and where the previous bytes are — and it warns about the one
+// thing a user's own SCRIPTS cannot discover for themselves, the renamed environment and payload.
+func TestMigrateLegacyConfigAnnouncesTheFold(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		given   string
+		want    []string
+		absent  []string
+		scripts bool
+	}{
+		{
+			name: "a fold, an approval rename and a promoted mechanism",
+			given: "hooks:\n  - name: notify\n    events: [approval-waiting]\n    command: [\"true\"]\n" +
+				"mechanisms:\n  tool_use_enforcer: false\n",
+			want: []string{
+				"hooks: became reactions: (1 entries)",
+				"approval-waiting is now approval-requested",
+				"the retired mechanisms: key was dropped (tool_use_enforcer → tool-use-enforcer:)",
+				"comments inside the old block did not survive",
+			},
+			scripts: true,
+		},
+		{
+			name:  "a strip whose ids all retired outright",
+			given: "mechanisms:\n  decompose: true\n  filehint: true\n",
+			want: []string{
+				"the retired mechanisms: key was dropped (the catalogue is empty; the seven Floor " +
+					"keys are the only switches)",
+			},
+			absent: []string{"hooks: became reactions:", "approval-waiting", "Scripts must read"},
+		},
+		{
+			name:    "a fold with nothing retired beside it",
+			given:   "hooks:\n  - name: bell\n    events: [error]\n    command: [\"true\"]\n",
+			want:    []string{"hooks: became reactions: (1 entries)"},
+			absent:  []string{"approval-waiting", "mechanisms:"},
+			scripts: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, tt.given)
+			_, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock, true)
+			if err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			for _, want := range append(tt.want, path, path+migrationBackupSuffix) {
+				if !strings.Contains(note, want) {
+					t.Errorf("the announcement does not carry %q: %s", want, note)
+				}
+			}
+			for _, absent := range tt.absent {
+				if strings.Contains(note, absent) {
+					t.Errorf("the announcement claims %q, which this file never said: %s", absent, note)
+				}
+			}
+			const scripts = `Scripts must read APOGEE_REACTION_* (was APOGEE_HOOK_*) and the ` +
+				`payload's "reaction" field (was "hook").`
+			if got := strings.Contains(note, scripts); got != tt.scripts {
+				t.Errorf("the script warning is present = %v; want %v: %s", got, tt.scripts, note)
+			}
+			if strings.Contains(note, "\n") {
+				t.Errorf("the announcement is more than one line: %s", note)
+			}
+		})
+	}
+}
+
+// A file carrying BOTH lists is a hand migration in progress, and finishing it would either
+// duplicate an id or reorder a lane the user was arranging deliberately. So it refuses, in the words
+// that tell them how to finish it, and writes NOTHING — not the rewrite, not even the backup.
+func TestMigrateLegacyConfigRefusesBothLists(t *testing.T) {
+	t.Parallel()
+	given := "hooks:\n  - name: old\n    events: [error]\n    command: [\"true\"]\n" +
+		"reactions:\n  - id: new\n    on: [error]\n    run: [\"true\"]\n"
+	path := writeMigrationConfig(t, given)
+
+	_, _, err := migrateLegacyConfig(path, []byte(given), migrationClock, true)
+
+	if err == nil {
+		t.Fatal("a config carrying both lists was folded; want a refusal")
+	}
+	for _, want := range []string{
+		"has both hooks: and reactions: — reactions: is the single list (hooks: was its earlier name)",
+		"apogee did not fold hooks: in for you because reactions: already exists",
+		"Move the hooks: entries into reactions: (name: → id:, events: → on:, command: or webhook: → run:) and delete hooks:.",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+	assertMigrationWroteNothing(t, path, given)
+}
+
+// A file whose top level the splice cannot read — here one flow mapping, where the `hooks:` key
+// shares its line with `mode:` — is REFUSED rather than left alone. Silence is the one answer it
+// must not get: the schema has no `hooks:` field any more, so an unfolded block would simply stop
+// being read and the entries would go quiet without ever failing.
+func TestMigrateLegacyConfigRefusesAFileItCannotSplice(t *testing.T) {
+	t.Parallel()
+	given := "{mode: plan, hooks: [{name: notify, events: [error], command: [\"true\"]}]}\n"
+	path := writeMigrationConfig(t, given)
+
+	_, _, err := migrateLegacyConfig(path, []byte(given), migrationClock, true)
+
+	if err == nil {
+		t.Fatal("a hooks: block in a file the splice cannot read passed unnoticed; want a refusal")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("the refusal does not name the file it is about: %v", err)
+	}
+	assertMigrationWroteNothing(t, path, given)
+}
+
+// A file the migration cannot copy is not rewritten either: the backup is the user's undo, and a
+// rewrite they cannot undo is worse than a refusal that names the file and says what it wanted to do.
+func TestMigrateLegacyConfigRefusesWhenItCannotBackUp(t *testing.T) {
+	t.Parallel()
+	given := "hooks:\n  - name: notify\n    events: [error]\n    command: [\"true\"]\n"
+	path := writeMigrationConfig(t, given)
+	// The backup name is taken already, and backUpConfig will not overwrite somebody else's copy.
+	if err := os.WriteFile(path+migrationBackupSuffix, []byte("someone else's copy\n"), 0o600); err != nil {
+		t.Fatalf("seed the backup: %v", err)
+	}
+
+	_, _, err := migrateLegacyConfig(path, []byte(given), migrationClock, true)
+
+	if err == nil {
+		t.Fatal("the config was rewritten with no backup behind it; want a refusal")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("the refusal does not name the file it is about: %v", err)
+	}
+	if onDisk, readErr := os.ReadFile(path); readErr != nil || string(onDisk) != given {
+		t.Errorf("the config was rewritten anyway:\n%s", onDisk)
+	}
+}
+
+// The migration is idempotent by construction — the keys it folds are gone once it has run — so a
+// second read of the migrated file writes nothing, announces nothing and hands the bytes straight
+// back. So does a file that never carried either key.
+func TestMigrateLegacyConfigLeavesAMigratedFileAlone(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name  string
+		given string
+	}{
+		{
+			name:  "a file already written in the reactions: schema",
+			given: "reactions:\n  - id: notify\n    on: [error]\n    run: [\"true\"]\n",
+		},
+		{name: "a file carrying none of the retired keys", given: "mode: plan\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, tt.given)
+
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock, true)
+
+			if err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			if string(updated) != tt.given {
+				t.Errorf("the bytes came back changed:\n%s", updated)
+			}
+			if note != "" {
+				t.Errorf("a file nothing was done to was announced: %s", note)
+			}
+			assertMigrationWroteNothing(t, path, tt.given)
+		})
+	}
+}
+
+// The fold is a STARTUP act and only a startup act: apogee does not rewrite a config file out from
+// under a running session, so a live re-read of a file that still carries `hooks:` refuses, writes
+// nothing, and says what a restart would do. The sentence is pinned whole because it is the one the
+// user meets on a `/settings` apply.
+func TestLoadFileConfigRefusesTheHooksBlockWithoutRewritingIt(t *testing.T) {
+	t.Parallel()
+	given := "hooks:\n  - name: notify\n    events: [error]\n    command: [\"true\"]\n"
+	path := writeMigrationConfig(t, given)
+
+	_, err := LoadFileConfig(path, os.ReadFile, noNotify)
+
+	if err == nil {
+		t.Fatal("a live re-read folded a hooks: block; want a refusal that writes nothing")
+	}
+	want := "apogee: " + path + " still has a hooks: block, and apogee does not rewrite a config " +
+		"file while a session is running — hooks: becomes reactions: at startup. Restart apogee to " +
+		"let it fold the block in, or move the entries into reactions: yourself (name: → id:, " +
+		"events: → on:, command: or webhook: → run:)."
+	if err.Error() != want {
+		t.Errorf("refusal =\n%q\nwant\n%q", err, want)
+	}
+	assertMigrationWroteNothing(t, path, given)
+}
+
+// A live re-read leaves a `mechanisms:` key exactly where it is rather than refusing over it: the
+// key still parses, it arms nothing either way, and the strip is a write a running session may not
+// make.
+func TestLoadFileConfigLeavesTheMechanismsKeyToStartup(t *testing.T) {
+	t.Parallel()
+	given := "mechanisms:\n  grammar: true\n"
+	path := writeMigrationConfig(t, given)
+
+	if _, err := LoadFileConfig(path, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("LoadFileConfig: %v — a live re-read must not refuse over a key it may not strip", err)
+	}
+
+	assertMigrationWroteNothing(t, path, given)
+}
+
+// assertMigrationWroteNothing holds the "no write at all" half of a refusal: the config is the file
+// it was, and no backup was left beside it.
+func assertMigrationWroteNothing(t *testing.T, path, given string) {
+	t.Helper()
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the config: %v", err)
+	}
+	if string(onDisk) != given {
+		t.Errorf("the config was rewritten:\n%s", onDisk)
+	}
+	if _, err := os.Stat(path + migrationBackupSuffix); err == nil {
+		t.Error("a backup was written for a rewrite that never happened")
+	}
+}
+
+// Every way the edit could be wrong is caught before a byte reaches the disk. The transaction makes
+// each of these unreachable in practice, which is the point: the verify is asked its question
+// directly so the three answers stay pinned even when nothing can produce them.
+func TestVerifyReactionsFoldRefusesEachWayTheEditCouldBeWrong(t *testing.T) {
+	t.Parallel()
+
+	entry := reactionConfig{ID: "notify", On: []string{"error"}, Run: []any{"true"}}
+	folded := fileConfig{Reactions: []reactionConfig{entry}}
+	want, err := toReactions(folded.Reactions)
+	if err != nil {
+		t.Fatalf("resolve the wanted list: %v", err)
+	}
+
+	for _, tt := range []struct {
+		name    string
+		before  fileConfig
+		after   fileConfig
+		updated string
+		want    string
+	}{
+		{
+			name:    "a retired block survived the edit",
+			after:   folded,
+			updated: "hooks:\n  - name: notify\n    events: [error]\n    command: [\"true\"]\n",
+			want:    "would have left one of the retired blocks behind",
+		},
+		{
+			name:    "the folded block fires something else",
+			after:   fileConfig{Reactions: []reactionConfig{{ID: "other", On: []string{"error"}, Run: []any{"true"}}}},
+			updated: "reactions:\n  - id: other\n    on: [error]\n    run: [\"true\"]\n",
+			want:    "does not fire what the hooks: block fired",
+		},
+		{
+			name:    "another setting moved with it",
+			before:  fileConfig{Mode: "plan"},
+			after:   fileConfig{Reactions: folded.Reactions, Mode: "auto"},
+			updated: "mode: auto\nreactions:\n  - id: notify\n    on: [error]\n    run: [\"true\"]\n",
+			want:    "changed more than hooks:, reactions: and mechanisms:",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := verifyReactionsFold(tt.before, tt.after, []byte(tt.updated), want)
+
+			if err == nil {
+				t.Fatalf("the verify passed %s; want a refusal carrying %q", tt.name, tt.want)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("refusal = %q; want it to carry %q", err, tt.want)
+			}
+		})
 	}
 }

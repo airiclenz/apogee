@@ -591,8 +591,6 @@ func everyKeyFileConfig() fileConfig {
 		RememberModel:    boolptr(true),
 		ContextWindow:    64000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
-		Hooks: []hookConfig{{Name: "notify", Events: []string{"error"},
-			Webhook: "https://hooks.example.com/apogee"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
 			Run: []any{"true"}}},
 		Tools:         &toolsConfig{Disabled: []string{"web_search"}},
@@ -2503,7 +2501,7 @@ func TestProfileEntryRecordsWhetherItSpellsTheToolsAxis(t *testing.T) {
     thinking:
       style: none
 `)
-	fc, err := parseConfigFile(filepath.Join(home, "config.yaml"), os.ReadFile, noNotify)
+	fc, err := parseConfigFile(filepath.Join(home, "config.yaml"), os.ReadFile, noNotify, true)
 	if err != nil {
 		t.Fatalf("parseConfigFile: %v", err)
 	}
@@ -2548,7 +2546,7 @@ func TestProfileEntriesCarryTheToolsAxisPresence(t *testing.T) {
     thinking:
       style: none
 `)
-	fc, err := parseConfigFile(filepath.Join(home, "config.yaml"), os.ReadFile, noNotify)
+	fc, err := parseConfigFile(filepath.Join(home, "config.yaml"), os.ReadFile, noNotify, true)
 	if err != nil {
 		t.Fatalf("parseConfigFile: %v", err)
 	}
@@ -2840,9 +2838,6 @@ server: workstation
     endpoint: http://192.168.64.1:2222
     model: qwen3-4b
     bypass: false
-    mechanisms:
-      validate: true
-      syntax: false
     context-window: 32768
 server: workstation
 sub-agents-server: grunt-box
@@ -2852,7 +2847,6 @@ sub-agents-server: grunt-box
 				{
 					Name: "grunt-box", Endpoint: "http://192.168.64.1:2222", Model: "qwen3-4b",
 					Bypass:        boolptr(false),
-					Mechanisms:    map[string]bool{"validate": true, "syntax": false},
 					ContextWindow: 32768,
 				},
 			},
@@ -2866,23 +2860,13 @@ sub-agents-server: grunt-box
   - name: box
     endpoint: http://one:1111
     bypass: true
-    mechanisms:
-      validate: true
   - name: other
     endpoint: http://two:1111
-    mechanisms:
-      syntax: true
 server: box
 `,
 			want: []ServerEntry{
-				{
-					Name: "box", Endpoint: "http://one:1111", Bypass: boolptr(true),
-					Mechanisms: map[string]bool{"validate": true},
-				},
-				{
-					Name: "other", Endpoint: "http://two:1111",
-					Mechanisms: map[string]bool{"syntax": true},
-				},
+				{Name: "box", Endpoint: "http://one:1111", Bypass: boolptr(true)},
+				{Name: "other", Endpoint: "http://two:1111"},
 			},
 		},
 		{
@@ -3373,37 +3357,13 @@ func TestApplyConfigSubAgentsChoice(t *testing.T) {
 	}
 }
 
-// The mechanisms config block parses into opts.mechanisms: a map of canonical ID → enabled. It arms
-// nothing any more — the composition root checks each ID against the retired roll and renders its
-// notice (ADR 0071, ADR 0076 D11) — but the key is still file-only, like mcp-servers, so this proves
-// the config surface lands end-to-end.
-func TestApplyConfigMechanisms(t *testing.T) {
-	t.Parallel()
-	home := testConfigHome(t, "")
-	const configYAML = `mechanisms:
-  validate: true
-  syntax: true
-  truncate_history: false
-`
-	writeConfigHome(t, home, configYAML)
-	opts := Options{ConfigDir: home}
-	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("ApplyConfig: %v", err)
-	}
-
-	want := map[string]bool{"validate": true, "syntax": true, "truncate_history": false}
-	if !reflect.DeepEqual(opts.Mechanisms, want) {
-		t.Errorf("opts.mechanisms = %+v; want %+v", opts.Mechanisms, want)
-	}
-}
-
-// The `mechanisms:` key is the one key with NO registry row, and it still parses. The /settings row
-// that described it went with the catalogue it described (ADR 0076 decision 1), while the key itself
-// keeps loading so an existing config file is not refused and the Drivers can still render the
-// retired roll's notices from it (ADR 0076 decision 11). Both halves are asserted here, because
-// deleting the row and the registry-free accessor together is exactly the mistake that would turn a
-// shipped config into a startup error.
-func TestMechanismsKeyParsesWithoutARegistryRow(t *testing.T) {
+// The `mechanisms:` key is the one key with NO registry row, and the migration now takes it out of
+// the file it is read from: the catalogue it named is gone (ADR 0071), the /settings row went with
+// it (ADR 0076 decision 1), and a config still carrying the block is STRIPPED at startup with a
+// note naming the Floor key that governs each promoted row now (ADR 0076 A6, configmigrate.go).
+// This holds the half that survives — no row, no refusal — while configmigrate_test.go holds the
+// strip itself.
+func TestMechanismsKeyIsStrippedAndHasNoRegistryRow(t *testing.T) {
 	t.Parallel()
 	if row, ok := LookupKey("mechanisms"); ok {
 		t.Errorf("registry describes %q (%s) — the /settings row went with the catalogue (ADR 0076)",
@@ -3413,10 +3373,10 @@ func TestMechanismsKeyParsesWithoutARegistryRow(t *testing.T) {
 	writeConfigHome(t, home, "mechanisms:\n  grammar: true\n")
 	opts := Options{ConfigDir: home}
 	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("ApplyConfig: %v — the key must keep parsing with no row behind it", err)
+		t.Fatalf("ApplyConfig: %v — a saved configuration naming a retired row must never be refused", err)
 	}
-	if want := map[string]bool{"grammar": true}; !reflect.DeepEqual(opts.Mechanisms, want) {
-		t.Errorf("opts.Mechanisms = %+v; want %+v", opts.Mechanisms, want)
+	if len(opts.Mechanisms) != 0 {
+		t.Errorf("opts.Mechanisms = %+v; want none — the key is stripped out of the file", opts.Mechanisms)
 	}
 }
 

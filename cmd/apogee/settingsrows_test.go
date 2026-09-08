@@ -389,7 +389,6 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"unconfined-hosts":        "1 host",
 		"web-search-endpoint":     "off",
 		"mcp-servers":             noneSettingValue,
-		"hooks":                   noneSettingValue, // unset in the fixture: the feature is dormant by default
 		"tools.disabled":          "[view_diff]",
 		"tools.enabled":           "[]", // unset: nothing is added back, which is the whole default menu
 		"url-safety.allow-hosts":  "[docs.example.com]",
@@ -542,7 +541,7 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	// that predicate: a derived list would only restate the invariant asserted over all rows above,
 	// while this one fails when a new read-only key reaches the pane without anyone naming it here.
 	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
-		"system-prompt-layers", "model-profiles", "sub-agents-server", "hooks", "tools.enabled",
+		"system-prompt-layers", "model-profiles", "sub-agents-server", "tools.enabled",
 		"reactions", "validated-sets.alias"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
