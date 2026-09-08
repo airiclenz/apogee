@@ -20,8 +20,8 @@ import (
 // configsplice.go's contract (ADR 0035) stated as a sequence rather than as a habit six writers
 // were each trusted to keep.
 //
-// What a writer keeps for itself is a triple and nothing else: LOCATE — which key, entry or
-// catalogue id it addresses, and what the file already says about it; SPLICE — the text it cuts in;
+// What a writer keeps for itself is a triple and nothing else: LOCATE — which key or entry it
+// addresses, and what the file already says about it; SPLICE — the text it cuts in;
 // VERIFY — the shape the result must have, in that writer's own wording. The ordering of those
 // steps, and the decision whether anything is written at all, belong here, so a writer cannot get
 // the order wrong and a change to the contract is one edit rather than six.

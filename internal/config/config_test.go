@@ -3371,10 +3371,10 @@ func TestApplyConfigSubAgentsChoice(t *testing.T) {
 	}
 }
 
-// The mechanisms config block parses into opts.mechanisms (Phase 4): a map of canonical ID →
-// enabled, whose enabled IDs runRoot hands to Config.EnableMechanisms for the engine to build
-// catalogue rows from. It is file-only, like mcp-servers, so this proves the config surface lands
-// end-to-end.
+// The mechanisms config block parses into opts.mechanisms: a map of canonical ID → enabled. It arms
+// nothing any more — the composition root checks each ID against the retired roll and renders its
+// notice (ADR 0071, ADR 0076 D11) — but the key is still file-only, like mcp-servers, so this proves
+// the config surface lands end-to-end.
 func TestApplyConfigMechanisms(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
