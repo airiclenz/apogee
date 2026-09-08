@@ -470,3 +470,15 @@ func TestBuildEnabledMechanismsNeverFloorsAHandedInRegistry(t *testing.T) {
 		t.Errorf("child armed %v, want nothing: an empty list adds nothing to what it inherited", got)
 	}
 }
+
+// armedIDs is the canonical IDs a built Agent actually holds at one hook point, sorted — the direct
+// read of what a Config's enable list constructed, independent of whether anything fired. It lives
+// beside the two buildEnabledMechanisms tests that are its only callers, and dies with them.
+func armedIDs(a *Agent, at domain.HookPoint) []domain.MechanismID {
+	var out []domain.MechanismID
+	for _, m := range a.registry.Ordered(at) {
+		out = append(out, m.Descriptor.ID)
+	}
+	slices.Sort(out)
+	return out
+}

@@ -164,33 +164,37 @@ func TestTurnRequestCarriesTheOutputCap(t *testing.T) {
 	}
 }
 
-// cappingHook is a pre-request hook that states its own reply ceiling, standing in for any
-// Mechanism that would.
-type cappingHook struct{ tokens int }
-
-func (h cappingHook) PreRequest(_ context.Context, req *domain.Request) error {
-	req.SetSampling(domain.SamplingParams{MaxTokens: &h.tokens})
-	return nil
+// cappingReaction is a pre-request Reaction that states its own reply ceiling, standing in for
+// any armed Reaction that would.
+func cappingReaction(tokens int) domain.Reaction {
+	return domain.Reaction{
+		ID:     "capping",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeView,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(_ context.Context, req *domain.Request) (domain.Outcome, error) {
+			req.SetSampling(domain.SamplingParams{MaxTokens: &tokens})
+			return domain.Outcome{}, nil
+		}),
+	}
 }
 
-// TestPreRequestHookBeatsTheOutputCap pins the ordering the loop's stamp depends on: the engine's
-// derived cap is the LOOP's value, set before the hooks run, so a hook that sets MaxTokens still
-// wins — SamplingParams's standing contract, true of this field for the first time (ADR 0046).
-func TestPreRequestHookBeatsTheOutputCap(t *testing.T) {
+// TestPreRequestReactionBeatsTheOutputCap pins the ordering the loop's stamp depends on: the
+// engine's derived cap is the LOOP's value, set before the Reactions run, so a Reaction that sets
+// MaxTokens still wins — SamplingParams's standing contract, true of this field for the first
+// time (ADR 0046).
+func TestPreRequestReactionBeatsTheOutputCap(t *testing.T) {
 	t.Parallel()
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 98304
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, cappingHook{tokens: 77}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{cappingReaction(77)}
 	resp := &capturingResponder{reply: "ok"}
 	driveOneStep(t, cfg, resp)
 
 	got := resp.got.Sampling.MaxTokens
 	if got == nil || *got != 77 {
-		t.Fatalf("MaxTokens = %v, want the hook's 77 rather than the loop's derived cap", got)
+		t.Fatalf("MaxTokens = %v, want the Reaction's 77 rather than the loop's derived cap", got)
 	}
 }
 

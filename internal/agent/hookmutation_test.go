@@ -1,7 +1,7 @@
 package agent
 
-// P1.5 acceptance: a pre-request hook's mutations provably reach the bytes the
-// provider receives — closing the P0.6 gap where hooks fired but their Request
+// P1.5 acceptance: a pre-request Reaction's mutations provably reach the bytes the
+// provider receives — closing the P0.6 gap where reactions fired but their Request
 // mutations were dropped. These tests drive a real Step through the unexported
 // newAgent seam (the provider stays internal) and assert on the captured
 // provider.Request.
@@ -17,7 +17,7 @@ import (
 )
 
 // capturingResponder records the request it is asked to send, then replies with a
-// canned message, so a test can assert what a pre-request hook shaped onto the wire.
+// canned message, so a test can assert what a pre-request Reaction shaped onto the wire.
 type capturingResponder struct {
 	got   provider.Request
 	reply string
@@ -30,14 +30,20 @@ func (r *capturingResponder) Stream(_ context.Context, req provider.Request) ite
 
 const guidanceMarker = "[apogee:guidance]"
 
-// shapingHook injects a system nudge and a role-safe context message — the two
+// shapingReaction injects a system nudge and a role-safe context message — the two
 // operations the P1.5 acceptance names (AppendToSystem / InjectContext).
-type shapingHook struct{}
-
-func (shapingHook) PreRequest(_ context.Context, req *domain.Request) error {
-	req.AppendToSystem(guidanceMarker, guidanceMarker+" stay focused")
-	req.InjectContext("remember the task")
-	return nil
+func shapingReaction() domain.Reaction {
+	return domain.Reaction{
+		ID:     "shaping",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeView,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(_ context.Context, req *domain.Request) (domain.Outcome, error) {
+			req.AppendToSystem(guidanceMarker, guidanceMarker+" stay focused")
+			req.InjectContext("remember the task")
+			return domain.Outcome{}, nil
+		}),
+	}
 }
 
 func driveOneStep(t *testing.T, cfg domain.Config, resp provider.Responder) {
@@ -54,17 +60,14 @@ func driveOneStep(t *testing.T, cfg domain.Config, resp provider.Responder) {
 	}
 }
 
-func TestPreRequestHookMutationsReachProvider(t *testing.T) {
+func TestPreRequestReactionMutationsReachProvider(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, shapingHook{}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{shapingReaction()}
 	resp := &capturingResponder{reply: "ok"}
 	driveOneStep(t, cfg, resp)
 
-	// The hook ran against the real outgoing request: the provider must now see a
+	// The Reaction ran against the real outgoing request: the provider must now see a
 	// system message carrying the nudge and an injected user message placed before the
 	// user's actual input — neither of which exists in the bare conversation.
 	msgs := resp.got.Messages

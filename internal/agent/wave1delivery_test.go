@@ -3,9 +3,9 @@ package agent
 // Loop-level delivery tests for the retry-in-place seam (R1, phase-4-review-fixes item 2), and the
 // shared fixtures the delivery suites drive it through. The Wave-1 Mechanisms that used to ride the
 // seam are gone — the tool-call validator became the tool-call-repair Floor guard and syntax and
-// autofix retired outright in v0.20.0 (ADR 0071) — so the cascade below is registered over
-// synthetic response-repair rows carrying the retired rows' shape: a response the repair guard
-// rejects must short-circuit it. The delivery cases whose subjects became Floor guards live in
+// autofix retired outright in v0.20.0 (ADR 0071) — so the cascade below is armed over synthetic
+// response-repair Reactions carrying the retired rows' shape: a response the repair guard rejects
+// must short-circuit them. The delivery cases whose subjects became Floor guards live in
 // floorguards_test.go beside the guards themselves.
 
 import (
@@ -22,41 +22,35 @@ import (
 // duplicated verbatim here so the loop-level test proves the exact wording rides the wire.
 const wave1Nudge = "Your response was empty. Review the original task — there are likely remaining steps or files you haven't addressed yet. Use a tool call to continue with the next unfinished part. Do not summarize or stop until every part of the task is complete."
 
-// labRepairHook is a synthetic response-repair Mechanism carrying the shape the retired
-// content-repair rows had: strikes-3 self-regulation, off under Bypass, and an ActionRetry whenever
-// the response carries a tool call — which is exactly when syntax and autofix acted. It stands in
-// for them wherever a test needs a catalogued row that the dispatch path can withdraw or
-// short-circuit; what those tests pin is the loop's treatment of such a row, never the retired
-// row's own decision logic.
-type labRepairHook struct{ id domain.MechanismID }
-
-func (h labRepairHook) row() domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{
-		Descriptor: domain.MechanismDescriptor{
-			ID:          h.id,
-			Capability:  domain.CapResponseRepair,
-			Suppression: domain.SuppressStrikesThree,
-		},
-		Hook: h,
+// labRepairReaction is a synthetic response-repair Reaction carrying the shape the retired
+// content-repair rows had: shape-view class (so Bypass switches it off) and a Retry whenever the
+// response carries a tool call — which is exactly when syntax and autofix acted. It stands in for
+// them wherever a test needs an armed reaction the dispatch path can withdraw or short-circuit;
+// what those tests pin is the loop's treatment of such a reaction, never the retired row's own
+// decision logic.
+func labRepairReaction(id string) domain.Reaction {
+	return domain.Reaction{
+		ID:     id,
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeView,
+		On:     []domain.Moment{domain.MomentPostResponse},
+		Handler: domain.PostResponseFunc(func(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
+			if len(resp.ToolCalls()) == 0 {
+				return domain.Outcome{}, nil
+			}
+			return domain.Outcome{Retry: true, Inject: "lab repair: produce a valid tool call"}, nil
+		}),
 	}
 }
 
-func (h labRepairHook) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
-	if len(resp.ToolCalls()) == 0 {
-		return domain.PostResponseDecision{}, nil
-	}
-	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: "lab repair: produce a valid tool call"}, nil
-}
-
-// wave1Registry builds a MechanismRegistry carrying one synthetic response-repair row per id, so
-// the tests exercise registry-backed dispatch rather than descriptor-only fakes.
-func wave1Registry(t *testing.T, ids ...domain.MechanismID) *domain.MechanismRegistry {
-	t.Helper()
-	reg := domain.NewMechanismRegistry()
+// wave1Reactions arms one synthetic response-repair Reaction per id, so the tests exercise the
+// armed leg of the real dispatcher rather than descriptor-only fakes.
+func wave1Reactions(ids ...string) []domain.Reaction {
+	out := make([]domain.Reaction, 0, len(ids))
 	for _, id := range ids {
-		mustAddMech(t, reg, labRepairHook{id: id}.row())
+		out = append(out, labRepairReaction(id))
 	}
-	return reg
+	return out
 }
 
 // schemaTool is fakeTool with an injectable JSON schema, so validate has required parameters to
@@ -144,10 +138,10 @@ func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 		schema:   `{"type":"object","required":["path","content","mode"]}`,
 	}
 	cfg := configWithTools(sink, writeTool)
-	cfg.Mechanisms = wave1Registry(t, "lab_content_repair", "lab_formatter_repair")
+	cfg.Reactions = wave1Reactions("lab_content_repair", "lab_formatter_repair")
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		// Missing the required "mode" argument, which the repair guard rejects; the call itself is
-		// what would also trip both registered rows.
+		// what would also trip both armed reactions.
 		toolCallScript("c1", "write_file", `{"path":"main.go","content":"package main\nfunc main() {"}`),
 		contentScript("stopping here"),
 	}}

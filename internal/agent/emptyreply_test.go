@@ -111,7 +111,7 @@ func TestEmptyReplyFailsTheTurn(t *testing.T) {
 func TestEmptyReplyGuardYieldsToRecoveredRetry(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
-	cfg := retryHookConfig(t, sink, scriptedRetryHook{injects: []string{"say something"}, calls: &calls})
+	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, "say something"))
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		emptyScript(),
 		contentScript("recovered answer"),

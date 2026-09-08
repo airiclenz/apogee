@@ -660,26 +660,23 @@ func TestStep_FileRefsAreSurfacedNotSilentlyDropped(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Post-response hooks: intercept + ActionDefer feed-forward
+// Post-response Reactions: intercept + Defer feed-forward
 // ---------------------------------------------------------------------------
 
-// interceptHook rewrites the assistant text in place (ActionIntercept).
-type interceptHook struct{ replacement string }
-
-func (h interceptHook) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
-	resp.SetText(h.replacement)
-	return domain.PostResponseDecision{Action: domain.ActionIntercept}, nil
+// interceptReaction rewrites the assistant text in place — the intercept the moved Revision books.
+func interceptReaction(replacement string) domain.Reaction {
+	return postResponseReaction("intercept_once", func(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
+		resp.SetText(replacement)
+		return domain.Outcome{}, nil
+	})
 }
 
-// TestStep_PostResponseIntercept proves an ActionIntercept hook's SetText reaches the
+// TestStep_PostResponseIntercept proves an intercepting Reaction's SetText reaches the
 // emitted MessageEvent and the committed conversation.
 func TestStep_PostResponseIntercept(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, interceptHook{replacement: "intercepted"}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{interceptReaction("intercepted")}
 
 	a, err := newAgent(cfg, echoResponder{reply: "original"})
 	if err != nil {
@@ -697,16 +694,16 @@ func TestStep_PostResponseIntercept(t *testing.T) {
 	}
 }
 
-// retryOnceHook asks the loop to re-call the Upstream exactly once (ActionRetry), then lets
-// the response stand — the post-response retry path.
-type retryOnceHook struct{ done *bool }
-
-func (h retryOnceHook) PostResponse(_ context.Context, _ *domain.Response) (domain.PostResponseDecision, error) {
-	if *h.done {
-		return domain.PostResponseDecision{Action: domain.ActionIntercept}, nil
-	}
-	*h.done = true
-	return domain.PostResponseDecision{Action: domain.ActionRetry}, nil
+// retryOnceReaction asks the loop to re-call the Upstream exactly once, then lets the response
+// stand — the post-response retry path.
+func retryOnceReaction(done *bool) domain.Reaction {
+	return postResponseReaction("retry_once", func(context.Context, *domain.Response) (domain.Outcome, error) {
+		if *done {
+			return domain.Outcome{Edited: true}, nil
+		}
+		*done = true
+		return domain.Outcome{Retry: true}, nil
+	})
 }
 
 // TestStep_RetryEmitsStreamReset proves an ActionRetry re-streams the Turn and emits a
@@ -716,10 +713,7 @@ func TestStep_RetryEmitsStreamReset(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	done := false
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, retryOnceHook{done: &done}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{retryOnceReaction(&done)}
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		contentScript("draft"),
 		contentScript("final"),
@@ -744,23 +738,20 @@ func TestStep_RetryEmitsStreamReset(t *testing.T) {
 	}
 }
 
-// deferOnceHook defers a correction on the first response only, then no-ops — the loop half
-// of the ActionDefer feed-forward path.
-type deferOnceHook struct {
-	done   *bool
-	inject string
-}
-
-func (h deferOnceHook) PostResponse(_ context.Context, _ *domain.Response) (domain.PostResponseDecision, error) {
-	if *h.done {
-		return domain.PostResponseDecision{Action: domain.ActionIntercept}, nil
-	}
-	*h.done = true
-	return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: h.inject}, nil
+// deferOnceReaction defers a correction on the first response only, then no-ops — the loop half
+// of the Defer feed-forward path.
+func deferOnceReaction(done *bool, inject string) domain.Reaction {
+	return postResponseReaction("defer_once", func(context.Context, *domain.Response) (domain.Outcome, error) {
+		if *done {
+			return domain.Outcome{Edited: true}, nil
+		}
+		*done = true
+		return domain.Outcome{Defer: inject}, nil
+	})
 }
 
 // TestStep_DeferredCorrectionExpiresAtExchangeEnd proves the Exchange-scoped lifetime of a Deferred
-// Response Action (item 7 / F6): a post-response ActionDefer made on a no-tool FINAL answer — the
+// Response Action (item 7 / F6): a post-response Defer made on a no-tool FINAL answer — the
 // Turn that ends the Exchange — is cleared at the Exchange boundary rather than carried into the next
 // Exchange. So neither the snapshot taken after the Exchange nor the resumed next-Exchange request
 // carries the correction. This reverses the pre-F6 cross-Exchange delivery (a stale directive leaking
@@ -770,10 +761,7 @@ func TestStep_DeferredCorrectionExpiresAtExchangeEnd(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	done := false
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, deferOnceHook{done: &done, inject: "remember the constraint"}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{deferOnceReaction(&done, "remember the constraint")}
 
 	a, err := newAgent(cfg, echoResponder{reply: "first answer"})
 	if err != nil {
@@ -800,7 +788,7 @@ func TestStep_DeferredCorrectionExpiresAtExchangeEnd(t *testing.T) {
 	// the expired correction — a directive never crosses an Exchange boundary.
 	sink2 := &recordingSink{}
 	cfg2 := baseConfig(sink2)
-	cfg2.Mechanisms = cfg.Mechanisms
+	cfg2.Reactions = cfg.Reactions
 	capt := &capturingResponder{reply: "second answer"}
 	b, err := resumeAgent(cfg2, snap, capt)
 	if err != nil {

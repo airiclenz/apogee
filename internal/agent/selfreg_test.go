@@ -782,3 +782,14 @@ func TestSelfRegulationResetsOnResume(t *testing.T) {
 		t.Errorf("resumed Mechanism dispatched %d times, want 1 (suppression state must reset on Resume)", firedB)
 	}
 }
+
+// mustAddMech registers one catalogue row. The registry no longer asks a Mechanism to describe
+// itself, so each fixture names the row it would be catalogued under through its own row() helper.
+// It lives here because self-regulation is the last subject that still needs a MechanismRegistry;
+// it dies with this file when the lab layer goes.
+func mustAddMech(t *testing.T, r *domain.MechanismRegistry, m domain.RegisteredMechanism) {
+	t.Helper()
+	if err := r.Add(m); err != nil {
+		t.Fatalf("Add(%s): %v", m.Descriptor.ID, err)
+	}
+}

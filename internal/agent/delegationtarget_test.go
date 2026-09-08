@@ -42,7 +42,6 @@ func TestSetDelegationTargetStoresAndClears(t *testing.T) {
 		ParallelAgents: 3,
 		Profile:        domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited}},
 		Bypass:         &bypass,
-		Mechanisms:     domain.NewMechanismRegistry,
 	}
 	a.SetDelegationTarget(want)
 
@@ -64,10 +63,6 @@ func TestSetDelegationTargetStoresAndClears(t *testing.T) {
 	if got.Bypass == nil || !*got.Bypass {
 		t.Errorf("latched Bypass = %v, want a non-nil true", got.Bypass)
 	}
-	if got.Mechanisms == nil || got.Mechanisms() == nil {
-		t.Error("latched Mechanisms factory is nil or builds no registry, want one that builds a fresh registry per child")
-	}
-
 	a.SetDelegationTarget(nil)
 
 	if got := a.delegationTarget(); got != nil {

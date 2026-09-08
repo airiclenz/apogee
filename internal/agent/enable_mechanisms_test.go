@@ -1,46 +1,55 @@
 package agent
 
-// Construction-path coverage for Config.EnableMechanisms (ADR 0015 §1–2, plan item 2): the engine
-// builds each named catalogued Mechanism at New/Resume, merges it into Config.Mechanisms (a fresh
-// registry when nil), and fails construction on an unknown ID, an unmet Requires stack, or a
-// duplicate — all observed through the loop's own effects (ReactionFiredEvent, construction error),
-// never the Agent's internals. The catalogued Mechanisms are built through the production catalogue,
-// the same seam the config surface drives, so these prove the real build-and-merge path end to end.
+// Construction-path coverage for Config.Reactions (ADR 0076 stage 1, recast off the retired
+// enable-list arm): the engine validates every armed Reaction at New and at Resume,
+// fails construction on an ill-formed or shadowed entry, and arms nothing at all when the list is
+// nil or empty — observed through the loop's own effects (a construction error, a firing) rather
+// than the Agent's internals. Config.Reactions is the seam every Driver and the bench drive, so
+// these prove the real arm-and-validate path end to end.
 
 import (
+	"context"
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// TestEnableMechanisms_UnknownIDFailsConstruction: a bogus ID fails New with a matchable
-// ErrUnknownMechanism (item 1's sentinel, wrapped by mechanisms.Build).
-func TestEnableMechanisms_UnknownIDFailsConstruction(t *testing.T) {
+// TestReactions_IllFormedEntryFailsConstruction: an entry that cannot fire — here one whose On
+// list names a Moment its handler does not serve — fails New with a matchable ErrInvalidReaction
+// rather than being armed and silently doing nothing.
+func TestReactions_IllFormedEntryFailsConstruction(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"not_a_real_mechanism"}
+	cfg.Reactions = []domain.Reaction{{
+		ID:     "wrong_seam",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPostResponse},
+		Handler: domain.PreRequestFunc(func(context.Context, *domain.Request) (domain.Outcome, error) {
+			return domain.Outcome{}, nil
+		}),
+	}}
 
 	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
-	if !errors.Is(err, domain.ErrUnknownMechanism) {
-		t.Errorf("newAgent err = %v, want it to wrap domain.ErrUnknownMechanism", err)
+	if !errors.Is(err, domain.ErrInvalidReaction) {
+		t.Errorf("newAgent err = %v, want it to wrap domain.ErrInvalidReaction", err)
 	}
 }
 
-// TestEnableMechanisms_MergeRejectionCarriesOnePrefix: a build-path rejection is RETURNED to the
+// TestReactions_ShadowedIDRejectionCarriesOnePrefix: an arm-path rejection is RETURNED to the
 // host, and cmd/apogee/main.go prints a returned error verbatim — so it has to read as ONE
-// "apogee: "-prefixed line naming the ID that failed. The shipped catalogue is empty since v0.20.0
-// (ADR 0071), so the reachable rejection is the unknown-ID one: mechanisms.Build's error already
-// arrives prefixed (house convention for a returned error), and the enable path must not wrap it in
-// a second prefix.
-func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
+// "apogee: "-prefixed line naming the ID that failed. The rejection driven here is the one a bench
+// hits first: an entry reusing an engine builtin's ID, which would make every attribution keyed on
+// that ID ambiguous.
+func TestReactions_ShadowedIDRejectionCarriesOnePrefix(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = []domain.MechanismID{"not_a_real_mechanism"}
+	fired := false
+	cfg.Reactions = []domain.Reaction{firingReaction("tool-loop-breaker", &fired)}
 
 	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if err == nil {
-		t.Fatal("newAgent accepted an uncatalogued EnableMechanisms entry; want a refusal")
+		t.Fatal("newAgent accepted a Reaction shadowing a builtin's ID; want a refusal")
 	}
 
 	msg := err.Error()
@@ -50,23 +59,15 @@ func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
 	if got := strings.Count(msg, "apogee: "); got != 1 {
 		t.Errorf("newAgent err = %q; want exactly one %q prefix, got %d", msg, "apogee: ", got)
 	}
-	if !strings.Contains(msg, `"not_a_real_mechanism"`) {
-		t.Errorf("newAgent err = %q; want it to name the mechanism that failed", msg)
-	}
-	// And the tail names the valid keys — "(none)" over the empty shipped catalogue rather than a
-	// dangling "known: " that would read as a truncated message. That is the whole of what a host can
-	// tell the user about which ids ARE arm-able in this build.
-	if !strings.Contains(msg, "(none)") {
-		t.Errorf("newAgent err = %q; want the known-ids tail to render %q for the empty catalogue", msg, "(none)")
+	if !strings.Contains(msg, `"tool-loop-breaker"`) {
+		t.Errorf("newAgent err = %q; want it to name the reaction that failed", msg)
 	}
 }
 
-// TestEnableMechanisms_SurvivesAlongsideArmedReactions: an EnableMechanisms build stands BESIDE
-// the Reactions the host armed, never in place of them (locked decision 2, carried onto the
-// Reaction core). With the shipped catalogue empty since v0.20.0 (ADR 0071) there is no
-// catalogued row left to build alongside them, so what stands here is the half that still can be
-// observed: a Config.Reactions entry survives construction and fires through the real loop.
-func TestEnableMechanisms_SurvivesAlongsideArmedReactions(t *testing.T) {
+// TestReactions_SurviveConstructionAndFire: what the host arms on Config.Reactions stands — the
+// engine's own builtins are added BESIDE it, never in place of it (locked decision 2, carried onto
+// the Reaction core) — and the armed entry fires through the real loop.
+func TestReactions_SurviveConstructionAndFire(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
 	fired := false
@@ -83,55 +84,43 @@ func TestEnableMechanisms_SurvivesAlongsideArmedReactions(t *testing.T) {
 	}
 }
 
-// TestEnableMechanisms_NilAndEmptyBuildNothing: a nil and an empty list both arm NOTHING. Every
-// Capability is default-off (D1) with no exception left — the two recoveries that used to be floored
-// in are Floor guards now (ADR 0071) — so an embedder that hands New a Config with no
-// `EnableMechanisms` gets an unarmed catalogue, and its recovery guarantees from Config.Floor.
+// TestReactions_NilAndEmptyArmNothing: a nil and an empty list both arm NOTHING beside the
+// engine's builtins. Every user-facing Reaction is default-off (ADR 0076 D1), so an embedder that
+// hands New a Config with no Reactions gets the Floor guards and nothing else, and its recovery
+// guarantees from Config.Floor.
 //
-// It is read off the registry rather than off fired events: what the list BUILDS is the claim, and a
-// Mechanism that never triggers on a well-behaved reply would make an event-based assertion say
-// nothing at all.
-func TestEnableMechanisms_NilAndEmptyBuildNothing(t *testing.T) {
-	cases := map[string][]domain.MechanismID{
+// It is read off what construction armed rather than off fired events: what the list ARMS is the
+// claim, and a Reaction that never triggers on a well-behaved reply would make an event-based
+// assertion say nothing at all.
+func TestReactions_NilAndEmptyArmNothing(t *testing.T) {
+	cases := map[string][]domain.Reaction{
 		"nil":   nil,
 		"empty": {},
 	}
-	for name, ids := range cases {
+	for name, reactions := range cases {
 		t.Run(name, func(t *testing.T) {
 			sink := &recordingSink{}
 			cfg := baseConfig(sink)
-			cfg.EnableMechanisms = ids
+			cfg.Reactions = reactions
 
 			a, err := newAgent(cfg, echoResponder{reply: "hi"})
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
 
-			if got := armedIDs(a, domain.HookPostResponse); len(got) != 0 {
-				t.Errorf("armed post-response Mechanisms = %v, want nothing armed", got)
+			if got := len(a.armed); got != 0 {
+				t.Errorf("armed Reactions = %d, want nothing armed beside the builtins", got)
 			}
 		})
 	}
 }
 
-// armedIDs is the canonical IDs a built Agent actually holds at one hook point, sorted — the direct
-// read of what a Config's EnableMechanisms list constructed, independent of whether anything fired.
-func armedIDs(a *Agent, at domain.HookPoint) []domain.MechanismID {
-	var out []domain.MechanismID
-	for _, m := range a.registry.Ordered(at) {
-		out = append(out, m.Descriptor.ID)
-	}
-	slices.Sort(out)
-	return out
-}
-
-// TestEnableMechanisms_ResumeArmsIdentically: Resume builds the ID list the same way New does —
-// mechanisms are Config, not session state — so a resumed Agent walks the same build path and
-// refuses the same list. With the shipped catalogue empty since v0.20.0 (ADR 0071) there is no row
-// left to arm and observe firing, so the pin is the refusal: a Config whose EnableMechanisms names
-// an uncatalogued ID fails resumeAgent exactly as it fails newAgent, which it could only do by
-// rebuilding from Config rather than restoring from the snapshot.
-func TestEnableMechanisms_ResumeArmsIdentically(t *testing.T) {
+// TestReactions_ResumeArmsIdentically: Resume arms the list the same way New does — Reactions are
+// Config, not session state — so a resumed Agent walks the same arm path and refuses the same
+// list. The pin is the refusal: a Config whose Reactions shadow a builtin's ID fails resumeAgent
+// exactly as it fails newAgent, which it could only do by re-arming from Config rather than
+// restoring from the snapshot.
+func TestReactions_ResumeArmsIdentically(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
 
@@ -146,9 +135,10 @@ func TestEnableMechanisms_ResumeArmsIdentically(t *testing.T) {
 	}
 
 	cfg2 := configWithTools(&recordingSink{}, fakeTool{name: "write_file", result: "ok"})
-	cfg2.EnableMechanisms = []domain.MechanismID{"not_a_real_mechanism"}
-	if _, err := resumeAgent(cfg2, snap, echoResponder{reply: "unreached"}); !errors.Is(err, domain.ErrUnknownMechanism) {
-		t.Errorf("resumeAgent err = %v, want ErrUnknownMechanism; mechanisms must be rebuilt from Config, not session state", err)
+	shadowFired := false
+	cfg2.Reactions = []domain.Reaction{firingReaction("tool-loop-breaker", &shadowFired)}
+	if _, err := resumeAgent(cfg2, snap, echoResponder{reply: "unreached"}); !errors.Is(err, domain.ErrInvalidReaction) {
+		t.Errorf("resumeAgent err = %v, want ErrInvalidReaction; Reactions must be re-armed from Config, not session state", err)
 	}
 }
 
@@ -175,7 +165,7 @@ func TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent(t *testing.T) {
 // TestBuildMechanisms_RefusesWhatConstructionRefuses: the error is the construction error, raised
 // where the host can still name the config that asked for it — an unknown ID wrapping
 // ErrUnknownMechanism, exactly as New refuses the same list. BuildMechanisms builds into a FRESH
-// registry and never reads cfg.Mechanisms, so the refusal it is checked on has to be one the
+// registry and never reads the host's own, so the refusal it is checked on has to be one the
 // shipped catalogue can still trip: the incompatibility gate no longer qualifies, its last two
 // declarers having been promoted to Floor guards and retired outright in v0.20.0 (ADR 0071). The
 // gate itself is pinned over synthetic rows in internal/domain.

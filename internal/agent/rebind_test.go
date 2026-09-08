@@ -121,48 +121,38 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 	}
 }
 
-// TestRebindRebuildsMechanismsForNewModel: a Rebind rebuilds the registry for the new model, and a
-// set that fails a gate leaves the OLD registry and cfg fully intact — the validate-then-commit
-// guarantee.
-//
-// The shipped catalogue has been empty since v0.20.0 (ADR 0071), so there is no ID left to arm and
-// read back: what proves the rebuild is that the registry INSTANCE is replaced, and what proves the
-// refusal is an unknown ID — the one rejection a fresh build over an empty catalogue can still trip.
-func TestRebindRebuildsMechanismsForNewModel(t *testing.T) {
+// TestRebindKeepsTheReactionsItWasBuiltWith: a Rebind is a MODEL binding, not a re-arm. The
+// Reactions the Agent was constructed with survive it — a live model switch may not silently drop
+// what a host armed — and they keep firing on the requests the new binding sends.
+func TestRebindKeepsTheReactionsItWasBuiltWith(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	cfg.EnableMechanisms = nil
+	fired := false
+	cfg.Reactions = []domain.Reaction{firingReaction("rebind_probe", &fired)}
 
-	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	seeded := a.registry
+	armed := len(a.armed)
+	if armed != 1 {
+		t.Fatalf("armed Reactions after construction = %d, want 1", armed)
+	}
 
 	if err := a.Rebind(RebindSpec{Model: "second-model"}); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
-	if a.registry == seeded {
-		t.Error("Rebind kept the seeded registry; the new model's set was never built")
+	if got := len(a.armed); got != armed {
+		t.Errorf("armed Reactions after a Rebind = %d, want the %d it was built with", got, armed)
 	}
 
-	// A set the build refuses must fail BEFORE anything is committed. (Rebind builds into a FRESH
-	// registry, so the refusal has to be one the shipped catalogue can still trip: an unknown ID.
-	// Neither the incompatibility gate nor the requirements gate has a catalogued declarer left —
-	// their rows became Floor guards or retired outright in v0.20.0, ADR 0071 — and both gates are
-	// pinned over synthetic rows in internal/domain.)
-	rebuilt := a.registry
-	err = a.Rebind(RebindSpec{
-		Model:            "third-model",
-		EnableMechanisms: []domain.MechanismID{"no_such_mechanism"},
-	})
-	if !errors.Is(err, domain.ErrUnknownMechanism) {
-		t.Fatalf("Rebind with a refused set err = %v, want it to wrap ErrUnknownMechanism", err)
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
 	}
-	if a.registry != rebuilt {
-		t.Error("a failed Rebind swapped the registry")
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
 	}
-	if a.cfg.Model != "second-model" {
-		t.Errorf("model = %q after a failed Rebind, want %q", a.cfg.Model, "second-model")
+	if !fired {
+		t.Error("the armed Reaction did not fire after the Rebind; the new binding dropped it")
 	}
 }
 
@@ -257,22 +247,6 @@ func TestRebindRefusesUnbuildableSpecs(t *testing.T) {
 		}
 		if err := a.Rebind(RebindSpec{Model: ""}); !errors.Is(err, errRebindMissingModel) {
 			t.Errorf("Rebind with no model err = %v, want errRebindMissingModel", err)
-		}
-		if a.cfg.Model != "test-model" {
-			t.Errorf("model = %q after the refusal, want it unchanged", a.cfg.Model)
-		}
-	})
-
-	t.Run("host-supplied registry", func(t *testing.T) {
-		cfg := baseConfig(&recordingSink{})
-		cfg.Mechanisms = domain.NewMechanismRegistry()
-
-		a, err := newAgent(cfg, echoResponder{reply: "unreached"})
-		if err != nil {
-			t.Fatalf("newAgent: %v", err)
-		}
-		if err := a.Rebind(RebindSpec{Model: "new-model"}); !errors.Is(err, errRebindPrebuiltMechanisms) {
-			t.Errorf("Rebind over a pre-built registry err = %v, want errRebindPrebuiltMechanisms", err)
 		}
 		if a.cfg.Model != "test-model" {
 			t.Errorf("model = %q after the refusal, want it unchanged", a.cfg.Model)

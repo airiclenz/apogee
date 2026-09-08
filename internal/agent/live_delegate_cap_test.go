@@ -73,35 +73,44 @@ func (l *liveEventLog) snapshot() []domain.Event {
 	return append([]domain.Event(nil), l.events...)
 }
 
-// budgetProbe is an experimental pre-request hook that records the Budget every request was
-// built under, and the size of the tool menu it carried, keyed by the Depth of the agent that
-// built it. It is the only seam a test has onto a CHILD's Budget and menu: the child Agent is
-// constructed inside runSubAgent and closed there, so nothing outside the delegation ever holds
-// it, while its requests all pass through here. Only buildRequest's requests reach a pre-request
-// hook — the summarizer's run none (compact.go) — so what it records is one entry per model call.
+// budgetProbe is a pre-request Reaction that records the Budget every request was built under,
+// and the size of the tool menu it carried, keyed by the Depth of the agent that built it. It is
+// the only seam a test has onto a CHILD's Budget and menu: the child Agent is constructed inside
+// runSubAgent and closed there, so nothing outside the delegation ever holds it, while its
+// requests all pass through here. Only buildRequest's requests reach a pre-request Reaction — the
+// summarizer's run none (compact.go) — so what it records is one entry per model call.
 //
-// It carries no live state to isolate between a parent and its children, so it deliberately
-// does NOT implement domain.SubAgentScoped — the child inherits this very instance
-// (MechanismRegistry.ForSubAgent), which is what lets one probe see both depths.
+// It leaves TopLevelOnly at its zero value, so the child inherits it, which is what lets one probe
+// see both depths — and it guards its own state under a mutex, because a Reaction's handler is
+// shared across concurrent siblings.
 type budgetProbe struct {
 	mu    sync.Mutex
 	seen  map[int][]domain.Budget
 	menus map[int][]int
 }
 
-func (p *budgetProbe) PreRequest(_ context.Context, req *domain.Request) error {
-	view := req.View()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.seen == nil {
-		p.seen = make(map[int][]domain.Budget)
+// reaction arms the probe as a pre-request Reaction on Config.Reactions.
+func (p *budgetProbe) reaction() domain.Reaction {
+	return domain.Reaction{
+		ID:     "budget_probe",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(_ context.Context, req *domain.Request) (domain.Outcome, error) {
+			view := req.View()
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			if p.seen == nil {
+				p.seen = make(map[int][]domain.Budget)
+			}
+			if p.menus == nil {
+				p.menus = make(map[int][]int)
+			}
+			p.seen[view.Depth()] = append(p.seen[view.Depth()], view.Budget())
+			p.menus[view.Depth()] = append(p.menus[view.Depth()], len(view.Tools()))
+			return domain.Outcome{}, nil
+		}),
 	}
-	if p.menus == nil {
-		p.menus = make(map[int][]int)
-	}
-	p.seen[view.Depth()] = append(p.seen[view.Depth()], view.Budget())
-	p.menus[view.Depth()] = append(p.menus[view.Depth()], len(view.Tools()))
-	return nil
 }
 
 // at returns the Budgets recorded for agents at the given nesting depth, in request order.
@@ -202,10 +211,6 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 
 	log := &liveEventLog{}
 	probe := &budgetProbe{}
-	mechanisms := domain.NewMechanismRegistry()
-	if err := mechanisms.AddExperimental(domain.HookPreRequest, probe); err != nil {
-		t.Fatalf("register the budget probe: %v", err)
-	}
 
 	// A read-only tool set in Plan mode: the child can discover and read, and can do nothing that
 	// would gate on an Approver this test does not supply.
@@ -229,7 +234,7 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 		WorkspaceDir: root,
 		Events:       log,
 		Tools:        registry,
-		Mechanisms:   mechanisms,
+		Reactions:    []domain.Reaction{probe.reaction()},
 		Delegation:   domain.DelegationConfig{MaxSteps: liveDelegateStepCap},
 		Context: domain.ContextConfig{
 			MaxContextTokens: info.ContextWindow,

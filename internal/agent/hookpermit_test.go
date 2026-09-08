@@ -1,9 +1,10 @@
 package agent
 
-// The hook-time subprocess permit (confinement-execution-contract §10). A hook runs outside the
-// per-call Resolution, so the ladder's answer to "may this fire spawn a process?" reaches it as a
-// domain.SubprocessPermit on the context. These tests drive a real Turn and read the permit back
-// through a post-response hook, which is the only hook point the engine installs one for.
+// The reaction-time subprocess permit (confinement-execution-contract §10). A Reaction runs
+// outside the per-call Resolution, so the ladder's answer to "may this fire spawn a process?"
+// reaches it as a domain.SubprocessPermit on the context. These tests drive a real Turn and read
+// the permit back through a post-response Reaction, which is the only Moment the engine installs
+// one for.
 
 import (
 	"context"
@@ -12,18 +13,27 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// permitProbe is a post-response hook that records the SubprocessPermit its fire ctx carried —
-// the observable end of hookExecutionCtx. A pointer receiver so the capture survives the fire.
+// permitProbe records the SubprocessPermit its fire ctx carried — the observable end of
+// hookExecutionCtx. A pointer so the capture survives the fire.
 type permitProbe struct {
 	fired   bool
 	granted bool
 	permit  domain.SubprocessPermit
 }
 
-func (p *permitProbe) PostResponse(ctx context.Context, _ *domain.Response) (domain.PostResponseDecision, error) {
-	p.fired = true
-	p.permit, p.granted = domain.SubprocessPermitFromContext(ctx)
-	return domain.PostResponseDecision{}, nil
+// reaction arms the probe as a post-response Reaction on Config.Reactions.
+func (p *permitProbe) reaction() domain.Reaction {
+	return domain.Reaction{
+		ID:     "permit_probe",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPostResponse},
+		Handler: domain.PostResponseFunc(func(ctx context.Context, _ *domain.Response) (domain.Outcome, error) {
+			p.fired = true
+			p.permit, p.granted = domain.SubprocessPermitFromContext(ctx)
+			return domain.Outcome{}, nil
+		}),
+	}
 }
 
 // permitConfig builds a Config in mode with the given fake Confiner and confine-to-workspace flag,
@@ -46,10 +56,7 @@ func runTurnWithPermitProbe(t *testing.T, cfg domain.Config, tighten func() doma
 	t.Helper()
 
 	probe := &permitProbe{}
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, probe); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{probe.reaction()}
 
 	a, err := newAgent(cfg, echoResponder{reply: "reply"})
 	if err != nil {

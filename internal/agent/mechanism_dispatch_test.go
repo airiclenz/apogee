@@ -152,16 +152,6 @@ func reactionFires(events []domain.Event) []domain.ReactionFiredEvent {
 	return out
 }
 
-// mustAddMech registers one catalogue row. The registry no longer asks a Mechanism to describe
-// itself, so each fixture below names the row it would be catalogued under through its own row()
-// helper, and a real Mechanism arrives as the row mechanisms.Build already returned.
-func mustAddMech(t *testing.T, r *domain.MechanismRegistry, m domain.RegisteredMechanism) {
-	t.Helper()
-	if err := r.Add(m); err != nil {
-		t.Fatalf("Add(%s): %v", m.Descriptor.ID, err)
-	}
-}
-
 // TestArmedReactionFiresUnderItsOwnID: a Reaction armed on Config.Reactions is invoked through
 // the real loop and its firing is booked under the ID it was armed with, never a synthetic one.
 func TestArmedReactionFiresUnderItsOwnID(t *testing.T) {

@@ -254,18 +254,30 @@ func TestAutoCompactSkippedFoldDoesNotSaturate(t *testing.T) {
 	}
 }
 
-// dropMiddleRewriter is a synthetic lab HistoryRewriter: it keeps the protected prefix and the last
-// keepLastTurns assistant-anchored exchanges, drops everything between them, and inserts note at the
-// cut. It stands in for whatever drop-the-middle rewrite a Driver or bench registers at the
-// history-rewrite hook — the shipped catalogue carries none since v0.20.0 (ADR 0071) — and it is
-// only the SHAPE the repair under test reacts to, not a Mechanism whose own behaviour is asserted
-// here.
+// dropMiddleRewriter is a synthetic history-rewrite double: it keeps the protected prefix and the
+// last keepLastTurns assistant-anchored exchanges, drops everything between them, and inserts note
+// at the cut. It stands in for whatever drop-the-middle rewrite a Driver or bench arms at the
+// history-rewrite Moment, and it is only the SHAPE the repair under test reacts to, not a Reaction
+// whose own behaviour is asserted here.
 type dropMiddleRewriter struct {
 	keepLastTurns int
 	note          string
 }
 
-func (r dropMiddleRewriter) RewriteHistory(_ context.Context, conv *domain.Conversation) error {
+// reaction arms the rewriter as a history-rewrite Reaction on Config.Reactions.
+func (r dropMiddleRewriter) reaction() domain.Reaction {
+	return domain.Reaction{
+		ID:     "drop-middle-rewriter",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeView,
+		On:     []domain.Moment{domain.MomentHistoryRewrite},
+		Handler: domain.HistoryRewriteFunc(func(ctx context.Context, conv *domain.Conversation) (domain.Outcome, error) {
+			return domain.Outcome{}, r.rewriteHistory(ctx, conv)
+		}),
+	}
+}
+
+func (r dropMiddleRewriter) rewriteHistory(_ context.Context, conv *domain.Conversation) error {
 	prefixEnd := conv.PrefixEnd()
 	boundaries := conv.AssistantBoundaries() // ascending assistant indices
 	kept, tailStart := 0, conv.Len()
@@ -290,18 +302,10 @@ func (r dropMiddleRewriter) RewriteHistory(_ context.Context, conv *domain.Conve
 // the gap note and AbortExchange rolls the conversation back to exactly prefix + gap note.
 func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 	sink := &recordingSink{}
-	reg := domain.NewMechanismRegistry()
-	mustAddMech(t, reg, domain.RegisteredMechanism{
-		Descriptor: domain.MechanismDescriptor{
-			ID:          "lab_history_rewrite",
-			Capability:  domain.CapProactiveNudge,
-			Suppression: domain.SuppressStrikesThree,
-		},
-		Hook: dropMiddleRewriter{
-			keepLastTurns: 4,
-			note:          "[Earlier conversation history was omitted to keep the context window within budget.]",
-		},
-	})
+	rewriter := dropMiddleRewriter{
+		keepLastTurns: 4,
+		note:          "[Earlier conversation history was omitted to keep the context window within budget.]",
+	}
 
 	toolReg := domain.NewToolRegistry()
 	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: "ok"}); err != nil {
@@ -309,7 +313,7 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 	}
 
 	cfg := baseConfig(sink)
-	cfg.Mechanisms = reg
+	cfg.Reactions = []domain.Reaction{rewriter.reaction()}
 	cfg.Tools = toolReg
 	// One main model call this Turn (the tool call keeps the Exchange open); compaction is off, so no
 	// summarizer call — a single script suffices.

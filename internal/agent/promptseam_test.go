@@ -139,11 +139,8 @@ func TestPromptSeam_AppendsToSeededSystemMessage(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := menuConfig(t, sink)
 	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
-	cfg.Mechanisms = domain.NewMechanismRegistry()
 	const seed = "You are a helpful assistant. [seed]"
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, seedingHook{text: seed}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{seedingReaction(seed)}
 
 	responder := &recordingResponder{reply: "All done."}
 	a := newProfileAgent(t, cfg, responder)
@@ -260,13 +257,19 @@ func TestPromptSeam_InjectedTextNeverEntersHistoryOrSnapshot(t *testing.T) {
 	}
 }
 
-// seedingHook is a pre-request hook standing in for an embedder that seeds a system message onto
-// the wire projection before the emit seam runs.
-type seedingHook struct{ text string }
-
-func (h seedingHook) PreRequest(_ context.Context, req *domain.Request) error {
-	req.AppendToSystem("[seed]", h.text)
-	return nil
+// seedingReaction is a pre-request Reaction standing in for an embedder that seeds a system
+// message onto the wire projection before the emit seam runs.
+func seedingReaction(text string) domain.Reaction {
+	return domain.Reaction{
+		ID:     "seeding",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeView,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(_ context.Context, req *domain.Request) (domain.Outcome, error) {
+			req.AppendToSystem("[seed]", text)
+			return domain.Outcome{}, nil
+		}),
+	}
 }
 
 // wireToDomain reduces provider messages to the role/content the emit-seam assertions read, so the
@@ -361,13 +364,10 @@ func TestPromptSeam_ConfiguredPromptMergesDirectivesAndToolBlock(t *testing.T) {
 	cfg.WorkspaceDir = promptWorkspace
 	cfg.SystemPrompt = promptTemplate
 	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	// seedingHook stands in for a Mechanism's directive: it appends through the same
-	// Request.AppendToSystem seam the catalogued nudges use.
+	// seedingReaction stands in for an armed Reaction's directive: it appends through the same
+	// Request.AppendToSystem seam every advising reaction uses.
 	const directive = "Always cite the files you read. [seed]"
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, seedingHook{text: directive}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{seedingReaction(directive)}
 
 	responder := &recordingResponder{reply: "All done."}
 	a := newProfileAgent(t, cfg, responder)
@@ -690,11 +690,8 @@ func TestContextSeam_MergesDirectivesAndToolBlock(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	cfg.SystemPrompt = promptTemplate
 	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
-	cfg.Mechanisms = domain.NewMechanismRegistry()
 	const directive = "Always cite the files you read. [seed]"
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, seedingHook{text: directive}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{seedingReaction(directive)}
 
 	responder := &recordingResponder{reply: "All done."}
 	a := newProfileAgent(t, cfg, responder)

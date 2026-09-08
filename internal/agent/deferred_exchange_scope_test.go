@@ -31,57 +31,52 @@ var deferSubtasks = []string{
 }
 
 const (
-	// deferFanOutCue is the synthetic hook's whole gate: the Exchange it opens a fan-out in is the
-	// one whose opening ask carries this cue. A real Mechanism measures a signal here; what F6 needs
-	// is only that the gate be Exchange-scoped, so a following Exchange's plain ask arms nothing.
+	// deferFanOutCue is the synthetic Reaction's whole gate: the Exchange it opens a fan-out in is
+	// the one whose opening ask carries this cue. A real Reaction measures a signal here; what F6
+	// needs is only that the gate be Exchange-scoped, so a following Exchange's plain ask arms
+	// nothing.
 	deferFanOutCue = "fan out the work"
 	// deferOpeningAsk is the ask that opens the fan-out under test.
 	deferOpeningAsk = "Take the login rewrite and fan out the work across sub-agents."
-	// deferDirectiveMarker is the synthetic hook's fixed remaining-items vocabulary — the marker the
-	// proofs below match on in a request, in the snapshot state, and across an Exchange boundary.
+	// deferDirectiveMarker is the synthetic Reaction's fixed remaining-items vocabulary — the marker
+	// the proofs below match on in a request, in the snapshot state, and across an Exchange
+	// boundary.
 	deferDirectiveMarker = "Remaining subtasks"
-	// deferringMechID is the synthetic row's catalogue ID. It is registered directly on a
-	// MechanismRegistry (never through the shipped catalogue), which is what keeps these proofs
-	// about the LOOP's Deferred-Action handling rather than about any one Mechanism.
-	deferringMechID domain.MechanismID = "deferring_fanout"
+	// deferringReactionID is the synthetic Reaction's ID. It is armed directly on Config.Reactions,
+	// which is what keeps these proofs about the LOOP's Deferred-Action handling rather than about
+	// any one Reaction.
+	deferringReactionID = "deferring_fanout"
 )
 
-// deferringMech is the synthetic stand-in for any Mechanism that opens a serialized sub_agent
+// deferringReaction is the synthetic stand-in for any Reaction that opens a serialized sub_agent
 // fan-out and feeds the remainder forward as a Deferred Response Action: on the cued Exchange's
 // first tool-less reply it synthesizes the opening delegation, and after every reply it defers a
 // directive naming how many subtasks are still outstanding. That is the exact shape F6 is about —
-// a correction queued mid-fan-out, drained by the next request — with nothing of a catalogue row
-// in it.
-type deferringMech struct{}
-
-// row is the catalogue row a test registers deferringMech under.
-func (m deferringMech) row() domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{
-		Descriptor: domain.MechanismDescriptor{ID: deferringMechID, Capability: domain.CapProactiveNudge},
-		Hook:       m,
-	}
+// a correction queued mid-fan-out, drained by the next request.
+func deferringReaction() domain.Reaction {
+	return postResponseReaction(deferringReactionID, deferringFanOut)
 }
 
-func (deferringMech) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
+func deferringFanOut(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
 	view := resp.View()
 	if view.Depth() != 0 {
-		return domain.PostResponseDecision{}, nil // the parent's fan-out only, never a child's own Turn
+		return domain.Outcome{}, nil // the parent's fan-out only, never a child's own Turn
 	}
 	conv := view.Conversation()
 	if !deferFanOutAsked(conv) {
-		return domain.PostResponseDecision{}, nil // this Exchange never asked for a fan-out
+		return domain.Outcome{}, nil // this Exchange never asked for a fan-out
 	}
 
 	calls := resp.ToolCalls()
 	dispatched := deferDispatchedThisExchange(conv) + deferSubAgentCalls(calls)
 	if dispatched >= len(deferSubtasks) {
-		return domain.PostResponseDecision{}, nil // the list is exhausted — nothing left to feed forward
+		return domain.Outcome{}, nil // the list is exhausted — nothing left to feed forward
 	}
 	if len(calls) == 0 {
 		// The opening reply: synthesize the first delegation so the fan-out is under way.
 		args, err := json.Marshal(tools.SubAgentArgs{Task: deferSubtasks[dispatched]})
 		if err != nil {
-			return domain.PostResponseDecision{}, err
+			return domain.Outcome{}, err
 		}
 		resp.AppendToolCall(domain.ToolCall{
 			ID:        fmt.Sprintf("defer-%d", dispatched),
@@ -92,11 +87,10 @@ func (deferringMech) PostResponse(_ context.Context, resp *domain.Response) (dom
 	}
 	remaining := len(deferSubtasks) - dispatched
 	if remaining == 0 {
-		return domain.PostResponseDecision{}, nil
+		return domain.Outcome{}, nil
 	}
-	return domain.PostResponseDecision{
-		Action: domain.ActionDefer,
-		Inject: fmt.Sprintf("%s (%d left)", deferDirectiveMarker, remaining),
+	return domain.Outcome{
+		Defer: fmt.Sprintf("%s (%d left)", deferDirectiveMarker, remaining),
 	}, nil
 }
 
@@ -134,14 +128,12 @@ func deferSubAgentCalls(calls []domain.ToolCall) int {
 	return n
 }
 
-// deferConfig wires the sub_agent recursion point and the synthetic deferring row onto a fresh
-// Config — the whole arm these proofs need.
+// deferConfig wires the sub_agent recursion point and the synthetic deferring Reaction onto a
+// fresh Config — the whole arm these proofs need.
 func deferConfig(t *testing.T, sink domain.EventSink) domain.Config {
 	t.Helper()
 	cfg := subAgentConfig(sink, domain.ModeAskBefore) // registers sub_agent so the fan-out has a target
-	reg := domain.NewMechanismRegistry()
-	mustAddMech(t, reg, deferringMech{}.row())
-	cfg.Mechanisms = reg
+	cfg.Reactions = []domain.Reaction{deferringReaction()}
 	return cfg
 }
 

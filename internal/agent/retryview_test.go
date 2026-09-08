@@ -31,34 +31,39 @@ func wireUserCountContaining(msgs []provider.Message, substr string) int {
 	return n
 }
 
-// repeatReadProbe is a synthetic post-response hook with exactly the sensitivity the retired
+// repeatReadProbe is a synthetic post-response Reaction with exactly the sensitivity the retired
 // read_repeat row had: when EVERY tool call in the response re-reads a file the conversation it can
-// see already read, it retries in place with a "you already read these" correction. It stands in for
-// any history-scanning lab hook a Driver or bench registers at this seam — the shipped catalogue
-// carries none since v0.20.0 (ADR 0071) — and it is the committedLen-bounded View() that is under
-// test here, not the hook's own wording.
-type repeatReadProbe struct{}
-
-func (repeatReadProbe) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
-	calls := resp.ToolCalls()
-	if len(calls) == 0 {
-		return domain.PostResponseDecision{}, nil
-	}
-	alreadyRead := make(map[string]bool)
-	resp.View().Conversation().Range(func(_ int, m domain.Message) bool {
-		for _, tc := range m.ToolCalls {
-			if tc.Tool == "read_file" {
-				alreadyRead[readPathOf(tc)] = true
+// see already read, it retries in place with a "you already read these" correction. It stands in
+// for any history-scanning Reaction a Driver or bench arms at this seam, and it is the
+// committedLen-bounded View() that is under test here, not the reaction's own wording.
+func repeatReadProbe(id string) domain.Reaction {
+	return domain.Reaction{
+		ID:     id,
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeView,
+		On:     []domain.Moment{domain.MomentPostResponse},
+		Handler: domain.PostResponseFunc(func(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
+			calls := resp.ToolCalls()
+			if len(calls) == 0 {
+				return domain.Outcome{}, nil
 			}
-		}
-		return true
-	})
-	for _, tc := range calls {
-		if tc.Tool != "read_file" || !alreadyRead[readPathOf(tc)] {
-			return domain.PostResponseDecision{}, nil
-		}
+			alreadyRead := make(map[string]bool)
+			resp.View().Conversation().Range(func(_ int, m domain.Message) bool {
+				for _, tc := range m.ToolCalls {
+					if tc.Tool == "read_file" {
+						alreadyRead[readPathOf(tc)] = true
+					}
+				}
+				return true
+			})
+			for _, tc := range calls {
+				if tc.Tool != "read_file" || !alreadyRead[readPathOf(tc)] {
+					return domain.Outcome{}, nil
+				}
+			}
+			return domain.Outcome{Retry: true, Inject: "You already read these files."}, nil
+		}),
 	}
-	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: "You already read these files."}, nil
 }
 
 // readPathOf reads a read_file call's path argument, or "" when it carries none.
@@ -83,15 +88,7 @@ func TestRetryView_ReadRepeatIgnoresSupersededRead(t *testing.T) {
 		schema:   `{"type":"object","properties":{"path":{"type":"string"},"max_lines":{"type":"integer"}},"required":["path","max_lines"]}`,
 	}
 	cfg := configWithTools(sink, readFile)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	mustAddMech(t, cfg.Mechanisms, domain.RegisteredMechanism{
-		Descriptor: domain.MechanismDescriptor{
-			ID:          "lab_repeat_read",
-			Capability:  domain.CapResponseRepair,
-			Suppression: domain.SuppressStrikesThree,
-		},
-		Hook: repeatReadProbe{},
-	})
+	cfg.Reactions = []domain.Reaction{repeatReadProbe("lab_repeat_read")}
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		toolCallScript("c1", "read_file", `{"path":"a.go"}`),                 // missing max_lines — the repair guard retries; reads a.go
 		toolCallScript("c2", "read_file", `{"path":"a.go","max_lines":100}`), // corrected — must dispatch, not re-fire the probe
@@ -195,23 +192,29 @@ type viewCaptureHook struct {
 	views *[]domain.ConversationView
 }
 
-func (h viewCaptureHook) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
-	*h.views = append(*h.views, resp.View().Conversation())
-	return domain.PostResponseDecision{}, nil
+// reaction arms the capture as a post-response Reaction on Config.Reactions.
+func (h viewCaptureHook) reaction() domain.Reaction {
+	return domain.Reaction{
+		ID:     "view_capture",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPostResponse},
+		Handler: domain.PostResponseFunc(func(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
+			*h.views = append(*h.views, resp.View().Conversation())
+			return domain.Outcome{}, nil
+		}),
+	}
 }
 
-// emptyRecoveryWithCapture builds a config carrying an experimental view-capturing hook, so a test
-// can drive a real empty-retry cycle — the empty-response recovery Floor guard is on for every model
-// (ADR 0071), no `mechanisms:` block needed — and observe the committedLen-bounded View() on the
-// retry pass. The guard short-circuits the hook cascade on the empty draft, exactly as the Mechanism
-// it was promoted from did, so the capture sees the RETRY pass alone.
+// emptyRecoveryWithCapture builds a config carrying a view-capturing Reaction, so a test can drive
+// a real empty-retry cycle — the empty-response recovery Floor guard is on for every model (ADR
+// 0071) — and observe the committedLen-bounded View() on the retry pass. The guard's Retry stops
+// the builtin leg and takes the Turn away from the armed leg below, so the capture sees the RETRY
+// pass alone.
 func emptyRecoveryWithCapture(t *testing.T, sink domain.EventSink, views *[]domain.ConversationView, tools ...domain.Tool) domain.Config {
 	t.Helper()
 	cfg := configWithTools(sink, tools...)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, viewCaptureHook{views: views}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{viewCaptureHook{views: views}.reaction()}
 	return cfg
 }
 

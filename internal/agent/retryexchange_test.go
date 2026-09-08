@@ -40,27 +40,36 @@ func (r *captureAllResponder) Stream(_ context.Context, req provider.Request) it
 	}
 }
 
-// scriptedRetryHook returns ActionRetry with injects[n] on its n-th invocation, then lets
+// scriptedRetryReaction returns a Retry Outcome with injects[n] on its n-th invocation, then lets
 // the response stand — distinct per-attempt texts prove corrections accumulate.
-type scriptedRetryHook struct {
-	injects []string
-	calls   *int
+func scriptedRetryReaction(calls *int, injects ...string) domain.Reaction {
+	return postResponseReaction("scripted_retry", func(context.Context, *domain.Response) (domain.Outcome, error) {
+		i := *calls
+		*calls++
+		if i >= len(injects) {
+			return domain.Outcome{}, nil
+		}
+		return domain.Outcome{Retry: true, Inject: injects[i]}, nil
+	})
 }
 
-func (h scriptedRetryHook) PostResponse(context.Context, *domain.Response) (domain.PostResponseDecision, error) {
-	i := *h.calls
-	*h.calls++
-	if i >= len(h.injects) {
-		return domain.PostResponseDecision{}, nil
+// alwaysRetryReaction retries with the same correction on every response — the cap driver.
+func alwaysRetryReaction(inject string) domain.Reaction {
+	return postResponseReaction("always_retry", func(context.Context, *domain.Response) (domain.Outcome, error) {
+		return domain.Outcome{Retry: true, Inject: inject}, nil
+	})
+}
+
+// postResponseReaction wraps a post-response handler as an engine-origin shape-view Reaction —
+// the shape every armed post-response double in this package takes.
+func postResponseReaction(id string, fn domain.PostResponseFunc) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginEngine,
+		Class:   domain.ClassShapeView,
+		On:      []domain.Moment{domain.MomentPostResponse},
+		Handler: fn,
 	}
-	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: h.injects[i]}, nil
-}
-
-// alwaysRetryHook retries with the same correction on every response — the cap driver.
-type alwaysRetryHook struct{ inject string }
-
-func (h alwaysRetryHook) PostResponse(context.Context, *domain.Response) (domain.PostResponseDecision, error) {
-	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: h.inject}, nil
 }
 
 // draftWithToolCall is a stream that emits narration content plus one native tool call —
@@ -77,14 +86,11 @@ func draftWithToolCall(text, id, name, args string) []provider.Delta {
 	}
 }
 
-// retryHookConfig wires one experimental post-response hook into a fresh registry.
-func retryHookConfig(t *testing.T, sink domain.EventSink, hook any) domain.Config {
+// retryReactionConfig arms one post-response Reaction on a base Config.
+func retryReactionConfig(t *testing.T, sink domain.EventSink, r domain.Reaction) domain.Config {
 	t.Helper()
 	cfg := baseConfig(sink)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, hook); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{r}
 	return cfg
 }
 
@@ -132,7 +138,7 @@ func wireRoleCount(msgs []provider.Message, role string) int {
 func TestRetryExchange_CarriesSupersededAssistantAndCorrection(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
-	cfg := retryHookConfig(t, sink, scriptedRetryHook{injects: []string{"use the tool correctly"}, calls: &calls})
+	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, "use the tool correctly"))
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		draftWithToolCall("narration first", "c1", "lookup", `{"q":"x"}`),
 		contentScript("fixed"),
@@ -172,7 +178,7 @@ func TestRetryExchange_CarriesSupersededAssistantAndCorrection(t *testing.T) {
 func TestRetryExchange_EmptySupersededAppendsOnlyCorrection(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
-	cfg := retryHookConfig(t, sink, scriptedRetryHook{injects: []string{"say something"}, calls: &calls})
+	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, "say something"))
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		{{Kind: provider.DeltaDone, FinishReason: "stop"}}, // the wholly empty draft
 		contentScript("recovered"),
@@ -197,7 +203,7 @@ func TestRetryExchange_EmptySupersededAppendsOnlyCorrection(t *testing.T) {
 func TestRetryExchange_EmptyInjectIsBareRestream(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
-	cfg := retryHookConfig(t, sink, scriptedRetryHook{injects: []string{""}, calls: &calls})
+	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, ""))
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		contentScript("draft"),
 		contentScript("final"),
@@ -220,7 +226,7 @@ func TestRetryExchange_EmptyInjectIsBareRestream(t *testing.T) {
 func TestRetryExchange_CorrectionsAccumulateAcrossRetries(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
-	cfg := retryHookConfig(t, sink, scriptedRetryHook{injects: []string{"fix one", "fix two"}, calls: &calls})
+	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, "fix one", "fix two"))
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		contentScript("draft one"),
 		contentScript("draft two"),
@@ -252,7 +258,7 @@ func TestRetryExchange_CorrectionsAccumulateAcrossRetries(t *testing.T) {
 // response passes through to the committed history.
 func TestRetryExchange_CapPassesLastResponseThrough(t *testing.T) {
 	sink := &recordingSink{}
-	cfg := retryHookConfig(t, sink, alwaysRetryHook{inject: "try again"})
+	cfg := retryReactionConfig(t, sink, alwaysRetryReaction("try again"))
 	responder := &captureAllResponder{scripts: [][]provider.Delta{
 		contentScript("r1"),
 		contentScript("r2"),
