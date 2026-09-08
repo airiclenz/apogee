@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // TestEventsIsTheWholeVocabularyInOrder pins the five events and their documented order — the
@@ -377,5 +379,65 @@ func TestResolveWorkspaceLeavesANonLeadingTildeAlone(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "backup~") {
 		t.Errorf("ResolveWorkspace(%q) = %q, want the trailing ~ preserved", odd, got)
+	}
+}
+
+// TestEventValuesArePinnedLiterals pins each Event constant to its exact spelling. The values
+// are a stable contract — they are what a user writes under `events:`, what reaches a fired
+// command as APOGEE_HOOK_EVENT, and now also the notice Moments of the Reaction core — so
+// re-homing the type behind an alias must not move a single byte.
+func TestEventValuesArePinnedLiterals(t *testing.T) {
+	t.Parallel()
+
+	pins := []struct {
+		got  Event
+		want string
+	}{
+		{ExchangeFinished, "exchange-finished"},
+		{TurnFinished, "turn-finished"},
+		{FileChanged, "file-changed"},
+		{ApprovalWaiting, "approval-waiting"},
+		{Error, "error"},
+	}
+	for _, pin := range pins {
+		if string(pin.got) != pin.want {
+			t.Errorf("event constant = %q, want %q", string(pin.got), pin.want)
+		}
+	}
+}
+
+// TestEventsAreTheNoticeMoments proves the two vocabularies are one set in one order, not two
+// that happen to agree: Event is an alias for domain.Moment, so a notice added on either side
+// without the other would show up here.
+func TestEventsAreTheNoticeMoments(t *testing.T) {
+	t.Parallel()
+
+	got, want := Events(), domain.Notices()
+
+	if len(got) != len(want) {
+		t.Fatalf("Events() = %v, want the notice Moments %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Events()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestParseEventErrorTextIsByteIdentical holds the refusal message to the byte. A misspelt event
+// name is the likeliest mistake in a `hooks:` block, so the sentence that lists the vocabulary is
+// user-facing text: an alias for the type must leave it untouched.
+func TestParseEventErrorTextIsByteIdentical(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseEvent("turn-started")
+
+	if err == nil {
+		t.Fatal("ParseEvent(\"turn-started\") returned no error, want one")
+	}
+	const want = `unknown hook event "turn-started" — the events are ` +
+		`exchange-finished, turn-finished, file-changed, approval-waiting, error`
+	if err.Error() != want {
+		t.Errorf("ParseEvent error =\n%q\nwant\n%q", err.Error(), want)
 	}
 }

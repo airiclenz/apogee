@@ -5,39 +5,44 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// Event names one of the moments a Hook may fire on. Every one is POST-HOC: it reports something
-// that already happened, so a Hook reading it can change nothing about it. The set is additive by
-// design — a moment not named here is not a Hook event yet — and deliberately excludes the
-// per-token, tool-call, sub-agent-phase, session-save, prune and usage moments (ADR 0073 §4).
+// Event names one of the moments a Hook may fire on — the five NOTICE Moments of the Reaction
+// core, which this name is an alias for (ADR 0076): the Hook vocabulary and the notice half of
+// the Moment vocabulary are one set, not two that happen to agree. Every one is POST-HOC: it
+// reports something that already happened, so a Hook reading it can change nothing about it. The
+// set is additive by design — a moment not named here is not a Hook event yet — and deliberately
+// excludes the per-token, tool-call, sub-agent-phase, session-save, prune and usage moments
+// (ADR 0073 §4).
 //
 // The string is the spelling a user writes in the `events:` list of a `hooks:` entry, so it is
 // also the value that reaches a fired command as APOGEE_HOOK_EVENT and the payload's "event"
 // field. It is a stable contract: renaming one breaks every configuration in the wild.
-type Event string
+type Event = domain.Moment
 
 const (
 	// ExchangeFinished fires when a Depth-0 Turn closed its Exchange — the model produced a final
 	// no-tool response, or the loop abandoned or capped the Exchange. The payload's Faulted and
 	// StepCapped say which, since neither is derivable from the status alone.
-	ExchangeFinished Event = "exchange-finished"
+	ExchangeFinished = domain.MomentExchangeFinished
 	// TurnFinished fires at every Depth-0 Turn boundary, whatever the Turn's status. A Turn that
 	// closed its Exchange produces BOTH this and ExchangeFinished — the boundary is one fact and
 	// the closure another, and a Hook may want either without the other.
-	TurnFinished Event = "turn-finished"
+	TurnFinished = domain.MomentTurnFinished
 	// FileChanged fires when a workspace-scoped write tool SUCCEEDED, at any depth. The payload
 	// carries the tool and the absolute path the write landed on; a delete, copy or move reports
 	// its destination, because that is the path whose content changed.
-	FileChanged Event = "file-changed"
+	FileChanged = domain.MomentFileChanged
 	// ApprovalWaiting fires when an Approval was RAISED — before its decision, while the human is
 	// still being waited on — so a Hook can ring a bell for a prompt nobody is watching. The
 	// verdict is deliberately not an event: a Hook that learned the answer could not act on it.
-	ApprovalWaiting Event = "approval-waiting"
+	ApprovalWaiting = domain.MomentApprovalWaiting
 	// Error fires on a localised, recovered engine fault at any depth. It is a Hook event and not
 	// an error value; the failures of the Hook machinery ITSELF never reach it, because a failing
 	// Hook that fired an `error` Hook would loop (ADR 0073 §8).
-	Error Event = "error"
+	Error = domain.MomentError
 )
 
 // allEvents is the vocabulary in the order Events reports it and a config template lists it.

@@ -204,7 +204,15 @@ go build ./... && go test -race -count=1 ./internal/agent/ && go test -race -cou
 ```
 **Commit:** `refactor(agent): every seam fires the Reaction dispatcher; guards and registry share one ladder`
 
-## 7. hooks: `Event` is a notice Moment
+## 7. hooks: `Event` is a notice Moment — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the two pin tests the item asks for were written and run against the PRE-edit code first, so their literals record today's values rather than the alias's: `TestEventValuesArePinnedLiterals` (the five spellings) and `TestParseEventErrorTextIsByteIdentical` (the whole `unknown hook event "turn-started" — the events are …` sentence).
+
+NOTES (2026-09-08): one test beyond the item's two — `TestEventsAreTheNoticeMoments` asserts `Events()` equals `domain.Notices()` element-for-element. The alias itself is proved by compilation; this pins the two vocabularies to the same membership AND the same order, which is the claim the item actually makes and which a notice added on one side alone would break.
+
+NOTES (2026-09-08): `doc.go` gained the "notice Moments (ADR 0076)" wording in TWO places, not one — the file-map line for `hooks.go` (where "the five Event constants" is named) and the package-doc sentence that read "fires at no Hook point", which the alias would otherwise leave reading as though the two vocabularies were unrelated; it now reads "fires at no seam: its events ARE the five notice Moments of the Reaction core (ADR 0076)". No other prose was touched — the Mechanism sweep is item 22's.
+
+NOTES (2026-09-08): `match.go`, `runner.go` and `internal/config/hooks.go` compiled unchanged as the item predicted; `apogee.go:714`'s `type HookEvent = hooks.Event` needed no edit and now resolves to `domain.Moment` transitively.
 
 **What:** Depends on item 3. `internal/hooks/hooks.go:22-40`: `type Event = domain.Moment`; the five consts become the `domain.Moment*` notice consts (values identical); `allEvents` order, `Events()`, `ParseEvent`, `eventList()` wording and every error string unchanged. `match.go` and `runner.go` compile unchanged; `doc.go` prose says "notice Moments (ADR 0076)". `internal/config/hooks.go` API unchanged.
 
