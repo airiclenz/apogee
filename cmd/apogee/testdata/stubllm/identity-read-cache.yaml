@@ -1,0 +1,38 @@
+# The upstream the Reaction identity arm's `read-cache` row talks to: a model that reads a file it
+# has already read, unchanged, and gets the second read capped to a header-only slice.
+#
+# The second call spells the SAME path differently. That is deliberate on both sides of the guard
+# it has to reach: floor.CacheRead compares the NORMALISED path (internal/floor/readerror.go drops a
+# leading "./"), so "./a.txt" is still the file already in the conversation and the cap applies;
+# floor.ToolLoopBreak compares the raw `name:arguments` BYTES of the previous tool-calling Turn
+# (internal/floor/loopbreak.go), so a byte-identical repeat would be broken as a loop at
+# post-response and the run would never reach the pre-tool-exec seam this row exists to record.
+#
+# The re-read also carries no start_line / end_line / max_lines: a call that already asks for a
+# slice is a targeted read rather than a redundant re-dump, and capReadArguments leaves it alone.
+#
+# The two calls carry EXPLICIT, distinct ids. floor.CacheRead skips the pending call's own id when it
+# looks back for the earlier read (priorSuccessfulReadUnchanged), and stubllm numbers a turn's calls
+# from one, so two turns of one call each would both be `call_1` and the earlier read would be
+# skipped as if it were the pending one — the guard would find no prior read and stand down.
+model: identity-model
+turns:
+    # Turn 1 — the read the user asked for. Nothing has been read yet, so the cache stands down.
+    - when:
+        last_message: ^Read a.txt
+      tool_calls:
+        - id: read-first
+          name: read_file
+          arguments: '{"path":"a.txt"}'
+    # Turn 2 — the same file again, spelled "./a.txt". This is the call `read-cache` exists for.
+    - when:
+        tool_result: read_file
+      tool_calls:
+        - id: read-again
+          name: read_file
+          arguments: '{"path":"./a.txt"}'
+    # Turn 3 — the answer the two reads bought.
+    - when:
+        tool_result: read_file
+      text: The file says hello.
+      chunk_runes: 5

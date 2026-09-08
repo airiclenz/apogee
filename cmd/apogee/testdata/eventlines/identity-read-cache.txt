@@ -1,0 +1,1 @@
+turn=1 depth=0 reaction=read-cache moment=pre-tool-exec action=intercept detail=

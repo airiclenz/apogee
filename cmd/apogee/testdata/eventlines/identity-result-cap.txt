@@ -1,0 +1,1 @@
+turn=2 depth=0 reaction=tool-result-cap moment=pre-request action=cap detail=

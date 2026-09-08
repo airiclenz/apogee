@@ -1,0 +1,33 @@
+# The upstream the Reaction identity arm's `tool-result-cap` row talks to: a model that reads a file
+# far too big to keep whole, then calls another tool, so the first result is an OLD one by the time
+# the next request is projected.
+#
+# Both halves are needed. floor.CapToolResults trims only results from BEFORE the most recent
+# tool-calling Turn (internal/floor/resultcap.go mostRecentToolCallTurn), so a run that stopped after
+# the big read would have nothing the guard is allowed to touch — the second call is what moves the
+# big result behind the protected frontier. And the file is sized by the ceiling itself: the pinned
+# 32768-token window leaves a per-result ceiling of ~42k characters (capMaxChars), while a result
+# estimated above the WHOLE history allocation is clamped on its way into the conversation
+# (internal/agent/dispatch.go clampToolResult) and would never reach the guard at all. The workspace
+# this row builds sits between the two — see resultCapWorkspace.
+model: identity-model
+turns:
+    # Turn 1 — the oversized read. It enters the conversation whole; nothing is capped yet, because
+    # the guard protects everything from the most recent tool-calling Turn onward.
+    - when:
+        last_message: ^Read big.txt
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"big.txt"}'
+    # Turn 2 — a second, small read. It is what puts a later tool-calling Turn in the conversation,
+    # so the big result above is no longer protected when the NEXT request is projected.
+    - when:
+        tool_result: read_file
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    # Turn 3 — the answer. The request that carries this Turn is the one `tool-result-cap` trims.
+    - when:
+        tool_result: read_file
+      text: The big file is mostly filler and a.txt says hello.
+      chunk_runes: 5
