@@ -8,12 +8,15 @@ list is empty by default, so a fresh install runs nothing and reports nothing.
 A hook is told what **already happened**. It cannot veto a tool call, delay a turn, answer an
 approval, or change anything about the run it is watching, and nothing it prints, returns or
 answers reaches the model, the conversation or the saved session — the failure of a hook is yours
-to see and nobody else's. It is not a [Mechanism](../../CONTEXT.md): a Mechanism runs inside the
-loop at a hook point and shapes what the model sees, while a hook runs after the fact, on your own
+to see and nobody else's. A hook is a [Reaction](../../CONTEXT.md) of user origin and `observe`
+class: it watches. A Floor guard is the engine's own `shape (view)` Reaction — it fires on a Moment
+inside the loop and changes what the model sees — while a hook fires after the fact, on your own
 machine, as your configuration rather than a model action. There are deliberately no `pre-*`
 events: every one of the five below reports a thing that is over.
 ([ADR 0073](../adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md) is the
-decision and its reasoning.)
+decision and its reasoning;
+[ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) is the origin and
+class vocabulary.)
 
 The same list is fired by every front-end — the interactive TUI, a `/schedule` firing inside it,
 [`apogee headless`](headless.md) and an [`apogee daemon`](daemon.md) firing — from one library, so
@@ -105,7 +108,7 @@ Per event, added to that block:
 | `remedy` | `approval-waiting` | The optional one-line route out of the condition that forced it. |
 | `sub_agent_name` | `approval-waiting` | The display name of the child whose call is waiting, when it has one. |
 | `scope` | `approval-waiting` | What the call reaches beyond what its arguments name, when that is stated. |
-| `source` | `error` | What faulted — a tool name, a mechanism id, or `loop`. |
+| `source` | `error` | What faulted — a tool name, a reaction id, or `loop`. |
 | `error` | `error` | The fault's message. |
 
 ```json

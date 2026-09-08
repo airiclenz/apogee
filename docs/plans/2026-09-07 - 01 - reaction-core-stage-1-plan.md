@@ -472,7 +472,13 @@ go build ./... && go vet ./... && go test -race -count=1 ./ ./cmd/apogee/
 ```
 **Commit:** `refactor(apogee): the facade arms Reactions; bench readiness proves invariant 4 on the core`
 
-## 15. Docs: the `hooks:` manual page and ADR pointers stay honest
+## 15. Docs: the `hooks:` manual page and ADR pointers stay honest — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the `source` column was reworded to "a reaction id" — verified against `internal/agent` after item 6: `fireOne` (`reactions.go:223`) still emits an `ErrorEvent` sourced with the firing reaction's id via `recoverHook`, so the engine can still emit an id there; every other `ErrorEvent` source in the package is a tool name, `loop`, `processing`, `compaction` or `undo`.
+
+NOTES (2026-09-08): ADR pointer notes verified, no edit — `docs/adr/0071-…:2,9-10` and `docs/adr/0073-…:2,7-8` already carry the ADR 0076 supersession notes (3 hits each).
+
+NOTES (2026-09-08): beyond the item's two named sites, the intro's trailing ADR citation gained an ADR 0076 pointer ("is the origin and class vocabulary") so the new origin/class wording in the same paragraph carries its source; ADR 0073 stays cited as the decision.
 
 **What:** `docs/manual/hooks.md:11-12` ("a Mechanism runs inside the loop at a hook point…") → a Hook is a user-origin `observe` Reaction; a Floor guard is an engine-origin `shape (view)` Reaction (ADR 0076); `:108` `source` column text keeps `mechanism id` only if the engine can still emit it — verify against `internal/agent` `ErrorEvent` sources after item 6 and reword to "a reaction id". `docs/adr/0071-…` and `docs/adr/0073-…` already carry the ADR 0076 pointer notes (`0071:2,9`, `0073:2,7`) — verify, no edit. Docs only.
 
