@@ -1400,9 +1400,9 @@ var settingsTable = []settingsEntry{
 			return "", nil
 		},
 	},
-	// The seven Floor-guard gates (ADR 0071). They share one apply and one engine seam: SetFloor takes
-	// the WHOLE FloorConfig, so a row that knows only its own key has to read the other six back off
-	// the holder — which is why these are the one bool family that needs the holder as well as the
+	// The seven Floor-guard gates (ADR 0071). They share one apply and one engine seam: SetReactions
+	// takes the WHOLE Generation, so a row that knows only its own key has to read the other six back
+	// off the holder — which is why these are the one bool family that needs the holder as well as the
 	// engine. Nothing else about them is special: each is an ordinary editable bool, on by default,
 	// in force the moment its apply returns.
 	{

@@ -92,10 +92,9 @@ type lateEngine struct {
 	// pointer where the Floor gates and Bypass were two, because they are one value now: a
 	// generation is what a live swap carries, and a holder remembering its halves separately could
 	// hand a bind a shape no apply ever asked for. nil means nothing was ever installed here, on the
-	// pointers-above terms, and it is also the base a PARTIAL edit reads (SetBypass, SetFloor) — so
-	// the composition root seeds it with what the Config and the Runner were built from
-	// (seedReactions), and a bypass toggled before the bind cannot re-enable a guard the config file
-	// switched off.
+	// pointers-above terms — so the composition root seeds it with what the Config and the Runner
+	// were built from (seedReactions), and a bypass toggled before the bind cannot re-enable a
+	// guard the config file switched off.
 	pendingGeneration *apogee.Generation
 	// observe is the observe list the Runner is ALREADY firing — what a new generation's list is
 	// compared against, so a Floor- or Bypass-only edit never retires a Runner generation whose list
@@ -192,8 +191,9 @@ func newLateEngine(mode apogee.Mode, confineToWorkspace bool) *lateEngine {
 // constructed with, and the list the Runner was built from. The composition root calls it once,
 // right after the holder is made (wire_live.go).
 //
-// It is what makes a PARTIAL edit honest. SetBypass and SetFloor move one field of the generation
-// they read, so a holder never told where the other fields stood would answer a bypass toggled
+// It is what makes a PARTIAL edit honest. A settings row that moves one field of the generation
+// hands the WHOLE value back (liveSettings.setBypass, setFloorGuard), so a holder never told
+// where the other fields stood would answer a bypass toggled
 // before the bind by re-enabling every Floor guard the config file switched off. And it is what
 // keeps a Floor-only edit off the Runner: the observe list recorded here is the one a new
 // generation's list is compared against.
@@ -396,24 +396,9 @@ func (e *lateEngine) SetConfineToWorkspace(confine bool) {
 	}
 }
 
-// SetBypass switches the advise and shape Reactions off or back on for the rest of the session
-// (the settings surface's `bypass` key), remembered while unbound for SetMode's reason: the pane
-// can be opened before a server is chosen, and an edit that persisted must not be the only half
-// that happened.
-//
-// It is a read-modify-write wrapper over SetReactions, which carries the whole contract — a
-// transitional one, kept while the settings rows still drive the two halves of a generation
-// separately. The error it discards is the RUNNER's, and a generation that moves no observe list
-// never reaches the Runner, so there is no outcome here to report.
-func (e *lateEngine) SetBypass(enabled bool) {
-	gen := e.generation()
-	gen.Bypass = enabled
-	_ = e.SetReactions(gen)
-}
-
 // SetScratchDir moves the session scratch dir the confinement box carries — the session host
 // calls it at each identity boundary (a /clear|/new rotate, a /sessions resume), remembered while
-// unbound for SetBypass's reason: a rotate before a server is chosen mints a new session id, and
+// unbound for SetMode's reason: a rotate before a server is chosen mints a new session id, and
 // the engine that eventually binds must fence the dir that id names, not the boot seed.
 func (e *lateEngine) SetScratchDir(dir string) {
 	e.mu.Lock()
@@ -447,8 +432,8 @@ func (e *lateEngine) SetJournal(j *undo.Journal, note string) {
 	}
 }
 
-// SetCompactionEnabled arms or disarms the automatic Compaction trigger (`auto-compact`), on the
-// same terms as SetBypass above.
+// SetCompactionEnabled arms or disarms the automatic Compaction trigger (`auto-compact`),
+// remembered while unbound on SetScratchDir's terms.
 func (e *lateEngine) SetCompactionEnabled(enabled bool) {
 	e.mu.Lock()
 	e.pendingCompaction = &enabled
@@ -469,19 +454,6 @@ func (e *lateEngine) SetPruneToolResults(enabled bool) {
 	if agent != nil {
 		agent.SetPruneToolResults(enabled)
 	}
-}
-
-// SetFloor replaces the Floor-guard gates (ADR 0071), on the same terms as SetPruneToolResults
-// above. The WHOLE FloorConfig is remembered rather than a gate at a time because that is what the
-// seam takes: a bind replays one value that says where all seven stand, so a session that flipped
-// two guards while the picker was up starts with both of them where the human left them.
-//
-// It is SetBypass's read-modify-write wrapper over SetReactions, on SetBypass's terms and with
-// SetBypass's transitional life.
-func (e *lateEngine) SetFloor(gates apogee.FloorConfig) {
-	gen := e.generation()
-	gen.Floor = gates
-	_ = e.SetReactions(gen)
 }
 
 // SetReactions installs one Generation across both halves of the Reaction surface: the engine, which
@@ -525,19 +497,6 @@ func (e *lateEngine) SetReactions(gen apogee.Generation) error {
 	e.observe = slices.Clone(gen.Observe)
 	e.mu.Unlock()
 	return nil
-}
-
-// generation reports the Generation a partial edit modifies and a bind replays: what the last apply
-// installed, or what the composition root seeded the holder with (seedReactions), and the zero value
-// on a holder that has had neither — every Floor guard on, Bypass off, nothing armed, which is what
-// a zero Config constructs too.
-func (e *lateEngine) generation() apogee.Generation {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.pendingGeneration == nil {
-		return apogee.Generation{}
-	}
-	return *e.pendingGeneration
 }
 
 // SetContextFiles replaces the workspace context-file names folded in at the next session boundary

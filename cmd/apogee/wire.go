@@ -324,13 +324,11 @@ func (w *rootWiring) close() {
 // renderer already follows.
 type settingsEngine interface {
 	SetMode(apogee.Mode)
-	SetBypass(bool)
 	SetCompactionEnabled(bool)
 	SetPruneToolResults(bool)
-	SetFloor(apogee.FloorConfig)
 	// SetReactions installs one Generation — the Floor enable set, Bypass and the user-origin observe
-	// list — across the engine and the Reaction Runner at once (ADR 0076 A8). It is the door the two
-	// setters above are transitional wrappers over, and the only one here that can fail: the Runner
+	// list — across the engine and the Reaction Runner at once (ADR 0076 A8). It is the ONE door the
+	// whole Reaction surface moves through, and the only one here that can fail: the Runner
 	// refuses a list it cannot arm, and that refusal is the settings row's sentence.
 	SetReactions(apogee.Generation) error
 	SetContextFiles(enable bool, names []string)

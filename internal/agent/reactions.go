@@ -342,7 +342,7 @@ func reactionAction(m domain.Moment, out domain.Outcome) string {
 
 // bypassSkips reports whether Bypass switches this armed reaction off (ADR 0076 D9): advise and
 // the two shape classes go quiet, observe and gate stay on. It reads the LIVE flag, so a
-// mid-session SetBypass lands at the very next Moment.
+// mid-session SetReactions lands at the very next Moment.
 func (a *Agent) bypassSkips(r domain.Reaction) bool {
 	if !a.bypassEnabled() {
 		return false

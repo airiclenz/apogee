@@ -383,7 +383,7 @@ func TestFireBypassMatrix(t *testing.T) {
 			} else {
 				a, sink = ladderAgent(t, nil, subject)
 			}
-			a.SetBypass(true)
+			swapBypass(a, true)
 
 			if _, err := a.fire(context.Background(), domain.MomentPostResponse, postResponse(true)); err != nil {
 				t.Fatalf("fire: %v", err)
@@ -888,7 +888,7 @@ func TestFireEmitsSeamClosedUnderBypassAndWhenNothingIsArmed(t *testing.T) {
 		a, sink := ladderAgent(t, nil, []domain.Reaction{
 			probe(log, "advisor", domain.ClassAdvise, acts(domain.Outcome{Edited: true})),
 		})
-		a.SetBypass(true)
+		swapBypass(a, true)
 		payload := postResponse(true)
 
 		if _, err := a.fire(context.Background(), domain.MomentPostResponse, payload); err != nil {

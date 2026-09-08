@@ -1,7 +1,6 @@
 package agent
 
-// The anytime-safe setters the settings surface drives mid-session — SetReactions (and the
-// SetBypass wrapper over it),
+// The anytime-safe setters the settings surface drives mid-session — SetReactions,
 // SetCompactionEnabled and SetContextFiles (the SetMode/SetConfineToWorkspace class). What each
 // test pins is the CONSUMPTION BOUNDARY: Bypass lands at the next reaction evaluation, the
 // auto-Compaction gate at the next fold decision, and the context-file names only at the next
@@ -24,7 +23,16 @@ func gateRow(id string, class domain.Class) domain.Reaction {
 	return domain.Reaction{ID: id, Origin: domain.OriginUser, Class: class}
 }
 
-// TestAgentSetBypassFlipsTheGateBetweenEvaluations proves a runtime SetBypass changes the skip
+// swapBypass moves Bypass alone through the ONE live-swap door: read the whole Generation, edit
+// the copy, hand it back (ADR 0076 A8). Every caller of the retired SetBypass wrapper now does
+// this for itself, and the suites that probe the gate share it so they read as one idiom.
+func swapBypass(a *Agent, on bool) {
+	gen := a.Generation()
+	gen.Bypass = on
+	a.SetReactions(gen)
+}
+
+// TestAgentSetBypassFlipsTheGateBetweenEvaluations proves a runtime Bypass swap changes the skip
 // decision on the SAME Agent with no rebuild, and that the class exemption (ADR 0076 D9) holds on
 // both sides of the flip: switching Bypass on never withdraws an observe or gate Reaction.
 func TestAgentSetBypassFlipsTheGateBetweenEvaluations(t *testing.T) {
@@ -53,16 +61,16 @@ func TestAgentSetBypassFlipsTheGateBetweenEvaluations(t *testing.T) {
 				t.Fatalf("bypassSkips at construction = %t, want %t", got, tc.wantUnderOff)
 			}
 
-			a.SetBypass(true)
+			swapBypass(a, true)
 
 			if got := a.bypassSkips(row); got != tc.wantUnderOn {
-				t.Fatalf("bypassSkips after SetBypass(true) = %t, want %t", got, tc.wantUnderOn)
+				t.Fatalf("bypassSkips with Bypass swapped on = %t, want %t", got, tc.wantUnderOn)
 			}
 
-			a.SetBypass(false)
+			swapBypass(a, false)
 
 			if got := a.bypassSkips(row); got != tc.wantUnderOff {
-				t.Fatalf("bypassSkips after SetBypass(false) = %t, want %t again", got, tc.wantUnderOff)
+				t.Fatalf("bypassSkips with Bypass swapped off = %t, want %t again", got, tc.wantUnderOff)
 			}
 		})
 	}
@@ -89,7 +97,7 @@ func TestAgentSetBypassObservedByTheNextHookFire(t *testing.T) {
 		t.Fatalf("before the switch: the shape-view Reaction fired %d times, the observe one %d; want 1 and 1", nudged, offRamped)
 	}
 
-	a.SetBypass(true)
+	swapBypass(a, true)
 
 	_ = runExchange(t, a, "second")
 	if nudged != 1 {
@@ -269,7 +277,7 @@ func TestAgentAnytimeSettersConcurrent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
-			a.SetBypass(i%2 == 0)
+			swapBypass(a, i%2 == 0)
 			a.SetCompactionEnabled(i%2 == 0)
 			a.SetContextFiles(i%2 == 0, []string{"A.md"})
 		}

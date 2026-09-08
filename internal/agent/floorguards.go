@@ -1,9 +1,5 @@
 package agent
 
-import (
-	"github.com/airiclenz/apogee/internal/domain"
-)
-
 // The Floor guards' configuration keys, one per guard. The key is the guard's identity everywhere
 // outside internal/floor: it is what a user writes in config.yaml, what a Generation's Floor
 // switches, and the
@@ -46,19 +42,4 @@ var guardIDs = []string{
 	guardToolUseEnforcer,
 	guardReadCache,
 	guardToolResultCap,
-}
-
-// SetFloor replaces the live Floor-guard gates for the rest of the session, leaving Bypass
-// exactly as it is. It is a read-modify-write wrapper over SetReactions, which carries the whole
-// contract — including the rebuild of the builtin ladder a moved Floor implies (the enable set)
-// and the transitional caveat SetBypass's own doc states.
-//
-// It takes the WHOLE FloorConfig rather than one flag at a time because the seven guards are read
-// as one value at each seam, and a caller that owns the settings surface owns all seven. It is safe to
-// call from another goroutine while a Step runs, like SetMode. A sub-agent spawned AFTER the switch
-// inherits the new value at spawn.
-func (a *Agent) SetFloor(gates domain.FloorConfig) {
-	gen := a.Generation()
-	gen.Floor = gates
-	a.SetReactions(gen)
 }

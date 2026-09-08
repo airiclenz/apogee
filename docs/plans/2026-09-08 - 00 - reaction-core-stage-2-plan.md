@@ -480,7 +480,27 @@ go test ./cmd/apogee/ -run 'Settings|Reactions|Floor|Bypass|Reload|Section'
 
 **Commit:** `refactor(apogee): the Floor, bypass and reactions rows swap one Generation`
 
-## 13. Delete `SetBypass`, `SetFloor` and their callers
+## 13. Delete `SetBypass`, `SetFloor` and their callers — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): `lateEngine.generation()` is deleted too. The two wrappers were its only callers, and the settings rows read their base from the HOLDER (`liveSettings.generation()`, `setBypass`, `setFloorGuard`) — so the item's "`floorConfig()`/`bypassEnabled()` readers if unused" rule reaches it. `bypassEnabled()` itself stays: `bypassSkips` still reads it every Moment. `floorConfig()` was already gone at item 10.
+
+NOTES (2026-09-08): the eight agent-side call sites share one `swapBypass(a, on)` helper in `setlive_test.go` (read `Generation()`, edit the copy, `SetReactions`) rather than eight inline read-modify-writes — the item's "re-expressed over `SetReactions`/`Generation()`" in one idiom. The two test FUNCTION names still read `TestAgentSetBypass…`: renaming existing identifiers is not this item's, and neither name matches the acceptance grep.
+
+NOTES (2026-09-08): `applySettingSpy` loses its `bypass` and `floors` fields with the two methods, and `drove()` counts `generations` instead. Nothing read them: item 12 already moved the `bypass` row and the seven Floor rows onto `SetReactions`, so the dispatcher had stopped driving either seam.
+
+NOTES (2026-09-08): `internal/agent/floorguards.go` lost its only `domain` reference with `SetFloor`, so the import goes with it; the file is now the guard keys, the action labels and `guardIDs`.
+
+NOTES (2026-09-08): `internal/agent/floorguards_test.go`, named in the item's known-site list, needed no edit — it never called either setter (verified by the acceptance grep, which returns nothing repo-wide).
+
+NOTES (2026-09-08): consequential edit — internal/agent/doc.go: made necessary by deleting `SetFloor` (the file map called floorguards.go "the Floor half of the live-generation swap").
+
+NOTES (2026-09-08): consequential edit — internal/agent/reactions.go: made necessary by deleting `SetBypass` (`bypassSkips`' doc said a mid-session `SetBypass` lands at the very next Moment).
+
+NOTES (2026-09-08): consequential edit — cmd/apogee/wire_settings.go: made necessary by deleting `SetFloor` (the seven Floor rows' comment said "SetFloor takes the WHOLE FloorConfig"; it is `SetReactions` and the whole Generation).
+
+NOTES (2026-09-08): the same false-comment sweep inside the item's own files: `agent.go` (the anytime-safe class list and `SetReactions`' doc), `wire.go` (the `settingsEngine` doc), `wire_engine.go` (the `pendingGeneration` field doc, `seedReactions`' partial-edit paragraph, and the three "for SetBypass's reason" back-references on `SetScratchDir` / `SetCompactionEnabled`), `setlive_test.go`'s header and `wire_engine_test.go`'s Floor-replay doc (a second swap now replaces the first whole rather than merging into it).
+
+NOTES (2026-09-08): the first `go test ./cmd/apogee/` of this tree reported FAIL, and its failing test name was lost to a `tail`. Two further full runs of the identical tree — one cached-clean, one `-count=1` — passed in 133.9s, and the item's changes to that package are an interface shrink plus test rewrites with no behaviour in them. Recorded as an unidentified one-off flake, not a finding.
 
 **What:** Depends on item 12. Delete the wrappers from `internal/agent`, `floorConfig()`/`bypassEnabled()` readers if unused, the two methods from `settingsEngine`, and retype every remaining caller — rule: `grep -rn 'SetBypass(\|SetFloor(' --include=*.go .` returns nothing after the item. Known sites: `internal/agent/{setlive_test,reactions_test,routedspawn_test,wire_test,floorguards_test}.go`, `cmd/apogee/{wire_settings_test,wire_helpers_test,wire_engine_test}.go`.
 

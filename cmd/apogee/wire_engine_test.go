@@ -113,17 +113,21 @@ func TestLateEngineReplaysThePruneGateAtTheBind(t *testing.T) {
 
 // The Floor gates ride the same remember-then-install contract, with one difference worth pinning:
 // they are a FIELD of the generation the holder remembers rather than a value of their own (ADR 0076
-// A8), so what a Floor edit leaves behind is where all seven guards stand — and a second edit made
-// before the bind must not lose the first one's.
+// A8), so what a Floor edit leaves behind is where all seven guards stand — and a second swap made
+// before the bind replaces the first one whole, which is the shape the bind then installs.
 func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 	t.Parallel()
 
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
 
-	engine.SetFloor(apogee.FloorConfig{DisableReadCache: true})
-	engine.SetFloor(apogee.FloorConfig{DisableReadCache: true, DisableToolResultCap: true})
+	if err := engine.SetReactions(apogee.Generation{Floor: apogee.FloorConfig{DisableReadCache: true}}); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
 	want := apogee.FloorConfig{DisableReadCache: true, DisableToolResultCap: true}
+	if err := engine.SetReactions(apogee.Generation{Floor: want}); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
 	if engine.pendingGeneration == nil || engine.pendingGeneration.Floor != want {
 		t.Fatalf("pendingGeneration = %+v; want the floor %+v held for the bind", engine.pendingGeneration, want)
 	}
@@ -136,7 +140,9 @@ func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 	}
 
 	// Past the bind the door stays open and stays anytime-safe, exactly as the prune gate's does.
-	engine.SetFloor(apogee.FloorConfig{})
+	if err := engine.SetReactions(apogee.Generation{}); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
 	if engine.pendingGeneration == nil || engine.pendingGeneration.Floor != (apogee.FloorConfig{}) {
 		t.Errorf("pendingGeneration after a bound edit = %+v; want the whole floor back on", engine.pendingGeneration)
 	}

@@ -47,8 +47,7 @@ import (
 // (Snapshot, Interject) are additionally valid at the boundary between two Steps of an open
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
-// anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetReactions (and the
-// SetBypass / SetFloor wrappers over it),
+// anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetReactions,
 // SetCompactionEnabled, SetPruneToolResults, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
 // behind its own mutex, so the host (the settings surface, Shift+Tab, /confine) may call it
 // while a Step runs and the change lands at that field's next consumption boundary.
@@ -1014,9 +1013,9 @@ func (a *Agent) closeUndoGroup() {
 }
 
 // SetReactions installs one live Generation — the Floor enable set and Bypass — for the rest of
-// the session. It is the engine's ONE swap seam for both (ADR 0076 A8): SetBypass and SetFloor
-// are read-modify-write wrappers over it, so nothing downstream can observe a state that is half
-// one generation and half the next.
+// the session. It is the engine's ONE swap seam for both (ADR 0076 A8), and the only one: a
+// caller moving a single field reads Generation, edits its copy and hands the whole value back,
+// so nothing downstream can observe a state that is half one generation and half the next.
 //
 // gen.Observe is IGNORED here. The observe lane belongs to the Runner, and an agent takes only
 // Floor and Bypass out of a generation (domain.Generation); the Driver hands the SAME value to
@@ -1052,18 +1051,6 @@ func (a *Agent) Generation() domain.Generation {
 	a.genMu.RLock()
 	defer a.genMu.RUnlock()
 	return a.gen
-}
-
-// SetBypass switches Bypass — the advise and shape Reactions of user or bench origin off, the
-// engine's own builtins and the structure on (ADR 0006, ADR 0076 D9) — on or off for the rest
-// of the session, leaving the Floor enable set exactly as it is. It is a read-modify-write
-// wrapper over SetReactions, which carries the whole contract — a transitional one, kept while
-// the Driver still drives the two halves separately, so two goroutines calling it and SetFloor
-// at the same instant may lose one edit. The generation itself is never half-swapped.
-func (a *Agent) SetBypass(enabled bool) {
-	gen := a.Generation()
-	gen.Bypass = enabled
-	a.SetReactions(gen)
 }
 
 // bypassEnabled reports the live Bypass flag under the lock, so the worker goroutine's per-hook

@@ -333,8 +333,8 @@ func TestRoutedSpawnBypassPosture(t *testing.T) {
 			t.Parallel()
 
 			parent := routingParent(t)
-			// SetBypass, not the construction seed: the rule is about the parent's LIVE flag.
-			parent.SetBypass(tc.parentBypass)
+			// A live swap, not the construction seed: the rule is about the parent's LIVE flag.
+			swapBypass(parent, tc.parentBypass)
 			target := routedTarget()
 			target.Bypass = tc.targetBypass
 			parent.SetDelegationTarget(target)

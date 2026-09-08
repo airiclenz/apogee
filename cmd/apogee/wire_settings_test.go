@@ -2074,7 +2074,9 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 	t.Parallel()
 	e := newLateEngine(domain.ModeAskBefore, true)
 
-	e.SetBypass(true)
+	if err := e.SetReactions(apogee.Generation{Bypass: true}); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
 	e.SetCompactionEnabled(false)
 	e.SetPruneToolResults(false)
 	e.SetContextFiles(true, []string{"AGENTS.md"})

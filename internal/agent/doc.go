@@ -32,8 +32,8 @@
 // and tool-call parsing, and the post-response retry cap. turn.go is turnLifecycle, the
 // Turn/Exchange state between quiescent boundaries (ADR 0007) and the exits that mutate the
 // conversation. floorguards.go is what the Floor guards keep outside internal/floor
-// (ADR 0071): the Floor half of the live-generation swap, the reserved guard ids, and the config
-// keys and action labels a guard is known by. reactions.go is the Reaction dispatcher that succeeded the
+// (ADR 0071): the reserved guard ids and the config keys and action labels a guard is known
+// by. reactions.go is the Reaction dispatcher that succeeded the
 // two ladders it replaced (ADR 0076): the one fire every seam calls, its two legs, the Bypass
 // gate, the recover boundary, the revision bracket and the ReactionFiredEvent a firing books.
 // builtins.go is the engine's own Reactions — the Floor guards the live generation leaves ON, as
