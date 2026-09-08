@@ -229,10 +229,11 @@ func (m Model) foldStats(e domain.Event) Model {
 //
 // SubAgentStarted is deliberately NOT one: the head's own ToolCallEvent already fired the save, and
 // under a fan-out a queued child's start adds nothing the record does not already show. Every other
-// variant answers false — streamed tokens, reasoning, approvals, usage, audit and wire records, and
-// a pruning notice (which rewrites what the ENGINE keeps, never the record, and whose host note the
-// per-Turn save carries anyway) either move nothing a reader of the record could act on or are
-// already covered by the per-Turn save that follows the Turn they belong to.
+// variant answers false — streamed tokens, reasoning, approvals, usage, audit and wire records, a
+// seam closure (whose payload is a live working value the sink may not even retain, let alone
+// persist), and a pruning notice (which rewrites what the ENGINE keeps, never the record, and whose
+// host note the per-Turn save carries anyway) either move nothing a reader of the record could act
+// on or are already covered by the per-Turn save that follows the Turn they belong to.
 func progressSaveTrigger(e domain.Event) bool {
 	switch e := e.(type) {
 	case domain.ToolCallEvent:

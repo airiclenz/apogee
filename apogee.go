@@ -253,6 +253,7 @@ type (
 	SubAgentNamedEvent     = domain.SubAgentNamedEvent
 	ChildInterjectionEvent = domain.ChildInterjectionEvent
 	ReactionFiredEvent     = domain.ReactionFiredEvent
+	SeamClosedEvent        = domain.SeamClosedEvent
 	ErrorEvent             = domain.ErrorEvent
 	PruneEvent             = domain.PruneEvent
 	UsageEvent             = domain.UsageEvent
@@ -454,19 +455,31 @@ const (
 	MomentHistoryRewrite = domain.MomentHistoryRewrite
 )
 
-// The five notice Moments — the post-hoc points, whose payload is sealed.
+// The six standalone notice Moments — post-hoc points that report a fact of their own, whose
+// payload is sealed.
 const (
 	MomentExchangeFinished = domain.MomentExchangeFinished
 	MomentTurnFinished     = domain.MomentTurnFinished
 	MomentFileChanged      = domain.MomentFileChanged
 	MomentApprovalWaiting  = domain.MomentApprovalWaiting
+	MomentApprovalDecided  = domain.MomentApprovalDecided
 	MomentError            = domain.MomentError
+)
+
+// The five seam-closing notices — one per seam, reporting that its Reaction cascade ran to its
+// end and the loop moved on. Moment.Closing maps a seam to the one that reports it.
+const (
+	MomentPreRequestFinished     = domain.MomentPreRequestFinished
+	MomentPostResponseFinished   = domain.MomentPostResponseFinished
+	MomentPreToolExecFinished    = domain.MomentPreToolExecFinished
+	MomentPostToolResultFinished = domain.MomentPostToolResultFinished
+	MomentHistoryRewriteFinished = domain.MomentHistoryRewriteFinished
 )
 
 // Seams returns the five seam Moments in loop order, as a fresh copy.
 func Seams() []Moment { return domain.Seams() }
 
-// Notices returns the five notice Moments in their documented order, as a fresh copy.
+// Notices returns the eleven notice Moments in their documented order, as a fresh copy.
 func Notices() []Moment { return domain.Notices() }
 
 // Origin is who a Reaction belongs to — one axis of the Reaction surface matrix (ADR 0076 D2).

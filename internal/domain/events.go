@@ -308,6 +308,33 @@ type ReactionFiredEvent struct {
 	Detail   string // optional supporting text; may be empty
 }
 
+// SeamClosedEvent reports that one SEAM finished passing: its Reaction cascade ran to its end
+// and the loop is about to move on with whatever working value came out of it. It is the event
+// behind the five seam-closing notices (Moment.Closing), so a user-origin observe entry can watch
+// an in-loop point from the post-hoc half of the vocabulary (ADR 0076 A6).
+//
+// Seam is the seam that closed — one of the five seam Moments, never a notice. Fired lists the
+// ids of the reactions that were booked as firings during the pass, in the order they fired; a
+// pass in which nothing acted carries an empty list, and the event is still emitted, because
+// "the seam passed and nothing happened" is the fact an observer most often wants.
+//
+// Value is the seam's PAYLOAD as fire received it: *Request at pre-request, PostResponseMoment at
+// post-response, *ToolCallEdit at pre-tool-exec, ToolResultMoment at post-tool-result and
+// *Conversation at history-rewrite. It is a READ-ONLY reference and it is valid only for the
+// duration of Emit — a sink must not retain it, hand it to another goroutine, or write through
+// it. A sink that wants any of it beyond the call takes its own copy of the fields it needs; the
+// engine keeps mutating the working value the moment Emit returns.
+//
+// It is SINK-ONLY: like WireEvent it never reaches the headless line contract (eventjson.Encode
+// answers ok=false for it and consumes no sequence number), because a serialized payload of
+// arbitrary shape is not something a documented stdout contract can promise.
+type SeamClosedEvent struct {
+	EventBase
+	Seam  Moment   // the seam that closed
+	Fired []string // the ids of the reactions booked as firings, in firing order
+	Value any      // the seam's payload, read-only and valid only during Emit
+}
+
 // ErrorEvent reports a localised, recovered fault — a tool or Reaction panic
 // caught at the extension boundary, or a tool execution error (ADR 0007). It does
 // not imply the loop stopped.

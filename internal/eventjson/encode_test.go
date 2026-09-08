@@ -334,6 +334,28 @@ func TestEncodeSkipsTheWireEvent(t *testing.T) {
 	}
 }
 
+// TestEncodeSkipsTheSeamClosedEvent pins the second sink-only variant: a seam closure carries the
+// seam's LIVE working value, read-only and valid only for the duration of Emit, so there is
+// nothing a line could serialize that a consumer could rely on. Like the wire record it answers
+// ok=false and consumes no sequence number.
+func TestEncodeSkipsTheSeamClosedEvent(t *testing.T) {
+	t.Parallel()
+
+	kind, base, data, ok := Encode(domain.SeamClosedEvent{
+		EventBase: domain.EventBase{Turn: 1},
+		Seam:      domain.MomentPostResponse,
+		Fired:     []string{"tool-call-repair"},
+		Value:     domain.PostResponseMoment{},
+	})
+
+	if ok {
+		t.Fatalf("Encode(SeamClosedEvent) ok = true, want false")
+	}
+	if kind != "" || data != nil || base != (domain.EventBase{}) {
+		t.Errorf("Encode(SeamClosedEvent) = (%q, %+v, %v, false), want zero values", kind, base, data)
+	}
+}
+
 // TestEncodeSkipsAnUnknownEvent covers the sealed type's default arm: a variant this package has
 // not been taught is skipped rather than written as a half-line.
 func TestEncodeSkipsAnUnknownEvent(t *testing.T) {

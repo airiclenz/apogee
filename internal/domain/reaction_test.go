@@ -16,7 +16,7 @@ var noopPreRequest = PreRequestFunc(func(context.Context, *Request) (Outcome, er
 	return Outcome{}, nil
 })
 
-// TestMomentValuesArePinnedLiterals pins all ten Moment spellings. The strings are the ones a
+// TestMomentValuesArePinnedLiterals pins all sixteen Moment spellings. The strings are the ones a
 // user writes in configuration and an observer reads off a ReactionFiredEvent, so changing one
 // breaks every configuration in the wild — the seams carry the retired hook-point values and the
 // notices the reactions.Event values, unchanged.
@@ -36,7 +36,13 @@ func TestMomentValuesArePinnedLiterals(t *testing.T) {
 		{MomentTurnFinished, "turn-finished"},
 		{MomentFileChanged, "file-changed"},
 		{MomentApprovalWaiting, "approval-waiting"},
+		{MomentApprovalDecided, "approval-decided"},
 		{MomentError, "error"},
+		{MomentPreRequestFinished, "pre-request-finished"},
+		{MomentPostResponseFinished, "post-response-finished"},
+		{MomentPreToolExecFinished, "pre-tool-exec-finished"},
+		{MomentPostToolResultFinished, "post-tool-result-finished"},
+		{MomentHistoryRewriteFinished, "history-rewrite-finished"},
 	}
 
 	for _, c := range cases {
@@ -67,7 +73,13 @@ func TestSeamsAndNoticesReportTheVocabularyAsACopy(t *testing.T) {
 		MomentTurnFinished,
 		MomentFileChanged,
 		MomentApprovalWaiting,
+		MomentApprovalDecided,
 		MomentError,
+		MomentPreRequestFinished,
+		MomentPostResponseFinished,
+		MomentPreToolExecFinished,
+		MomentPostToolResultFinished,
+		MomentHistoryRewriteFinished,
 	}
 
 	seams := Seams()
@@ -115,7 +127,13 @@ func TestMomentIsSeam(t *testing.T) {
 		{MomentTurnFinished, false},
 		{MomentFileChanged, false},
 		{MomentApprovalWaiting, false},
+		{MomentApprovalDecided, false},
 		{MomentError, false},
+		{MomentPreRequestFinished, false},
+		{MomentPostResponseFinished, false},
+		{MomentPreToolExecFinished, false},
+		{MomentPostToolResultFinished, false},
+		{MomentHistoryRewriteFinished, false},
 		{Moment("not-a-moment"), false},
 		{Moment(""), false},
 	}
@@ -126,6 +144,73 @@ func TestMomentIsSeam(t *testing.T) {
 
 			if got := c.moment.IsSeam(); got != c.want {
 				t.Errorf("Moment(%q).IsSeam() = %v, want %v", string(c.moment), got, c.want)
+			}
+		})
+	}
+}
+
+// TestMomentIsNotice separates the post-hoc half of the vocabulary from the in-loop half. It is
+// deliberately not the negation of IsSeam: a spelling outside the vocabulary is neither, which is
+// the case a caller validating a configured Moment has to see.
+func TestMomentIsNotice(t *testing.T) {
+	t.Parallel()
+
+	for _, m := range Notices() {
+		t.Run(string(m), func(t *testing.T) {
+			t.Parallel()
+
+			if !m.IsNotice() {
+				t.Errorf("Moment(%q).IsNotice() = false, want true", string(m))
+			}
+		})
+	}
+
+	for _, m := range append(Seams(), "not-a-moment", "") {
+		t.Run("not a notice: "+string(m), func(t *testing.T) {
+			t.Parallel()
+
+			if m.IsNotice() {
+				t.Errorf("Moment(%q).IsNotice() = true, want false", string(m))
+			}
+		})
+	}
+}
+
+// TestClosingMapsEverySeamToItsNotice walks the whole vocabulary: each of the five seams answers
+// its own `<seam>-finished` notice, that answer is itself a notice and never a seam, and every
+// notice — plus a spelling outside the vocabulary — answers the zero Moment.
+func TestClosingMapsEverySeamToItsNotice(t *testing.T) {
+	t.Parallel()
+
+	wantClosings := map[Moment]Moment{
+		MomentPreRequest:     MomentPreRequestFinished,
+		MomentPostResponse:   MomentPostResponseFinished,
+		MomentPreToolExec:    MomentPreToolExecFinished,
+		MomentPostToolResult: MomentPostToolResultFinished,
+		MomentHistoryRewrite: MomentHistoryRewriteFinished,
+	}
+
+	for _, seam := range Seams() {
+		t.Run(string(seam), func(t *testing.T) {
+			t.Parallel()
+
+			got := seam.Closing()
+
+			if got != wantClosings[seam] {
+				t.Fatalf("Moment(%q).Closing() = %q, want %q", string(seam), string(got), string(wantClosings[seam]))
+			}
+			if !got.IsNotice() || got.IsSeam() {
+				t.Errorf("Moment(%q).Closing() = %q, which is not a notice — a closing reports a pass, it is not one", string(seam), string(got))
+			}
+		})
+	}
+
+	for _, m := range append(Notices(), "not-a-moment", "") {
+		t.Run("no closing: "+string(m), func(t *testing.T) {
+			t.Parallel()
+
+			if got := m.Closing(); got != "" {
+				t.Errorf("Moment(%q).Closing() = %q, want the zero Moment — only a seam closes", string(m), string(got))
 			}
 		})
 	}

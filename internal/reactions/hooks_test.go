@@ -10,14 +10,20 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// TestEventsIsTheWholeVocabularyInOrder pins the five events and their documented order — the
-// order a config template lists and an error message names them in.
+// TestEventsIsTheWholeVocabularyInOrder pins the eleven events and their documented order — the
+// order a config template lists and an error message names them in. The six standalone notices
+// come first, in the order this package has always listed them, then the five seam-closing
+// notices in loop order.
 func TestEventsIsTheWholeVocabularyInOrder(t *testing.T) {
 	t.Parallel()
 
 	got := Events()
 
-	want := []Event{"exchange-finished", "turn-finished", "file-changed", "approval-waiting", "error"}
+	want := []Event{
+		"exchange-finished", "turn-finished", "file-changed", "approval-waiting",
+		"approval-decided", "error", "pre-request-finished", "post-response-finished",
+		"pre-tool-exec-finished", "post-tool-result-finished", "history-rewrite-finished",
+	}
 	if len(got) != len(want) {
 		t.Fatalf("Events() = %v, want %v", got, want)
 	}
@@ -426,7 +432,7 @@ func TestEventsAreTheNoticeMoments(t *testing.T) {
 
 // TestParseEventErrorTextIsByteIdentical holds the refusal message to the byte. A misspelt event
 // name is the likeliest mistake in a `hooks:` block, so the sentence that lists the vocabulary is
-// user-facing text: an alias for the type must leave it untouched.
+// user-facing text: it changes only when the vocabulary itself does, and then deliberately.
 func TestParseEventErrorTextIsByteIdentical(t *testing.T) {
 	t.Parallel()
 
@@ -436,7 +442,9 @@ func TestParseEventErrorTextIsByteIdentical(t *testing.T) {
 		t.Fatal("ParseEvent(\"turn-started\") returned no error, want one")
 	}
 	const want = `unknown hook event "turn-started" — the events are ` +
-		`exchange-finished, turn-finished, file-changed, approval-waiting, error`
+		`exchange-finished, turn-finished, file-changed, approval-waiting, approval-decided, ` +
+		`error, pre-request-finished, post-response-finished, pre-tool-exec-finished, ` +
+		`post-tool-result-finished, history-rewrite-finished`
 	if err.Error() != want {
 		t.Errorf("ParseEvent error =\n%q\nwant\n%q", err.Error(), want)
 	}

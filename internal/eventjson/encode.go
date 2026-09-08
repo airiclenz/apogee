@@ -61,10 +61,13 @@ func Kinds() []string {
 // the envelope's turn/depth/call_id are stamped from, and the value that marshals to the line's
 // `data` object.
 //
-// ok is false for exactly one variant — domain.WireEvent — and for a nil or unrecognised event.
-// The Inspector's raw provider protocol is excluded by ADR 0075 decision 2: putting a wire format
-// on a documented stdout contract would make it part of a public surface. A caller that sees false
-// writes no line at all and, per the same decision, consumes no sequence number for it.
+// ok is false for the two SINK-ONLY variants — domain.WireEvent and domain.SeamClosedEvent — and
+// for a nil or unrecognised event. The Inspector's raw provider protocol is excluded by ADR 0075
+// decision 2: putting a wire format on a documented stdout contract would make it part of a public
+// surface. A seam closure is excluded on the same terms: its Value is the seam's live working
+// value, read-only and valid only for the duration of Emit, so there is nothing a line could carry
+// that a consumer could rely on. A caller that sees false writes no line at all and, per the same
+// decision, consumes no sequence number for it.
 //
 // base is read as ev.EventBase explicitly at every case, which matters for domain.AuditEvent
 // alone: that variant declares a CallID of its own — the AUDITED call — which shadows the

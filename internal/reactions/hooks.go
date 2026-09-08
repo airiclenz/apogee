@@ -9,13 +9,17 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// Event names one of the moments a Hook may fire on — the five NOTICE Moments of the Reaction
-// core, which this name is an alias for (ADR 0076): the Hook vocabulary and the notice half of
-// the Moment vocabulary are one set, not two that happen to agree. Every one is POST-HOC: it
-// reports something that already happened, so a Hook reading it can change nothing about it. The
-// set is additive by design — a moment not named here is not a Hook event yet — and deliberately
+// Event names one of the moments a Hook may fire on — the NOTICE Moments of the Reaction core,
+// which this name is an alias for (ADR 0076): the Hook vocabulary and the notice half of the
+// Moment vocabulary are one set, not two that happen to agree. Every one is POST-HOC: it reports
+// something that already happened, so a Hook reading it can change nothing about it. The set is
+// additive by design — a moment not named here is not a Hook event yet — and deliberately
 // excludes the per-token, tool-call, sub-agent-phase, session-save, prune and usage moments
 // (ADR 0073 §4).
+//
+// Only the five named below have a constant here; the vocabulary itself is domain.Notices(), so
+// `approval-decided` and the five `<seam>-finished` closings are accepted under `events:` from the
+// same commit that added them to the core, and are matched by their spelling.
 //
 // The string is the spelling a user writes in the `events:` list of a `hooks:` entry, so it is
 // also the value that reaches a fired command as APOGEE_HOOK_EVENT and the payload's "event"
@@ -45,20 +49,19 @@ const (
 	Error = domain.MomentError
 )
 
-// allEvents is the vocabulary in the order Events reports it and a config template lists it.
-var allEvents = []Event{ExchangeFinished, TurnFinished, FileChanged, ApprovalWaiting, Error}
-
-// Events returns the five Hook events in their documented order. The slice is a fresh copy, so a
-// caller listing them for a help text or a validation message cannot disturb the vocabulary.
+// Events returns the Hook events in their documented order. It IS domain.Notices() — the two
+// vocabularies are one set rather than two that happen to agree, so a notice added to the Reaction
+// core is a Hook event from the same commit. The slice is a fresh copy, so a caller listing them
+// for a help text or a validation message cannot disturb the vocabulary.
 func Events() []Event {
-	return append([]Event(nil), allEvents...)
+	return domain.Notices()
 }
 
 // ParseEvent turns one `events:` entry into an Event, refusing anything outside the vocabulary
 // with a message that lists what is allowed — a misspelt event name is the likeliest mistake in
 // a `hooks:` block, and a bare "invalid" would leave the user guessing at the spelling.
 func ParseEvent(name string) (Event, error) {
-	for _, e := range allEvents {
+	for _, e := range domain.Notices() {
 		if string(e) == name {
 			return e, nil
 		}
@@ -68,8 +71,9 @@ func ParseEvent(name string) (Event, error) {
 
 // eventList renders the vocabulary for an error message.
 func eventList() string {
-	names := make([]string, 0, len(allEvents))
-	for _, e := range allEvents {
+	events := domain.Notices()
+	names := make([]string, 0, len(events))
+	for _, e := range events {
 		names = append(names, string(e))
 	}
 	return strings.Join(names, ", ")
@@ -196,7 +200,7 @@ func ValidateAll(list []Hook) error {
 // so an event no Hook asked for costs nothing at all. An empty result means the matcher is a
 // no-op for every engine event.
 func SubscribedEvents(list []Hook) map[Event]bool {
-	subscribed := make(map[Event]bool, len(allEvents))
+	subscribed := make(map[Event]bool, len(domain.Notices()))
 	for _, h := range list {
 		for _, e := range h.Events {
 			subscribed[e] = true

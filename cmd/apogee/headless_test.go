@@ -2372,9 +2372,10 @@ func TestHeadlessFormatJSONKeepsStderrProse(t *testing.T) {
 //
 // The delegation's phase event is emitted at Depth 1 because a child's events are the only ones
 // that arrive from a nesting level this Driver never opened; they must reach the stream at their
-// own depth rather than being flattened or dropped. The WireEvent is here for the opposite reason:
-// it is excluded from the contract (decision 2) and consumes no seq, so its presence in the
-// emission proves the exclusion instead of merely not testing it.
+// own depth rather than being flattened or dropped. The WireEvent and the SeamClosedEvent are here
+// for the opposite reason: both are sink-only — excluded from the contract (decision 2) and
+// consuming no seq — so their presence in the emission proves the exclusion instead of merely not
+// testing it.
 func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1},
 		emit: func(sink domain.EventSink) {
@@ -2404,6 +2405,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 				domain.UsageEvent{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 				domain.AuditEvent{Tool: "terminal", CallID: "call-1", Decision: "allowed"},
 				domain.WireEvent{Direction: domain.WireDirectionRequest, Payload: "{}"},
+				domain.SeamClosedEvent{Seam: domain.MomentPostResponse, Fired: []string{"tool-call-repair"}},
 			} {
 				sink.Emit(e)
 			}
@@ -2432,7 +2434,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 	for i, line := range lines {
 		if line["seq"] != float64(i+1) {
 			t.Errorf("line %d (%v) has seq %v; the sequence starts at 1 and never skips — a gap "+
-				"means a lost line, and the excluded WireEvent must not consume one",
+				"means a lost line, and the excluded sink-only variants must not consume one",
 				i, line["event"], line["seq"])
 		}
 	}

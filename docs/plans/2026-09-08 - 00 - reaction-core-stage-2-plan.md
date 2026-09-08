@@ -65,7 +65,19 @@ go test ./internal/reactions/ ./internal/tuitest/ ./internal/config/ ./cmd/apoge
 
 **Commit:** `refactor(reactions): rename internal/hooks to internal/reactions`
 
-## 2. Domain: the seam-closing notices and `SeamClosedEvent`
+## 2. Domain: the seam-closing notices and `SeamClosedEvent` — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): consequential edit — apogee.go: made necessary by adding domain.SeamClosedEvent — the facade re-exports every Event variant, so the new one joins the alias block beside the notice aliases the item asked for.
+
+NOTES (2026-09-08): consequential edit — internal/reactions/hooks.go: made necessary by `Events()` becoming `domain.Notices()` — the `Event` doc comment said "the five NOTICE Moments" and now says the vocabulary is `domain.Notices()`, with only the original five carrying a named constant here.
+
+NOTES (2026-09-08): consequential edit — internal/tui/fold.go: made necessary by adding domain.SeamClosedEvent — `progressSaveTrigger`'s doc enumerates the variants that answer false and now names the seam closure among them.
+
+NOTES (2026-09-08): added `TestMomentIsNotice` beyond the item's Tests list — `Moment.IsNotice()` is new exported behaviour and the standards require a success and a negative case for it; `TestClosingMapsEverySeamToItsNotice` covers `Closing()` as the item asked.
+
+NOTES (2026-09-08): `docs/manual/hooks.md` still says "one or more of the five events" and `docs/manual/configuration.md:373` still lists five; not touched here — items 18 and 19 own the manual, and neither is done.
+
+NOTES (2026-09-08): `TestEventValuesArePinnedLiterals` (`hooks_test.go`) still pins exactly the five original `reactions` constants, which is correct — this item added no constants to that package, only vocabulary to `domain`.
 
 **What:** Recast at the regression check (2026-09-08). In `internal/domain/reaction.go` add `MomentApprovalDecided = "approval-decided"` and five notices `MomentPreRequestFinished`, `MomentPostResponseFinished`, `MomentPreToolExecFinished`, `MomentPostToolResultFinished`, `MomentHistoryRewriteFinished` (spellings `<seam>-finished`); `allNotices` order becomes `exchange-finished, turn-finished, file-changed, approval-waiting, approval-decided, error, pre-request-finished, post-response-finished, pre-tool-exec-finished, post-tool-result-finished, history-rewrite-finished`. Add `Moment.IsNotice()` and `Moment.Closing() Moment` (seam → its `-finished` notice; zero for a notice). In `internal/domain/events.go` add `SeamClosedEvent{EventBase; Seam Moment; Fired []string; Value any}` with a doc comment binding `Value` to the seam's payload as `fire` received it (`*Request`, `PostResponseMoment`, `*ToolCallEdit`, `ToolResultMoment`, `*Conversation`), read-only, valid only for the duration of `Emit` — a sink must not retain it. The event is sink-only: `internal/eventjson/encode.go`'s default arm already returns `ok=false`; rewrite its doc comment (:63-66) to name the two sink-only variants. `internal/tui`'s `foldCases()` gets an explicit "nothing" row; `apogee.go` gains the new notice aliases. `approval-waiting` is NOT renamed here (item 5).
 

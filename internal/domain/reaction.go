@@ -34,18 +34,36 @@ const (
 	MomentHistoryRewrite Moment = "history-rewrite"  // edit conversation state
 )
 
-// The five notice Moments — the post-hoc points. The values are the reactions.Event spellings
+// The six standalone notice Moments — post-hoc points that report a fact of their own rather
+// than the closing of a seam. The first five values are the reactions.Event spellings
 // (internal/reactions), unchanged: they are what a configured `events:` list already names.
 const (
 	MomentExchangeFinished Moment = "exchange-finished" // a Depth-0 Turn closed its Exchange
 	MomentTurnFinished     Moment = "turn-finished"     // a Depth-0 Turn boundary, whatever its status
 	MomentFileChanged      Moment = "file-changed"      // a workspace-scoped write tool succeeded
 	MomentApprovalWaiting  Moment = "approval-waiting"  // an Approval was raised, before its decision
+	MomentApprovalDecided  Moment = "approval-decided"  // an Approval reached its verdict
 	MomentError            Moment = "error"             // a localised, recovered engine fault
 )
 
+// The five SEAM-CLOSING notices — one per seam, spelled `<seam>-finished`. Each reports that its
+// seam finished passing: the cascade ran to its end and the loop moved on with whatever working
+// value came out of it. They are notices and not seams, so a reaction reading one changes nothing
+// about the pass it reports; what they buy is observability of an in-loop point from the post-hoc
+// half of the vocabulary, where a user-origin observe entry may subscribe (ADR 0076 A6).
+const (
+	MomentPreRequestFinished     Moment = "pre-request-finished"
+	MomentPostResponseFinished   Moment = "post-response-finished"
+	MomentPreToolExecFinished    Moment = "pre-tool-exec-finished"
+	MomentPostToolResultFinished Moment = "post-tool-result-finished"
+	MomentHistoryRewriteFinished Moment = "history-rewrite-finished"
+)
+
 // allSeams is the seam vocabulary in loop order; allNotices is the notice vocabulary in the
-// order internal/reactions reports it.
+// order internal/reactions reports it — the six standalone notices first, in the order that
+// package already listed them, then the five seam-closing notices in loop order. Appending
+// rather than interleaving keeps the five spellings a configuration in the wild already names
+// at the head of every listing they appear in.
 var (
 	allSeams = []Moment{
 		MomentPreRequest,
@@ -59,7 +77,13 @@ var (
 		MomentTurnFinished,
 		MomentFileChanged,
 		MomentApprovalWaiting,
+		MomentApprovalDecided,
 		MomentError,
+		MomentPreRequestFinished,
+		MomentPostResponseFinished,
+		MomentPreToolExecFinished,
+		MomentPostToolResultFinished,
+		MomentHistoryRewriteFinished,
 	}
 )
 
@@ -75,11 +99,43 @@ func (m Moment) IsSeam() bool {
 	return false
 }
 
+// IsNotice reports whether the Moment is one of the notice Moments — the post-hoc kind, whose
+// payload is sealed. It is not the negation of IsSeam: a spelling outside the vocabulary is
+// neither, so a caller validating a configured Moment must ask both.
+func (m Moment) IsNotice() bool {
+	for _, n := range allNotices {
+		if m == n {
+			return true
+		}
+	}
+	return false
+}
+
+// Closing returns the seam-closing notice that reports the end of this seam's pass —
+// MomentPreRequestFinished for MomentPreRequest, and so on for the other four. It answers the
+// ZERO Moment for a notice and for any spelling outside the vocabulary: only a seam closes, and
+// a notice is already the report of something that finished.
+func (m Moment) Closing() Moment {
+	switch m {
+	case MomentPreRequest:
+		return MomentPreRequestFinished
+	case MomentPostResponse:
+		return MomentPostResponseFinished
+	case MomentPreToolExec:
+		return MomentPreToolExecFinished
+	case MomentPostToolResult:
+		return MomentPostToolResultFinished
+	case MomentHistoryRewrite:
+		return MomentHistoryRewriteFinished
+	}
+	return ""
+}
+
 // Seams returns the five seam Moments in loop order. The slice is a fresh copy, so a caller
 // listing them for a help text or a validation message cannot disturb the vocabulary.
 func Seams() []Moment { return append([]Moment(nil), allSeams...) }
 
-// Notices returns the five notice Moments in their documented order, as a fresh copy.
+// Notices returns the eleven notice Moments in their documented order, as a fresh copy.
 func Notices() []Moment { return append([]Moment(nil), allNotices...) }
 
 // Origin is who a Reaction belongs to — one axis of the Reaction surface matrix (CONTEXT:

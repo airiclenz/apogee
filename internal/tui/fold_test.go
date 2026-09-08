@@ -298,6 +298,14 @@ func foldCases() []foldCase {
 			// is what shows them, so the scrollback, the gauge and the status phrase all stay put.
 			event: domain.WireEvent{Direction: domain.WireDirectionRequest, Payload: `{"model":"m"}`},
 		},
+		{
+			name: "SeamClosedEvent is inert in the view",
+			// Nothing at all, and by contract: the event is sink-only, and its Value is the seam's
+			// live working value — read-only and valid only for the duration of Emit. A view that
+			// rendered it would be holding a reference the engine keeps mutating. What the human
+			// sees of a seam is the ReactionFiredEvent of whatever acted there, not the pass itself.
+			event: domain.SeamClosedEvent{Seam: domain.MomentPostResponse, Fired: []string{"tool-call-repair"}},
+		},
 	}
 }
 
