@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: superseded by ADR 0076 (amendment A9, 2026-09-08)
 ---
 
 # Curation is per-model: Validated sets keyed by the model fingerprint

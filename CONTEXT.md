@@ -29,8 +29,8 @@ the coding tool now. Terms that described the old middleware structure are retir
 **Apogee** (the coding agent):
 The terminal-based agent that owns the agentic coding loop end-to-end for a small local
 LLM: it builds each request, calls the Upstream, parses the response, dispatches tools,
-and applies Mechanisms — all in one cross-platform Go binary. It is no longer a layer
-between a coding tool and a model; it is the coding tool.
+and fires the **Reactions** armed at each **Moment** it passes — all in one cross-platform Go
+binary. It is no longer a layer between a coding tool and a model; it is the coding tool.
 _Avoid_: "the proxy", "Apogee Core", "the extension", "middleware" (all describe the
 retired predecessor structure).
 
@@ -69,8 +69,8 @@ surface needs them. See
 [ADR 0001](docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md) and
 [ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md).
 _Avoid_: "message" (that is a conversation message, the `Role`/`Content` kind), "notification",
-"**Hook event**" (that names the five-moment vocabulary a **Hook** fires on — a lossy projection of
-five of these variants, not this).
+"notice **[Moment](#reactions-and-moments)**" (that names the eleven post-hoc points a user-origin
+**Reaction** fires on — a lossy projection of some of these variants, not this).
 
 **Event lines**:
 The one-line-per-**Event** JSON rendering `apogee headless --format json` writes to stdout. The
@@ -80,12 +80,12 @@ They are a Driver's protocol, not the engine's surface: the engine stays wire-si
 Go values, and headless composes the bytes. They carry every Event variant except the **Inspector**'s
 raw-protocol one, each as one object with a shared envelope (`event`, `v`, `seq`, `time`, `session`,
 `turn`, `depth`, `call_id`) and the variant's own members under `data`; its event names are
-snake_case, deliberately distinct from a **Hook event**'s kebab-case vocabulary, because the same
-moment is not filtered the same way in both. They are bracketed by two frames that are *not* Events —
-`run_started` and `run_finished`, the latter carrying the run's summary and exit code and written on
-every exit path, including one whose run never started. Lossless and ordered: they never drop, the
-deliberate contrast with a **Hook**, which does — a stalled reader stalls the loop instead. Versioned
-`v:1` and additive within it. See
+snake_case, deliberately distinct from a notice **[Moment](#reactions-and-moments)**'s kebab-case
+vocabulary, because the same moment is not filtered the same way in both. They are bracketed by two
+frames that are *not* Events — `run_started` and `run_finished`, the latter carrying the run's
+summary and exit code and written on every exit path, including one whose run never started. Lossless and ordered: they never drop, the
+deliberate contrast with an observe **[Reaction](#reactions-and-moments)**, which does — a stalled
+reader stalls the loop instead. Versioned `v:1` and additive within it. See
 [ADR 0075](docs/adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md).
 _Avoid_: "Event stream" for the lines (that is the engine's sequence these render), "log" (apogee
 owns no log files or retention policy — this is a contract), "API" / "server mode" (a wire surface
@@ -113,10 +113,10 @@ result saved as an ordinary **Session record** marked with its Schedule's identi
 on browsable `Meta`) so the `/sessions` browser can label it. A Firing *is* a **headless run** —
 the same act as the `apogee headless` runner, over the shared core (`internal/run`)
 both use. It carries nothing over from the previous Firing (fresh context; no summary is
-injected — model-visible content would be a Mechanism to bench, not a scheduler feature), its
-Approver is a **fail-safe denier** (a gated action fails visibly and nothing waits for a human),
-its **Asker** and **Presenter** are `nil`, and it saves **once, at completion** — a deliberate
-scoping of ADR 0022's per-Turn cadence to a bounded, unattended run. Firings of one Schedule are
+injected — model-visible content would be an **advise** Reaction to bench, not a scheduler
+feature), its Approver is a **fail-safe denier** (a gated action fails visibly and nothing waits
+for a human), its **Asker** and **Presenter** are `nil`, and it saves **once, at completion** — a
+deliberate scoping of ADR 0022's per-Turn cadence to a bounded, unattended run. Firings of one Schedule are
 strictly serial: a tick landing while one is in flight is **skipped**, never queued. See
 [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md).
 _Avoid_: "background task" / "detached process" (a Firing is a Session in this process, and it
@@ -146,36 +146,14 @@ The colloquial alias for a **user**-origin **[Reaction](#reactions-and-moments)*
 other tools call a hook" — offered in the manual's introduction and nowhere else in the glossary
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D12). The
 observe-only Hook of [ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md)
-is the **observe** cell of the user row: an entry naming the **Moment**(s) it fires on and an argv
-`run:` or a `webhook:`, optionally filtered to one `workspace:`, composed by every **Driver** from
-one shared library and run after the fact on the user's own machine, outside confinement, as the
-user's config. A user Reaction that returns text (`advise:`) or a decision (`gate:`) is still a
-Reaction, not a "hook that talks back".
+is the **observe** cell of the user row: an entry naming the notice **Moment**(s) it fires on and
+one `run:` — an argv, or a webhook mapping — optionally filtered to one `workspace:`, composed by
+every **Driver** from one shared library and run after the fact on the user's own machine, outside
+confinement, as the user's config. A user Reaction that returns text (`advise:`) or a decision
+(`gate:`) is still a Reaction, not a "hook that talks back".
 _Avoid_: "Hook" as a glossary term (say **Reaction**, and name the class), "plugin" (a Reaction
 adds no capability to apogee), "trigger" (that names the `on:` half of a daemon Schedule's
 envelope).
-
-**Hook event**:
-A **notice [Moment](#reactions-and-moments)** under its Driver-side name — one of the five
-after-the-fact, never model-visible points a **Hook** fires on: `exchange-finished` (a Depth-0 Turn
-closed its Exchange; carries faulted / step-capped), `turn-finished` (every Depth-0 Turn boundary,
-with its status), `file-changed` (a write tool succeeded, at any depth), `approval-waiting` (an
-**Approval** was raised, before its decision), `error` (an engine error, at any depth). The set is
-additive by design; a moment not on it is not a Hook event yet. Per-token, tool-call,
-sub-agent-phase, session-save, prune and usage moments are deliberately not in the first set.
-A **Hook** itself is an entry in the global `hooks:` list naming the event(s) it fires on and either
-an argv `command:` or a `webhook:` URL, optionally filtered to one `workspace:`, composed by every
-**Driver** from one shared library over the engine's event stream, so the TUI, `apogee headless`
-and a daemon **Firing** fire the same list. It is strictly one-way: nothing a Hook prints, returns
-or answers reaches the model, the conversation or the Session record, and a Hook can neither veto
-nor delay the loop — the runner queues per Hook, in order, off the engine's path, and drops under
-overload rather than block. That is the **observe** cell of the user row and nothing more: a Hook
-runs after the fact on the user's own machine, outside confinement, as the user's config rather
-than a model action. See
-[ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md).
-_Avoid_: "plugin" (a Hook adds no capability to apogee), "trigger" (that names the `on:` half of
-a daemon Schedule's envelope), "hook point" (retired — say seam **Moment**, which is not where a
-Hook fires).
 
 **Sub-agent**:
 A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with its
@@ -1207,26 +1185,41 @@ and a panic reported and stepped over. Each returns one **`Outcome`**:
 Anything else is a firing, and it reaches every Driver as one `ReactionFiredEvent` keyed by id,
 under the action `retry`, else `defer`, else `intercept` when a shape reaction moved the working
 value's revision. The seven Floor-guard booleans stay the canonical switches for the builtins.
-Stage 2 adds the rest of the design: the `reactions:` list a user writes, argv
-(`run:` / `advise:` / `gate:`) and `webhook:` handlers, the per-class lanes and trust postures, and
-the `hooks:` alias notice. Until then the async observe lane is `internal/hooks`' own runner,
-unchanged
-([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D4).
+A **user**-origin Reaction is one entry of the global `reactions:` list —
+`{id, on: [notices], run: <argv | {url, headers, headers-env}>, workspace?, timeout?, enabled?}` —
+resolved at **observe** class into a `domain.Reaction` the async lane (`internal/reactions`' own
+runner) fires. `advise:` and `gate:` are reserved keys that refuse the file with a sentence naming
+them, as does an `on:` naming a seam, and `enabled: false` **parks** an entry: it stays in the file
+and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
+**`Generation`** — `{Floor, Bypass, Observe}` — which a **Driver** applies in one act to the agent
+(which takes Floor and Bypass) and to the runner (which takes Observe), so nothing downstream reads
+a half-swapped state; it is the single idiom that replaced `SetBypass`, `SetFloor` and the runner's
+own `Replace`
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D4, A8). The
+key's earlier name was `hooks:`, and a file still carrying it is **folded** into `reactions:` once,
+at start-up: backed up first, re-rendered from its parsed entries, and reported in a note naming
+every rename it made.
 _Avoid_: "Hook" (the colloquial alias — see [Hook](#identity-and-shape)), "Mechanism" (retired),
 "plugin" (no Reaction adds a capability).
 
 **Moment**:
 A point the loop passes, on which a **Reaction** may fire — `domain.Moment`, one string vocabulary
-of ten. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and its
-five are listed in the order a Turn passes them: `pre-request`, `post-response`, `pre-tool-exec`,
-`post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload sealed, and its
-five carry the **Hook event** spellings unchanged: `exchange-finished`, `turn-finished`,
-`file-changed`, `approval-waiting`, `error`. The strings are the contract — they are what a
+of sixteen. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and
+its five are listed in the order a Turn passes them: `pre-request`, `post-response`,
+`pre-tool-exec`, `post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload
+sealed, and there are **eleven** of them. Six report a fact of their own: `exchange-finished`,
+`turn-finished`, `file-changed`, `approval-requested`, `approval-decided`, `error`. Five are the
+**seam-closing** notices — one per seam, spelled `<seam>-finished`: `pre-request-finished`,
+`post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished`,
+`history-rewrite-finished` — each reporting that its seam's cascade ran to its end and the loop
+moved on with whatever came out of it. A seam-closing notice carries the seam's **full working
+value**, not a digest: the payload is a read-only reference valid for the duration of the emit,
+serialized only where an entry actually subscribes and never copied or logged otherwise, so the
+observability costs nothing when nobody is watching. The strings are the contract — they are what a
 configuration names and what reaches an observer on a `ReactionFiredEvent` — and the set grows
-additively: the further notices ADR 0076 D1 describes, and the rule that every seam publishes a
-notice when it closes, land with stage 2's resolver.
-_Avoid_: "Hook point" (retired — a seam Moment is what it named), "Hook event" (a notice Moment),
-"stage", "phase".
+additively.
+_Avoid_: "Hook point" (retired — a seam Moment is what it named), "Hook event" (retired — a notice
+Moment is what it named), "stage", "phase".
 
 **Mechanism**:
 **Retired** by [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
@@ -1746,22 +1739,21 @@ moved — the bindings did), "rehome" as a noun for a server switch (the operati
 **Behavioral fingerprint**:
 The model identity a completed **model battery** earns — the model's own advertised label, at
 **medium** confidence. The battery raises an identity's *tier*; it never re-spells it (ADR 0021,
-Amendment 2026-07-22), because that label is the key [Validated set](#validation-and-the-bench)
-entries and user aliases are both filed under, and a
-probe that renamed the model would orphan every one of them. It is the middle rung of the
-`ModelFingerprint`'s own best-available ladder — weights-hash (**high**) → behavioral fingerprint (**medium**) →
-metadata label (**low**) — and the *only* source of `ConfidenceMedium`, because identity is
+Amendment 2026-07-22), because that label is the key **Model profile** overrides and user aliases
+are filed under, and a probe that renamed the model would orphan every one of them. It is the
+middle rung of the `ModelFingerprint`'s own best-available ladder — weights-hash (**high**) →
+behavioral fingerprint (**medium**) → metadata label (**low**) — and the *only* source of `ConfidenceMedium`, because identity is
 resolved offline at startup: it reaches later sessions **through a persisted probe record**
 (versioned, owner-private, keyed on endpoint + advertised label + probe timestamp; any defect is
-skipped with a warning, never a blocked startup). What the battery observed is recorded beside
-the claim as the **behavioral signature** — a **fuzzy feature match over battery outcomes**
-(which capabilities were observed; logprobs preferred where the Upstream exposes them), **never a
+skipped with a warning, never a blocked startup). Since
+[Validated sets](#retired-terms) retired, medium confidence switches **no automatism** on — the one
+it used to (a matching set auto-applying instead of being offered) went with them; what the record
+buys is a stable identity across sessions, and deleting it (or `--no-save`) drops that. What the
+battery observed is recorded beside the claim as the **behavioral signature** — a **fuzzy feature
+match over battery outcomes** (which capabilities were observed; logprobs preferred where the Upstream exposes them), **never a
 hash of response text**, so sampling noise or a re-worded prompt does not move it. The signature
 is *evidence*, never a match key: comparing it across probes is what makes a swapped model behind
-an unchanged label detectable. Consequence worth knowing before running the battery: at medium
-confidence a matching Validated set **auto-applies** instead of being offered (ADR 0016 §5) — so
-probing is the act that switches that automatism on, and deleting the record (or `--no-save`) is
-the off-switch.
+an unchanged label detectable.
 _Avoid_: "response hash" / "output signature" (explicitly rejected — noise, not identity),
 "model detection" (it identifies the model *behind* a label, it does not name it), calling the
 signature a fingerprint (the signature is the evidence; the fingerprint is the identity).
@@ -1798,41 +1790,6 @@ in-process heir to the bench's portable-tier Interventions (`system_addendum`, `
 `tool_filter`).
 _Avoid_: "intervention" (the bench's term for its own experiment surface).
 
-**Validated set**:
-A **per-model** enable set of catalogued Mechanisms that has passed the aggregate
-non-inferiority gate against Bypass **on that model** (ADR 0009) — proven *safe* there;
-benefit is deliberately **not** part of the claim (non-inferiority is the bar, superiority is
-not required). Keyed on the
-confidence-tagged `ModelFingerprint`, resolved best-available — the evidence attaches to the
-precise model measured, and any carry-over to a sibling quant or family member is an explicit
-human decision, never automatic. A model with no Validated set runs the catalogue's global
-defaults (the D1 floor) — and with the shipped catalogue empty, that is the
-[Floor guards](#floor-guard) and nothing above them. An entry is produced only by a completed, pre-registered aggregate
-Campaign passing the gate on that model — with engagement verified — regardless of who runs it.
-A matching set applies **whole or not at all** — a subset, or a merge with hand-picked
-Mechanisms, is a different, *unvalidated* stack — and applies *automatically* only at ≥ medium
-fingerprint confidence; below that it is **offered**, and applying it (like carrying it over to
-an aliased model) is an explicit config decision. Explicit mechanism config and Bypass take
-precedence over auto-application. The **shipped roster is empty**: the one curated entry apogee
-shipped (gemma) retired with the fourteen rows, because its evidence was a leave-one-out campaign
-over a fifteen-member stack nine of whose members no longer exist and a measured set is its members
-([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)).
-The surface itself stays whole — a **user's own** `~/.apogee/validated/*.json` entry still resolves,
-still applies, and sheds any id that has since retired rather than being skipped as a set.
-_Avoid_: "recommended set" (promises help; the bar is safety), "default set" (an unknown model's
-default is the floor, not a set), "per-architecture set" (the key is the fingerprint, not the
-family).
-
-**Curation**:
-The operator decision layer above the evidence stream: what the global catalogue contains
-(membership, port verdicts, global defaults) and what each model's
-[Validated set](#validation-and-the-bench) contains. Strictly separate from evidence: a
-completed Campaign appends a **ledger entry only** (the L9 discipline); a curation action is a
-distinct, later decision that cites ledger entries. Scope follows evidence: a single-model
-campaign can license only that model's Validated set; global actions (deleting a catalogue row,
-flipping a global default) need cross-model evidence.
-_Avoid_: treating a ledger entry as a behaviour change (evidence records; curation acts).
-
 ### Retired terms
 
 These were canonical in `apogee-sim/CONTEXT.md` and are **deliberately dropped** because
@@ -1855,14 +1812,37 @@ vocabulary can map forward:
   it fires on. The distinctions that still matter survive as attributes (the **Outcome** a seam
   Reaction returns; `Outcome.Defer` vs a hint derived fresh at `pre-request`).
 
-Three more were canonical here and retired by
+Four more were canonical here and retired by
 [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md), which folds
 Floor guards, the Mechanism lab layer and Hooks into one **Reaction** core over **Moments** with an
 origin × class policy matrix: **Mechanism** → [Reaction](#reactions-and-moments) (the lab layer
 is deleted; the bench arms an engine-origin Reaction through the facade); **Hook point** → seam
-[Moment](#reactions-and-moments); **Experimental hook** → bench-armed Reaction. **Hook** is
-not retired but demoted to the colloquial alias for a user-origin Reaction, and **Bypass** now reads
+[Moment](#reactions-and-moments); **Hook event** → notice [Moment](#reactions-and-moments) (the
+eleven post-hoc spellings, with the old waiting spelling renamed `approval-requested` and the
+five seam-closing notices added in stage 2); **Experimental hook** → bench-armed Reaction.
+**Hook** is not retired but demoted to the colloquial alias for a user-origin Reaction, and **Bypass** now reads
 "advise and shape Reactions off" rather than "Mechanisms off".
+
+Two more retired with the **validated-set surface itself**, deleted in stage 2 of ADR 0076 on
+[ADR 0016](docs/adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md)'s own
+2026-09-08 amendment, which supersedes that ADR in full:
+
+- **Validated set** → gone, together with the `validated-sets:` key, `internal/validated`, the
+  shipped roster, both `/settings` rows and the manual section; the config migration strips the key
+  out of a saved file. It named a **per-model** enable set of catalogued Mechanisms that had passed
+  the aggregate non-inferiority gate against Bypass *on that model*
+  ([ADR 0009](docs/adr/0009-the-ab-decision-rule.md)) — proven *safe* there, benefit deliberately
+  not part of the claim — keyed on the confidence-tagged `ModelFingerprint`, resolved
+  best-available, and applied whole or not at all. ADR 0071 retired the roster it selected from, so
+  from **v0.20.0** the surface loaded, validated and armed nothing. The reasoning kept: curation is
+  per model, and a fingerprint is how you key it — a per-model **Reaction** roster, if one is ever
+  wanted, belongs on the **Model profile** axis rather than in a parallel mechanism of its own.
+- **Curation** → gone with it. It named the operator decision layer above the evidence stream: what
+  the global catalogue contained (membership, port verdicts, global defaults) and what each model's
+  Validated set contained, held strictly separate from evidence — a completed **Campaign** appends
+  a ledger entry only, and a curation action was a distinct, later decision citing those entries.
+  With no catalogue and no per-model set there is nothing left to curate; the evidence discipline
+  itself is untouched.
 
 The rest were canonical in **this** glossary and retired with the mechanism wave of
 [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md),
@@ -1885,8 +1865,8 @@ rather than earning an unknown-id failure, and the archived
   injected qualifying observations through a pre-request Mechanism) → retired with the `library`
   Mechanism: nothing observes Turns or injects learned text any more, and `~/.apogee/library/` on
   disk is never touched. `internal/library`'s other half stays and is not this term — the
-  confidence-tagged `ModelFingerprint` and the persisted probe record, which serve
-  [Validated sets](#validation-and-the-bench) and `probe model`. The **Failure library** was always
+  confidence-tagged `ModelFingerprint` and the persisted probe record, which serve `probe model` and
+  the identity a **Model profile** and its aliases are keyed on. The **Failure library** was always
   the bench's own term and is unaffected.
 - **History truncation** (`truncate_history`) → retired unshipped: the cheap alternative to
   Compaction, mechanically dropping the middle of the conversation and keeping the last N

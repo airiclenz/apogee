@@ -268,12 +268,12 @@ numbers drift; names do not.
 | `runHooks[H]` + 5 adapters | `internal/agent/hookrun.go` | the sync-lane dispatcher |
 | `runPostResponseGuards`, `runPreToolExecGuards`, `runPreRequestGuards` | `internal/agent/floorguards.go` | engine-origin reactions on the same dispatcher |
 | double ladder at 5 sites | `loop.go` (pre-request ×2, post-response), `dispatch.go` (pre-tool-exec ×2, post-tool-result ×2) | one `Fire(moment, payload)` per site |
-| `hooks.Runner` (queue, matcher, executors) | `internal/hooks/runner.go`, `match.go`, `command.go`, `webhook.go` | the async lane, unchanged in substance |
-| `SetBypass`/`bypassMu`, `SetFloor`/`floorMu`, `Runner.Replace` | `agent.go`, `floorguards.go`, `runner.go` | one generation swap of the reaction set |
+| `hooks.Runner` (queue, matcher, executors) | `internal/hooks/runner.go`, `match.go`, `command.go`, `webhook.go` | the async lane, unchanged in substance — **delivered 2026-09-08 (stage 2)** |
+| `SetBypass`/`bypassMu`, `SetFloor`/`floorMu`, `Runner.Replace` | `agent.go`, `floorguards.go`, `runner.go` | one generation swap of the reaction set — **delivered 2026-09-08 (stage 2)** |
 | `mechanisms.Deps`, `register`, `catalogue`, `SwapCatalogue`, `Build`, `Descriptors` | `internal/mechanisms/catalogue.go` | deleted |
 | `selfreg.go` (strikes, Turn Budget), `skipUnderBypass` | `internal/agent/selfreg.go`, `hookrun.go` | deleted from the core; `--bypass` = builtins only |
-| `retired.go` roll with `Successor` | `internal/mechanisms/retired.go` | the config migration table |
-| `hooks:` list, `mechanisms:` map | `internal/config/hooks.go`, `config.go`, `configwrite_mechanism.go`, `cmd/apogee/wire_settings.go` | one `reactions:` list, one resolver (amended 2026-09-08: the 7 floor `*bool` keys and the `floorFromOptions` negation seam STAY — ADR 0076 D11; the layers are stage 2b) |
+| `retired.go` roll with `Successor` | `internal/mechanisms/retired.go` | the config migration table — **delivered 2026-09-08 (stage 2)** |
+| `hooks:` list, `mechanisms:` map | `internal/config/hooks.go`, `config.go`, `configwrite_mechanism.go`, `cmd/apogee/wire_settings.go` | one `reactions:` list, one resolver (amended 2026-09-08: the 7 floor `*bool` keys and the `floorFromOptions` negation seam STAY — ADR 0076 D11; the layers are stage 2b) — **delivered 2026-09-08 (stage 2)** |
 | `/settings` rows: hooks (read-only), mechanisms (read-only) | `internal/config/registry.go` | one read-only structured `reactions` row (amended 2026-09-08: the 7 floor rows stay as they are — ADR 0076 D11, open bead `apogee-tbs`; no per-entry toggle table until stage 2b) |
 
 Stays byte-for-byte: the policy functions in `internal/floor` (`SalvageToolCall`, `ToolLoopBreak`,

@@ -709,7 +709,11 @@ go test ./cmd/apogee/ -run 'Docs'
 
 **Commit:** `docs: the manual, README and agent guide speak reactions:`
 
-## 20. CONTEXT.md and the ADR pointer notes
+## 20. CONTEXT.md and the ADR pointer notes — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the acceptance grep forbids the literal `approval-waiting` in CONTEXT.md, so the Retired-terms **Hook event** pointer says "the old waiting spelling renamed `approval-requested`" rather than naming it.
+NOTES (2026-09-09): retiring **Validated set** left three stale back-references in CONTEXT.md that the move made false — Behavioral fingerprint's "the key Validated set entries and user aliases are both filed under" and its medium-confidence auto-apply consequence, and the Library retired term's `#validation-and-the-bench` link. All three were corrected in the same file; the "Validation and the bench" section header stays (The bench, Experimental hook remain under it).
+NOTES (2026-09-09): pre-existing debt, not touched — CONTEXT.md still uses "Mechanism" as live vocabulary at :1767-1768 (Capability tier) and in a dozen "not a Mechanism" contrast lines outside this item's enumerated ranges; ADR 0076 D12 retired the term in stage 1.
 
 **What:** Depends on item 19. `CONTEXT.md`: **Hook event** (:158-179) moves to Retired terms as a pointer to Moment (call: term retired); **Moment** (:1218-1230) lists the eleven notices with the five seam-closing ones and their full-value posture; **Reaction** (:1192-1217) gains the `reactions:` entry shape, `Generation`, and the migration sentence; **Hook** (:144-157) keeps its alias role; **Validated set** (:1800-1824) and **Curation** (:1825-1834) move to Retired terms with the ADR 0016 pointer; header line :32 ("applies Mechanisms") and any header prose naming the old vocabulary (:5-6, :10, :17, :72, :83, :87, :116 — check each) are corrected. `docs/adr/0016-*.md` `Status:` line becomes `superseded by ADR 0076 (amendment A9, 2026-09-08)`. `docs/adr/0073-*.md` D6, D8, D9 gain one pointer note each (`APOGEE_REACTION_*`, `internal/reactions`, the `reaction` payload field — stage 2 of ADR 0076), and D4 one too (the guard). `docs/design/reaction-core-greenfield.md` §9.1 rows 8, 9, 12, 13 gain a "delivered 2026-09-08 (stage 2)" note.
 

@@ -57,6 +57,12 @@ phase field so existing consumers keep folding one card. Observation only, like
 Everything else (tokens, tool calls, sub-agent phases, session saves, prune, usage) is additive
 later.
 
+> Stage 2 of [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) took the
+> additive slot: the waiting spelling above is now `approval-requested`, and six notices joined it —
+> `approval-decided` plus the five seam-closing `<seam>-finished` notices. Eleven notice **Moments**
+> ship; the "no `pre-*` event, ever" rule is unchanged, because a seam-closing notice reports a pass
+> that is already over.
+
 **5. Global config only, workspace filter.** `hooks:` is a list in `~/.apogee/config.yaml`
 (structured row, count summary, live-reloaded with the file). A repo-local hook file is
 **denied**: a Hook runs commands on the user's machine, and a cloned repository must never be
@@ -71,6 +77,12 @@ POST of the same JSON, no retries (the receiver owns durability), optional `head
 may reference an env var so no token sits in the file. The payload is not secret-scrubbed: it goes
 to the user's own command or URL, the same trust as the screen — accepted.
 
+> Stage 2 of ADR 0076 renamed the spellings, not the posture: the env set is `APOGEE_REACTION_*`
+> (`APOGEE_HOOK_*` above is the historical name), the payload's `hook` field is `reaction`, and
+> `command:` and `webhook:` became the two shapes — argv list, or `{url, headers, headers-env}`
+> mapping — of one `run:` key. The config migration says so in its note, because a user's own
+> scripts are the one half apogee cannot rewrite.
+
 **7. Dispatch.** One bounded, ordered queue and one worker per Hook; different Hooks run in
 parallel; a full queue drops the newest event and counts it; shutdown waits a bounded grace. The
 engine never waits on a Hook.
@@ -79,10 +91,18 @@ engine never waits on a Hook.
 — a de-duplicated ephemeral notice in the TUI, a log line headless and in the daemon — never as an
 `ErrorEvent`, so an `error` Hook cannot fire on its own failure.
 
+> Stage 2 of ADR 0076 keeps the rule and re-words the notice, which now reports `reaction <id>: …`.
+> It covers all eleven notice **Moments**, the five seam-closing ones included: a failure on any of
+> them still never re-enters the Event stream.
+
 **9. One library, every root.** `internal/hooks`, re-exported on the public facade; wired at the
 TUI bridge sink and through `run.Spec.Config.Events` for headless and daemon Firings, whose
 payload carries the Schedule's id and name. A per-schedule `run: notify:` key in the daemon
 envelope is deferred as the additive ADR 0034 §4 slot.
+
+> Stage 2 of ADR 0076 renamed the package to `internal/reactions` and re-typed it over
+> `domain.Reaction` and `domain.Generation` instead of an entry type of its own. The one library,
+> its install sites and its re-export on the public facade are otherwise unchanged.
 
 ## Rejected
 
