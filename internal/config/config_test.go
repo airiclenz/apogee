@@ -466,7 +466,11 @@ func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 
 	bound := map[string]keyAccessor{}
 	for _, k := range keyAccessors {
-		if _, ok := LookupKey(k.row.Path); !ok {
+		// `mechanisms` is the one accessor with no registry row: the key keeps PARSING (ADR 0076
+		// decision 11) while the /settings row that described it went with the catalogue (ADR 0076
+		// decision 1), so it is bound here and described nowhere. Every other accessor still has to
+		// name a described key.
+		if _, ok := LookupKey(k.row.Path); !ok && k.row.Path != "mechanisms" {
 			t.Errorf("keyAccessors binds %q, which the registry does not describe", k.row.Path)
 		}
 		if _, dup := bound[k.row.Path]; dup {
@@ -3388,6 +3392,29 @@ func TestApplyConfigMechanisms(t *testing.T) {
 	want := map[string]bool{"validate": true, "syntax": true, "truncate_history": false}
 	if !reflect.DeepEqual(opts.Mechanisms, want) {
 		t.Errorf("opts.mechanisms = %+v; want %+v", opts.Mechanisms, want)
+	}
+}
+
+// The `mechanisms:` key is the one key with NO registry row, and it still parses. The /settings row
+// that described it went with the catalogue it described (ADR 0076 decision 1), while the key itself
+// keeps loading so an existing config file is not refused and the Drivers can still render the
+// retired roll's notices from it (ADR 0076 decision 11). Both halves are asserted here, because
+// deleting the row and the registry-free accessor together is exactly the mistake that would turn a
+// shipped config into a startup error.
+func TestMechanismsKeyParsesWithoutARegistryRow(t *testing.T) {
+	t.Parallel()
+	if row, ok := LookupKey("mechanisms"); ok {
+		t.Errorf("registry describes %q (%s) — the /settings row went with the catalogue (ADR 0076)",
+			row.Path, row.Kind)
+	}
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "mechanisms:\n  grammar: true\n")
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v — the key must keep parsing with no row behind it", err)
+	}
+	if want := map[string]bool{"grammar": true}; !reflect.DeepEqual(opts.Mechanisms, want) {
+		t.Errorf("opts.Mechanisms = %+v; want %+v", opts.Mechanisms, want)
 	}
 }
 

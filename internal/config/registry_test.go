@@ -61,6 +61,15 @@ func walkSchema(t *testing.T, typ reflect.Type, prefix string, described map[str
 			walkSchema(t, deref, path, described)
 			continue
 		}
+		if path == "mechanisms" {
+			// The one key with no registry row, deliberately: `mechanisms:` still PARSES so an
+			// existing config loads (ADR 0076 decision 11), and the /settings row that described it
+			// went with the catalogue (ADR 0076 decision 1). It reaches the Options through a
+			// registry-free keyAccessor, which config_test's own bijection names too. The exemption
+			// belongs on this leaf arm rather than in the top loop above: fileConfig.Mechanisms is a
+			// map, so the descent ends here.
+			continue
+		}
 		t.Errorf("config key %q (%s.%s) has no registry row — add one so /settings can show it",
 			path, typ.Name(), field.Name)
 	}

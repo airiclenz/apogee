@@ -891,7 +891,14 @@ var keyAccessors = []keyAccessor{
 		fromFlag: func(o *Options, flags Options) { o.Bypass = flags.Bypass },
 	},
 	{
-		row: mustKey("mechanisms"),
+		// The ONE accessor with no registry row behind it. `mechanisms:` keeps parsing — an existing
+		// config still loads and the block still reaches the Options, where the Drivers turn it into
+		// the retired roll's notices (ADR 0076 decision 11) — while the /settings row that used to
+		// describe it went with the catalogue it described (ADR 0076 decision 1). The Key is spelled
+		// here rather than looked up because there is nothing to look up: mustKey would panic this
+		// package at init. Both bijection guards name this one exemption
+		// (TestKeyAccessorsBindDescribedKeys, walkSchema) and nothing else.
+		row: Key{Path: "mechanisms", Kind: KindStructured},
 		fromFile: func(o *Options, fc fileConfig) {
 			o.Mechanisms = nil
 			if len(fc.Mechanisms) > 0 {

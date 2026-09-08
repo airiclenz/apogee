@@ -39,7 +39,7 @@ const maskedSettingValue = "••••"
 // row failed to render"; "none" is the answer to the question the row asks.
 const noneSettingValue = "none"
 
-// The three pointers a non-editable row carries — where the key IS edited. A structured block is
+// The two pointers a non-editable row carries — where the key IS edited. A structured block is
 // edited in the human's own editor, which the row's ⏎ opens for them on that key's line (ADR 0037
 // decision 5): the pane cannot hold a list of servers or a profile block on a row, but it can put
 // the cursor on the line that holds one, which is a good deal more than telling somebody the name of
@@ -47,24 +47,14 @@ const noneSettingValue = "none"
 // acknowledgement interlock (a distinct affirmative act, never a default-yes) stays single-homed in
 // /confine (ADR 0012), so the pane sends the human there rather than growing a second way to loosen
 // a blast radius.
-//
-// mechanisms is the third, and the one row that is neither: its block's children are SWITCHES
-// — one bool per catalogued Mechanism — and a list of switches is a shape the pane holds perfectly
-// well, so ⏎ opens a sub-list of them rather than the file (tui.Options.ListMechanisms). Raw block
-// edits are still made in config.yaml by hand; what this row's ⏎ no longer does is open it there.
 const (
-	pointerExternalEdit  = "⏎ opens $EDITOR"
-	pointerConfine       = "use /confine"
-	pointerMechanismList = "⏎ opens toggle list"
+	pointerExternalEdit = "⏎ opens $EDITOR"
+	pointerConfine      = "use /confine"
 )
 
-// settingKeyMechanisms is the registry path of that row. It is spelled here because the pointer and
-// the affordance below both have to recognise the one key whose read-only-ness means something else.
-const settingKeyMechanisms = "mechanisms"
-
 // The two registry paths whose value the ENGINE holds rather than the resolution — the pair
-// overlayLiveSettings below replaces. They are spelled here for settingKeyMechanisms' reason: a row
-// that has to be recognised at all is recognised by its path.
+// overlayLiveSettings below replaces. They are spelled here because a row that has to be recognised
+// at all is recognised by its path.
 const (
 	settingKeyMode               = "mode"
 	settingKeyConfineToWorkspace = "confine-to-workspace"
@@ -290,8 +280,6 @@ func editPointer(k config.Key) string {
 	switch {
 	case k.Editable:
 		return ""
-	case k.Path == settingKeyMechanisms:
-		return pointerMechanismList
 	case externallyEdited(k):
 		return pointerExternalEdit
 	default:
@@ -304,9 +292,9 @@ func editPointer(k config.Key) string {
 // cannot come to describe different sets of keys.
 //
 // It is every key the pane will not write except the confinement pair — whose interlock (ADR 0012)
-// is what makes them unopenable, not their shape — and `mechanisms`, which the pane now edits in a
-// list of its own. Both exceptions are subtractions from "read-only", not a shape test: a key that
-// became read-only for some other reason tomorrow should reach the editor like the rest.
+// is what makes them unopenable, not their shape. That exception is a subtraction from "read-only",
+// not a shape test: a key that became read-only for some other reason tomorrow should reach the
+// editor like the rest.
 func externallyEdited(k config.Key) bool {
-	return !k.Editable && !k.GlobalOnly && k.Path != settingKeyMechanisms
+	return !k.Editable && !k.GlobalOnly
 }

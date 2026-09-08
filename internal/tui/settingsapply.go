@@ -396,9 +396,6 @@ func colorSchemeWarningNote(n int) string {
 // seam applied it (the footer's own copy); the rest are the renderer-owned keys settingsApplyLocal
 // puts into effect itself. Every other key is a path this package never spells — the binary's
 // dispatcher routes them by name, which is exactly the coupling ADR 0037 decision 2 keeps out here.
-// settingKeyMechanisms is the one exception to that last sentence and is not applied here at all: it
-// is the row whose ⏎ opens a list of its own instead of an editor, and a row can only be recognised
-// by its path (settingsEnter, the settingKeyColorScheme precedent in settingsVocabulary).
 const (
 	settingKeyMode             = "mode"
 	settingKeyAutoTitle        = "auto-title"
@@ -409,7 +406,6 @@ const (
 	settingKeyStallAfter       = "ui.stall-after"
 	settingKeySkillSuggestions = "ui.skill-suggestions"
 	settingKeyCursorShape      = "cursor-shape"
-	settingKeyMechanisms       = "mechanisms"
 )
 
 // settingsApplyFailedNote opens the row's failure when the WRITE landed and the apply did not: the

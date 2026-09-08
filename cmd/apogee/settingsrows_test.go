@@ -15,9 +15,8 @@ import (
 
 // fabricatedSettings is a resolved config with a DISTINCT value in every key, so a row that reads
 // the wrong field of options shows the wrong string rather than coincidentally the right one. The
-// values are deliberately not the defaults: `api-key` is set (so masking has something to hide),
-// `cursor-shape` is left unset (so the default-fallback rule has a subject), and `mechanisms`
-// carries an explicit `false` entry (so counting keys instead of enabled ones would overcount).
+// values are deliberately not the defaults: `api-key` is set (so masking has something to hide) and
+// `cursor-shape` is left unset (so the default-fallback rule has a subject).
 func fabricatedSettings() config.Options {
 	return config.Options{
 		Endpoint:      "http://192.168.64.1:1111",
@@ -64,7 +63,6 @@ func fabricatedSettings() config.Options {
 		UI: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false},
 		Bypass:              true,
-		Mechanisms:          map[string]bool{"validate": true, "syntax": true, "autofix": false},
 		ValidatedSetsEnable: true,
 		ValidatedSetsAlias:  map[string]string{"gpt-oss-20b": "gpt-oss"},
 		ModelProfiles: []profiles.Entry{
@@ -426,14 +424,11 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.skill-suggestions":    "false", // turned off in the fixture: a bool row reports the value, never the default
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
-		"sessions.max-age":   "0s",
-		"sessions.max-count": "0",
-		"cursor-shape":       "block", // unset, so the declared default is what is in force
-		"editor":             "code -w",
-		"bypass":             "true",
-		// The explicit `false` entry is not an enabled one, and nothing is added beside the block:
-		// no catalogued row is on by default (ADR 0071), so the count is the block's alone.
-		"mechanisms":            "2 mechanisms",
+		"sessions.max-age":      "0s",
+		"sessions.max-count":    "0",
+		"cursor-shape":          "block", // unset, so the declared default is what is in force
+		"editor":                "code -w",
+		"bypass":                "true",
 		"validated-sets.enable": "true",
 		"validated-sets.alias":  "1 alias",
 		"model-profiles":        "1 model profile",
@@ -538,16 +533,6 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 		if byPath[path].ExternalEdit {
 			t.Errorf("row %q opens $EDITOR; the confinement interlock is single-homed in /confine", path)
 		}
-	}
-	// mechanisms is the one structured block the pane opens ITSELF, in a list of switches, so its
-	// pointer names that list and its $EDITOR affordance is off — the two facts the predicate above
-	// already requires of each other, pinned here as the wording a human reads on the row.
-	if got := byPath["mechanisms"].EditPointer; got != pointerMechanismList {
-		t.Errorf("row %q pointer = %q; want %q — its children are switches the pane holds",
-			"mechanisms", got, pointerMechanismList)
-	}
-	if byPath["mechanisms"].ExternalEdit {
-		t.Errorf("row %q opens $EDITOR; ⏎ opens the Mechanism list instead", "mechanisms")
 	}
 	// system-prompt-text is NOT among them since it became editable in its own multi-line field: the
 	// prose the file carries as a block is written in the pane now (tui.SettingText).

@@ -660,12 +660,6 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return boolValue(o.Bypass) },
 	},
 	{
-		Path: "mechanisms", Kind: KindStructured,
-		Desc:      "Catalogued small-model Mechanisms by canonical ID; every one defaults off and is armed only by being named.",
-		Read:      func(o Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
-		Structure: func(o Options) any { return o.Mechanisms },
-	},
-	{
 		// The block's off-switch is a row of its own, for the `context-files.*` reason: it is a bool
 		// the pane can write, and leaving it inside a structured summary would send a human to their
 		// editor to flip a single true/false. The alias map below stays structured — a map of model
@@ -984,7 +978,7 @@ func boolValue(v bool) string { return strconv.FormatBool(v) }
 // countSummary summarizes a structured block by how much is in it ("3 servers"). Zero returns
 // EMPTY rather than "0 servers", so a surface's own rule for an empty block ("none") is what the
 // reader sees, in the one wording every empty structured row shows. The plural is the naive one
-// because every noun the rows count ("server", "model", "host", "line", "mechanism", "alias")
+// because every noun the rows count ("server", "model", "host", "line", "alias")
 // takes a bare s.
 func countSummary(n int, noun string) string {
 	switch n {
@@ -995,23 +989,6 @@ func countSummary(n int, noun string) string {
 	default:
 		return strconv.Itoa(n) + " " + noun + "s"
 	}
-}
-
-// enabledCount counts the Mechanisms actually switched ON. A `mechanisms:` block may carry explicit
-// `false` entries — that is how a user records a decision to leave one off — and those are not
-// enabled Mechanisms, so counting map keys would overstate what the session is running.
-//
-// No catalogued row is on by default, so the `true` keys are the whole count: the Floor guards this
-// session also runs are Config.Floor's own top-level keys (ADR 0071), each with its own registry row
-// and its own summary line, and folding them in here would count them twice.
-func enabledCount(block map[string]bool) int {
-	n := 0
-	for _, on := range block {
-		if on {
-			n++
-		}
-	}
-	return n
 }
 
 // LookupKey returns the registry row for a yaml path. A linear scan is the right shape at
