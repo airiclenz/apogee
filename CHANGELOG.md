@@ -33,6 +33,101 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Reaction core types (stage 1).** `internal/domain` gains the one vocabulary the Floor-guard, Mechanism and Hook layers collapse into (ADR 0076 D1/D2): `Moment` with its five seam and five notice constants (the retired `HookPoint` and `hooks.Event` spellings, unchanged), the `Origin` × `Class` axes of the Reaction surface matrix, `Reaction` with a `Validate` that applies that matrix, the single `Outcome` shape every seam folds to, a sealed per-seam `Handler`, the two revision-bearing seam payloads, and the `ReactionFiredEvent` that will succeed `MechanismFiredEvent` and `FloorGuardEvent`. All of it is re-exported from the root facade. Nothing fires them yet — no behaviour changes.
+
+- Headless `--format json` gains a twentieth Event line kind, `reaction_fired`: the one firing line of the Reaction core, carrying the reaction's id, its origin, the Moment it fired on, the action it took and optional detail. It is additive, so the contract version `v` stays `1`; `mechanism_fired` and `floor_guard` are unchanged.
+
+- The engine gained its one Reaction dispatcher (ADR 0076 D1): a single `fire` per seam Moment runs the engine's builtins — the seven Floor guards, now `domain.Reaction` values of engine origin and shape-view class — and then the Reactions a host arms on the new `Config.Reactions`, booking each firing as one `ReactionFiredEvent`. Bypass switches off armed advise and shape reactions only (D9); a builtin is never withdrawn. Sub-agents inherit every armed Reaction, with `Reaction.TopLevelOnly` as the opt-out. No seam is rewired yet.
+
+- Every seam of the loop now fires the one Reaction dispatcher (ADR 0076 D1): the five in-loop Moments each call a single `fire`, whose builtin Floor guards run first, then the Reactions armed on `Config.Reactions`, then the registry bridge that still carries the retired lab layer. The two old firing events are gone from the engine — a Floor guard and a catalogued Mechanism now both book one `ReactionFiredEvent`, so an observer reads what a reaction did without knowing which ladder it came from. Behaviour is unchanged: the guard order, the shared retry budget, the Bypass gate, self-regulation and every seam's error disposition are what they were, proved by the identity arm's goldens passing untouched.
+
+- **Hook events are notice Moments.** `hooks.Event` is now an alias for `domain.Moment` and its five constants are the five notice Moments themselves (ADR 0076), so the Hook vocabulary and the notice half of the Reaction vocabulary are one set rather than two that happen to agree. Every spelling, the documented order, and the refusal message a misspelt `events:` entry gets are byte-identical — no configuration changes and no behaviour changes.
+
+- **`/settings`: the Mechanisms section is renamed Reactions, and the mechanisms toggle list leaves
+  the command side.** ADR 0076 D1 retires the pane's `mechanisms:` sub-list: the binary no longer
+  offers a catalogue of switches, writes one back, or re-reads the block on a live apply — with the
+  catalogue retired in v0.20.0 that list was empty in every shipped build. The `mechanisms:` key
+  still parses and still arms nothing. The manual drops the sub-list paragraph and names the seven
+  Floor guards as the ordinary **Session** rows they are.
+
+- **The `/settings` Mechanism toggle list is gone.** The shipped catalogue emptied in v0.20.0
+  (ADR 0071), so the row that opened it, the sub-list it opened and the per-mechanism config writer
+  behind it are removed with it (ADR 0076 decision 1). `mechanisms:` still parses — an existing
+  config file loads unchanged and the block still reaches the resolved options (ADR 0076 decision
+  11) — it simply has no `/settings` row any more; the Floor guards keep their own Session-section
+  keys on that pane.
+
+- **`mechanisms:` no longer arms anything.** Every Driver — the TUI's startup, a headless run, a
+  daemon, a scheduled Firing and the per-model rebind — now reads the block through the new
+  `RetiredNotices` door: the key still parses, a typo is still a loud startup refusal, and a key
+  naming a retired Mechanism still earns the same sentence it earned before, word for word. What is
+  gone is the enable fold behind it (ADR 0076 decision 11): nothing the block or a matched Validated
+  set names reaches the engine any more. The Validated-set match still runs and still narrates; its
+  set arms nothing until stage 2 re-homes the surface.
+- **`--bypass` says what it actually does.** The flag's help on `apogee` and `apogee headless`, and
+  the `bypass` description in `/settings`, now read "run with advise and shape Reactions of user or
+  bench origin off; Floor guards and structural reducers stay on (ADR 0076)".
+
+- **A `sub-agents:` seat's `mechanisms:` map no longer arms anything.** The key still parses, a typo
+  in it still refuses the run at startup and at a mid-session reload — with the same sentence, naming
+  the same server — and a retired id still earns its line. What is gone is the per-seat catalogue
+  behind it (ADR 0076 decision 11): a routed child now inherits exactly what a child of a seat with
+  no map inherits, and the resolved delegation target carries the seat's `bypass:` as its only
+  posture.
+- **A Validated set arms nothing, and says so honestly.** Entries still load, still match a model
+  identity, still shed retired members with the line that names them, and still print their skip or
+  offer notice word for word. The roster they are checked against is empty and permanent until
+  stage 2 re-homes the surface, so a matched entry is skipped rather than applied — the same answer
+  an empty catalogue has given since v0.20.0.
+
+- The root `apogee` facade no longer re-exports the Mechanism lab surface: `HookPoint` and its
+  five consts, the five hook interfaces, `PostResponseDecision`/`PostResponseAction` and their
+  consts, `RegisteredMechanism`, `MechanismID`, `MechanismDescriptor`, `Capability`,
+  `SuppressionPolicy`, `OrderingConstraints`, `MechanismRegistry`, `NewMechanismRegistry`,
+  `BuildMechanisms`, `CataloguedMechanisms` and the four sentinels `ErrOrderingCycle`,
+  `ErrIncompatibleMechanisms`, `ErrMissingRequirement`, `ErrUnknownMechanism` are gone. An
+  embedder arms behaviour through `Config.Reactions` and matches a refused arm with
+  `ErrInvalidReaction` (ADR 0076).
+- The bench-readiness proof (the ADR 0031 invariant-4 regression) now arms engine-origin
+  Reactions at all five seam Moments through `Config.Reactions` and reads what they did off the
+  `ReactionFiredEvent` stream, including the ADR 0076 D9 Bypass rule: an armed `observe`
+  Reaction keeps running under Bypass while an armed `advise` one goes quiet.
+
+- Docs: the hooks manual page now describes a hook as a user-origin `observe` Reaction and a Floor
+  guard as the engine's own `shape (view)` Reaction (ADR 0076), and the `error` payload's `source`
+  field is documented as carrying a reaction id.
+
+- The engine's lab layer is gone from the agent core: per-Session self-regulation (Adaptive Suppression and the Turn Budget), the catalogued-Mechanism registry the seams still fired through, and the `Config.EnableMechanisms` build path are deleted. Every seam Moment now runs the Reaction ladder alone — the engine's Floor-guard builtins, then the Reactions armed on `Config.Reactions` — and a sub-agent inherits its parent's Reactions rather than a copy of its registry (ADR 0076 stage 1).
+
+- The Mechanism vocabulary is gone from the domain: `HookPoint` and its five constants, the five hook interfaces, the post-response decision, the descriptor, the registry and its stacking rules, `Config.Mechanisms` and `Config.EnableMechanisms`, and `LoopView.Fired` with the per-Session fire ledger `NewRequest` used to carry — a reaction that wants to know what a peer did no longer has a shared ledger to read. `internal/mechanisms` keeps the retired roll and nothing else: the catalogue, its constructors and its test-only swap seam are deleted, and `RetiredNotices` is now the whole of what a `mechanisms:` block means (it still parses, still refuses an unknown key naming "(none)", still earns a removed id its line, and still arms nothing — ADR 0076 D11).
+
+- The hidden debug view renders the Reaction core's one firing event: a firing now prints `reaction <id> @ <moment>: <action>`, with ` (<detail>)` appended when the reaction filled one, replacing the separate Mechanism and Floor-guard lines. A firing still adds nothing to the normal transcript and nothing to a session record.
+
+- **Event lines are `v:2`, and `reaction_fired` is the one firing kind.** The headless JSON
+  protocol's `mechanism_fired` and `floor_guard` kinds are gone, folded into the single
+  `reaction_fired` line the Reaction core emits (ADR 0076 D1) — a removal and a rename, which is
+  what bumps `v` (ADR 0075 D10). The vocabulary is eighteen kinds now: sixteen Event variants plus
+  the two frames. `domain.MechanismFiredEvent` and `domain.FloorGuardEvent` are deleted along with
+  their root-package aliases, so an external Driver reads `apogee.ReactionFiredEvent` instead — its
+  `Reaction` field carries the id (a Floor guard's config key for a builtin), `Origin` says whose
+  reaction it was, `Moment` where in the loop it fired, and `Action`/`Detail` what it did. A
+  consumer that branched on the two old kinds must switch to `reaction_fired`; one that ignores
+  unknown kinds sees nothing break. `docs/manual/headless.md` carries the new table and the
+  version-history sentence.
+
+- Docs: `CONTEXT.md`'s "Mechanism and hook points" section is now "Reactions and Moments" and
+  describes the shipped core — `domain.Reaction`, the five seam and five notice `Moment` strings,
+  the `Outcome` a seam reaction returns and the one `fire` per seam. **Post-response decision**,
+  **Mechanism descriptor** and the whole **Self-regulation** section are marked retired with the
+  lab layer they named (ADR 0076 D12), the identity and **Bypass mode** paragraphs are restated per
+  D9, and **Hook event** now reads as a notice Moment.
+
+- The manual and the agent guide describe the Reaction core: `mechanisms:` is documented as a retired key that parses, notices and arms nothing (root and per-seat), `--bypass` is restated in ADR 0076 D9 terms — advise and shape Reactions of user or bench origin off, Floor guards and structural reducers on — and the `validated-sets:` surface is marked inert pending stage 2.
+
+- Code comments across the engine, the composition root and the root facade now speak the Reaction
+  core's vocabulary — Reaction, Moment, the retired roll — instead of Mechanisms, hook points and
+  the experimental-hook lab layer. No behaviour change.
+
 - **One Reaction core, decided (ADR 0076).** Floor guards, the Mechanism lab layer and Hooks are
   one abstraction — a **Reaction** `{id, origin, class, on: [Moments], handler}` over an
   origin × class policy matrix (observe / advise / gate / shape-view / shape-work). Day-one user
