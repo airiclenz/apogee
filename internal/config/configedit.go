@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"maps"
 	"reflect"
 	"strings"
 
@@ -222,16 +221,4 @@ func serversChangedOnlyAt(before, after []ServerEntry, at int, want ServerEntry)
 		}
 	}
 	return true
-}
-
-// mechanismsChangedOnlyAt reports whether after is before with id set to enabled and nothing else
-// moved — the shape a mechanism splice must produce, which is serversChangedOnlyAt's rule over a map
-// rather than a list.
-func mechanismsChangedOnlyAt(before, after map[string]bool, id string, enabled bool) bool {
-	want := maps.Clone(before)
-	if want == nil {
-		want = make(map[string]bool, 1)
-	}
-	want[id] = enabled
-	return maps.Equal(after, want)
 }
