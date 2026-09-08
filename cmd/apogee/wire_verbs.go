@@ -23,8 +23,7 @@ import (
 
 // rebind is the composition root's half of an observed model change. The TUI decides WHEN (at idle,
 // or at the exchange-terminal boundary), this decides WHAT — because every input to the decision is
-// config the binary owns (the per-model system prompt, ADR 0023; the manual mechanisms list; the
-// window pin) and the engine mutators are the binary's to drive. It runs on the Update goroutine,
+// config the binary owns (the per-model system prompt, ADR 0023; the window pin) and the engine mutators are the binary's to drive. It runs on the Update goroutine,
 // at a quiescent boundary Agent.Rebind demands, so nothing here needs a
 // lock of its own. A resolution error returns WITHOUT touching the engine, and Agent.Rebind is
 // itself validate-then-commit, so a refused rebind leaves the session bound exactly where it was.

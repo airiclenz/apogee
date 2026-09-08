@@ -14,7 +14,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/reactions"
 	// Aliased because the tests below hold a skills.Provider in a variable called `provider`,
@@ -645,11 +644,6 @@ func (s *stubBeat) discover(_ context.Context, endpoint, _, _ string) heartbeat.
 // a Firing runs while nobody is watching, so refusing to start over a grunt box that is merely down
 // would turn a scheduled run into a silent gap in the record (ADR 0042's visible degrade).
 func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
-	// A key the entry's `mechanisms:` map may legally carry. The shipped catalogue is empty since
-	// v0.20.0 (ADR 0071), so the legal keys left are the RETIRED ones: they validate, arm nothing,
-	// and are what proves that a PRESENT map is still accepted by an unattended composition rather
-	// than refusing the run.
-	known := mechanisms.RetiredIDs()[0]
 	grunt := config.ServerEntry{
 		Name:        "grunt",
 		Endpoint:    "http://grunt.example/v1",
@@ -657,10 +651,6 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 		Model:       "grunt-model",
 		APIKey:      "sk-grunt",
 	}
-	armed := grunt
-	armed.Mechanisms = map[string]bool{known: true}
-	defective := grunt
-	defective.Mechanisms = map[string]bool{"no-such-mechanism": true}
 
 	for _, tc := range []struct {
 		name       string
@@ -671,9 +661,6 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 		wantTarget bool
 		wantSeat   bool
 		wantNotice string
-		// noticePrefix compares the head of the sentence only, for the one case whose tail is the
-		// whole Mechanism catalogue — a list this test has no business pinning.
-		noticePrefix bool
 	}{
 		{
 			name:  "no key names no seat and asks nothing",
@@ -703,24 +690,6 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 			wantBeat:   true,
 			wantSeat:   true,
 			wantNotice: "sub-agents: grunt unavailable — delegations run on the session server",
-		},
-		{
-			name:  "a defective mechanisms map is a notice, never an error",
-			named: "grunt",
-			entry: defective,
-			wantNotice: "sub-agents: delegations run on the session server — apogee: unknown mechanism " +
-				`"no-such-mechanism"`,
-			noticePrefix: true,
-		},
-		{
-			name:       "a mechanisms map is accepted and arms nothing",
-			named:      "grunt",
-			entry:      armed,
-			beat:       heartbeat.Beat{Reachable: true, TotalSlots: 2},
-			wantBeat:   true,
-			wantTarget: true,
-			wantSeat:   true,
-			wantNotice: "sub-agents: routing to grunt (grunt-model)",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -765,12 +734,7 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 				}) {
 					t.Errorf("notices = %q; a run that names no Sub-agent server says nothing about a seat", notices)
 				}
-			} else if !slices.ContainsFunc(notices, func(n string) bool {
-				if tc.noticePrefix {
-					return strings.HasPrefix(n, tc.wantNotice)
-				}
-				return n == tc.wantNotice
-			}) {
+			} else if !slices.Contains(notices, tc.wantNotice) {
 				t.Errorf("notices = %q; want %q among them", notices, tc.wantNotice)
 			}
 

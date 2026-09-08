@@ -74,37 +74,12 @@ spells them as `Disable…` fields, so an embedder handing `New` a bare `Config`
 [ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) records
 why they are behaviour rather than catalogued rows.
 
-The `mechanisms:` block is a **retired key**. It still parses, so a config that carries one is not
-refused, but it arms nothing at all. What runs above the floor is the **Reaction** core
-([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)), and the lab
-catalogue this block used to name is gone: every row it once carried either became one of the guards
-above or retired outright, with the per-row verdicts in the
-[archived catalogue](../design/archived/mechanism-catalogue.md). The key that arms a Reaction of your
-own is not in this release.
-
-What the block still does is tell you it is doing nothing. A **retired** ID is not an error: it
-earns one startup notice and is ignored, and where the row was promoted to a guard the notice names
-the key that governs the behaviour now, so this:
-
-```yaml
-mechanisms:
-  tool_use_enforcer: false
-```
-
-is answered at startup with
-
-```
-apogee: mechanism "tool_use_enforcer" is the "tool-use-enforcer" floor guard since v0.20.0;
-"tool_use_enforcer: false" under mechanisms: no longer turns it off — set tool-use-enforcer: false
-at the top level
-```
-
-rather than being mapped to the new key behind your back — a line that no longer switches anything
-is worth being told about. A row that retired outright says exactly that instead — `apogee: mechanism
-"grammar" was retired in v0.18.7 and is ignored; remove it from mechanisms:` — and an ID the retired
-roll does not carry at all is still a startup **error**, `apogee: unknown mechanism "some_bench_row";
-known: (none)`, because a name apogee cannot account for is a mistake worth stopping on rather than a
-line to skip quietly.
+What runs *above* the floor is the **Reaction** core
+([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)) — the
+[`reactions:`](#reactions--reactions) list, and nothing else in this release. The lab catalogue an
+earlier build let you switch rows of is gone; a file that still carries its key is rewritten for you
+at start-up rather than refused — see
+[Keys apogee migrates for you](#keys-apogee-migrates-for-you) below.
 
 Separately from all of this, every write tool appends its own in-process syntax verdict to the
 success result it hands the model: always on, not configurable, and neither a Floor guard nor a
@@ -160,6 +135,37 @@ asked for the family by name. A `tools:` axis of your own for that model replace
 whole, the way every axis here replaces the built-in's — so `disabled: [console_open]` under a
 `qwen3.8` entry of yours turns the whole family back off rather than trimming one tool out of it;
 re-list the ones you still want under `enabled:`.
+
+## Keys apogee migrates for you
+
+Three keys earlier releases carried have left the schema, and none of them is a reason a saved file
+stops loading. apogee **rewrites the file for you** on the start-up that first reads it: it takes a
+dated backup beside `config.yaml`, applies every fold and strip in one edit, and prints one line
+saying what it did and where the backup is. Your other keys, your comments and your layout are left
+exactly where they were.
+
+- **`hooks:` became `reactions:`.** Same entries, same behaviour — apogee re-renders the block under
+  the new key and renames the `approval-waiting` moment to `approval-requested` on the way through.
+  A script an entry runs has to be told: the environment now carries `APOGEE_REACTION_*` (was
+  `APOGEE_HOOK_*`) and the payload names its entry in a `"reaction"` field (was `"hook"`), so the
+  start-up line says that too. The block is re-**rendered** rather than moved line by line, so
+  comments written *inside* it do not survive — the backup keeps them.
+- **`mechanisms:` is dropped**, at the top level and on every `servers:` entry that carried a
+  `mechanisms:` map of its own. Every row it once named either became one of the seven Floor guards
+  above or retired outright, with the per-row verdicts in the
+  [archived catalogue](../design/archived/mechanism-catalogue.md). Where a row was **promoted**, the
+  line names the top-level key that governs that behaviour now — `tool_use_enforcer →
+  tool-use-enforcer:` — so the one sentence you read tells you what to write if you meant to switch
+  it off. Where none was, it says the catalogue is empty and the guards are on by default.
+- **`validated-sets:` is dropped.** It named the per-model set of catalogue rows a bench run had
+  cleared for your model. With the catalogue gone there is no set left for it to name, and there is
+  no successor key to point at.
+
+A whole rewritten file is verified before it replaces the original — the folded entries must fire
+exactly what the old block fired, and no other setting may have moved — so a fold apogee cannot make
+safely leaves your file untouched and says so instead. A **live** re-read never rewrites: the fold
+belongs to start-up, so an editor left open on a file that still carries a retired key is told to
+restart rather than having the file changed under it.
 
 ## Environment overrides
 
@@ -901,9 +907,8 @@ text saying what that server is **for**, which the `/sub-agents-server` picker
 shows and which the model reads when you let it pick the seat
 ([below](#letting-the-model-pick-the-seat)) — and `llama-launcher`,
 which lets apogee start, switch and stop that server itself — [below](#local-servers--llama-launcher).
-`bypass` and the retired `mechanisms` key are optional too, and say what
-*delegations to* that entry run as rather than how the server itself behaves —
-further down this section.
+`bypass` is optional too, and says what *delegations to* that entry run as
+rather than how the server itself behaves — further down this section.
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
 runs them concurrently — as many at a time as that server's cap allows. Unset, the cap
@@ -982,42 +987,28 @@ there:
 Adding `effort-dialect:` to that entry — the same key, the same
 values as above — is the fix.
 
-**And an entry can say what delegations to it run as.** Two more keys are legal on any
-`servers:` entry — `bypass:` and `mechanisms:`, in the root keys' shapes verbatim — and
-together they are that entry's **delegation posture**: not how the server behaves, but what a
-sub-agent routed there runs with. They apply while that entry is the `sub-agents-server:` target
-and never to the session itself, so where the parent happens to be running has no bearing on what
-its children run as.
+**And an entry can say what delegations to it run as.** One more key is legal on any
+`servers:` entry — `bypass:`, in the root key's shape verbatim — and it is that entry's
+**delegation posture**: not how the server behaves, but what a sub-agent routed there runs with. It
+applies while that entry is the `sub-agents-server:` target and never to the session itself, so
+where the parent happens to be running has no bearing on what its children run as.
 
 ```yaml
 # ~/.apogee/config.yaml
 servers:
   - name: rented-box
     endpoint: https://llm.example.com
-    bypass: false      # delegations there run with advise and shape Reactions on …
-    mechanisms:        # … and this map is the retired key, here as everywhere else
-      grammar: true
+    bypass: false      # delegations there run with advise and shape Reactions on
 ```
 
-`bypass:` is the live half, and it **replaces whole** what the child would otherwise have inherited.
+It **replaces whole** what the child would otherwise have inherited.
 An **absent** `bypass:` leaves the child inheriting the parent's *live* flag at spawn — the rule
 delegations have always followed, and the reason the key is written as it is: an explicit
 `bypass: false` is a posture in its own right, not the same thing as leaving the key out. Either way
 the child keeps its Floor guards — those are engine behaviour, not something a posture can take
 away — and it inherits every Reaction the parent has armed bar the ones marked top-level-only.
 
-`mechanisms:` is the same retired key here as at the top of this page: the map loads and is
-validated, it earns the same startup notices the session's own block earns, and it arms nothing. The
-validation is what still makes it worth writing correctly — an id the retired roll does not carry is
-a **start-up error**, and it names the entry the map came from:
-
-    apogee: unknown mechanism "some_bench_rwo"; known: (none) — in the `sub-agents:` server "rented-box"
-
-That refusal is a *session's*. A daemon **Firing** routed at the entry has no start-up to refuse:
-it reports the same message as a notice on that run and delegates to the session's own server
-instead.
-
-Both keys are legal on **any** entry by design, the way `context-window:` is — which entry takes the
+It is legal on **any** entry by design, the way `context-window:` is — which entry takes the
 delegations is the root `sub-agents-server:` key's answer, and that answer moves inside a running
 session. A posture written on an entry nothing currently delegates to is therefore a description of
 what would happen there, not a defect.

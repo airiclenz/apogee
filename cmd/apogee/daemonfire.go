@@ -22,7 +22,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/reactions"
@@ -37,7 +36,7 @@ import (
 // TUI's live session:
 //
 //   - The HOST half — the resolved config, the key sources, the confinement backend, the sessions
-//     store, the validated `mechanisms:` list — is resolved ONCE, by newDaemonWiring, because
+//     store — is resolved ONCE, by newDaemonWiring, because
 //     `config.yaml` is read once at startup and rebinding servers is a daemon restart (ADR 0055).
 //   - The ENTRY half — which server, which model, which workspace, which mode — is resolved per
 //     Firing off the adopted set, because `schedules.yaml` IS live-reloaded (ADR 0034) and the
@@ -98,28 +97,18 @@ type daemonWiring struct {
 }
 
 // newDaemonWiring resolves everything about the HOST that every Firing of this daemon shares, and
-// fails before a clock is started when any of it is wrong: a `mechanisms:` key naming no known id
-// is a defect in the config the daemon must report at startup rather than at 3am in a saved record.
-//
-// The retired-id notices come back BESIDE the wiring rather than being printed here, for the reason
-// [daemonWiring.closeConfiner] returns its own: where a daemon's narration goes is the daemon's
-// decision (daemon.go), and a Firing's own stderr is not it. A caller that took the wiring and
-// dropped the lines would arm nothing and say nothing about a `mechanisms:` key naming an id
-// this release retired.
+// fails before a clock is started when any of it is wrong: a root it cannot resolve is a defect in
+// the config the daemon must report at startup rather than at 3am in a saved record.
 //
 // The adopted set starts empty. A daemon adopts its first file immediately after this, through the
 // same [daemonWiring.adopt] call every later reload makes.
 //
 // The log is the caller's, not this function's: a Firing narrates through the same stream the
 // lifecycle lines land on, and the daemon owns when that stream is opened.
-func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, []string, error) {
+func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, error) {
 	roots, err := resolveRoots(opts.ConfigDir, "")
 	if err != nil {
-		return nil, nil, err
-	}
-	retiredNotices, err := mechanisms.RetiredNotices(opts.Mechanisms)
-	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// The scratch sweep, run once at startup for the reason runRoot runs it (wire.go): a daemon
@@ -146,7 +135,7 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, []stri
 		log:       log,
 		adopted:   make(map[string]daemon.Entry),
 		prewarmed: make(map[string]struct{}),
-	}, retiredNotices, nil
+	}, nil
 }
 
 // closeConfiner tears the confinement backend down at the end of the daemon's life and reports the

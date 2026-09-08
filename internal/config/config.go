@@ -884,22 +884,6 @@ var keyAccessors = []keyAccessor{
 		fromFile: projectReactions,
 	},
 	{
-		// The ONE accessor with no registry row behind it. `mechanisms:` keeps parsing — an existing
-		// config still loads and the block still reaches the Options, where the Drivers turn it into
-		// the retired roll's notices (ADR 0076 decision 11) — while the /settings row that used to
-		// describe it went with the catalogue it described (ADR 0076 decision 1). The Key is spelled
-		// here rather than looked up because there is nothing to look up: mustKey would panic this
-		// package at init. Both bijection guards name this one exemption
-		// (TestKeyAccessorsBindDescribedKeys, walkSchema) and nothing else.
-		row: Key{Path: "mechanisms", Kind: KindStructured},
-		fromFile: func(o *Options, fc fileConfig) {
-			o.Mechanisms = nil
-			if len(fc.Mechanisms) > 0 {
-				o.Mechanisms = fc.Mechanisms
-			}
-		},
-	},
-	{
 		// Ordered by pattern on the way in (toProfileEntries), so the same file always resolves to
 		// the same slice; the map is carried whole rather than merged pattern by pattern (ADR 0044).
 		row: mustKey("model-profiles"),
@@ -1332,10 +1316,10 @@ type fileConfig struct {
 	PruneToolResults *bool `yaml:"prune-tool-results"`
 	// The seven FLOOR GUARDS (ADR 0071), each a file-only pointer for auto-compact's reason: an
 	// explicit `<key>: false` is distinguishable from an absent key, and absent is the default
-	// true. They are the engine's own behaviour rather than Mechanisms — they stay on under
-	// Bypass and a `mechanisms:` entry can no longer turn one off — so these keys are the only
-	// way to take a guard away. They stay POSITIVE here; the composition root negates them into
-	// domain.FloorConfig's Disable… fields at the one seam that builds it.
+	// true. They are the engine's own behaviour rather than Reactions — they stay on under
+	// Bypass — so these keys are the only way to take a guard away. They stay POSITIVE here; the
+	// composition root negates them into domain.FloorConfig's Disable… fields at the one seam that
+	// builds it.
 	//
 	// ToolUseEnforcer gates the retry of a turn that narrated where the user asked for an action.
 	ToolUseEnforcer *bool `yaml:"tool-use-enforcer"`
@@ -1454,13 +1438,6 @@ type fileConfig struct {
 	// spelling to paste (configmigrate.go): a profile is per-model now, so a config that still
 	// spells it must be told rather than silently unread.
 	ModelProfiles map[string]modelProfileConfig `yaml:"model-profiles"`
-	// Mechanisms is the retired `mechanisms:` key: a map of catalogue ID → enabled that still
-	// parses and drives NOTHING (ADR 0076 decision 11). The catalogue it once named is gone — six
-	// rows became Floor guards under their own top-level keys and fourteen retired outright
-	// (ADR 0071) — so the block reaches the Options only for the Drivers to turn into the retired
-	// roll's notices (internal/mechanisms). File-only (no flag/env), like mcp-servers. It is kept
-	// so a saved configuration naming a removed ID is tolerated rather than refused.
-	Mechanisms map[string]bool `yaml:"mechanisms"`
 	// Present configures how a finished document is shown to the user (ADR 0019): the
 	// presentation ladder's auto-open switch, the application that stands in for the OS opener,
 	// and the doc server's port and advertised host. File-only (no flag/env), like the blocks
@@ -1616,16 +1593,14 @@ type UnconfinedHost struct {
 // agents means a smaller context window each, since `--parallel N` splits one window into N slots
 // (ADR 0024 — Apogee's numbers are per-slot-honest either way).
 //
-// Bypass and Mechanisms are this entry's DELEGATION POSTURE (ADR 0045 decision 2), in the top-level
-// keys' shapes verbatim: "delegations to this server run with this". A present key replaces the
-// value the child would otherwise have inherited WHOLE — a present `mechanisms:` map is the child's
-// entire catalogue, with no per-ID merge, which would need an `inherit` spelling to be readable —
-// and an absent one inherits the parent's LIVE value at spawn, exactly today's rule. Bypass is a
-// pointer for the reason the top-level key is one: an explicit `bypass: false` is a posture, not an
-// absent key. Both are legal on ANY entry, like `context-window:` below: which entry takes the
-// delegations is the root `sub-agents-server:` key's answer and it moves in a running session, so
-// the posture is written where the server is described and applies whenever that entry is the
-// target. Posture rides the ROUTING, so where the parent itself happens to be running is irrelevant
+// Bypass is this entry's DELEGATION POSTURE (ADR 0045 decision 2), in the top-level key's shape
+// verbatim: "delegations to this server run with this". A present key replaces the value the child
+// would otherwise have inherited, and an absent one inherits the parent's LIVE value at spawn,
+// exactly today's rule. It is a pointer for the reason the top-level key is one: an explicit
+// `bypass: false` is a posture, not an absent key. It is legal on ANY entry, like `context-window:`
+// below: which entry takes the delegations is the root `sub-agents-server:` key's answer and it
+// moves in a running session, so the posture is written where the server is described and applies
+// whenever that entry is the target. Posture rides the ROUTING, so where the parent itself happens to be running is irrelevant
 // to what its children run as.
 //
 // ContextWindow PINS this server's per-slot context window in tokens — the top-level
@@ -1707,24 +1682,23 @@ type UnconfinedHost struct {
 // DIALECT, never a model family — it is the fallback ADR 0050 decision 2 anticipated, one statement
 // per endpoint, and not a table of who speaks what.
 type ServerEntry struct {
-	Name            string          `yaml:"name"`
-	Endpoint        string          `yaml:"endpoint"`
-	Description     string          `yaml:"description,omitempty"`
-	APIKey          string          `yaml:"api-key,omitempty"`
-	APIKeyCmd       string          `yaml:"api-key-cmd,omitempty"`
-	APIKeyEnv       string          `yaml:"api-key-env,omitempty"`
-	PlaintextKeyOK  bool            `yaml:"plaintext-key-ok,omitempty"`
-	Model           string          `yaml:"model,omitempty"`
-	LlamaLauncher   string          `yaml:"llama-launcher,omitempty"`
-	LaunchProfile   string          `yaml:"launch-profile,omitempty"`
-	ParallelAgents  int             `yaml:"parallel-agents,omitempty"`
-	Bypass          *bool           `yaml:"bypass,omitempty"`
-	Mechanisms      map[string]bool `yaml:"mechanisms,omitempty"`
-	ContextWindow   TokenCount      `yaml:"context-window,omitempty"`
-	WorkingWindow   int             `yaml:"working-window,omitempty"`
-	MaxOutputTokens int             `yaml:"max-output-tokens,omitempty"`
-	ResponseReserve float64         `yaml:"response-reserve,omitempty"`
-	EffortDialect   string          `yaml:"effort-dialect,omitempty"`
+	Name            string     `yaml:"name"`
+	Endpoint        string     `yaml:"endpoint"`
+	Description     string     `yaml:"description,omitempty"`
+	APIKey          string     `yaml:"api-key,omitempty"`
+	APIKeyCmd       string     `yaml:"api-key-cmd,omitempty"`
+	APIKeyEnv       string     `yaml:"api-key-env,omitempty"`
+	PlaintextKeyOK  bool       `yaml:"plaintext-key-ok,omitempty"`
+	Model           string     `yaml:"model,omitempty"`
+	LlamaLauncher   string     `yaml:"llama-launcher,omitempty"`
+	LaunchProfile   string     `yaml:"launch-profile,omitempty"`
+	ParallelAgents  int        `yaml:"parallel-agents,omitempty"`
+	Bypass          *bool      `yaml:"bypass,omitempty"`
+	ContextWindow   TokenCount `yaml:"context-window,omitempty"`
+	WorkingWindow   int        `yaml:"working-window,omitempty"`
+	MaxOutputTokens int        `yaml:"max-output-tokens,omitempty"`
+	ResponseReserve float64    `yaml:"response-reserve,omitempty"`
+	EffortDialect   string     `yaml:"effort-dialect,omitempty"`
 }
 
 // canonicaliseServers trims the whitespace around every entry's `name:` and `endpoint:`, so the
@@ -1818,7 +1792,7 @@ func canonicaliseServers(fc *fileConfig) {
 // the entry, the key and what may stand there, the way the thinking axes' own enum refusal does
 // (validateThinkingAxes). Absent is `auto` spelled by omission and is not a defect.
 //
-// What it deliberately does NOT check is the delegation posture: `bypass:`/`mechanisms:` are legal
+// What it deliberately does NOT check is the delegation posture: `bypass:` is legal
 // on every entry, because which one takes the delegations is the root `sub-agents-server:` key's
 // answer and that key moves in a running session (`/sub-agents-server`). A posture written on an
 // entry nothing currently delegates to is a description of that server, not a defect in the file.
@@ -3410,7 +3384,7 @@ func ApogeeHome(configDir string) (string, error) {
 }
 
 // ServerNameList renders the switchable names for findServer's error (an empty list renders
-// "(none)", matching mechanisms.RetiredNotices' known-catalogue tail for the same job).
+// "(none)").
 func ServerNameList(entries []ServerEntry) string {
 	if len(entries) == 0 {
 		return "(none)"

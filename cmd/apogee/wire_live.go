@@ -4,7 +4,7 @@ package main
 //
 // One function: every holder, host and seam the running session is built from, in the order the
 // startup has always built them — the MCP connections and the tool registry folded onto the base
-// Config, the `mechanisms:` block's retired-roll notices, the session store and the record a
+// Config, the session store and the record a
 // --resume restores, the engine and Upstream holders and the one bind that fills them, the
 // live-settings holder the `/settings` edits move, the config watcher, and the out-of-band work
 // (the launcher, the naming call, the scheduler) that reads the binding rather than capturing it.
@@ -23,7 +23,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
@@ -151,25 +150,6 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		return registryWithMCP(w.roots.workspace, host, spec.seatChoice, w.mcpSet.tools())
 	})
 
-	// Validate the `mechanisms:` block and take what it earns the human to say — which is now the
-	// notices and nothing else (ADR 0076 D11: the key parses, speaks, and arms nothing). Startup
-	// validates EVERY key here, enabled AND disabled, exactly as it always did: a typo'd key is a
-	// loud refusal at the surface the human typed it on, and it stays loud whichever value it
-	// carries. What the block no longer does is decide anything the engine runs — a Reaction is
-	// armed from `Config.Reactions`, and the Floor guards are engine behaviour under Config.Floor.
-	retiredNotices, err := mechanisms.RetiredNotices(w.opts.Mechanisms)
-	if err != nil {
-		return err
-	}
-
-	// A `mechanisms:` key naming a RETIRED id is tolerated rather than refused (the id was
-	// valid at the release before the removal), and this is the one caller that says so: startup runs
-	// before the alt screen, so a stderr line here reaches the human, where the same resolver running
-	// under the live `/settings` apply or per delegate would paint over the TUI.
-	for _, n := range retiredNotices {
-		fmt.Fprintln(os.Stderr, n)
-	}
-
 	// The id-addressed session store under this run's sessions root, and the record a --resume or
 	// --continue start restores from (nil for a fresh start). Resolving it here lets the host begin
 	// ACTIVE on that record — continuing its file in place rather than forking a new session — and
@@ -276,9 +256,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	}
 
 	// The startup snapshot's MUTABLE half (ADR 0037): the `context-window:` pin, the `servers:` list,
-	// the `mechanisms:` ids the retired roll reads and the `system-prompt-*` inputs — every value
-	// below that a committed `/settings` edit can now move mid-session. The
-	// seams that used to capture each of them by value read this holder instead, so the next thing
+	// the `system-prompt-*` inputs — every value below that a committed `/settings` edit can now
+	// move mid-session. The seams that used to capture each of them by value read this holder
+	// instead, so the next thing
 	// that re-resolves — a rebind, a server switch, a scheduled Firing — sees what the human
 	// changed rather than what the process launched with. Seeded from opts, so a session nobody
 	// edits behaves exactly as it did.

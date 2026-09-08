@@ -556,9 +556,9 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	//
 	// The POSTURE key follows ADR 0045 §2's replace-or-inherit rule and is already seeded with the
 	// inherited value above: a PRESENT `bypass:` replaces it WHOLE (no OR-ing of flags), an ABSENT
-	// one leaves the parent's live value standing. A per-seat `mechanisms:` map no longer travels
-	// here at all — it arms nothing since the Reaction core landed (ADR 0076 D11), so the seat's
-	// only posture is the flag.
+	// one leaves the parent's live value standing. The per-seat `mechanisms:` map that used to
+	// travel beside it went with the catalogue it named (ADR 0076 A6), so the seat's only posture
+	// is the flag.
 	//
 	// The client is built rather than mutated — provider.Client.SetModel rebinds the model and
 	// deliberately never the endpoint — so the child's wire target moves atomically with its key,

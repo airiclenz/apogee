@@ -70,7 +70,7 @@ func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness 
 	newConfiner = func() apogee.Confiner { return fenceableHost }
 	t.Cleanup(func() { runOnce, discoverBeat, newConfiner = prevRunner, prevBeat, prevConfiner })
 
-	wiring, _, err := newDaemonWiring(opts, &daemonLog{out: harness.logged, now: time.Now})
+	wiring, err := newDaemonWiring(opts, &daemonLog{out: harness.logged, now: time.Now})
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}

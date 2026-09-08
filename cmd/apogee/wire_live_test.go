@@ -283,34 +283,6 @@ func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T
 	}
 }
 
-// The startup line a human sees when their `mechanisms:` block still names a Mechanism this
-// release retired (the issue register, 2026-08-29: the notice's producer and the helper's
-// wording were pinned, the boundary that prints it was not).
-//
-// This is the ONE resolver path that may write to stderr — startup runs before the alt screen —
-// so the assertion is about the process stream rather than a returned string, and the test is
-// sequential for that reason: captureStderr swaps a process global.
-func TestWireSessionReportsARetiredMechanismOnStderr(t *testing.T) {
-	w := urlGuardWiring(t, config.Options{Mechanisms: map[string]bool{"grammar": true}})
-
-	var err error
-	stderr := captureStderr(t, func() { err = w.wireSession(context.Background()) })
-
-	if err != nil {
-		t.Fatalf("wireSession: %v; a retired mechanism id is tolerated, never a refusal", err)
-	}
-	want := retiredMechanismNotice("grammar")
-	if got := strings.Count(stderr, want); got != 1 {
-		t.Errorf("the retired-mechanism notice appeared %d times on stderr; want exactly 1 line\n"+
-			"want: %q\nstderr: %q", got, want, stderr)
-	}
-	if got := w.cfg.Reactions; len(got) != 0 {
-		t.Errorf("Config.Reactions = %v, want nothing armed beside the engine builtins; the "+
-			"`mechanisms:` key drives nothing (ADR 0076 D11) — which is exactly why the line above "+
-			"has to be printed", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // The session's undo snapshot store (ADR 0074)
 // ---------------------------------------------------------------------------

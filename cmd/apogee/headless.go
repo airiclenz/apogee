@@ -22,7 +22,6 @@ import (
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
@@ -684,24 +683,6 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		if shouldPrewarmLabelWalk(mode, opts.ConfineToWorkspace, confiner.Capabilities().FSWrite) {
 			prewarmLabelWalk(confiner, roots.workspace, cmd.ErrOrStderr())
 		}
-	}
-
-	// Every `mechanisms:` key is validated here — enabled AND disabled — exactly as startup
-	// validates them: the key arms nothing since the Reaction core landed (ADR 0076 D11), but a
-	// typo'd key is still a loud refusal at the surface the human typed it on, whichever value it
-	// carries.
-	retiredNotices, err := mechanisms.RetiredNotices(opts.Mechanisms)
-	if err != nil {
-		return run.Result{}, notStarted(err)
-	}
-	// A key naming a RETIRED id is tolerated rather than refused — it was valid at the
-	// release before the removal — and this is where this Driver says so. Without the line the run
-	// arms nothing and explains nothing: a script whose config still asks for a removed id
-	// would keep paying for runs that quietly differ from the ones it was tuned on. It goes to
-	// stderr, beside the plaintext-key and confinement notices above, because stdout is the
-	// model's answer and nothing else.
-	for _, notice := range retiredNotices {
-		cmd.PrintErrln(notice)
 	}
 
 	// This run's own record id, minted here because the runner is handed it beside the Config

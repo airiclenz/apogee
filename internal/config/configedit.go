@@ -206,7 +206,8 @@ func scalarAtPath(data []byte, path string) (string, bool, error) {
 // serversChangedOnlyAt reports whether after is before with the entry at index at replaced by want
 // and nothing else moved — the shape a `servers:` entry splice must produce (serversAppended's rule,
 // for an edit in place rather than an append). Entries are compared with reflect.DeepEqual because a
-// ServerEntry holding a `mechanisms:` map cannot be `==`d.
+// ServerEntry holding a `bypass:` pointer cannot be `==`d meaningfully — `==` would compare the
+// addresses rather than the postures.
 func serversChangedOnlyAt(before, after []ServerEntry, at int, want ServerEntry) bool {
 	if len(after) != len(before) || at < 0 || at >= len(before) {
 		return false

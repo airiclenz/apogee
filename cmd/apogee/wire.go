@@ -22,8 +22,8 @@ package main
 //
 //   - wire_settings.go — the live `settings` holder and the dispatcher a committed /settings key is
 //     applied through, plus the per-model re-resolution a heartbeat rebind drives.
-//   - wire_tools.go — the live tool registry, the builders that assemble one (built-ins plus MCP),
-//     and the validation of the `mechanisms:` block against the catalogue.
+//   - wire_tools.go — the live tool registry and the builders that assemble one (built-ins plus
+//     MCP).
 //   - wire_mcp.go — the connected MCP sessions and the validate-then-commit reconnect that moves a
 //     session onto another set of servers.
 //   - wire_present.go — the presentation ladder this host can walk, and the holder that rebuilds it

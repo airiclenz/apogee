@@ -36,7 +36,6 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -63,8 +62,7 @@ func (h delegationHost) Targets() []tui.ServerChoice {
 
 // Retarget points every delegation spawned from now on at the named entry, through the wiring that
 // owns the latch, the second heartbeat and the posture keys (delegationWiring.Retarget). It refuses
-// a name the live list does not carry, and an entry whose `mechanisms:` map this build does not
-// know, and changes nothing when it does.
+// a name the live list does not carry, and changes nothing when it does.
 //
 // A pick that LANDED is mirrored onto the live settings projection, beside the `servers:` list and
 // the `sub-agents-choice:` gate that projection already carries. A Firing raised from this session
@@ -242,12 +240,12 @@ type delegationWiring struct {
 //
 // base is the session's own Config, carried for the entry-assembly step (see the field): it reads
 // nothing today, because the per-seat catalogue it used to build retired with the catalogue itself
-// (ADR 0076 decision 11).
+// (ADR 0071), and the `mechanisms:` key that named it left the schema with ADR 0076 A6.
 //
-// It still fails the run rather than degrading when the named entry's `mechanisms:` map is
-// defective — an unknown key. That is the same posture the session's own block takes at this same
-// boundary (mechanisms.RetiredNotices, wireSession): a typo in a file outlives the day it was
-// written, and a key that silently meant nothing would be invisible for months.
+// Nothing about a named entry can be refused here any more: the entry was validated as a `servers:`
+// row before this seam ever saw it, and the seat's whole posture is the `bypass:` pointer. The error
+// return is the seam's contract with its live siblings (relist, Retarget), which install a re-read
+// list validate-then-commit.
 func newDelegationWiring(
 	name string,
 	servers func() []config.ServerEntry,
@@ -270,11 +268,7 @@ func newDelegationWiring(
 		engine:        engine,
 	}
 	if entry, ok := config.SubAgentsServerTarget(entries, name); ok {
-		server, err := newSubAgentServer(entry, base)
-		if err != nil {
-			return nil, err
-		}
-		wiring.server = server
+		wiring.server = newSubAgentServer(entry, base)
 	}
 	// What the MODEL is told the far seat is (ADR 0069), installed here and not on a beat: these are
 	// the human's own words for the box, so they are known the moment the entry is resolved and they
@@ -331,28 +325,20 @@ func missingNameNotice(name string, entries []config.ServerEntry) string {
 		"server (configured: %s)", name, configured)
 }
 
-// newSubAgentServer builds the beat for one named entry and validates its `mechanisms:` map. It is
-// the step a startup and a config reload share, so a Sub-agent server that arrives hours into a
-// session is assembled exactly as one named at launch — including the refusal of a defective
-// `mechanisms:` map, which a reload returns to the settings row rather than to the terminal.
+// newSubAgentServer builds the beat for one named entry. It is the step a startup and a config
+// reload share, so a Sub-agent server that arrives hours into a session is assembled exactly as one
+// named at launch.
 //
-// The map itself arms NOTHING since the Reaction core landed (ADR 0076 D11): it goes through
-// mechanisms.RetiredNotices, which still refuses an unknown key and still earns a retired id its
-// line, and the child inherits every parent Reaction that is not TopLevelOnly exactly as it would
-// with no map at all. The retired-id notices are DISCARDED here for the reason they always were: a
-// child's posture is resolved with the alt screen up, where a stderr line paints over the TUI, and
-// the session's own block already said the same lines on stderr at startup.
-func newSubAgentServer(entry config.ServerEntry, base apogee.Config) (*subAgentServer, error) {
-	if _, err := mechanisms.RetiredNotices(entry.Mechanisms); err != nil {
-		// RetiredNotices already carries the house "apogee: " prefix, so the entry that asked for it
-		// is appended rather than prefixed: the message would otherwise print the prefix twice, and
-		// a user with two servers listed needs to know which one is meant.
-		return nil, fmt.Errorf("%w — in the `sub-agents:` server %q", err, entry.Name)
-	}
+// It cannot fail. It could, while a seat carried a `mechanisms:` map of its own to validate; that
+// key went with the catalogue it named (ADR 0076 A6), and the seat's whole posture is now the
+// `bypass:` pointer, whose nil-ness is an instruction rather than a value that can be wrong. The
+// entry itself was already validated as a `servers:` row (config.ValidateServers) long before it
+// reaches here, so the assembly has nothing left to refuse.
+func newSubAgentServer(entry config.ServerEntry, base apogee.Config) *subAgentServer {
 	return &subAgentServer{
 		entry: entry,
 		beat:  subAgentBeat(entry),
-	}, nil
+	}
 }
 
 // subAgentBeat builds the beat for one named entry: the Monitor that observes it, constructed on
@@ -608,8 +594,8 @@ func (d *delegationWiring) stateChange(name string, target *apogee.DelegationTar
 // never would.
 //
 // missing is the held missing-name sentence, "" when the name is empty or names an entry. configErr
-// is a refusal the run could not route AROUND — the entry's key source, or a `mechanisms:` map this
-// build does not know — carried through whole rather than summarized: it is the only place the human
+// is a refusal the run could not route AROUND — the entry's key source — carried through whole
+// rather than summarized: it is the only place the human
 // is told why a server they flagged is taking no delegations, and "unavailable" would send them
 // looking at a network that is working.
 func delegationStateNotice(
@@ -692,9 +678,9 @@ func (d *delegationWiring) dialectAdvice(name string, target *apogee.DelegationT
 // so the next beat says it once — and a list edited elsewhere while the name is still missing
 // re-renders the SAME sentence, which is not news and is not said again.
 //
-// It is validate-then-commit, like every other live re-read: a named entry whose `mechanisms:` map
-// this build refuses returns the error with NOTHING installed, so the session keeps routing exactly
-// as it did while the human fixes the file. A list whose Sub-agent server is untouched — the common
+// It is validate-then-commit, like every other live re-read: a re-read list that could not be
+// installed returns the error with NOTHING installed, so the session keeps routing exactly as it
+// did while the human fixes the file. A list whose Sub-agent server is untouched — the common
 // case, since most `servers:` edits are about some other entry — is a comparison and no work at all.
 func (d *delegationWiring) relist(name string, entries []config.ServerEntry) error {
 	d.mu.Lock()
@@ -720,11 +706,7 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 
 	var next *subAgentServer
 	if found {
-		built, err := newSubAgentServer(entry, d.base)
-		if err != nil {
-			return err
-		}
-		next = built
+		next = newSubAgentServer(entry, d.base)
 	}
 	// Whether what is LATCHED still describes the named server. An entry edited in place still
 	// does — same name, same endpoint, so the delegations in flight are going to the right box and
@@ -786,9 +768,9 @@ func (d *delegationWiring) adopt(configured, target string) {
 // FILE's key (missingNameNotice, which degrades to the session's own server and says so). A name in
 // a config file is a thing written once and read for months, so refusing to load over it would be a
 // hostage-taking; a name handed to this seam comes from a human picking a row in this session, and
-// the honest answer to a row that names nothing is to say so and change nothing. An entry whose
-// `mechanisms:` map this build refuses is refused for the same reason and returned whole — the
-// reload rule (relist), so a defective posture never lands half-installed.
+// the honest answer to a row that names nothing is to say so and change nothing. Anything else this
+// seam could not install is refused for the same reason and returned whole — the reload rule
+// (relist), so a defective posture never lands half-installed.
 //
 // An EMPTY name is not a refusal but the opt-out: routing stops and delegations run on this session's
 // own Upstream, which is the behaviour of a config that names no Sub-agent server at all.
@@ -809,11 +791,7 @@ func (d *delegationWiring) Retarget(name string) error {
 		if !found {
 			return fmt.Errorf("no servers entry named %q", name)
 		}
-		built, err := newSubAgentServer(entry, d.base)
-		if err != nil {
-			return err
-		}
-		next = built
+		next = newSubAgentServer(entry, d.base)
 	}
 
 	d.mu.Lock()
@@ -855,9 +833,9 @@ func (d *delegationWiring) Retarget(name string) error {
 //
 // The POSTURE is copied across untranslated on purpose: `bypass:` is the entry's own pointer, whose
 // nil-ness IS the inherit-versus-replace instruction, and it is the seat's ONLY posture since the
-// Reaction core landed (ADR 0076 decision 11) — the per-seat `mechanisms:` map arms nothing and
-// composes nothing onto the target. It is not a per-beat resolution either, because it is not
-// something a server can be observed to have.
+// Reaction core landed — the per-seat `mechanisms:` map went with the catalogue it named (ADR 0076
+// A6). It is not a per-beat resolution either, because it is not something a server can be observed
+// to have.
 func resolveDelegationTarget(
 	entry config.ServerEntry,
 	apiKey string,

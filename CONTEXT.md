@@ -283,8 +283,8 @@ routes to**, so a cheap grunt model does delegated work while a smarter model or
 Every entry is an eligible target, including the one the session itself runs on, and the choice
 **moves in a running session**: `/sub-agents-server` re-points the delegations spawned from then
 on and records the name back into the file, while children already in flight keep the server they
-were spawned against. ANY entry may also carry the children's **posture** — `bypass:` and
-`mechanisms:` overrides that apply to every child *routed there* whenever that entry is the
+were spawned against. ANY entry may also carry the children's **posture** — the `bypass:`
+override that applies to every child *routed there* whenever that entry is the
 target (present key replaces whole, absent key inherits the parent's live value; where the
 *parent* runs is irrelevant). Delegations there also speak that server's own
 [Thinking-effort](#identity-and-shape) **wire dialect** — its `effort-dialect:` pin, else
@@ -1234,8 +1234,9 @@ D12 — say **Reaction**. It named the gated, self-regulating lab surface (hook 
 enable set, `mechanisms:` key) that
 [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) had
 kept beside an empty catalogue; the core deletes that layer, the bench arms an **engine**-origin
-Reaction through the facade instead, and a `mechanisms:` key answers with the **retired roll**'s
-message. See [Retired terms](#retired-terms).
+Reaction through the facade instead, and a saved `mechanisms:` key is **stripped** out of the file
+at start-up with a note naming each promoted row's successor key. See
+[Retired terms](#retired-terms).
 
 **Hook point**:
 **Retired** by ADR 0076 D12 — say **seam [Moment](#reactions-and-moments)**. The five
@@ -1867,9 +1868,11 @@ The rest were canonical in **this** glossary and retired with the mechanism wave
 [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md),
 which promoted six catalogue rows to [Floor guards](#floor-guard) and retired the other fourteen
 in **v0.20.0** on ratified verdicts rather than on ADR 0016's older "inert by construction"
-precondition. Their source, tests and assets are deleted; every id stays on the **retired roll**
-(`internal/mechanisms/retired.go`) with the release that retired it, so an old `mechanisms:` block
-naming one gets a message rather than an unknown-id failure, and the archived
+precondition. Their source, tests and assets are deleted, and so is the roll that outlived them
+(`internal/mechanisms`, deleted with the `mechanisms:` key itself — ADR 0076 A6); what survives is
+the config migration's successor table (`internal/config/configmigrate.go`), so an old
+`mechanisms:` block is stripped out of the file with a note naming each promoted row's Floor key
+rather than earning an unknown-id failure, and the archived
 [catalogue](docs/design/archived/mechanism-catalogue.md) records the per-row verdict.
 
 - **Off-ramp** (Exempt Mechanism) → retired as a shipped concept: a Mechanism exempt from Adaptive

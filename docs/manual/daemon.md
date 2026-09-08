@@ -105,10 +105,7 @@ file carries no secrets. Leave `server:` out and the schedule runs on whatever `
 in `config.yaml` names as the startup default.
 
 `config.yaml` is read **once**, at startup: changing your servers means restarting the
-daemon. `schedules.yaml` is the only live surface. A `mechanisms:` key in `config.yaml`
-naming a Mechanism this release retired is ignored rather than refused, and the daemon
-logs one line saying so as it starts — naming, where that row became a Floor guard, the
-top-level key that governs the behaviour now. The seven Floor guards themselves are on for
+daemon. `schedules.yaml` is the only live surface. The seven Floor guards are on for
 every firing, exactly as they are in a session.
 
 The daemon **never loads a model**. On a server llama-launcher fronts, `model:` would be

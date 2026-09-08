@@ -600,7 +600,23 @@ go test ./internal/config/ && go test ./cmd/apogee/ -run 'Docs|Settings'
 
 **Commit:** `refactor(config)!: validated-sets: and internal/validated are deleted (ADR 0076 A9)`
 
-## 16. Delete `mechanisms:` and `internal/mechanisms`
+## 16. Delete `mechanisms:` and `internal/mechanisms` — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): `newSubAgentServer` lost its `error` return — the mechanisms validation was its whole body, so every remaining caller's `if err != nil` would have been dead. The cascade stops there: `newDelegationWiring` and `delegationWiring.relist` keep their `error` returns (their callers, `wire_live.go` and `wire_settings.go`'s `reloadServers`, are the live validate-then-commit seam), and their doc paragraphs are rewritten so neither still claims the deleted failure mode. `newDaemonWiring`'s `[]string` return WAS dropped, because it carried nothing but the retired notices.
+
+NOTES (2026-09-08): `TestApplySettingServersDrivesTheSubAgentServer`'s `libary: true` case (`delegation_test.go`) IS deleted this time, unlike at item 9 — with `ServerEntry.Mechanisms` gone the key is simply an unknown field yaml ignores, so the apply no longer refuses and the case pinned nothing.
+
+NOTES (2026-09-08): `verifyReactionsFold` takes the round-2 guard's shape verbatim: `withoutServerMechanisms` is deleted, the servers are compared with plain `sameServers` and `serversKey` joins `reactionsKey` in the `sameApartFrom` call — `mechanisms` had to leave that list because `zeroConfigPath` answers false for a path the schema no longer has, which would have failed every fold.
+
+NOTES (2026-09-08): `TestApplyConfigNoMechanismsIsNil` is deleted (nothing left to be nil) and `TestMechanismsKeyIsStrippedAndHasNoRegistryRow` now reads the rewritten file back instead of asserting `opts.Mechanisms`, which is the only claim the deleted field left it able to make.
+
+NOTES (2026-09-08): the manual's migration block is named `## Keys apogee migrates for you` and every surviving `mechanisms` mention in `docs/manual/configuration.md` lives inside it, bar the ADR 0006 link line the acceptance excludes.
+
+NOTES (2026-09-08): consequential edit — CONTEXT.md: made necessary by deleting the key and the package — the `servers:` posture sentence (:287), the **Mechanism** retired-term entry and the retired-roll paragraph each named `mechanisms:` or `internal/mechanisms/retired.go` as live. Item 20 owns CONTEXT.md's Reaction/Moment/Hook-event/Validated-set entries and header prose; none of those three is on its list.
+
+NOTES (2026-09-08): consequential edit — cmd/apogee/wire.go, cmd/apogee/wire_tools.go, cmd/apogee/wire_verbs.go, cmd/apogee/wire_settings.go, internal/agent/subagent.go, internal/config/configmigrate.go: made necessary by deleting the key and its validation — each carried a doc comment describing `mechanisms:` validation, the retired-roll notices or "`mechanisms:` still parses" as current behaviour.
+
+NOTES (2026-09-08): historical `internal/mechanisms` mentions that describe where code USED to live (`internal/syntaxcheck`, `internal/domain/domaintest`, `internal/tools/exec_fence_test.go`, `internal/library/doc.go`, `internal/floor/toolnames.go`) are left as written, which is what the item's Tests line allows; `internal/floor` is untouched under the plan's standing requirement. Stale mentions of the deleted registry in `internal/tui/doc.go:566` and `tui.go:299` predate this item (stage 1 deleted the registry) and belong to item 21's comment sweep.
 
 **What:** Recast at the regression check (2026-09-08). Depends on items 9 and 14. Delete `fileConfig.Mechanisms`, `ServerEntry.Mechanisms` (making `ServerEntry` comparable — replace the `reflect.DeepEqual` in `configmigrate.go:238` and `configedit.go:209` with `==` where the comment says that was the only reason), `Options.Mechanisms`, the registry-free accessor (`config.go:894-908`), the `walkSchema` and `TestKeyAccessorsBindDescribedKeys` exemptions, the template mentions (`defaults/config.yaml:212`, `:590` comments), and `internal/mechanisms/` whole (call: package deleted) with its four start-up notice call sites in `daemonfire.go:120`, `delegation.go:346`, `headless.go:693`, `wire_live.go:160` and `delegation.go:858`'s per-seat note. `docs/manual/configuration.md`'s per-seat `mechanisms:` mentions (:1013-1041) and `docs/manual/headless.md:52`, `docs/manual/daemon.md:108-109` lose the key.
 

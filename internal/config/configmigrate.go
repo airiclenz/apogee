@@ -287,8 +287,8 @@ func verifyFold(before, after fileConfig, updated []byte, entry ServerEntry) err
 // serversAppended reports whether after is exactly before plus entry, appended last — the only
 // shape the fold may produce (hostsAppended's rule, one list over).
 //
-// The comparison goes through reflect.DeepEqual because ServerEntry stopped being comparable when it
-// grew the sub-agent posture's `mechanisms:` map (ADR 0045): a struct holding a map cannot be `==`d.
+// The comparison goes through reflect.DeepEqual because ServerEntry carries the sub-agent posture's
+// `bypass:` POINTER (ADR 0045): `==` would compare the two addresses rather than the two postures.
 // slices.EqualFunc still carries the head comparison so that a nil `before` and an empty one keep
 // reading the same, which a bare DeepEqual over the two slices would not.
 func serversAppended(before, after []ServerEntry, entry ServerEntry) bool {
@@ -920,7 +920,7 @@ func verifySubAgentsMigration(before, after fileConfig, updated []byte, name str
 
 // sameServers reports whether two parsed `servers:` lists are the same list, entry for entry. It is
 // serversAppended's comparison without the appended entry, and it goes through reflect.DeepEqual for
-// serversAppended's reason: a ServerEntry holding a map cannot be `==`d.
+// serversAppended's reason: a ServerEntry holding a pointer cannot be `==`d.
 func sameServers(before, after []ServerEntry) bool {
 	return slices.EqualFunc(before, after, func(a, b ServerEntry) bool { return reflect.DeepEqual(a, b) })
 }
@@ -997,7 +997,7 @@ type blockSpan struct {
 // half: the `hooks:` block ADR 0076 renamed, the `mechanisms:` blocks ADR 0071 emptied, and the
 // `validated-sets:` block ADR 0076 A9 deleted. It exists for legacyFileConfig's reason one
 // migration over: fileConfig no longer has a `hooks:` or a `validated-sets:` field, so those blocks
-// would be silently unread, and `mechanisms:` still parses but drives nothing.
+// would be silently unread, and `mechanisms:` no longer parses at all.
 //
 // Nothing resolves from it. Its only job is to answer "does this file still carry any of those
 // shapes, and where do those lines start and end" — the two facts the fold and the strip both need.
@@ -1239,13 +1239,14 @@ func strippedMechanismIDs(rc legacyReactionsConfig) []string {
 // OTHER setting.
 //
 // The retired keys are read out of the edited BYTES, because they are what fileConfig has no field
-// for: the parsed after says nothing about a `hooks:` the fold was supposed to take away. The
-// servers are compared with their `mechanisms:` maps blanked on both sides, for the same reason —
-// that map is what the strip removes, and sameApartFrom cannot reach inside a list.
+// for: the parsed after says nothing about a `hooks:` the fold was supposed to take away.
 //
-// `validated-sets` is deliberately NOT a sameApartFrom path: fileConfig has forgotten the key, so
-// the comparison is already blind to it and naming it would only claim a field that no longer
-// exists. The byte-level span above is the strip's one and only reader.
+// Neither `mechanisms` nor `validated-sets` is a sameApartFrom path: fileConfig has forgotten both
+// keys, so the comparison is already blind to them and naming one would only claim a field that no
+// longer exists. The byte-level spans above are the strips' one and only reader. The `servers:`
+// list is compared on its own for the same reason the sub-agents migration compares it on its own
+// (verifySubAgentsMigration): the per-server `mechanisms:` strip reaches inside a list, where
+// sameApartFrom cannot follow, and sameServers reads a nil list and an empty one alike.
 func verifyReactionsFold(before, after fileConfig, updated []byte, want []domain.Reaction) error {
 	rc, err := readLegacyReactions(updated)
 	if err != nil {
@@ -1260,30 +1261,14 @@ func verifyReactionsFold(before, after fileConfig, updated []byte, want []domain
 		return errors.New("the edit would have left one of the retired blocks behind")
 	case !reflect.DeepEqual(got, want):
 		return errors.New("the folded reactions: block does not fire what the hooks: block fired")
-	case !sameApartFrom(withoutServerMechanisms(before), withoutServerMechanisms(after),
-		reactionsKey, mechanismsKey):
+	case !sameServers(before.Servers, after.Servers):
+		return errors.New("the edit would have changed the servers: list itself")
+	case !sameApartFrom(before, after, reactionsKey, serversKey):
 		//nolint:staticcheck // ST1005: ends with the validated-sets: key's own colon by design.
 		return errors.New("the edit would have changed more than hooks:, reactions:, mechanisms: " +
 			"and validated-sets:")
 	}
 	return nil
-}
-
-// withoutServerMechanisms copies fc with every server entry's `mechanisms:` map blanked, so the
-// whole-file comparison can ask its question about the settings the strip does NOT touch. The
-// copy is deep enough to leave the caller's own parsed config alone: the slice is rebuilt rather
-// than written through.
-func withoutServerMechanisms(fc fileConfig) fileConfig {
-	if len(fc.Servers) == 0 {
-		return fc
-	}
-	servers := make([]ServerEntry, len(fc.Servers))
-	copy(servers, fc.Servers)
-	for i := range servers {
-		servers[i].Mechanisms = nil
-	}
-	fc.Servers = servers
-	return fc
 }
 
 // ----------------------------------------------------------------------------

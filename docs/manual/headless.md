@@ -48,10 +48,7 @@ action is refused rather than parked — the refusals are the `denied:` count �
 and `present_document` are not registered, and no MCP server is contacted.
 
 Under the default `--format text`, only the model's answer goes to **stdout**; resolution
-notices — including one line per
-`mechanisms:` key naming a Mechanism this release retired, which is ignored rather than
-refused and, where the row became a Floor guard, names the top-level key that governs it
-now — and the one-line summary go to **stderr**, so a pipeline reads the text and
+notices and the one-line summary go to **stderr**, so a pipeline reads the text and
 nothing else. `--format json` replaces that stdout wholesale with the machine-readable
 Event lines; the section at the foot of this page is their contract, and everything said
 about stderr here holds under both formats bar the one line that section names as

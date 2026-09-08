@@ -226,8 +226,8 @@ func TestResolveDelegationTargetResolvesTheProfileForTheBoundModel(t *testing.T)
 
 // The posture key rides the routing untranslated: `bypass:` travels as the entry's own pointer,
 // because its NIL-ness is the inherit-versus-replace instruction the engine reads (ADR 0045 §2).
-// It is the seat's ONLY posture since the Reaction core landed (ADR 0076 D11) — a per-seat
-// `mechanisms:` map arms nothing and composes nothing onto the target.
+// It is the seat's ONLY posture since the Reaction core landed — the per-seat `mechanisms:` map
+// went with the catalogue it named (ADR 0076 A6).
 func TestResolveDelegationTargetCarriesThePostureVerbatim(t *testing.T) {
 	t.Parallel()
 
@@ -422,61 +422,18 @@ func TestDelegationWiringObservePushesWhatTheBeatResolvedTo(t *testing.T) {
 	}
 }
 
-// A seat's `mechanisms:` map still parses, still refuses a typo, and ARMS NOTHING since the
-// Reaction core landed (ADR 0076 decision 11). `grammar` is a retired id, so the map is the one a
-// user actually has in a saved file: the seat builds, the retired-id line is discarded exactly as
-// it always was (a child's posture resolves with the alt screen up), and the target the seat
-// composes is the SAME target the same entry without the map composes — which is the whole claim,
-// because a routed child now inherits every parent Reaction that is not TopLevelOnly, exactly as it
-// would with no map at all.
-func TestASeatsMechanismsMapArmsNothing(t *testing.T) {
-	t.Parallel()
-
-	base := validCfg(t)
-	entry := config.ServerEntry{
-		Name:       "grunt",
-		Endpoint:   "http://127.0.0.1:2222",
-		Mechanisms: map[string]bool{"grammar": true},
-	}
-	server, err := newSubAgentServer(entry, base)
-	if err != nil {
-		t.Fatalf("newSubAgentServer with a retired-id arm: %v; want the saved map accepted", err)
-	}
-	if server.entry.Mechanisms == nil {
-		t.Error("the seat lost its `mechanisms:` map; the key still parses and still notices")
-	}
-
-	observed := heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}
-	bare := entry
-	bare.Mechanisms = nil
-	withMap := resolveDelegationTarget(entry, "", observed, nil)
-	without := resolveDelegationTarget(bare, "", observed, nil)
-	if withMap == nil || without == nil {
-		t.Fatal("a reachable seat resolved no target")
-	}
-	if !reflect.DeepEqual(withMap, without) {
-		t.Errorf("the `mechanisms:` map changed the composed target:\n with = %+v\n without = %+v", withMap, without)
-	}
-}
-
-// The posture keys are legal on EVERY entry now, which the flag era refused: the config loads, and
+// The posture key is legal on EVERY entry now, which the flag era refused: the config loads, and
 // the wiring builds the posture of the entry the key names — not of the one that merely carries a
-// map. Which entry takes the delegations is the root key's answer, so the posture follows the target
-// rather than a per-entry flag.
+// pointer. Which entry takes the delegations is the root key's answer, so the posture follows the
+// target rather than a per-entry flag.
 func TestNewDelegationWiringTakesThePostureOfTheNamedEntry(t *testing.T) {
 	t.Parallel()
 
 	base := validCfg(t)
 	off, on := false, true
 	entries := []config.ServerEntry{
-		{
-			Name: "here", Endpoint: "http://127.0.0.1:1111", Bypass: &off,
-			Mechanisms: map[string]bool{"library": true},
-		},
-		{
-			Name: "grunt", Endpoint: "http://127.0.0.1:2222", Bypass: &on,
-			Mechanisms: map[string]bool{"error_enrichment": false},
-		},
+		{Name: "here", Endpoint: "http://127.0.0.1:1111", Bypass: &off},
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222", Bypass: &on},
 	}
 	if err := config.ValidateServers(entries); err != nil {
 		t.Fatalf("posture on an entry the key does not name: %v; want the list accepted", err)
@@ -529,27 +486,6 @@ func TestDelegationRelistSaysWhenTheNamedEntryLeavesTheList(t *testing.T) {
 	wiring.observe(context.Background())()
 	if len(notices.notes) != said+1 {
 		t.Errorf("notices = %q; want the same missing name not said twice", notices.notes)
-	}
-}
-
-// A typo in the named entry's posture is a defect in the file, and it fails the run at the startup
-// boundary naming the entry — the same posture the session's own `mechanisms:` block gets, because a
-// posture that silently armed nothing would be invisible for months.
-func TestNewDelegationWiringRefusesADefectiveMechanismsMap(t *testing.T) {
-	t.Parallel()
-
-	entries := []config.ServerEntry{{
-		Name:       "grunt",
-		Endpoint:   "http://127.0.0.1:2222",
-		Mechanisms: map[string]bool{"libary": true},
-	}}
-	_, err := newDelegationWiring(
-		"grunt", staticServerList(entries), validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
-	if err == nil {
-		t.Fatal("a misspelled mechanism key was accepted; want the run refused")
-	}
-	if !strings.Contains(err.Error(), "libary") || !strings.Contains(err.Error(), "grunt") {
-		t.Errorf("error = %q; want it to name both the key and the entry that asked for it", err)
 	}
 }
 
@@ -1071,34 +1007,6 @@ func TestDelegationRelistIgnoresAnEditElsewhereInTheList(t *testing.T) {
 	}
 }
 
-// A live edit is validate-then-commit, exactly as the startup build is loud: a named entry whose
-// `mechanisms:` map this build does not know is refused with NOTHING installed, so the session keeps
-// routing where it was routing while the human fixes the file.
-func TestDelegationRelistRefusesADefectiveMechanismsMap(t *testing.T) {
-	t.Parallel()
-
-	base := validCfg(t)
-	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
-	spy := &delegationSpy{}
-	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
-	wiring.base = base
-	wiring.observe(context.Background())()
-
-	defective := entry
-	defective.Mechanisms = map[string]bool{"libary": true}
-	err := wiring.relist("grunt", []config.ServerEntry{defective})
-	if err == nil {
-		t.Fatal("a misspelled mechanism key was accepted; want the edit refused")
-	}
-	if !strings.Contains(err.Error(), "libary") || !strings.Contains(err.Error(), "grunt") {
-		t.Errorf("error = %q; want it to name both the key and the entry that asked for it", err)
-	}
-	if wiring.server.entry.Mechanisms != nil || len(spy.pushes) != 1 {
-		t.Errorf("server = %+v and pushes = %+v; want the refused edit to have installed nothing",
-			wiring.server.entry, spy.pushes)
-	}
-}
-
 // The target is named by a root key read out of the SAME file the `servers:` list lives in, so the
 // door a live edit reaches routing through is that list's own apply (ADR 0037's dispatcher) — the
 // same one an editor's exit and the watcher's report both end in, and it carries both halves at
@@ -1124,21 +1032,6 @@ func TestApplySettingServersDrivesTheSubAgentServer(t *testing.T) {
 	}
 	if wiring.server == nil || wiring.server.entry.Name != "grunt" {
 		t.Fatalf("Sub-agent server after the edit = %+v; want the named grunt entry", wiring.server)
-	}
-
-	// A named entry this build refuses is refused BEFORE anything is installed, so the session
-	// keeps both the list and the routing it was already running.
-	writeSettingsFixture(t, path, "servers:\n"+
-		"  - name: local\n    endpoint: http://127.0.0.1:1111\n"+
-		"  - name: grunt\n    endpoint: http://127.0.0.1:2222\n"+
-		"    mechanisms:\n      libary: true\n"+
-		"sub-agents-server: grunt\n")
-	if _, err := apply("servers", "2 servers"); err == nil {
-		t.Fatal("apply of a defective `mechanisms:` map: want the refusal, got none")
-	}
-	if wiring.server.entry.Mechanisms != nil || len(live.serverList()) != 2 {
-		t.Errorf("refused edit installed %+v and a %d-entry list; want neither touched",
-			wiring.server.entry, len(live.serverList()))
 	}
 
 	writeSettingsFixture(t, path, "servers:\n  - name: local\n    endpoint: http://127.0.0.1:1111\n")
@@ -1372,34 +1265,6 @@ func TestDelegationRetargetRefusesANameNoEntryCarries(t *testing.T) {
 	}
 	if len(spy.pushes) != 1 || len(notices.notes) != 2 {
 		t.Errorf("a refused pick pushed %+v and said %q; want neither moved", spy.pushes, notices.notes)
-	}
-}
-
-// The reload rule (relist): an entry whose `mechanisms:` map this build refuses is refused with
-// NOTHING installed, and the message reaches the caller whole — it is the only place a human learns
-// which key on which entry they mistyped.
-func TestDelegationRetargetRefusesADefectiveMechanismsMap(t *testing.T) {
-	t.Parallel()
-
-	entries := []config.ServerEntry{
-		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
-		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333", Mechanisms: map[string]bool{"libary": true}},
-	}
-	spy := &delegationSpy{}
-	wiring := retargetableWiring(t, entries[0], entries,
-		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
-	wiring.observe(context.Background())()
-
-	err := wiring.Retarget("cheaper")
-	if err == nil {
-		t.Fatal("a misspelled mechanism key was accepted; want the pick refused")
-	}
-	if !strings.Contains(err.Error(), "libary") || !strings.Contains(err.Error(), "cheaper") {
-		t.Errorf("error = %q; want it to name both the key and the entry that asked for it", err)
-	}
-	if wiring.server == nil || wiring.server.entry.Name != "grunt" || len(spy.pushes) != 1 {
-		t.Errorf("a refused pick installed %+v and pushed %+v; want the old target still live",
-			wiring.server, spy.pushes)
 	}
 }
 

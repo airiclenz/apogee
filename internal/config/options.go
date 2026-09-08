@@ -361,13 +361,6 @@ type Options struct {
 	// because which model is bound is not a fact this file holds.
 	ModelProfiles []profiles.Entry
 
-	// mechanisms is the retired `mechanisms:` block, loaded from the config file only
-	// (default-empty). It arms nothing: the catalogue it enabled rows from is gone, and the Floor
-	// guards the run still carries are Config.Floor's own top-level keys (ADR 0071, ADR 0076 D11).
-	// ApplyConfig sets it from settings; the composition root validates every key against the
-	// retired roll, so a typo is still a loud refusal and a retired id still earns its notice.
-	Mechanisms map[string]bool
-
 	// present is the resolved `present:` block (ADR 0019) — the presentation ladder's config:
 	// auto-open, the command override, and the doc server's port and advertised host. Loaded from
 	// the config file only, like the blocks above. ApplyConfig sets it from the resolved settings;

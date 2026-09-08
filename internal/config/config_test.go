@@ -198,11 +198,6 @@ func TestResolvePrecedence(t *testing.T) {
 			},
 		},
 		{
-			name: "mechanisms are file-only (default empty)",
-			file: fileConfig{Mechanisms: map[string]bool{"validate": true, "syntax": false}},
-			want: func(o *Options) { o.Mechanisms = map[string]bool{"validate": true, "syntax": false} },
-		},
-		{
 			name: "the present block is file-only (all four keys)",
 			file: fileConfig{Present: &presentConfig{AutoOpen: boolptr(false), Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}},
 			want: func(o *Options) {
@@ -466,11 +461,7 @@ func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 
 	bound := map[string]keyAccessor{}
 	for _, k := range keyAccessors {
-		// `mechanisms` is the one accessor with no registry row: the key keeps PARSING (ADR 0076
-		// decision 11) while the /settings row that described it went with the catalogue (ADR 0076
-		// decision 1), so it is bound here and described nowhere. Every other accessor still has to
-		// name a described key.
-		if _, ok := LookupKey(k.row.Path); !ok && k.row.Path != "mechanisms" {
+		if _, ok := LookupKey(k.row.Path); !ok {
 			t.Errorf("keyAccessors binds %q, which the registry does not describe", k.row.Path)
 		}
 		if _, dup := bound[k.row.Path]; dup {
@@ -538,7 +529,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"AutoTitle":        true, "RememberModel": true,
 		"ContextWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
 		"ToolsDisabled": true,
-		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true, "Mechanisms": true,
+		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true,
 		"Present":      true,
 		"SystemPrompt": true, "ContextFiles": true, "UI": true, "CursorShape": true,
 	}
@@ -596,7 +587,6 @@ func everyKeyFileConfig() fileConfig {
 		Tools:         &toolsConfig{Disabled: []string{"web_search"}},
 		URLSafety:     &urlSafetyConfig{AllowHosts: []string{"example.com"}, DenyHosts: []string{"evil.example"}},
 		ModelProfiles: map[string]modelProfileConfig{"qwen": {ToolCallFormat: "xml"}},
-		Mechanisms:    map[string]bool{"decompose": true},
 		Present: &presentConfig{AutoOpen: boolptr(false), Command: "open {path}", Port: 8080,
 			Host: "box.local"},
 		SystemPromptText: "be brief", SystemPromptFile: "prompt.md",
@@ -3355,12 +3345,12 @@ func TestApplyConfigSubAgentsChoice(t *testing.T) {
 	}
 }
 
-// The `mechanisms:` key is the one key with NO registry row, and the migration now takes it out of
-// the file it is read from: the catalogue it named is gone (ADR 0071), the /settings row went with
-// it (ADR 0076 decision 1), and a config still carrying the block is STRIPPED at startup with a
-// note naming the Floor key that governs each promoted row now (ADR 0076 A6, configmigrate.go).
-// This holds the half that survives — no row, no refusal — while configmigrate_test.go holds the
-// strip itself.
+// The `mechanisms:` key is gone from the schema entirely: the catalogue it named is gone (ADR 0071),
+// the /settings row went with it (ADR 0076 decision 1), the Options field and the registry-free
+// accessor that carried it went with ADR 0076 A6, and a config still carrying the block is STRIPPED
+// at startup with a note naming the Floor key that governs each promoted row now (configmigrate.go).
+// This holds the half that survives — no row, no field, no refusal — while configmigrate_test.go
+// holds the strip itself.
 func TestMechanismsKeyIsStrippedAndHasNoRegistryRow(t *testing.T) {
 	t.Parallel()
 	if row, ok := LookupKey("mechanisms"); ok {
@@ -3373,21 +3363,12 @@ func TestMechanismsKeyIsStrippedAndHasNoRegistryRow(t *testing.T) {
 	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("ApplyConfig: %v — a saved configuration naming a retired row must never be refused", err)
 	}
-	if len(opts.Mechanisms) != 0 {
-		t.Errorf("opts.Mechanisms = %+v; want none — the key is stripped out of the file", opts.Mechanisms)
+	rewritten, err := os.ReadFile(filepath.Join(home, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read back config.yaml: %v", err)
 	}
-}
-
-// With no mechanisms block, opts.mechanisms is nil — every Mechanism default-off (D1), the
-// byte-identical anchor: a config without the block behaves exactly as before.
-func TestApplyConfigNoMechanismsIsNil(t *testing.T) {
-	t.Parallel()
-	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
-	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("ApplyConfig: %v", err)
-	}
-	if opts.Mechanisms != nil {
-		t.Errorf("opts.mechanisms = %+v; want nil (no block ⇒ nothing enabled)", opts.Mechanisms)
+	if strings.Contains(string(rewritten), "mechanisms:") {
+		t.Error("the `mechanisms:` block survived the startup read; the key has no field to reach any more")
 	}
 }
 

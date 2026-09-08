@@ -93,8 +93,8 @@ type firingInputs struct {
 // chances for one configuration to mean two different runs depending on which Driver read it, which
 // is the one thing ADR 0031's benchable-all-the-way-up shape cannot afford.
 //
-// It composes; it does not decide. The mode gate, the roots, the `mechanisms:` validation, the
-// scratch sweep and every notice a Driver prints in its own voice stay with the Driver — what comes
+// It composes; it does not decide. The mode gate, the roots, the scratch sweep and every notice a
+// Driver prints in its own voice stay with the Driver — what comes
 // back is a Config, this run's routing (firingRouting) and the per-model rebind notices, which
 // headless prints on stderr, the daemon logs, and the TUI's `/schedule` Driver drops (its narration
 // is the session record it leaves behind).
@@ -482,8 +482,7 @@ type firingRouting struct {
 // session raises afterwards.
 //
 // Nothing here is an error. Every way routing can fail to resolve — no key at all, a name the list
-// does not carry, an entry whose `mechanisms:` map this build refuses, a key source that would not
-// answer, a server that is unreachable or has no model bound — leaves the target nil, the run
+// does not carry, a key source that would not answer, a server that is unreachable or has no model bound — leaves the target nil, the run
 // delegating to its own Upstream, and ONE notice saying so (delegationStateNotice). That is the same
 // visible degrade a session takes (ADR 0042), and the reason is stronger here: a Firing runs while
 // nobody is watching, so refusing to start over a grunt box that is merely down would turn a
@@ -510,13 +509,9 @@ func resolveFiringRouting(
 		return firingRouting{}, missingNameNotice(name, entries)
 	}
 
-	// The same build a session's startup and its config reloads go through, so a routed Firing is
-	// refused the same defective `mechanisms:` maps a session is — which here is a notice rather
-	// than the session's refusal to load.
-	server, err := newSubAgentServer(entry, base)
-	if err != nil {
-		return firingRouting{}, delegationStateNotice(name, nil, "", err)
-	}
+	// The same build a session's startup and its config reloads go through, so a routed Firing
+	// assembles its seat exactly as a session does.
+	server := newSubAgentServer(entry, base)
 	// The far seat, installed on the ENTRY rather than on the observation below: the words are the
 	// human's and they do not move when the box does (ADR 0069, delegationSeatOf).
 	seat := delegationSeatOf(server)

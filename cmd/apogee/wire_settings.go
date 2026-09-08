@@ -182,8 +182,8 @@ type liveSettings struct {
 	contextFileNames   []string
 
 	// modelProfiles is the `model-profiles:` map (ADR 0044): the user tier the next per-model
-	// resolution matches a model name against. It is held for the `mechanisms:` reason — an edit is
-	// an INPUT to a resolution rather than a value the engine keeps — even though its own key also
+	// resolution matches a model name against. It is held because an edit to it is an INPUT to a
+	// resolution rather than a value the engine keeps — even though its own key also
 	// pushes the resolved profile at SetProfile straight away: without it a switch made after the
 	// edit would re-resolve against the map this process launched with.
 	modelProfiles []profiles.Entry
@@ -1575,8 +1575,7 @@ var settingsTable = []settingsEntry{
 		// in the list because the map it stores is what the NEXT rebind reads.
 		reaches: func(a settingsApplier) bool { return a.engine != nil && a.binding != nil && a.live != nil },
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			// The map is an INPUT to the per-model resolution, like `mechanisms:` above — but the
-			// model has NOT changed, and re-driving a whole rebind to move one field would refuse the
+			// The map is an INPUT to the per-model resolution — but the model has NOT changed, and re-driving a whole rebind to move one field would refuse the
 			// edit whenever an Exchange is open. So it takes the profile's own engine door instead
 			// (ADR 0044 ratified call 6: Rebind is the model-switch door, SetProfile the same-model
 			// config-edit one). The value the pane persisted is not read — a map of blocks is a shape
@@ -2061,9 +2060,8 @@ func (a settingsApplier) reloadServers() (bool, error) {
 		return false, err
 	}
 	// The Sub-agent server the file now names (ADR 0045), re-pointed BEFORE anything is installed:
-	// it is the one part of this apply that can still refuse — a named entry whose `mechanisms:`
-	// map this build does not know — and a refusal has to leave the session on the list it was
-	// already running, not half-way onto a new one. Both halves come from the SAME re-read: the
+	// a re-list that cannot be installed has to leave the session on the list it was already
+	// running, not half-way onto a new one. Both halves come from the SAME re-read: the
 	// root `sub-agents-server:` key names the entry and the list carries it, so a save that moves
 	// both resolves as one act.
 	if a.delegation != nil {
