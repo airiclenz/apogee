@@ -608,8 +608,8 @@ func TestHeadlessReportsARetiredMechanism(t *testing.T) {
 	}
 	// The retired id is dropped and nothing stands in its place: no catalogued row is on by default,
 	// a headless run getting its recovery guarantees from the Floor guards instead (ADR 0071).
-	if got := stub.spec.Config.EnableMechanisms; len(got) != 0 {
-		t.Errorf("EnableMechanisms = %v, want nothing armed", got)
+	if got := stub.spec.Config.Reactions; len(got) != 0 {
+		t.Errorf("Config.Reactions = %v, want nothing armed beside the engine builtins", got)
 	}
 }
 

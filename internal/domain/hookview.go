@@ -1,19 +1,18 @@
 package domain
 
 // Concrete read-only views backing Request.View / Response.View / the tool-stage
-// hooks' LoopView argument. They are unexported: a hook receives them only through the
-// LoopView / ConversationView interfaces (docs/design/hook-mutation-api.md §2.1). Each
+// reactions' LoopView argument. They are unexported: a reaction receives them only through
+// the LoopView / ConversationView interfaces (docs/design/hook-mutation-api.md §2.1). Each
 // holds the loop's backing slices by reference but exposes only copies and value
-// snapshots, so a hook reading through a view can never mutate loop state — mutation
+// snapshots, so a reaction reading through a view can never mutate loop state — mutation
 // is always by index against the owning Request / Conversation.
 
-// loopView is the read-only window onto loop state every hook gets.
+// loopView is the read-only window onto loop state every reaction gets.
 type loopView struct {
 	messages       []Message
 	tools          []ToolDef
 	budget         Budget
 	turn           int
-	fired          map[MechanismID]int
 	depth          int
 	parallelAgents int
 }
@@ -29,8 +28,6 @@ func (v loopView) Turn() int { return v.turn }
 func (v loopView) Depth() int { return v.depth }
 
 func (v loopView) ParallelAgents() int { return v.parallelAgents }
-
-func (v loopView) Fired(id MechanismID) int { return v.fired[id] }
 
 // conversationView is the read-only history with tool-call/result pairing helpers.
 type conversationView struct {

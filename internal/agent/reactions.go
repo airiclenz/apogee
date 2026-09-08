@@ -209,7 +209,7 @@ func (a *Agent) fireOne(
 			out, err = domain.Outcome{}, nil
 		}
 	}()
-	defer a.recoverHook(turn, domain.MechanismID(r.ID), &panicErr)()
+	defer a.recoverHook(turn, r.ID, &panicErr)()
 
 	before := seam.work.Revision()
 	out, err = seam.invoke(ctx, r.Handler)
@@ -228,12 +228,12 @@ func (a *Agent) fireOne(
 // attributed to the firing reaction's id and signals errHookPanicked through errp — the single
 // recover-at-extension-boundary primitive the dispatcher installs around every invocation
 // (ADR 0007 / ADR 0002).
-func (a *Agent) recoverHook(turn int, id domain.MechanismID, errp *error) func() {
+func (a *Agent) recoverHook(turn int, id string, errp *error) func() {
 	return func() {
 		if r := recover(); r != nil {
 			a.cfg.Events.Emit(domain.ErrorEvent{
 				EventBase: a.base(turn),
-				Source:    string(id),
+				Source:    id,
 				Err:       fmt.Sprintf("panic: %v", r),
 			})
 			*errp = errHookPanicked

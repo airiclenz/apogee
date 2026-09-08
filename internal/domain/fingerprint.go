@@ -8,7 +8,7 @@ package domain
 // the Upstream. The Library keys learned observations on a fingerprint and gates injection
 // on this tier ("prefer not to inject under uncertainty", CONTEXT "Library"): a low-confidence
 // identity is easily aliased — two different builds can advertise the same label — so an
-// observation keyed there is the weakest evidence and an inject Mechanism may decline it.
+// observation keyed there is the weakest evidence and an injecting reaction may decline it.
 type FingerprintConfidence int
 
 const (

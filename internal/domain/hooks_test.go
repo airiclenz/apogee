@@ -16,7 +16,7 @@ func sysUserReq(t *testing.T) *Request {
 	return NewRequest("m", []Message{
 		{Role: RoleSystem, Content: "base"},
 		{Role: RoleUser, Content: "do it"},
-	}, nil, Budget{}, 0, nil)
+	}, nil, Budget{}, 0)
 }
 
 func roles(msgs []Message) []Role {
@@ -51,7 +51,7 @@ func TestRequestAppendToSystem(t *testing.T) {
 	})
 
 	t.Run("creates a system message when absent", func(t *testing.T) {
-		r := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0, nil)
+		r := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0)
 		if injected := r.AppendToSystem("[m1]", "[m1] new"); !injected {
 			t.Fatal("AppendToSystem did not inject when no system message existed")
 		}
@@ -83,7 +83,7 @@ func TestRequestInjectContext(t *testing.T) {
 			{Role: RoleUser, Content: "go"},
 			{Role: RoleAssistant, Content: "", ToolCalls: []ToolCall{{ID: "c1", Tool: "read"}}},
 			{Role: RoleTool, Content: "file body", ToolCallID: "c1"},
-		}, nil, Budget{}, 0, nil)
+		}, nil, Budget{}, 0)
 		r.InjectContext("note")
 		msgs := r.State().Messages
 		if len(msgs) != 4 {
@@ -95,7 +95,7 @@ func TestRequestInjectContext(t *testing.T) {
 	})
 
 	t.Run("appends at the end when there is no user message", func(t *testing.T) {
-		r := NewRequest("m", []Message{{Role: RoleSystem, Content: "base"}}, nil, Budget{}, 0, nil)
+		r := NewRequest("m", []Message{{Role: RoleSystem, Content: "base"}}, nil, Budget{}, 0)
 		r.InjectContext("note")
 		msgs := r.State().Messages
 		if len(msgs) != 2 || msgs[1].Role != RoleUser || msgs[1].Content != "note" {
@@ -110,7 +110,7 @@ func TestRequestInjectContext(t *testing.T) {
 // injected message is UNMARKED, so anchoring on the plain last user message would slot it
 // between the remark and the ask, making the injection itself the newest non-interjected
 // user message: the derived Exchange would collapse to the interjection alone and every
-// Mechanism scoped to the Exchange would lose the ask it shares context with.
+// reaction scoped to the Exchange would lose the ask it shares context with.
 func TestRequestInjectContextPreservesExchangeOpening(t *testing.T) {
 	msgs := []Message{
 		{Role: RoleSystem, Content: "base"},
@@ -124,7 +124,7 @@ func TestRequestInjectContextPreservesExchangeOpening(t *testing.T) {
 		t.Fatalf("fixture wrong: opening index %d (found=%v)", before.UserIndex(), before.Found())
 	}
 
-	r := NewRequest("m", msgs, nil, Budget{}, 0, nil)
+	r := NewRequest("m", msgs, nil, Budget{}, 0)
 	r.InjectContext("hint")
 	got := r.State().Messages
 
@@ -279,7 +279,7 @@ func TestRequestView(t *testing.T) {
 		{Role: RoleUser, Content: "u1"},
 		{Role: RoleAssistant, Content: "a"},
 		{Role: RoleUser, Content: "u2"},
-	}, []ToolDef{{Name: "t"}}, budget, 7, nil)
+	}, []ToolDef{{Name: "t"}}, budget, 7)
 	v := r.View()
 
 	if r.Model() != "model-x" {
@@ -293,9 +293,6 @@ func TestRequestView(t *testing.T) {
 	}
 	if got := v.Tools(); len(got) != 1 || got[0].Name != "t" {
 		t.Errorf("Tools = %+v", got)
-	}
-	if v.Fired("anything") != 0 {
-		t.Errorf("Fired on a Phase-1 view should be 0, got %d", v.Fired("anything"))
 	}
 	conv := v.Conversation()
 	if conv.Len() != 4 {
@@ -643,10 +640,10 @@ func TestConversationEditing(t *testing.T) {
 }
 
 // TestConversationDeferSurvivesRoundTrip is the domain-level proof of the P1.5
-// ActionDefer-feed-forward primitive: a deferred correction recorded on the
+// defer-feed-forward primitive: a deferred correction recorded on the
 // Conversation survives a serialize/deserialize boundary (the snapshot/resume path)
 // and, drained on the next turn, injects role-safely into the outgoing Request. The
-// loop integration that runs post-response hooks and snapshots the unified
+// loop integration that runs post-response reactions and snapshots the unified
 // conversation lands in P1.2/P1.6; this proves the primitives those steps compose.
 func TestConversationDeferSurvivesRoundTrip(t *testing.T) {
 	conv := NewConversation([]Message{{Role: RoleUser, Content: "go"}})
@@ -671,7 +668,7 @@ func TestConversationDeferSurvivesRoundTrip(t *testing.T) {
 	}
 
 	// Feed-forward: the drained corrections inject into the next request.
-	req := NewRequest("m", restored.Messages(), nil, Budget{}, 1, nil)
+	req := NewRequest("m", restored.Messages(), nil, Budget{}, 1)
 	for _, in := range injects {
 		req.InjectContext(in)
 	}
@@ -769,7 +766,7 @@ func TestResponseAppendToolCall(t *testing.T) {
 // nesting level surfaces it through View().Depth() (and the Response produced against that
 // view), while an unstamped Request and the degraded no-view Response report the top-level 0.
 func TestLoopViewDepth(t *testing.T) {
-	req := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0, nil)
+	req := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0)
 	if got := req.View().Depth(); got != 0 {
 		t.Errorf("a Request built without SetDepth reports Depth %d, want 0 (top-level default)", got)
 	}
@@ -794,12 +791,12 @@ func TestLoopViewDepth(t *testing.T) {
 	}
 }
 
-// TestLoopViewParallelAgents proves the ParallelAgents() seam a batching Mechanism reads (ADR 0039 /
+// TestLoopViewParallelAgents proves the ParallelAgents() seam a batching reaction reads (ADR 0039 /
 // ADR 0014 amendment 2026-08-07): the SetDepth sibling stamps the delegation width onto a Request,
 // the view — and the Response produced against it — surfaces it, and an unstamped Request or the
 // degraded no-view Response reports 0, the serial floor.
 func TestLoopViewParallelAgents(t *testing.T) {
-	req := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0, nil)
+	req := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0)
 	if got := req.View().ParallelAgents(); got != 0 {
 		t.Errorf("a Request built without SetParallelAgents reports %d, want 0 (the serial floor)", got)
 	}

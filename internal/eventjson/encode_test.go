@@ -211,8 +211,8 @@ func TestEncodeJSONGolden(t *testing.T) {
 			name: "mechanism_fired",
 			event: domain.MechanismFiredEvent{
 				EventBase: domain.EventBase{Turn: 2},
-				Mechanism: domain.MechanismID("codeinfo"),
-				Hook:      domain.HookPostToolResult,
+				Mechanism: "codeinfo",
+				Hook:      "post-tool-result",
 				Action:    "suppressed",
 			},
 			wantKind: "mechanism_fired",

@@ -106,10 +106,10 @@ func firesBeforeStreamReset(events []domain.Event) []domain.ReactionFiredEvent {
 }
 
 // fireCountFor counts the ReactionFiredEvents attributed to id.
-func fireCountFor(events []domain.Event, id domain.MechanismID) int {
+func fireCountFor(events []domain.Event, id string) int {
 	n := 0
 	for _, fe := range reactionFires(events) {
-		if fe.Reaction == string(id) {
+		if fe.Reaction == id {
 			n++
 		}
 	}

@@ -78,16 +78,8 @@ type setDecision struct {
 }
 
 // retiredSetIDs is the retired roll in the spelling internal/validated holds set members in.
-// That package is deliberately catalogue-agnostic — its sets are plain strings — so the roll
-// crosses the boundary here rather than typing itself into the entry data.
-func retiredSetIDs() []string {
-	rolled := mechanisms.RetiredIDs()
-	out := make([]string, len(rolled))
-	for i, id := range rolled {
-		out[i] = string(id)
-	}
-	return out
-}
+// Both sides hold ids as plain strings, so the roll crosses the boundary as it stands.
+func retiredSetIDs() []string { return mechanisms.RetiredIDs() }
 
 // startupSetDecision is THE identity-and-match ladder: what the next session start decides
 // about the Validated-set surface for this (model, endpoint, config) triple. It exists once,
@@ -267,19 +259,19 @@ func retiredSetNotice(d validated.Decision) string {
 //   - promoted to a FLOOR GUARD (a successor key): the row went from the catalogue but the
 //     behaviour did not — six of the twenty-one shed rows are these. Saying only "retired" would
 //     tell the reader their measured stack lost a member it in fact still has, so the line names
-//     the key that governs it now, in the phrasing mechanisms.ResolveEnabled already uses for the
+//     the key that governs it now, in the phrasing mechanisms.RetiredNotices already uses for the
 //     same IDs, and says the behaviour is on by default.
 //
 // Pure, so both wordings are table-testable.
 func retiredSetMemberNotice(e validated.Entry, id string) string {
-	if successor := mechanisms.Successor(domain.MechanismID(id)); successor != "" {
+	if successor := mechanisms.Successor(id); successor != "" {
 		return fmt.Sprintf(
 			"apogee: validated-set entry %q names mechanism %q, the %q floor guard since %s — it is dropped from the set and the rest applies; the behaviour is on by default.",
-			e.Key, id, successor, mechanisms.RetiredRelease(domain.MechanismID(id)))
+			e.Key, id, successor, mechanisms.RetiredRelease(id))
 	}
 	return fmt.Sprintf(
 		"apogee: validated-set entry %q names mechanism %q, retired in %s — it is dropped and the rest of the set applies.",
-		e.Key, id, mechanisms.RetiredRelease(domain.MechanismID(id)))
+		e.Key, id, mechanisms.RetiredRelease(id))
 }
 
 // appliedNotice is the per-session line for an applying set (ADR 0016 §5's "visible

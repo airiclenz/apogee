@@ -14,7 +14,7 @@ import (
 // repair guard which needs only the response). The view is a real domain request view so
 // Conversation()/Tools()/LastUser() behave exactly as they do in the loop.
 func guardResponse(history []domain.Message, tools []domain.ToolDef, text string, calls ...domain.ToolCall) *domain.Response {
-	view := domain.NewRequest("m", history, tools, domain.Budget{}, 0, nil).View()
+	view := domain.NewRequest("m", history, tools, domain.Budget{}, 0).View()
 	finish := domain.FinishStop
 	if len(calls) > 0 {
 		finish = domain.FinishToolCalls

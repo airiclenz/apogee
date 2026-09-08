@@ -304,9 +304,9 @@ func TestWireSessionReportsARetiredMechanismOnStderr(t *testing.T) {
 		t.Errorf("the retired-mechanism notice appeared %d times on stderr; want exactly 1 line\n"+
 			"want: %q\nstderr: %q", got, want, stderr)
 	}
-	if got := w.cfg.EnableMechanisms; len(got) != 0 {
-		t.Errorf("EnableMechanisms = %v, want nothing armed; a retired id is dropped from what the "+
-			"engine arms and no catalogued row is on by default — which is exactly why the line above "+
+	if got := w.cfg.Reactions; len(got) != 0 {
+		t.Errorf("Config.Reactions = %v, want nothing armed beside the engine builtins; the "+
+			"`mechanisms:` key drives nothing (ADR 0076 D11) — which is exactly why the line above "+
 			"has to be printed", got)
 	}
 }

@@ -46,7 +46,7 @@ const (
 // succeeded or failed — the persisted half of ToolResult.IsError. The flag itself lives only
 // on the live result the tool stage passes around; once the result is committed to history all
 // that survives is its Content, and a successful read_file's Content IS a file body. So a
-// Mechanism asking "did that earlier call fail?" had nothing but the text to sniff, and file
+// reaction asking "did that earlier call fail?" had nothing but the text to sniff, and file
 // bodies are full of error strings. This marker is that missing fact.
 //
 // It is a tri-state on purpose: Unrecorded is distinct from Succeeded, so a reader can tell a
@@ -98,7 +98,7 @@ type Message struct {
 	// rather than one that opens an Exchange. It is set ONLY by Agent.Interject; every
 	// other user message leaves it false. The derived Exchange opening skips it
 	// (CurrentExchange, exchange.go), so a mid-Exchange message never moves the boundary
-	// the Mechanisms read. It is process-local: the wire projection maps fields
+	// the Reactions read. It is process-local: the wire projection maps fields
 	// explicitly, so the marker never reaches a provider request.
 	Interjected bool
 
@@ -300,10 +300,10 @@ type Budget struct {
 	History         int
 }
 
-// LoopView is the read-only window every hook has onto loop state beyond its own
-// mutable value — the conversation so far, the tool menu, the budget, the Turn index,
-// and a self-regulation query. It is the home of all cross-Turn reads: most
-// Mechanisms decide by aggregating across Turns, so the primary mutable value (a
+// LoopView is the read-only window every reaction has onto loop state beyond its own
+// mutable value — the conversation so far, the tool menu, the budget and the Turn index.
+// It is the home of all cross-Turn reads: most reactions
+// decide by aggregating across Turns, so the primary mutable value (a
 // *Response, a *ToolCallEdit, a *ToolResultEdit) is never sufficient alone. Request
 // and Response expose it via their View method; the tool-stage hooks receive it as an
 // argument.
@@ -312,42 +312,34 @@ type LoopView interface {
 	Tools() []ToolDef
 	Budget() Budget
 	Turn() int
-	// Depth reports the sub-agent nesting level the hook is firing at: 0 for a top-level
+	// Depth reports the sub-agent nesting level the reaction is firing at: 0 for a top-level
 	// Agent, parent+1 for a sub-agent (ADR 0013). It is the seam a gate keyed on "only at
-	// the top level" needs — a Mechanism that opens a fan-out shapes only the primary call,
+	// the top level" needs — a reaction that opens a fan-out shapes only the primary call,
 	// never a nested delegation it itself set up. A view built without a depth (a test
 	// fake, the degraded no-view Response) reports 0, the top-level default.
 	Depth() int
-	// ParallelAgents reports how many sub_agent delegations the agent this hook is firing
+	// ParallelAgents reports how many sub_agent delegations the agent this reaction is firing
 	// inside may run AT ONCE — the bound server's Parallel agents cap (ADR 0039 decision 2,
 	// pin-else-discover-else-1) at Depth 0, and 1 at any deeper level, where a child's own
-	// delegations stay serial inline (decision 3). It is the width a Mechanism that
+	// delegations stay serial inline (decision 3). It is the width a reaction that
 	// synthesizes delegations batches by, dispatching min(cap, remaining) per Turn (ADR 0039
 	// decision 2). A view built without one (a test
 	// fake, the degraded no-view Response) reports 0, which reads the same as 1 — strictly
 	// serial, the ratified floor.
 	ParallelAgents() int
-	// Fired reports how many times a Mechanism has ACTED this Session (R4): an
-	// invocation is booked only when it mutated its working value or returned a
-	// non-zero post-response Action — an inspect-and-do-nothing invocation is not a
-	// fire. It is the seam for cross-Mechanism coupling (a Mechanism muting itself
-	// once a peer has fired) without a shared mutable meta map. An
-	// experimental hook's synthetic ID keeps counting every invocation (bench
-	// observability).
-	Fired(id MechanismID) int
 }
 
 // ConversationView is read-only history with the tool-call/result pairing helpers
-// every history-inspecting Mechanism needs: the tool name and arguments live only on
+// every history-inspecting reaction needs: the tool name and arguments live only on
 // the originating ToolCall, never on the tool-result message, so resolving a result
-// back to its call is mandatory for error-handling Mechanisms.
+// back to its call is mandatory for error-handling reactions.
 type ConversationView interface {
 	Len() int
 	At(i int) Message
 	Range(fn func(i int, m Message) bool)
 	// LastUser returns the most recent user message and its index — an Interjection
 	// included. It is deliberately NOT the Exchange opening (CurrentExchange skips
-	// interjections): a Mechanism asking "what did the human last say" wants the
+	// interjections): a reaction asking "what did the human last say" wants the
 	// remark, while one scoping itself to the Exchange derives the boundary instead.
 	LastUser() (msg Message, index int, ok bool)
 	// CallByID resolves a tool result to its originating call (for the name/args).
@@ -360,10 +352,10 @@ type ConversationView interface {
 // Request — the pre-request hook's working value
 // ----------------------------------------------------------------------------
 
-// Request is the outgoing Upstream request a pre-request hook may shape. Reads go
+// Request is the outgoing Upstream request a pre-request reaction may shape. Reads go
 // through View; mutations are the characterised operation set from apogee-sim's
-// pre-request Mechanisms. The loop builds one with NewRequest, hands it to every
-// pre-request hook (their mutations compose), then drains it with State to project
+// pre-request lab rows. The loop builds one with NewRequest, hands it to every
+// pre-request reaction (their mutations compose), then drains it with State to project
 // onto the provider wire shape.
 type Request struct {
 	model    string
@@ -371,7 +363,6 @@ type Request struct {
 	tools    []ToolDef
 	budget   Budget
 	turn     int
-	fired    map[MechanismID]int
 	sampling SamplingParams
 	extras   map[string]json.RawMessage
 	revision int // bumped by each mutator — the acted-fire probe (R4), read via Revision
@@ -398,20 +389,15 @@ type Request struct {
 }
 
 // NewRequest builds the pre-request working value from loop state (engine seam). The
-// messages and tools slices are copied, so a hook mutating the Request never reaches
-// back into the loop's conversation storage. fired, in contrast, is shared BY REFERENCE:
-// it is the loop's live per-Session fire ledger LoopView.Fired reads, so a Mechanism can
-// see a peer's fire from earlier in the same hook pass (the cross-Mechanism coupling
-// seam). It is only ever read through the view — no view operation mutates it — so the
-// shared reference is safe. nil is fine (Fired then reports 0 for every Mechanism).
-func NewRequest(model string, messages []Message, tools []ToolDef, budget Budget, turn int, fired map[MechanismID]int) *Request {
+// messages and tools slices are copied, so a reaction mutating the Request never reaches
+// back into the loop's conversation storage.
+func NewRequest(model string, messages []Message, tools []ToolDef, budget Budget, turn int) *Request {
 	return &Request{
 		model:        model,
 		messages:     append([]Message(nil), messages...),
 		tools:        append([]ToolDef(nil), tools...),
 		budget:       budget,
 		turn:         turn,
-		fired:        fired,
 		committedLen: -1, // no retry appendage yet — View() exposes the whole request
 	}
 }
@@ -456,7 +442,6 @@ func (r *Request) View() LoopView {
 		tools:          r.tools,
 		budget:         r.budget,
 		turn:           r.turn,
-		fired:          r.fired,
 		depth:          r.depth,
 		parallelAgents: r.parallelAgents,
 	}
@@ -486,7 +471,7 @@ func (r *Request) SetDepth(depth int) { r.depth = depth }
 func (r *Request) SetParallelAgents(width int) { r.parallelAgents = width }
 
 // Extra reports a preserved unknown request field — the read half of SetExtra (a
-// pre-request Mechanism checks for an existing response_format before setting one).
+// pre-request reaction checks for an existing response_format before setting one).
 func (r *Request) Extra(key string) (json.RawMessage, bool) {
 	v, ok := r.extras[key]
 	return v, ok
@@ -494,7 +479,7 @@ func (r *Request) Extra(key string) (json.RawMessage, bool) {
 
 // AppendToSystem appends text to the first system message (creating one if absent),
 // but is a no-op if marker already occurs there — the idempotent inject the nudge
-// Mechanisms (library today) share. Reports whether it injected. The caller
+// reactions share. Reports whether it injected. The caller
 // embeds marker within text so a second call with the same marker is a no-op.
 func (r *Request) AppendToSystem(marker, text string) (injected bool) {
 	if i := firstIndex(r.messages, RoleSystem); i >= 0 && strings.Contains(r.messages[i].Content, marker) {
@@ -515,7 +500,7 @@ func (r *Request) AppendToSystem(marker, text string) (injected bool) {
 // The insert anchors on lastExchangeOpening (exchange.go), NOT on the last user message:
 // an Interjection is a user message committed INSIDE the running Exchange, and inserting
 // above it would make this request-scoped injection the newest non-interjected user
-// message — the derived opening — collapsing the Exchange every Mechanism reads down to
+// message — the derived opening — collapsing the Exchange every reaction reads down to
 // the interjection alone. Anchoring on the opening puts the injection exactly where it has
 // always gone (immediately before the human's ask, hence ahead of any interjection) and
 // moves no boundary.
@@ -548,7 +533,7 @@ func (r *Request) InjectContext(text string) {
 
 // AppendSupersededAssistant appends a superseded assistant message (text + tool calls)
 // to the end of the request — the loop's retry-exchange seam (engine seam, R1), NOT a
-// hook-mutation primitive: on an ActionRetry correction the loop appends the response
+// reaction-mutation primitive: on a retry correction the loop appends the response
 // it is retrying, then the correction via InjectContext, so the re-streamed request
 // carries the exchange the sim's retry builders carried. The append is request-scoped
 // — it is never committed to history. A wholly empty superseded response (empty text,
@@ -585,7 +570,7 @@ func (r *Request) SetMessageContent(index int, content string) {
 	r.revision++
 }
 
-// SetTools replaces and reorders the tool menu (the tool-filter Mechanism). The slice
+// SetTools replaces and reorders the tool menu (a shape-view reaction). The slice
 // is copied so the caller cannot mutate the menu after the call.
 func (r *Request) SetTools(tools []ToolDef) {
 	r.tools = append([]ToolDef(nil), tools...)
@@ -593,7 +578,7 @@ func (r *Request) SetTools(tools []ToolDef) {
 }
 
 // SetExtra sets an unknown request field, allocating the carrier if needed (e.g. a
-// pre-request Mechanism setting a provider-specific response_format).
+// pre-request reaction setting a provider-specific response_format).
 func (r *Request) SetExtra(key string, v json.RawMessage) {
 	if r.extras == nil {
 		r.extras = make(map[string]json.RawMessage)
@@ -654,9 +639,9 @@ type SamplingParams struct {
 // Response — the post-response hook's working value
 // ----------------------------------------------------------------------------
 
-// Response is the model response a post-response hook inspects and may intercept. The
+// Response is the model response a post-response reaction inspects and may intercept. The
 // loop builds one with NewResponse from the parsed Upstream reply; reads go through
-// the accessors, and ActionIntercept is expressed by mutating in place.
+// the accessors, and an intercept is expressed by mutating in place.
 type Response struct {
 	text         string
 	thinking     string
@@ -683,7 +668,7 @@ func NewResponse(text, thinking string, toolCalls []ToolCall, finish FinishReaso
 }
 
 // View exposes the read-only conversation/tools/budget window — response-repair
-// Mechanisms validate tool calls against the menu; loop detection reads history.
+// reactions validate tool calls against the menu; loop detection reads history.
 func (r *Response) View() LoopView { return r.view }
 
 // Text is the assistant's raw text content.
@@ -700,14 +685,14 @@ func (r *Response) FinishReason() FinishReason { return r.finishReason }
 // it (ok == false when there is none).
 func (r *Response) Thinking() (text string, ok bool) { return r.thinking, r.thinking != "" }
 
-// SetText replaces the assistant text — the intercept path (ActionIntercept).
+// SetText replaces the assistant text — the intercept path.
 func (r *Response) SetText(s string) {
 	r.text = s
 	r.revision++
 }
 
-// SetToolCallArguments rewrites one tool call's arguments in place — the auto-fix
-// Mechanism writing back repaired/formatted content (ActionIntercept). An out-of-range
+// SetToolCallArguments rewrites one tool call's arguments in place — a shape-work
+// reaction writing back repaired/formatted content. An out-of-range
 // index is a no-op.
 func (r *Response) SetToolCallArguments(index int, args json.RawMessage) {
 	if index < 0 || index >= len(r.toolCalls) {
@@ -718,15 +703,15 @@ func (r *Response) SetToolCallArguments(index int, args json.RawMessage) {
 }
 
 // AppendToolCall appends a synthesized tool call to the response and bumps the revision —
-// the intercept seam a post-response Mechanism uses to add a delegation the model did not
-// itself emit (a fan-out Mechanism synthesizing the first sub_agent call from a plan the
+// the intercept seam a post-response reaction uses to add a delegation the model did not
+// itself emit (a fan-out reaction synthesizing the first sub_agent call from a plan the
 // model wrote out as text). The appended call is indistinguishable from a model-emitted one
 // downstream: the loop reads it back through ToolCalls(), records it on the committed
 // assistant message, and dispatches it through the full per-call Resolution — the ADR 0013
 // recursion point for a sub_agent call. The caller owns the call's ID (the loop's
-// synthesized-call style) and arguments; combined with a returned ActionDefer the appended
-// call and the deferred correction both take effect (hookrun applies the in-place mutation,
-// then routes the defer).
+// synthesized-call style) and arguments; combined with a returned Outcome.Defer the appended
+// call and the deferred correction both take effect (the dispatcher applies the in-place
+// mutation, then routes the defer).
 func (r *Response) AppendToolCall(call ToolCall) {
 	r.toolCalls = append(r.toolCalls, call)
 	r.revision++
@@ -757,7 +742,7 @@ const (
 // bench fork by deep-copying it and the user resume from a snapshot. Summaries are
 // not a separate structure: they are ordinary messages produced by generative
 // Compaction (context/) and written back via Replace. A deferred Response Action
-// (ActionDefer) is held here (Defer / TakeDeferred) so it survives a snapshot/resume
+// (an Outcome.Defer) is held here (Defer / TakeDeferred) so it survives a snapshot/resume
 // boundary.
 //
 // MarshalJSON / UnmarshalJSON keep the type opaque while persisting it; the v1 wire
@@ -766,10 +751,10 @@ const (
 // envelope (internal/agent/state.go), which adds the loop counters.
 type Conversation struct {
 	messages []Message
-	deferred []string // pending ActionDefer injections, FIFO
+	deferred []string // pending deferred injections, FIFO
 	// revision is bumped by each mutator — the acted-fire probe (R4), read via
 	// Revision. Runtime-only: it is deliberately NOT serialized (it carries no
-	// history, only "did a hook just mutate me").
+	// history, only "did a reaction just mutate me").
 	revision int
 }
 
@@ -872,8 +857,8 @@ func (c *Conversation) Replace(msgs []Message) {
 	c.revision++
 }
 
-// Defer records a deferred correction (the Inject payload of an ActionDefer
-// PostResponseDecision) to be injected, role-safe, into the next request. It is held
+// Defer records a deferred correction (the Inject payload of a deferring Outcome)
+// to be injected, role-safe, into the next request. It is held
 // in conversation state so it survives a snapshot/resume boundary — the streaming
 // feed-forward path (design §4.1).
 func (c *Conversation) Defer(inject string) {

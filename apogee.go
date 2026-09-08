@@ -611,7 +611,7 @@ func DecodeSession(data []byte) (Session, error) { return domain.DecodeSession(d
 // action it takes (an argv command or a webhook POST), and the workspace it is scoped to.
 // A Hook is the HOST's reaction to the engine's event stream, not a model action: nothing it
 // prints or answers reaches the model, the conversation or the Session record, and it can
-// neither veto nor delay the loop. It is unrelated to HookPoint, which is where a Mechanism
+// neither veto nor delay the loop. It is unrelated to a seam Moment, which is where a Reaction
 // fires INSIDE the loop.
 type Hook = hooks.Hook
 

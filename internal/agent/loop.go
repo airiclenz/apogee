@@ -19,12 +19,6 @@ import (
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
-// experimentalMechanismID is the loop's shorthand for the reserved synthetic MechanismID a
-// descriptor-less experimental hook fires under (ADR 0002 — no descriptor, no
-// self-regulation). The constant itself lives in domain (R5, phase-4-review-fixes item 4)
-// so MechanismRegistry.Add can refuse a catalogued Mechanism claiming it.
-const experimentalMechanismID = domain.ExperimentalMechanismID
-
 // maxPostResponseRetries caps how many times an ActionRetry post-response decision may
 // re-call the Upstream within one Turn, so a response-repair hook that always retries
 // cannot spin the loop forever. After the cap the loop proceeds with the last response.
@@ -895,7 +889,7 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	if sys := a.standingSystem(); sys != "" {
 		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
 	}
-	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn, nil)
+	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn)
 	// The reply ceiling the engine states on the wire (ADR 0046), stamped HERE — after construction
 	// and before any pre-request hook sees the Request — for two reasons. It is the engine's own
 	// bound, so it holds under Bypass, where no hook runs at all; and being the loop's value rather
@@ -1445,7 +1439,7 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 // REQUEST-projection concern owned by buildRequest, while this view is "the conversation so
 // far" — which is why the profile's tool-instruction block is likewise absent from it.
 func (a *Agent) loopView(turn int) domain.LoopView {
-	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, nil)
+	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn)
 	// Stamped here too, on the same call as buildRequest's, so the two projections of one Turn
 	// never state different ceilings (ADR 0046). This one reaches no server — a LoopView is read by
 	// the tool-stage hooks and drained by nobody — so it is a consistency stamp, not a wire bound.

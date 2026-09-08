@@ -5,7 +5,7 @@ import "math"
 // The Budget's pure token arithmetic (ADR 0010: pure logic on a domain type lives
 // in domain). The chars→token conversion has exactly ONE implementation — the two
 // methods below. The calibrating estimator (internal/context.TokenEstimator) and
-// every token-gated Mechanism delegate here, so their estimates cannot drift.
+// every token-gated reader delegate here, so their estimates cannot drift.
 
 // EstimateTokens converts a character count to a token estimate through the
 // calibrated chars→token ratio, rounding up so a part is never estimated to fit
@@ -32,7 +32,7 @@ func (b Budget) EstimateTokens(chars int) int {
 // there is no basis to bound HERE; the engine's trigger substitutes its own
 // conservative ceiling before calling this (internal/agent, ADR 0018), so the
 // compare stays the single one while the assumption stays out of the Budget
-// view hooks and Mechanisms read.
+// view the reactions read.
 func (b Budget) HistoryExceedsAllocation(msgs []Message) bool {
 	if b.History <= 0 {
 		return false

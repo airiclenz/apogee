@@ -27,7 +27,7 @@ func capLines(n int, line string) string {
 
 // capRequest is a Request carrying msgs and b — the pre-request working value the guard shapes.
 func capRequest(msgs []domain.Message, b domain.Budget) *domain.Request {
-	return domain.NewRequest("m", msgs, nil, b, 0, nil)
+	return domain.NewRequest("m", msgs, nil, b, 0)
 }
 
 // TestCapToolResultsTrimsOversizedResult caps an over-budget tool result to head+tail+marker and

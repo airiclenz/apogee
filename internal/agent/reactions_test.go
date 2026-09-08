@@ -81,7 +81,7 @@ func ladderAgent(t *testing.T, builtins, armed []domain.Reaction) (*Agent, *reco
 // postResponse builds the post-response payload the dispatcher takes: a plain text response over
 // an empty view, with the loop's remaining retry budget stated.
 func postResponse(retryable bool) domain.PostResponseMoment {
-	view := domain.NewRequest("m", nil, nil, domain.Budget{}, 0, nil).View()
+	view := domain.NewRequest("m", nil, nil, domain.Budget{}, 0).View()
 	return domain.PostResponseMoment{
 		Resp:      domain.NewResponse("narration", "", nil, domain.FinishStop, view),
 		Retryable: retryable,
@@ -632,7 +632,7 @@ func TestBuiltinToolUseEnforcer(t *testing.T) {
 		domaintest.UserMessage("please implement feature X now"),
 	}
 	menu := []domain.ToolDef{{Name: "read_file"}, {Name: "write_file"}}
-	view := domain.NewRequest("m", history, menu, domain.Budget{}, 0, nil).View()
+	view := domain.NewRequest("m", history, menu, domain.Budget{}, 0).View()
 	resp := domain.NewResponse("I would edit main.go to add the parser.", "", nil, domain.FinishStop, view)
 
 	out, err := a.fire(context.Background(), domain.MomentPostResponse,

@@ -11,7 +11,7 @@ import (
 // Canned message constructors
 // ----------------------------------------------------------------------------
 //
-// These are the literal message shapes hook tests build — the same literals the
+// These are the literal message shapes reaction tests build — the same literals the
 // package-local helpers across internal/mechanisms produced before they became
 // delegates. The ConversationBuilder appends exactly these, so a fixture built
 // message-by-message and one built fluently are byte-identical.
@@ -144,19 +144,18 @@ func (b *ConversationBuilder) Messages() []domain.Message {
 // FakeLoopView
 // ----------------------------------------------------------------------------
 
-// FakeLoopView is a settable domain.LoopView for hook tests. Set only the fields a
+// FakeLoopView is a settable domain.LoopView for reaction tests. Set only the fields a
 // test cares about; the zero value is usable and reports the documented test-fake
 // defaults — an empty conversation, no tools, a zero Budget, Turn 0, Depth 0 (the
-// LoopView docstring's "a view built without a depth reports 0"), ParallelAgents 0
-// (read as the serial floor), and Fired 0 for every Mechanism.
+// LoopView docstring's "a view built without a depth reports 0") and ParallelAgents 0
+// (read as the serial floor).
 type FakeLoopView struct {
-	Messages      []domain.Message           // the history Conversation() serves
-	ToolMenu      []domain.ToolDef           // the menu Tools() returns (as a copy)
-	BudgetValue   domain.Budget              // what Budget() reports
-	TurnIndex     int                        // what Turn() reports
-	NestDepth     int                        // what Depth() reports (sub-agent nesting, ADR 0013)
-	DelegationCap int                        // what ParallelAgents() reports (fan-out width, ADR 0039)
-	FireCounts    map[domain.MechanismID]int // per-Mechanism Fired counts; nil reports 0
+	Messages      []domain.Message // the history Conversation() serves
+	ToolMenu      []domain.ToolDef // the menu Tools() returns (as a copy)
+	BudgetValue   domain.Budget    // what Budget() reports
+	TurnIndex     int              // what Turn() reports
+	NestDepth     int              // what Depth() reports (sub-agent nesting, ADR 0013)
+	DelegationCap int              // what ParallelAgents() reports (fan-out width, ADR 0039)
 }
 
 // Conversation serves a real domain conversation view over Messages, built through
@@ -164,7 +163,7 @@ type FakeLoopView struct {
 // behave exactly as in the loop and can never drift from the production
 // implementation. Each call snapshots the current Messages field.
 func (v FakeLoopView) Conversation() domain.ConversationView {
-	return domain.NewRequest("", v.Messages, nil, domain.Budget{}, 0, nil).View().Conversation()
+	return domain.NewRequest("", v.Messages, nil, domain.Budget{}, 0).View().Conversation()
 }
 
 // Tools returns a copy of ToolMenu, matching the production view's aliasing contract.
@@ -183,6 +182,3 @@ func (v FakeLoopView) Depth() int { return v.NestDepth }
 
 // ParallelAgents reports DelegationCap.
 func (v FakeLoopView) ParallelAgents() int { return v.DelegationCap }
-
-// Fired reports the FireCounts entry for id (0 when absent or the map is nil).
-func (v FakeLoopView) Fired(id domain.MechanismID) int { return v.FireCounts[id] }

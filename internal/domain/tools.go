@@ -530,7 +530,7 @@ type ToolResult struct {
 	// always returns — means there is nothing but the prose: the host reads Content.
 	//
 	// It describes what the TOOL DID, not what the text says, so text rewriting never
-	// invalidates it: a Mechanism that edits Content on the PostToolResult seam, and the
+	// invalidates it: a reaction that edits Content on the post-tool-result seam, and the
 	// loop's own clampToolResult elision of an oversized result, both leave the summary
 	// true. It is view-facing only — the model reads Content — and is never persisted.
 	Summary ToolSummary

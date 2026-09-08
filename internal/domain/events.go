@@ -60,7 +60,7 @@ type EventBase struct {
 func (b EventBase) eventDepth() int { return b.Depth }
 
 // TokenEvent is one streamed chunk of assistant text. The tokens streamed for a Turn may be
-// superseded by a StreamResetEvent (the loop re-streamed the Turn on an ActionRetry):
+// superseded by a StreamResetEvent (the loop re-streamed the Turn on a retry):
 // accumulate TokenEvents per Turn and discard the accumulation when a reset arrives.
 type TokenEvent struct {
 	EventBase
@@ -94,7 +94,7 @@ type ReasoningEvent struct {
 
 // StreamResetEvent signals that the assistant tokens streamed for the current Turn since the
 // last boundary are superseded and must be discarded — the loop is re-streaming the Turn
-// because an ActionRetry post-response decision re-called the Upstream. A streaming observer
+// because a post-response retry re-called the Upstream. A streaming observer
 // (the TUI) clears its in-progress token buffer for the Turn on this event; the MessageEvent
 // that ends the Turn carries the final, accepted text.
 type StreamResetEvent struct {
@@ -132,7 +132,7 @@ type ToolCallEvent struct {
 }
 
 // ToolResultEvent reports a tool's result after execution (and after any
-// post-tool-result Mechanisms have acted on it).
+// post-tool-result Reactions have acted on it).
 type ToolResultEvent struct {
 	EventBase
 	Result ToolResult
@@ -204,7 +204,7 @@ type SubAgentPhaseEvent struct {
 // that a delegation EXISTS by reading this stream, so a rename has to reach those same readers by
 // the same road (ADR 0068 decision 6). It is the naming act's whole wire presence: no TokenEvent,
 // no UsageEvent, no movement of any context gauge — the naming call is neither a Turn nor a
-// Mechanism, and its tokens belong to no conversation.
+// Reaction, and its tokens belong to no conversation.
 //
 // A reader that ignores it loses nothing but the improved name: the run keeps the delegated task's
 // first line, which is what it wore before this variant existed.
@@ -294,15 +294,15 @@ type TurnEvent struct {
 // hook point — the observability spine for self-regulation and bench attribution.
 type MechanismFiredEvent struct {
 	EventBase
-	Mechanism MechanismID
-	Hook      HookPoint
-	Action    string // e.g. the PostResponseDecision taken, or "suppressed"
+	Mechanism string
+	Hook      string
+	Action    string // e.g. the post-response decision taken, or "suppressed"
 }
 
 // FloorGuardEvent reports that a Floor guard fired — the engine changing what the model sees after
 // its own failure, or shaping the request without steering it (ADR 0071). It is the guards'
 // counterpart to MechanismFiredEvent and deliberately a SEPARATE variant: a guard is not a
-// catalogued Mechanism, carries no MechanismID, and is never attributed to one in a bench run.
+// catalogued Mechanism, carries no Mechanism id, and is never attributed to one in a bench run.
 //
 // Guard is the guard's configuration key — the same spelling a user writes in config.yaml
 // (`tool-call-repair`, `tool-loop-breaker`, …), so an observer never has to map an internal name
@@ -310,7 +310,7 @@ type MechanismFiredEvent struct {
 // "intercept", "cap"), and Detail is optional supporting text a renderer may show verbatim or
 // ignore.
 //
-// It carries no HookPoint, unlike MechanismFiredEvent: a guard is not registered at a hook, it is
+// It carries no Hook value, unlike MechanismFiredEvent: a guard is not registered at a hook, it is
 // the engine's own behaviour at a seam, and the Guard key already names which seam it runs at.
 //
 // A Driver renders it where it renders a Mechanism firing and nowhere else — the TUI's hidden debug
@@ -345,19 +345,19 @@ type ReactionFiredEvent struct {
 	Detail   string // optional supporting text; may be empty
 }
 
-// ErrorEvent reports a localised, recovered fault — a tool or Mechanism panic
+// ErrorEvent reports a localised, recovered fault — a tool or Reaction panic
 // caught at the extension boundary, or a tool execution error (ADR 0007). It does
 // not imply the loop stopped.
 type ErrorEvent struct {
 	EventBase
-	Source string // tool name / mechanism ID / "loop"
+	Source string // tool name / reaction id / "loop"
 	Err    string
 }
 
 // PruneEvent reports that the engine dropped stale tool results from the conversation it
 // keeps — a structural rewrite of history at a Turn boundary, performed so a long Exchange
 // stops spending its window on output the model has already acted on. Like Compaction it is
-// engine behaviour rather than a Mechanism, so it survives Bypass, and like Compaction it
+// engine behaviour rather than an armed Reaction, so it survives Bypass, and like Compaction it
 // changes what the next request carries: the pruned results are replaced by a one-line stub
 // naming the call, and re-running that call is how a model gets the content back.
 //

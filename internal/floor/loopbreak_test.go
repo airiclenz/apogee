@@ -13,7 +13,7 @@ import (
 // resp.View().Conversation(). The view is a real domain request view, so the scans behave exactly
 // as they do in the loop.
 func loopResponse(history []domain.Message, calls ...domain.ToolCall) *domain.Response {
-	view := domain.NewRequest("m", history, nil, domain.Budget{}, 0, nil).View()
+	view := domain.NewRequest("m", history, nil, domain.Budget{}, 0).View()
 	finish := domain.FinishStop
 	if len(calls) > 0 {
 		finish = domain.FinishToolCalls

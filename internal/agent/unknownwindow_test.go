@@ -61,7 +61,7 @@ func TestUnknownWindowBoundsShareOneCeiling(t *testing.T) {
 		guarded, _ := unknownWindowAgent(t, &recordingSink{})
 		calibrate(guarded) // CALIBRATED: the ratio margin is out of the way and the ceiling is the bare one
 		exceeds := func() bool {
-			req := domain.NewRequest(guarded.cfg.Model, guarded.conv.Messages(), guarded.toolMenu(), guarded.budget(), 0, nil)
+			req := domain.NewRequest(guarded.cfg.Model, guarded.conv.Messages(), guarded.toolMenu(), guarded.budget(), 0)
 			return guarded.requestExceedsWindow(req)
 		}
 		guarded.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("x", ceiling)})
@@ -240,7 +240,7 @@ func TestKnownWindowIgnoresTheUnknownWindowCeiling(t *testing.T) {
 	if a.historyExceedsAllocation() {
 		t.Error("a history past the assumed ceiling but under the History allocation tripped the boundary trigger")
 	}
-	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), nil, a.budget(), 0, nil)
+	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), nil, a.budget(), 0)
 	if a.requestExceedsWindow(req) {
 		t.Error("a request past the assumed ceiling but inside the working room tripped the predictive guard")
 	}

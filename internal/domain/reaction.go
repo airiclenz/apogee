@@ -25,7 +25,7 @@ import (
 type Moment string
 
 // The five seam Moments — the in-loop points, in the order a Turn passes them. The values
-// are the HookPoint spellings this vocabulary replaces (mechanism.go), unchanged.
+// are the hook-point spellings this vocabulary replaced, unchanged.
 const (
 	MomentPreRequest     Moment = "pre-request"      // shape the outgoing request
 	MomentPostResponse   Moment = "post-response"    // inspect the response, choose an action
@@ -149,7 +149,7 @@ type Outcome struct {
 	// (docs/design/reaction-core-greenfield.md §9.2). The DISPATCHER sets it on the Outcome it
 	// books whenever the revision bracket sees the payload's Revision() move; a handler MAY also
 	// set it explicitly without moving a revision, which is the same act as the retired
-	// ActionIntercept. Either way the firing is booked.
+	// intercept decision. Either way the firing is booked.
 	//
 	// It is the last term of the firing rule the dispatcher applies:
 	// acted = Retry || Inject != "" || Defer != "" || Edited || the revision moved. The action a
@@ -225,7 +225,7 @@ type PostResponseMoment struct {
 func (m PostResponseMoment) Revision() int { return m.Resp.Revision() }
 
 // Reaction is the single thing apogee does when the loop passes a Moment (CONTEXT: Reaction):
-// one {id, origin, class, on, handler}. Floor guards, the retired Mechanism lab layer and Hooks
+// one {id, origin, class, on, handler}. Floor guards, the retired lab layer and Hooks
 // are all one of these (ADR 0076 D1).
 type Reaction struct {
 	// ID is the reaction's stable identifier — the key an observer sees on a ReactionFiredEvent

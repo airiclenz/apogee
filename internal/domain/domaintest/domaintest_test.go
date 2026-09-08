@@ -17,7 +17,7 @@ var _ domain.LoopView = domaintest.FakeLoopView{}
 // The builder must produce the exact literal shapes the delegating package-local
 // helpers (internal/mechanisms' readCall / userMsg / assistantText / assistantCall)
 // produced before they became delegates — asserted against literal domain.Message
-// values, so any drift in the canned constructors breaks here, not in a Mechanism test.
+// values, so any drift in the canned constructors breaks here, not in a reaction test.
 func TestConversationBuilderProducesLiteralShapes(t *testing.T) {
 	t.Parallel()
 	got := domaintest.NewConversation().
@@ -89,9 +89,6 @@ func TestFakeLoopViewZeroValue(t *testing.T) {
 	if got := v.ParallelAgents(); got != 0 {
 		t.Errorf("ParallelAgents() = %d, want 0 (read as the serial floor)", got)
 	}
-	if got := v.Fired("anything"); got != 0 {
-		t.Errorf("Fired() = %d, want 0 from a nil FireCounts", got)
-	}
 }
 
 // Set fields come back through the interface, and the conversation view carries the
@@ -110,7 +107,6 @@ func TestFakeLoopViewReportsSetValues(t *testing.T) {
 		TurnIndex:     3,
 		NestDepth:     1,
 		DelegationCap: 3,
-		FireCounts:    map[domain.MechanismID]int{"read_loop_interceptor": 2},
 	}
 
 	conv := v.Conversation()
@@ -141,11 +137,5 @@ func TestFakeLoopViewReportsSetValues(t *testing.T) {
 	}
 	if got := v.ParallelAgents(); got != 3 {
 		t.Errorf("ParallelAgents() = %d, want 3", got)
-	}
-	if got := v.Fired("read_loop_interceptor"); got != 2 {
-		t.Errorf("Fired(read_loop_interceptor) = %d, want 2", got)
-	}
-	if got := v.Fired("other"); got != 0 {
-		t.Errorf("Fired(other) = %d, want 0", got)
 	}
 }

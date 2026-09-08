@@ -23,29 +23,6 @@ var (
 	// unconfined. Distinct from ErrAutoUnavailable, which gates Auto at construction.
 	ErrConfinementUnavailable = errors.New("apogee: confinement unavailable on this host")
 
-	// ErrOrderingCycle is returned by New / registry Add when Mechanism ordering
-	// constraints form a cycle — it must fail loudly at startup (ADR 0003).
-	ErrOrderingCycle = errors.New("apogee: mechanism ordering constraints contain a cycle")
-
-	// ErrIncompatibleMechanisms is returned by New when two registered Mechanisms declare
-	// each other incompatible (MechanismDescriptor.IncompatibleWith) — they must never
-	// co-fire, so registering both is a configuration error that fails loudly at startup
-	// (ADR 0003), the same posture as ErrOrderingCycle.
-	ErrIncompatibleMechanisms = errors.New("apogee: incompatible mechanisms registered together")
-
-	// ErrMissingRequirement is returned by New when a registered Mechanism declares a required
-	// peer (MechanismDescriptor.Requires) that is not itself registered — the two are benched as
-	// a stack, so enabling one without the other is a configuration error that fails loudly at
-	// startup (ADR 0003 posture, ADR 0014 §4), the dual of ErrIncompatibleMechanisms.
-	ErrMissingRequirement = errors.New("apogee: a required mechanism is not registered")
-
-	// ErrUnknownMechanism is wrapped by mechanisms.Build (and, through it, agent construction from
-	// Config.EnableMechanisms) when a named Mechanism ID is not in the catalogue — a typo'd or
-	// deferred ID fails loudly rather than silently disabling a Mechanism (ADR 0015 §4). The
-	// wrapping error still names the known IDs; this sentinel makes the condition matchable with
-	// errors.Is (locked decision 5).
-	ErrUnknownMechanism = errors.New("apogee: unknown mechanism")
-
 	// ErrSessionVersion is returned by Resume / DecodeSession for a snapshot whose
 	// schema version this build does not understand.
 	ErrSessionVersion = errors.New("apogee: unsupported session schema version")

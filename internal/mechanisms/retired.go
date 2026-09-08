@@ -3,9 +3,6 @@ package mechanisms
 import (
 	"fmt"
 	"slices"
-	"strings"
-
-	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // retiredRow is one entry on the roll: the catalogue ID, the release whose notes carry its
@@ -13,7 +10,7 @@ import (
 // the top-level configuration key that governs that behaviour now. Successor is empty for a row
 // retired outright, which is what tells the two apart everywhere the roll is read.
 type retiredRow struct {
-	ID        domain.MechanismID
+	ID        string
 	Release   string
 	Successor string
 }
@@ -124,11 +121,12 @@ var retired = []retiredRow{
 	{ID: "library", Release: "v0.20.0"},
 }
 
-// RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. It is
-// the complement of KnownIDs: an ID in neither list is unknown, and unknown stays a loud error
-// everywhere a retired ID is quietly dropped.
-func RetiredIDs() []domain.MechanismID {
-	out := make([]domain.MechanismID, 0, len(retired))
+// RetiredIDs returns the retired catalogue IDs, sorted, as a fresh slice the caller may keep. The
+// live catalogue is gone, so this roll is the WHOLE vocabulary the `mechanisms:` key still knows:
+// an ID that is not on it is unknown, and unknown stays a loud error everywhere a retired ID is
+// quietly dropped.
+func RetiredIDs() []string {
+	out := make([]string, 0, len(retired))
 	for _, r := range retired {
 		out = append(out, r.ID)
 	}
@@ -136,15 +134,14 @@ func RetiredIDs() []domain.MechanismID {
 	return out
 }
 
-// IsRetired reports whether id names a Mechanism this build retired. A retired ID is never also a
-// known one — retired_test.go pins that — so a caller may ask the two questions in either order.
-func IsRetired(id domain.MechanismID) bool { return rowFor(id) != nil }
+// IsRetired reports whether id names a lab row this build retired.
+func IsRetired(id string) bool { return rowFor(id) != nil }
 
 // RetiredRelease returns the version whose notes carry id's retirement, or "" when id is not on the
 // roll. It is a per-ID lookup rather than one const because the roll spans several waves, and every
 // caller that words a notice about a removed ID — this package's own, a Validated-set shed line —
 // must name the release that ID actually went in.
-func RetiredRelease(id domain.MechanismID) string {
+func RetiredRelease(id string) string {
 	if r := rowFor(id); r != nil {
 		return r.Release
 	}
@@ -155,7 +152,7 @@ func RetiredRelease(id domain.MechanismID) string {
 // provide, or "" when id retired outright (and for an ID that is not on the roll at all). A
 // non-empty answer is what turns a retired-ID notice from "this does nothing, delete it" into
 // "this is engine behaviour now, and here is the key that switches it".
-func Successor(id domain.MechanismID) string {
+func Successor(id string) string {
 	if r := rowFor(id); r != nil {
 		return r.Successor
 	}
@@ -164,7 +161,7 @@ func Successor(id domain.MechanismID) string {
 
 // rowFor finds id's roll entry, or nil. The roll is a handful of rows walked linearly rather than a
 // map, so the source order stays the documentation it is.
-func rowFor(id domain.MechanismID) *retiredRow {
+func rowFor(id string) *retiredRow {
 	for i := range retired {
 		if retired[i].ID == id {
 			return &retired[i]
@@ -173,35 +170,20 @@ func rowFor(id domain.MechanismID) *retiredRow {
 	return nil
 }
 
-// ResolveEnabled validates every `mechanisms:` configuration key against the known catalogue and
-// returns the enabled IDs in sorted canonical order for Config.EnableMechanisms — the engine
-// (apogee.New/Resume) builds them, derives their Deps, and runs the stacking gates (ADR 0015 §1: a
-// Driver's wiring collapses to a YAML→ID-list producer). EVERY key is validated here, enabled AND
-// disabled: the engine only ever sees the enabled IDs, so a typo'd DISABLED key — never
-// constructed — must still fail loudly at this startup boundary (phase-4-review-fixes item 5). An
-// unknown key, whether true or false, is a loud error naming the known catalogue. Keys are walked
-// in sorted spelling so the returned list (and any engine-side build error over it) is
-// deterministic; the dispatch order is the registry's own topo-sort (ADR 0003), independent of this
-// order.
+// RetiredNotices validates a `mechanisms:` map against the retired roll and hands back the
+// user-facing lines it earns. The catalogue is permanently EMPTY, so the key arms NOTHING (ADR
+// 0076 D11 — the block parses, notices, and drives nothing); the key survives so a saved
+// configuration is never refused, and the notices survive so a configuration still asking for a
+// removed row says so once instead of going quiet.
 //
-// NO CATALOGUED ROW IS ON BY DEFAULT: what the block names is exactly what is armed (D1). The two
-// recoveries that once defaulted on are Floor guards now (ADR 0071) — engine behaviour for every
-// model, switched by their own top-level keys in Config.Floor rather than from this block.
+// EVERY key is validated, enabled AND disabled: a typo'd DISABLED key must still fail loudly at
+// this startup boundary rather than pass unread. An unknown key — one that is not on the roll —
+// returns the error and no lines: a refused block never reached the point of tolerating anything.
+// Keys are walked in sorted spelling so the lines and any error over them are deterministic.
 //
-// A RETIRED ID (RetiredIDs — a row this build removed) is DROPPED from ids, silently and whatever
-// its value: the key was valid at the release before the removal, so refusing it would break a
-// configuration the user never edited. The roll is read here rather than injected beside known
-// because every path that resolves the block must tolerate it identically — a Driver's startup, a
-// live `/settings` apply, each delegate's per-server posture, a headless run, a daemon Firing —
-// and a path that forgot to pass it would refuse where its siblings tolerate. The silence in ids is
-// the same requirement: several of those paths run with the alt screen up, where a stderr line is
-// painted over the TUI.
-//
-// notices is the user-facing half of that tolerance, handed back WITH the ids so a caller cannot
-// take the ids and forget the lines: one line per retired ID the block speaks about, sorted by ID,
-// so a configuration still asking for a removed Mechanism says so once instead of arming nothing
-// without explanation. Which values earn a line depends on whether the row was PROMOTED (Successor
-// non-empty):
+// A RETIRED ID is tolerated whatever its value: the key was valid at the release before the
+// removal, so refusing it would break a configuration the user never edited. Which values earn a
+// line depends on whether the row was PROMOTED (Successor non-empty):
 //
 //   - Retired OUTRIGHT and set true: the plain line naming the release and asking for the key's
 //     removal. Set FALSE it earns no line — the user is not asking for it, and telling them to
@@ -213,95 +195,47 @@ func rowFor(id domain.MechanismID) *retiredRow {
 //     stopped working and names the top-level key that does it, rather than leaving them believing
 //     a guard is off when it is on.
 //
-// An unknown key returns the error and no lines: a refused block never reached the point of
-// tolerating anything. ResolveEnabled PRINTS nothing itself — the caller decides where the lines go, because only a pre-TUI path may write to
-// stderr, a live apply folds them into the answer its pane renders, and a delegate's posture
-// discards them.
-func ResolveEnabled(
-	enabled map[string]bool,
-	known []domain.MechanismID,
-) (ids []domain.MechanismID, notices []string, err error) {
-	knownSet := make(map[string]bool, len(known))
-	for _, id := range known {
-		knownSet[string(id)] = true
-	}
-
+// It PRINTS nothing itself — the caller decides where the lines go, because only a pre-TUI path
+// may write to stderr, a live apply folds them into the answer its pane renders, and a delegate's
+// posture discards them.
+func RetiredNotices(enabled map[string]bool) (notices []string, err error) {
 	keys := make([]string, 0, len(enabled))
 	for key := range enabled {
 		keys = append(keys, key)
 	}
 	slices.Sort(keys)
 
-	resolved := make([]domain.MechanismID, 0, len(keys))
-	var retiredNoticed []string
+	var noticed []string
 	for _, key := range keys {
-		if IsRetired(domain.MechanismID(key)) {
-			if enabled[key] || Successor(domain.MechanismID(key)) != "" {
-				retiredNoticed = append(retiredNoticed, key)
-			}
-			continue
+		if !IsRetired(key) {
+			return nil, fmt.Errorf("apogee: unknown mechanism %q; known: %s", key, knownList)
 		}
-		if !knownSet[key] {
-			return nil, nil, fmt.Errorf("apogee: unknown mechanism %q; known: %s", key, knownIDList(known))
+		if enabled[key] || Successor(key) != "" {
+			noticed = append(noticed, key)
 		}
-		if enabled[key] {
-			resolved = append(resolved, domain.MechanismID(key))
-		}
-	}
-	slices.Sort(resolved)
-	if len(resolved) == 0 {
-		resolved = nil
 	}
 
-	for _, key := range retiredNoticed {
-		id := domain.MechanismID(key)
-		switch successor := Successor(id); {
+	for _, key := range noticed {
+		switch successor := Successor(key); {
 		case successor == "":
 			notices = append(notices, fmt.Sprintf(
 				"apogee: mechanism %q was retired in %s and is ignored; remove it from mechanisms:",
-				key, RetiredRelease(id)))
+				key, RetiredRelease(key)))
 		case enabled[key]:
 			notices = append(notices, fmt.Sprintf(
 				"apogee: mechanism %q is the %q floor guard since %s and is on by default; remove it from mechanisms:",
-				key, successor, RetiredRelease(id)))
+				key, successor, RetiredRelease(key)))
 		default:
 			notices = append(notices, fmt.Sprintf(
 				"apogee: mechanism %q is the %q floor guard since %s; \"%s: false\" under mechanisms: "+
 					"no longer turns it off — set %s: false at the top level",
-				key, successor, RetiredRelease(id), key, successor))
+				key, successor, RetiredRelease(key), key, successor))
 		}
 	}
-	return resolved, notices, nil
+	return notices, nil
 }
 
-// RetiredNotices is ResolveEnabled over a roster that is now permanently EMPTY: it validates a
-// `mechanisms:` map, hands back the retired-ID lines it earns, and resolves NO ids at all, because
-// there is nothing left for the key to arm (ADR 0076 D11 — the block parses, notices, and drives
-// nothing). It is the door every Driver reaches this package through since the enable fold left the
-// wiring: the key survives so a saved configuration is never refused, and the notices survive so a
-// configuration still asking for a removed Mechanism says so once instead of going quiet.
-//
-// It is deliberately a call INTO ResolveEnabled rather than a second walk of the same map: the three
-// notice strings and the unknown-key error are the ones a user read yesterday, and a re-implementation
-// is how the two spellings of one sentence start to drift. A nil roster is exactly what the shipped
-// catalogue hands over today (KnownIDs over an empty table), so the unknown-key error still names
-// "(none)" as the known list.
-func RetiredNotices(enabled map[string]bool) (notices []string, err error) {
-	_, notices, err = ResolveEnabled(enabled, nil)
-	return notices, err
-}
-
-// knownIDList renders the catalogue ResolveEnabled was handed as a comma-separated string for its
-// unknown-key error, matching the engine's own unknown-ID error tail (an empty catalogue renders
-// "(none)" rather than a dangling tail). It takes the ID slice the caller passed, where knownList
-// takes the registry table.
-func knownIDList(known []domain.MechanismID) string {
-	if len(known) == 0 {
-		return "(none)"
-	}
-	parts := make([]string, len(known))
-	for i, id := range known {
-		parts[i] = string(id)
-	}
-	return strings.Join(parts, ", ")
-}
+// knownList is the tail the unknown-key error names. The catalogue is empty and stays empty, so
+// there is never anything to list — "(none)" is the same rendering the resolver produced over an
+// empty table before the catalogue was deleted.
+const knownList = "(none)"

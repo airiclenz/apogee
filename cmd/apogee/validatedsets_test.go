@@ -348,8 +348,7 @@ func probedLabFixture(t *testing.T) (opts config.Options, userDir, probeDir stri
 // (ADR 0076 decision 11): nothing is catalogued any more, so every member of every non-empty set is
 // an unknown id and the ladder stops one rung short, at setSkipped. That is the state every real
 // installation is in, and there is no longer a catalogue seam a test could open the rung with —
-// mechanisms.SwapCatalogue used to be it, and swapping the table now changes nothing the ladder
-// reads.
+// the catalogue and its test-only swap seam were deleted with the lab layer (ADR 0076 D1).
 //
 // So the claim is split in two, and the string roster carries the half the ladder can no longer
 // show: the RECORD is sound — it validates whole against a roster that carries its members, so what

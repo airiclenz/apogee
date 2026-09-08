@@ -1,8 +1,8 @@
 package domain
 
-// Tests for the two permit context seams. The hook-time SubprocessPermit
+// Tests for the two permit context seams. The reaction-time SubprocessPermit
 // (docs/design/confinement-execution-contract.md §10) pins the three-state contract the engine and
-// the Mechanisms both key on: absent = "may not spawn", present+nil = "unfenced", present+box =
+// the Reactions both key on: absent = "may not spawn", present+nil = "unfenced", present+box =
 // "confine first". The write-time WriteEscapePermit (ADR 0049) pins the two-state one the shared
 // write funnel keys on: absent = "the workspace fence alone governs", present = "this one resolved
 // target, and only it".

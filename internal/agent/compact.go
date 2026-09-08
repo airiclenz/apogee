@@ -482,7 +482,7 @@ type compactCompleter struct{ a *Agent }
 
 func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (string, error) {
 	// The summarizer request runs no hooks, so it carries no fire ledger (Fired ⇒ 0 throughout).
-	req := domain.NewRequest(c.a.cfg.Model, msgs, nil, c.a.budget(), c.a.turns.index, nil)
+	req := domain.NewRequest(c.a.cfg.Model, msgs, nil, c.a.budget(), c.a.turns.index)
 	temp, maxTok := compactTemperature, compactMaxTokens
 	req.SetSampling(domain.SamplingParams{Temperature: &temp, MaxTokens: &maxTok})
 

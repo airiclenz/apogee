@@ -31,7 +31,7 @@ func toolResult(callID, content string) domain.Message {
 // menu it sees, and returns the (possibly capped) call and whether the guard reported a cap.
 func cacheReadWithTools(history []domain.Message, call domain.ToolCall, tools []domain.ToolDef) (domain.ToolCall, bool) {
 	c := call
-	view := domain.NewRequest("m", history, tools, domain.Budget{}, 0, nil).View()
+	view := domain.NewRequest("m", history, tools, domain.Budget{}, 0).View()
 	ok := CacheRead(view, domain.NewToolCallEdit(&c))
 	return c, ok
 }

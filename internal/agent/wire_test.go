@@ -29,7 +29,7 @@ func TestProviderRequestOmitsInterjected(t *testing.T) {
 		{Role: domain.RoleTool, ToolCallID: "c1", Content: "contents"},
 		{Role: domain.RoleUser, Content: "also check the tests", Interjected: true},
 	}
-	req := domain.NewRequest("test-model", msgs, nil, domain.Budget{}, 0, nil)
+	req := domain.NewRequest("test-model", msgs, nil, domain.Budget{}, 0)
 
 	got := a.toProviderRequest(req)
 
@@ -156,5 +156,5 @@ func TestEffortHoldsUnderBypass(t *testing.T) {
 // resolution reads nothing off the request itself, so one user message is enough.
 func effortTestRequest() *domain.Request {
 	msgs := []domain.Message{{Role: domain.RoleUser, Content: "the ask"}}
-	return domain.NewRequest("test-model", msgs, nil, domain.Budget{}, 0, nil)
+	return domain.NewRequest("test-model", msgs, nil, domain.Budget{}, 0)
 }

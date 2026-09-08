@@ -157,7 +157,7 @@ func TestCurrentExchange(t *testing.T) {
 
 // TestCurrentExchangeSkipsInterjected pins the marker's whole point: a user message the
 // human interjected INTO a running Exchange joins that Exchange's body instead of opening a
-// new one, so every Mechanism reading the boundary keeps seeing the original ask. It is the
+// new one, so every reaction reading the boundary keeps seeing the original ask. It is the
 // one deliberate divergence from conversationView.LastUser (which still reports the most
 // recent user message, interjected or not), so this fixture is kept out of TestCurrentExchange's
 // LastUser property pin on purpose.

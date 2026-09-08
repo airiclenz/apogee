@@ -18,7 +18,7 @@ import (
 // (its setRetired rung); no caller may treat an emptied entry as a validated stack.
 //
 // Retired IDs are a parameter for the same reason the known roster is: this package never imports
-// the Mechanism catalogue. The caller passes mechanisms.RetiredIDs() as strings. The entry is
+// the retired roll itself. The caller passes mechanisms.RetiredIDs(). The entry is
 // copied, so the source entry (a shipped bundle member, a decoded user file) is never edited in
 // place.
 func DropRetired(e Entry, retired []string) (pruned Entry, dropped []string) {

@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
-	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -28,7 +27,7 @@ import (
 // earns the floor-guard line instead, which these Drivers print through the same seam.
 func retiredMechanismNotice(id string) string {
 	return fmt.Sprintf("apogee: mechanism %q was retired in %s and is ignored; remove it from mechanisms:",
-		id, mechanisms.RetiredRelease(domain.MechanismID(id)))
+		id, mechanisms.RetiredRelease(id))
 }
 
 // captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to

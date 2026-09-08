@@ -27,14 +27,14 @@ import "encoding/json"
 // The identity fields are deliberately read-only. ToolCall.ID and ToolResult.CallID are
 // what the loop pairs a result to its call by — the ToolCallEvent naming the call is
 // already emitted when a pre-tool-exec hook runs, and the committed tool-result message
-// links back through the same id — so a hook may reshape WHAT runs and WHAT came back,
+// links back through the same id — so a reaction may reshape WHAT runs and WHAT came back,
 // never which call it was.
 //
 // Like NewRequest / NewResponse / NewConversation, the constructors are the ENGINE SEAM:
-// internal/agent wraps the live struct it owns, hands ONE wrapper to every hook at that
-// point (so their mutations compose, as at every other hook point), and reads the result
+// internal/agent wraps the live struct it owns, hands ONE wrapper to every reaction at that
+// Moment (so their mutations compose, as at every other Moment), and reads the result
 // back through the pointer it still holds. The root facade aliases the two types, so an
-// embedder can implement the hook interfaces, but not the constructors — a hook receives
+// embedder can implement the handler funcs, but not the constructors — a reaction receives
 // an edit value and never mints one.
 
 // ToolCallEdit is the pending tool call a pre-tool-exec hook may reshape before the loop

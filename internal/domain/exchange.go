@@ -62,11 +62,11 @@ func lastRoleIndex(c messageReader, role Role) int {
 // lastExchangeOpening returns the index of the last message in c that OPENS an
 // Exchange — a RoleUser message that is not an Interjection — or -1. It is the
 // one place the interjection skip lives: everything reading the Exchange boundary
-// (CurrentExchange and, through it, the Mechanisms) or inserting relative to it
+// (CurrentExchange and, through it, the Reactions) or inserting relative to it
 // (Request.InjectContext) routes here, so a mid-Exchange user message moves no
 // boundary and no injection is ever placed above one. lastRoleIndex stays the plain
 // role scan: the hooks' LastUser deliberately still reports the most recent user
-// message, interjected or not, because a Mechanism asking "what did the human last
+// message, interjected or not, because a reaction asking "what did the human last
 // say" wants exactly that.
 func lastExchangeOpening(c messageReader) int {
 	return lastMatchIndex(c, func(m Message) bool { return m.Role == RoleUser && !m.Interjected })

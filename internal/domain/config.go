@@ -65,7 +65,7 @@ type Config struct {
 
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
-	Bypass bool // ADR 0006: Mechanisms off, structure on (the hard-constraint floor)
+	Bypass bool // ADR 0006/0076 D9: armed advise and shape Reactions off, structure on (the hard-constraint floor)
 
 	// ConfineToWorkspace tunes Auto's blast radius (ADR 0012); meaningful only in Auto.
 	// true (the default) fences subprocess writes to the workspace under OS confinement
@@ -123,28 +123,6 @@ type Config struct {
 	// Extension points. nil ⇒ the built-in defaults.
 	Tools *ToolRegistry // open extension point (ADR 0002)
 
-	// Mechanisms is the experimental-hook carrier: the bench registers candidate hooks on it via
-	// AddExperimental, and a host may pre-build catalogued Mechanisms into it directly. Catalogued
-	// Mechanisms are normally armed by ID through EnableMechanisms (ADR 0015), which builds each
-	// named Mechanism and merges it INTO this registry (a fresh one when nil), so the two coexist in
-	// one arm. The field keeps its name under v1 semver (no rename); EnableMechanisms is the
-	// enable-by-ID surface (ADR 0002/0003, ADR 0015).
-	Mechanisms *MechanismRegistry
-
-	// EnableMechanisms names catalogued Mechanisms to arm by ID (ADR 0015 §1). New and Resume build
-	// each named Mechanism at construction and merge it INTO Mechanisms (creating a fresh registry
-	// when that is nil), so a catalogued Mechanism and a bench experimental hook coexist in one arm.
-	// An unknown ID (ErrUnknownMechanism), an ID listed twice or already pre-built into Mechanisms
-	// (the registry's already-registered rejection), a hook-less Mechanism, or a half-armed Requires
-	// stack fails construction — a typo or a half-built stack never silently disables a Mechanism.
-	// Empty/nil arms NOTHING (agent.buildEnabledMechanisms): every Capability keeps the default-off
-	// posture, and the recovery guarantees an embedder gets whatever this list says are the Floor
-	// guards of Config.Floor — engine behaviour rather than catalogue rows (ADR 0071). The
-	// catalogue's CONTENTS are data, not v1
-	// contract — an ID may change in a minor with a CHANGELOG notice; the field and its build
-	// semantics are the stable surface (locked decisions 1–2, 6).
-	EnableMechanisms []MechanismID
-
 	// Reactions are the Reactions armed BESIDE the engine's own builtins (ADR 0076 D1): the
 	// seven Floor guards fire first at every seam, then these, in registration order. A host
 	// arms a Go reaction here to observe or shape a Turn without touching the engine — which is
@@ -156,9 +134,9 @@ type Config struct {
 	// ambiguous. A failure here fails construction — an invalid or shadowed reaction never
 	// silently does nothing.
 	//
-	// Every entry is inherited by each sub-agent this Agent spawns, exactly as an armed
-	// Mechanism is; Reaction.TopLevelOnly is the per-entry opt-out. Nil/empty arms nothing
-	// beyond the builtins, which is what a stock install runs.
+	// Every entry is inherited by each sub-agent this Agent spawns; Reaction.TopLevelOnly is
+	// the per-entry opt-out. Nil/empty arms nothing beyond the builtins, which is what a stock
+	// install runs.
 	Reactions []Reaction
 
 	// Skills resolves the user's attached skill IDs (UserInput.SkillIDs) to their injectable
@@ -179,8 +157,8 @@ type Config struct {
 
 	// ConfigDir is the injected apogee home — no implicit ~/.apogee (ADR 0001). The bench points
 	// it at an ephemeral dir so a sim run never touches the user's own state. The probe records
-	// the identity ladder reads live under it. Its sibling LibraryDir went with the `library`
-	// Mechanism and the observation store only that row read (v0.20.0, ADR 0071).
+	// the identity ladder reads live under it. Its sibling LibraryDir went with the retired
+	// `library` lab row and the observation store only that row read (v0.20.0, ADR 0071).
 	ConfigDir string
 
 	// WorkspaceDir is the sandbox root the built-in file tools are scoped to when
@@ -397,8 +375,8 @@ type Config struct {
 
 // FloorConfig switches the Floor guards off one at a time (ADR 0071). A Floor guard changes only
 // what the model sees after its own failure, or shapes the request without steering it, so it needs
-// no per-model proof and is NOT a Mechanism: it is plain engine behaviour that stays on under
-// Bypass, and the fields below are the only way to take one away.
+// no per-model proof and is NOT an armed Reaction: it is plain engine behaviour that stays on
+// under Bypass, and the fields below are the only way to take one away.
 //
 // Every field is a Disable… bool ON PURPOSE: the guards are the floor, so the zero value is the
 // full floor and only a deliberate opt-out removes one. The host folds in the seven file-only config
@@ -434,7 +412,7 @@ type FloorConfig struct {
 	DisableReadCache bool
 }
 
-// DelegationConfig bounds a sub-agent run. It is NOT a Mechanism (ADR 0006): a delegate that
+// DelegationConfig bounds a sub-agent run. It is NOT an armed Reaction (ADR 0006): a delegate that
 // cannot be stopped is a structural hole, so the bound stays on under Bypass.
 type DelegationConfig struct {
 	// MaxSteps is the number of Turns a child agent may take in its one Exchange before the
@@ -444,7 +422,7 @@ type DelegationConfig struct {
 }
 
 // ContextConfig governs the structural context reducers — Budget, Compaction and Pruning —
-// which are NOT Mechanisms and stay on under Bypass (CONTEXT: Budget, Compaction).
+// which are NOT armed Reactions and stay on under Bypass (CONTEXT: Budget, Compaction).
 type ContextConfig struct {
 	MaxContextTokens int // 0 ⇒ window unknown; the CLI discovers it or the context-window key supplies it (the Budget then allocates nothing and the engine's growth bounds fall back to one conservative assumed ceiling — internal/agent, ADR 0018)
 	ResponseReserve  int
@@ -484,7 +462,7 @@ type ContextConfig struct {
 	// PruneToolResults arms the cheap, NON-generative reducer: at a Turn boundary the engine
 	// rewrites stale tool results into a one-line stub naming the call that produced them
 	// (internal/context.Prune), so a long Exchange stops spending its window on output the model
-	// has already acted on. Like CompactionEnabled it is STRUCTURAL, not a Mechanism — it stays on
+	// has already acted on. Like CompactionEnabled it is STRUCTURAL, not an armed Reaction — it stays on
 	// under Bypass and is opted out only by the file-only `prune-tool-results: false` key — and
 	// like it, it is only the construction SEED: the live gate is swapped mid-session through
 	// Agent.SetPruneToolResults. Default true; the thresholds themselves are code constants, never
@@ -554,7 +532,7 @@ type ModelProfile struct {
 //
 // Like those lists it applies to the DEFAULT tool set only: an injected Config.Tools is the
 // host's own assembly, taken exactly as given (ADR 0001), and MCP-served tools ride their own
-// surface untouched. It is plain configuration, not a Mechanism — no gating, no Bypass
+// surface untouched. It is plain configuration, not an armed Reaction — no gating, no Bypass
 // interaction.
 type ToolRosterDelta struct {
 	// Disabled names built-in tools this model must NOT be offered, whatever the global lists and

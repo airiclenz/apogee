@@ -5,9 +5,9 @@ package main
 // What the session's tools are made of and how they change: the live holder that owns the registry
 // the engine is running on — re-pointing a registered tool where it can, going through the single
 // SwapTools door where it must (ADR 0037 binding F) — plus the startup builders behind it and the
-// registry assembly that folds the discovered MCP tools onto the built-in set. Turning a
-// `mechanisms:` config block into the ID list the engine arms is mechanisms.ResolveEnabled's job
-// (ADR 0015 §1), which every Driver reaches directly.
+// registry assembly that folds the discovered MCP tools onto the built-in set. A `mechanisms:`
+// config block arms nothing at all now (ADR 0076 D11); validating it and wording the notices a
+// retired id earns is mechanisms.RetiredNotices' job, which every Driver reaches directly.
 
 import (
 	"fmt"

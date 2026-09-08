@@ -1,8 +1,7 @@
 // Package domain is the ubiquitous language (CONTEXT.md) rendered as Go: every
-// type, interface, enum, sentinel error, and hook working-value in Apogee's public
-// surface, plus the pure logic intrinsic to those types (the Mechanism registry's
-// ordering-cycle detection, ConfinementCaps.AutoEligible, the Session envelope and
-// its versioning).
+// type, interface, enum, sentinel error, and reaction working-value in Apogee's public
+// surface, plus the pure logic intrinsic to those types (Reaction.Validate,
+// ConfinementCaps.AutoEligible, the Session envelope and its versioning).
 //
 // It is the foundational layer of the package layout decided in ADR 0010: the engine
 // (internal/agent), the provider (internal/provider), and the platform backends
@@ -16,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-five files, grouped by which part of the language each one carries.
+// Twenty-three files, grouped by which part of the language each one carries.
 //
 // The construction surface and the session envelope. config.go is Config, the whole
 // construction surface (ADR 0001), plus the mode ladder it opens on — Mode, ParseMode,
@@ -39,29 +38,20 @@
 // human's reply (ADR 0039). naming.go is DelegationNamer and the DelegationNaming the engine
 // hands it — the out-of-band naming of a delegation the model left unnamed (ADR 0068).
 // events.go is EventSink and every typed Event the loop emits: tokens and reasoning, messages,
-// tool calls and results, approvals, delegation lifecycle and naming, Mechanism fires, usage,
+// tool calls and results, approvals, delegation lifecycle and naming, Reaction firings, usage,
 // audit.
 //
-// The loop's working values. hooks.go is the substrate a hook actually touches — Message and
+// The loop's working values. hooks.go is the substrate a reaction actually touches — Message and
 // its wire JSON, Role, ToolDef, Budget, the method-only Request / Response / Conversation,
 // and the LoopView / ConversationView interfaces. hookview.go is the unexported read-only
-// views backing those interfaces, so a hook reading loop state can never mutate it.
+// views backing those interfaces, so a reaction reading loop state can never mutate it.
 // exchange.go derives the current Exchange's boundary from the conversation instead of
 // caching it, skipping the Interjection that is deliberately not an opening. budget.go is
 // the Budget's pure token arithmetic — the ONE chars-to-token conversion every estimator and
-// token-gated Mechanism delegates to.
+// token-gated reader delegates to.
 //
-// Mechanisms. mechanism.go is the Mechanism vocabulary: the HookPoint set, the five hook
-// interfaces, the descriptor with its ordering constraints and suppression policy, the
-// post-response decision, and the MechanismRegistry surface. registry.go is that registry's
-// pure logic — the hook-interface assertions, the startup ordering-cycle check, the
-// deterministic per-hook-point total order, and the incompatibility gate (ADR 0003).
-// stack.go is the one implementation of "is this Mechanism stack valid?", the
-// requires/conflicts rule and its StackDefectKind, read by both the pre-build catalogue check
-// and the post-build registry gates.
-//
-// The Reaction core. reaction.go is the one vocabulary the Mechanism layer above is collapsing
-// into (ADR 0076): the Moment set with its seam and notice halves, the Origin and Class axes of
+// The Reaction core. reaction.go is the one vocabulary every seam speaks
+// (ADR 0076): the Moment set with its seam and notice halves, the Origin and Class axes of
 // the Reaction surface matrix, the Reaction itself with its Validate, the one Outcome shape every
 // seam folds to, the sealed per-seam Handler funcs, and the two seam payloads that carry a
 // revision the dispatcher can bracket.
@@ -75,8 +65,8 @@
 // an argument object agrees on (the executor's decode matches keys case-insensitively), the check
 // that refuses an object naming one parameter under two spellings, and the check that refuses an
 // object answering one parameter twice with differing values.
-// tooledit.go is the tool stage's pair of hook working values — ToolCallEdit and
-// ToolResultEdit, the revision-bearing wrappers the two tool-stage hooks reshape a pending
+// tooledit.go is the tool stage's pair of reaction working values — ToolCallEdit and
+// ToolResultEdit, the revision-bearing wrappers the two tool-stage reactions reshape a pending
 // call and a returned result through. toolsummary.go is ToolSummary and its seven variants,
 // the structured half of an outcome, written for a host rather than for the model. confinement.go is the Confiner interface, its
 // capability and box value types, the per-call Confinement / SubprocessPermit context

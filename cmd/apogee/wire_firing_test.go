@@ -652,7 +652,7 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 	// v0.20.0 (ADR 0071), so the legal keys left are the RETIRED ones: they validate, arm nothing,
 	// and are what proves that a PRESENT map is still accepted by an unattended composition rather
 	// than refusing the run.
-	known := string(mechanisms.RetiredIDs()[0])
+	known := mechanisms.RetiredIDs()[0]
 	grunt := config.ServerEntry{
 		Name:        "grunt",
 		Endpoint:    "http://grunt.example/v1",
