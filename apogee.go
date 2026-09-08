@@ -256,6 +256,7 @@ type (
 	ChildInterjectionEvent = domain.ChildInterjectionEvent
 	MechanismFiredEvent    = domain.MechanismFiredEvent
 	FloorGuardEvent        = domain.FloorGuardEvent
+	ReactionFiredEvent     = domain.ReactionFiredEvent
 	ErrorEvent             = domain.ErrorEvent
 	PruneEvent             = domain.PruneEvent
 	UsageEvent             = domain.UsageEvent
@@ -534,6 +535,87 @@ func BuildMechanisms(cfg Config, ids []MechanismID) (*MechanismRegistry, error) 
 }
 
 // ----------------------------------------------------------------------------
+// Reactions (internal/domain)
+// ----------------------------------------------------------------------------
+
+// Moment is a point the loop passes, on which a Reaction may fire: a SEAM Moment is in-loop and
+// synchronous with an editable payload, a NOTICE Moment is post-hoc with a sealed one.
+type Moment = domain.Moment
+
+// The five seam Moments, in the order a Turn passes them.
+const (
+	MomentPreRequest     = domain.MomentPreRequest
+	MomentPostResponse   = domain.MomentPostResponse
+	MomentPreToolExec    = domain.MomentPreToolExec
+	MomentPostToolResult = domain.MomentPostToolResult
+	MomentHistoryRewrite = domain.MomentHistoryRewrite
+)
+
+// The five notice Moments — the post-hoc points, whose payload is sealed.
+const (
+	MomentExchangeFinished = domain.MomentExchangeFinished
+	MomentTurnFinished     = domain.MomentTurnFinished
+	MomentFileChanged      = domain.MomentFileChanged
+	MomentApprovalWaiting  = domain.MomentApprovalWaiting
+	MomentError            = domain.MomentError
+)
+
+// Seams returns the five seam Moments in loop order, as a fresh copy.
+func Seams() []Moment { return domain.Seams() }
+
+// Notices returns the five notice Moments in their documented order, as a fresh copy.
+func Notices() []Moment { return domain.Notices() }
+
+// Origin is who a Reaction belongs to — one axis of the Reaction surface matrix (ADR 0076 D2).
+type Origin = domain.Origin
+
+const (
+	OriginEngine = domain.OriginEngine
+	OriginUser   = domain.OriginUser
+)
+
+// Class is what a Reaction may do — the other axis of the Reaction surface matrix.
+type Class = domain.Class
+
+const (
+	ClassObserve   = domain.ClassObserve
+	ClassAdvise    = domain.ClassAdvise
+	ClassGate      = domain.ClassGate
+	ClassShapeView = domain.ClassShapeView
+	ClassShapeWork = domain.ClassShapeWork
+)
+
+// Outcome is what one fired Reaction reports back, in one shape for every seam; the zero value
+// means it did nothing.
+type Outcome = domain.Outcome
+
+// Handler is the behaviour a Reaction runs. It is sealed in internal/domain — only the five
+// per-seam func types below implement it — so external code arms a Reaction with one of them
+// but cannot add a handler kind.
+type Handler = domain.Handler
+
+// The five Go handler types, one per seam.
+type (
+	PreRequestFunc     = domain.PreRequestFunc
+	PostResponseFunc   = domain.PostResponseFunc
+	PreToolExecFunc    = domain.PreToolExecFunc
+	PostToolResultFunc = domain.PostToolResultFunc
+	HistoryRewriteFunc = domain.HistoryRewriteFunc
+)
+
+// ToolResultMoment is the post-tool-result seam's payload: the originating call paired with the
+// result's revision-bearing edit.
+type ToolResultMoment = domain.ToolResultMoment
+
+// PostResponseMoment is the post-response seam's payload: the response, plus whether the loop has
+// retry budget left.
+type PostResponseMoment = domain.PostResponseMoment
+
+// Reaction is the single thing apogee does when the loop passes a Moment: one
+// {id, origin, class, on, handler}, validated against the Reaction surface matrix.
+type Reaction = domain.Reaction
+
+// ----------------------------------------------------------------------------
 // Hook working values (internal/domain)
 // ----------------------------------------------------------------------------
 
@@ -734,4 +816,10 @@ var (
 	// ErrInvalidTool is returned by ToolRegistry.Register for an unaddressable tool
 	// (currently an empty Name).
 	ErrInvalidTool = domain.ErrInvalidTool
+
+	// ErrInvalidReaction is wrapped by Reaction.Validate for a reaction the engine will not
+	// accept: no ID, no origin or class, an origin x class outside the Reaction surface matrix,
+	// no handler, an empty or duplicate-bearing On list, or an On entry its handler cannot
+	// serve. Match with errors.Is.
+	ErrInvalidReaction = domain.ErrInvalidReaction
 )

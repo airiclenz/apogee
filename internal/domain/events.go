@@ -325,6 +325,25 @@ type FloorGuardEvent struct {
 	Detail string // optional supporting text; may be empty
 }
 
+// ReactionFiredEvent reports that a Reaction acted — the ONE firing event of the Reaction core
+// (ADR 0076 D1), succeeding MechanismFiredEvent and FloorGuardEvent above, which it replaces.
+// A firing is a reaction that did something: an engine builtin such as a Floor guard, or a
+// reaction armed beside them, at the Moment it fired on.
+//
+// Reaction is the reaction's id — for a builtin, the same config key a user writes in config.yaml
+// (`tool-call-repair`, `tool-loop-breaker`, …), so an observer never has to map an internal name
+// back to the switch that turns the behaviour off. Origin says whose reaction it was, Moment where
+// in the loop it fired, Action what it did ("retry", "intercept", "defer", "cap", …), and Detail
+// is optional supporting text a renderer may show verbatim or ignore.
+type ReactionFiredEvent struct {
+	EventBase
+	Reaction string // the reaction's id, e.g. "tool-call-repair"
+	Origin   Origin // engine (builtin or bench-armed) or user
+	Moment   Moment // where in the loop it fired
+	Action   string // what it did, e.g. "retry"
+	Detail   string // optional supporting text; may be empty
+}
+
 // ErrorEvent reports a localised, recovered fault — a tool or Mechanism panic
 // caught at the extension boundary, or a tool execution error (ADR 0007). It does
 // not imply the loop stopped.

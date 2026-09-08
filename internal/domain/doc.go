@@ -16,7 +16,7 @@
 //
 // # The files, one line each
 //
-// Twenty-four files, grouped by which part of the language each one carries.
+// Twenty-five files, grouped by which part of the language each one carries.
 //
 // The construction surface and the session envelope. config.go is Config, the whole
 // construction surface (ADR 0001), plus the mode ladder it opens on — Mode, ParseMode,
@@ -59,6 +59,12 @@
 // stack.go is the one implementation of "is this Mechanism stack valid?", the
 // requires/conflicts rule and its StackDefectKind, read by both the pre-build catalogue check
 // and the post-build registry gates.
+//
+// The Reaction core. reaction.go is the one vocabulary the Mechanism layer above is collapsing
+// into (ADR 0076): the Moment set with its seam and notice halves, the Origin and Class axes of
+// the Reaction surface matrix, the Reaction itself with its Validate, the one Outcome shape every
+// seam folds to, the sealed per-seam Handler funcs, and the two seam payloads that carry a
+// revision the dispatcher can bracket.
 //
 // Tools and confinement. tools.go is the open Tool extension point (ADR 0002) with ToolCall,
 // ToolResult, the ToolRegistry, and the marker interfaces the dispatch disposition reads —
