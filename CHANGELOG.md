@@ -19,6 +19,18 @@ point is a **minor** bump, not a breaking change.
   the exit waits for the record write to land, exactly as a clean quit's flush does. Pinned by a
   driven run that quits with the reply still held on the server. Closes bead `apogee-944`.
 
+- Fixed (tests): **the Event-lines golden no longer fails on the length of its own temp directory.**
+  `standing_tokens` is `ceil(len(standingSystem())/ratio)`, and the standing prompt spells the run's
+  workspace and scratch dir — so although the golden redacts the temp PATH, the path's LENGTH stayed
+  baked into the number. `t.TempDir()` names its directory after the test plus a random decimal whose
+  digit count varies between runs, which moved the ceil: one unchanged host, one unchanged binary,
+  twelve runs, three answers (808, 810, 811), and CI red on `TestE2EEventLinesGolden/a_completed_run`
+  in run `34192164949` against a golden that had passed twice the day before. The completed-run case
+  now redacts the count to `"<standing>"` — the member and its position are still pinned, so one that
+  vanished or moved is still a diff — and asserts semantically that a run which built a standing
+  prompt reports a positive count. The exact arithmetic stays pinned where it is deterministic, in
+  `internal/agent/contextfiles_test.go`.
+
 ### Changed
 
 - **One Reaction core, decided (ADR 0076).** Floor guards, the Mechanism lab layer and Hooks are

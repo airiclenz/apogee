@@ -119,9 +119,13 @@ func eventLinesGolden(name string) string {
 // eventLinesRedactions is what has to come out of the stream before it can be compared to a file on
 // disk: the clock, the run's own id, the build string and the temporary workspace. Everything else
 // a line carries is either scripted (the model, the token chunks, the two usage blocks) or derived
-// from the prompt, and is therefore the same on every host — which is the point of comparing at
+// from the prompt, and is therefore the same on every run — which is the point of comparing at
 // all. Nothing here redacts a NAME or a KEY: a member that silently disappeared would still be a
 // diff, and that is exactly the failure a golden is here to catch.
+//
+// This is the set EVERY case takes. A case whose stream carries a value the run itself cannot make
+// repeatable appends its own — the dial's OS error text below, and the standing-prompt token count
+// in the completed run — because a redaction that is not needed everywhere is not shared.
 func eventLinesRedactions(workspace string) []tuitest.Redaction {
 	return []tuitest.Redaction{
 		tuitest.Redact(`"time":"[^"]*"`, `"time":"<time>"`),
@@ -228,7 +232,19 @@ func TestE2EEventLinesGolden(t *testing.T) {
 		}
 		stub.AssertConsumed(t)
 
-		tuitest.GoldenText(t, eventLinesGolden("run"), out, eventLinesRedactions(workspace)...)
+		// standing_tokens is ceil(len(standingSystem())/ratio), and the standing prompt SPELLS the
+		// run's workspace and scratch dir — so the redacted path's own LENGTH survives into the
+		// number even though the path does not. t.TempDir() names its directory after the test plus
+		// a random decimal whose DIGIT COUNT varies from run to run, and the ceil lands on a
+		// different integer when it does: one unchanged host, one unchanged binary, twelve runs,
+		// three answers (808, 810, 811). Pinning the count therefore failed about half of all runs
+		// for no reason anyone could act on. The token keeps the member and its position honest —
+		// a standing_tokens that vanished or moved is still a diff — and the assertion below keeps
+		// its meaning. The arithmetic itself is pinned where it is deterministic:
+		// internal/agent/contextfiles_test.go.
+		redactions := append(eventLinesRedactions(workspace),
+			tuitest.Redact(`"standing_tokens":\d+`, `"standing_tokens":"<standing>"`))
+		tuitest.GoldenText(t, eventLinesGolden("run"), out, redactions...)
 
 		lines := jsonEventLines(t, out)
 		assertEventLineEnvelopes(t, lines)
@@ -238,6 +254,17 @@ func TestE2EEventLinesGolden(t *testing.T) {
 		}
 		_, data := finishedFrame(t, lines)
 		wantExitCode(t, data, 0)
+		// What the redaction gave up, said semantically: a run that built a standing prompt counts
+		// it, so the number is present and positive rather than the zero the not-started cases
+		// carry — which is the only thing the golden's digits were ever worth.
+		files, ok := data["context_files"].(map[string]any)
+		if !ok {
+			t.Fatalf("the closing frame's context_files is %v; want the report block", data["context_files"])
+		}
+		if standing, _ := files["standing_tokens"].(float64); standing <= 0 {
+			t.Errorf("standing_tokens = %v; a run whose standing prompt was built counts its tokens",
+				files["standing_tokens"])
+		}
 	})
 
 	t.Run("a run whose server answered nothing", func(t *testing.T) {
