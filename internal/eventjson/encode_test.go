@@ -232,6 +232,21 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"guard":"tool-call-repair","action":"retry","detail":"unparsable arguments"}`,
 		},
 		{
+			name: "reaction_fired",
+			event: domain.ReactionFiredEvent{
+				EventBase: domain.EventBase{Turn: 2},
+				Reaction:  "tool-call-repair",
+				Origin:    domain.OriginEngine,
+				Moment:    domain.MomentPostResponse,
+				Action:    "retry",
+				Detail:    "unparsable arguments",
+			},
+			wantKind: "reaction_fired",
+			wantBase: domain.EventBase{Turn: 2},
+			wantData: `{"reaction":"tool-call-repair","origin":"engine","moment":"post-response",` +
+				`"action":"retry","detail":"unparsable arguments"}`,
+		},
+		{
 			name: "error",
 			event: domain.ErrorEvent{
 				EventBase: domain.EventBase{Turn: 2},
@@ -353,16 +368,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreNineteen pins the vocabulary itself — the seventeen serialized variants plus the two
+// TestKindsAreTwenty pins the vocabulary itself — the eighteen serialized variants plus the two
 // frames — so a kind added to the encoder without a manual entry, or an entry without a kind, is a
 // failing test rather than a documentation drift.
-func TestKindsAreNineteen(t *testing.T) {
+func TestKindsAreTwenty(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 19 {
-		t.Fatalf("len(Kinds()) = %d, want 19: %v", len(kinds), kinds)
+	if len(kinds) != 20 {
+		t.Fatalf("len(Kinds()) = %d, want 20: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

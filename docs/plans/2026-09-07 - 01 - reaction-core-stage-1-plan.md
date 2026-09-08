@@ -154,7 +154,9 @@ go build ./... && go test -race -count=1 ./internal/domain/ ./
 ```
 **Commit:** `feat(domain): Moment, Reaction, Outcome and ReactionFiredEvent — the stage-1 Reaction core types`
 
-## 4. eventjson: additive `reaction_fired` kind
+## 4. eventjson: additive `reaction_fired` kind — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): consequential edit — internal/eventjson/doc.go: made necessary by adding the eighteenth serialized variant, which made the package doc's "across seventeen variants" count false.
 
 **What:** Depends on item 3. `internal/eventjson/encode.go:13-31`: add `kindReactionFired = "reaction_fired"`, list it in `Kinds()` (now 20), add the switch case emitting `reactionFiredData{reaction, origin, moment, action, detail}` (explicit snake_case tags, no `omitempty`). `lineVersion` (`writer.go:18`) STAYS 1 — an addition never bumps (ADR 0075 D10). `docs/manual/headless.md:172-173`: add the `reaction_fired` row ("a Reaction acted: builtin Floor guard or armed Reaction, at which Moment, and what it did"); the two old rows stay until item 19.
 

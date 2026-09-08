@@ -136,7 +136,7 @@ rather than flattened beside it:
 
 | Member | What it carries |
 |---|---|
-| `event` | the line kind: one of the nineteen names below |
+| `event` | the line kind: one of the twenty names below |
 | `v` | the contract version — `1` today, on **every** line |
 | `seq` | 1-based, counting every line the run wrote, the two frames included |
 | `time` | RFC3339Nano, stamped as the line is written |
@@ -150,9 +150,9 @@ Every member is **always present**, and is `null` where the line has no value fo
 never has to test for a missing key. `depth` is what separates the run's own events from a
 sub-agent's: the lines carry every depth, not just the top.
 
-### The nineteen line kinds
+### The twenty line kinds
 
-Seventeen of them are engine events, and the two frames are not. The names are snake_case on
+Eighteen of them are engine events, and the two frames are not. The names are snake_case on
 purpose — a [Hook event](hooks.md)'s kebab-case name for a neighbouring moment is a *different*
 moment, and the case difference is the signal.
 
@@ -171,6 +171,7 @@ moment, and the case difference is the signal.
 | `turn` | a Turn boundary, at every depth: its status, whether it faulted, whether it hit the step cap |
 | `mechanism_fired` | a lab Mechanism acted, and on what |
 | `floor_guard` | a Floor guard acted, and on what |
+| `reaction_fired` | a Reaction acted: builtin Floor guard or armed Reaction, at which Moment, and what it did |
 | `error` | something failed, named by its source |
 | `prune` | the context was pruned: how many results, how many tokens |
 | `usage` | one model call's token accounting and the run's cumulative totals |

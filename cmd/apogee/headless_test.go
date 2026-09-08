@@ -2395,6 +2395,12 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 				domain.TurnEvent{},
 				domain.MechanismFiredEvent{Mechanism: "plan-first", Action: "suppressed"},
 				domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
+				domain.ReactionFiredEvent{
+					Reaction: "tool-call-repair",
+					Origin:   domain.OriginEngine,
+					Moment:   domain.MomentPostResponse,
+					Action:   "retry",
+				},
 				domain.ErrorEvent{Source: "loop", Err: "a tool panicked"},
 				domain.PruneEvent{Results: 3, Tokens: 1200},
 				domain.UsageEvent{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
@@ -2410,7 +2416,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 		t.Fatalf("a completed run returned an error: %v", err)
 	}
 
-	// The two frames bracket the seventeen variants, in the contract's own order.
+	// The two frames bracket the eighteen variants, in the contract's own order.
 	kinds := eventjson.Kinds()
 	want := append([]string{"run_started"}, kinds[:len(kinds)-2]...)
 	want = append(want, "run_finished")

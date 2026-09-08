@@ -6,7 +6,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The nineteen line kinds of ADR 0075 §4 — seventeen Event variants plus the two frames that
+// The twenty line kinds of ADR 0075 §4 — eighteen Event variants plus the two frames that
 // bracket a run and are not Events. They are snake_case on purpose: a Hook event's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 const (
@@ -23,6 +23,7 @@ const (
 	kindTurn              = "turn"
 	kindMechanismFired    = "mechanism_fired"
 	kindFloorGuard        = "floor_guard"
+	kindReactionFired     = "reaction_fired"
 	kindError             = "error"
 	kindPrune             = "prune"
 	kindUsage             = "usage"
@@ -50,6 +51,7 @@ func Kinds() []string {
 		kindTurn,
 		kindMechanismFired,
 		kindFloorGuard,
+		kindReactionFired,
 		kindError,
 		kindPrune,
 		kindUsage,
@@ -125,6 +127,14 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			Guard:  e.Guard,
 			Action: e.Action,
 			Detail: e.Detail,
+		}, true
+	case domain.ReactionFiredEvent:
+		return kindReactionFired, e.EventBase, reactionFiredData{
+			Reaction: e.Reaction,
+			Origin:   string(e.Origin),
+			Moment:   string(e.Moment),
+			Action:   e.Action,
+			Detail:   e.Detail,
 		}, true
 	case domain.ErrorEvent:
 		return kindError, e.EventBase, errorData{Source: e.Source, Err: e.Err}, true
@@ -245,6 +255,18 @@ type floorGuardData struct {
 	Guard  string `json:"guard"`
 	Action string `json:"action"`
 	Detail string `json:"detail"`
+}
+
+// reactionFiredData is the reaction_fired line: the ONE firing line of the Reaction core (ADR 0076
+// D1), which succeeds mechanism_fired and floor_guard above. Reaction is the reaction's id — for an
+// engine builtin, the same config key a user writes in config.yaml — so a reader never has to map
+// an internal name back to the switch that turns the behaviour off.
+type reactionFiredData struct {
+	Reaction string `json:"reaction"`
+	Origin   string `json:"origin"`
+	Moment   string `json:"moment"`
+	Action   string `json:"action"`
+	Detail   string `json:"detail"`
 }
 
 // errorData is the error line: a localised, recovered fault. The member is `err` because the tag
