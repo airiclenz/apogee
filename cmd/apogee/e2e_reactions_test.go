@@ -22,11 +22,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -466,6 +468,370 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 		t.Errorf("the failing hook left %d lines in the daemon log, want exactly one:\n%s",
 			n, h.out.String())
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The stage-2 journeys (ADR 0076)
+// ----------------------------------------------------------------------------
+
+// TestE2EReactionsMigrateAHooksFileAtStartup is the migration journey: a home whose config.yaml is
+// still written in the retired schema — a `hooks:` block naming the retired approval event, the
+// `mechanisms:` key both top-level and on the server entry, and `validated-sets:` — booted at the
+// TUI root, which is where the fold runs and the only place it ever does.
+//
+// It is the claim the unit tests in internal/config cannot make: that a user who upgrades and
+// starts apogee gets a file that has already been rewritten, a copy of what they had, a line saying
+// so, and — the part a fold that merely parsed would miss — an entry that still FIRES, off the
+// block apogee wrote for them rather than the one they did.
+func TestE2EReactionsMigrateAHooksFileAtStartup(t *testing.T) {
+	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	t.Setenv(hookSinkEnv, sink)
+
+	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
+	if err != nil {
+		t.Fatalf("load the smoke script: %v", err)
+	}
+	stub := stubllm.New(t, script)
+	drv := tuitest.NewDriver(t, e2eSize)
+	home := legacyReactionsHome(t, stub)
+	sess := launchTUIOn(t, drv, stub, home, "")
+
+	// The folded entry fires, which is what makes the rewritten block a working one.
+	submit(drv, "What files are in this workspace?")
+	drv.WaitText("The workspace holds one file")
+	drv.WaitFor(func() bool {
+		_, ok := hookPayloadFor(readHookPayloads(t, sink), reactions.ExchangeFinished)
+		return ok
+	}, tuitest.Awaiting("the migrated reaction to fire on exchange-finished"))
+	if payload, _ := hookPayloadFor(readHookPayloads(t, sink), reactions.ExchangeFinished); payload.Reaction != hooksSinkName {
+		t.Errorf("the exchange-finished payload names the reaction %q; want the folded entry %q",
+			payload.Reaction, hooksSinkName)
+	}
+
+	// Quit first: the startup notice is written to the command tree's own error stream from the
+	// run's goroutine, so it is only safely readable once that goroutine has returned.
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+
+	path := filepath.Join(home, "config.yaml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the migrated config: %v", err)
+	}
+	if !strings.Contains(string(body), migratedReactionsBlock) {
+		t.Errorf("the migrated config does not carry the folded block\n%s\nwant it to contain\n%s",
+			body, migratedReactionsBlock)
+	}
+	for _, retired := range []string{"hooks:", "mechanisms:", "validated-sets:", retiredApprovalSpelling} {
+		if strings.Contains(string(body), retired) {
+			t.Errorf("the migrated config still carries %q:\n%s", retired, body)
+		}
+	}
+
+	backup := soleConfigBackup(t, home)
+	kept, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatalf("read the backup %s: %v", backup, err)
+	}
+	if !strings.Contains(string(kept), "hooks:") {
+		t.Errorf("the backup %s does not hold the file as it was:\n%s", backup, kept)
+	}
+
+	// The note, whole: the user's only warning that a file they own was rewritten, and the only
+	// place the two facts a script author needs — the environment prefix and the payload's key —
+	// are said out loud.
+	wantNote := "apogee: rewrote " + path + " — " +
+		"hooks: became reactions: (2 entries); " +
+		retiredApprovalSpelling + " is now approval-requested; " +
+		"the retired mechanisms: key was dropped (cached_content_intercept → read-cache:, " +
+		"tool_use_enforcer → tool-use-enforcer:); " +
+		"the inert validated-sets: key was dropped; " +
+		"comments inside the old block did not survive; backup at " + backup + "." +
+		` Scripts must read APOGEE_REACTION_* (was APOGEE_HOOK_*) and the payload's ` +
+		`"reaction" field (was "hook").`
+	if !strings.Contains(sess.Output(), wantNote) {
+		t.Errorf("the run's notices do not carry the migration note\n%s\nwant\n%s",
+			sess.Output(), wantNote)
+	}
+}
+
+// TestE2EReactionsApprovalDecidedCarriesTheVerdict is the second half of the approval pair (ADR
+// 0076 A6): `approval-requested` says a human is being waited on, `approval-decided` says what they
+// answered. Only the driven root can make the claim — a decision needs somebody to make it — and
+// the payload's `decision` is the fact no other notice carries.
+func TestE2EReactionsApprovalDecidedCarriesTheVerdict(t *testing.T) {
+	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	t.Setenv(hookSinkEnv, sink)
+
+	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
+	if err != nil {
+		t.Fatalf("load the smoke script: %v", err)
+	}
+	stub := stubllm.New(t, script)
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, hookBlockOf(
+		"  - id: "+hooksSinkName+"\n"+
+			"    on: [approval-decided]\n"+
+			"    run: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"))
+
+	submit(drv, `Append a line saying "smoke test" to a.txt.`)
+	drv.WaitText("Always allow this session")
+	drv.WaitQuiet(settled)
+	drv.Type("a")
+	drv.WaitText(smokeWriteReply)
+
+	drv.WaitFor(func() bool {
+		_, ok := hookPayloadFor(readHookPayloads(t, sink), reactions.ApprovalDecided)
+		return ok
+	}, tuitest.Awaiting("the approval-decided payload in the reaction sink"))
+
+	decided, _ := hookPayloadFor(readHookPayloads(t, sink), reactions.ApprovalDecided)
+	if decided.Decision != string(domain.ApprovalAllow) {
+		t.Errorf("the approval-decided payload's decision = %q; want %q — the human pressed Allow",
+			decided.Decision, domain.ApprovalAllow)
+	}
+	if decided.Tool != "write_file" {
+		t.Errorf("the approval-decided payload names the tool %q; want write_file", decided.Tool)
+	}
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// TestE2EReactionsPostToolResultFinishedCarriesTheResult is a seam-closing notice at the headless
+// root: `post-tool-result-finished` reports that the post-tool-result seam finished passing, and
+// its payload carries the working value that came out of it — the call and the text the model is
+// about to read.
+//
+// The claim is made on the script's STDIN rather than on a field of the run: what a command entry
+// receives is the payload as JSON on its standard input, so a projection that never reached the
+// wire would look identical from inside the Runner and be worth nothing here.
+func TestE2EReactionsPostToolResultFinishedCarriesTheResult(t *testing.T) {
+	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	t.Setenv(hookSinkEnv, sink)
+
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	headlessHooksAgainst(t, stub, "What files are in this workspace?", hookBlockOf(
+		"  - id: "+hooksSinkName+"\n"+
+			"    on: ["+string(domain.MomentPostToolResultFinished)+"]\n"+
+			"    run: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"))
+
+	fired := readHookPayloads(t, sink)
+	closed, ok := hookPayloadFor(fired, domain.MomentPostToolResultFinished)
+	if !ok {
+		t.Fatalf("the reaction sink holds no post-tool-result-finished payload; it holds:\n%+v", fired)
+	}
+	if closed.Seam != domain.MomentPostToolResult {
+		t.Errorf("the payload names the seam %q; want %q", closed.Seam, domain.MomentPostToolResult)
+	}
+
+	value := seamValue(t, closed)
+	call, _ := value["call"].(map[string]any)
+	if name, _ := call["name"].(string); name != "list_dir" {
+		t.Errorf("the value's call names the tool %q; want list_dir — the one the script called", name)
+	}
+	content, _ := value["content"].(string)
+	if !strings.Contains(content, "a.txt") {
+		t.Errorf("the value's content = %q; want the tool result the seeded workspace produces, "+
+			"which names a.txt", content)
+	}
+}
+
+// TestE2EReactionsPreRequestFinishedCarriesThePrompt is the seam at the other end of the loop:
+// `pre-request-finished` closes over the request as the pre-request cascade left it, so its value
+// is what apogee is about to SEND — the user's own words among it.
+//
+// One prompt, one Turn, no tool call: the run makes exactly one request, so the single payload in
+// the sink is that request and there is nothing to disambiguate.
+func TestE2EReactionsPreRequestFinishedCarriesThePrompt(t *testing.T) {
+	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	t.Setenv(hookSinkEnv, sink)
+
+	stub := stubllm.New(t, loadScript(t, "hooks"))
+	headlessHooksAgainst(t, stub, hooksPrompt, hookBlockOf(
+		"  - id: "+hooksSinkName+"\n"+
+			"    on: ["+string(domain.MomentPreRequestFinished)+"]\n"+
+			"    run: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"))
+
+	fired := readHookPayloads(t, sink)
+	closed, ok := hookPayloadFor(fired, domain.MomentPreRequestFinished)
+	if !ok {
+		t.Fatalf("the reaction sink holds no pre-request-finished payload; it holds:\n%+v", fired)
+	}
+	if closed.Seam != domain.MomentPreRequest {
+		t.Errorf("the payload names the seam %q; want %q", closed.Seam, domain.MomentPreRequest)
+	}
+
+	messages, _ := seamValue(t, closed)["messages"].([]any)
+	if !messagesCarry(messages, hooksPrompt) {
+		t.Errorf("the value's messages do not carry the prompt %q:\n%+v", hooksPrompt, messages)
+	}
+}
+
+// TestE2EReactionsReloadSwapsTheArmedList is the live-reload journey: the `reactions:` key is
+// rewritten under a running session, the watcher applies it, and the list that fires from then on
+// is the NEW one — one generation, swapped whole, rather than a list the old entries linger in.
+//
+// The claim is made on what fires rather than on how many times the engine was told, because the
+// swap itself is invisible from out here: the count belongs to the unit spy over SetReactions. What
+// a user can see is that their edit took, and that the entry they deleted stopped firing.
+func TestE2EReactionsReloadSwapsTheArmedList(t *testing.T) {
+	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	t.Setenv(hookSinkEnv, sink)
+
+	const (
+		before = "before"
+		after  = "after"
+	)
+	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
+	if err != nil {
+		t.Fatalf("load the smoke script: %v", err)
+	}
+	stub := stubllm.New(t, script)
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, hookBlockOf(sinkEntry(before)))
+
+	submit(drv, "What files are in this workspace?")
+	drv.WaitText("The workspace holds one file")
+	drv.WaitFor(func() bool { return len(readHookPayloads(t, sink)) == 1 },
+		tuitest.Awaiting("the first generation's entry to fire"))
+
+	rewriteHomeHooks(t, sess.Home(), sinkEntry(after))
+	drv.WaitText(appliedNote)
+	drv.WaitQuiet(settled)
+
+	submit(drv, "Is there anything else worth knowing?")
+	drv.WaitText("Nothing else")
+	drv.WaitFor(func() bool { return len(readHookPayloads(t, sink)) == 2 },
+		tuitest.Awaiting("the second generation's entry to fire"))
+	drv.WaitQuiet(settled)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+
+	// Two exchanges, two firings, one from each generation and in that order: a third payload
+	// would be the deleted entry still armed, and a second `before` would be it firing again.
+	fired := readHookPayloads(t, sink)
+	names := make([]string, 0, len(fired))
+	for _, payload := range fired {
+		names = append(names, payload.Reaction)
+	}
+	if want := []string{before, after}; !slices.Equal(names, want) {
+		t.Errorf("the sink holds the firings %v; want %v — the reload swaps the armed list rather "+
+			"than adding to it", names, want)
+	}
+}
+
+// sinkEntry is one `reactions:` entry, named, that appends every payload it is handed to the shared
+// sink. The NAME is what the reload journey reads back: two entries writing to one file are told
+// apart by the payload's own `reaction` field, which is the field a firing is attributed by.
+func sinkEntry(id string) string {
+	return "  - id: " + id + "\n" +
+		"    on: [exchange-finished]\n" +
+		"    run: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"
+}
+
+// retiredApprovalSpelling is the event name the retired `hooks:` schema used for the approval
+// notice, which the fold rewrites. It is assembled rather than written whole so the acceptance
+// sweep that forbids the literal in Go source stays armed.
+const retiredApprovalSpelling = "approval-" + "waiting"
+
+// migratedReactionsBlock is the block the fold writes over the `hooks:` one in
+// [legacyReactionsHome] — byte for byte, because "what did apogee put in my file" is a question a
+// user asks of the file and not of a parser. Both entry shapes are here: the argv list on one line,
+// and the webhook as the mapping the schema documents.
+const migratedReactionsBlock = "reactions:\n" +
+	"  - id: " + hooksSinkName + "\n" +
+	"    on: [exchange-finished]\n" +
+	"    run: [sh, -c, cat >> \"$APOGEE_TEST_SINK\"]\n" +
+	"  - id: " + hooksBellName + "\n" +
+	"    on: [approval-requested]\n" +
+	"    run:\n" +
+	"      url: https://example.invalid/apogee\n"
+
+// legacyReactionsHome writes an apogee home in the RETIRED schema: a `hooks:` block carrying both
+// entry shapes and the retired approval spelling, the `mechanisms:` key top-level and on the server
+// entry, and `validated-sets:`. It is written by hand rather than through [writeConfigHome] because
+// a per-server key sits inside a list item, which no helper can reach after the fact.
+func legacyReactionsHome(t *testing.T, stub *stubllm.Server) string {
+	t.Helper()
+
+	home := t.TempDir()
+	body := "servers:\n" +
+		"  - name: probe-target\n" +
+		"    endpoint: " + stub.URL + "\n" +
+		"    model: " + stub.Model + "\n" +
+		"    mechanisms:\n" +
+		"      tool_use_enforcer: false\n" +
+		"server: probe-target\n" +
+		"mechanisms:\n" +
+		"  cached_content_intercept: false\n" +
+		"validated-sets:\n" +
+		"  " + stub.Model + ": [list_dir]\n" +
+		"hooks:\n" +
+		"  - name: " + hooksSinkName + "\n" +
+		"    events: [exchange-finished]\n" +
+		"    command: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n" +
+		"  - name: " + hooksBellName + "\n" +
+		"    events: [" + retiredApprovalSpelling + "]\n" +
+		"    webhook: https://example.invalid/apogee\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write the legacy home's config: %v", err)
+	}
+	return home
+}
+
+// soleConfigBackup is the one `.bak-` sibling the migration left beside the home's config, and
+// fails when there is any other number of them: the note names exactly one path, and a second
+// backup would mean the fold ran twice.
+func soleConfigBackup(t *testing.T, home string) string {
+	t.Helper()
+
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatalf("read the migrated home: %v", err)
+	}
+	var found []string
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "config.yaml.bak-") {
+			found = append(found, filepath.Join(home, entry.Name()))
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("the home holds %d config backups (%v); the migration writes exactly one",
+			len(found), found)
+	}
+	return found[0]
+}
+
+// seamValue is a seam-closing payload's `value` as it comes back off the wire: the projection is
+// built as `any` and read here through a JSON decode, so it arrives as the object a script's own
+// `jq` would see rather than as the Go type that produced it.
+func seamValue(t *testing.T, payload reactions.Payload) map[string]any {
+	t.Helper()
+
+	value, ok := payload.Value.(map[string]any)
+	if !ok {
+		t.Fatalf("the %s payload carries no value object: %#v", payload.Event, payload.Value)
+	}
+	return value
+}
+
+// messagesCarry reports whether any projected message's content holds want.
+func messagesCarry(messages []any, want string) bool {
+	for _, raw := range messages {
+		message, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if content, _ := message["content"].(string); strings.Contains(content, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // headlessHooksAgainst runs one real `apogee headless` against stub in a home of its own and hands

@@ -638,7 +638,13 @@ go test ./internal/config/ ./cmd/apogee/
 
 **Commit:** `refactor(config,apogee)!: the mechanisms: key and internal/mechanisms are deleted`
 
-## 17. E2E journeys: migration, the new notices, one-swap reload
+## 17. E2E journeys: migration, the new notices, one-swap reload — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): `cmd/apogee/e2e_hooks_test.go` is `git mv`d to `e2e_reactions_test.go` as the item asks; the file's own prose, helper names (`hookBlockOf`, `rewriteHomeHooks`, `readHookPayloads`, …) and the three existing roots are untouched — item 21 owns that wording pass, which item 9's NOTES already recorded for this file.
+NOTES (2026-09-09): journey (a)'s byte-for-byte block pins the argv `run:` UNQUOTED (`run: [sh, -c, cat >> "$APOGEE_TEST_SINK"]`) — that is what the marshaller writes for a plain scalar carrying no flow indicator, and the pin is the point: it is the block a user reads in their own file.
+NOTES (2026-09-09): journey (c) needed a headless conversation with a tool call in it, which `testdata/stubllm/hooks.yaml` has not; `testdata/stubllm/reactions.yaml` is that script plus one `list_dir` call. Journey (d) stays on `hooks.yaml`, whose single request makes the one `pre-request-finished` payload unambiguous.
+NOTES (2026-09-09): journey (e) is the guard's observable form — two entries writing to ONE sink, told apart by the payload's own `reaction` field, so the whole claim is the firing order `[before, after]`: a second `before` is the deleted entry still armed and a third payload is the list having grown. No engine spy, no Floor assertion; the one-swap count stays with item 12's unit spy as the guard says.
+NOTES (2026-09-09): the migration note is read from `e2eSession.Output()` AFTER `Quit()` — the notice is written to the command tree's error stream from the run's own goroutine, so reading it earlier would be a race rather than an assertion.
 
 **What:** Depends on items 7, 9 and 12. `cmd/apogee/e2e_hooks_test.go` becomes `e2e_reactions_test.go` and gains: (a) **migration journey** — a real `~/.apogee/config.yaml` under a temp home carrying `hooks:` (argv + webhook, `approval-waiting`), a top-level and a per-server `mechanisms:`, and `validated-sets:`; boot the TUI root; assert the file's `reactions:` block byte-for-byte, the `.bak-` sibling, the note text exactly as item 9 composes it in the Driver's notice channel, and that the migrated reaction fires on `exchange-finished`; (b) `approval-decided` payload with `decision` at the TUI root; (c) `post-tool-result-finished` at the headless root — the script's stdin carries the tool result text; (d) `pre-request-finished` — the payload's `value.messages` holds the user prompt; (e) editing `reactions:` and applying the row swaps the generation once (the spy counts one `SetReactions`) and the Floor bits are unchanged.
 

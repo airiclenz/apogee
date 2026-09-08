@@ -1,0 +1,21 @@
+# The upstream the two SEAM-CLOSING headless journeys talk to (ADR 0076 A6): one `apogee headless`
+# run whose Exchange actually calls a tool, which is the only way a `post-tool-result-finished`
+# notice has a result to carry.
+#
+# hooks.yaml cannot serve them: its one Turn answers with text and never calls anything, so the
+# post-tool-result seam it closes has no working value worth reading. This script is that script
+# plus a tool call — the shortest conversation in which a tool result exists.
+model: reactions-model
+turns:
+    - when:
+        last_message: ^What files are in this workspace
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"."}'
+    - when:
+        tool_result: list_dir
+      text: Both roots fired their reactions.
+    # Anything apogee asks on its own account. Never consumed, so the two turns above stay the
+    # whole conversation.
+    - repeat: true
+      text: OK.
