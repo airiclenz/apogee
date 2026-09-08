@@ -542,7 +542,11 @@ go build ./... && go vet ./... && go test -race -count=1 ./internal/domain/... .
 ```
 **Commit:** `refactor(domain,mechanisms): delete the Mechanism types, the catalogue and LoopView.Fired`
 
-## 18. TUI and session record render `ReactionFiredEvent`
+## 18. TUI and session record render `ReactionFiredEvent` — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the `foldCases` rows for `MechanismFiredEvent` and `FloorGuardEvent` are KEPT (reworded to say the variants now reach no Driver) rather than deleted — `TestFoldEventCoversEveryEventVariant` parses `internal/domain/events.go` and demands a row per DECLARED variant, so the rows can only go when item 19 retires the variants.
+
+NOTES (2026-09-08): consequential edit — internal/domain/events.go: made necessary by deleting `transcript.addFloorGuard`; `FloorGuardEvent`'s doc comment named that function as the renderer and now names `transcript.addReaction`.
 
 **What:** Depends on item 6. `internal/tui/transcript.go:956-959` → one `case domain.ReactionFiredEvent: t.addReaction(e)`; `:1837-1858` (`addMechanism`, `addFloorGuard`) → `addReaction` rendering the ratified line (`reaction <id> @ <moment>: <action>`, ` (<detail>)` appended when non-empty, `stripEscapes`, `entryNote`, debug view only); `:47,924-925` comments. `internal/run/transcript.go:76-83` comment names `ReactionFiredEvent` as the deliberately excluded event. Tests in `transcript_test.go`, `activity_test.go`, `fold_test.go` switch to the new event; `internal/tui/transcript_test.go:1103` and `internal/run/transcript_test.go:46` switch their `domain.HookPoint*` consts to `domain.Moment*` (round three: item 17 deletes `HookPoint` and depends on this item for exactly these two sites).
 

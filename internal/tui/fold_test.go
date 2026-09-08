@@ -246,16 +246,30 @@ func foldCases() []foldCase {
 			event: domain.TurnEvent{Status: domain.StatusExchangeComplete},
 		},
 		{
-			name: "MechanismFiredEvent is inert outside the debug view",
-			// Nothing: no entry (transcript.debug is off by default), no phrase, no stats.
+			name: "ReactionFiredEvent is inert outside the debug view",
+			// Nothing here, and deliberately: a Reaction firing is engine behaviour correcting the
+			// model's own failure or shaping what it sees, not user news the way a prune pass is
+			// (ADR 0071, ADR 0076 D1). It is recorded in the hidden debug view
+			// (transcript.addReaction, pinned in transcript_test.go) and nowhere else, so a default
+			// fold shows no entry, no phrase and no stats.
+			event: domain.ReactionFiredEvent{
+				Reaction: "tool-call-repair",
+				Origin:   domain.OriginEngine,
+				Moment:   domain.MomentPostResponse,
+				Action:   "retry",
+			},
+		},
+		{
+			name: "MechanismFiredEvent is folded by nothing at all",
+			// The Reaction core emits ReactionFiredEvent for every firing (ADR 0076 D1), so this
+			// variant reaches no Driver any more; the row survives only because the variant is
+			// still declared, and it goes with the variant when the protocol bumps to v2.
 			event: domain.MechanismFiredEvent{Mechanism: "m", Hook: "h", Action: "a"},
 		},
 		{
-			name: "FloorGuardEvent is inert outside the debug view",
-			// Nothing here, and deliberately: a Floor guard firing is engine behaviour correcting
-			// the model's own failure, not user news the way a prune pass is (ADR 0071). It is
-			// recorded beside a Mechanism firing in the hidden debug view (transcript.addFloorGuard,
-			// pinned in transcript_test.go) and nowhere else, so a default fold shows nothing.
+			name: "FloorGuardEvent is folded by nothing at all",
+			// Retired beside MechanismFiredEvent above and for the same reason: a Floor guard is a
+			// builtin Reaction now, and its firing arrives as a ReactionFiredEvent.
 			event: domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"},
 		},
 		{

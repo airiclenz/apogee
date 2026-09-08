@@ -1096,64 +1096,67 @@ func TestTranscriptApprovalRecordedOncePerApproval(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// MechanismFired is gated behind the debug view
+// A Reaction firing is gated behind the debug view
 // ----------------------------------------------------------------------------
 
-func TestTranscriptMechanismGatedByDebug(t *testing.T) {
-	fired := domain.MechanismFiredEvent{Mechanism: "truncate_history", Hook: domain.HookHistoryRewrite, Action: "fired"}
-
-	t.Run("off by default", func(t *testing.T) {
-		tr := feed(fired)
-		if n := len(tr.entries); n != 0 {
-			t.Errorf("mechanism rendered without debug: entries = %d, want 0", n)
-		}
-	})
-
-	t.Run("recorded under debug", func(t *testing.T) {
-		tr := &transcript{debug: true}
-		tr.apply(fired)
-		if got := plainRender(tr); !strings.Contains(got, "mechanism truncate_history") {
-			t.Errorf("mechanism not recorded under debug:\n%s", got)
-		}
-	})
-}
-
-// ----------------------------------------------------------------------------
-// A Floor-guard firing is gated behind the same debug view
-// ----------------------------------------------------------------------------
-
-// TestTranscriptFloorGuardGatedByDebug pins the Driver contract for domain.FloorGuardEvent: a guard
-// firing is rendered where a Mechanism firing is — the hidden debug view — and nowhere else. A
-// guard repairs the model's own failure or shapes the request without steering it (ADR 0071), which
-// is observability rather than news the human asked for, unlike a prune pass (addPrune) that says
-// out loud what the conversation no longer holds.
+// TestTranscriptReactionGatedByDebug pins the Driver contract for domain.ReactionFiredEvent, the
+// ONE firing event of the Reaction core (ADR 0076 D1): a firing is rendered in the hidden debug
+// view and nowhere else. A reaction repairs the model's own failure or shapes what it sees without
+// steering it (ADR 0071), which is observability rather than news the human asked for, unlike a
+// prune pass (addPrune) that says out loud what the conversation no longer holds.
 //
-// The wording is asserted literally: it names the guard's CONFIG KEY, so a human reading the debug
-// view already knows the switch that turns the behaviour off, and it carries no hook point because
-// the event carries none.
-func TestTranscriptFloorGuardGatedByDebug(t *testing.T) {
-	fired := domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"}
+// The wording is asserted literally: it names the reaction's ID — for a builtin, the CONFIG KEY
+// that turns the behaviour off — and the Moment it fired at, so a human reading the debug view
+// never has to map an internal name back to a seam.
+func TestTranscriptReactionGatedByDebug(t *testing.T) {
+	fired := domain.ReactionFiredEvent{
+		Reaction: "tool-call-repair",
+		Origin:   domain.OriginEngine,
+		Moment:   domain.MomentPostResponse,
+		Action:   "retry",
+	}
 
 	t.Run("off by default", func(t *testing.T) {
 		tr := feed(fired)
 		if n := len(tr.entries); n != 0 {
-			t.Errorf("guard rendered without debug: entries = %d, want 0", n)
+			t.Errorf("reaction rendered without debug: entries = %d, want 0", n)
 		}
 	})
 
 	t.Run("recorded under debug", func(t *testing.T) {
 		tr := &transcript{debug: true}
 		tr.apply(fired)
-		if got, want := plainRender(tr), "guard tool-call-repair: retry"; !strings.Contains(got, want) {
-			t.Errorf("guard not recorded under debug as %q:\n%s", want, got)
+		if got, want := plainRender(tr), "reaction tool-call-repair @ post-response: retry"; !strings.Contains(got, want) {
+			t.Errorf("reaction not recorded under debug as %q:\n%s", want, got)
 		}
 	})
 
-	t.Run("a detail is shown when the guard filled one", func(t *testing.T) {
+	t.Run("a detail is shown when the reaction filled one", func(t *testing.T) {
 		tr := &transcript{debug: true}
-		tr.apply(domain.FloorGuardEvent{Guard: "tool-result-cap", Action: "cap", Detail: "2 results"})
-		if got, want := plainRender(tr), "guard tool-result-cap: cap (2 results)"; !strings.Contains(got, want) {
-			t.Errorf("guard detail not rendered as %q:\n%s", want, got)
+		tr.apply(domain.ReactionFiredEvent{
+			Reaction: "tool-result-cap",
+			Origin:   domain.OriginEngine,
+			Moment:   domain.MomentPostToolResult,
+			Action:   "cap",
+			Detail:   "2 results",
+		})
+		want := "reaction tool-result-cap @ post-tool-result: cap (2 results)"
+		if got := plainRender(tr); !strings.Contains(got, want) {
+			t.Errorf("reaction detail not rendered as %q:\n%s", want, got)
+		}
+	})
+
+	t.Run("a history-rewrite firing renders its own Moment", func(t *testing.T) {
+		tr := &transcript{debug: true}
+		tr.apply(domain.ReactionFiredEvent{
+			Reaction: "truncate_history",
+			Origin:   domain.OriginUser,
+			Moment:   domain.MomentHistoryRewrite,
+			Action:   "intercept",
+		})
+		want := "reaction truncate_history @ history-rewrite: intercept"
+		if got := plainRender(tr); !strings.Contains(got, want) {
+			t.Errorf("reaction not recorded under debug as %q:\n%s", want, got)
 		}
 	})
 }

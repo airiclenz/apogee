@@ -44,7 +44,7 @@ type transcript struct {
 	// session never displaces anything — and it is written copy-on-write, so a Model copy that is
 	// discarded rather than returned cannot leave its edit behind (ADR 0011).
 	parked []parkedText
-	debug  bool // when set, MechanismFired and FloorGuard events are recorded (a hidden debug view)
+	debug  bool // when set, ReactionFired events are recorded (a hidden debug view)
 	// ws is the project root a tool card's paths are printed relative to (workspacepath.go), resolved
 	// once at construction from Options.Workspace. It lives here because addToolCall and
 	// addToolResult are reached through apply, which folds an Event with no Model in sight; it is a
@@ -921,8 +921,8 @@ func presentedStatus(v presentedView) string {
 // delegation was just given lands ON that same block, renaming the run every surface reads off it
 // (addSubAgentName); a ChildInterjection commits the message it reports INSIDE the child's run
 // when it landed and a note saying it never did when it did not (addChildInterjection); a
-// MechanismFired is surfaced only in the debug view, and a FloorGuardFired with it — a guard
-// correcting the model's own failure is engine behaviour rather than user news (addFloorGuard);
+// ReactionFired is surfaced only in the debug view — a reaction correcting the model's own
+// failure, or shaping what it sees, is engine behaviour rather than user news (addReaction);
 // a Prune says, in one host note, that the
 // engine dropped stale tool results from the conversation it keeps (addPrune). It renders only —
 // no agent logic (C5).
@@ -953,10 +953,8 @@ func (t *transcript) apply(e domain.Event) {
 		if e.Phase == domain.ApprovalDecided {
 			t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
 		}
-	case domain.MechanismFiredEvent:
-		t.addMechanism(e)
-	case domain.FloorGuardEvent:
-		t.addFloorGuard(e)
+	case domain.ReactionFiredEvent:
+		t.addReaction(e)
 	case domain.ErrorEvent:
 		t.addError(e.Source, e.Err, runOf(e.EventBase))
 	case domain.PruneEvent:
@@ -1834,32 +1832,22 @@ func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.App
 	t.place(entry{kind: entryNote, text: text, depth: run.depth, spawnCallID: run.spawn})
 }
 
-// addMechanism records a fired Mechanism, but only in the debug view (off by default).
-// There is no Mechanism catalogue until Phase 4, so a fired event is observability noise
-// for the product UI; the switch handles it now so a Phase-4 Mechanism needs no retrofit.
-func (t *transcript) addMechanism(e domain.MechanismFiredEvent) {
-	if !t.debug {
-		return
-	}
-	text := fmt.Sprintf("mechanism %s @ %s: %s", e.Mechanism, e.Hook, e.Action)
-	run := runOf(e.EventBase)
-	t.place(entry{kind: entryNote, text: text, depth: run.depth, spawnCallID: run.spawn})
-}
-
-// addFloorGuard records a fired Floor guard, and — like addMechanism — only in the debug view.
-// A guard firing is the engine repairing the model's own failure or shaping the request without
-// steering it (ADR 0071): it is observability, not the conversation, so it stays out of the
-// product UI even though a PruneEvent (which changes what the conversation still holds) does not.
+// addReaction records a fired Reaction — the ONE firing event of the Reaction core (ADR 0076 D1) —
+// and only in the debug view (off by default). A firing is the engine repairing the model's own
+// failure, shaping what it sees, or a reaction armed beside the builtins acting: observability, not
+// the conversation, so it stays out of the product UI even though a PruneEvent (which changes what
+// the conversation still holds) does not.
 //
-// The wording carries no hook point, because the event carries none: a guard is not registered at
-// a hook, and its config key already names the seam it runs at. Guard and Action are engine
-// constants, but Detail is free text a guard may fill from what it acted on, so the whole note is
-// escape-stripped as addApproval strips the tool name it prints.
-func (t *transcript) addFloorGuard(e domain.FloorGuardEvent) {
+// The wording names the reaction's ID — for a builtin, the same config key that turns the behaviour
+// off — and the Moment it fired at, so a human reading the debug view never has to map an internal
+// name back to a seam. Reaction, Moment and Action are engine-side spellings, but Detail is free
+// text a reaction may fill from what it acted on, so the whole note is escape-stripped as
+// addApproval strips the tool name it prints.
+func (t *transcript) addReaction(e domain.ReactionFiredEvent) {
 	if !t.debug {
 		return
 	}
-	text := fmt.Sprintf("guard %s: %s", e.Guard, e.Action)
+	text := fmt.Sprintf("reaction %s @ %s: %s", e.Reaction, e.Moment, e.Action)
 	if e.Detail != "" {
 		text += " (" + e.Detail + ")"
 	}

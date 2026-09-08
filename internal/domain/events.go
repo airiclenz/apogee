@@ -314,7 +314,8 @@ type MechanismFiredEvent struct {
 // the engine's own behaviour at a seam, and the Guard key already names which seam it runs at.
 //
 // A Driver renders it where it renders a Mechanism firing and nowhere else — the TUI's hidden debug
-// view (internal/tui's transcript.addFloorGuard) — and NOT where it renders a PruneEvent: a guard
+// view (internal/tui's transcript.addReaction, which now renders ReactionFiredEvent below) — and
+// NOT where it renders a PruneEvent: a guard
 // firing is the engine correcting the model's own failure, which is not news the human asked for,
 // while a prune changes what the conversation still holds and is. So headless prints no line for it
 // and a session record folds no entry (ADR 0071).

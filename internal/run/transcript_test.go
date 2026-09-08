@@ -32,18 +32,28 @@ func TestTranscriptFoldRecordsAPrune(t *testing.T) {
 	}
 }
 
-// TestTranscriptFoldIgnoresAGuardFiring pins the other half of the prune contract: a Floor guard
-// firing contributes NOTHING to a Firing's record, exactly as a Mechanism firing already does.
-// A guard repairs the model's own failure or shapes the request without steering it (ADR 0071) —
-// engine behaviour the reader of a session record is owed no line about — while a prune changes
-// what the conversation still holds and earns its note above.
-func TestTranscriptFoldIgnoresAGuardFiring(t *testing.T) {
+// TestTranscriptFoldIgnoresAReactionFiring pins the other half of the prune contract: a Reaction
+// firing contributes NOTHING to a Firing's record. A reaction repairs the model's own failure or
+// shapes what it sees without steering it (ADR 0071, ADR 0076) — engine behaviour the reader of a
+// session record is owed no line about — while a prune changes what the conversation still holds
+// and earns its note above.
+func TestTranscriptFoldIgnoresAReactionFiring(t *testing.T) {
 	t.Parallel()
 
 	f := newTranscriptFold("")
 
-	f.fold(domain.FloorGuardEvent{Guard: "tool-call-repair", Action: "retry"})
-	f.fold(domain.MechanismFiredEvent{Mechanism: "lab_row", Hook: domain.HookPostResponse, Action: "fired"})
+	f.fold(domain.ReactionFiredEvent{
+		Reaction: "tool-call-repair",
+		Origin:   domain.OriginEngine,
+		Moment:   domain.MomentPostResponse,
+		Action:   "retry",
+	})
+	f.fold(domain.ReactionFiredEvent{
+		Reaction: "bench_row",
+		Origin:   domain.OriginEngine,
+		Moment:   domain.MomentPostResponse,
+		Action:   "intercept",
+	})
 
 	if len(f.entries) != 0 {
 		t.Errorf("the fold wrote %d entries for firings that contribute none: %+v", len(f.entries), f.entries)
