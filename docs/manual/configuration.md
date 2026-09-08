@@ -74,17 +74,17 @@ spells them as `Disable…` fields, so an embedder handing `New` a bare `Config`
 [ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) records
 why they are behaviour rather than catalogued rows.
 
-The `mechanisms:` block is the lab surface above that floor, and in a shipped build its catalogue is
-**empty**: every row it once carried either became one of the guards above or retired outright,
-with the per-row verdicts in the [archived catalogue](../design/archived/mechanism-catalogue.md).
-The block stays because a bench Driver registers experimental rows of its own through the Go API,
-and naming an ID under `mechanisms:` is how one is enabled — from the Go API, `Config.EnableMechanisms`
-with `apogee.CataloguedMechanisms()` to enumerate what this build knows. An **unknown** ID is still a
-startup error listing those IDs, and `--bypass` still wins over the block (an enabled row does not
-fire under Bypass).
+The `mechanisms:` block is a **retired key**. It still parses, so a config that carries one is not
+refused, but it arms nothing at all. What runs above the floor is the **Reaction** core
+([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)), and the lab
+catalogue this block used to name is gone: every row it once carried either became one of the guards
+above or retired outright, with the per-row verdicts in the
+[archived catalogue](../design/archived/mechanism-catalogue.md). The key that arms a Reaction of your
+own is not in this release.
 
-A **retired** ID is not an error. It earns one startup notice and is ignored, and where the row was
-promoted to a guard the notice names the key that governs the behaviour now, so this:
+What the block still does is tell you it is doing nothing. A **retired** ID is not an error: it
+earns one startup notice and is ignored, and where the row was promoted to a guard the notice names
+the key that governs the behaviour now, so this:
 
 ```yaml
 mechanisms:
@@ -100,10 +100,15 @@ at the top level
 ```
 
 rather than being mapped to the new key behind your back — a line that no longer switches anything
-is worth being told about.
+is worth being told about. A row that retired outright says exactly that instead — `apogee: mechanism
+"grammar" was retired in v0.18.7 and is ignored; remove it from mechanisms:` — and an ID the retired
+roll does not carry at all is still a startup **error**, `apogee: unknown mechanism "some_bench_row";
+known: (none)`, because a name apogee cannot account for is a mistake worth stopping on rather than a
+line to skip quietly.
 
 Separately from all of this, every write tool appends its own in-process syntax verdict to the
-success result it hands the model: always on, not configurable, and neither a guard nor a Mechanism.
+success result it hands the model: always on, not configurable, and neither a Floor guard nor a
+Reaction.
 
 The **built-in tools** are all on by default — all but the default-off **Console family**
 (`console_open`, `console_send`, `console_read`, `console_close`;
@@ -162,7 +167,7 @@ Eight `APOGEE_*` variables are read, and they divide by what each one can reach.
 ordinary config keys and so ride the four-layer precedence above — flag, then variable, then file,
 then default: `APOGEE_SERVER` (`--server`) names the `servers:` entry this session starts on,
 `APOGEE_MODE` (`--mode`) the autonomy mode it starts in, and `APOGEE_BYPASS` (`--bypass`) the
-Mechanisms switch spelled out below. A value one of these cannot parse — `APOGEE_MODE=fast`,
+Reactions switch spelled out below. A value one of these cannot parse — `APOGEE_MODE=fast`,
 `APOGEE_BYPASS=maybe` — is a startup **error** naming the variable and the value, never a setting
 that quietly falls back to its default. Being config keys, they appear in `/settings`: a row a
 variable won says which variable won it, and committing an edit to that row applies now and then
@@ -183,18 +188,21 @@ sessions. `APOGEE_WORKSPACE` (`--workspace`, then the variable, then the current
 workspace root — the fence every file tool is scoped to, so it decides what the model may read and
 write at all, not merely which directory a session opens in.
 
-`APOGEE_BYPASS` earns a paragraph of its own, because of what it is for. It turns apogee's
-**Mechanisms off for the whole session**: every catalogued row is skipped wherever it would have
-fired, and the Validated set your bound model would otherwise be given is not applied either. On a
-stock install that changes nothing you can see, because a shipped build's catalogue is empty — the
-switch is the bench's control arm, and it earns its keep the moment a Driver registers experimental
-rows of its own.
-Bypass is the honest "Mechanisms-off" floor every Mechanism is measured against on the bench
-([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code path
-you can run yourself. What it never touches is the agent's structure and its floor — context
+`APOGEE_BYPASS` earns a paragraph of its own, because of what it is for. It runs the whole session
+with **advise and shape Reactions of user or bench origin off** — exactly what can move the floor —
+while the Floor guards and the structural reducers stay on
+([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)). **observe** and
+**gate** Reactions keep running too, because they change nothing the floor measures: a run under
+Bypass still fires your Hooks and still asks before it acts. The Validated set your bound model would
+otherwise be given is not applied either. On a stock install that changes nothing you can see, since
+nothing of user or bench origin is armed — the switch is the bench's control arm, and it earns its
+keep the moment a Driver arms Reactions of its own.
+Bypass is the honest "model-shaping Reactions off" floor an armed Reaction is measured against on the
+bench ([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code
+path you can run yourself. What it never touches is the agent's structure and its floor — context
 compaction, the Budget, all seven Floor guards, the rest of the
 loop — so the floor is a working agent rather than a naked model. The same switch is
-the `bypass` row in `/settings`, and it is live: flip it mid-session and the next hook evaluation
+the `bypass` row in `/settings`, and it is live: flip it mid-session and the next Reaction to fire
 already sees it. [**Bypass mode**](../../CONTEXT.md) in `CONTEXT.md` is the full definition.
 
 ## What the network tools may reach — `url-safety:`
@@ -792,14 +800,20 @@ model-profiles:
 to paste here. Editing this block while a session runs swaps the parser on the spot, like every
 other key in this file.
 
-## Per-model Mechanism sets — `validated-sets:`
+## Per-model validated sets — `validated-sets:`
 
-A **Validated set** is a per-model list of catalogued Mechanisms that has been measured on *that
-model* and shown to be no worse than running with none of them at all — the same floor `--bypass`
-gives you. Benefit is deliberately not part of the claim: what a set says is "this stack is safe on
-this model", never "this stack is better". So there is nothing to tune in this block and nothing to
-pick from — it is the switch over machinery that either has an entry for the model you bound or has
-none ([ADR 0016](../adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md)).
+A **Validated set** is a per-model list of ids that has been measured on *that model* and shown to be
+no worse than running with none of them at all — the same floor `--bypass` gives you. Benefit is
+deliberately not part of the claim: what a set says is "this stack is safe on this model", never
+"this stack is better". So there is nothing to tune in this block and nothing to pick from — it is
+the switch over machinery that either has an entry for the model you bound or has none
+([ADR 0016](../adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md)).
+
+**The surface is inert in this release.** The block still loads, an entry still validates and a match
+is still reported to you, but a set arms nothing: there is no catalogue left for its ids to name.
+Re-homing it onto the **Reaction** core is stage 2 of
+[ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md); until then read
+what follows as what the surface *does* rather than as something that currently changes a run.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -816,7 +830,7 @@ you, because the measurement attaches to the precise model that was measured. An
 no entry carries is a **startup error**: a config naming a set apogee cannot find is a mistake
 worth stopping on, not a line to skip quietly.
 
-A set applies **whole or not at all** — a subset of it, or a merge of it with Mechanisms you picked
+A set applies **whole or not at all** — a subset of it, or a merge of it with ids you picked
 yourself, is a different and unmeasured stack — and it applies *automatically* only when the bound
 model is identified with at least **medium** confidence. Below that the match is **offered**
 instead: apogee names the entry it found and leaves applying it to you. An alias you wrote applies
@@ -914,9 +928,9 @@ text saying what that server is **for**, which the `/sub-agents-server` picker
 shows and which the model reads when you let it pick the seat
 ([below](#letting-the-model-pick-the-seat)) — and `llama-launcher`,
 which lets apogee start, switch and stop that server itself — [below](#local-servers--llama-launcher).
-`bypass` and `mechanisms` are optional too, and say what *delegations to* that
-entry run as rather than how the server itself behaves — further down this
-section.
+`bypass` and the retired `mechanisms` key are optional too, and say what
+*delegations to* that entry run as rather than how the server itself behaves —
+further down this section.
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
 runs them concurrently — as many at a time as that server's cap allows. Unset, the cap
@@ -1000,30 +1014,31 @@ values as above — is the fix.
 together they are that entry's **delegation posture**: not how the server behaves, but what a
 sub-agent routed there runs with. They apply while that entry is the `sub-agents-server:` target
 and never to the session itself, so where the parent happens to be running has no bearing on what
-its children run as. Each one **replaces whole** what the child would otherwise have inherited;
-neither merges.
+its children run as.
 
 ```yaml
 # ~/.apogee/config.yaml
 servers:
   - name: rented-box
     endpoint: https://llm.example.com
-    bypass: false      # delegations there run with the lab surface live …
-    mechanisms:        # … and this map is their entire catalogue
-      some_bench_row: true
+    bypass: false      # delegations there run with advise and shape Reactions on …
+    mechanisms:        # … and this map is the retired key, here as everywhere else
+      grammar: true
 ```
 
+`bypass:` is the live half, and it **replaces whole** what the child would otherwise have inherited.
 An **absent** `bypass:` leaves the child inheriting the parent's *live* flag at spawn — the rule
 delegations have always followed, and the reason the key is written as it is: an explicit
-`bypass: false` is a posture in its own right, not the same thing as leaving the key out. A
-**present** `mechanisms:` map is the child's **entire catalogue**, with no per-ID merge, so a map of
-nothing but `false` values arms nothing at all while leaving the key out is what inherits the
-parent's set. Either way the child keeps its Floor guards: those are engine behaviour rather than
-catalogue rows. The map's IDs get the same validation the session's own `mechanisms:` block gets, so
-one this build's catalogue does not carry is a **start-up error**, and it names the entry the map
-came from:
+`bypass: false` is a posture in its own right, not the same thing as leaving the key out. Either way
+the child keeps its Floor guards — those are engine behaviour, not something a posture can take
+away — and it inherits every Reaction the parent has armed bar the ones marked top-level-only.
 
-    apogee: unknown mechanism "some_bench_rwo"; known: … — in the `sub-agents:` server "rented-box"
+`mechanisms:` is the same retired key here as at the top of this page: the map loads and is
+validated, it earns the same startup notices the session's own block earns, and it arms nothing. The
+validation is what still makes it worth writing correctly — an id the retired roll does not carry is
+a **start-up error**, and it names the entry the map came from:
+
+    apogee: unknown mechanism "some_bench_rwo"; known: (none) — in the `sub-agents:` server "rented-box"
 
 That refusal is a *session's*. A daemon **Firing** routed at the entry has no start-up to refuse:
 it reports the same message as a notice on that run and delegates to the session's own server

@@ -655,7 +655,17 @@ test "$(grep -c '#reactions-and-moments' CONTEXT.md)" -eq 12 && ! grep -n "#mech
 ```
 **Commit:** `docs(context): Reactions and Moments replace the Mechanism and hook-point section`
 
-## 21. Manual, README and AGENTS.md
+## 21. Manual, README and AGENTS.md — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): `README.md` needed no edit and is NOT in FILES — the item's "reworded only if it names a Mechanism (verify)" was verified: `README.md:223-225`'s Hooks bullet says only "run a command or POST a webhook … Observe-only", and `grep -n -i "mechanism|hook point" README.md` returns nothing.
+
+NOTES (2026-09-08): the bounding grep's remaining hits are triaged as correct, not stale — `daemon.md:108-109` and `headless.md:52` describe the retired key's notice behaviour (still exactly what it does), `headless.md:214` is item 19's protocol history, `configuration.md:97-105,1041` quote the notice and error strings verbatim from `internal/mechanisms/retired.go:211-233`, `:201` is the ADR 0006 filename, `:837` ("a non-empty `mechanisms:` block is the other way to stop it") still holds because `startupSetDecision` reads `opts.Mechanisms`, and `AGENTS.md:10` keeps the archived catalogue as history per the item.
+
+NOTES (2026-09-08): beyond the item's named line ranges, three more sites in `configuration.md` were reworded because the same prose rule reaches them — `:106` ("neither a guard nor a Mechanism" → "neither a Floor guard nor a Reaction"), the `## Per-model Mechanism sets` heading → `## Per-model validated sets` (no inbound anchor link exists anywhere in the tree, verified) and `:805`/`:833`'s "catalogued Mechanisms" / "a merge of it with Mechanisms" → "ids".
+
+NOTES (2026-09-08): the per-seat example at `:1024-1026` swaps `some_bench_row: true` for `grammar: true` — with the catalogue empty, the old example is now a start-up error rather than the accepted map the surrounding sentence claims; `grammar` is on the retired roll (`retired.go:101`), so the example demonstrates the notice path the reworded paragraph describes. The unknown-id error below it gains its real tail, `known: (none)`, which `:105` also now quotes.
+
+NOTES (2026-09-08): the paragraph replacing "a **present** `mechanisms:` map is the child's entire catalogue" states the child inheritance rule that actually applies now — every Reaction the parent armed bar the ones marked top-level-only (item 13's `TopLevelOnly`) — because the sentence it replaces was the only statement of what a child inherits.
 
 **What:** Depends on items 15 and 19. `docs/manual/configuration.md:77-98` (the `mechanisms:` block) → a short "retired key" paragraph quoting the exact notice text of item 12; `:193`, `:823`, `:917`, `:999-1026` (per-seat `mechanisms:`) reworded: the key loads, notices, arms nothing; the `validated-sets:` section (`:795-823`) states the surface is inert pending stage 2. `AGENTS.md:3` identity line → "the **Reaction** core; **Bypass mode** switches its model-shaping classes off (ADR 0076)"; `:7` and `:10` reworded (catalogue archived stays historical). `README.md:223-225` Hooks bullet reworded only if it names a Mechanism (verify). Prose rule: every manual sentence stating that `mechanisms:` enables something, that Hooks cannot advise, or that a Mechanism runs at a hook point is reworded — `grep -rn "EnableMechanisms\|CataloguedMechanisms\|hook point\|mechanisms: block\|enables a Mechanism" docs/manual README.md AGENTS.md` bounds it.
 
