@@ -203,3 +203,108 @@ Hooks), gate, and advise once decision 5's arm passes.
 - Bead `apogee-575` closes on this record. Implementation follows a plan in the house format; the
   bench identity arm for stage 1 and the fixed-text arm for stage 3 are that plan's acceptance,
   not this ADR's.
+
+## Amendment — 2026-09-08: the stage-2 config surface
+
+Grilled 2026-09-08 while stage 1 was in flight, before the stage-2 plan was written. This amendment
+refines decisions 10, 11 and 13; it supersedes nothing in decisions 1–9 and 12.
+
+**A1. `reactions:` is the user-origin surface only.** Decision 10's "builtins appear by id with
+`enabled:`" is **struck**. The seven Floor booleans stay the single canonical spelling (decision 11),
+so a builtin id inside `reactions:` would be a second spelling for one value — the fourth idiom this
+ADR rejected, and a break of the mechanical anti-drift in `TestRegistryIsBijectionWithFileConfig`. A
+builtin or Floor-guard id in `reactions:` is a **load-time validation error naming the top-level
+boolean instead** — never silently ignored. Engine origin stays code: the bench arms a Go reaction
+in-process through the facade (decision 1), not through this key. `enabled:` keeps a real job —
+parking a user entry in the file. `docs/design/reaction-core-greenfield.md` §2.4 and §9.1 rows 12–13
+are amended to match.
+
+**A2. Stage 2 ships the global file only; the repo layer becomes stage 2b.** Decision 13's stage 2 is
+split. **Stage 2** = the `reactions:` key in `~/.apogee/config.yaml`, the migration, the async lane
+over `domain.Reaction`, the generation swap, the `/settings` row. **Stage 2b** = the repo layer, the
+adoption pin, the write deny and the key-class rule — grilled on its own, discharging bead
+`apogee-089` ("Project-local config with a trust gate", which asks for exactly that grill). Three
+reasons the layer is not refactor work: decision 10's key-class table calls every non-execution key a
+freely-overridable *parameter*, which would hand a repo layer `confine-to-workspace`,
+`unconfined-hosts`, `tools.disabled` and `url-safety.deny-hosts` — all `GlobalOnly` precisely so a
+project cannot set them (ADR 0012) — and names neither `GlobalOnly` nor the tighten-only shape that
+already exists unfed in `security.MergeDangerousRules`' `projectAdd`; decision 10's backstop "the
+repo config path is on the tool write deny list" describes machinery that does not exist (there is no
+path deny list, and `~/.apogee` is only `TierForceApproval` — "a forced look, never a boundary",
+ADR 0049 §4); and nothing in the tree hashes a config entry or models workspace trust. The file
+watcher is also single-file by construction (ADR 0041). Per-project reactions keep working meanwhile
+through the per-entry `workspace:` filter, which already ships. `AGENTS.md`'s "single `~/.apogee`
+dotdir — settled decision" stands until stage 2b reopens it.
+
+**A3. `/settings` gets one read-only structured row.** With the Floor rows staying (decision 11), the
+reactions row replaces exactly one thing: today's read-only `hooks` row. It is `KindStructured`,
+`Editable: false`, ⏎ opening `$EDITOR` on the key — no per-entry toggle table. The only in-tree
+precedent for such a table is the mechanisms sub-list that stage 1 deletes, and the columns that
+would justify rebuilding it (*layer*, *adopted?*) have no values until stage 2b. Bead `apogee-tbs`
+(ADR 0071 D5 vs the seven editable Floor rows) therefore no longer blocks this work and stays open.
+
+**A4. The async lane keeps its sink seat.** `hooks.Runner` remains the `EventSink` decorator in the
+wire chain and keeps its matcher and executors; what changes is that it takes `[]domain.Reaction` of
+class `observe` and `hooks.Hook` is deleted in favour of the domain type. Notice derivation does not
+move into the agent — that would lift event derivation out of the sink chain that `eventjson.Writer`
+and the Driver bridge both sit on, for no gain the config work needs. This is greenfield §9.1 row 8
+read literally. The package is renamed **`internal/hooks` → `internal/reactions`**: every
+user-facing name in it changes anyway, so the package name is the last piece carrying the retired
+term.
+
+**A5. Decision 1's "every seam publishes a notice when it closes" is implemented.** Five notice
+Moments are added — `pre-request-finished`, `post-response-finished`, `pre-tool-exec-finished`,
+`post-tool-result-finished`, `history-rewrite-finished` — named for consistency with
+`exchange-finished` / `turn-finished` and because `Moment` is one namespace, so a notice cannot reuse
+a seam's name. Each fires **unconditionally**, armed or not, and carries the sealed working value
+plus the reaction ids that fired at that seam. They are **sink-only**: `eventjson.Encode` returns
+`ok=false` for them, so the headless Event lines are unchanged. `pre-request` and `post-response`
+fire per streamed Turn and the two tool seams per tool call; five new line kinds would roughly double
+a typical stream's volume for consumers who never asked, and ADR 0075 D10 makes adding the lines
+later purely additive.
+
+**A6. A hard rename, delivered by an automatic file migration.** `approval-waiting` becomes
+`approval-requested`, `approval-decided` is added and carries the verdict (the engine already emits
+both phases at `dispatch.go:1021` and `:1032`; `matchApproval` today discards the second), the
+payload's `"hook"` field becomes `"reaction"`, and `APOGEE_HOOK_*` becomes `APOGEE_REACTION_*`. **No
+aliases survive in the code.** The break is absorbed instead by the migration idiom already in the
+tree (`migrateLegacyConfig`, ADR 0036): `hooks:` folds into `reactions:` and the event names are
+rewritten **in the user's own file** — verified fold, timestamped backup, atomic rewrite, one-time
+note. The note also names the `APOGEE_HOOK_*` → `APOGEE_REACTION_*` and `"hook"` → `"reaction"`
+changes a user's *scripts* need, which no migration can make for them; that is the one half of the
+break that stays theirs to fix, and naming it in the note is what keeps it from being silent. If
+both `hooks:` and `reactions:` are present the fold **refuses** in `legacyRefusal`'s shape — one
+paragraph, no write at all — rather than guessing a merge. The dead `mechanisms:` key (top-level and
+per-seat) is stripped by the same migration, printing stage 1's retired-roll message once in the
+same note. This supersedes decision 11's "keeps loading through one migration table as an alias" and
+its one-time load notice: the file is fixed, not aliased.
+
+**A7. The entry schema.** `name:` → `id:`, `events:` → `on:`; `workspace:` and `timeout:` unchanged;
+`enabled:` added. `run:` carries the class and is **polymorphic** — a sequence is argv
+(`run: ["notify-send", "done"]`, decision 10's shown form), a mapping is a webhook
+(`run: {url:, headers:, headers-env:}`) — so class lives on one key and the common one-line notifier
+stays one line. `advise:` and `gate:` are **rejected at load** in stage 2 with "not yet shipped";
+they arrive in stage 3.
+
+**A8. One generation swap covers bypass too.** A generation is *the reactions that will fire*: the
+builtin enable set resolved from the seven Floor booleans, the user entries from `reactions:`, and
+the bypass filter applied. One `SetReactions(gen)` retires `SetBypass`, `SetFloor` and
+`Runner.Replace` together, so a reload is one atomic swap and the row-driven read-modify-write on the
+floor holder disappears. Greenfield §9.1 row 9, delivered whole. Consolidating the five independent
+`LoadFileConfig(a.configPath, …)` re-reads in `wire_settings.go` is **out of scope** — four are MCP,
+model profiles and validated sets, unrelated to reactions; a bead carries it.
+
+**A9. `validated-sets:` is deleted.** Stage 1 leaves it loading, validating and arming nothing, and
+an inert key is exactly the failure `internal/config/config.go:2756` names ("a config apogee has
+quietly stopped understanding is indistinguishable from one that never said anything"). The key,
+`internal/validated`, `shipped.json`, both `/settings` rows and the manual section go; the migration
+strips the key from the file. ADR 0016's per-model enable sets no longer have a referent — the
+Mechanism roster they gated is gone (ADR 0071) and `shipped.json` has been empty since v0.20.0 — and
+per-model reaction rosters, if a case ever arrives, are a model-profile concern. ADR 0016 gains an
+amendment note. This closes bead `apogee-jwf`.
+
+**Consequences of this amendment.** `docs/manual/hooks.md` becomes `docs/manual/reactions.md`;
+`docs/manual/configuration.md` §357-387 and §795-833 and `docs/manual/commands.md` §344-436 are
+rewritten. Bead `apogee-pjx` narrows to the stage-2 scope above; stage 2b and stage 3 get their own
+beads. `CONTEXT.md`'s glossary work belongs to the stage-2 plan, not here, so it does not collide
+with stage 1 item 20, which is in flight.

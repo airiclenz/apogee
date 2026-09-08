@@ -166,3 +166,18 @@ The same tolerance holds one layer out, for the same reason: a `mechanisms:` con
 per-server `sub-agents:` posture naming a retired id is dropped rather than refused (ADR 0015's
 removed-ID posture is loud only for ids that were never valid). The first application of this
 amendment is `grammar`, retired 2026-08-29 — see CHANGELOG.
+
+## Amendment — 2026-09-08: superseded, validated sets are deleted
+
+This ADR is **superseded in full** by
+[ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) amendment A9. Its
+subject — a per-model enable set over the Mechanism roster — no longer has a referent: ADR 0071
+retired the roster, `shipped.json` has been empty since v0.20.0, and the Reaction core's stage 1
+leaves `validated-sets:` loading, validating and arming nothing. Rather than ship an inert key, the
+Reaction core's stage 2 deletes `validated-sets:`, `internal/validated`, `shipped.json`, both
+`/settings` rows and the manual section, and the config migration strips the key from the user's
+file.
+
+The reasoning kept: curation is per model, and a fingerprint is how you key it. If per-model
+Reaction rosters are ever wanted, they belong on the model-profile axis rather than in a parallel
+mechanism of their own.

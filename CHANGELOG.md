@@ -35,6 +35,25 @@ point is a **minor** bump, not a breaking change.
   changes yet; the staged plan (core → config → user cells) is the next session's work. Closes bead
   `apogee-575`.
 
+- **The Reaction core's config surface, grilled (ADR 0076 amendment).** Nine calls settle stage 2
+  before its plan is written. `reactions:` is the **user-origin** surface only — the seven Floor
+  booleans stay the one canonical spelling, and a builtin id inside `reactions:` is a load error
+  naming the boolean. Stage 2 ships the **global file only**: the repo layer, the adoption pin and
+  the write deny become a stage 2b of their own on bead `apogee-089`, because ADR 0076 D10's
+  key-class rule would have handed a cloned repo four `GlobalOnly` keys, its deny-list backstop
+  described machinery the tree does not have, and nothing here hashes a config entry. `/settings`
+  gets one read-only structured row; the async lane keeps its `EventSink` seat and takes
+  `[]domain.Reaction`, with `internal/hooks` renamed `internal/reactions`. Decision 1's "every seam
+  publishes a notice" ships as five sink-only notice Moments. The event names, `APOGEE_HOOK_*` and
+  the payload's `"hook"` field are **hard-renamed** and the break absorbed by rewriting the user's
+  own config — verified fold, timestamped backup, one note — the `migrateLegacyConfig` idiom ADR
+  0036 already established, rather than an alias. An entry is `id:` / `on:` / `run:` (a sequence is
+  argv, a mapping is a webhook) / `workspace:` / `timeout:` / `enabled:`, with `advise:` and `gate:`
+  refused until stage 3, and one `SetReactions` generation swap retires `SetBypass`, `SetFloor` and
+  `Runner.Replace` together. `validated-sets:` is **deleted**, superseding ADR 0016 in full: the
+  Mechanism roster it gated is gone and shipping a key that arms nothing is the failure the config
+  parser's own comment warns about. Doctrine only — no code changes yet.
+
 ## [0.21.0] — 2026-09-07
 
 ### Added

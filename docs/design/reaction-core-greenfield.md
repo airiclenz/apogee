@@ -84,9 +84,7 @@ Later layers override by key; one resolver; `/settings` shows which layer each v
 
 ```yaml
 reactions:
-  - id: tool-call-repair            # builtin; enabled: true is the default
-    enabled: false
-  - id: notify
+  - id: notify                                   # user origin; enabled: false parks it
     on: [exchange-finished]
     run: ["notify-send", "apogee done"]          # observe lane
   - id: lint-after-edit
@@ -99,8 +97,19 @@ reactions:
 ```
 
 `run:` = observe, `advise:` = returns text, `gate:` = returns a decision; an entry may carry more
-than one. Builtins appear by id only. The old `hooks:`, `mechanisms:` and seven floor booleans
-migrate through one table — the retired roll already models exactly this mapping.
+than one. The old `hooks:` list and the `mechanisms:` map migrate through one table — the retired
+roll already models exactly this mapping.
+
+> **Amended 2026-09-08 (stage-2 grill; ADR 0076 amendment A1, A2, A7).** `reactions:` is the
+> **user-origin surface only**, and stage 2 ships the **global file only** — the repo layer, the
+> three-layer resolver and the adoption pin below become stage 2b, grilled on bead `apogee-089`.
+> The seven Floor booleans stay canonical and do not migrate (ADR 0076 D11: a Floor guard is by
+> definition one top-level file-only boolean); a builtin id inside `reactions:` is a load-time
+> validation error naming the boolean instead, never a second spelling. Engine origin is code — the
+> bench arms a Go reaction in-process through the facade (ADR 0076 D1), not through this key. The
+> entry schema is `id:` / `on:` / `run:` (polymorphic — a sequence is argv, a mapping is a webhook)
+> / `workspace:` / `timeout:` / `enabled:`; `advise:` and `gate:` are rejected at load until stage 3.
+> This supersedes D10's "builtins appear by id with `enabled:`" and the original wording here.
 
 **Which keys a repo layer may set.** The rule to keep is not "global only" but *a clone cannot run a
 command before the user has seen it*:
@@ -264,8 +273,8 @@ numbers drift; names do not.
 | `mechanisms.Deps`, `register`, `catalogue`, `SwapCatalogue`, `Build`, `Descriptors` | `internal/mechanisms/catalogue.go` | deleted |
 | `selfreg.go` (strikes, Turn Budget), `skipUnderBypass` | `internal/agent/selfreg.go`, `hookrun.go` | deleted from the core; `--bypass` = builtins only |
 | `retired.go` roll with `Successor` | `internal/mechanisms/retired.go` | the config migration table |
-| `hooks:` list, `mechanisms:` map, 7 floor `*bool` keys, `floorFromOptions` negation seam | `internal/config/hooks.go`, `config.go`, `configwrite_mechanism.go`, `cmd/apogee/wire_settings.go` | one `reactions:` list, one resolver, three layers |
-| `/settings` rows: hooks (read-only), mechanisms (read-only), 7 floor rows | `internal/config/registry.go` | one reactions table |
+| `hooks:` list, `mechanisms:` map | `internal/config/hooks.go`, `config.go`, `configwrite_mechanism.go`, `cmd/apogee/wire_settings.go` | one `reactions:` list, one resolver (amended 2026-09-08: the 7 floor `*bool` keys and the `floorFromOptions` negation seam STAY — ADR 0076 D11; the layers are stage 2b) |
+| `/settings` rows: hooks (read-only), mechanisms (read-only) | `internal/config/registry.go` | one read-only structured `reactions` row (amended 2026-09-08: the 7 floor rows stay as they are — ADR 0076 D11, open bead `apogee-tbs`; no per-entry toggle table until stage 2b) |
 
 Stays byte-for-byte: the policy functions in `internal/floor` (`SalvageToolCall`, `ToolLoopBreak`,
 `ToolCallRepair`, `RecoverEmpty`, `EnforceToolUse`, `CacheRead`, `CapToolResults`) and the working
