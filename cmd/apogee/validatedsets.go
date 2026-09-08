@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
@@ -35,8 +34,8 @@ const (
 	// setSuppressed — an entry matched but the explicit `mechanisms:` block wins
 	// (whole-set-or-nothing — a merge would be an unvalidated stack).
 	setSuppressed
-	// setSkipped — the matched entry fails validation against the live catalogue (unknown
-	// ID after catalogue evolution, now-invalid stacking) and is skipped whole.
+	// setSkipped — the matched entry fails validation against the live roster (an unknown ID
+	// after catalogue evolution) and is skipped whole.
 	setSkipped
 	// setApplied — the entry applies this session.
 	setApplied
@@ -75,7 +74,19 @@ type setDecision struct {
 	// validated (ADR 0016's 2026-08-29 amendment). It is carried rather than folded into
 	// loadNotices because it is not a defect in the SOURCE: the file was written correctly for the
 	// build that recorded it, and both renderers word it as a curation change, not a warning.
-	droppedRetired []domain.MechanismID
+	droppedRetired []string
+}
+
+// retiredSetIDs is the retired roll in the spelling internal/validated holds set members in.
+// That package is deliberately catalogue-agnostic — its sets are plain strings — so the roll
+// crosses the boundary here rather than typing itself into the entry data.
+func retiredSetIDs() []string {
+	rolled := mechanisms.RetiredIDs()
+	out := make([]string, len(rolled))
+	for i, id := range rolled {
+		out[i] = string(id)
+	}
+	return out
 }
 
 // startupSetDecision is THE identity-and-match ladder: what the next session start decides
@@ -130,7 +141,7 @@ func startupSetDecision(opts config.Options, userDir, probeDir string) setDecisi
 	// before anything reads the entry, so every renderer downstream — the startup apply and `probe
 	// model`'s effect line alike — counts the same members; a shed that ran only on the applying
 	// branch would let the probe report promise a member startup does not arm (ADR 0021 §4).
-	match.Entry, out.droppedRetired = validated.DropRetired(match.Entry, mechanisms.RetiredIDs())
+	match.Entry, out.droppedRetired = validated.DropRetired(match.Entry, retiredSetIDs())
 	out.match = match
 
 	// The entry key itself retired: nothing carries it any more, so there is no set to weigh.
@@ -161,7 +172,11 @@ func startupSetDecision(opts config.Options, userDir, probeDir string) setDecisi
 		out.kind = setOffered
 		return out
 	}
-	if verr := validated.Validate(match.Entry, mechanisms.Descriptors()); verr != nil {
+	// The known roster handed in is NIL, and permanently: nothing is catalogued since the Reaction
+	// core landed (ADR 0076 D11), so every member of a surviving set is an unknown id and every
+	// non-empty set is skipped with the sentence a catalogue evolution has always earned. It is the
+	// same rejection an empty catalogue yields today, written as the empty roster it now is.
+	if verr := validated.Validate(match.Entry, nil); verr != nil {
 		out.kind = setSkipped
 		out.skipErr = verr
 		return out
@@ -188,7 +203,7 @@ func startupSetDecision(opts config.Options, userDir, probeDir string) setDecisi
 //
 // The decision itself is startupSetDecision's; this function only renders it in the
 // startup voice and enacts the one applying case.
-func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []apogee.MechanismID, notices []string, err error) {
+func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []string, notices []string, err error) {
 	d := startupSetDecision(opts, userDir, probeDir)
 	for _, w := range d.loadNotices {
 		notices = append(notices, "apogee: "+w)
@@ -207,7 +222,7 @@ func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []a
 	case setRetired:
 		notices = append(notices, retiredSetNotice(d.match))
 	case setApplied:
-		set = append([]apogee.MechanismID(nil), d.match.Entry.Set...)
+		set = append([]string(nil), d.match.Entry.Set...)
 		sort.Slice(set, func(i, j int) bool { return set[i] < set[j] })
 		for _, id := range d.droppedRetired {
 			notices = append(notices, retiredSetMemberNotice(d.match.Entry, id))
@@ -256,15 +271,15 @@ func retiredSetNotice(d validated.Decision) string {
 //     same IDs, and says the behaviour is on by default.
 //
 // Pure, so both wordings are table-testable.
-func retiredSetMemberNotice(e validated.Entry, id domain.MechanismID) string {
-	if successor := mechanisms.Successor(id); successor != "" {
+func retiredSetMemberNotice(e validated.Entry, id string) string {
+	if successor := mechanisms.Successor(domain.MechanismID(id)); successor != "" {
 		return fmt.Sprintf(
 			"apogee: validated-set entry %q names mechanism %q, the %q floor guard since %s — it is dropped from the set and the rest applies; the behaviour is on by default.",
-			e.Key, id, successor, mechanisms.RetiredRelease(id))
+			e.Key, id, successor, mechanisms.RetiredRelease(domain.MechanismID(id)))
 	}
 	return fmt.Sprintf(
 		"apogee: validated-set entry %q names mechanism %q, retired in %s — it is dropped and the rest of the set applies.",
-		e.Key, id, mechanisms.RetiredRelease(id))
+		e.Key, id, mechanisms.RetiredRelease(domain.MechanismID(id)))
 }
 
 // appliedNotice is the per-session line for an applying set (ADR 0016 §5's "visible

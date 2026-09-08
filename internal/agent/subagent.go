@@ -571,12 +571,11 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// same processing.ParserFor the one-swap applyProfile runs, so a routed child reads the grunt
 	// model's dialect rather than the orchestrator's.
 	//
-	// The two POSTURE keys follow ADR 0045 §2's replace-or-inherit rule, and both are already
-	// seeded with the inherited value above: a PRESENT key replaces it WHOLE (no per-ID merge, no
-	// OR-ing of flags), an ABSENT one leaves the parent's live value standing. Mechanisms arrives as
-	// a FACTORY rather than a registry for the reason ForSubAgent exists one line up: siblings in a
-	// depth-0 fan-out run at once (ADR 0039), so each child needs a registry of its own and the
-	// factory is called once per child.
+	// The POSTURE key follows ADR 0045 §2's replace-or-inherit rule and is already seeded with the
+	// inherited value above: a PRESENT `bypass:` replaces it WHOLE (no OR-ing of flags), an ABSENT
+	// one leaves the parent's live value standing. A per-seat `mechanisms:` map no longer travels
+	// here at all — it arms nothing since the Reaction core landed (ADR 0076 D11), so the seat's
+	// only posture is the flag.
 	//
 	// The client is built rather than mutated — provider.Client.SetModel rebinds the model and
 	// deliberately never the endpoint — so the child's wire target moves atomically with its key,
@@ -650,9 +649,6 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 		routedDialect = target.EffortDialect
 		if target.Bypass != nil {
 			childCfg.Bypass = *target.Bypass
-		}
-		if target.Mechanisms != nil {
-			childCfg.Mechanisms = target.Mechanisms()
 		}
 		var opts []provider.Option
 		opts, tap = armWireCapture(childCfg)

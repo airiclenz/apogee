@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -112,7 +111,7 @@ func TestResolveDelegationTargetPinsOutrankTheBeat(t *testing.T) {
 
 	// The key is the RESOLVED one the caller hands in — the entry names a source, and turning that
 	// source into a token is the resolver's job one layer up (delegationWiring.observe).
-	target := resolveDelegationTarget(entry, "grunt-key", observed, nil, nil)
+	target := resolveDelegationTarget(entry, "grunt-key", observed, nil)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target; want the pinned one")
 	}
@@ -140,7 +139,7 @@ func TestResolveDelegationTargetObservesWhatIsNotPinned(t *testing.T) {
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
 	observed := heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model", ContextWindow: 8192}
 
-	target := resolveDelegationTarget(entry, "", observed, nil, nil)
+	target := resolveDelegationTarget(entry, "", observed, nil)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target; want the observed one")
 	}
@@ -153,7 +152,7 @@ func TestResolveDelegationTargetObservesWhatIsNotPinned(t *testing.T) {
 
 	// And the slot count the same server reports a beat later widens it, with nothing else moving.
 	observed.TotalSlots = 4
-	if wider := resolveDelegationTarget(entry, "", observed, nil, nil); wider.ParallelAgents != 4 {
+	if wider := resolveDelegationTarget(entry, "", observed, nil); wider.ParallelAgents != 4 {
 		t.Errorf("ParallelAgents with 4 observed slots = %d; want 4", wider.ParallelAgents)
 	}
 }
@@ -175,7 +174,7 @@ func TestResolveDelegationTargetCarriesTheEntrysResponseReserve(t *testing.T) {
 		Endpoint:        "http://127.0.0.1:2222",
 		ResponseReserve: 0.35,
 	}
-	target := resolveDelegationTarget(stated, "", observed, nil, nil)
+	target := resolveDelegationTarget(stated, "", observed, nil)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target; want the one stating a share")
 	}
@@ -187,7 +186,7 @@ func TestResolveDelegationTargetCarriesTheEntrysResponseReserve(t *testing.T) {
 	// And the absent key stays absent: nothing here invents a share for an entry that states none,
 	// because 0 is precisely how the spawn is told to leave the parent's standing.
 	unstated := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
-	quiet := resolveDelegationTarget(unstated, "", observed, nil, nil)
+	quiet := resolveDelegationTarget(unstated, "", observed, nil)
 	if quiet == nil {
 		t.Fatal("a reachable server resolved to no target; want the one stating nothing")
 	}
@@ -210,7 +209,7 @@ func TestResolveDelegationTargetResolvesTheProfileForTheBoundModel(t *testing.T)
 		Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited}},
 	}}
 
-	target := resolveDelegationTarget(entry, "", observed, user, nil)
+	target := resolveDelegationTarget(entry, "", observed, user)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target")
 	}
@@ -219,15 +218,16 @@ func TestResolveDelegationTargetResolvesTheProfileForTheBoundModel(t *testing.T)
 	}
 	// A model no tier knows keeps the zero profile — native tool calls, no inline thinking — which is
 	// how an unprofiled delegation has always parsed.
-	unmatched := resolveDelegationTarget(entry, "", heartbeat.Beat{Reachable: true, ActiveModel: "nobody-knows"}, user, nil)
+	unmatched := resolveDelegationTarget(entry, "", heartbeat.Beat{Reachable: true, ActiveModel: "nobody-knows"}, user)
 	if !reflect.DeepEqual(unmatched.Profile, domain.ModelProfile{}) {
 		t.Errorf("Profile for an unmatched model = %+v; want the zero profile", unmatched.Profile)
 	}
 }
 
-// The posture keys ride the routing untranslated: `bypass:` travels as the entry's own pointer,
-// because its NIL-ness is the inherit-versus-replace instruction the engine reads (ADR 0045 §2), and
-// the Mechanism catalogue travels as the factory the entry's map built.
+// The posture key rides the routing untranslated: `bypass:` travels as the entry's own pointer,
+// because its NIL-ness is the inherit-versus-replace instruction the engine reads (ADR 0045 §2).
+// It is the seat's ONLY posture since the Reaction core landed (ADR 0076 D11) — a per-seat
+// `mechanisms:` map arms nothing and composes nothing onto the target.
 func TestResolveDelegationTargetCarriesThePostureVerbatim(t *testing.T) {
 	t.Parallel()
 
@@ -235,26 +235,16 @@ func TestResolveDelegationTargetCarriesThePostureVerbatim(t *testing.T) {
 	observed := heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model"}
 
 	// Nothing on the entry: both postures are absent, and absent is what makes a child inherit.
-	bare := resolveDelegationTarget(entry, "", observed, nil, nil)
+	bare := resolveDelegationTarget(entry, "", observed, nil)
 	if bare.Bypass != nil {
 		t.Errorf("Bypass with none on the entry = %v; want absent so the child inherits the parent's live flag", bare.Bypass)
-	}
-	if bare.Mechanisms != nil {
-		t.Error("a catalogue was built for an entry with no `mechanisms:` map; want absent so the child inherits")
 	}
 
 	on := true
 	entry.Bypass = &on
-	catalogue := func() *apogee.MechanismRegistry { return apogee.NewMechanismRegistry() }
-	dressed := resolveDelegationTarget(entry, "", observed, nil, catalogue)
+	dressed := resolveDelegationTarget(entry, "", observed, nil)
 	if dressed.Bypass == nil || !*dressed.Bypass {
 		t.Errorf("Bypass = %v; want the entry's own true", dressed.Bypass)
-	}
-	if dressed.Mechanisms == nil {
-		t.Fatal("Mechanisms = nil; want the catalogue factory the entry's map built")
-	}
-	if first, second := dressed.Mechanisms(), dressed.Mechanisms(); first == second {
-		t.Error("the factory handed out the same registry twice; siblings in a fan-out need one each")
 	}
 }
 
@@ -274,16 +264,16 @@ func TestResolveDelegationTargetRanksTheEffortDialect(t *testing.T) {
 
 	forced := entry
 	forced.EffortDialect = "kwargs"
-	if got := resolveDelegationTarget(forced, "", observed, nil, nil).EffortDialect; got != provider.EffortDialectKwargs {
+	if got := resolveDelegationTarget(forced, "", observed, nil).EffortDialect; got != provider.EffortDialectKwargs {
 		t.Errorf("dialect with a pin = %q; want the entry's forced %q", got, provider.EffortDialectKwargs)
 	}
-	if got := resolveDelegationTarget(entry, "", observed, nil, nil).EffortDialect; got != provider.EffortDialectReasoning {
+	if got := resolveDelegationTarget(entry, "", observed, nil).EffortDialect; got != provider.EffortDialectReasoning {
 		t.Errorf("dialect with no pin = %q; want the beat's observed %q", got, provider.EffortDialectReasoning)
 	}
 
 	tellLess := observed
 	tellLess.EffortSupport = provider.EffortSupport{}
-	if got := resolveDelegationTarget(entry, "", tellLess, nil, nil).EffortDialect; got != provider.EffortDialectNone {
+	if got := resolveDelegationTarget(entry, "", tellLess, nil).EffortDialect; got != provider.EffortDialectNone {
 		t.Errorf("dialect with neither = %q; want the zero that names none", got)
 	}
 }
@@ -296,18 +286,18 @@ func TestResolveDelegationTargetRefusesAnUnusableBeat(t *testing.T) {
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
 
 	unreachable := heartbeat.Beat{Failure: "connection refused"}
-	if target := resolveDelegationTarget(entry, "", unreachable, nil, nil); target != nil {
+	if target := resolveDelegationTarget(entry, "", unreachable, nil); target != nil {
 		t.Errorf("an unreachable server resolved to %+v; want no target", target)
 	}
 	// Reachable but serving nothing this session can name, and no pin to name it with: a delegation
 	// that cannot say which model it is talking to is not a usable target either.
 	nameless := heartbeat.Beat{Reachable: true}
-	if target := resolveDelegationTarget(entry, "", nameless, nil, nil); target != nil {
+	if target := resolveDelegationTarget(entry, "", nameless, nil); target != nil {
 		t.Errorf("a server with no model bound resolved to %+v; want no target", target)
 	}
 	// The pin is what rescues that case: the file names the model the server will serve.
 	entry.Model = "pinned-model"
-	if target := resolveDelegationTarget(entry, "", nameless, nil, nil); target == nil || target.Model != "pinned-model" {
+	if target := resolveDelegationTarget(entry, "", nameless, nil); target == nil || target.Model != "pinned-model" {
 		t.Errorf("target with a pinned model on a model-less beat = %+v; want the pin", target)
 	}
 }
@@ -432,69 +422,41 @@ func TestDelegationWiringObservePushesWhatTheBeatResolvedTo(t *testing.T) {
 	}
 }
 
-// The flagged entry's `mechanisms:` map is the child's ENTIRE catalogue, built once at startup and
-// handed to each child as a copy of its own. An absent map is the other instruction — inherit — and
-// the two are told apart by the map, not by what it validates to.
-func TestSubAgentCatalogueBuildsTheEntrysOwnMechanisms(t *testing.T) {
+// A seat's `mechanisms:` map still parses, still refuses a typo, and ARMS NOTHING since the
+// Reaction core landed (ADR 0076 decision 11). `grammar` is a retired id, so the map is the one a
+// user actually has in a saved file: the seat builds, the retired-id line is discarded exactly as
+// it always was (a child's posture resolves with the alt screen up), and the target the seat
+// composes is the SAME target the same entry without the map composes — which is the whole claim,
+// because a routed child now inherits every parent Reaction that is not TopLevelOnly, exactly as it
+// would with no map at all.
+func TestASeatsMechanismsMapArmsNothing(t *testing.T) {
 	t.Parallel()
 
 	base := validCfg(t)
-
-	absent, err := subAgentCatalogue(config.ServerEntry{Name: "grunt"}, base)
-	if err != nil {
-		t.Fatalf("subAgentCatalogue with no map: %v", err)
-	}
-	if absent != nil {
-		t.Error("an entry with no `mechanisms:` map built a catalogue; want nil so the child inherits")
-	}
-
-	// A PRESENT map builds a catalogue of the child's own, one fresh registry per child. Every key
-	// the map can legally carry is a RETIRED id now — the shipped catalogue emptied in v0.20.0
-	// (ADR 0071) — so the resolver drops them all and the child runs on nothing but its Floor
-	// guards; what this pins is that the map produced a catalogue at all, and a private one.
 	entry := config.ServerEntry{
 		Name:       "grunt",
 		Endpoint:   "http://127.0.0.1:2222",
-		Mechanisms: map[string]bool{"library": true, "error_enrichment": false},
+		Mechanisms: map[string]bool{"grammar": true},
 	}
-	catalogue, err := subAgentCatalogue(entry, base)
+	server, err := newSubAgentServer(entry, base)
 	if err != nil {
-		t.Fatalf("subAgentCatalogue with a retired-id arm: %v", err)
+		t.Fatalf("newSubAgentServer with a retired-id arm: %v; want the saved map accepted", err)
 	}
-	if catalogue == nil {
-		t.Fatal("a present map built no catalogue")
-	}
-	if first, second := catalogue(), catalogue(); first == nil || first == second {
-		t.Error("the factory must hand each child its own registry")
-	}
-	if armed := postResponseIDs(catalogue()); len(armed) != 0 {
-		t.Errorf("a block naming only retired ids armed post-response %v; want nothing armed", armed)
+	if server.entry.Mechanisms == nil {
+		t.Error("the seat lost its `mechanisms:` map; the key still parses and still notices")
 	}
 
-	// A map that enables nothing is still a map: replace-whole means the child runs on NOTHING — a
-	// catalogue of its own rather than an inheritance — its recovery guarantees coming from the
-	// Floor guards the engine runs whatever any block says.
-	off, err := subAgentCatalogue(config.ServerEntry{Name: "grunt", Mechanisms: map[string]bool{"library": false}}, base)
-	if err != nil {
-		t.Fatalf("subAgentCatalogue with an all-false map: %v", err)
+	observed := heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}
+	bare := entry
+	bare.Mechanisms = nil
+	withMap := resolveDelegationTarget(entry, "", observed, nil)
+	without := resolveDelegationTarget(bare, "", observed, nil)
+	if withMap == nil || without == nil {
+		t.Fatal("a reachable seat resolved no target")
 	}
-	if off == nil {
-		t.Fatal("an all-false map inherited the parent's catalogue; want an empty one of its own")
+	if !reflect.DeepEqual(withMap, without) {
+		t.Errorf("the `mechanisms:` map changed the composed target:\n with = %+v\n without = %+v", withMap, without)
 	}
-	if armed := postResponseIDs(off()); len(armed) != 0 {
-		t.Errorf("an all-false map armed %v; want nothing armed", armed)
-	}
-}
-
-// postResponseIDs is the canonical IDs a child's registry holds at the post-response hook, sorted —
-// the hook the replace-whole rule is read at, so it is the direct read of what reached the child.
-func postResponseIDs(r *apogee.MechanismRegistry) []apogee.MechanismID {
-	var out []apogee.MechanismID
-	for _, m := range r.Ordered(apogee.HookPostResponse) {
-		out = append(out, m.Descriptor.ID)
-	}
-	slices.Sort(out)
-	return out
 }
 
 // The posture keys are legal on EVERY entry now, which the flag era refused: the config loads, and
@@ -527,9 +489,6 @@ func TestNewDelegationWiringTakesThePostureOfTheNamedEntry(t *testing.T) {
 	}
 	if wiring.server == nil || wiring.server.entry.Bypass == nil || !*wiring.server.entry.Bypass {
 		t.Fatalf("wired posture = %+v; want the named entry's own bypass", wiring.server)
-	}
-	if wiring.server.catalogue == nil {
-		t.Error("the named entry's `mechanisms:` map built no catalogue")
 	}
 }
 
@@ -1623,7 +1582,7 @@ func TestResolveDelegationTargetCarriesTheWorkingWindow(t *testing.T) {
 	}
 	observed := heartbeat.Beat{Reachable: true, ActiveModel: "pinned-model", ContextWindow: 131072}
 
-	bounded := resolveDelegationTarget(entry, "", observed, nil, nil)
+	bounded := resolveDelegationTarget(entry, "", observed, nil)
 	if bounded == nil {
 		t.Fatal("a reachable server resolved to no target; want the bounded one")
 	}
@@ -1633,7 +1592,7 @@ func TestResolveDelegationTargetCarriesTheWorkingWindow(t *testing.T) {
 
 	entry.WorkingWindow = 0
 
-	unbounded := resolveDelegationTarget(entry, "", observed, nil, nil)
+	unbounded := resolveDelegationTarget(entry, "", observed, nil)
 	if unbounded == nil {
 		t.Fatal("a reachable server resolved to no target; want the unbounded one")
 	}

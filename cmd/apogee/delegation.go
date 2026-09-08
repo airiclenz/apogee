@@ -9,8 +9,8 @@ package main
 // observes the named entry on the session monitor's own cadence, and each beat is resolved into the
 // one value the engine latches — the Delegation target.
 //
-// The split is ADR 0031's: the resolution happens HERE, at the layer that knows the file, the pins,
-// the profile tiers and the Mechanism catalogue, and the engine is handed a finished spec it applies
+// The split is ADR 0031's: the resolution happens HERE, at the layer that knows the file, the pins
+// and the profile tiers, and the engine is handed a finished spec it applies
 // without reading a line of config. And it is ADR 0042's degrade: a server that cannot be reached,
 // or that binds no model, resolves to nil — which the engine reads as "not routing", so delegations
 // run on the session's own Upstream exactly as they did before any of this existed.
@@ -123,11 +123,6 @@ type subAgentServer struct {
 	// on the next beat when it fails, rather than at the startup that has no business waiting on a
 	// keychain for a server this session may never delegate to.
 	beat func(ctx context.Context, apiKey string) heartbeat.Beat
-	// catalogue builds the Mechanism registry ONE routed child runs with, and is nil when the entry
-	// carries no `mechanisms:` map — which is the engine's signal to inherit the parent's catalogue
-	// as it always has (ADR 0045 §2). It is a factory because siblings in a fan-out run at once and
-	// each needs a registry of its own.
-	catalogue func() *apogee.MechanismRegistry
 }
 
 // delegationWiring is this session's Sub-agent server: which entry `sub-agents-server:` names right
@@ -191,8 +186,11 @@ type delegationWiring struct {
 	// `effort-dialect:` — a fact about the ENTRY rather than about the routing state, so it is said
 	// once and not again each time the box goes down and comes back (dialectAdvice).
 	dialectAdvised bool
-	// base is the session's own Config, kept because a re-read `servers:` list has to build the new
-	// entry's Mechanism catalogue out of exactly what startup built the old one from.
+	// base is the session's own Config, carried so a re-read `servers:` list assembles a new entry
+	// out of exactly what startup assembled the old one from. Nothing reads it today: the per-seat
+	// posture it used to build — the entry's own Mechanism catalogue — retired with the catalogue
+	// itself (ADR 0076 decision 11), and stage 2's per-seat `reactions:` resolver is what needs it
+	// back.
 	base apogee.Config
 	// userProfiles reads the `model-profiles:` user tier as it stands NOW, so a profile committed
 	// mid-session reaches the next beat's resolution rather than the next launch.
@@ -242,15 +240,14 @@ type delegationWiring struct {
 // A name matching no entry is not a refusal: the wiring holds no server, delegations fall back to the
 // session's upstream, and the notice missingNameNotice renders is said on the first observe.
 //
-// base is the session's own Config, and it is read for exactly what building the named entry's
-// Mechanism catalogue needs: the state roots. The entry's own endpoint and `model:` pin replace the
-// session's on the copy that build sees, so the identity a Library observation is filed under is the
-// SUB-AGENT server's model rather than the orchestrator's.
+// base is the session's own Config, carried for the entry-assembly step (see the field): it reads
+// nothing today, because the per-seat catalogue it used to build retired with the catalogue itself
+// (ADR 0076 decision 11).
 //
-// It fails the run rather than degrading when the named entry's `mechanisms:` map is defective —
-// an unknown key, or a set the stacking gates refuse. That is the same posture the session's own
-// block takes at this same boundary (mechanisms.ResolveEnabled, wireSession): a typo in a file outlives the day
-// it was written, and a posture that silently armed nothing would be invisible for months.
+// It still fails the run rather than degrading when the named entry's `mechanisms:` map is
+// defective — an unknown key. That is the same posture the session's own block takes at this same
+// boundary (mechanisms.RetiredNotices, wireSession): a typo in a file outlives the day it was
+// written, and a key that silently meant nothing would be invisible for months.
 func newDelegationWiring(
 	name string,
 	servers func() []config.ServerEntry,
@@ -334,19 +331,27 @@ func missingNameNotice(name string, entries []config.ServerEntry) string {
 		"server (configured: %s)", name, configured)
 }
 
-// newSubAgentServer builds the beat and the Mechanism catalogue for one named entry. It is the
-// step a startup and a config reload share, so a Sub-agent server that arrives hours into a session
-// is assembled exactly as one named at launch — including the refusal of a defective `mechanisms:`
-// map, which a reload returns to the settings row rather than to the terminal.
+// newSubAgentServer builds the beat for one named entry and validates its `mechanisms:` map. It is
+// the step a startup and a config reload share, so a Sub-agent server that arrives hours into a
+// session is assembled exactly as one named at launch — including the refusal of a defective
+// `mechanisms:` map, which a reload returns to the settings row rather than to the terminal.
+//
+// The map itself arms NOTHING since the Reaction core landed (ADR 0076 D11): it goes through
+// mechanisms.RetiredNotices, which still refuses an unknown key and still earns a retired id its
+// line, and the child inherits every parent Reaction that is not TopLevelOnly exactly as it would
+// with no map at all. The retired-id notices are DISCARDED here for the reason they always were: a
+// child's posture is resolved with the alt screen up, where a stderr line paints over the TUI, and
+// the session's own block already said the same lines on stderr at startup.
 func newSubAgentServer(entry config.ServerEntry, base apogee.Config) (*subAgentServer, error) {
-	catalogue, err := subAgentCatalogue(entry, base)
-	if err != nil {
-		return nil, err
+	if _, err := mechanisms.RetiredNotices(entry.Mechanisms); err != nil {
+		// RetiredNotices already carries the house "apogee: " prefix, so the entry that asked for it
+		// is appended rather than prefixed: the message would otherwise print the prefix twice, and
+		// a user with two servers listed needs to know which one is meant.
+		return nil, fmt.Errorf("%w — in the `sub-agents:` server %q", err, entry.Name)
 	}
 	return &subAgentServer{
-		entry:     entry,
-		beat:      subAgentBeat(entry),
-		catalogue: catalogue,
+		entry: entry,
+		beat:  subAgentBeat(entry),
 	}, nil
 }
 
@@ -389,9 +394,9 @@ func subAgentBeat(entry config.ServerEntry) func(context.Context, string) heartb
 // rests on a beat staying strictly shorter than the interval. Run side by side they cost the longer
 // of the two, so the second server is observed on the same cadence without slowing the first.
 //
-// What it resolves against is a SNAPSHOT taken before the goroutine starts: the entry, its beat and
-// its catalogue travel together, so a `servers:` edit landing mid-beat cannot pair one server's
-// observation with another's posture. The landing checks the generation that snapshot was taken on
+// What it resolves against is a SNAPSHOT taken before the goroutine starts: the entry and its beat
+// travel together, so a `servers:` edit landing mid-beat cannot pair one server's observation with
+// another's posture. The landing checks the generation that snapshot was taken on
 // (see land), which is what keeps the edit's own push the last word.
 func (d *delegationWiring) observe(ctx context.Context) func() {
 	d.mu.Lock()
@@ -435,8 +440,7 @@ func (d *delegationWiring) observe(ctx context.Context) func() {
 			return
 		}
 		d.land(generation, server.entry.Name,
-			resolveDelegationTarget(server.entry, apiKey, observed, d.userProfiles(),
-				server.catalogue), nil)
+			resolveDelegationTarget(server.entry, apiKey, observed, d.userProfiles()), nil)
 	}()
 	return func() { <-done }
 }
@@ -850,15 +854,15 @@ func (d *delegationWiring) Retarget(name string) error {
 // fallback, and the delegations run on the session's own Upstream with the session's posture.
 //
 // The POSTURE is copied across untranslated on purpose: `bypass:` is the entry's own pointer, whose
-// nil-ness IS the inherit-versus-replace instruction, and the catalogue factory is whatever the
-// entry's `mechanisms:` map built (nil when it has none). Neither is a per-beat resolution, because
-// neither is something a server can be observed to have.
+// nil-ness IS the inherit-versus-replace instruction, and it is the seat's ONLY posture since the
+// Reaction core landed (ADR 0076 decision 11) — the per-seat `mechanisms:` map arms nothing and
+// composes nothing onto the target. It is not a per-beat resolution either, because it is not
+// something a server can be observed to have.
 func resolveDelegationTarget(
 	entry config.ServerEntry,
 	apiKey string,
 	observed heartbeat.Beat,
 	userProfiles []profiles.Entry,
-	catalogue func() *apogee.MechanismRegistry,
 ) *apogee.DelegationTarget {
 	if !observed.Reachable {
 		return nil
@@ -914,52 +918,5 @@ func resolveDelegationTarget(
 		Profile:                 profile,
 		EffortDialect:           dialect,
 		Bypass:                  entry.Bypass,
-		Mechanisms:              catalogue,
 	}
-}
-
-// subAgentCatalogue builds the factory a routed child's Mechanism catalogue comes out of, and nil
-// when the flagged entry carries no `mechanisms:` map at all — the absent key that leaves a child
-// inheriting the parent's catalogue as it always has (ADR 0045 §2).
-//
-// A PRESENT map is the child's entire catalogue, so a map whose every key is false is not the same
-// as no map: it replaces whatever the parent arms with NOTHING — a `{"some_row": false}` entry builds
-// an empty catalogue, no row being on by default. That is the replace-whole rule doing exactly what
-// it says, and it is why the emptiness test below is on the map rather than on the ids it validates
-// to: an empty map means "inherit the parent's catalogue", while a map of nothing but falses means
-// "arm nothing". Either way the child keeps its Floor guards, which are engine behaviour off
-// Config.Floor rather than catalogue rows (ADR 0071).
-//
-// The build goes through the engine's own BuildMechanisms rather than assembling a registry here,
-// because the Deps a catalogue row needs — the Library store, the identity ladder keyed on the
-// model — are the engine's to derive (ADR 0015 §2). What this layer owns is the two things the
-// engine cannot know: that the map's keys are catalogued at all (mechanisms.ResolveEnabled, the same validation
-// the session's own block gets, typo'd DISABLED keys included), and that the identity is the
-// SUB-AGENT server's — hence the endpoint and model swapped onto the config copy the build reads.
-//
-// The result is built ONCE, at startup, and the factory hands each child a copy through ForSubAgent:
-// the registry is a per-run instance surface, not a per-model resolution, so re-deriving it on every
-// beat would buy nothing and would put a build error somewhere no one can see it.
-func subAgentCatalogue(entry config.ServerEntry, base apogee.Config) (func() *apogee.MechanismRegistry, error) {
-	if len(entry.Mechanisms) == 0 {
-		return nil, nil
-	}
-	// The retired-id notices are DISCARDED here: a child's posture is resolved with the alt screen
-	// up, where a stderr line paints over the TUI, and the session's own block already said the same
-	// lines on stderr at startup.
-	ids, _, err := mechanisms.ResolveEnabled(entry.Mechanisms, mechanisms.KnownIDs())
-	if err != nil {
-		// ResolveEnabled already carries the house "apogee: " prefix, so the entry that asked for it is
-		// appended rather than prefixed (buildEnabledMechanisms' rule): the message would otherwise
-		// print the prefix twice, and a user with two servers listed needs to know which one is meant.
-		return nil, fmt.Errorf("%w — in the `sub-agents:` server %q", err, entry.Name)
-	}
-	cfg := base
-	cfg.Endpoint = entry.Endpoint
-	cfg.Model = entry.Model
-	built, err := apogee.BuildMechanisms(cfg, ids)
-	if err != nil {
-		return nil, fmt.Errorf("%w — in the `sub-agents:` server %q", err, entry.Name)
-	}
-	return built.ForSubAgent, nil
 }

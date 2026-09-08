@@ -3,10 +3,9 @@ package validated
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
-
-	"github.com/airiclenz/apogee/internal/domain"
 )
 
 func writeFile(t *testing.T, dir, name, content string) {
@@ -16,12 +15,8 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-func ids(names ...string) []domain.MechanismID {
-	out := make([]domain.MechanismID, len(names))
-	for i, n := range names {
-		out[i] = domain.MechanismID(n)
-	}
-	return out
+func ids(names ...string) []string {
+	return slices.Clone(names)
 }
 
 func TestLoadUserDir_MissingDirIsEmpty(t *testing.T) {

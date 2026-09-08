@@ -11,10 +11,8 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/mcp"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/snapshot"
-	"github.com/airiclenz/apogee/internal/validated"
 )
 
 // The `url-safety:` guard an MCP connect is made under (audit 2026-08-25 F-40).
@@ -310,36 +308,6 @@ func TestWireSessionReportsARetiredMechanismOnStderr(t *testing.T) {
 		t.Errorf("EnableMechanisms = %v, want nothing armed; a retired id is dropped from what the "+
 			"engine arms and no catalogued row is on by default — which is exactly why the line above "+
 			"has to be printed", got)
-	}
-}
-
-// A validated set becomes the enable list VERBATIM once its retired members are shed: no catalogued
-// row is floored in beside it any more (ADR 0071), so what a set names is exactly what the engine is
-// asked to build. The proof runs the shed set through the engine's own build, which is the code a
-// stale or duplicated member would fail in.
-//
-// The set is SYNTHETIC — the shipped roster is empty since v0.20.0, and a silent t.Skip over that
-// emptiness would leave this claim untested rather than failing when it breaks. A record naming only
-// retired members is exactly what a user upgrading into this wave holds, and what it must build to
-// is the empty list.
-func TestAValidatedSetBuildsAsTheEnableList(t *testing.T) {
-	t.Parallel()
-
-	roll := mechanisms.RetiredIDs()
-	if len(roll) == 0 {
-		t.Fatal("the retired roll is empty; this pin needs one rolled ID to shed")
-	}
-	entry := validated.Entry{Version: validated.EntryVersion, Key: "synthetic-model", Set: roll}
-
-	// The retired members are shed first, exactly as resolveValidatedSet sheds them: a saved record
-	// is a historical curation, and BuildMechanisms only ever sees the live half of one.
-	live, dropped := validated.DropRetired(entry, roll)
-	if len(dropped) != len(roll) || len(live.Set) != 0 {
-		t.Fatalf("shed %d of %d members leaving %v; a wholly-retired record sheds to nothing",
-			len(dropped), len(roll), live.Set)
-	}
-	if _, err := apogee.BuildMechanisms(validCfg(t), live.Set); err != nil {
-		t.Errorf("BuildMechanisms over the shed set %v: %v", live.Set, err)
 	}
 }
 

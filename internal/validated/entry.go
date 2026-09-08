@@ -3,8 +3,6 @@ package validated
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // EntryVersion is the current on-disk schema version. A file claiming a NEWER version
@@ -33,11 +31,11 @@ type Evidence struct {
 // the model it was measured on (ADR 0016 §3). The set is the exact enable set that
 // passed the gate — it applies verbatim or not at all.
 type Entry struct {
-	Version  int                  `json:"version"`
-	Key      string               `json:"key"`
-	Set      []domain.MechanismID `json:"set"`
-	Evidence Evidence             `json:"evidence"`
-	Entered  string               `json:"entered,omitempty"`
+	Version  int      `json:"version"`
+	Key      string   `json:"key"`
+	Set      []string `json:"set"`
+	Evidence Evidence `json:"evidence"`
+	Entered  string   `json:"entered,omitempty"`
 
 	// Source is stamped by the loader (SourceShipped / SourceUser), never read from disk.
 	Source string `json:"-"`
@@ -45,8 +43,8 @@ type Entry struct {
 
 // decodeEntry parses and shape-checks one entry. The checks here are the always-fatal
 // defects a file cannot recover from (bad JSON, wrong version, no key, empty set);
-// catalogue-dependent validity (unknown IDs, stacking) is Validate's job, because it
-// depends on the binary the entry meets, not on the file.
+// roster-dependent validity (unknown IDs) is Validate's job, because it depends on the
+// binary the entry meets, not on the file.
 func decodeEntry(data []byte) (Entry, error) {
 	var e Entry
 	if err := json.Unmarshal(data, &e); err != nil {

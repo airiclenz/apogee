@@ -649,9 +649,9 @@ func (s *stubBeat) discover(_ context.Context, endpoint, _, _ string) heartbeat.
 // would turn a scheduled run into a silent gap in the record (ADR 0042's visible degrade).
 func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 	// A key the entry's `mechanisms:` map may legally carry. The shipped catalogue is empty since
-	// v0.20.0 (ADR 0071), so the legal keys left are the RETIRED ones: they validate, resolve to an
-	// empty arm, and are what proves that a PRESENT map still travels to the child as a catalogue of
-	// its own rather than leaving it inheriting the parent's.
+	// v0.20.0 (ADR 0071), so the legal keys left are the RETIRED ones: they validate, arm nothing,
+	// and are what proves that a PRESENT map is still accepted by an unattended composition rather
+	// than refusing the run.
 	known := string(mechanisms.RetiredIDs()[0])
 	grunt := config.ServerEntry{
 		Name:        "grunt",
@@ -677,7 +677,6 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 		// noticePrefix compares the head of the sentence only, for the one case whose tail is the
 		// whole Mechanism catalogue — a list this test has no business pinning.
 		noticePrefix bool
-		wantArmed    bool
 	}{
 		{
 			name:  "no key names no seat and asks nothing",
@@ -717,14 +716,13 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 			noticePrefix: true,
 		},
 		{
-			name:       "a mechanisms map travels to the child as the entry's own",
+			name:       "a mechanisms map is accepted and arms nothing",
 			named:      "grunt",
 			entry:      armed,
 			beat:       heartbeat.Beat{Reachable: true, TotalSlots: 2},
 			wantBeat:   true,
 			wantTarget: true,
 			wantSeat:   true,
-			wantArmed:  true,
 			wantNotice: "sub-agents: routing to grunt (grunt-model)",
 		},
 	} {
@@ -799,10 +797,6 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 			if want := tc.beat.TotalSlots; routing.target.ParallelAgents != want {
 				t.Errorf("routing.target.ParallelAgents = %d; want the %d the beat reported",
 					routing.target.ParallelAgents, want)
-			}
-			if got := routing.target.Mechanisms != nil; got != tc.wantArmed {
-				t.Errorf("routing.target.Mechanisms non-nil = %v, want %v — an entry with a `mechanisms:` "+
-					"map must not leave its children inheriting the parent's catalogue", got, tc.wantArmed)
 			}
 		})
 	}

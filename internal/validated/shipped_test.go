@@ -9,6 +9,17 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 )
 
+// stringIDs is the catalogue-to-package conversion the runtime path makes at the same boundary
+// (cmd/apogee/validatedsets.go): this package holds set members as plain strings, so a roll or a
+// roster read out of internal/mechanisms crosses in its own spelling and is retyped here.
+func stringIDs(ids []domain.MechanismID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = string(id)
+	}
+	return out
+}
+
 // TestShipped_PinnedAgainstCatalogue is the CI drift guard the ADR 0016 realisation
 // names: shipped entries are curation data compiled into the binary, so a catalogue
 // change that invalidates one (a removed ID, a changed Requires/IncompatibleWith
@@ -30,7 +41,7 @@ func TestShipped_PinnedAgainstCatalogue(t *testing.T) {
 		t.Fatalf("Shipped: %v", err)
 	}
 
-	descriptors := mechanisms.Descriptors()
+	known := stringIDs(mechanisms.KnownIDs())
 	seen := map[string]bool{}
 	for _, e := range entries {
 		if seen[e.Key] {
@@ -40,12 +51,12 @@ func TestShipped_PinnedAgainstCatalogue(t *testing.T) {
 		if e.Source != SourceShipped {
 			t.Fatalf("entry %q: Source not stamped shipped: %q", e.Key, e.Source)
 		}
-		live, _ := DropRetired(e, mechanisms.RetiredIDs())
+		live, _ := DropRetired(e, stringIDs(mechanisms.RetiredIDs()))
 		if len(live.Set) == 0 {
 			t.Fatalf("shipped entry %q sheds to nothing: a roster row that arms no live Mechanism "+
 				"promises what it cannot deliver — retire the entry key instead", e.Key)
 		}
-		if err := Validate(live, descriptors); err != nil {
+		if err := Validate(live, known); err != nil {
 			t.Fatalf("shipped entry %q no longer validates against the catalogue: %v", e.Key, err)
 		}
 	}
@@ -65,12 +76,12 @@ func TestShipped_RemovalWithoutARollEntryStillTrips(t *testing.T) {
 	t.Parallel()
 
 	// One rolled member and one live member, in the shape a roster entry has.
-	rolled := mechanisms.RetiredIDs()
+	rolled := stringIDs(mechanisms.RetiredIDs())
 	if len(rolled) == 0 {
 		t.Fatal("the retired roll is empty; this pin needs one rolled ID to shed")
 	}
-	entry := Entry{Version: EntryVersion, Key: "synthetic-model", Set: []domain.MechanismID{rolled[0], "live_row"}}
-	catalogue := []domain.MechanismDescriptor{{ID: "live_row"}}
+	entry := Entry{Version: EntryVersion, Key: "synthetic-model", Set: []string{rolled[0], "live_row"}}
+	catalogue := []string{"live_row"}
 
 	live, dropped := DropRetired(entry, rolled)
 	if len(dropped) != 1 || dropped[0] != rolled[0] {
@@ -107,13 +118,13 @@ func TestShipped_RosterIsEmptyAndTheGemmaEntryIsRolled(t *testing.T) {
 	}
 
 	// The fifteen the gemma entry named, verbatim from the retired shipped.json.
-	gemmaSet := []domain.MechanismID{
+	gemmaSet := []string{
 		"autofix", "cached_content_intercept", "decompose", "empty_response_recovery",
 		"error_enrichment", "filehint", "library", "list_nudge", "syntax",
 		"tool_loop_interceptor", "tool_result_cap", "tool_use_directive",
 		"tool_use_enforcer", "toolfilter", "validate",
 	}
-	roll := mechanisms.RetiredIDs()
+	roll := stringIDs(mechanisms.RetiredIDs())
 	for _, id := range gemmaSet {
 		if !slices.Contains(roll, id) {
 			t.Errorf("gemma-set member %q is not on the retired roll; a set member that vanished "+

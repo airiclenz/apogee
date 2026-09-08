@@ -3,33 +3,24 @@ package validated
 import (
 	"strings"
 	"testing"
-
-	"github.com/airiclenz/apogee/internal/domain"
 )
 
 func TestValidate(t *testing.T) {
-	descriptors := []domain.MechanismDescriptor{
-		{ID: "a"},
-		{ID: "b", Requires: []domain.MechanismID{"a"}},
-		{ID: "c", IncompatibleWith: []domain.MechanismID{"a"}},
-		{ID: "d"},
-	}
+	known := ids("a", "b", "c", "d")
 
 	tests := []struct {
 		name    string
-		set     []domain.MechanismID
+		set     []string
 		wantErr string // substring; "" = valid
 	}{
 		{"whole valid set", ids("a", "b", "d"), ""},
 		{"single member", ids("d"), ""},
 		{"unknown id", ids("a", "ghost"), `unknown mechanism "ghost"`},
 		{"duplicate id", ids("a", "a"), `lists mechanism "a" twice`},
-		{"requirement outside the set", ids("b", "d"), `requires "a"`},
-		{"incompatible pair inside the set", ids("a", "c"), "declared incompatible"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Validate(Entry{Key: "k", Set: tt.set}, descriptors)
+			err := Validate(Entry{Key: "k", Set: tt.set}, known)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("want valid, got %v", err)
@@ -76,7 +67,7 @@ func TestDropRetiredLeavesACleanEntryAlone(t *testing.T) {
 
 	for _, tt := range []struct {
 		name    string
-		retired []domain.MechanismID
+		retired []string
 	}{
 		{"nothing on the roll matches", ids("gone")},
 		{"the roll is empty", nil},
@@ -109,7 +100,7 @@ func TestDropRetiredCanEmptyASet(t *testing.T) {
 }
 
 // equalIDs compares two ID lists element-wise, treating nil and empty as equal.
-func equalIDs(got, want []domain.MechanismID) bool {
+func equalIDs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
 	}

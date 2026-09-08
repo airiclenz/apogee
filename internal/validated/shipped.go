@@ -10,8 +10,7 @@ import (
 // shippedJSON is the bench-validated entries compiled into the binary — the ADR 0016
 // "shipped entries for bench-validated models". The bundle is an array of entries in the
 // same schema user-local files use (one decode path); shipped_test.go pins it against
-// the live Mechanism catalogue so curation drift (a removed ID, a changed stacking
-// relation) fails CI, never a user's startup.
+// the live Mechanism roster so curation drift (a removed ID) fails CI, never a user's startup.
 //
 // The bundle is EMPTY since v0.20.0. Its one entry, `gemma-4-e4b-it-qat`, named fifteen
 // catalogued Mechanisms and every one of them retired in that wave (ADR 0071), so the entry

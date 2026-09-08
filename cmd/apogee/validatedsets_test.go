@@ -9,11 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/validated"
 )
 
@@ -30,7 +27,7 @@ const labKey = "lab-model"
 // labSet is what those synthetic entries enable: one ID no build carries, standing in for the
 // experimental row a bench build registers into the (otherwise empty) catalogue. It is on no
 // retired roll, so DropRetired leaves it alone and the entry reaches the catalogue check whole.
-var labSet = []domain.MechanismID{"lab_row"}
+var labSet = []string{"lab_row"}
 
 func baseOpts(model string) config.Options {
 	return config.Options{Model: model, ValidatedSetsEnable: true}
@@ -101,7 +98,7 @@ func TestResolveValidatedSet_IdentityAliasReplacesTheConfidenceGate(t *testing.T
 		t.Fatalf("the alias must carry past the low-confidence offer; got %v", notices)
 	}
 	if !strings.Contains(notices[0], "skipping validated-set entry") ||
-		!strings.Contains(notices[0], string(labSet[0])) {
+		!strings.Contains(notices[0], labSet[0]) {
 		t.Fatalf("want the skip notice naming the entry's live member, got %v", notices)
 	}
 }
@@ -200,7 +197,7 @@ func TestResolveValidatedSet_UserEntryUnderARetiredKeyStillResolves(t *testing.T
 func TestResolveValidatedSet_AllRetiredEntryNoLongerApplies(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	retired := mechanisms.RetiredIDs()
+	retired := retiredSetIDs()
 	if len(retired) < 2 {
 		t.Fatalf("the retired roll carries %d ids; this fixture needs two", len(retired))
 	}
@@ -276,7 +273,7 @@ func TestResolveValidatedSetDropsARetiredIDWithANotice(t *testing.T) {
 
 	// The record as it stood before the retirement: a live member with `grammar` written in the
 	// middle, so the shed cannot be passing by position.
-	legacy := []domain.MechanismID{labSet[0], "grammar", "lab_row_two"}
+	legacy := []string{labSet[0], "grammar", "lab_row_two"}
 	writeLabEntry(t, dir, labKey, legacy)
 	opts := baseOpts(labKey)
 	opts.ValidatedSetsAlias = map[string]string{labKey: labKey}
@@ -286,7 +283,7 @@ func TestResolveValidatedSetDropsARetiredIDWithANotice(t *testing.T) {
 	if len(d.droppedRetired) != 1 || d.droppedRetired[0] != "grammar" {
 		t.Fatalf("droppedRetired = %v, want only the retired member shed", d.droppedRetired)
 	}
-	want := []domain.MechanismID{labSet[0], "lab_row_two"}
+	want := []string{labSet[0], "lab_row_two"}
 	if len(d.match.Entry.Set) != len(want) || d.match.Entry.Set[0] != want[0] || d.match.Entry.Set[1] != want[1] {
 		t.Fatalf("surviving set = %v, want the live members in order %v", d.match.Entry.Set, want)
 	}
@@ -323,7 +320,7 @@ const labEndpoint = "http://127.0.0.1:1111"
 // labSecondRow is the second member of the applying fixture's set. Two members, not one: the
 // canonical sort needs something to order, and the recorded set lists this one FIRST, which is
 // what makes that sort observable at all.
-const labSecondRow domain.MechanismID = "lab_row_two"
+const labSecondRow = "lab_row_two"
 
 // probedLabFixture stands up the whole user side of the applying path: a user-local entry naming
 // both lab rows OUT of canonical order, plus the probe record that lifts the bare label from LOW
@@ -332,7 +329,7 @@ const labSecondRow domain.MechanismID = "lab_row_two"
 func probedLabFixture(t *testing.T) (opts config.Options, userDir, probeDir string) {
 	t.Helper()
 	userDir, probeDir = t.TempDir(), t.TempDir()
-	writeLabEntry(t, userDir, labKey, []domain.MechanismID{labSecondRow, labSet[0]})
+	writeLabEntry(t, userDir, labKey, []string{labSecondRow, labSet[0]})
 	if _, err := library.SaveProbeRecord(probeDir, library.ProbeRecord{
 		Endpoint:   labEndpoint,
 		ModelLabel: labKey,
@@ -346,103 +343,55 @@ func probedLabFixture(t *testing.T) (opts config.Options, userDir, probeDir stri
 	return opts, userDir, probeDir
 }
 
-// The APPLYING rung, walked end to end. setApplied, the canonical member sort and appliedNotice are
-// unreachable by any SHIPPED configuration: the catalogue is empty by design (ADR 0071), so
-// validated.Validate rejects every non-empty member set and the ladder stops one rung short at
-// setSkipped. They were pinned only as hand-built decisions in internal/probe, which is a statement
-// about a renderer rather than about the path a user's own record travels. This walks that path
-// whole — a catalogue carrying the rows, a probe record lifting the identity to medium confidence,
-// the user's entry naming them — and asserts the three things a hand-built decision cannot: the
-// order of the enable list, the sentence the session prints, and that the list actually builds.
+// The APPLYING rung is UNREACHABLE, and this is where that is pinned. The roster
+// startupSetDecision validates a matched entry against is a hard nil since the Reaction core landed
+// (ADR 0076 decision 11): nothing is catalogued any more, so every member of every non-empty set is
+// an unknown id and the ladder stops one rung short, at setSkipped. That is the state every real
+// installation is in, and there is no longer a catalogue seam a test could open the rung with —
+// mechanisms.SwapCatalogue used to be it, and swapping the table now changes nothing the ladder
+// reads.
 //
-// TWO rows, and the entry's members out of canonical order: a one-member set makes the sort at
-// resolveValidatedSet's applying branch unobservable, so this test could not fail against an
-// unsorted implementation it claims to pin.
+// So the claim is split in two, and the string roster carries the half the ladder can no longer
+// show: the RECORD is sound — it validates whole against a roster that carries its members, so what
+// follows is not a defect in the fixture — and the LADDER skips it anyway, naming the member the
+// live roster does not carry. A stage-2 plan that re-homes this surface has to move both halves
+// with it.
 //
-// No t.Parallel(): mechanisms.SwapCatalogue assigns a package-level variable and is deliberately not
-// concurrency-safe. The swap and its deferred restore come FIRST, before any t.TempDir() registers a
-// cleanup, so the curated table is back before anything else unwinds.
-func TestResolveValidatedSet_AppliedRungWalksFromRecordToEnableList(t *testing.T) {
-	restore := mechanisms.SwapCatalogue([]mechanisms.Row{
-		{
-			Descriptor: domain.MechanismDescriptor{ID: labSet[0], Capability: domain.CapProactiveNudge},
-			Construct:  func(mechanisms.Deps) (any, error) { return labMechanism{}, nil },
-		},
-		{
-			Descriptor: domain.MechanismDescriptor{ID: labSecondRow, Capability: domain.CapResponseRepair},
-			Construct:  func(mechanisms.Deps) (any, error) { return labMechanism{}, nil },
-		},
-	})
-	defer restore()
+// TWO members, recorded out of canonical order, for the reason they always were: it is what a
+// re-homed applying rung would have to sort.
+func TestResolveValidatedSet_TheApplyingRungHasNoRosterToReach(t *testing.T) {
+	t.Parallel()
 
 	opts, userDir, probeDir := probedLabFixture(t)
 
-	set, notices, err := resolveValidatedSet(opts, userDir, probeDir)
-	if err != nil {
-		t.Fatalf("resolveValidatedSet: %v", err)
+	record := validated.Entry{
+		Version: validated.EntryVersion,
+		Key:     labKey,
+		Set:     []string{labSecondRow, labSet[0]},
 	}
-
-	// The enable list is the entry's members in CANONICAL order, not the order they were recorded
-	// in: the sort is what makes two records naming the same stack the same session.
-	want := []domain.MechanismID{labSet[0], labSecondRow}
-	if len(set) != len(want) || set[0] != want[0] || set[1] != want[1] {
-		t.Fatalf("enable set = %v, want the recorded members sorted %v", set, want)
+	if err := validated.Validate(record, []string{labSet[0], labSecondRow}); err != nil {
+		t.Fatalf("the recorded set must validate against a roster carrying its members: %v", err)
 	}
-
-	// The session says so exactly once, in appliedNotice's own sentence, carrying the count and the
-	// source the matched entry actually has — a user-local record, not a shipped one.
-	if len(notices) != 1 {
-		t.Fatalf("notices = %v, want exactly the applied line", notices)
-	}
-	for _, w := range []string{
-		"Validated set for " + labKey + " applied",
-		"2 mechanisms on",
-		"campaign lab-run-1",
-		validated.SourceUser,
-		"validated-sets: enable: false",
-	} {
-		if !strings.Contains(notices[0], w) {
-			t.Errorf("applied notice = %q, want it to name %q", notices[0], w)
-		}
-	}
-
-	// And the list is not merely well-formed but BUILDABLE. This is the rung the whole surface
-	// exists to reach: a set apogee auto-applied and then failed to construct would be a startup
-	// failure on config the user never wrote.
-	if _, err := apogee.BuildMechanisms(validCfg(t), set); err != nil {
-		t.Fatalf("BuildMechanisms(%v): %v", set, err)
-	}
-}
-
-// The same entry and the same record against the SHIPPED catalogue: the ladder stops at setSkipped.
-// That is what makes the walk above a statement about the applying rung rather than about the
-// fixture — the catalogue seam is the one thing that differs, so it is the one thing that opened the
-// rung. It is also the state every real installation is in while the roster stays empty.
-//
-// No t.Parallel(): this reads the package catalogue its sibling above swaps, and the pair is easier
-// to keep honest when both stay sequential.
-func TestResolveValidatedSet_AppliedRungNeedsTheCatalogueRows(t *testing.T) {
-	opts, userDir, probeDir := probedLabFixture(t)
 
 	set, notices, err := resolveValidatedSet(opts, userDir, probeDir)
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
 	if set != nil {
-		t.Fatalf("an entry the empty catalogue cannot assemble must not apply; got %v", set)
+		t.Fatalf("an entry the empty roster cannot answer for must not apply; got %v", set)
 	}
 	if len(notices) != 1 || !strings.Contains(notices[0], "skipping validated-set entry") {
 		t.Fatalf("want the one skip notice, got %v", notices)
 	}
-	if !strings.Contains(notices[0], string(labSecondRow)) {
-		t.Errorf("skip notice = %q, want it to name the member the catalogue does not carry", notices[0])
+	if !strings.Contains(notices[0], labSecondRow) {
+		t.Errorf("skip notice = %q, want it to name the member the roster does not carry", notices[0])
 	}
 }
 
 // writeLabEntry drops one synthetic entry into a user-local validated-sets directory, the way a
 // saved record reaches startup. The shipped roster is empty since v0.20.0, so this is where every
 // entry these tests match against comes from.
-func writeLabEntry(t *testing.T, dir, key string, set []domain.MechanismID) {
+func writeLabEntry(t *testing.T, dir, key string, set []string) {
 	t.Helper()
 	blob, err := json.Marshal(validated.Entry{
 		Version:  validated.EntryVersion,
@@ -464,5 +413,5 @@ func writeLabEntry(t *testing.T, dir, key string, set []domain.MechanismID) {
 // labEntryJSON is writeLabEntry's on-disk twin for the tests that seed an entry through
 // writeUserValidatedEntry's raw-body helper.
 func labEntryJSON(key string) string {
-	return `{"version":1,"key":"` + key + `","set":["` + string(labSet[0]) + `"],"evidence":{"campaign":"lab-run-1"}}`
+	return `{"version":1,"key":"` + key + `","set":["` + labSet[0] + `"],"evidence":{"campaign":"lab-run-1"}}`
 }

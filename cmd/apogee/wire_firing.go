@@ -533,7 +533,7 @@ func resolveFiringRouting(
 	// And the one resolution the session's own beat lands, reused whole rather than re-derived: the
 	// pin-else-observe ladder is ADR 0045 decision 4, and a second copy of it is how one Driver ends
 	// up routing to a window the other would not.
-	target := resolveDelegationTarget(entry, apiKey, observed, in.opts.ModelProfiles, server.catalogue)
+	target := resolveDelegationTarget(entry, apiKey, observed, in.opts.ModelProfiles)
 	return firingRouting{target: target, seat: seat},
 		delegationStateNotice(name, target, "", nil)
 }

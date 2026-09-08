@@ -5,7 +5,7 @@ package agent
 // smart model orchestrates the session while a cheaper one, possibly on another box, does the
 // delegated grunt work. What that server IS (endpoint, key, model, window, fan-out width, model
 // profile, the wire shape it reads a thinking-effort intent in) and what its delegations run WITH
-// (Bypass, Mechanisms) is discovered by the host's second heartbeat monitor and handed to the
+// (Bypass) is discovered by the host's second heartbeat monitor and handed to the
 // engine here as one resolved value.
 //
 // The engine stays wire-silent (ADR 0031): it never learns that a `servers:` list exists, which
@@ -102,13 +102,6 @@ type DelegationTarget struct {
 	// inherited value whole: delegations to this server run with this flag whatever the parent's
 	// is. nil inherits the parent's LIVE flag at spawn, which is today's rule.
 	Bypass *bool
-	// Mechanisms builds the catalogue a routed child runs with, translated by the composition root
-	// from the flagged entry's `mechanisms:` map. Non-nil REPLACES the inherited catalogue whole
-	// (no per-ID merge — ADR 0045 §2), and it is a FACTORY rather than a registry because it is
-	// called once per child: siblings in a fan-out run at once, so each needs a registry of its
-	// own, the same live-state isolation MechanismRegistry.ForSubAgent already encodes. nil
-	// inherits the parent's catalogue through ForSubAgent, as today.
-	Mechanisms func() *domain.MechanismRegistry
 }
 
 // delegationLatch holds the current Delegation target behind an RWMutex. It is a POINTER on the
