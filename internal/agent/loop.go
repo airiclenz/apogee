@@ -19,7 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
-// maxPostResponseRetries caps how many times an ActionRetry post-response decision may
+// maxPostResponseRetries caps how many times an Outcome{Retry} post-response decision may
 // re-call the Upstream within one Turn, so a response-repair hook that always retries
 // cannot spin the loop forever. After the cap the loop proceeds with the last response.
 const maxPostResponseRetries = 3
@@ -364,7 +364,7 @@ func holdOffRestream(ctx context.Context) bool {
 
 // respondAndReview streams one Upstream reply, parses its tool calls, builds the post-
 // response working value, and runs the post-response hooks — re-calling the Upstream in
-// place for an ActionRetry decision (bounded by maxPostResponseRetries). A retrying
+// place for an Outcome{Retry} decision (bounded by maxPostResponseRetries). A retrying
 // decision that carries a correction (Inject != "") re-streams a corrected request in the
 // same Turn (R1, amending catalogue C5): the superseded assistant message (text + tool
 // calls, when non-empty) and then the correction as a role-safe user message are appended
@@ -387,7 +387,7 @@ func holdOffRestream(ctx context.Context) bool {
 // provider's Retryable verdict — a 429/5xx/provider_unavailable an aggregator wrapped in an
 // HTTP 200 partway through the stream, where the client's own HTTP retries can no longer
 // reach it). The Turn re-sends the SAME request once (t.restreamSpent), and only the loop
-// does it: the provider stays a wire, and StreamResetEvent — the same signal an ActionRetry
+// does it: the provider stays a wire, and StreamResetEvent — the same signal an Outcome{Retry}
 // emits, which a streaming Driver already reads as "discard the partial reply, it is coming
 // again" — is the loop's to emit. A recovered re-stream is SILENT, exactly as a recovered
 // overflow fold is; the second fault, of any class, surfaces as every fault always did.
@@ -469,7 +469,7 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 }
 
 // applyRetry prepares the Turn's next attempt for a retry the caller has already counted, and is
-// the ONE place a re-stream is set up: a Floor guard's retry and a post-response hook's ActionRetry
+// the ONE place a re-stream is set up: a Floor guard's retry and a post-response Reaction's Outcome{Retry}
 // take it identically, because the two differ only in who asked.
 //
 // It tells observers the tokens emitted this attempt are superseded, so a streaming UI discards them
@@ -866,7 +866,7 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 }
 
 // buildRequest projects the conversation onto the hook-facing domain.Request the pre-
-// request hooks shape, draining any deferred corrections (the ActionDefer feed-forward)
+// request hooks shape, draining any deferred corrections (the Outcome{Defer} feed-forward)
 // and injecting each role-safely. It returns the drained corrections so a cancellation can
 // re-queue them. The request carries the tool menu (Plan-filtered) and a trivial Budget so
 // a hook can read them through req.View().

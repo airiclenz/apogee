@@ -1,7 +1,7 @@
 package agent
 
 // The retry-in-place corrective exchange (R1, phase-4-review-fixes item 1): an
-// ActionRetry{Inject} post-response decision re-streams the corrected request in the same
+// Outcome{Retry, Inject} post-response decision re-streams the corrected request in the same
 // Turn — the loop appends the superseded assistant message (text + tool calls) and then
 // the role-safe user correction to the in-flight request, request-scoped, never committed
 // to history. These tests drive the seam end-to-end through a request-capturing scripted
@@ -198,7 +198,7 @@ func TestRetryExchange_EmptySupersededAppendsOnlyCorrection(t *testing.T) {
 	}
 }
 
-// TestRetryExchange_EmptyInjectIsBareRestream: an ActionRetry with no Inject re-streams
+// TestRetryExchange_EmptyInjectIsBareRestream: an Outcome{Retry} with no Inject re-streams
 // the request untouched — byte-identical to the superseded attempt's request.
 func TestRetryExchange_EmptyInjectIsBareRestream(t *testing.T) {
 	sink := &recordingSink{}

@@ -92,7 +92,7 @@ func Language(path string) string {
 // The gate matters because `//` is not a comment everywhere: in Python it is floor division
 // (`n // 2`) and in Ruby an empty regex literal, so breaking out of the line scan there abandons a
 // valid line before its closing bracket and invents an "unclosed bracket" — a false positive that
-// fires ActionRetry against correct code, which the Bypass floor forbids. The second false-positive
+// fires a retry against correct code, which the Bypass floor forbids. The second false-positive
 // family the gate must not create is the JavaScript/TypeScript regex literal: where `//` really is
 // a comment, a lone `/` may still open a literal whose quotes and brackets are inert, so
 // checkBrackets applies the regexOpeners rule immediately after this gate.
@@ -218,7 +218,7 @@ func checkBrackets(content, lang string) Result {
 			// Inside a regex literal only the closing unescaped `/` matters: `\` escapes the next
 			// rune, and within a `[ … ]` character class a `/` is an ordinary rune. Quotes,
 			// backticks, brackets and `//` in here are inert — reading them as code is the false
-			// positive that fires ActionRetry against correct JS/TS.
+			// positive that fires a retry against correct JS/TS.
 			if inRegex {
 				switch {
 				case regexEscaped:

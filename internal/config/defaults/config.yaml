@@ -587,8 +587,8 @@ prune-tool-results: true
 # twice in a row, a tool result too big to afford, and a file read again unchanged. None of them
 # steers your model — each one either changes what the model sees AFTER a failure of its own, or
 # shapes the request without telling the model what to think — so they are on for every model and
-# stay on under --bypass. They are NOT Mechanisms: a row of the catalogue block further down can no
-# longer turn one off, and the seven keys below are the only way to take one away. Config-file only
+# stay on under --bypass. The retired `mechanisms:` block further down cannot turn one off — the
+# seven keys below are the only way to take one away. Config-file only
 # (no flag or env). Default: true.
 
 # Retry a turn that narrated where you asked for an action: when the model answers "fix this" or
@@ -941,29 +941,29 @@ ui:
 # bypass: false
 
 # =============================================================================
-# Catalogued small-model Mechanisms to enable, by canonical ID (Phase 4). Config-file only (no
-# flag or env). EVERY Mechanism ships OFF by default — enabled only once its A/B bench run has
-# proven it a win — so this block is how you opt one in, and a block that is absent or empty arms
-# nothing at all. Map each ID to true to enable it; an unknown ID is a startup error that lists the
-# IDs this build knows. Bypass still wins: an enabled Mechanism does not fire under --bypass. The
-# shipped catalogue is EMPTY (ADR 0071) — the wave's per-row verdicts are in the archived map at
-# docs/design/archived/mechanism-catalogue.md — so in a stock build this block has nothing to name,
-# and an ID retired by that wave earns a one-line notice rather than a refusal.
+# The retired catalogue key. It still parses and it drives NOTHING: the catalogue it once named is
+# gone (ADR 0071) — six rows became Floor guards above, each with its own top-level key, and
+# fourteen retired outright — so there is nothing here to enable and --bypass has nothing here to
+# switch off. The key is kept so a configuration saved before the removal is tolerated rather than
+# refused: an ID on the retired roll earns a one-line startup notice naming what governs that
+# behaviour now, or saying it is simply ignored, while an ID this build has never heard of is still
+# a startup error listing the IDs it knows. The wave's per-row verdicts are in the archived map at
+# docs/design/archived/mechanism-catalogue.md. Config-file only (no flag or env).
 #
 # THE RECOVERY GUARANTEES ARE NOT IN HERE (ADR 0071). The guards every model benefits from — the
 # empty-reply recovery, the narrated-instead-of-acted recovery and their four siblings — are Floor
 # guards: plain engine behaviour, on in every arm including --bypass, each switched by its own
 # top-level key rather than by a row of this block.
 #
-# NOTHING IN HERE IS RECOMMENDED for a small context window: the reducer that used to be, the
-# oversized-tool-result cap, is now the tool-result-cap Floor guard above and is already on.
+# The reducer that used to be recommended for a small context window, the oversized-tool-result
+# cap, is now the tool-result-cap Floor guard above and is already on.
 #
 # CAVEAT (ADR 0016): a non-empty mechanisms: block means manual control — a Validated set
 # matching your model (see below) is then NOT auto-applied; apogee prints a one-line notice
 # naming it instead. Leave this block commented out to let Validated sets apply automatically.
 #
 # mechanisms:
-#   <id>: true    # a lab surface: the IDs a build knows are what `--bypass` switches off
+#   <id>: true    # tolerated for a saved configuration; nothing here arms anything
 
 # =============================================================================
 # Validated sets (ADR 0016): per-model Mechanism sets bench-proven SAFE (non-inferior to

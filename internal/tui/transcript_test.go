@@ -191,7 +191,7 @@ func TestTranscriptToolCallNarrationEdges(t *testing.T) {
 // StreamReset discards the superseded tokens
 // ----------------------------------------------------------------------------
 
-// A StreamResetEvent (an ActionRetry re-stream) discards the in-progress buffer; only the
+// A StreamResetEvent (an Outcome{Retry} re-stream) discards the in-progress buffer; only the
 // re-stream's accepted text is committed.
 func TestTranscriptStreamResetDiscards(t *testing.T) {
 	tr := feed(

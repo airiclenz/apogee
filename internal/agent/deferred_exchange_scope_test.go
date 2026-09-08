@@ -5,7 +5,8 @@ package agent
 // fault (abandonTurn) or an Esc-path AbortExchange — and is truncated-then-restored (never doubled)
 // when a cancelled Turn is rolled back. They drive the real loop with a SYNTHETIC deferring hook —
 // the catalogued row that used to supply the fan-out retired in v0.20.0 (ADR 0071), while
-// ActionDefer stays lab API — using the directive marker as the discriminator: a stale directive
+// Outcome{Defer} stays part of the Reaction API — using the directive marker as the
+// discriminator: a stale directive
 // would ride the NEXT Exchange's first request, and a doubled one would round-trip through the
 // snapshot.
 

@@ -18,7 +18,7 @@ import (
 // quiescent-boundary state of the loop that Config does not re-supply on Resume:
 //
 //   - conversation : the role-tagged message history (with tool-call/result pairing and
-//     per-message Extra wire fields) plus the pending ActionDefer queue, serialized by
+//     per-message Extra wire fields) plus the pending Outcome{Defer} queue, serialized by
 //     domain.Conversation itself.
 //   - turnIndex    : the 0-based index of the next Turn, so Resume continues the Exchange at
 //     the right Turn rather than re-zeroing it (the P0.6 gap P1.6 closes).

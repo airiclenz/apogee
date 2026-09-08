@@ -182,8 +182,8 @@ func TestRetryView_RepeatedRepairFailGetsCorrectionNotToolLoop(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // viewCaptureHook records the conversation View() it is handed on each post-response pass that
-// reaches it. A catalogued ActionRetry short-circuits the cascade before the experimental
-// hooks, so this only fires on a pass whose response STANDS (the retry pass's recovered reply)
+// reaches it. A builtin Outcome{Retry} short-circuits the cascade before the armed
+// reactions, so this only fires on a pass whose response STANDS (the retry pass's recovered reply)
 // — exactly the committedLen-bounded View() under test. It keeps the ConversationView itself so
 // the test can exercise the real LastUser / ResultFor helpers the scanners key on; the view is
 // stable once its pass's response stands (the loop appends the committed message to a.conv, not

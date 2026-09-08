@@ -37,7 +37,7 @@ import (
 //     inspect-and-do-nothing invocation books nothing.
 //   - At post-response the first Retry STOPS THE LEG it fires in, whatever retry budget the loop
 //     has left: that is what both chains this replaces did — the Floor guards' first-guard-to-fire
-//     and the retired hook runner's ActionRetry short-circuit — and the budget is a LOOP concern
+//     and the retired hook runner's retry short-circuit — and the budget is a LOOP concern
 //     deciding only whether the Turn re-streams. The one place the budget reaches the cascade is the handover
 //     between the legs: a builtin Retry the loop WILL act on takes the Turn away from the armed
 //     leg, while one it cannot act on (budget spent) lets the armed leg run on the untouched

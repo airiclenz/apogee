@@ -6,7 +6,7 @@ import (
 )
 
 // The heuristic checker's contract is that it reports only unambiguous breakage: a false positive
-// fires ActionRetry against correct code and costs a Turn, which is exactly the regression the
+// fires a retry against correct code and costs a Turn, which is exactly the regression the
 // Bypass floor forbids. This is the negative table — valid code in every language the checker
 // claims to understand, with the constructs that used to trip it: `//` where it is floor division
 // or a regex literal rather than a comment, JavaScript/TypeScript regex literals holding a quote,

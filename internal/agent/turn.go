@@ -69,7 +69,7 @@ type turnRun struct {
 	// on a 200 mid-stream, past every retry the client could make. One re-send costs a momentary
 	// blip a stutter instead of the whole exchange; a second fault of any class is not a blip, so
 	// it surfaces exactly as it did before the re-stream existed. The latch is deliberately its own
-	// budget: maxPostResponseRetries bounds hook-driven ActionRetry and foldSpent bounds the
+	// budget: maxPostResponseRetries bounds a Reaction-driven Outcome{Retry} and foldSpent bounds the
 	// overflow fold — different remedies for different failures, none of them spending another's.
 	restreamSpent bool
 }

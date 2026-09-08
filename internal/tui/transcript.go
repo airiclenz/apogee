@@ -1099,7 +1099,7 @@ func (t *transcript) appendToken(text string, run runRef) {
 }
 
 // discardPending drops the in-progress assistant buffer when the agent at depth re-streams its
-// Turn. A StreamResetEvent signals the loop is re-streaming (an ActionRetry post-response
+// Turn. A StreamResetEvent signals the loop is re-streaming (an Outcome{Retry} post-response
 // decision re-called the Upstream), so the tokens accumulated so far are superseded and
 // must never be committed (events.go contract). The re-stream's tokens arrive next and the
 // Turn's MessageEvent carries the final, accepted text.

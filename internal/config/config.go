@@ -1474,11 +1474,12 @@ type fileConfig struct {
 	// spelling to paste (configmigrate.go): a profile is per-model now, so a config that still
 	// spells it must be told rather than silently unread.
 	ModelProfiles map[string]modelProfileConfig `yaml:"model-profiles"`
-	// Mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4): a map of
-	// canonical mechanism ID → enabled. File-only (no flag/env), like mcp-servers. Absent/empty ⇒
-	// no Mechanism is enabled — ALL default OFF (D1, default-off until bench-proven), so an entry
-	// is required to turn one on. An unknown ID is a loud startup error listing the known
-	// catalogue; Bypass still disables enabled non-off-ramp Mechanisms (ADR 0006).
+	// Mechanisms is the retired `mechanisms:` key: a map of catalogue ID → enabled that still
+	// parses and drives NOTHING (ADR 0076 decision 11). The catalogue it once named is gone — six
+	// rows became Floor guards under their own top-level keys and fourteen retired outright
+	// (ADR 0071) — so the block reaches the Options only for the Drivers to turn into the retired
+	// roll's notices (internal/mechanisms). File-only (no flag/env), like mcp-servers. It is kept
+	// so a saved configuration naming a removed ID is tolerated rather than refused.
 	Mechanisms map[string]bool `yaml:"mechanisms"`
 	// ValidatedSets configures the Validated-set runtime surface (ADR 0016 and its 2026-07-19
 	// realisation). File-only (no flag/env), like mechanisms. Absent ⇒ the surface is ON with no

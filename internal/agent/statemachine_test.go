@@ -5,7 +5,7 @@ package agent
 // tool dispatch through Approval → post-tool-result → quiescent boundary. These tests
 // assert: a multi-Turn tool Exchange completes; Approval is consulted in Ask-Before and
 // bypassed in Plan; cancellation mid-tool yields StatusCancelled + a resumable snapshot; a
-// panicking tool yields an ErrorEvent and the loop survives; and the ActionDefer
+// panicking tool yields an ErrorEvent and the loop survives; and the Outcome{Defer}
 // feed-forward is Exchange-scoped — expired at the Exchange boundary, never crossing into the
 // next Exchange (item 7 / F6).
 
@@ -706,7 +706,7 @@ func retryOnceReaction(done *bool) domain.Reaction {
 	})
 }
 
-// TestStep_RetryEmitsStreamReset proves an ActionRetry re-streams the Turn and emits a
+// TestStep_RetryEmitsStreamReset proves an Outcome{Retry} re-streams the Turn and emits a
 // StreamResetEvent first, so a streaming observer discards the superseded tokens; the
 // committed final message is the retried response, not the draft.
 func TestStep_RetryEmitsStreamReset(t *testing.T) {
