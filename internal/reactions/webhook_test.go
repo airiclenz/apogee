@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // TestWebhookSenderPostsTheJSONWithBothKindsOfHeader is the round trip the webhook half exists
@@ -48,13 +50,17 @@ func TestWebhookSenderPostsTheJSONWithBothKindsOfHeader(t *testing.T) {
 		Workspace: "/work/space",
 		Status:    "completed",
 	}
-	hook := Hook{
-		Name:       "ping",
-		Events:     []Event{ExchangeFinished},
-		Webhook:    server.URL + "/fire",
-		Headers:    map[string]string{"X-Source": "apogee-test"},
-		HeadersEnv: map[string]string{"Authorization": "APOGEE_HOOK_TEST_TOKEN"},
-		Timeout:    10 * time.Second,
+	hook := domain.Reaction{
+		ID:     "ping",
+		Origin: domain.OriginUser,
+		Class:  domain.ClassObserve,
+		On:     []Event{ExchangeFinished},
+		Handler: domain.WebhookHandler{
+			URL:        server.URL + "/fire",
+			Headers:    map[string]string{"X-Source": "apogee-test"},
+			HeadersEnv: map[string]string{"Authorization": "APOGEE_HOOK_TEST_TOKEN"},
+		},
+		Timeout: 10 * time.Second,
 	}
 
 	// DefaultExecutor rather than webhookSender directly, so the dispatch on `webhook:` is
@@ -88,10 +94,12 @@ func TestWebhookSenderReportsANonSuccessStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	hook := Hook{
-		Name:    "ping",
-		Events:  []Event{ExchangeFinished},
-		Webhook: server.URL,
+	hook := domain.Reaction{
+		ID:      "ping",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{ExchangeFinished},
+		Handler: domain.WebhookHandler{URL: server.URL},
 		Timeout: 10 * time.Second,
 	}
 
@@ -116,12 +124,16 @@ func TestWebhookSenderRefusesToSendWhenTheHeaderVariableIsUnset(t *testing.T) {
 	}))
 	defer server.Close()
 
-	hook := Hook{
-		Name:       "ping",
-		Events:     []Event{ExchangeFinished},
-		Webhook:    server.URL,
-		HeadersEnv: map[string]string{"Authorization": "APOGEE_HOOK_TEST_ABSENT_TOKEN"},
-		Timeout:    10 * time.Second,
+	hook := domain.Reaction{
+		ID:     "ping",
+		Origin: domain.OriginUser,
+		Class:  domain.ClassObserve,
+		On:     []Event{ExchangeFinished},
+		Handler: domain.WebhookHandler{
+			URL:        server.URL,
+			HeadersEnv: map[string]string{"Authorization": "APOGEE_HOOK_TEST_ABSENT_TOKEN"},
+		},
+		Timeout: 10 * time.Second,
 	}
 
 	err := webhookSender{}.Run(context.Background(), hook, Payload{Event: ExchangeFinished})
@@ -154,10 +166,12 @@ func TestWebhookSenderReportsTheDeadlineOnAStalledEndpoint(t *testing.T) {
 	defer server.Close()
 	defer close(release)
 
-	hook := Hook{
-		Name:    "ping",
-		Events:  []Event{ExchangeFinished},
-		Webhook: server.URL,
+	hook := domain.Reaction{
+		ID:      "ping",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{ExchangeFinished},
+		Handler: domain.WebhookHandler{URL: server.URL},
 		Timeout: 150 * time.Millisecond,
 	}
 

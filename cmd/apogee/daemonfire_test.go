@@ -897,10 +897,12 @@ func TestDaemonFireStampsTheScheduleOnItsHookPayload(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fired.json")
 	harness := newDaemonFireHarness(t, config.Options{
 		Endpoint: "http://box.invalid",
-		Hooks: []reactions.Hook{{
-			Name:    "record",
-			Events:  []reactions.Event{reactions.ExchangeFinished},
-			Command: []string{"sh", "-c", `cat > "$0"`, marker},
+		Hooks: []domain.Reaction{{
+			ID:      "record",
+			Origin:  domain.OriginUser,
+			Class:   domain.ClassObserve,
+			On:      []reactions.Event{reactions.ExchangeFinished},
+			Handler: domain.ArgvHandler{Argv: []string{"sh", "-c", `cat > "$0"`, marker}},
 			Timeout: 10 * time.Second,
 		}},
 	})
@@ -930,10 +932,12 @@ func TestDaemonFireLogsAFailingHookAsOneSanitisedLine(t *testing.T) {
 
 	harness := newDaemonFireHarness(t, config.Options{
 		Endpoint: "http://box.invalid",
-		Hooks: []reactions.Hook{{
-			Name:    "record",
-			Events:  []reactions.Event{reactions.ExchangeFinished},
-			Command: []string{"sh", "-c", "printf 'boom 100%% done\\n' >&2; exit 1"},
+		Hooks: []domain.Reaction{{
+			ID:      "record",
+			Origin:  domain.OriginUser,
+			Class:   domain.ClassObserve,
+			On:      []reactions.Event{reactions.ExchangeFinished},
+			Handler: domain.ArgvHandler{Argv: []string{"sh", "-c", "printf 'boom 100%% done\\n' >&2; exit 1"}},
 			Timeout: 10 * time.Second,
 		}},
 	})

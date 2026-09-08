@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -55,8 +56,8 @@ const (
 	maxErrorStderr = 240
 )
 
-// commandExecutor runs a Hook's `command:` argv. It holds only the workspace root, because that is
-// the whole fence: everything else about one run comes from the Hook and the firing.
+// commandExecutor runs an entry's `command:` argv. It holds only the workspace root, because that
+// is the whole fence: everything else about one run comes from the entry and the firing.
 //
 // It is safe for concurrent use — it keeps no per-run state — which the Executor contract requires,
 // since one executor serves every Hook and each Hook has a worker of its own.
@@ -64,28 +65,29 @@ type commandExecutor struct {
 	workspaceRoot string
 }
 
-// Run executes the Hook's argv with the payload on stdin, and reports what went wrong in the words
-// the Driver puts in front of the user. The Runner prefixes the Hook's name and event, so the
-// message here says only what happened: `exit 3: …`, `timed out after 30s`, or the refusal that
+// Run executes the entry's argv with the payload on stdin, and reports what went wrong in the
+// words the Driver puts in front of the user. The Runner prefixes the entry's name and event, so
+// the message here says only what happened: `exit 3: …`, `timed out after 30s`, or the refusal that
 // stopped the program from being run at all.
 //
-// The context is already bounded by the Hook's Timeout by the time it arrives, and is cancelled
+// The context is already bounded by the entry's Timeout by the time it arrives, and is cancelled
 // when the Runner is closing; both end the child, and only the deadline is reported — a
 // cancellation is apogee's own shutdown and the Runner drops it.
-func (c commandExecutor) Run(ctx context.Context, h Hook, p Payload) error {
-	if len(h.Command) == 0 {
+func (c commandExecutor) Run(ctx context.Context, r domain.Reaction, p Payload) error {
+	handler, ok := r.Handler.(domain.ArgvHandler)
+	if !ok || len(handler.Argv) == 0 {
 		return errors.New("no command to run")
 	}
 	body, err := encodePayload(p)
 	if err != nil {
 		return err
 	}
-	program, err := c.resolveProgram(h.Command[0])
+	program, err := c.resolveProgram(handler.Argv[0])
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, program, h.Command[1:]...)
+	cmd := exec.CommandContext(ctx, program, handler.Argv[1:]...)
 	cmd.Stdin = bytes.NewReader(body)
 	cmd.Stdout = io.Discard
 	stderr := &cappedWriter{limit: maxStderr}
@@ -97,7 +99,7 @@ func (c commandExecutor) Run(ctx context.Context, h Hook, p Payload) error {
 	said := stderrTail(stderr.String())
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return fmt.Errorf("timed out after %s%s", h.Timeout, said)
+		return fmt.Errorf("timed out after %s%s", r.Timeout, said)
 	case runErr == nil:
 		return nil
 	}
@@ -105,10 +107,10 @@ func (c commandExecutor) Run(ctx context.Context, h Hook, p Payload) error {
 	if errors.As(runErr, &exitErr) {
 		return fmt.Errorf("exit %d%s", exitErr.ExitCode(), said)
 	}
-	return fmt.Errorf("could not run %s: %w%s", h.Command[0], runErr, said)
+	return fmt.Errorf("could not run %s: %w%s", handler.Argv[0], runErr, said)
 }
 
-// resolveProgram turns the Hook's argv[0] into the absolute program apogee will execute, or the
+// resolveProgram turns the entry's argv[0] into the absolute program apogee will execute, or the
 // refusal it earns. It is resolveKeyProgram's rule, verbatim in behaviour.
 //
 // An argv[0] carrying a path separator is made absolute FIRST, against apogee's own working

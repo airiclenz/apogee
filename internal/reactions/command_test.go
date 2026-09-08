@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // requireShell skips a test that scripts its Hook with `sh`. Every assertion in this file is about
@@ -22,12 +24,14 @@ func requireShell(t *testing.T) {
 	}
 }
 
-// shellHook builds a command Hook that runs one shell script under a generous timeout.
-func shellHook(name, script string) Hook {
-	return Hook{
-		Name:    name,
-		Events:  []Event{TurnFinished},
-		Command: []string{"sh", "-c", script},
+// shellHook builds a command entry that runs one shell script under a generous timeout.
+func shellHook(name, script string) domain.Reaction {
+	return domain.Reaction{
+		ID:      name,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{TurnFinished},
+		Handler: domain.ArgvHandler{Argv: []string{"sh", "-c", script}},
 		Timeout: 10 * time.Second,
 	}
 }
@@ -158,10 +162,12 @@ func TestCommandExecutorRefusesAProgramInsideTheWorkspace(t *testing.T) {
 		t.Fatalf("write the program: %v", err)
 	}
 
-	hook := Hook{
-		Name:    "planted",
-		Events:  []Event{TurnFinished},
-		Command: []string{program},
+	hook := domain.Reaction{
+		ID:      "planted",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{TurnFinished},
+		Handler: domain.ArgvHandler{Argv: []string{program}},
 		Timeout: 10 * time.Second,
 	}
 

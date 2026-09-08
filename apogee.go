@@ -625,38 +625,35 @@ type Session = domain.Session
 func DecodeSession(data []byte) (Session, error) { return domain.DecodeSession(data) }
 
 // ----------------------------------------------------------------------------
-// Hooks (internal/reactions) — observe-only Driver-side reactions (ADR 0073)
+// The observe lane (internal/reactions) — user-origin Reactions on the notice
+// Moments, run out of process by a Driver (ADR 0073, ADR 0076)
 // ----------------------------------------------------------------------------
 
-// Hook is one entry of the user's global `hooks:` list: the events it fires on, the one
-// action it takes (an argv command or a webhook POST), and the workspace it is scoped to.
-// A Hook is the HOST's reaction to the engine's event stream, not a model action: nothing it
-// prints or answers reaches the model, the conversation or the Session record, and it can
-// neither veto nor delay the loop. It is unrelated to a seam Moment, which is where a Reaction
+// ReactionPayload is the JSON document a fired observe Reaction receives — on stdin for a
+// command, as the POST body for a webhook. Its field names are a documented contract for the
+// user's script.
+type ReactionPayload = reactions.Payload
+
+// RunnerOptions are the facts a ReactionRunner cannot derive: the sink it decorates, the
+// workspace it is rooted in, the Schedule a Firing runs for, where failures are reported, and
+// how an entry reaches the outside world.
+type RunnerOptions = reactions.Options
+
+// ReactionRunner is the observe-only EventSink decorator that fires the user's observe
+// Reactions. A Driver installs one as Config.Events, wrapping whatever sink it already had;
+// Emit never blocks the loop, and Close drains the workers within the grace its context allows.
+//
+// Nothing it runs reaches the model, the conversation or the Session record, and it can neither
+// veto nor delay the loop — which is what class observe means. A seam Reaction, by contrast,
 // fires INSIDE the loop.
-type Hook = reactions.Hook
+type ReactionRunner = reactions.Runner
 
-// HookEvent names one of the five post-hoc moments a Hook may fire on, spelled as the
-// `events:` list spells it. It is the Hook vocabulary, not the engine's Event sum type.
-type HookEvent = reactions.Event
-
-// HookPayload is the JSON document a fired Hook receives — on stdin for a command, as the
-// POST body for a webhook. Its field names are a documented contract for the user's script.
-type HookPayload = reactions.Payload
-
-// HookOptions are the facts a HookRunner cannot derive: the sink it decorates, the workspace
-// it is rooted in, the Schedule a Firing runs for, where failures are reported, and how a
-// Hook reaches the outside world.
-type HookOptions = reactions.Options
-
-// HookRunner is the observe-only EventSink decorator that fires Hooks. A Driver installs one
-// as Config.Events, wrapping whatever sink it already had; Emit never blocks the loop, and
-// Close drains the workers within the grace its context allows.
-type HookRunner = reactions.Runner
-
-// NewHookRunner builds a HookRunner over a Hook list, keeping the entries active at the given
-// workspace and starting one worker per survivor. See internal/reactions for the contract.
-func NewHookRunner(list []Hook, o HookOptions) (*HookRunner, error) { return reactions.New(list, o) }
+// NewReactionRunner builds a ReactionRunner over a list of user-origin observe Reactions,
+// keeping the entries active at the given workspace and starting one worker per survivor. See
+// internal/reactions for the contract.
+func NewReactionRunner(list []Reaction, o RunnerOptions) (*ReactionRunner, error) {
+	return reactions.New(list, o)
+}
 
 // ----------------------------------------------------------------------------
 // Event lines (internal/eventjson) — the versioned JSONL rendering (ADR 0075)
@@ -667,7 +664,7 @@ func NewHookRunner(list []Hook, o HookOptions) (*HookRunner, error) { return rea
 // run_finished frame pair. It is what `apogee headless --format json` writes to stdout, and it is
 // re-exported so any Driver can produce the same documented stream. Wrap gives it the sink it
 // displaces — every Event is forwarded on, whether or not a line was written for it — and it
-// belongs OUTSIDE a HookRunner, never inside one: writing is lossless and therefore blocking.
+// belongs OUTSIDE a ReactionRunner, never inside one: writing is lossless and therefore blocking.
 type EventLines = eventjson.Writer
 
 // EventLinesOptions are the facts an EventLines cannot derive: the run's session id (empty until

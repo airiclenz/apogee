@@ -1,6 +1,7 @@
 package reactions
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,12 +81,26 @@ func TestParseEvent(t *testing.T) {
 }
 
 // validHook is the smallest entry that passes, for a table to vary one field of.
-func validHook() Hook {
-	return Hook{
-		Name:    "notify",
-		Events:  []Event{TurnFinished},
-		Command: []string{"say", "done"},
+func validHook() domain.Reaction {
+	return domain.Reaction{
+		ID:      "notify",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{TurnFinished},
+		Handler: domain.ArgvHandler{Argv: []string{"say", "done"}},
 		Timeout: 30 * time.Second,
+	}
+}
+
+// webhookHook is the smallest webhook entry that passes.
+func webhookHook(handler domain.WebhookHandler) domain.Reaction {
+	return domain.Reaction{
+		ID:      "post",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{Error},
+		Handler: handler,
+		Timeout: time.Second,
 	}
 }
 
@@ -97,122 +112,95 @@ func TestHookValidateAcceptsTheValidShapes(t *testing.T) {
 
 	cases := []struct {
 		name string
-		hook Hook
+		hook domain.Reaction
 	}{
 		{"command", validHook()},
-		{"command scoped to a workspace", func() Hook {
+		{"command scoped to a workspace", func() domain.Reaction {
 			h := validHook()
 			h.Workspace = "/work/repo"
 			return h
 		}()},
-		{"command on several events", func() Hook {
+		{"command on several events", func() domain.Reaction {
 			h := validHook()
-			h.Events = []Event{TurnFinished, ExchangeFinished, FileChanged, ApprovalWaiting, Error}
+			h.On = []Event{TurnFinished, ExchangeFinished, FileChanged, ApprovalWaiting, Error}
 			return h
 		}()},
-		{"webhook", Hook{
-			Name:    "post",
-			Events:  []Event{Error},
-			Webhook: "https://example.test/hook",
-			Timeout: time.Second,
-		}},
-		{"webhook with literal headers", Hook{
-			Name:    "post",
-			Events:  []Event{Error},
-			Webhook: "http://example.test/hook",
+		{"webhook", webhookHook(domain.WebhookHandler{URL: "https://example.test/hook"})},
+		{"webhook with literal headers", webhookHook(domain.WebhookHandler{
+			URL:     "http://example.test/hook",
 			Headers: map[string]string{"X-Origin": "apogee"},
-			Timeout: time.Second,
-		}},
-		{"webhook with env headers", Hook{
-			Name:       "post",
-			Events:     []Event{Error},
-			Webhook:    "https://example.test/hook",
+		})},
+		{"webhook with env headers", webhookHook(domain.WebhookHandler{
+			URL:        "https://example.test/hook",
 			HeadersEnv: map[string]string{"Authorization": "APOGEE_HOOK_TOKEN"},
-			Timeout:    time.Second,
-		}},
+		})},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 
-			if err := c.hook.Validate(); err != nil {
+			if err := Validate(c.hook); err != nil {
 				t.Errorf("Validate() = %v, want no error for a valid %s entry", err, c.name)
 			}
 		})
 	}
 }
 
-// TestHookValidateRefusesEachRule checks every rule of the entry shape, and that the message
-// names the entry so a user with several Hooks is told which line to fix.
+// TestHookValidateRefusesEachRule checks every rule of the entry shape this package still owns —
+// the exactly-one-action and headers-belong-to-a-webhook rules moved to the config layer with the
+// Hook struct, since a domain.Reaction carries one Handler — and that the message names the entry
+// so a user with several entries is told which line to fix.
 func TestHookValidateRefusesEachRule(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name     string
-		hook     Hook
+		hook     domain.Reaction
 		wantText string
 		unnamed  bool
 	}{
-		{name: "no name", hook: func() Hook {
+		{name: "no name", hook: func() domain.Reaction {
 			h := validHook()
-			h.Name = "  "
+			h.ID = "  "
 			return h
 		}(), wantText: "no name", unnamed: true},
-		{name: "no events", hook: func() Hook {
+		{name: "no events", hook: func() domain.Reaction {
 			h := validHook()
-			h.Events = nil
+			h.On = nil
 			return h
 		}(), wantText: "no events"},
-		{name: "unknown event", hook: func() Hook {
+		{name: "unknown event", hook: func() domain.Reaction {
 			h := validHook()
-			h.Events = []Event{"turn-started"}
+			h.On = []Event{"turn-started"}
 			return h
 		}(), wantText: "unknown hook event"},
-		{name: "both actions", hook: func() Hook {
+		{name: "empty argv", hook: func() domain.Reaction {
 			h := validHook()
-			h.Webhook = "https://example.test/hook"
-			return h
-		}(), wantText: "exactly one"},
-		{name: "neither action", hook: func() Hook {
-			h := validHook()
-			h.Command = nil
-			return h
-		}(), wantText: "exactly one"},
-		{name: "blank argv[0]", hook: func() Hook {
-			h := validHook()
-			h.Command = []string{"   ", "done"}
+			h.Handler = domain.ArgvHandler{}
 			return h
 		}(), wantText: "must not be blank"},
-		{name: "headers on a command", hook: func() Hook {
+		{name: "blank argv[0]", hook: func() domain.Reaction {
 			h := validHook()
-			h.Headers = map[string]string{"X-Origin": "apogee"}
+			h.Handler = domain.ArgvHandler{Argv: []string{"   ", "done"}}
 			return h
-		}(), wantText: "belong to a `webhook:` entry"},
-		{name: "headers-env on a command", hook: func() Hook {
-			h := validHook()
-			h.HeadersEnv = map[string]string{"Authorization": "TOKEN"}
-			return h
-		}(), wantText: "belong to a `webhook:` entry"},
-		{name: "relative webhook", hook: Hook{
-			Name: "post", Events: []Event{Error}, Webhook: "example.test/hook", Timeout: time.Second,
-		}, wantText: "absolute http:// or https:// URL"},
-		{name: "non-http webhook", hook: Hook{
-			Name: "post", Events: []Event{Error}, Webhook: "ftp://example.test/hook", Timeout: time.Second,
-		}, wantText: "absolute http:// or https:// URL"},
-		{name: "hostless webhook", hook: Hook{
-			Name: "post", Events: []Event{Error}, Webhook: "https:///hook", Timeout: time.Second,
-		}, wantText: "names no host"},
-		{name: "blank headers-env value", hook: Hook{
-			Name: "post", Events: []Event{Error}, Webhook: "https://example.test/hook",
-			HeadersEnv: map[string]string{"Authorization": " "}, Timeout: time.Second,
-		}, wantText: "maps to no environment variable name"},
-		{name: "zero timeout", hook: func() Hook {
+		}(), wantText: "must not be blank"},
+		{name: "relative webhook", hook: webhookHook(domain.WebhookHandler{URL: "example.test/hook"}),
+			wantText: "absolute http:// or https:// URL"},
+		{name: "non-http webhook", hook: webhookHook(domain.WebhookHandler{URL: "ftp://example.test/hook"}),
+			wantText: "absolute http:// or https:// URL"},
+		{name: "hostless webhook", hook: webhookHook(domain.WebhookHandler{URL: "https:///hook"}),
+			wantText: "names no host"},
+		{name: "blank headers-env value", hook: webhookHook(domain.WebhookHandler{
+			URL:        "https://example.test/hook",
+			HeadersEnv: map[string]string{"Authorization": " "},
+		}), wantText: "maps to no environment variable name"},
+		{name: "zero timeout", hook: func() domain.Reaction {
 			h := validHook()
 			h.Timeout = 0
 			return h
 		}(), wantText: "not a positive duration"},
-		{name: "negative timeout", hook: func() Hook {
+		{name: "negative timeout", hook: func() domain.Reaction {
 			h := validHook()
 			h.Timeout = -time.Second
 			return h
@@ -223,7 +211,7 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := c.hook.Validate()
+			err := Validate(c.hook)
 
 			if err == nil {
 				t.Fatalf("Validate() returned no error for %s, want one", c.name)
@@ -231,10 +219,29 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 			if !strings.Contains(err.Error(), c.wantText) {
 				t.Errorf("Validate() = %q, want it to contain %q", err, c.wantText)
 			}
-			if !c.unnamed && !strings.Contains(err.Error(), `hook "`+c.hook.Name+`"`) {
-				t.Errorf("Validate() = %q, want it to name the entry %q", err, c.hook.Name)
+			if !c.unnamed && !strings.Contains(err.Error(), `reaction "`+c.hook.ID+`"`) {
+				t.Errorf("Validate() = %q, want it to name the entry %q", err, c.hook.ID)
 			}
 		})
+	}
+}
+
+// TestHookValidateRefusesAReactionTheCoreRejects proves this package's own checks do not shadow
+// [domain.Reaction.Validate]: a shape only the core knows about — here a user entry claiming a
+// class the observe lane does not take — still earns the core's refusal.
+func TestHookValidateRefusesAReactionTheCoreRejects(t *testing.T) {
+	t.Parallel()
+
+	h := validHook()
+	h.Class = domain.ClassAdvise
+
+	err := Validate(h)
+
+	if err == nil {
+		t.Fatal("Validate() accepted a command entry claiming class advise, want the core's refusal")
+	}
+	if !errors.Is(err, domain.ErrInvalidReaction) {
+		t.Errorf("Validate() = %v, want it to wrap domain.ErrInvalidReaction", err)
 	}
 }
 
@@ -244,9 +251,9 @@ func TestValidateAllRefusesDuplicateNames(t *testing.T) {
 	t.Parallel()
 
 	first, second := validHook(), validHook()
-	second.Events = []Event{Error}
+	second.On = []Event{Error}
 
-	err := ValidateAll([]Hook{first, second})
+	err := ValidateAll([]domain.Reaction{first, second})
 
 	if err == nil {
 		t.Fatal("ValidateAll returned no error for two entries named \"notify\", want one")
@@ -256,14 +263,14 @@ func TestValidateAllRefusesDuplicateNames(t *testing.T) {
 	}
 }
 
-// TestValidateAllAcceptsDistinctEntriesAndAnEmptyList — no Hooks configured is the ordinary case.
+// TestValidateAllAcceptsDistinctEntriesAndAnEmptyList — no entries configured is the ordinary case.
 func TestValidateAllAcceptsDistinctEntriesAndAnEmptyList(t *testing.T) {
 	t.Parallel()
 
 	second := validHook()
-	second.Name = "post"
+	second.ID = "post"
 
-	if err := ValidateAll([]Hook{validHook(), second}); err != nil {
+	if err := ValidateAll([]domain.Reaction{validHook(), second}); err != nil {
 		t.Errorf("ValidateAll(two distinct entries) = %v, want no error", err)
 	}
 	if err := ValidateAll(nil); err != nil {
@@ -276,12 +283,12 @@ func TestValidateAllReportsAMalformedEntry(t *testing.T) {
 	t.Parallel()
 
 	broken := validHook()
-	broken.Name = "broken"
-	broken.Command = nil
+	broken.ID = "broken"
+	broken.Handler = domain.ArgvHandler{}
 
-	err := ValidateAll([]Hook{validHook(), broken})
+	err := ValidateAll([]domain.Reaction{validHook(), broken})
 
-	if err == nil || !strings.Contains(err.Error(), `hook "broken"`) {
+	if err == nil || !strings.Contains(err.Error(), `reaction "broken"`) {
 		t.Errorf("ValidateAll = %v, want the failure to name the broken entry", err)
 	}
 }
@@ -291,10 +298,10 @@ func TestSubscribedEventsIsTheUnion(t *testing.T) {
 	t.Parallel()
 
 	first, second := validHook(), validHook()
-	second.Name = "post"
-	second.Events = []Event{TurnFinished, Error}
+	second.ID = "post"
+	second.On = []Event{TurnFinished, Error}
 
-	got := SubscribedEvents([]Hook{first, second})
+	got := SubscribedEvents([]domain.Reaction{first, second})
 
 	want := map[Event]bool{TurnFinished: true, Error: true}
 	if len(got) != len(want) {

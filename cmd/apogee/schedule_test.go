@@ -1366,11 +1366,13 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	}
 	dir := t.TempDir()
 	bootMarker, reloadedMarker := filepath.Join(dir, "boot.json"), filepath.Join(dir, "reloaded.json")
-	recorder := func(name, marker string) reactions.Hook {
-		return reactions.Hook{
-			Name:    name,
-			Events:  []reactions.Event{reactions.ExchangeFinished},
-			Command: []string{"sh", "-c", `cat > "$0"`, marker},
+	recorder := func(name, marker string) domain.Reaction {
+		return domain.Reaction{
+			ID:      name,
+			Origin:  domain.OriginUser,
+			Class:   domain.ClassObserve,
+			On:      []reactions.Event{reactions.ExchangeFinished},
+			Handler: domain.ArgvHandler{Argv: []string{"sh", "-c", `cat > "$0"`, marker}},
 			Timeout: 10 * time.Second,
 		}
 	}
@@ -1382,8 +1384,8 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prevRunner })
 
-	live := newLiveSettings(config.Options{Hooks: []reactions.Hook{recorder("boot", bootMarker)}})
-	live.setHooks([]reactions.Hook{recorder("reloaded", reloadedMarker)})
+	live := newLiveSettings(config.Options{Hooks: []domain.Reaction{recorder("boot", bootMarker)}})
+	live.setHooks([]domain.Reaction{recorder("reloaded", reloadedMarker)})
 
 	w := scheduleWiring{
 		roots:   roots,

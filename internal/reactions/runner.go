@@ -35,7 +35,7 @@ const (
 // error is REPORTED to the Driver and otherwise discarded — nothing an executor produces
 // reaches the model, the conversation or the Session record.
 type Executor interface {
-	Run(ctx context.Context, h Hook, p Payload) error
+	Run(ctx context.Context, r domain.Reaction, p Payload) error
 }
 
 // Options are the facts a Runner cannot derive: what it decorates, where it is rooted, who it
@@ -116,7 +116,7 @@ type Runner struct {
 	closeErr  error
 }
 
-// hookSet is one generation of active Hooks: the workers that run them, the matcher built over
+// hookSet is one generation of active entries: the workers that run them, the matcher built over
 // exactly their subscribed events, and the context every job of theirs runs under. A Replace
 // builds a whole new generation rather than editing this one, so Emit never sees a half-swapped
 // list and the old generation's cancellation cannot reach the new one's jobs.
@@ -127,10 +127,10 @@ type hookSet struct {
 	cancel  context.CancelFunc
 }
 
-// worker is one active Hook and its queue. lastFailure is touched only by the worker's own
+// worker is one active entry and its queue. lastFailure is touched only by the worker's own
 // goroutine; the counters are touched from Emit's goroutine as well and are therefore atomic.
 type worker struct {
-	hook   Hook
+	hook   domain.Reaction
 	events map[Event]bool
 	queue  chan Payload
 	done   chan struct{}
@@ -150,7 +150,7 @@ type worker struct {
 //
 // It fails when an entry is malformed (ValidateAll's message names the entry), when a workspace
 // path cannot be resolved, or when a Hook would have to run with no Options.Exec to run it.
-func New(list []Hook, o Options) (*Runner, error) {
+func New(list []domain.Reaction, o Options) (*Runner, error) {
 	if err := ValidateAll(list); err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (r *Runner) fanOut(set *hookSet, f firing, now string) {
 			continue
 		}
 		payload := f.Payload
-		payload.Hook = w.hook.Name
+		payload.Hook = w.hook.ID
 		payload.Time = now
 		payload.Workspace = r.workspace
 		if r.schedule != nil {
@@ -237,7 +237,7 @@ func (r *Runner) fanOut(set *hookSet, f firing, now string) {
 func (r *Runner) noteDrop(w *worker) {
 	w.dropped.Add(1)
 	if w.dropReported.CompareAndSwap(false, true) {
-		r.emitReport(fmt.Sprintf("hook %s: dropped 1 event (queue full)", w.hook.Name))
+		r.emitReport(fmt.Sprintf("hook %s: dropped 1 event (queue full)", w.hook.ID))
 	}
 }
 
@@ -251,7 +251,7 @@ func (r *Runner) noteDrop(w *worker) {
 // whose tool result has not arrived — are forgotten, because the new generation starts with a
 // clean correlation map; a reload is a rare, human-initiated event and the alternative would be to
 // read one generation's map from another generation's goroutine.
-func (r *Runner) Replace(list []Hook) error {
+func (r *Runner) Replace(list []domain.Reaction) error {
 	if err := ValidateAll(list); err != nil {
 		return err
 	}
@@ -298,17 +298,17 @@ func (r *Runner) Close(ctx context.Context) error {
 }
 
 // buildSet reduces the list to the Hooks active at this root and starts a worker for each.
-func (r *Runner) buildSet(list []Hook) (*hookSet, error) {
-	active := make([]Hook, 0, len(list))
-	for _, h := range list {
-		scope, err := ResolveWorkspace(h.Workspace)
+func (r *Runner) buildSet(list []domain.Reaction) (*hookSet, error) {
+	active := make([]domain.Reaction, 0, len(list))
+	for _, entry := range list {
+		scope, err := ResolveWorkspace(entry.Workspace)
 		if err != nil {
-			return nil, h.errorf("%v", err)
+			return nil, reactionError(entry.ID, "%v", err)
 		}
 		if scope != "" && scope != r.workspace {
 			continue
 		}
-		active = append(active, h)
+		active = append(active, entry)
 	}
 	if len(active) > 0 && r.exec == nil {
 		return nil, fmt.Errorf("hooks: %d hook(s) are active here but no executor was supplied to run them", len(active))
@@ -321,10 +321,10 @@ func (r *Runner) buildSet(list []Hook) (*hookSet, error) {
 		ctx:     ctx,
 		cancel:  cancel,
 	}
-	for _, h := range active {
+	for _, entry := range active {
 		w := &worker{
-			hook:   h,
-			events: eventSet(h.Events),
+			hook:   entry,
+			events: eventSet(entry.On),
 			queue:  make(chan Payload, queueDepth),
 			done:   make(chan struct{}),
 		}
@@ -360,7 +360,7 @@ func (r *Runner) runOne(set *hookSet, w *worker, payload Payload) {
 		// failure line on every shutdown that killed a slow script.
 		return
 	}
-	line := fmt.Sprintf("hook %s (%s): %v", w.hook.Name, payload.Event, err)
+	line := fmt.Sprintf("hook %s (%s): %v", w.hook.ID, payload.Event, err)
 	if line == w.lastFailure {
 		return
 	}
@@ -394,7 +394,7 @@ func (r *Runner) drainSet(set *hookSet, ctx context.Context) error {
 func (r *Runner) reportDrops(set *hookSet) {
 	for _, w := range set.workers {
 		if dropped := w.dropped.Load(); dropped > 0 {
-			r.emitReport(fmt.Sprintf("hook %s: dropped %d events", w.hook.Name, dropped))
+			r.emitReport(fmt.Sprintf("hook %s: dropped %d events", w.hook.ID, dropped))
 		}
 	}
 }
@@ -409,7 +409,7 @@ func (r *Runner) emitReport(line string) {
 	r.report(line)
 }
 
-// eventSet indexes one Hook's events for the per-firing membership test.
+// eventSet indexes one entry's events for the per-firing membership test.
 func eventSet(events []Event) map[Event]bool {
 	set := make(map[Event]bool, len(events))
 	for _, e := range events {

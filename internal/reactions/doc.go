@@ -18,9 +18,8 @@
 // # The files, one line each
 //
 // hooks.go is the vocabulary and the entry shape — the five Event constants, which are the notice
-// Moments of the Reaction core under an alias (ADR 0076), Events/ParseEvent, the Hook struct a
-// config row decodes into, and the Validate/ValidateAll rules that refuse a malformed entry with
-// a sentence naming it.
+// Moments of the Reaction core under an alias (ADR 0076), Events/ParseEvent, and the
+// Validate/ValidateAll rules that refuse a malformed domain.Reaction with a sentence naming it.
 // payload.go is the JSON document a firing Hook receives on stdin or in a POST body — the
 // documented field contract, plus the small APOGEE_HOOK_* environment set Env derives from it.
 // match.go is the pure mapping from one domain.Event to the Hook events it produces, built over

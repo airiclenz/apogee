@@ -110,11 +110,9 @@ var (
 	_ apogee.ConfinementCaps
 	_ apogee.ConfinementBox
 	_ apogee.Session
-	_ apogee.Hook
-	_ apogee.HookEvent
-	_ apogee.HookPayload
-	_ apogee.HookOptions
-	_ apogee.HookRunner
+	_ apogee.ReactionPayload
+	_ apogee.RunnerOptions
+	_ apogee.ReactionRunner
 	_ apogee.EventLines
 	_ apogee.EventLinesOptions
 	_ apogee.RunStarted
@@ -128,7 +126,7 @@ var (
 	_ = apogee.IsReadOnly
 	_ = apogee.NewToolRegistry
 	_ = apogee.DecodeSession
-	_ = apogee.NewHookRunner
+	_ = apogee.NewReactionRunner
 	_ = apogee.NewEventLines
 )
 

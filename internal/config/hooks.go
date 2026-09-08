@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/reactions"
 )
 
@@ -15,10 +16,11 @@ import (
 // is noticed rather than waited on (ADR 0073, ratified call B).
 const defaultHookTimeout = 30 * time.Second
 
-// hookConfig is the on-disk schema for one entry of the global `hooks:` list. It mirrors
-// [reactions.Hook] with yaml tags and the two spellings only a FILE has — an event list written as
-// plain strings, and a timeout written as a duration like `30s` — which toHook maps across, so the
-// on-disk shape and the package's value type stay independently evolvable (mcpServerConfig's rule).
+// hookConfig is the on-disk schema for one entry of the global `hooks:` list. It mirrors the
+// user-origin observe [domain.Reaction] with yaml tags and the three spellings only a FILE has — an
+// event list written as plain strings, a timeout written as a duration like `30s`, and the two
+// actions written as sibling keys rather than one handler — which toHook maps across, so the
+// on-disk shape and the core's value type stay independently evolvable (mcpServerConfig's rule).
 //
 // Headers and HeadersEnv belong to a `webhook:` entry alone; HeadersEnv maps a header name to the
 // NAME of an environment variable holding its value, on the `api-key-env` precedent, so a token
@@ -35,29 +37,38 @@ type hookConfig struct {
 	Timeout    string            `yaml:"timeout"`
 }
 
-// toHook maps one on-disk entry onto the value the Runner fires: every event name parsed against
-// the closed vocabulary, an absent `timeout:` defaulted, and `workspace:` reduced to the one
+// toHook maps one on-disk entry onto the user-origin observe Reaction the Runner fires: every
+// event name parsed against the closed vocabulary, the one action the entry spells turned into the
+// handler that runs it, an absent `timeout:` defaulted, and `workspace:` reduced to the one
 // spelling both sides of the filter are compared as (ratified call C — `~` expanded, absolute,
 // symlinks evaluated). It reports the first thing it cannot map, naming the entry, so a user with
 // several Hooks is told which line to fix.
 //
-// It does NOT enforce the entry SHAPE — that is [reactions.Hook.Validate]'s, and validateHooks runs it
-// over the mapped value so the shape rules live in one place for every root.
-func (h hookConfig) toHook() (reactions.Hook, error) {
+// The two rules about the SIBLING keys live here — exactly one of `command:`/`webhook:`, and
+// headers belonging to a webhook — because this is the only place both fields still coexist: a
+// domain.Reaction carries one Handler and cannot express either fault. Everything else about the
+// entry shape is [reactions.Validate]'s, and validateHooks runs it over the mapped value so those
+// rules live in one place for every root.
+func (h hookConfig) toHook() (domain.Reaction, error) {
 	var events []reactions.Event
 	for _, name := range h.Events {
 		event, err := reactions.ParseEvent(name)
 		if err != nil {
-			return reactions.Hook{}, hookError(h.Name, "%v", err)
+			return domain.Reaction{}, hookError(h.Name, "%v", err)
 		}
 		events = append(events, event)
+	}
+
+	handler, err := h.handler()
+	if err != nil {
+		return domain.Reaction{}, err
 	}
 
 	timeout := defaultHookTimeout
 	if spelled := strings.TrimSpace(h.Timeout); spelled != "" {
 		parsed, err := time.ParseDuration(spelled)
 		if err != nil {
-			return reactions.Hook{}, hookError(h.Name,
+			return domain.Reaction{}, hookError(h.Name,
 				"timeout: %q is not a duration — write it as `30s` or `2m`", spelled)
 		}
 		timeout = parsed
@@ -65,19 +76,44 @@ func (h hookConfig) toHook() (reactions.Hook, error) {
 
 	workspace, err := h.resolvedWorkspace()
 	if err != nil {
-		return reactions.Hook{}, err
+		return domain.Reaction{}, err
 	}
 
-	return reactions.Hook{
-		Name:       h.Name,
-		Events:     events,
-		Command:    h.Command,
-		Webhook:    h.Webhook,
-		Headers:    h.Headers,
-		HeadersEnv: h.HeadersEnv,
-		Workspace:  workspace,
-		Timeout:    timeout,
+	return domain.Reaction{
+		ID:        h.Name,
+		Origin:    domain.OriginUser,
+		Class:     domain.ClassObserve,
+		On:        events,
+		Handler:   handler,
+		Workspace: workspace,
+		Timeout:   timeout,
 	}, nil
+}
+
+// handler turns the one action the entry spells into the handler that runs it, refusing an entry
+// that spells both or neither. `headers:`/`headers-env:` are refused on a command for the same
+// reason: they are the webhook's alone, and an entry carrying them beside a `command:` has been
+// written against the wrong action.
+func (h hookConfig) handler() (domain.Handler, error) {
+	hasCommand, hasWebhook := len(h.Command) > 0, strings.TrimSpace(h.Webhook) != ""
+	switch {
+	case hasCommand && hasWebhook:
+		return nil, hookError(h.Name, "both `command:` and `webhook:` are set — an entry takes exactly one")
+	case !hasCommand && !hasWebhook:
+		return nil, hookError(h.Name, "neither `command:` nor `webhook:` is set — an entry takes exactly one")
+	case hasCommand:
+		if len(h.Headers) > 0 || len(h.HeadersEnv) > 0 {
+			return nil, hookError(h.Name,
+				"`headers:`/`headers-env:` belong to a `webhook:` entry — a command carries none")
+		}
+		return domain.ArgvHandler{Argv: h.Command}, nil
+	default:
+		return domain.WebhookHandler{
+			URL:        h.Webhook,
+			Headers:    h.Headers,
+			HeadersEnv: h.HeadersEnv,
+		}, nil
+	}
 }
 
 // resolvedWorkspace reduces this entry's `workspace:` filter to its comparable spelling. An empty
@@ -100,11 +136,11 @@ func (h hookConfig) resolvedWorkspace() (string, error) {
 
 // toHooks maps the whole list, stopping at the first entry it cannot map. An empty list maps to
 // nil rather than an empty slice, so an absent block and an explicitly empty one resolve alike.
-func toHooks(list []hookConfig) ([]reactions.Hook, error) {
+func toHooks(list []hookConfig) ([]domain.Reaction, error) {
 	if len(list) == 0 {
 		return nil, nil
 	}
-	mapped := make([]reactions.Hook, 0, len(list))
+	mapped := make([]domain.Reaction, 0, len(list))
 	for _, entry := range list {
 		hook, err := entry.toHook()
 		if err != nil {
@@ -117,9 +153,10 @@ func toHooks(list []hookConfig) ([]reactions.Hook, error) {
 
 // validateHooks refuses a `hooks:` block that cannot be run, at PARSE time — beside
 // validateModelProfiles — so a mistyped event or a Hook with two actions is a startup refusal
-// naming the entry rather than a Hook that silently never fires. It is the mapping plus the two
-// shape checks the hooks package owns: [reactions.Hook.Validate] per entry, and [reactions.ValidateAll]
-// for the uniqueness of the names every failure notice and payload keys on.
+// naming the entry rather than a Hook that silently never fires. It is the mapping (which owns the
+// sibling-key rules) plus the two shape checks the reactions package owns: [reactions.Validate] per
+// entry, and [reactions.ValidateAll] for the uniqueness of the names every failure notice and
+// payload keys on.
 func validateHooks(list []hookConfig) error {
 	mapped, err := toHooks(list)
 	if err != nil {
@@ -137,7 +174,11 @@ func HookEnvNames(o Options) []string {
 	var names []string
 	seen := make(map[string]bool)
 	for _, hook := range o.Hooks {
-		for _, envName := range hook.HeadersEnv {
+		handler, ok := hook.Handler.(domain.WebhookHandler)
+		if !ok {
+			continue
+		}
+		for _, envName := range handler.HeadersEnv {
 			name := strings.TrimSpace(envName)
 			if name == "" || seen[name] {
 				continue

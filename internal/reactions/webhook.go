@@ -10,6 +10,9 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"time"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // maxResponseDrain bounds how much of a webhook's reply apogee reads before closing the body. The
@@ -19,9 +22,9 @@ import (
 // that streams a gigabyte back is therefore drained up to this bound and then hung up on.
 const maxResponseDrain = 64 << 10
 
-// webhookSender POSTs the payload to a Hook's `webhook:` URL. It carries no state at all: the
-// client is built per send because its Timeout is the HOOK's, and a client with no Transport of
-// its own uses http.DefaultTransport — so every Hook still shares one connection pool rather than
+// webhookSender POSTs the payload to an entry's `webhook:` URL. It carries no state at all: the
+// client is built per send because its Timeout is the ENTRY's, and a client with no Transport of
+// its own uses http.DefaultTransport — so every entry still shares one connection pool rather than
 // opening a fresh socket for each firing.
 //
 // It is safe for concurrent use, which the Executor contract requires.
@@ -34,26 +37,30 @@ type webhookSender struct{}
 // The headers are resolved BEFORE the request is sent, so a `headers-env:` entry naming a variable
 // that is not set fails without the endpoint ever hearing from us — the alternative is a POST that
 // arrives unauthenticated and is refused for a reason the user cannot see from here.
-func (webhookSender) Run(ctx context.Context, h Hook, p Payload) error {
+func (webhookSender) Run(ctx context.Context, r domain.Reaction, p Payload) error {
+	handler, ok := r.Handler.(domain.WebhookHandler)
+	if !ok {
+		return errors.New("no webhook to POST to")
+	}
 	body, err := encodePayload(p)
 	if err != nil {
 		return err
 	}
-	header, err := webhookHeaders(h)
+	header, err := webhookHeaders(handler)
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.Webhook, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, handler.URL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("could not build the request: %w", err)
 	}
 	request.Header = header
 	request.ContentLength = int64(len(body))
 
-	client := &http.Client{Timeout: h.Timeout}
+	client := &http.Client{Timeout: r.Timeout}
 	response, err := client.Do(request)
 	if err != nil {
-		return postFailure(h, err)
+		return postFailure(r.Timeout, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	_, _ = io.CopyN(io.Discard, response.Body, maxResponseDrain)
@@ -72,15 +79,15 @@ func (webhookSender) Run(ctx context.Context, h Hook, p Payload) error {
 // A variable that is not set is a failure naming the header and the variable and NEVER the value,
 // which is the whole reason `headers-env:` exists: the secret lives in the environment so that it
 // is never in the config file, and it must not leak into a failure line either.
-func webhookHeaders(h Hook) (http.Header, error) {
+func webhookHeaders(handler domain.WebhookHandler) (http.Header, error) {
 	header := http.Header{}
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", "apogee")
-	for _, name := range sortedKeys(h.Headers) {
-		header.Set(name, h.Headers[name])
+	for _, name := range sortedKeys(handler.Headers) {
+		header.Set(name, handler.Headers[name])
 	}
-	for _, name := range sortedKeys(h.HeadersEnv) {
-		envName := h.HeadersEnv[name]
+	for _, name := range sortedKeys(handler.HeadersEnv) {
+		envName := handler.HeadersEnv[name]
 		value, ok := os.LookupEnv(envName)
 		if !ok {
 			return nil, fmt.Errorf("header %s: the environment variable %s is not set", name, envName)
@@ -90,7 +97,7 @@ func webhookHeaders(h Hook) (http.Header, error) {
 	return header, nil
 }
 
-// sortedKeys orders a header map so two runs of the same Hook build the request the same way and
+// sortedKeys orders a header map so two runs of the same entry build the request the same way and
 // a failure names the same header every time — map order alone would make both arbitrary.
 func sortedKeys(m map[string]string) []string {
 	names := make([]string, 0, len(m))
@@ -102,13 +109,14 @@ func sortedKeys(m map[string]string) []string {
 }
 
 // postFailure words a transport-level failure. It deliberately drops the URL that net/http wraps
-// its errors with: the failure line is shown to the user by the Driver, the Hook's name is already
-// on it, and a webhook URL is exactly the kind of thing that carries a token in its path or query.
-func postFailure(h Hook, err error) error {
+// its errors with: the failure line is shown to the user by the Driver, the entry's name is
+// already on it, and a webhook URL is exactly the kind of thing that carries a token in its path
+// or query.
+func postFailure(timeout time.Duration, err error) error {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
 		if urlErr.Timeout() {
-			return fmt.Errorf("timed out after %s", h.Timeout)
+			return fmt.Errorf("timed out after %s", timeout)
 		}
 		err = urlErr.Err
 	}

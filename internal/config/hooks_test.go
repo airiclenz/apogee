@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/reactions"
 )
 
@@ -20,8 +21,9 @@ func writeHooksConfig(t *testing.T, body string) string {
 	return path
 }
 
-// A `hooks:` block resolves entry for entry onto the values a root's Runner fires: the events
-// parsed, the action carried across whole, an absent `timeout:` defaulted to the ratified 30s and a
+// A `hooks:` block resolves entry for entry onto the user-origin observe Reactions a root's Runner
+// fires: origin and class stamped, the events parsed, the one action the entry spells carried across
+// whole as the handler that runs it, an absent `timeout:` defaulted to the ratified 30s and a
 // spelled one parsed, and `workspace:` reduced to the comparable spelling with its leading `~`
 // expanded. The home directory is moved for the case rather than read, so the `~` rule is asserted
 // against a path this test owns.
@@ -59,10 +61,21 @@ hooks:
 	if err != nil {
 		t.Fatalf("resolve the expected workspace: %v", err)
 	}
-	if got, want := notify.Events, []reactions.Event{reactions.ExchangeFinished, reactions.Error}; !eventsEqual(got, want) {
+	if notify.ID != "notify" {
+		t.Errorf("notify id = %q; want the entry's own `name:`", notify.ID)
+	}
+	if notify.Origin != domain.OriginUser || notify.Class != domain.ClassObserve {
+		t.Errorf("notify origin/class = %q/%q; want %q/%q — a `hooks:` entry is the user's observe row",
+			notify.Origin, notify.Class, domain.OriginUser, domain.ClassObserve)
+	}
+	if got, want := notify.On, []reactions.Event{reactions.ExchangeFinished, reactions.Error}; !eventsEqual(got, want) {
 		t.Errorf("notify events = %v; want %v", got, want)
 	}
-	if got, want := strings.Join(notify.Command, " "), "notify-send apogee finished"; got != want {
+	argv, ok := notify.Handler.(domain.ArgvHandler)
+	if !ok {
+		t.Fatalf("notify handler = %T; want a domain.ArgvHandler for a `command:` entry", notify.Handler)
+	}
+	if got, want := strings.Join(argv.Argv, " "), "notify-send apogee finished"; got != want {
 		t.Errorf("notify command = %q; want %q", got, want)
 	}
 	if notify.Timeout != defaultHookTimeout {
@@ -78,13 +91,17 @@ hooks:
 	if bell.Timeout != 250*time.Millisecond {
 		t.Errorf("bell timeout = %v; want 250ms — a spelled duration replaces the default", bell.Timeout)
 	}
-	if bell.Webhook != "https://hooks.example.com/apogee" {
-		t.Errorf("bell webhook = %q; want the URL the file spells", bell.Webhook)
+	webhook, ok := bell.Handler.(domain.WebhookHandler)
+	if !ok {
+		t.Fatalf("bell handler = %T; want a domain.WebhookHandler for a `webhook:` entry", bell.Handler)
 	}
-	if got := bell.Headers["X-Source"]; got != "apogee" {
+	if webhook.URL != "https://hooks.example.com/apogee" {
+		t.Errorf("bell webhook = %q; want the URL the file spells", webhook.URL)
+	}
+	if got := webhook.Headers["X-Source"]; got != "apogee" {
 		t.Errorf("bell literal header = %q; want apogee", got)
 	}
-	if got := bell.HeadersEnv["Authorization"]; got != "APOGEE_HOOK_TOKEN" {
+	if got := webhook.HeadersEnv["Authorization"]; got != "APOGEE_HOOK_TOKEN" {
 		t.Errorf("bell headers-env value = %q; want the variable NAME the header is read from", got)
 	}
 	if bell.Workspace != "" {
@@ -116,6 +133,9 @@ func TestLoadFileConfigRefusesAnUnrunnableHook(t *testing.T) {
 		name string
 		body string
 		want string
+		// key is the prefix the refusal carries: the config layer's own `hook "…"` for a rule it
+		// owns, the reactions package's `reaction "…"` for one the Runner's Validate owns.
+		key string
 	}{
 		{
 			name: "duplicate names",
@@ -129,6 +149,7 @@ hooks:
     command: ["false"]
 `,
 			want: "must be unique",
+			key:  `reaction "notify"`,
 		},
 		{
 			name: "unknown event",
@@ -139,6 +160,7 @@ hooks:
     command: ["true"]
 `,
 			want: "unknown hook event",
+			key:  `hook "notify"`,
 		},
 		{
 			name: "both actions",
@@ -150,6 +172,7 @@ hooks:
     webhook: https://hooks.example.com/apogee
 `,
 			want: "exactly one",
+			key:  `hook "notify"`,
 		},
 		{
 			name: "no action",
@@ -159,6 +182,7 @@ hooks:
     events: [error]
 `,
 			want: "exactly one",
+			key:  `hook "notify"`,
 		},
 		{
 			name: "headers on a command",
@@ -171,6 +195,7 @@ hooks:
       X-Source: apogee
 `,
 			want: "belong to a `webhook:` entry",
+			key:  `hook "notify"`,
 		},
 		{
 			name: "webhook is not http",
@@ -181,6 +206,7 @@ hooks:
     webhook: ftp://files.example.com/drop
 `,
 			want: "absolute http:// or https:// URL",
+			key:  `reaction "notify"`,
 		},
 		{
 			name: "timeout is not a duration",
@@ -192,6 +218,7 @@ hooks:
     timeout: soon
 `,
 			want: "is not a duration",
+			key:  `hook "notify"`,
 		},
 	}
 
@@ -207,8 +234,8 @@ hooks:
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("refusal = %q; want it to explain %q", err, tc.want)
 			}
-			if !strings.Contains(err.Error(), `hook "notify"`) {
-				t.Errorf("refusal = %q; want the entry's own name so the user knows which line to fix", err)
+			if !strings.Contains(err.Error(), tc.key) {
+				t.Errorf("refusal = %q; want %s so the user knows which line to fix", err, tc.key)
 			}
 		})
 	}
@@ -234,11 +261,17 @@ func TestLoadFileConfigWithoutHooksResolvesNone(t *testing.T) {
 func TestHookEnvNamesDeduplicatesAndSorts(t *testing.T) {
 	t.Parallel()
 
-	opts := Options{Hooks: []reactions.Hook{
-		{Name: "bell", HeadersEnv: map[string]string{"Authorization": "TOKEN_B", "X-Trace": "TOKEN_A"}},
-		{Name: "page", HeadersEnv: map[string]string{"Authorization": "TOKEN_B"}},
-		{Name: "quiet", HeadersEnv: map[string]string{"X-Blank": "  "}},
-		{Name: "run", Command: []string{"true"}},
+	opts := Options{Hooks: []domain.Reaction{
+		{ID: "bell", Handler: domain.WebhookHandler{
+			HeadersEnv: map[string]string{"Authorization": "TOKEN_B", "X-Trace": "TOKEN_A"},
+		}},
+		{ID: "page", Handler: domain.WebhookHandler{
+			HeadersEnv: map[string]string{"Authorization": "TOKEN_B"},
+		}},
+		{ID: "quiet", Handler: domain.WebhookHandler{
+			HeadersEnv: map[string]string{"X-Blank": "  "},
+		}},
+		{ID: "run", Handler: domain.ArgvHandler{Argv: []string{"true"}}},
 	}}
 
 	got := HookEnvNames(opts)

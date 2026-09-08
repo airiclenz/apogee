@@ -812,14 +812,14 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		// this test owes it is the other half — a holder nobody edited hands back the list the run
 		// launched with, so a Firing raised before any `/settings` commit fires the session's Hooks
 		// rather than none at all.
-		Hooks: []reactions.Hook{hookEntry("boot", reactions.TurnFinished)},
+		Hooks: []domain.Reaction{hookEntry("boot", reactions.TurnFinished)},
 	}
 
 	// The unedited case, asserted around every apply below: seeded from the snapshot, handed back as
 	// a COPY, and left alone by every other key's apply.
 	assertBootHooks := func(t *testing.T, opts config.Options) {
 		t.Helper()
-		if len(opts.Hooks) != 1 || opts.Hooks[0].Name != "boot" {
+		if len(opts.Hooks) != 1 || opts.Hooks[0].ID != "boot" {
 			t.Errorf("options().Hooks = %+v, want the one hook the run launched with", opts.Hooks)
 		}
 	}
@@ -1012,7 +1012,7 @@ func clobberOptions(opts config.Options) {
 		opts.ModelProfiles[i] = profiles.Entry{}
 	}
 	for i := range opts.Hooks {
-		opts.Hooks[i] = reactions.Hook{Name: "clobbered"}
+		opts.Hooks[i] = domain.Reaction{ID: "clobbered"}
 	}
 	clear(opts.ValidatedSetsAlias)
 	clear(opts.SystemPrompt.Models)
@@ -2869,12 +2869,12 @@ func newRecordingHookExec() *recordingHookExec {
 	return &recordingHookExec{done: make(chan string, 8)}
 }
 
-func (r *recordingHookExec) Run(ctx context.Context, h reactions.Hook, p reactions.Payload) error {
+func (r *recordingHookExec) Run(ctx context.Context, h domain.Reaction, p reactions.Payload) error {
 	r.mu.Lock()
-	r.fired = append(r.fired, h.Name)
+	r.fired = append(r.fired, h.ID)
 	r.mu.Unlock()
 	select {
-	case r.done <- h.Name:
+	case r.done <- h.ID:
 	default:
 	}
 	return nil
@@ -2897,7 +2897,7 @@ func newGatingHookExec() *gatingHookExec {
 	return &gatingHookExec{gate: make(chan struct{})}
 }
 
-func (g *gatingHookExec) Run(ctx context.Context, h reactions.Hook, p reactions.Payload) error {
+func (g *gatingHookExec) Run(ctx context.Context, h domain.Reaction, p reactions.Payload) error {
 	select {
 	case <-g.gate:
 	case <-ctx.Done():
@@ -2910,11 +2910,13 @@ func (g *gatingHookExec) release() { close(g.gate) }
 
 // hookEntry is the one shape every case below configures: a named Hook subscribed to one event, with
 // an argv action the recording executor never actually runs.
-func hookEntry(name string, event reactions.Event) reactions.Hook {
-	return reactions.Hook{
-		Name:    name,
-		Events:  []reactions.Event{event},
-		Command: []string{"apogee-test-hook"},
+func hookEntry(name string, event reactions.Event) domain.Reaction {
+	return domain.Reaction{
+		ID:      name,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []reactions.Event{event},
+		Handler: domain.ArgvHandler{Argv: []string{"apogee-test-hook"}},
 		Timeout: time.Second,
 	}
 }
@@ -2926,7 +2928,7 @@ func hookEntry(name string, event reactions.Event) reactions.Hook {
 func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
-	boot := []reactions.Hook{hookEntry("boot", reactions.TurnFinished)}
+	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
 	exec := newRecordingHookExec()
 	runner, err := reactions.New(boot, reactions.Options{Workspace: workspace, Exec: exec})
 	if err != nil {
@@ -2950,7 +2952,7 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 
 	// The projection a Firing composes from now names the re-read entry, not the boot one.
 	handed := live.options()
-	if len(handed.Hooks) != 1 || handed.Hooks[0].Name != "reloaded" {
+	if len(handed.Hooks) != 1 || handed.Hooks[0].ID != "reloaded" {
 		t.Fatalf("options().Hooks = %+v, want the one entry the re-read file lists", handed.Hooks)
 	}
 
@@ -2973,7 +2975,7 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
-	boot := []reactions.Hook{hookEntry("boot", reactions.TurnFinished)}
+	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
 	exec := newRecordingHookExec()
 	runner, err := reactions.New(boot, reactions.Options{Workspace: workspace, Exec: exec})
 	if err != nil {
@@ -2991,7 +2993,7 @@ func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) 
 	if _, err := apply("hooks", "1 hook"); err == nil {
 		t.Fatal("a hooks: block naming an unknown event applied silently; want a refusal")
 	}
-	if got := live.options().Hooks; len(got) != 1 || got[0].Name != "boot" {
+	if got := live.options().Hooks; len(got) != 1 || got[0].ID != "boot" {
 		t.Errorf("options().Hooks = %+v, want the boot list a refused edit leaves standing", got)
 	}
 }
@@ -3047,7 +3049,7 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 		}
 	}
 	gate := newGatingHookExec()
-	runner, err := reactions.New([]reactions.Hook{hookEntry("boot", reactions.TurnFinished)}, reactions.Options{
+	runner, err := reactions.New([]domain.Reaction{hookEntry("boot", reactions.TurnFinished)}, reactions.Options{
 		Workspace: workspace, Exec: gate, Report: report,
 	})
 	if err != nil {
@@ -3064,7 +3066,7 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 	}
 	armed.Store(true)
 
-	if err := runner.Replace([]reactions.Hook{hookEntry("next", reactions.TurnFinished)}); err != nil {
+	if err := runner.Replace([]domain.Reaction{hookEntry("next", reactions.TurnFinished)}); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
 	close(caller)
@@ -3090,7 +3092,7 @@ func TestRootHookWriteTargetIsRaceSafeAcrossARosterSwap(t *testing.T) {
 	workspace := t.TempDir()
 	w := newRootWiring(config.Options{
 		Workspace: workspace,
-		Hooks:     []reactions.Hook{hookEntry("watcher", reactions.FileChanged)},
+		Hooks:     []domain.Reaction{hookEntry("watcher", reactions.FileChanged)},
 	}, domain.ModeAskBefore, stateRoots{config: t.TempDir(), workspace: workspace})
 	if err := w.resolveConfig(); err != nil {
 		t.Fatalf("resolveConfig: %v", err)
@@ -3160,12 +3162,16 @@ func TestRootWiringScrubsHookHeaderVariables(t *testing.T) {
 	w := newRootWiring(config.Options{
 		Workspace: workspace,
 		Servers:   []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111", APIKeyEnv: "SERVER_KEY"}},
-		Hooks: []reactions.Hook{{
-			Name:       "notify",
-			Events:     []reactions.Event{reactions.TurnFinished},
-			Webhook:    "https://hooks.example.com/notify",
-			HeadersEnv: map[string]string{"Authorization": "HOOK_TOKEN"},
-			Timeout:    time.Second,
+		Hooks: []domain.Reaction{{
+			ID:     "notify",
+			Origin: domain.OriginUser,
+			Class:  domain.ClassObserve,
+			On:     []reactions.Event{reactions.TurnFinished},
+			Handler: domain.WebhookHandler{
+				URL:        "https://hooks.example.com/notify",
+				HeadersEnv: map[string]string{"Authorization": "HOOK_TOKEN"},
+			},
+			Timeout: time.Second,
 		}},
 	}, domain.ModeAskBefore, stateRoots{config: t.TempDir(), workspace: workspace})
 	if err := w.resolveConfig(); err != nil {

@@ -9,7 +9,7 @@ import (
 
 // allSubscribed is the set a run with a Hook on every event is built over.
 func allSubscribed() map[Event]bool {
-	return SubscribedEvents([]Hook{{Events: Events()}})
+	return SubscribedEvents([]domain.Reaction{{On: Events()}})
 }
 
 // writeTargetFor answers like tools.WorkspaceWriteTarget over a registry holding only apogee's

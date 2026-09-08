@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// DefaultExecutor is the Executor every Driver installs: it runs a Hook's `command:` argv or POSTs
-// its `webhook:` URL, picking by whichever the entry set. Validate has already guaranteed exactly
-// one is set, so the choice is a fact of the entry rather than a preference expressed here.
+// DefaultExecutor is the Executor every Driver installs: it runs an entry's `command:` argv or
+// POSTs its `webhook:` URL, picking by whichever handler the entry carries. A domain.Reaction holds
+// exactly one, so the choice is a fact of the entry rather than a preference expressed here.
 //
 // workspaceRoot is the exec fence, and only the command half uses it: a program that lives inside
 // the workspace is one the model could have written, and running it would turn a file write into
@@ -25,19 +27,20 @@ func DefaultExecutor(workspaceRoot string) Executor {
 	}
 }
 
-// defaultExecutor is the pair of real executors behind DefaultExecutor, dispatching on the Hook.
+// defaultExecutor is the pair of real executors behind DefaultExecutor, dispatching on the
+// entry's handler.
 type defaultExecutor struct {
 	command commandExecutor
 	webhook webhookSender
 }
 
-// Run hands the firing to whichever half the Hook configured.
-func (e defaultExecutor) Run(ctx context.Context, h Hook, p Payload) error {
-	switch {
-	case len(h.Command) > 0:
-		return e.command.Run(ctx, h, p)
-	case h.Webhook != "":
-		return e.webhook.Run(ctx, h, p)
+// Run hands the firing to whichever half the entry's handler names.
+func (e defaultExecutor) Run(ctx context.Context, r domain.Reaction, p Payload) error {
+	switch r.Handler.(type) {
+	case domain.ArgvHandler:
+		return e.command.Run(ctx, r, p)
+	case domain.WebhookHandler:
+		return e.webhook.Run(ctx, r, p)
 	}
 	return errors.New("neither a command nor a webhook to run")
 }

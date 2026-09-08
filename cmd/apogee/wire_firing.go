@@ -550,7 +550,7 @@ func resolveFiringRouting(
 // The caller closes what comes back — [hookCloseGrace], the same grace the session gives (wire.go) —
 // and a returned error fails the Firing: a `hooks:` list this root cannot resolve is structural
 // configuration, exactly as an unreadable prompt is.
-func firingHooks(list []reactions.Hook, workspace string, sched *reactions.ScheduleRef, report func(string)) (*reactions.Runner, error) {
+func firingHooks(list []domain.Reaction, workspace string, sched *reactions.ScheduleRef, report func(string)) (*reactions.Runner, error) {
 	return reactions.New(list, reactions.Options{
 		// Inner stays nil: a Firing's Config carries no sink of its own (firingConfig), so there is
 		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself

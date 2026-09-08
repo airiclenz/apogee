@@ -46,7 +46,7 @@ func newFakeExecutor() *fakeExecutor {
 	return &fakeExecutor{started: make(chan Payload, 512), cancelled: make(chan struct{})}
 }
 
-func (f *fakeExecutor) Run(ctx context.Context, _ Hook, p Payload) error {
+func (f *fakeExecutor) Run(ctx context.Context, _ domain.Reaction, p Payload) error {
 	f.mu.Lock()
 	f.runs = append(f.runs, p)
 	index := len(f.runs) - 1
@@ -109,8 +109,15 @@ func (l *reportLog) all() []string {
 // ----------------------------------------------------------------------------
 
 // commandHook is a valid entry whose action never matters — the fake Executor is what runs.
-func commandHook(name string, events ...Event) Hook {
-	return Hook{Name: name, Events: events, Command: []string{"true"}, Timeout: time.Minute}
+func commandHook(name string, events ...Event) domain.Reaction {
+	return domain.Reaction{
+		ID:      name,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      events,
+		Handler: domain.ArgvHandler{Argv: []string{"true"}},
+		Timeout: time.Minute,
+	}
 }
 
 // turnEvent is a Depth-0 Turn boundary carrying an index a test can recognise the firing by.
@@ -154,7 +161,7 @@ func TestRunnerForwardsEveryEventToInner(t *testing.T) {
 
 	inner := &recordingSink{}
 	exec := newFakeExecutor()
-	runner, err := New([]Hook{commandHook("notify", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
 		Inner: inner, Workspace: t.TempDir(), Exec: exec,
 	})
 	if err != nil {
@@ -188,7 +195,7 @@ func TestRunnerKeepsOneHooksFiringsInOrder(t *testing.T) {
 	t.Parallel()
 
 	exec := newFakeExecutor()
-	runner, err := New([]Hook{commandHook("notify", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
 		Workspace: t.TempDir(), Exec: exec,
 	})
 	if err != nil {
@@ -229,7 +236,7 @@ func TestRunnerStampsTheIdentityFields(t *testing.T) {
 	fixed := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 
 	exec := newFakeExecutor()
-	runner, err := New([]Hook{commandHook("notify", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
 		Workspace: workspace, Schedule: &schedule, Exec: exec,
 		Now: func() time.Time { return fixed },
 	})
@@ -264,7 +271,7 @@ func TestRunnerRunsHooksConcurrently(t *testing.T) {
 
 	exec := newFakeExecutor()
 	exec.gate = make(chan struct{})
-	runner, err := New([]Hook{
+	runner, err := New([]domain.Reaction{
 		commandHook("slow", TurnFinished),
 		commandHook("fast", TurnFinished),
 	}, Options{Workspace: t.TempDir(), Exec: exec})
@@ -292,7 +299,7 @@ func TestEmitReturnsWhileAHookIsBlocked(t *testing.T) {
 
 	exec := newFakeExecutor()
 	exec.gate = make(chan struct{})
-	runner, err := New([]Hook{commandHook("wedged", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("wedged", TurnFinished)}, Options{
 		Workspace: t.TempDir(), Exec: exec,
 	})
 	if err != nil {
@@ -327,7 +334,7 @@ func TestRunnerDropsTheNewestFiringWhenAHooksQueueIsFull(t *testing.T) {
 	log := &reportLog{}
 	exec := newFakeExecutor()
 	exec.gate = make(chan struct{})
-	runner, err := New([]Hook{commandHook("wedged", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("wedged", TurnFinished)}, Options{
 		Workspace: t.TempDir(), Exec: exec, Report: log.add,
 	})
 	if err != nil {
@@ -377,7 +384,7 @@ func TestRunnerReportsAFailureOnceUntilTheHookSucceeds(t *testing.T) {
 	log := &reportLog{}
 	exec := newFakeExecutor()
 	exec.errs = []error{boom, boom, nil, boom}
-	runner, err := New([]Hook{commandHook("notify", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
 		Workspace: t.TempDir(), Exec: exec, Report: log.add,
 	})
 	if err != nil {
@@ -413,7 +420,7 @@ func TestRunnerIgnoresAHookScopedToAnotherWorkspace(t *testing.T) {
 	theirs.Workspace = elsewhere
 
 	exec := newFakeExecutor()
-	runner, err := New([]Hook{mine, theirs}, Options{Workspace: here, Exec: exec})
+	runner, err := New([]domain.Reaction{mine, theirs}, Options{Workspace: here, Exec: exec})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -433,7 +440,7 @@ func TestReplaceStopsTheOldHookAndStartsTheNew(t *testing.T) {
 	t.Parallel()
 
 	exec := newFakeExecutor()
-	runner, err := New([]Hook{commandHook("old", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("old", TurnFinished)}, Options{
 		Workspace: t.TempDir(), Exec: exec,
 	})
 	if err != nil {
@@ -445,7 +452,7 @@ func TestReplaceStopsTheOldHookAndStartsTheNew(t *testing.T) {
 		t.Fatalf("first firing went to %q, want old", started.Hook)
 	}
 
-	if err := runner.Replace([]Hook{commandHook("new", TurnFinished)}); err != nil {
+	if err := runner.Replace([]domain.Reaction{commandHook("new", TurnFinished)}); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
 	runner.Emit(turnEvent(2))
@@ -469,7 +476,7 @@ func TestReplaceRefusesAMalformedListAndKeepsRunning(t *testing.T) {
 	t.Parallel()
 
 	exec := newFakeExecutor()
-	runner, err := New([]Hook{commandHook("notify", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
 		Workspace: t.TempDir(), Exec: exec,
 	})
 	if err != nil {
@@ -477,9 +484,9 @@ func TestReplaceRefusesAMalformedListAndKeepsRunning(t *testing.T) {
 	}
 
 	broken := commandHook("notify", TurnFinished)
-	broken.Webhook = "https://example.test/hook"
-	if err := runner.Replace([]Hook{broken}); err == nil {
-		t.Fatal("Replace accepted an entry with both a command and a webhook")
+	broken.Handler = domain.ArgvHandler{}
+	if err := runner.Replace([]domain.Reaction{broken}); err == nil {
+		t.Fatal("Replace accepted an entry with an empty command")
 	}
 
 	runner.Emit(turnEvent(1))
@@ -498,7 +505,7 @@ func TestCloseWithAnExpiredContextCancelsTheRunningHook(t *testing.T) {
 	log := &reportLog{}
 	exec := newFakeExecutor()
 	exec.gate = make(chan struct{}) // never closed: the run ends only by cancellation
-	runner, err := New([]Hook{commandHook("wedged", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("wedged", TurnFinished)}, Options{
 		Workspace: t.TempDir(), Exec: exec, Report: log.add,
 	})
 	if err != nil {
@@ -541,7 +548,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 	t.Parallel()
 
 	exec := newFakeExecutor()
-	runner, err := New([]Hook{commandHook("notify", TurnFinished)}, Options{
+	runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
 		Workspace: t.TempDir(), Exec: exec,
 	})
 	if err != nil {
@@ -550,7 +557,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 	closeRunner(t, runner)
 	closeRunner(t, runner)
 
-	if err := runner.Replace([]Hook{commandHook("late", TurnFinished)}); err == nil {
+	if err := runner.Replace([]domain.Reaction{commandHook("late", TurnFinished)}); err == nil {
 		t.Fatal("Replace on a closed runner was accepted")
 	}
 	// A closed Runner still forwards; it simply fires nothing.
@@ -598,7 +605,7 @@ func TestRunnerWithNoHooksTouchesNothing(t *testing.T) {
 		t.Fatalf("inner received %d events, want %d", len(inner.events), len(quiet))
 	}
 
-	if err := runner.Replace([]Hook{commandHook("watch", FileChanged)}); err != nil {
+	if err := runner.Replace([]domain.Reaction{commandHook("watch", FileChanged)}); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
 	second := domain.ToolCall{ID: "call-2", Tool: "write_file"}
@@ -620,7 +627,7 @@ func TestRunnerWithNoHooksTouchesNothing(t *testing.T) {
 func TestNewRefusesAHookItCannotRun(t *testing.T) {
 	t.Parallel()
 
-	if _, err := New([]Hook{commandHook("notify", TurnFinished)}, Options{Workspace: t.TempDir()}); err == nil {
+	if _, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{Workspace: t.TempDir()}); err == nil {
 		t.Fatal("New accepted an active hook with no executor")
 	}
 	// With nothing to run, no executor is needed.
@@ -637,7 +644,7 @@ func TestNewRefusesAMalformedList(t *testing.T) {
 	t.Parallel()
 
 	nameless := commandHook("", TurnFinished)
-	if _, err := New([]Hook{nameless}, Options{Workspace: t.TempDir(), Exec: newFakeExecutor()}); err == nil {
+	if _, err := New([]domain.Reaction{nameless}, Options{Workspace: t.TempDir(), Exec: newFakeExecutor()}); err == nil {
 		t.Fatal("New accepted a nameless entry")
 	}
 }

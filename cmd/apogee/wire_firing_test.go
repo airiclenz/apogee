@@ -1092,12 +1092,16 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 	t.Parallel()
 
 	roots := firingRoots(t)
-	list := []reactions.Hook{{
-		Name:       "notify",
-		Events:     []reactions.Event{reactions.ExchangeFinished},
-		Webhook:    "https://hooks.example/fire",
-		HeadersEnv: map[string]string{"Authorization": "NOTIFY_TOKEN"},
-		Timeout:    time.Second,
+	list := []domain.Reaction{{
+		ID:     "notify",
+		Origin: domain.OriginUser,
+		Class:  domain.ClassObserve,
+		On:     []reactions.Event{reactions.ExchangeFinished},
+		Handler: domain.WebhookHandler{
+			URL:        "https://hooks.example/fire",
+			HeadersEnv: map[string]string{"Authorization": "NOTIFY_TOKEN"},
+		},
+		Timeout: time.Second,
 	}}
 	runner, err := firingHooks(list, roots.workspace, &reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil)
 	if err != nil {

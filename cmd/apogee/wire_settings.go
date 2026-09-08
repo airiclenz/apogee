@@ -72,7 +72,7 @@ type liveSettings struct {
 	// edit that reached the session and not the runs it raises would be exactly the drift ADR 0037
 	// abolished. It is written by the reload arm after Runner.Replace has accepted the list, so a
 	// refused edit leaves both the session and this mirror on the list that is actually running.
-	hooks []reactions.Hook
+	hooks []domain.Reaction
 
 	// pinnedWindow is the `context-window:` key in tokens: > 0 is the user's pin, which outranks
 	// whatever the server reports (ADR 0024 decision 9), and 0 means "discover it, live".
@@ -699,7 +699,7 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 // It is called AFTER Runner.Replace returned, never before, for setToolSet's reason: a refused list
 // leaves the session firing the Hooks it already had, and a mirror written ahead of the swap would
 // hand a Firing a list this session never ran.
-func (s *liveSettings) setHooks(list []reactions.Hook) {
+func (s *liveSettings) setHooks(list []domain.Reaction) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hooks = list

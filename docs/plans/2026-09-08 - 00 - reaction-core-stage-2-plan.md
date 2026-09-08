@@ -125,7 +125,21 @@ go test ./internal/agent/ -run 'TestReaction|TestSetLive'
 
 **Commit:** `feat(domain): argv and webhook observe handlers, Reaction.Workspace and the Generation value`
 
-## 4. The Runner takes `[]domain.Reaction`
+## 4. The Runner takes `[]domain.Reaction` — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the package's per-entry validator is the FUNCTION `reactions.Validate(domain.Reaction)`, not a method — `domain.Reaction` already carries its own `Validate()` method, which this function runs last, so the package check could not stay a method on the entry.
+
+NOTES (2026-09-08): `TestHookValidateRefusesEachRule` lost its both-actions / neither-action / headers-on-a-command / headers-env-on-a-command rows, which a one-Handler value cannot express; the guard's config rows still pin all four under `hook "notify"`. It gained an empty-argv row, and `TestHookValidateRefusesAReactionTheCoreRejects` proves the package's checks do not shadow `domain.Reaction.Validate`.
+
+NOTES (2026-09-08): `TestLoadFileConfigRefusesAnUnrunnableHook`'s table gained a per-row `key` field — the guard's split between the config layer's `hook "notify"` rows and the Runner's `reaction "notify"` ones (duplicate names, webhook-not-http).
+
+NOTES (2026-09-08): `TestReplaceRefusesAMalformedListAndKeepsRunning` now breaks its entry with an empty `ArgvHandler` instead of setting both actions, which the new value type cannot hold.
+
+NOTES (2026-09-08): `postFailure` takes the timeout rather than the entry — it needed only that one field, and the entry no longer carries it beside the URL.
+
+NOTES (2026-09-08): internal identifiers the Runner uses for its own state (`worker.hook`, `hookSet`, the report-line wording) are left as they are; item 5 owns that wording pass.
+
+NOTES (2026-09-08): consequential edit — internal/reactions/doc.go: made necessary by deleting the Hook struct (the file map's hooks.go line named it).
 
 **What:** Depends on items 1 and 3. Delete `reactions.Hook`; `New`, `Replace`, `Validate`/`ValidateAll`, `SubscribedEvents`, `buildSet`, the executors and the payload stamping take `domain.Reaction` (id → `ID`, events → `On`, command → `ArgvHandler`, webhook+headers → `WebhookHandler`, `Workspace`, `Timeout`). Per-entry validation is `Reaction.Validate` plus the package's own runnable checks (empty argv, bad URL, header names) with today's message texts re-keyed on `reaction %q:`. `internal/config/hooks.go`'s `toHook` builds `domain.Reaction` (origin user, class observe) — the `hooks:` schema itself is untouched until item 8; `Options.Hooks` becomes `[]domain.Reaction`. Facade: `Hook`, `HookOptions`, `HookRunner`, `NewHookRunner` become `RunnerOptions`, `ReactionRunner`, `NewReactionRunner` (the `Hook` alias is deleted; `HookEvent` too — it is `Moment`); `HookPayload` → `ReactionPayload`. Every test that constructs a `Hook{…}` constructs a `domain.Reaction{…}` instead. Event names, env names, payload keys and report lines stay as they are (item 5).
 
