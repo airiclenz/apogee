@@ -222,6 +222,8 @@ func eventBaseOf(e domain.Event) (domain.EventBase, bool) {
 		return ev.EventBase, true
 	case domain.ReactionFiredEvent:
 		return ev.EventBase, true
+	case domain.SeamClosedEvent:
+		return ev.EventBase, true
 	case domain.ErrorEvent:
 		return ev.EventBase, true
 	case domain.UsageEvent:

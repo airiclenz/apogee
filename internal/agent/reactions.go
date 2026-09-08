@@ -105,6 +105,11 @@ type seamPayload struct {
 // asked for the re-stream (the last one to ask, when both legs did), and Edited is set when any
 // reaction reshaped the working value. A returned error ends the cascade and comes back with a
 // zero Outcome — the seam degrades rather than acting on half a cascade.
+//
+// Every pass that reaches the ladder closes with one SeamClosedEvent, which is what the five
+// seam-closing notices are built on. The one dispatch that emits nothing is the engine bug
+// seamPayload refuses below: no ladder ran, the Moment may be no seam at all, and the payload is
+// by definition not the one the event promises to carry.
 func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, error) {
 	turn := a.turns.index
 
@@ -123,7 +128,25 @@ func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.
 
 	var result domain.Outcome
 
-	retried, err := a.fireLeg(ctx, turn, m, seam, a.builtins, true, &result)
+	// The seam closes exactly ONCE per fire call, and it closes whatever the cascade did: the
+	// deferred emit below covers the ordinary return, the retry hand-back, and an error that
+	// ended the cascade half way — and it fires just as readily under Bypass or with nothing
+	// armed at all, because "the seam passed and nothing happened" is the fact an observer most
+	// often wants (ADR 0076 A5). Once per CALL is why a retried post-response Turn closes once
+	// per attempt rather than once per Turn. fired is the ids bookFiring booked, in firing
+	// order, and payload is handed on untouched — the event carries the working value by
+	// reference, read-only and only for the duration of Emit.
+	var fired []string
+	defer func() {
+		a.cfg.Events.Emit(domain.SeamClosedEvent{
+			EventBase: a.base(turn),
+			Seam:      m,
+			Fired:     fired,
+			Value:     payload,
+		})
+	}()
+
+	retried, err := a.fireLeg(ctx, turn, m, seam, a.builtins, true, &result, &fired)
 	if err != nil {
 		return domain.Outcome{}, err
 	}
@@ -133,7 +156,7 @@ func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.
 		return result, nil
 	}
 
-	if _, err := a.fireLeg(ctx, turn, m, seam, a.armed, false, &result); err != nil {
+	if _, err := a.fireLeg(ctx, turn, m, seam, a.armed, false, &result, &fired); err != nil {
 		return domain.Outcome{}, err
 	}
 	return result, nil
@@ -164,6 +187,7 @@ func (a *Agent) fireLeg(
 	leg []armedReaction,
 	builtin bool,
 	result *domain.Outcome,
+	fired *[]string,
 ) (bool, error) {
 	for _, r := range leg {
 		if !slices.Contains(r.spec.On, m) {
@@ -181,7 +205,7 @@ func (a *Agent) fireLeg(
 			continue
 		}
 
-		a.bookFiring(turn, m, r, out, result)
+		a.bookFiring(turn, m, r, out, result, fired)
 		if m == domain.MomentPostResponse && out.Retry {
 			return true, nil
 		}
@@ -255,6 +279,7 @@ func (a *Agent) bookFiring(
 	r armedReaction,
 	out domain.Outcome,
 	result *domain.Outcome,
+	fired *[]string,
 ) {
 	if out.Defer != "" {
 		a.conv.Defer(out.Defer)
@@ -268,6 +293,7 @@ func (a *Agent) bookFiring(
 	if label == "" {
 		label = reactionAction(m, out)
 	}
+	*fired = append(*fired, r.spec.ID)
 	a.cfg.Events.Emit(domain.ReactionFiredEvent{
 		EventBase: a.base(turn),
 		Reaction:  r.spec.ID,

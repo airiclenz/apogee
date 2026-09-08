@@ -190,7 +190,13 @@ go test ./internal/domain/ ./internal/reactions/ ./internal/config/ ./internal/a
 
 **Commit:** `feat(reactions)!: approval-requested and approval-decided notices; APOGEE_REACTION_* and the reaction payload field`
 
-## 6. The agent emits `SeamClosedEvent` when a seam closes
+## 6. The agent emits `SeamClosedEvent` when a seam closes — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the emit is installed AFTER `seamPayload` resolves, so the one dispatch that closes no seam is the engine bug `seamPayload` refuses (a payload that is not the Moment's own, a handler that cannot serve it, or a Moment that is no seam at all). No ladder ran there, the Moment may be no seam, and the payload is by definition not the one the event promises to carry — emitting it would make the event lie. Stated in `fire`'s doc comment.
+
+NOTES (2026-09-08): the booked ids are appended inside `bookFiring` (which gained a `fired *[]string` out-param, threaded through `fireLeg`) rather than at its one call site, so a firing cannot be booked without being recorded. `fireLeg` and `bookFiring` are unexported and have no other callers.
+
+NOTES (2026-09-08): beyond the item's named tests, `assertSeamClosed` also pins the closure as the LAST event of the pass — a closure reported before the cascade's own `ReactionFiredEvent`s would be reporting a pass that had not happened yet, and that ordering is what `TestFireEmitsSeamClosedAfterAReturnedError` means by "the event follows the error".
 
 **What:** Depends on item 2. `fire()` in `internal/agent/reactions.go` emits one `SeamClosedEvent{Seam: m, Fired: <ids bookFiring booked in this call, in order>, Value: payload}` through `a.cfg.Events.Emit` after its ladder returns — on success, on a returned error, and under Bypass or with nothing armed (A5: unconditional) — once per `fire` call, so a retried post-response Turn closes once per attempt. `firePostToolResult` goes through the same path. `Value` is the payload reference `fire` received; nothing is copied. The fan-out pre-tool-exec path in `dispatch.go` is covered by the same `fire`.
 

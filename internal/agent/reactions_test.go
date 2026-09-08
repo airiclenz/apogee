@@ -657,3 +657,181 @@ func TestBuiltinToolUseEnforcer(t *testing.T) {
 		t.Errorf("firing = %+v, want tool-use-enforcer/post-response/retry", fired[0])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The seam-closing event
+// ---------------------------------------------------------------------------
+
+// seamClosings lists the SeamClosedEvents in a recorded stream, in emission order.
+func seamClosings(events []domain.Event) []domain.SeamClosedEvent {
+	var closed []domain.SeamClosedEvent
+	for _, e := range events {
+		if sc, ok := e.(domain.SeamClosedEvent); ok {
+			closed = append(closed, sc)
+		}
+	}
+	return closed
+}
+
+// seamValueKey reduces a seam payload to the pointer at its heart — the working value fire
+// brackets. Comparing that pointer is how a test proves the event carries the very payload fire
+// received rather than a copy of it: the three pointer payloads are their own key, and the two
+// pair types answer the pointer they wrap.
+func seamValueKey(t *testing.T, v any) any {
+	t.Helper()
+	switch p := v.(type) {
+	case *domain.Request:
+		return p
+	case domain.PostResponseMoment:
+		return p.Resp
+	case *domain.ToolCallEdit:
+		return p
+	case domain.ToolResultMoment:
+		return p.Edit
+	case *domain.Conversation:
+		return p
+	}
+	t.Fatalf("no seam carries a %T payload", v)
+	return nil
+}
+
+// seamProbe is one seam with the payload fire takes there and a handler that acts on it — the
+// three parts a dispatcher test needs to drive a seam other than post-response.
+type seamProbe struct {
+	moment  domain.Moment
+	payload any
+	handler domain.Handler
+}
+
+// everySeam returns the five seams in loop order, each with its own payload and a handler that
+// books a firing there. Every seam gets its own payload value so a test comparing the event's
+// Value against it cannot pass by accident.
+func everySeam() []seamProbe {
+	edited := domain.Outcome{Edited: true}
+	call := domain.ToolCall{ID: "c1", Tool: "lookup"}
+	return []seamProbe{
+		{domain.MomentPreRequest, domain.NewRequest("m", nil, nil, domain.Budget{}, 0),
+			domain.PreRequestFunc(func(context.Context, *domain.Request) (domain.Outcome, error) {
+				return edited, nil
+			})},
+		{domain.MomentPostResponse, postResponse(true),
+			domain.PostResponseFunc(func(context.Context, *domain.Response) (domain.Outcome, error) {
+				return edited, nil
+			})},
+		{domain.MomentPreToolExec, domain.NewToolCallEdit(&call),
+			domain.PreToolExecFunc(func(context.Context, domain.LoopView, *domain.ToolCallEdit) (domain.Outcome, error) {
+				return edited, nil
+			})},
+		{domain.MomentPostToolResult,
+			domain.ToolResultMoment{Call: call, Edit: domain.NewToolResultEdit(&domain.ToolResult{CallID: "c1", Content: "42"})},
+			domain.PostToolResultFunc(func(context.Context, domain.LoopView, domain.ToolCall, *domain.ToolResultEdit) (domain.Outcome, error) {
+				return edited, nil
+			})},
+		{domain.MomentHistoryRewrite, &domain.Conversation{},
+			domain.HistoryRewriteFunc(func(context.Context, *domain.Conversation) (domain.Outcome, error) {
+				return edited, nil
+			})},
+	}
+}
+
+// assertSeamClosed reads the one SeamClosedEvent a fire call must have left in the stream and
+// checks the three things it promises: which seam closed, which ids were booked while it passed,
+// and that Value is the payload fire was handed. It also pins the event LAST, since a closure
+// reported before the cascade's own firings would be reporting a pass that had not happened yet.
+func assertSeamClosed(t *testing.T, sink *recordingSink, m domain.Moment, payload any, wantFired []string) {
+	t.Helper()
+
+	closed := seamClosings(sink.events)
+	if len(closed) != 1 {
+		t.Fatalf("SeamClosedEvents = %d, want exactly one per fire call", len(closed))
+	}
+	if _, ok := sink.events[len(sink.events)-1].(domain.SeamClosedEvent); !ok {
+		t.Errorf("last event = %T, want the seam closure to follow every firing", sink.events[len(sink.events)-1])
+	}
+	if closed[0].Seam != m {
+		t.Errorf("Seam = %q, want %q", closed[0].Seam, m)
+	}
+	assertOrder(t, "Fired", closed[0].Fired, wantFired)
+	if seamValueKey(t, closed[0].Value) != seamValueKey(t, payload) {
+		t.Errorf("Value = %#v, want the payload fire received", closed[0].Value)
+	}
+}
+
+// Every one of the five seams closes with its own event, carrying the seam that closed, the ids
+// booked while it passed, and the working value itself — the fact the five seam-closing notices
+// are built on.
+func TestFireEmitsSeamClosedForEverySeam(t *testing.T) {
+	for _, s := range everySeam() {
+		t.Run(string(s.moment), func(t *testing.T) {
+			a, sink := ladderAgent(t, nil, []domain.Reaction{{
+				ID:      "watcher",
+				Origin:  domain.OriginEngine,
+				Class:   domain.ClassObserve,
+				On:      []domain.Moment{s.moment},
+				Handler: s.handler,
+			}})
+
+			if _, err := a.fire(context.Background(), s.moment, s.payload); err != nil {
+				t.Fatalf("fire(%s): %v", s.moment, err)
+			}
+
+			assertSeamClosed(t, sink, s.moment, s.payload, []string{"watcher"})
+		})
+	}
+}
+
+// The closure is UNCONDITIONAL (ADR 0076 A5): a seam whose armed reaction Bypass switched off,
+// and a seam with nothing armed at all, both close — with an empty Fired list, which is the
+// event saying the pass happened and nothing acted.
+func TestFireEmitsSeamClosedUnderBypassAndWhenNothingIsArmed(t *testing.T) {
+	t.Run("nothing armed", func(t *testing.T) {
+		a, sink := ladderAgent(t, nil, nil)
+		payload := postResponse(true)
+
+		if _, err := a.fire(context.Background(), domain.MomentPostResponse, payload); err != nil {
+			t.Fatalf("fire: %v", err)
+		}
+
+		assertSeamClosed(t, sink, domain.MomentPostResponse, payload, nil)
+	})
+
+	t.Run("bypass", func(t *testing.T) {
+		log := &ladderLog{}
+		a, sink := ladderAgent(t, nil, []domain.Reaction{
+			probe(log, "advisor", domain.ClassAdvise, acts(domain.Outcome{Edited: true})),
+		})
+		a.SetBypass(true)
+		payload := postResponse(true)
+
+		if _, err := a.fire(context.Background(), domain.MomentPostResponse, payload); err != nil {
+			t.Fatalf("fire: %v", err)
+		}
+
+		assertOrder(t, "invocations", log.calls, nil)
+		assertSeamClosed(t, sink, domain.MomentPostResponse, payload, nil)
+	})
+}
+
+// A reaction that returns an error ends the cascade, and the seam still closes: the event
+// follows the error out and its Fired list holds the ids that acted before the fault, so an
+// observer reading it sees exactly how far the pass got.
+func TestFireEmitsSeamClosedAfterAReturnedError(t *testing.T) {
+	boom := errors.New("boom")
+	log := &ladderLog{}
+	a, sink := ladderAgent(t, nil, []domain.Reaction{
+		probe(log, "acted", domain.ClassObserve, acts(domain.Outcome{Edited: true})),
+		probe(log, "broke", domain.ClassObserve, func(*domain.Response) (domain.Outcome, error) {
+			return domain.Outcome{}, boom
+		}),
+		probe(log, "never", domain.ClassObserve, acts(domain.Outcome{Edited: true})),
+	})
+	payload := postResponse(true)
+
+	_, err := a.fire(context.Background(), domain.MomentPostResponse, payload)
+
+	if !errors.Is(err, boom) {
+		t.Fatalf("fire err = %v, want the reaction's error", err)
+	}
+	assertOrder(t, "invocations", log.calls, []string{"acted", "broke"})
+	assertSeamClosed(t, sink, domain.MomentPostResponse, payload, []string{"acted"})
+}
