@@ -3564,9 +3564,11 @@ func TestModelPrePromptNoteNeverSaves(t *testing.T) {
 	}
 }
 
-// Quitting while a worker is in flight must NOT snapshot — the worker owns the Agent, and
-// the Agent is single-goroutine, so a snapshot here would race its Step. ctrl+c cancels and
-// DEFERS the exit until the worker returns (item 8), and the last boundary stays unsaved.
+// Quitting while a worker is in flight must NOT snapshot AT THE KEYPRESS — the worker owns the
+// Agent, and the Agent is single-goroutine, so a snapshot there would race its Step. ctrl+c cancels
+// and DEFERS the exit until the worker returns (item 8); the closing flush rides that deferral and
+// goes out from the terminal fold, once the goroutine has unwound and the engine is the Update
+// loop's again.
 func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	snapshotted := false
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) {
@@ -3588,15 +3590,19 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
 		t.Error("ctrl+c×2 while busy quit immediately instead of waiting for the worker")
 	}
-	// The worker's terminal Msg fires the deferred quit — and still saves nothing: finishWorker's
-	// quitting branch short-circuits before the idle finisher, so the deferred exit never
-	// snapshots the cancelled boundary (the per-Turn saves already captured every completed Turn).
-	_, doneCmd := stepCmd(t, next, cancelledMsg{})
-	if snapshotted || len(host.savedCalls()) != 0 {
-		t.Error("the deferred quit snapshotted the cancelled boundary; the busy path must not save")
+	// The worker's terminal Msg flushes the settled boundary and THEN exits: the per-Turn snapshots
+	// cover only an Exchange that reached a Turn boundary, so a one-Step answer interrupted by
+	// ⌃c⌃c would otherwise leave the conversation unwritten (finishWorker).
+	next, doneCmd := stepCmd(t, next, cancelledMsg{})
+	if !snapshotted {
+		t.Error("the deferred quit exited without snapshotting the settled boundary")
 	}
-	if _, isQuit := cmdMsg(doneCmd).(tea.QuitMsg); !isQuit {
-		t.Error("the worker's terminal Msg did not fire the deferred quit")
+	if !next.quitting || len(host.savedCalls()) != 0 {
+		t.Error("the deferred quit exited before its closing flush had reached the host")
+	}
+	drainToQuit(t, next, doneCmd)
+	if n := len(host.savedCalls()); n != 1 {
+		t.Errorf("Save calls once the deferred quit drained = %d; want the single closing flush", n)
 	}
 }
 

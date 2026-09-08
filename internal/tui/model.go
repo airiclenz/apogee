@@ -1908,6 +1908,27 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 		// returned its terminal Msg, so its goroutine has unwound and the teardown cannot race it.
 		// A binding change captured during that Exchange is deliberately dropped: the session is
 		// ending, and rebinding an engine nobody will send to would only delay the exit.
+		//
+		// The closing flush is NOT dropped with it. This path used to exit without saving, on the
+		// reasoning that the per-Turn snapshots had already captured every completed Turn — which is
+		// true only of an Exchange that HAS a Turn boundary. stepToBoundary snapshots at
+		// StatusTurnComplete alone, so an Exchange the model answers in one Step emits no
+		// turnSnapshotMsg at all: a ⌃c⌃c landing during that first answer left the whole
+		// conversation unwritten, and the session was simply gone (the flake this closes:
+		// TestE2EPopupFramesLists, CI 2026-09-07, whose relaunch found an empty store). Saving here
+		// is safe for exactly the reason the idle save below is — the worker has unwound and the
+		// engine is the Update loop's again (C1) — and the exit then waits for the queue to drain
+		// (pumpOrQuit), the same deferral quit's own flush takes.
+		//
+		// Only a settled Exchange is flushed. A quit that lands on a loop fault leaves with the
+		// record where the last save put it, which is what the non-quitting path below does with an
+		// errored end too.
+		if next == stateIdle {
+			cmd := m.saveAtIdle()
+			if m.writeBusy || len(m.pendingWrites) > 0 {
+				return cmd
+			}
+		}
 		return tea.Quit
 	}
 	// The engine is the Update loop's again, which is the boundary a binding change captured

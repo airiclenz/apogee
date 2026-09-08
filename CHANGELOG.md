@@ -8,6 +8,17 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Fixed
+
+- **⌃c⌃c during an answer no longer loses the whole session.** A quit requested while the model was
+  still working deferred the exit until the worker unwound (C4) and then left without writing the
+  record, on the reasoning that the per-Turn snapshots had already captured every completed Turn —
+  true only of an Exchange that reaches a Turn boundary. An Exchange the model answers in one Step
+  emits no per-Turn snapshot at all, so interrupting a first answer left nothing on disk and the
+  conversation was gone. The closing flush now runs from the terminal fold for a settled end, and
+  the exit waits for the record write to land, exactly as a clean quit's flush does. Pinned by a
+  driven run that quits with the reply still held on the server. Closes bead `apogee-944`.
+
 ### Changed
 
 - **One Reaction core, decided (ADR 0076).** Floor guards, the Mechanism lab layer and Hooks are

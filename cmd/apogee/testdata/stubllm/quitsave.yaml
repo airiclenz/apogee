@@ -1,0 +1,20 @@
+# The upstream TestE2EQuitMidAnswerStillSavesTheSession talks to: one reply that is never written.
+#
+# The `await:` gate is the whole fixture. It holds the answer on the server while the test quits, so
+# the ⌃c⌃c lands with the worker still inside its first Step — the state in which apogee used to
+# exit without writing the record at all. Nothing ever releases the gate: the quit cancels the
+# request and the held reply is dropped (awaitRelease returns on ctx.Done), which is exactly what a
+# real server sees when a human interrupts an answer.
+model: quitsave-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Interrupted answer
+    # The answer that never arrives.
+    - when:
+        last_message: ^Take your time over this
+      await: held-answer
+      text: This reply is never written.
