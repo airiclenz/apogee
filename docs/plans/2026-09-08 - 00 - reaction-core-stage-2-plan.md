@@ -662,7 +662,11 @@ git diff --quiet d84dd988 -- cmd/apogee/testdata/eventlines/
 
 **Commit:** `test(apogee): reactions e2e — file migration, approval-decided, seam-closing notices, one-swap reload`
 
-## 18. Manual: `docs/manual/reactions.md`
+## 18. Manual: `docs/manual/reactions.md` — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the page's examples keep the `reactions:` shapes the item-17 journeys run (argv `run:` via `sh -c`, webhook `run:` mapping with `headers-env:`) with readable ids (`notify`, `ci-bell`) rather than the journeys' literal sink names, which are test fixtures.
+NOTES (2026-09-09): the eleven notices are one table with a Depth column rather than two — the five seam-closing rows each carry the item's "full working value; only serialized when you subscribe" wording, and the per-seam `value` shapes are a second small table under The payload.
+NOTES (2026-09-09): `grep -rn 'hooks.md' README.md docs/manual/` lists five sites (`README.md:225,:251`, `docs/manual/README.md:12`, `docs/manual/headless.md:153`, `docs/manual/configuration.md:419`) — all in item 19's Files list, which owns them and is not yet done.
 
 **What:** Depends on items 7 and 9. `git mv docs/manual/hooks.md docs/manual/reactions.md` and rewrite around the shipped surface: the entry schema (`id`, `on`, `run` polymorphic, `timeout` 30s default, `workspace`, `enabled`; `advise:`/`gate:` "not yet shipped"), the eleven notices in a table (the five seam-closing ones marked "full working value; only serialized when you subscribe"), the payload keys (`reaction`, `seam`, `reactions`, `value` shapes per seam, `decision`), the env set `APOGEE_REACTION_*`, the exec/webhook posture (ADR 0073 D6 unchanged), failure notice `reaction notify (approval-requested): …`, queue/drop/live reload, and a "Migrating from `hooks:`" section quoting the note and the two script changes. The intro keeps the one colloquial line ("what other tools call a hook"). Every example is one the item-17 journeys run.
 
