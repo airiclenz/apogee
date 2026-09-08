@@ -1,12 +1,12 @@
 package agent
 
-// Item-2 acceptance (ADR 0014): the two hook-visible seams a fan-out Mechanism needs but
+// Item-2 acceptance (ADR 0014): the two Reaction-visible seams a fan-out extension needs but
 // hooks could not reach — LoopView.Depth() and Response.AppendToolCall. These drive the seams
-// through the REAL loop with a scripted upstream (no mechanism internals mocked): a stub
-// post-response hook synthesizes a sub_agent delegation the model never emitted, and the loop
+// through the REAL loop with a scripted upstream (no internals mocked): a stub post-response
+// Reaction synthesizes a sub_agent delegation the model never emitted, and the loop
 // must treat it exactly like a model-emitted call — commit it on the assistant message and
 // dispatch it through the full per-call Resolution to a real nested child (Depth 1). A second
-// case proves an in-place mutation and a returned ActionDefer both take effect.
+// case proves an in-place mutation and a returned Outcome.Defer both take effect.
 
 import (
 	"context"
@@ -19,33 +19,31 @@ import (
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
-// synthesizeCallHook is an experimental post-response hook standing in for guided
+// synthesizeCallReaction is an armed post-response Reaction standing in for guided
 // decomposition's intercept: at the top level (Depth 0) it appends a sub_agent delegation the
-// model never emitted, exactly once, and — when deferInject is set — also returns ActionDefer
+// model never emitted, exactly once, and — when deferInject is set — also returns Outcome.Defer
 // so the mutate-AND-defer composition is exercised. Gating on Depth() == 0 keeps a nested
-// child (which inherits the parent's Mechanisms into a registry of its own) from re-appending,
-// exercising the Depth() seam in the same test.
-type synthesizeCallHook struct {
-	task        string
-	callID      string
-	deferInject string
-	appended    *bool
-}
-
-func (h synthesizeCallHook) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
-	if resp.View().Depth() != 0 || *h.appended {
-		return domain.PostResponseDecision{}, nil
+// child (which inherits the parent's Reactions) from re-appending, exercising the Depth() seam
+// in the same test.
+func synthesizeCallReaction(task, callID, deferInject string, appended *bool) domain.Reaction {
+	return domain.Reaction{
+		ID:     "synthesize_call",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeView,
+		On:     []domain.Moment{domain.MomentPostResponse},
+		Handler: domain.PostResponseFunc(func(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
+			if resp.View().Depth() != 0 || *appended {
+				return domain.Outcome{}, nil
+			}
+			resp.AppendToolCall(domain.ToolCall{
+				ID:        callID,
+				Tool:      tools.SubAgentToolName,
+				Arguments: json.RawMessage(subAgentArgs(task)),
+			})
+			*appended = true
+			return domain.Outcome{Defer: deferInject}, nil
+		}),
 	}
-	resp.AppendToolCall(domain.ToolCall{
-		ID:        h.callID,
-		Tool:      tools.SubAgentToolName,
-		Arguments: json.RawMessage(subAgentArgs(h.task)),
-	})
-	*h.appended = true
-	if h.deferInject != "" {
-		return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: h.deferInject}, nil
-	}
-	return domain.PostResponseDecision{}, nil
 }
 
 // TestSynthesizedToolCall_DispatchesLikeModelEmitted proves a post-response hook can add a
@@ -56,16 +54,11 @@ func TestSynthesizedToolCall_DispatchesLikeModelEmitted(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 	appended := false
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, synthesizeCallHook{
-		task:     "summarise the repo",
-		callID:   "text_call_0",
-		appended: &appended,
-	}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
+	cfg.Reactions = []domain.Reaction{
+		synthesizeCallReaction("summarise the repo", "text_call_0", "", &appended),
 	}
 
-	// The model itself emits NO tool call (plain text); the hook synthesizes the sub_agent
+	// The model itself emits NO tool call (plain text); the Reaction synthesizes the sub_agent
 	// delegation. The child (Depth 1) then replies with its final message.
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		contentScript("here is my plan"), // parent Turn: text only, no native tool call
@@ -89,7 +82,7 @@ func TestSynthesizedToolCall_DispatchesLikeModelEmitted(t *testing.T) {
 		t.Errorf("Step status = %q, want %q (the synthesized call must make it a tool Turn)", res.Status, domain.StatusTurnComplete)
 	}
 	if !appended {
-		t.Fatal("the synthesis hook never fired at Depth 0")
+		t.Fatal("the synthesis Reaction never fired at Depth 0")
 	}
 
 	// The committed assistant message must carry the synthesized sub_agent call.
@@ -113,27 +106,21 @@ func TestSynthesizedToolCall_DispatchesLikeModelEmitted(t *testing.T) {
 	}
 }
 
-// TestSynthesizedToolCall_MutateAndDeferBothLand pins the decision-composition semantic the
+// TestSynthesizedToolCall_MutateAndDeferBothLand pins the Outcome-composition semantic the
 // intercept relies on: an in-place response mutation (AppendToolCall) combined with a returned
-// ActionDefer must BOTH take effect — the appended call dispatches, and the deferred directive
-// is queued for the next request (hookrun applies the mutation, then routes the defer).
+// Outcome.Defer must BOTH take effect — the appended call dispatches, and the deferred directive
+// is queued for the next request (the dispatcher books the edit, then routes the defer).
 func TestSynthesizedToolCall_MutateAndDeferBothLand(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 	appended := false
 	const remaining = "REMAINING: delegate the next subtask via sub_agent"
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, synthesizeCallHook{
-		task:        "first subtask",
-		callID:      "text_call_0",
-		deferInject: remaining,
-		appended:    &appended,
-	}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
+	cfg.Reactions = []domain.Reaction{
+		synthesizeCallReaction("first subtask", "text_call_0", remaining, &appended),
 	}
 
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		contentScript("plan text"), // parent Turn: text only; the hook appends + defers
+		contentScript("plan text"), // parent Turn: text only; the Reaction appends + defers
 		contentScript("child one"), // the synthesized child
 	}}
 	a, err := newAgent(cfg, responder)
@@ -153,7 +140,7 @@ func TestSynthesizedToolCall_MutateAndDeferBothLand(t *testing.T) {
 		t.Errorf("the in-place mutation did not take effect: sub_agent result = %+v (ok=%v)", sub, ok)
 	}
 
-	// The ActionDefer also landed: the remaining-items directive is queued for the next request
+	// The Outcome.Defer also landed: the remaining-items directive is queued for the next request
 	// (it rides conversation state, drained by the next buildRequest).
 	injects, ok := a.conv.TakeDeferred()
 	if !ok || len(injects) != 1 || injects[0] != remaining {

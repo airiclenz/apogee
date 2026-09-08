@@ -93,21 +93,36 @@ func (r *closingResponder) Close() error {
 	return nil
 }
 
-// firingHook is a no-op experimental pre-request hook that records that it fired.
-type firingHook struct {
-	fired *bool
+// firingReaction is an armed pre-request Reaction that records that it fired and reports the
+// firing through its Outcome without touching the request — the bench's plain instrument, booked
+// on every invocation because it SAYS it acted (fired means acted, so a Reaction that touches
+// nothing and says nothing is never booked).
+func firingReaction(id string, fired *bool) domain.Reaction {
+	return domain.Reaction{
+		ID:     id,
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(context.Context, *domain.Request) (domain.Outcome, error) {
+			*fired = true
+			return domain.Outcome{Edited: true}, nil
+		}),
+	}
 }
 
-func (h firingHook) PreRequest(context.Context, *domain.Request) error {
-	*h.fired = true
-	return nil
-}
-
-// panickingHook is an experimental hook that panics — the input for the
+// panickingReaction is an armed Reaction that panics — the input for the
 // recover-at-extension-boundary guarantee.
-type panickingHook struct{}
-
-func (panickingHook) PreRequest(context.Context, *domain.Request) error { panic("hook boom") }
+func panickingReaction(id string) domain.Reaction {
+	return domain.Reaction{
+		ID:     id,
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(context.Context, *domain.Request) (domain.Outcome, error) {
+			panic("reaction boom")
+		}),
+	}
+}
 
 // ---------------------------------------------------------------------------
 
@@ -141,17 +156,14 @@ func hasEvent[T domain.Event](events []domain.Event) bool {
 // ---------------------------------------------------------------------------
 
 // TestHarness_FullCapstonePath drives the end-to-end seam the plan names: construct →
-// Submit → Step (observe the experimental hook fire + the assistant message at the
+// Submit → Step (observe the armed Reaction fire + the assistant message at the
 // quiescent boundary) → Snapshot → Resume → Submit → Step, proving the resumed Agent
 // continues the restored conversation.
 func TestHarness_FullCapstonePath(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	fired := false
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firingHook{fired: &fired}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{firingReaction("capstone_probe", &fired)}
 
 	a, err := newAgent(cfg, echoResponder{reply: "hello from model"})
 	if err != nil {
@@ -173,10 +185,10 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 		t.Errorf("Step TurnIndex = %d, want 0", res.TurnIndex)
 	}
 	if !fired {
-		t.Error("experimental pre-request hook did not fire")
+		t.Error("the armed pre-request Reaction did not fire")
 	}
 	if !hasEvent[domain.ReactionFiredEvent](sink.events) {
-		t.Error("no ReactionFiredEvent emitted for the experimental hook")
+		t.Error("no ReactionFiredEvent emitted for the armed Reaction")
 	}
 	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != "hello from model" {
 		t.Errorf("MessageEvent = %+v (ok=%v), want Text=%q", me, ok, "hello from model")
@@ -193,7 +205,7 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	// Resume into a fresh Agent (fresh sink) and continue the restored conversation.
 	sink2 := &recordingSink{}
 	cfg2 := baseConfig(sink2)
-	cfg2.Mechanisms = cfg.Mechanisms
+	cfg2.Reactions = cfg.Reactions
 	b, err := resumeAgent(cfg2, snap, echoResponder{reply: "second reply"})
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
@@ -319,16 +331,15 @@ func TestHarness_CancellationIsResumable(t *testing.T) {
 	}
 }
 
-// TestHarness_PanicRecovery proves a panicking hook becomes an ErrorEvent at a clean
-// boundary and the loop survives a second Step (the host is never unwound).
+// TestHarness_PanicRecovery proves a panicking Reaction becomes an ErrorEvent at a clean
+// boundary and the loop survives a second Step (the host is never unwound). The Turn itself is
+// untouched: a recovered Reaction degrades to one that did nothing, so the request still goes
+// out (ADR 0076 stage-1 header call).
 func TestHarness_PanicRecovery(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, panickingHook{}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
-	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
+	cfg.Reactions = []domain.Reaction{panickingReaction("panic_probe")}
+	a, err := newAgent(cfg, echoResponder{reply: "answered anyway"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -338,16 +349,16 @@ func TestHarness_PanicRecovery(t *testing.T) {
 	}
 	res, err := a.Step(context.Background())
 	if err != nil {
-		t.Fatalf("Step returned a loop error on hook panic: %v", err)
+		t.Fatalf("Step returned a loop error on a Reaction panic: %v", err)
 	}
 	if res.Status != domain.StatusExchangeComplete {
 		t.Errorf("Step status = %q, want %q", res.Status, domain.StatusExchangeComplete)
 	}
 	if !hasEvent[domain.ErrorEvent](sink.events) {
-		t.Error("no ErrorEvent emitted for the panicking hook")
+		t.Error("no ErrorEvent emitted for the panicking Reaction")
 	}
-	if _, ok := firstMessageEvent(t, sink.events); ok {
-		t.Error("a MessageEvent was emitted despite the pre-request hook panicking")
+	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != "answered anyway" {
+		t.Errorf("MessageEvent = %+v (ok=%v), want the Turn to carry on past the recovered panic", me, ok)
 	}
 
 	// The loop survived: a second Submit/Step recovers again and still returns cleanly.

@@ -1,129 +1,109 @@
 package agent
 
-// White-box tests for catalogued-Mechanism dispatch (Phase-4 item 2, broadened by
-// phase-4-review-fixes item 5): the loop dispatches registered Mechanisms under their real
-// MechanismID; at ALL FIVE hook points the Bypass gate drops non-off-ramp Mechanisms while
-// keeping off-ramps and never touching experimental hooks, and catalogued fire before
-// experimental; the incompatibility gate surfaces at construction; and a panicking
-// catalogued Mechanism is contained exactly like a panicking experimental hook.
-// Order/tiebreak determinism itself is proven in package domain.
+// White-box tests for armed-Reaction dispatch (Phase-4 item 2, broadened by
+// phase-4-review-fixes item 5; recast onto the Reaction core by ADR 0076 stage 1): the loop
+// dispatches the Reactions a host armed on Config.Reactions under their own IDs; at ALL FIVE
+// seam Moments the Bypass gate drops advise and the two shape classes while keeping observe
+// and gate; armed Reactions fire in registration order; and a panicking Reaction is contained
+// at the extension boundary. Revision bracketing itself is proven in package domain.
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// allHookPoints is the complete hook-point set the dispatch matrix spans.
-var allHookPoints = []domain.HookPoint{
-	domain.HookPreRequest,
-	domain.HookPostResponse,
-	domain.HookPreToolExec,
-	domain.HookPostToolResult,
-	domain.HookHistoryRewrite,
+// allSeamMoments is the complete seam vocabulary the dispatch matrix spans, in loop order.
+var allSeamMoments = domain.Seams()
+
+// recordingReaction is an armed pre-request Reaction that counts its invocations; class sets the
+// cell the Bypass gate reads. It edits the request on every invocation, so each one moves the
+// working value's Revision and is an ACTED fire (R4) booked under the reaction's own ID.
+func recordingReaction(id string, class domain.Class, fired *int) domain.Reaction {
+	return domain.Reaction{
+		ID:     id,
+		Origin: domain.OriginEngine,
+		Class:  class,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(_ context.Context, req *domain.Request) (domain.Outcome, error) {
+			*fired++
+			req.AppendToSystem("[dispatch-test "+id+"]", "[dispatch-test "+id+"] nudge")
+			return domain.Outcome{}, nil
+		}),
+	}
 }
 
-// recordingMech is a catalogued pre-request Mechanism that counts its invocations; cap sets
-// the Capability the Bypass gate reads. It mutates the request so each invocation is an
-// ACTED fire (R4) and is booked/attributed.
-type recordingMech struct {
-	id    domain.MechanismID
-	cap   domain.Capability
-	fired *int
+// countingReaction is an armed pre-request Reaction that only counts: it touches nothing and
+// returns the zero Outcome, so it is invoked but never booked. What it proves is arrival — a
+// reaction Bypass dropped was never invoked, so its counter cannot move.
+func countingReaction(id string, class domain.Class, fired *int) domain.Reaction {
+	return domain.Reaction{
+		ID:     id,
+		Origin: domain.OriginEngine,
+		Class:  class,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(context.Context, *domain.Request) (domain.Outcome, error) {
+			*fired++
+			return domain.Outcome{}, nil
+		}),
+	}
 }
 
-func (m recordingMech) row() domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id, Capability: m.cap}, Hook: m}
-}
-func (m recordingMech) PreRequest(_ context.Context, req *domain.Request) error {
-	*m.fired++
-	req.AppendToSystem("[dispatch-test "+string(m.id)+"]", "[dispatch-test "+string(m.id)+"] nudge")
-	return nil
-}
-
-// fivePointProbe implements all five hook interfaces, reporting each invocation (and its
-// hook point) through note without acting — the shared core of the five-point Bypass matrix
-// and the catalogued-before-experimental order probe. Registered bare via AddExperimental it
-// is an experimental hook at every point; wrapped in fivePointMech it is one catalogued
-// Mechanism spanning the whole matrix.
-type fivePointProbe struct {
-	note func(domain.HookPoint)
-}
-
-func (p fivePointProbe) RewriteHistory(context.Context, *domain.Conversation) error {
-	p.note(domain.HookHistoryRewrite)
-	return nil
-}
-
-func (p fivePointProbe) PreRequest(context.Context, *domain.Request) error {
-	p.note(domain.HookPreRequest)
-	return nil
-}
-
-func (p fivePointProbe) PostResponse(context.Context, *domain.Response) (domain.PostResponseDecision, error) {
-	p.note(domain.HookPostResponse)
-	return domain.PostResponseDecision{}, nil
-}
-
-func (p fivePointProbe) PreToolExec(context.Context, *domain.ToolCallEdit, domain.LoopView) error {
-	p.note(domain.HookPreToolExec)
-	return nil
-}
-
-func (p fivePointProbe) PostToolResult(context.Context, domain.ToolCall, *domain.ToolResultEdit, domain.LoopView) error {
-	p.note(domain.HookPostToolResult)
-	return nil
-}
-
-// fivePointMech is fivePointProbe with a descriptor — a catalogued Mechanism hooking at all
-// five points at once, so one tool-carrying exchange probes the full dispatch matrix.
-type fivePointMech struct {
-	fivePointProbe
-	id  domain.MechanismID
-	cap domain.Capability
+// seamProbes builds ONE Reaction per seam Moment — five of them, sharing an origin, a class and
+// a note func — each reporting its invocation without acting. A Reaction's handler is sealed to
+// one seam, so a probe that spans the whole matrix is a set rather than a single row; the IDs are
+// prefix + "-" + the Moment, because the dispatcher refuses two reactions sharing one ID.
+func seamProbes(prefix string, class domain.Class, note func(domain.Moment)) []domain.Reaction {
+	out := make([]domain.Reaction, 0, len(allSeamMoments))
+	for _, m := range allSeamMoments {
+		r := domain.Reaction{
+			ID:     prefix + "-" + string(m),
+			Origin: domain.OriginEngine,
+			Class:  class,
+			On:     []domain.Moment{m},
+		}
+		switch m {
+		case domain.MomentPreRequest:
+			r.Handler = domain.PreRequestFunc(func(context.Context, *domain.Request) (domain.Outcome, error) {
+				note(domain.MomentPreRequest)
+				return domain.Outcome{}, nil
+			})
+		case domain.MomentPostResponse:
+			r.Handler = domain.PostResponseFunc(func(context.Context, *domain.Response) (domain.Outcome, error) {
+				note(domain.MomentPostResponse)
+				return domain.Outcome{}, nil
+			})
+		case domain.MomentPreToolExec:
+			r.Handler = domain.PreToolExecFunc(func(context.Context, domain.LoopView, *domain.ToolCallEdit) (domain.Outcome, error) {
+				note(domain.MomentPreToolExec)
+				return domain.Outcome{}, nil
+			})
+		case domain.MomentPostToolResult:
+			r.Handler = domain.PostToolResultFunc(func(context.Context, domain.LoopView, domain.ToolCall, *domain.ToolResultEdit) (domain.Outcome, error) {
+				note(domain.MomentPostToolResult)
+				return domain.Outcome{}, nil
+			})
+		case domain.MomentHistoryRewrite:
+			r.Handler = domain.HistoryRewriteFunc(func(context.Context, *domain.Conversation) (domain.Outcome, error) {
+				note(domain.MomentHistoryRewrite)
+				return domain.Outcome{}, nil
+			})
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
-func (m fivePointMech) row() domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id, Capability: m.cap}, Hook: m}
+// countsByMoment returns a per-seam invocation counter and the note func feeding it.
+func countsByMoment() (map[domain.Moment]int, func(domain.Moment)) {
+	counts := make(map[domain.Moment]int, len(allSeamMoments))
+	return counts, func(m domain.Moment) { counts[m]++ }
 }
-
-// countsByPoint returns a per-hook-point invocation counter and the note func feeding it.
-func countsByPoint() (map[domain.HookPoint]int, func(domain.HookPoint)) {
-	counts := make(map[domain.HookPoint]int, len(allHookPoints))
-	return counts, func(at domain.HookPoint) { counts[at]++ }
-}
-
-// incompatMech is a minimal pre-request Mechanism declaring an IncompatibleWith constraint —
-// the fixture for the construction-time incompatibility gate.
-type incompatMech struct {
-	id       domain.MechanismID
-	incompat []domain.MechanismID
-}
-
-func (m incompatMech) row() domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id, IncompatibleWith: m.incompat}, Hook: m}
-}
-func (incompatMech) PreRequest(context.Context, *domain.Request) error { return nil }
-
-// requiresMech is a minimal pre-request Mechanism declaring a Requires constraint — the fixture for
-// the construction-time requirements gate. It is synthetic rather than a catalogue row because no
-// catalogued Mechanism declares Requires any more: the one that did named the tool-result cap, which
-// is a Floor guard now (ADR 0071), while Requires itself stays lab API.
-type requiresMech struct {
-	id       domain.MechanismID
-	requires []domain.MechanismID
-}
-
-func (m requiresMech) row() domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id, Requires: m.requires}, Hook: m}
-}
-func (requiresMech) PreRequest(context.Context, *domain.Request) error { return nil }
 
 // driveToolExchange drives one full Exchange whose first Turn carries a tool call and whose
-// second closes with text — so every one of the five hook points is exercised at least once.
+// second closes with text — so every one of the five seam Moments is exercised at least once.
 func driveToolExchange(t *testing.T, cfg domain.Config) {
 	t.Helper()
 	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
@@ -148,16 +128,21 @@ func driveToolExchange(t *testing.T, cfg domain.Config) {
 	}
 }
 
-// panicMech is a catalogued pre-request Mechanism that panics — the input for the
-// recover-at-extension-boundary guarantee under the catalogued path.
-type panicMech struct{ id domain.MechanismID }
-
-func (m panicMech) row() domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id}, Hook: m}
+// panicReaction is an armed pre-request Reaction that panics — the input for the
+// recover-at-extension-boundary guarantee on the armed leg.
+func panicReaction(id string) domain.Reaction {
+	return domain.Reaction{
+		ID:     id,
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeView,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(context.Context, *domain.Request) (domain.Outcome, error) {
+			panic("armed reaction boom")
+		}),
+	}
 }
-func (panicMech) PreRequest(context.Context, *domain.Request) error { panic("catalogued boom") }
 
-func mechanismFires(events []domain.Event) []domain.ReactionFiredEvent {
+func reactionFires(events []domain.Event) []domain.ReactionFiredEvent {
 	var out []domain.ReactionFiredEvent
 	for _, e := range events {
 		if fe, ok := e.(domain.ReactionFiredEvent); ok {
@@ -177,19 +162,20 @@ func mustAddMech(t *testing.T, r *domain.MechanismRegistry, m domain.RegisteredM
 	}
 }
 
-func TestCataloguedMechanismFiresUnderRealID(t *testing.T) {
+// TestArmedReactionFiresUnderItsOwnID: a Reaction armed on Config.Reactions is invoked through
+// the real loop and its firing is booked under the ID it was armed with, never a synthetic one.
+func TestArmedReactionFiresUnderItsOwnID(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
 	fired := 0
-	mustAddMech(t, cfg.Mechanisms, recordingMech{id: "greet", cap: domain.CapProactiveNudge, fired: &fired}.row())
+	cfg.Reactions = []domain.Reaction{recordingReaction("greet", domain.ClassShapeView, &fired)}
 
 	driveOneStep(t, cfg, echoResponder{reply: "ok"})
 
 	if fired != 1 {
-		t.Errorf("catalogued mechanism fired %d times, want 1", fired)
+		t.Errorf("armed reaction fired %d times, want 1", fired)
 	}
-	fires := mechanismFires(sink.events)
+	fires := reactionFires(sink.events)
 	found := false
 	for _, fe := range fires {
 		if fe.Reaction == "greet" {
@@ -197,132 +183,111 @@ func TestCataloguedMechanismFiresUnderRealID(t *testing.T) {
 			if fe.Moment != domain.MomentPreRequest {
 				t.Errorf("fired event moment = %q, want %q", fe.Moment, domain.MomentPreRequest)
 			}
-		}
-		if fe.Reaction == string(experimentalMechanismID) {
-			t.Errorf("catalogued fire was attributed to the synthetic experimental ID, want %q", "greet")
+			if fe.Origin != domain.OriginEngine {
+				t.Errorf("fired event origin = %q, want %q", fe.Origin, domain.OriginEngine)
+			}
 		}
 	}
 	if !found {
-		t.Errorf("no ReactionFiredEvent carried the catalogued ID %q; got %+v", "greet", fires)
+		t.Errorf("no ReactionFiredEvent carried the armed ID %q; got %+v", "greet", fires)
 	}
 }
 
-// TestBypassGate is the five-point Bypass dispatch matrix (phase-4-review-fixes item 5): at
-// EVERY hook point an off-ramp survives Bypass, proactive-nudge and response-repair are
-// dropped under it (and all three dispatch without it), and an experimental hook — the
-// bench's own instrument — is never gated either way.
+// TestBypassGate is the five-seam Bypass dispatch matrix (phase-4-review-fixes item 5, recast on
+// ADR 0076 D9): at EVERY seam Moment an armed observe or gate Reaction survives Bypass, while
+// advise, shape-view and shape-work are dropped before they are ever invoked — and all five
+// dispatch when Bypass is off.
 func TestBypassGate(t *testing.T) {
 	tests := []struct {
 		name   string
 		bypass bool
 	}{
-		{name: "bypass off ⇒ all catalogued dispatch", bypass: false},
-		{name: "bypass on ⇒ only the off-ramp dispatches", bypass: true},
+		{name: "bypass off ⇒ every class dispatches", bypass: false},
+		{name: "bypass on ⇒ only observe and gate dispatch", bypass: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sink := &recordingSink{}
 			cfg := configWithTools(sink, fakeTool{name: "probe", readOnly: true, result: "ok"})
 			cfg.Bypass = tt.bypass
-			cfg.Mechanisms = domain.NewMechanismRegistry()
 
-			offCounts, noteOff := countsByPoint()
-			nudgeCounts, noteNudge := countsByPoint()
-			repairCounts, noteRepair := countsByPoint()
-			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteOff}, "off", domain.CapOffRamp}.row())
-			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteNudge}, "nudge", domain.CapProactiveNudge}.row())
-			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteRepair}, "repair", domain.CapResponseRepair}.row())
-
-			expCounts, noteExp := countsByPoint()
-			for _, at := range allHookPoints {
-				if err := cfg.Mechanisms.AddExperimental(at, fivePointProbe{noteExp}); err != nil {
-					t.Fatalf("AddExperimental(%s): %v", at, err)
-				}
+			type subject struct {
+				class   domain.Class
+				counts  map[domain.Moment]int
+				dropped bool // whether Bypass switches this class off (D9)
+			}
+			subjects := map[string]*subject{
+				"observe":    {class: domain.ClassObserve},
+				"gate":       {class: domain.ClassGate},
+				"advise":     {class: domain.ClassAdvise, dropped: true},
+				"shape-view": {class: domain.ClassShapeView, dropped: true},
+				"shape-work": {class: domain.ClassShapeWork, dropped: true},
+			}
+			for name, s := range subjects {
+				counts, note := countsByMoment()
+				s.counts = counts
+				cfg.Reactions = append(cfg.Reactions, seamProbes(name, s.class, note)...)
 			}
 
 			driveToolExchange(t, cfg)
 
-			for _, at := range allHookPoints {
-				if offCounts[at] == 0 {
-					t.Errorf("[%s] off-ramp did not dispatch (bypass=%v); off-ramps survive Bypass", at, tt.bypass)
-				}
-				if gated := nudgeCounts[at] == 0; gated != tt.bypass {
-					t.Errorf("[%s] proactive-nudge dispatched %d times (bypass=%v)", at, nudgeCounts[at], tt.bypass)
-				}
-				if gated := repairCounts[at] == 0; gated != tt.bypass {
-					t.Errorf("[%s] response-repair dispatched %d times (bypass=%v)", at, repairCounts[at], tt.bypass)
-				}
-				if expCounts[at] == 0 {
-					t.Errorf("[%s] experimental hook did not fire (bypass=%v); it must never be Bypass-gated", at, tt.bypass)
+			for name, s := range subjects {
+				for _, m := range allSeamMoments {
+					gated := s.counts[m] == 0
+					want := tt.bypass && s.dropped
+					if gated != want {
+						t.Errorf("[%s] class %s dispatched %d times (bypass=%v), want gated=%v",
+							m, name, s.counts[m], tt.bypass, want)
+					}
 				}
 			}
 		})
 	}
 }
 
-// TestCataloguedFireBeforeExperimental proves the catalogued-first dispatch order at every
-// hook point: within each dispatch pass the catalogued Mechanism runs before the
-// experimental hook, so the bench observes the configured behaviour, never the reverse.
-func TestCataloguedFireBeforeExperimental(t *testing.T) {
+// TestArmedReactionsFireInRegistrationOrder proves the armed leg's order at every seam Moment:
+// the Reactions on Config.Reactions run in the order the host listed them, so a bench instrument
+// armed after a subject observes the subject's behaviour and never the reverse.
+func TestArmedReactionsFireInRegistrationOrder(t *testing.T) {
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "probe", readOnly: true, result: "ok"})
-	cfg.Mechanisms = domain.NewMechanismRegistry()
 
-	order := make(map[domain.HookPoint][]string, len(allHookPoints))
-	label := func(name string) func(domain.HookPoint) {
-		return func(at domain.HookPoint) { order[at] = append(order[at], name) }
+	order := make(map[domain.Moment][]string, len(allSeamMoments))
+	label := func(name string) func(domain.Moment) {
+		return func(m domain.Moment) { order[m] = append(order[m], name) }
 	}
-	mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{label("catalogued")}, "cat", domain.CapProactiveNudge}.row())
-	for _, at := range allHookPoints {
-		if err := cfg.Mechanisms.AddExperimental(at, fivePointProbe{label("experimental")}); err != nil {
-			t.Fatalf("AddExperimental(%s): %v", at, err)
-		}
-	}
+	cfg.Reactions = append(cfg.Reactions, seamProbes("first", domain.ClassObserve, label("first"))...)
+	cfg.Reactions = append(cfg.Reactions, seamProbes("second", domain.ClassObserve, label("second"))...)
 
 	driveToolExchange(t, cfg)
 
-	// Some points run once per exchange (the tool stages), others once per Turn: assert every
-	// pass alternates catalogued → experimental rather than pinning a pass count.
-	want := [2]string{"catalogued", "experimental"}
-	for _, at := range allHookPoints {
-		got := order[at]
+	// Some Moments run once per exchange (the tool stages), others once per Turn: assert every
+	// pass alternates first → second rather than pinning a pass count.
+	want := [2]string{"first", "second"}
+	for _, m := range allSeamMoments {
+		got := order[m]
 		if len(got) == 0 || len(got)%2 != 0 {
-			t.Errorf("[%s] dispatch order = %v, want complete catalogued/experimental pairs", at, got)
+			t.Errorf("[%s] dispatch order = %v, want complete first/second pairs", m, got)
 			continue
 		}
 		for i, name := range got {
 			if name != want[i%2] {
-				t.Errorf("[%s] dispatch order = %v, want alternating [catalogued experimental ...]", at, got)
+				t.Errorf("[%s] dispatch order = %v, want alternating [first second ...]", m, got)
 				break
 			}
 		}
 	}
 }
 
-// TestNewSurfacesIncompatibleMechanismsAtConstruction is the construction-time gate proven
-// end-to-end (phase-4-review-fixes item 5): a registry carrying two mutually-incompatible
-// Mechanisms is refused by New AND by the newAgent seam it delegates to — the loud startup
-// failure, not a silently co-firing pair. Method-level coverage lives in package domain.
-func TestNewSurfacesIncompatibleMechanismsAtConstruction(t *testing.T) {
-	cfg := baseConfig(&recordingSink{})
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	mustAddMech(t, cfg.Mechanisms, incompatMech{id: "read_loop", incompat: []domain.MechanismID{"cached_content_intercept"}}.row())
-	mustAddMech(t, cfg.Mechanisms, incompatMech{id: "cached_content_intercept"}.row())
-
-	if _, err := New(cfg); !errors.Is(err, domain.ErrIncompatibleMechanisms) {
-		t.Errorf("New = %v, want ErrIncompatibleMechanisms", err)
-	}
-	if _, err := newAgent(cfg, echoResponder{reply: "ok"}); !errors.Is(err, domain.ErrIncompatibleMechanisms) {
-		t.Errorf("newAgent = %v, want ErrIncompatibleMechanisms", err)
-	}
-}
-
-func TestPanickingCataloguedMechanismContained(t *testing.T) {
+// TestPanickingReactionContained: a panicking armed Reaction is recovered at the extension
+// boundary, reported as an ErrorEvent under its own ID, and treated as having done nothing — the
+// cascade and the Turn carry on (ADR 0076 stage-1 header call), and the loop survives a second
+// Step.
+func TestPanickingReactionContained(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	mustAddMech(t, cfg.Mechanisms, panicMech{id: "boom"}.row())
+	cfg.Reactions = []domain.Reaction{panicReaction("boom")}
 
-	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
+	a, err := newAgent(cfg, echoResponder{reply: "still answered"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -331,14 +296,13 @@ func TestPanickingCataloguedMechanismContained(t *testing.T) {
 	}
 	res, err := a.Step(context.Background())
 	if err != nil {
-		t.Fatalf("Step returned a loop error on catalogued panic: %v", err)
+		t.Fatalf("Step returned a loop error on an armed-reaction panic: %v", err)
 	}
 	if res.Status != domain.StatusExchangeComplete {
 		t.Errorf("Step status = %q, want %q", res.Status, domain.StatusExchangeComplete)
 	}
 
-	// The panic degraded the Turn: an ErrorEvent attributed to the mechanism's real ID, and no
-	// assistant message (the Upstream was never called).
+	// The panic was attributed to the reaction's own ID and booked no firing.
 	var gotSource string
 	for _, e := range sink.events {
 		if ee, ok := e.(domain.ErrorEvent); ok {
@@ -346,10 +310,16 @@ func TestPanickingCataloguedMechanismContained(t *testing.T) {
 		}
 	}
 	if gotSource != "boom" {
-		t.Errorf("ErrorEvent Source = %q, want the catalogued mechanism ID %q", gotSource, "boom")
+		t.Errorf("ErrorEvent Source = %q, want the armed reaction's ID %q", gotSource, "boom")
 	}
-	if _, ok := firstMessageEvent(t, sink.events); ok {
-		t.Error("a MessageEvent was emitted despite the catalogued mechanism panicking")
+	if fires := reactionFires(sink.events); len(fires) != 0 {
+		t.Errorf("a panicking reaction booked %d firings, want 0: %+v", len(fires), fires)
+	}
+
+	// The reaction degraded to a no-op rather than degrading the Turn: the Upstream was still
+	// called and its reply reached the host.
+	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != "still answered" {
+		t.Errorf("MessageEvent = %+v (ok=%v), want the Turn to carry on past the recovered panic", me, ok)
 	}
 
 	// The loop survived: a second Step recovers again and still returns cleanly.

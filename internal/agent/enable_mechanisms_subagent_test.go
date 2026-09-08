@@ -30,8 +30,8 @@ import (
 // now — on for every agent at every Depth, and so no proof that a registry was inherited — and the
 // row itself retired on the same verdict.)
 
-// inheritedMechID names the synthetic row the parent arms and the child must inherit.
-const inheritedMechID domain.MechanismID = "inherited_probe"
+// inheritedReactionID names the synthetic Reaction the parent arms and the child must inherit.
+const inheritedReactionID = "inherited_probe"
 
 // gdWindow is the discovered context window these delegation tests run under: at 4 chars/token
 // (uncalibrated) it allocates ~400 tokens to FileContext and ~960 to History, so a modest ask leaves
@@ -46,8 +46,7 @@ func enableMechanismsSubAgentConfig(t *testing.T, sink domain.EventSink) domain.
 	cfg := subAgentConfig(sink, domain.ModeAskBefore,
 		fakeTool{name: "write_file", result: "ok"})
 	fired := 0
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	mustAddMech(t, cfg.Mechanisms, recordingMech{id: inheritedMechID, cap: domain.CapProactiveNudge, fired: &fired}.row())
+	cfg.Reactions = []domain.Reaction{recordingReaction(inheritedReactionID, domain.ClassShapeView, &fired)}
 	cfg.Context.MaxContextTokens = gdWindow
 	return cfg
 }
@@ -155,9 +154,9 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 	// The child ran the INHERITED stack: the armed row acted on the child's own request, booking a
 	// fire at Depth 1. A child on an empty registry (the EnableMechanisms clear mis-applied to
 	// Mechanisms, or the inheritance dropped) books no such fire.
-	if !hasFireAtDepth(sink.events, inheritedMechID, 1) {
+	if !hasFireAtDepth(sink.events, inheritedReactionID, 1) {
 		t.Errorf("no %s fire at Depth 1; the child did not run the inherited stack. fires=%+v",
-			inheritedMechID, mechanismFires(sink.events))
+			inheritedReactionID, reactionFires(sink.events))
 	}
 }
 
@@ -172,9 +171,9 @@ func gdMessageEventDepth(events []domain.Event, text string) int {
 }
 
 // hasFireAtDepth reports whether a ReactionFiredEvent for id was emitted at the given nesting Depth.
-func hasFireAtDepth(events []domain.Event, id domain.MechanismID, depth int) bool {
-	for _, fe := range mechanismFires(events) {
-		if fe.Reaction == string(id) && fe.Depth == depth {
+func hasFireAtDepth(events []domain.Event, id string, depth int) bool {
+	for _, fe := range reactionFires(events) {
+		if fe.Reaction == id && fe.Depth == depth {
 			return true
 		}
 	}

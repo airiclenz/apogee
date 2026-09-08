@@ -509,7 +509,7 @@ func TestNoOpInvocationNotBooked(t *testing.T) {
 	if invoked != turns {
 		t.Errorf("inspect-only Mechanism dispatched %d times, want %d (unbooked invocations accrue no strikes)", invoked, turns)
 	}
-	for _, fe := range mechanismFires(sink.events) {
+	for _, fe := range reactionFires(sink.events) {
 		if fe.Reaction == "watcher" {
 			t.Errorf("a no-op invocation emitted a ReactionFiredEvent: %+v", fe)
 		}
@@ -546,7 +546,7 @@ func TestFiredCountsVisibleToHook(t *testing.T) {
 		t.Errorf("hook read Fired(greet) = %d, want 1 (the catalogued acted fire from the same pass)", seen)
 	}
 	found := false
-	for _, fe := range mechanismFires(sink.events) {
+	for _, fe := range reactionFires(sink.events) {
 		if fe.Reaction == "greet" {
 			found = true
 		}

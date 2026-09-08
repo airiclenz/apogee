@@ -348,6 +348,13 @@ func TestRoutedSpawnBypassPosture(t *testing.T) {
 	}
 }
 
+// inertPreRequestHook is a registry hook that does nothing: the routed-spawn posture tests need
+// the parent's catalogue to be NON-EMPTY so "inherited" and "replaced" are distinguishable, and
+// nothing more than that.
+type inertPreRequestHook struct{}
+
+func (inertPreRequestHook) PreRequest(context.Context, *domain.Request) error { return nil }
+
 // TestRoutedSpawnMechanismsPosture is the catalogue half of the same rule: a factory on the target
 // REPLACES the inherited catalogue whole and is called once per child (a fresh registry each, the
 // live-state isolation a concurrent fan-out needs), while no factory leaves ForSubAgent's inherited
@@ -361,8 +368,7 @@ func TestRoutedSpawnMechanismsPosture(t *testing.T) {
 		t.Helper()
 		cfg := configWithTools(&recordingSink{}, fakeTool{name: "w"})
 		cfg.Mechanisms = domain.NewMechanismRegistry()
-		fired := false
-		if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firingHook{fired: &fired}); err != nil {
+		if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, inertPreRequestHook{}); err != nil {
 			t.Fatalf("AddExperimental: %v", err)
 		}
 		a, err := newAgent(cfg, &scriptedResponder{})

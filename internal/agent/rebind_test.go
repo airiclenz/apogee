@@ -265,11 +265,7 @@ func TestRebindRefusesUnbuildableSpecs(t *testing.T) {
 
 	t.Run("host-supplied registry", func(t *testing.T) {
 		cfg := baseConfig(&recordingSink{})
-		fired := false
 		cfg.Mechanisms = domain.NewMechanismRegistry()
-		if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firingHook{fired: &fired}); err != nil {
-			t.Fatalf("AddExperimental: %v", err)
-		}
 
 		a, err := newAgent(cfg, echoResponder{reply: "unreached"})
 		if err != nil {

@@ -28,24 +28,6 @@ func TestEnableMechanisms_UnknownIDFailsConstruction(t *testing.T) {
 	}
 }
 
-// TestEnableMechanisms_HalfStackFailsRequirement: a registered row whose Required peer is absent
-// fails the requirements gate with ErrMissingRequirement (ADR 0014 §4 stacking, re-checked over the
-// merged registry). The row is synthetic: no catalogued Mechanism declares Requires any more — the
-// one that did named the tool-result cap, now a Floor guard — while the gate itself stays.
-func TestEnableMechanisms_HalfStackFailsRequirement(t *testing.T) {
-	cfg := baseConfig(&recordingSink{})
-	reg := domain.NewMechanismRegistry()
-	if err := reg.Add(requiresMech{id: "half_stack", requires: []domain.MechanismID{"absent_peer"}}.row()); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-	cfg.Mechanisms = reg
-
-	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
-	if !errors.Is(err, domain.ErrMissingRequirement) {
-		t.Errorf("newAgent err = %v, want it to wrap domain.ErrMissingRequirement", err)
-	}
-}
-
 // TestEnableMechanisms_MergeRejectionCarriesOnePrefix: a build-path rejection is RETURNED to the
 // host, and cmd/apogee/main.go prints a returned error verbatim — so it has to read as ONE
 // "apogee: "-prefixed line naming the ID that failed. The shipped catalogue is empty since v0.20.0
@@ -79,19 +61,16 @@ func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
 	}
 }
 
-// TestEnableMechanisms_MergesWithProvidedExperimentalHook: a Config.Mechanisms carrying an
-// experimental hook is the registry construction MERGES INTO, never one it replaces (locked
-// decision 2). With the shipped catalogue empty since v0.20.0 (ADR 0071) there is no catalogued row
-// left to merge alongside it, so what stands here is the half that still can be observed: the
-// provided registry survives construction and its hook fires through the real loop.
-func TestEnableMechanisms_MergesWithProvidedExperimentalHook(t *testing.T) {
+// TestEnableMechanisms_SurvivesAlongsideArmedReactions: an EnableMechanisms build stands BESIDE
+// the Reactions the host armed, never in place of them (locked decision 2, carried onto the
+// Reaction core). With the shipped catalogue empty since v0.20.0 (ADR 0071) there is no
+// catalogued row left to build alongside them, so what stands here is the half that still can be
+// observed: a Config.Reactions entry survives construction and fires through the real loop.
+func TestEnableMechanisms_SurvivesAlongsideArmedReactions(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
 	fired := false
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firingHook{fired: &fired}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
-	}
+	cfg.Reactions = []domain.Reaction{firingReaction("provided_probe", &fired)}
 
 	a, err := newAgent(cfg, echoResponder{reply: "done"})
 	if err != nil {
@@ -100,7 +79,7 @@ func TestEnableMechanisms_MergesWithProvidedExperimentalHook(t *testing.T) {
 	runExchange(t, a, "update the config file")
 
 	if !fired {
-		t.Error("the pre-existing experimental hook did not fire; construction replaced the provided registry")
+		t.Error("the armed Reaction did not fire; construction dropped what the host armed")
 	}
 }
 

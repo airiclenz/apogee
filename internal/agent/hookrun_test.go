@@ -1,9 +1,10 @@
 package agent
 
-// The hook-cascade matrix: every one of the five hook points × the five things the shared
-// runner (hookrun.go) promises at each of them — a catalogued hook that acts is booked, one
-// that only inspects is not, an experimental hook is booked either way, a panicking hook is
-// contained per that point's own contract, and Bypass skips the catalogued hook entirely.
+// The Reaction-cascade matrix: every one of the five seam Moments × the four things the
+// dispatcher (reactions.go) promises at each of them — an armed Reaction that acts is booked,
+// one that only inspects is not, one that REPORTS acting through its Outcome is booked even
+// though it moved nothing, and a panicking one is contained. Bypass is the fifth cell: at every
+// Moment it drops a shape-class Reaction before it is ever invoked.
 //
 // Every cell is driven through the real Submit → Step → dispatchTools path against a tool
 // whose result carries an UNCOMPARABLE summary (ReadSpan's []int of located lines) — the
@@ -21,8 +22,8 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// cascadeProbeID is the catalogue ID every catalogued cell registers its probe under.
-const cascadeProbeID domain.MechanismID = "cascade_probe"
+// cascadeReactionID is the ID every cell arms its probe under.
+const cascadeReactionID = "cascade_probe"
 
 // locatedReadSummary is the uncomparable summary read_file returns on every successful read:
 // LocatedOn is a slice, so a struct compare of two ToolResults carrying one panics.
@@ -47,101 +48,105 @@ func summaryTool(ran *int) fakeTool {
 	}
 }
 
-// probeBehavior is what a cascadeProbe does at the hook point under test.
-type probeBehavior int
+// cellBehavior is what the cascade probe does at the seam Moment under test.
+type cellBehavior int
 
 const (
-	probeInspects probeBehavior = iota // reads the working value and leaves it alone
-	probeActs                          // mutates the working value through that point's edit surface
-	probePanics                        // panics inside the hook, for the recover boundary
+	probeInspects cellBehavior = iota // reads the working value and leaves it alone
+	probeActs                         // mutates the working value through that Moment's edit surface
+	probeReports                      // touches nothing but returns an Outcome saying it acted
+	probePanics                       // panics inside the handler, for the recover boundary
 )
 
-// cascadeProbe implements all five hook interfaces, so ONE fixture stands at whichever point a
-// cell is testing: at `at` it applies `behavior`, at every other point it inspects and returns.
-// seen counts invocations per point, so a Bypass-gated cell can prove the probe never arrived.
-type cascadeProbe struct {
-	at       domain.HookPoint
-	behavior probeBehavior
-	seen     func(domain.HookPoint)
+// reportedOutcome is what a probe returns once it has done (or not done) its work: the zero
+// Outcome for every behaviour but probeReports, which says it acted without moving anything —
+// the shape a bench instrument uses when it wants every invocation booked.
+func reportedOutcome(b cellBehavior) domain.Outcome {
+	if b == probeReports {
+		return domain.Outcome{Edited: true}
+	}
+	return domain.Outcome{}
 }
 
-func (p cascadeProbe) row(capability domain.Capability) domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{
-		Descriptor: domain.MechanismDescriptor{ID: cascadeProbeID, Capability: capability},
-		Hook:       p,
+// cascadeReaction builds the one Reaction a cell arms: it stands at Moment at, records its
+// arrival through seen, and applies behavior there. A Reaction's handler is sealed to one seam,
+// so the probe stands at the Moment under test and nowhere else.
+func cascadeReaction(at domain.Moment, behavior cellBehavior, class domain.Class, seen func(domain.Moment)) domain.Reaction {
+	arrive := func() bool {
+		seen(at)
+		if behavior == probePanics {
+			panic("cascade probe: deliberate panic at " + string(at))
+		}
+		return behavior == probeActs
 	}
+
+	r := domain.Reaction{
+		ID:     cascadeReactionID,
+		Origin: domain.OriginEngine,
+		Class:  class,
+		On:     []domain.Moment{at},
+	}
+	switch at {
+	case domain.MomentPreRequest:
+		r.Handler = domain.PreRequestFunc(func(_ context.Context, req *domain.Request) (domain.Outcome, error) {
+			if arrive() {
+				req.AppendToSystem("[cascade]", "[cascade] nudge")
+			}
+			return reportedOutcome(behavior), nil
+		})
+	case domain.MomentPostResponse:
+		r.Handler = domain.PostResponseFunc(func(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
+			if arrive() {
+				resp.SetText(resp.Text() + "[cascade]")
+			}
+			return reportedOutcome(behavior), nil
+		})
+	case domain.MomentPreToolExec:
+		r.Handler = domain.PreToolExecFunc(func(_ context.Context, _ domain.LoopView, call *domain.ToolCallEdit) (domain.Outcome, error) {
+			if arrive() {
+				call.SetArguments(json.RawMessage(`{"cascade":true}`))
+			}
+			return reportedOutcome(behavior), nil
+		})
+	case domain.MomentPostToolResult:
+		r.Handler = domain.PostToolResultFunc(func(_ context.Context, _ domain.LoopView, _ domain.ToolCall, result *domain.ToolResultEdit) (domain.Outcome, error) {
+			if arrive() {
+				result.SetContent(result.Content() + " [cascade]")
+			}
+			return reportedOutcome(behavior), nil
+		})
+	case domain.MomentHistoryRewrite:
+		r.Handler = domain.HistoryRewriteFunc(func(_ context.Context, conv *domain.Conversation) (domain.Outcome, error) {
+			if arrive() && conv.Len() > 0 {
+				conv.SetMessageContent(0, conv.At(0).Content+" [cascade]")
+			}
+			return reportedOutcome(behavior), nil
+		})
+	}
+	return r
 }
 
-// arrive records one invocation at at and reports whether the probe should mutate there — or
-// panics instead, when at is the point the cell is probing and the behavior asks for it.
-func (p cascadeProbe) arrive(at domain.HookPoint) bool {
-	p.seen(at)
-	if at != p.at {
-		return false
-	}
-	if p.behavior == probePanics {
-		panic("cascade probe: deliberate panic at " + string(at))
-	}
-	return p.behavior == probeActs
-}
-
-func (p cascadeProbe) RewriteHistory(_ context.Context, conv *domain.Conversation) error {
-	if p.arrive(domain.HookHistoryRewrite) && conv.Len() > 0 {
-		conv.SetMessageContent(0, conv.At(0).Content+" [cascade]")
-	}
-	return nil
-}
-
-func (p cascadeProbe) PreRequest(_ context.Context, req *domain.Request) error {
-	if p.arrive(domain.HookPreRequest) {
-		req.AppendToSystem("[cascade]", "[cascade] nudge")
-	}
-	return nil
-}
-
-func (p cascadeProbe) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
-	if p.arrive(domain.HookPostResponse) {
-		resp.SetText(resp.Text() + "[cascade]")
-	}
-	return domain.PostResponseDecision{}, nil
-}
-
-func (p cascadeProbe) PreToolExec(_ context.Context, call *domain.ToolCallEdit, _ domain.LoopView) error {
-	if p.arrive(domain.HookPreToolExec) {
-		call.SetArguments(json.RawMessage(`{"cascade":true}`))
-	}
-	return nil
-}
-
-func (p cascadeProbe) PostToolResult(_ context.Context, _ domain.ToolCall, result *domain.ToolResultEdit, _ domain.LoopView) error {
-	if p.arrive(domain.HookPostToolResult) {
-		result.SetContent(result.Content() + " [cascade]")
-	}
-	return nil
-}
-
-// cascadeSpec is one cell's registration: where the probe stands, what it does there, whether
-// it is catalogued (under capability) or experimental, and whether Bypass is on.
+// cascadeSpec is one cell's arming: where the probe stands, what it does there, which class cell
+// it occupies (what Bypass reads), and whether Bypass is on.
 type cascadeSpec struct {
-	at           domain.HookPoint
-	behavior     probeBehavior
-	capability   domain.Capability
-	experimental bool
-	bypass       bool
+	at       domain.Moment
+	behavior cellBehavior
+	class    domain.Class
+	bypass   bool
 }
 
 // cascadeRun is what one driven Exchange leaves behind for a cell to assert on.
 type cascadeRun struct {
 	events     []domain.Event
-	seen       map[domain.HookPoint]int
+	seen       map[domain.Moment]int
 	toolRuns   int
 	toolStatus domain.StepStatus // the status of the tool-carrying first Turn
 }
 
-// driveCascade registers the probe spec describes and drives one Exchange whose first Turn
-// carries a tool call — so all five hook points run — closing it with a second Step whenever
-// the first Turn survived. It fails the test only on a loop error: a hook point that abandons
-// its Turn is a contract, not a failure, so the caller asserts the status itself.
+// driveCascade arms the Reaction spec describes and drives one Exchange whose first Turn carries
+// a tool call — so all five seam Moments run — closing it with a second Step whenever the first
+// Turn survived. It fails the test only on a loop error: what a Moment's cascade leaves behind is
+// a contract, not a failure, so the caller asserts the status itself.
 func driveCascade(t *testing.T, spec cascadeSpec) cascadeRun {
 	t.Helper()
 
@@ -149,16 +154,10 @@ func driveCascade(t *testing.T, spec cascadeSpec) cascadeRun {
 	toolRuns := 0
 	cfg := configWithTools(sink, summaryTool(&toolRuns))
 	cfg.Bypass = spec.bypass
-	cfg.Mechanisms = domain.NewMechanismRegistry()
 
-	seen := make(map[domain.HookPoint]int, len(allHookPoints))
-	probe := cascadeProbe{at: spec.at, behavior: spec.behavior, seen: func(at domain.HookPoint) { seen[at]++ }}
-	if spec.experimental {
-		if err := cfg.Mechanisms.AddExperimental(spec.at, probe); err != nil {
-			t.Fatalf("AddExperimental(%s): %v", spec.at, err)
-		}
-	} else {
-		mustAddMech(t, cfg.Mechanisms, probe.row(spec.capability))
+	seen := make(map[domain.Moment]int, len(allSeamMoments))
+	cfg.Reactions = []domain.Reaction{
+		cascadeReaction(spec.at, spec.behavior, spec.class, func(m domain.Moment) { seen[m]++ }),
 	}
 
 	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
@@ -185,11 +184,11 @@ func driveCascade(t *testing.T, spec cascadeSpec) cascadeRun {
 	return cascadeRun{events: sink.events, seen: seen, toolRuns: toolRuns, toolStatus: res.Status}
 }
 
-// firesAt counts the fires booked for id at hook point at.
-func firesAt(events []domain.Event, id domain.MechanismID, at domain.HookPoint) int {
+// firesAt counts the firings booked for id at seam Moment m.
+func firesAt(events []domain.Event, id string, m domain.Moment) int {
 	n := 0
-	for _, fe := range mechanismFires(events) {
-		if fe.Reaction == string(id) && fe.Moment == domain.Moment(at) {
+	for _, fe := range reactionFires(events) {
+		if fe.Reaction == id && fe.Moment == m {
 			n++
 		}
 	}
@@ -197,136 +196,121 @@ func firesAt(events []domain.Event, id domain.MechanismID, at domain.HookPoint) 
 }
 
 // hookPanicBooked reports whether the recover boundary turned id's panic into an ErrorEvent
-// attributed to id — the containment receipt every hook point shares.
-func hookPanicBooked(events []domain.Event, id domain.MechanismID) bool {
+// attributed to id — the containment receipt every seam Moment shares.
+func hookPanicBooked(events []domain.Event, id string) bool {
 	for _, e := range events {
 		ee, ok := e.(domain.ErrorEvent)
-		if ok && ee.Source == string(id) && strings.HasPrefix(ee.Err, "panic:") {
+		if ok && ee.Source == id && strings.HasPrefix(ee.Err, "panic:") {
 			return true
 		}
 	}
 	return false
 }
 
-// panicContract is what each hook point's recover boundary leaves behind when a hook panics
-// during the tool-carrying Turn: whether the tool still ran, and how that Turn ended. The two
-// pre-Upstream points abandon the Turn with nothing executed; post-response degrades into the
-// response as reviewed so far, so its tool calls still dispatch; pre-tool-exec skips the call
-// it was guarding but lets the Turn finish; post-tool-result panics after execution and is
-// swallowed outright.
-var panicContract = map[domain.HookPoint]struct {
-	toolRan bool
-	status  domain.StepStatus
-}{
-	domain.HookHistoryRewrite: {toolRan: false, status: domain.StatusExchangeComplete},
-	domain.HookPreRequest:     {toolRan: false, status: domain.StatusExchangeComplete},
-	domain.HookPostResponse:   {toolRan: true, status: domain.StatusTurnComplete},
-	domain.HookPreToolExec:    {toolRan: false, status: domain.StatusTurnComplete},
-	domain.HookPostToolResult: {toolRan: true, status: domain.StatusTurnComplete},
-}
-
-// TestHookCascade is the five-point × five-scenario matrix of the shared hook runner: at every
-// hook point, booking follows the acted probe for catalogued Mechanisms and nothing else, an
-// experimental hook is booked on every invocation, a panic is contained per that point's
-// contract, and Bypass drops the catalogued Mechanism before it is ever invoked.
+// TestHookCascade is the five-Moment × five-scenario matrix of the Reaction dispatcher: at every
+// seam Moment, booking follows the acted probe and nothing else, a probe that reports acting
+// through its Outcome is booked on every invocation, a panic is contained the same way
+// everywhere, and Bypass drops a shape-class Reaction before it is ever invoked.
 func TestHookCascade(t *testing.T) {
 	cells := []struct {
 		name string
-		run  func(t *testing.T, at domain.HookPoint)
+		run  func(t *testing.T, m domain.Moment)
 	}{
-		{name: "catalogued acts ⇒ booked", run: assertActedFireBooked},
-		{name: "catalogued no-op ⇒ not booked", run: assertNoOpNotBooked},
-		{name: "experimental ⇒ always booked", run: assertExperimentalAlwaysBooked},
-		{name: "panicking hook ⇒ contained", run: assertPanicContained},
+		{name: "acts ⇒ booked", run: assertActedFireBooked},
+		{name: "no-op ⇒ not booked", run: assertNoOpNotBooked},
+		{name: "reports acting ⇒ booked every time", run: assertReportedFireBooked},
+		{name: "panicking reaction ⇒ contained", run: assertPanicContained},
 		{name: "bypass ⇒ skipped", run: assertBypassSkips},
 	}
 
-	for _, at := range allHookPoints {
+	for _, m := range allSeamMoments {
 		for _, cell := range cells {
-			t.Run(string(at)+"/"+cell.name, func(t *testing.T) { cell.run(t, at) })
+			t.Run(string(m)+"/"+cell.name, func(t *testing.T) { cell.run(t, m) })
 		}
 	}
 }
 
-// assertActedFireBooked: a catalogued Mechanism that edits the point's working value is booked
-// under its real ID at that point.
-func assertActedFireBooked(t *testing.T, at domain.HookPoint) {
+// assertActedFireBooked: an armed Reaction that edits the Moment's working value is booked under
+// its own ID at that Moment — the Revision bracket sees the move whether or not it said so.
+func assertActedFireBooked(t *testing.T, m domain.Moment) {
 	t.Helper()
 
-	run := driveCascade(t, cascadeSpec{at: at, behavior: probeActs, capability: domain.CapOffRamp})
+	run := driveCascade(t, cascadeSpec{at: m, behavior: probeActs, class: domain.ClassShapeView})
 
-	if run.seen[at] == 0 {
-		t.Fatalf("the catalogued Mechanism was never invoked at %s", at)
+	if run.seen[m] == 0 {
+		t.Fatalf("the armed Reaction was never invoked at %s", m)
 	}
-	if got := firesAt(run.events, cascadeProbeID, at); got == 0 {
-		t.Errorf("an acting hook booked no fire at %s; an intervention must be booked", at)
+	if got := firesAt(run.events, cascadeReactionID, m); got == 0 {
+		t.Errorf("an acting Reaction booked no fire at %s; an intervention must be booked", m)
 	}
 }
 
-// assertNoOpNotBooked: a catalogued Mechanism that inspects and leaves the working value alone
-// is invoked but books nothing — fired means ACTED (R4).
-func assertNoOpNotBooked(t *testing.T, at domain.HookPoint) {
+// assertNoOpNotBooked: an armed Reaction that inspects and leaves the working value alone is
+// invoked but books nothing — fired means ACTED (R4).
+func assertNoOpNotBooked(t *testing.T, m domain.Moment) {
 	t.Helper()
 
-	run := driveCascade(t, cascadeSpec{at: at, behavior: probeInspects, capability: domain.CapOffRamp})
+	run := driveCascade(t, cascadeSpec{at: m, behavior: probeInspects, class: domain.ClassObserve})
 
-	if run.seen[at] == 0 {
-		t.Fatalf("the catalogued Mechanism was never invoked at %s", at)
+	if run.seen[m] == 0 {
+		t.Fatalf("the armed Reaction was never invoked at %s", m)
 	}
-	if got := firesAt(run.events, cascadeProbeID, at); got != 0 {
-		t.Errorf("an inspect-only hook booked %d fires at %s, want 0", got, at)
+	if got := firesAt(run.events, cascadeReactionID, m); got != 0 {
+		t.Errorf("an inspect-only Reaction booked %d fires at %s, want 0", got, m)
 	}
 }
 
-// assertExperimentalAlwaysBooked: an experimental hook is the bench's instrument — every
-// invocation is booked under the synthetic ID, even one that touches nothing.
-func assertExperimentalAlwaysBooked(t *testing.T, at domain.HookPoint) {
+// assertReportedFireBooked: the bench's instrument books every invocation by SAYING it acted —
+// a non-zero Outcome is a firing even when the working value never moved. It is what a Reaction
+// arms in place of the always-booked experimental hook the registry had.
+func assertReportedFireBooked(t *testing.T, m domain.Moment) {
 	t.Helper()
 
-	run := driveCascade(t, cascadeSpec{at: at, behavior: probeInspects, experimental: true})
+	run := driveCascade(t, cascadeSpec{at: m, behavior: probeReports, class: domain.ClassObserve})
 
-	if run.seen[at] == 0 {
-		t.Fatalf("the experimental hook was never invoked at %s", at)
+	if run.seen[m] == 0 {
+		t.Fatalf("the armed Reaction was never invoked at %s", m)
 	}
-	if got := firesAt(run.events, experimentalMechanismID, at); got != run.seen[at] {
-		t.Errorf("experimental hook booked %d fires for %d invocations at %s; every invocation is booked", got, run.seen[at], at)
+	if got := firesAt(run.events, cascadeReactionID, m); got != run.seen[m] {
+		t.Errorf("a reporting Reaction booked %d fires for %d invocations at %s; each one is booked", got, run.seen[m], m)
 	}
 }
 
-// assertPanicContained: a panicking hook degrades to an ErrorEvent under its own ID and the
-// loop carries on exactly as that hook point's contract says.
-func assertPanicContained(t *testing.T, at domain.HookPoint) {
+// assertPanicContained: a panicking Reaction degrades to an ErrorEvent under its own ID and to a
+// reaction that did NOTHING — the cascade and the Turn carry on unchanged at every Moment (ADR
+// 0076 stage-1 header call). The five per-point dispositions the hook runner had are gone with
+// it: a broken extension can no longer degrade a Turn.
+func assertPanicContained(t *testing.T, m domain.Moment) {
 	t.Helper()
 
-	run := driveCascade(t, cascadeSpec{at: at, behavior: probePanics, capability: domain.CapOffRamp})
+	run := driveCascade(t, cascadeSpec{at: m, behavior: probePanics, class: domain.ClassShapeView})
 
-	want := panicContract[at]
-	if !hookPanicBooked(run.events, cascadeProbeID) {
-		t.Errorf("no ErrorEvent attributed to the panicking Mechanism at %s", at)
+	if !hookPanicBooked(run.events, cascadeReactionID) {
+		t.Errorf("no ErrorEvent attributed to the panicking Reaction at %s", m)
 	}
-	if got := firesAt(run.events, cascadeProbeID, at); got != 0 {
-		t.Errorf("a panicking hook booked %d fires at %s, want 0", got, at)
+	if got := firesAt(run.events, cascadeReactionID, m); got != 0 {
+		t.Errorf("a panicking Reaction booked %d fires at %s, want 0", got, m)
 	}
-	if ran := run.toolRuns > 0; ran != want.toolRan {
-		t.Errorf("tool ran = %v after a panic at %s, want %v", ran, at, want.toolRan)
+	if run.toolRuns == 0 {
+		t.Errorf("the tool did not run after a panic at %s; the Turn must carry on", m)
 	}
-	if run.toolStatus != want.status {
-		t.Errorf("Turn status = %q after a panic at %s, want %q", run.toolStatus, at, want.status)
+	if run.toolStatus != domain.StatusTurnComplete {
+		t.Errorf("Turn status = %q after a panic at %s, want %q", run.toolStatus, m, domain.StatusTurnComplete)
 	}
 }
 
-// assertBypassSkips: under Bypass a catalogued non-off-ramp Mechanism is dropped at dispatch —
-// never invoked, so nothing to book (D5).
-func assertBypassSkips(t *testing.T, at domain.HookPoint) {
+// assertBypassSkips: under Bypass an armed shape-class Reaction is dropped at dispatch — never
+// invoked, so nothing to book (ADR 0076 D9).
+func assertBypassSkips(t *testing.T, m domain.Moment) {
 	t.Helper()
 
-	run := driveCascade(t, cascadeSpec{at: at, behavior: probeActs, capability: domain.CapProactiveNudge, bypass: true})
+	run := driveCascade(t, cascadeSpec{at: m, behavior: probeActs, class: domain.ClassShapeView, bypass: true})
 
-	if run.seen[at] != 0 {
-		t.Errorf("a Bypass-gated Mechanism was invoked %d times at %s, want 0", run.seen[at], at)
+	if run.seen[m] != 0 {
+		t.Errorf("a Bypass-gated Reaction was invoked %d times at %s, want 0", run.seen[m], m)
 	}
-	if got := firesAt(run.events, cascadeProbeID, at); got != 0 {
-		t.Errorf("a Bypass-gated Mechanism booked %d fires at %s, want 0", got, at)
+	if got := firesAt(run.events, cascadeReactionID, m); got != 0 {
+		t.Errorf("a Bypass-gated Reaction booked %d fires at %s, want 0", got, m)
 	}
 }
 
@@ -344,17 +328,17 @@ func (s *firePanickingSink) Emit(e domain.Event) {
 }
 
 // TestFireBookedOutsideRecoverBoundary pins which side of the recover boundary the booking
-// sits on. a.fired reaches the HOST's Events sink, so a sink that panics while being told
-// about a fire is the host's fault, not the Mechanism's: it must unwind to the host rather
-// than come back as errHookPanicked attributed to a Mechanism whose hook already returned
-// cleanly. The hook BODY keeps its coverage — a panic there is still recovered and attributed.
+// sits on. The booking reaches the HOST's Events sink, so a sink that panics while being told
+// about a fire is the host's fault, not the Reaction's: it must unwind to the host rather
+// than come back as errHookPanicked attributed to a Reaction whose handler already returned
+// cleanly. The handler BODY keeps its coverage — a panic there is still recovered and attributed.
 func TestFireBookedOutsideRecoverBoundary(t *testing.T) {
-	t.Run("panicking sink ⇒ not attributed to the Mechanism", func(t *testing.T) {
+	t.Run("panicking sink ⇒ not attributed to the Reaction", func(t *testing.T) {
 		sink := &firePanickingSink{}
 		cfg := baseConfig(sink)
-		cfg.Mechanisms = domain.NewMechanismRegistry()
-		probe := cascadeProbe{at: domain.HookPreRequest, behavior: probeActs, seen: func(domain.HookPoint) {}}
-		mustAddMech(t, cfg.Mechanisms, probe.row(domain.CapOffRamp))
+		cfg.Reactions = []domain.Reaction{
+			cascadeReaction(domain.MomentPreRequest, probeActs, domain.ClassShapeView, func(domain.Moment) {}),
+		}
 
 		a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{contentScript("done")}})
 		if err != nil {
@@ -369,16 +353,16 @@ func TestFireBookedOutsideRecoverBoundary(t *testing.T) {
 		if escaped == nil {
 			t.Fatalf("the sink panic did not reach the host: the fire is still booked inside the recover boundary")
 		}
-		if hookPanicBooked(sink.events, cascadeProbeID) {
-			t.Errorf("a panicking Events sink was reported as a hook panic attributed to %s", cascadeProbeID)
+		if hookPanicBooked(sink.events, cascadeReactionID) {
+			t.Errorf("a panicking Events sink was reported as a handler panic attributed to %s", cascadeReactionID)
 		}
 	})
 
-	t.Run("panicking hook body ⇒ still attributed to the Mechanism", func(t *testing.T) {
-		run := driveCascade(t, cascadeSpec{at: domain.HookPreRequest, behavior: probePanics, capability: domain.CapOffRamp})
+	t.Run("panicking handler body ⇒ still attributed to the Reaction", func(t *testing.T) {
+		run := driveCascade(t, cascadeSpec{at: domain.MomentPreRequest, behavior: probePanics, class: domain.ClassShapeView})
 
-		if !hookPanicBooked(run.events, cascadeProbeID) {
-			t.Errorf("a panicking hook body was not attributed to %s; the body keeps its coverage", cascadeProbeID)
+		if !hookPanicBooked(run.events, cascadeReactionID) {
+			t.Errorf("a panicking handler body was not attributed to %s; the body keeps its coverage", cascadeReactionID)
 		}
 	})
 }

@@ -66,16 +66,17 @@ func TestAgentSetBypassFlipsTheGateBetweenEvaluations(t *testing.T) {
 	}
 }
 
-// TestAgentSetBypassObservedByTheNextHookFire drives the switch through real dispatch: a catalogued
-// proactive-nudge Mechanism fires in the first Exchange and is gone from the next one, while the
-// off-ramp beside it keeps firing. It pins the wiring end to end — dispatch reads the LIVE flag,
+// TestAgentSetBypassObservedByTheNextHookFire drives the switch through real dispatch: an armed
+// shape-view Reaction fires in the first Exchange and is gone from the next one, while the observe
+// Reaction beside it keeps firing. It pins the wiring end to end — dispatch reads the LIVE flag,
 // not cfg's construction seed.
 func TestAgentSetBypassObservedByTheNextHookFire(t *testing.T) {
 	nudged, offRamped := 0, 0
 	cfg := baseConfig(&recordingSink{})
-	cfg.Mechanisms = domain.NewMechanismRegistry()
-	mustAddMech(t, cfg.Mechanisms, recordingMech{id: "nudge", cap: domain.CapProactiveNudge, fired: &nudged}.row())
-	mustAddMech(t, cfg.Mechanisms, recordingMech{id: "offramp", cap: domain.CapOffRamp, fired: &offRamped}.row())
+	cfg.Reactions = []domain.Reaction{
+		recordingReaction("nudge", domain.ClassShapeView, &nudged),
+		countingReaction("offramp", domain.ClassObserve, &offRamped),
+	}
 	a, err := newAgent(cfg, echoResponder{reply: "ok"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -83,17 +84,17 @@ func TestAgentSetBypassObservedByTheNextHookFire(t *testing.T) {
 
 	_ = runExchange(t, a, "first")
 	if nudged != 1 || offRamped != 1 {
-		t.Fatalf("before the switch: nudge fired %d times, off-ramp %d; want 1 and 1", nudged, offRamped)
+		t.Fatalf("before the switch: the shape-view Reaction fired %d times, the observe one %d; want 1 and 1", nudged, offRamped)
 	}
 
 	a.SetBypass(true)
 
 	_ = runExchange(t, a, "second")
 	if nudged != 1 {
-		t.Errorf("nudge fired %d times in total; want 1 — Bypass must drop it from the next hook fire", nudged)
+		t.Errorf("the shape-view Reaction fired %d times in total; want 1 — Bypass must drop it from the next Moment", nudged)
 	}
 	if offRamped != 2 {
-		t.Errorf("off-ramp fired %d times in total; want 2 — Bypass never withdraws a recovery guarantee", offRamped)
+		t.Errorf("the observe Reaction fired %d times in total; want 2 — Bypass never switches observe off", offRamped)
 	}
 }
 
