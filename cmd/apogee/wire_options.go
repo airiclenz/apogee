@@ -14,12 +14,10 @@ package main
 // over and one seam a renderer test fakes.
 
 import (
-	"os"
 	"path/filepath"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -33,15 +31,13 @@ func (w *rootWiring) options() tui.Options {
 	// answers an unknown name with the default anyway — a caret is drawn either way.
 	cursorShape, _ := tui.ParseCursorShape(w.opts.CursorShape)
 
-	// The config file this session resolved, named once: the `/settings` write half splices it, the
-	// apply half re-reads it, and the Mechanism sub-list below does both.
+	// The config file this session resolved, named once: the `/settings` write half splices it and
+	// the apply half re-reads it.
 	configPath := filepath.Join(w.roots.config, "config.yaml")
 
-	// The apply dispatcher, built ahead of the literal rather than inside it, because TWO seams reach
-	// it now: the pane's own ⏎ ([tui.SettingsHost.Apply]) and the Mechanism toggle, whose write is
-	// addressed by catalogue id and therefore cannot be handed to the pane's path-keyed pair — it
-	// persists and applies behind one call, through this same dispatcher's `mechanisms` arm (ADR 0037
-	// decision 1).
+	// The apply dispatcher, built ahead of the literal rather than inside it, because the settingsHost
+	// below is composed out of it as well as out of the two paths that splice the file — one value the
+	// pane's own ⏎ ([tui.SettingsHost.Apply]) reaches every key through (ADR 0037 decision 1).
 	applySetting := applySettingFor(settingsApplier{
 		engine:     w.engine,
 		live:       w.live,
@@ -210,29 +206,6 @@ func (w *rootWiring) options() tui.Options {
 				return w.live.promptEditorSeed(w.holder.Binding().Model, w.roots.config)
 			},
 		},
-		// The `mechanisms:` block's own two seams — the one row of the pane whose children are edited
-		// in a list rather than in the file. What the list OFFERS is the catalogue this build carries,
-		// sorted canonically, each id answered from the FILE's manual block (absent ⇒ off) rather than
-		// from the resolution this run started on: the block is one a human also edits by hand, and it
-		// is re-read per ask so an edit made in another window shows in an open list.
-		//
-		// A file that cannot be read answers with the catalogue all-off rather than with nothing,
-		// which is the same degrade the resolution itself takes: the ids exist whatever the file says,
-		// and a list that vanished on an unreadable config would look like a build with no Mechanisms.
-		ListMechanisms: func() []tui.MechanismToggle {
-			enabled := mechanismBlock(configPath)
-			// No catalogued row is on by default: a row reads as ON only where the block says so. The
-			// Floor guards the run also carries are Config.Floor's own keys, not rows of this list.
-			known := mechanisms.KnownIDs()
-			toggles := make([]tui.MechanismToggle, 0, len(known))
-			for _, id := range known {
-				toggles = append(toggles, tui.MechanismToggle{ID: string(id), Enabled: enabled[string(id)]})
-			}
-			return toggles
-		},
-		// And the write half: one line spliced into that block and put in force on the same call
-		// (writeMechanismFor).
-		WriteMechanism: writeMechanismFor(configPath, w.externalEdits.refresh, applySetting),
 		// The `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5): out through a
 		// command line this binary resolves — the file, the key's own line, the editor this environment
 		// names — and back through a re-read that says which keys changed. The pane applies them
@@ -292,50 +265,6 @@ func (w *rootWiring) options() tui.Options {
 	}
 }
 
-// mechanismBlock is the config file's own `mechanisms:` map — which Mechanisms the human has switched
-// on and off BY HAND — read fresh from the file rather than taken from the resolution this run
-// started on, exactly as the apply dispatcher re-reads it (settingsApplier.reloadMechanisms) and for
-// the same reason: the block is one an editor in another window can change under a running session.
-//
-// A file that cannot be read or parsed answers with an empty block rather than with an error,
-// because the only reader is a LIST and an absent block already means the same thing: nothing is
-// switched on. The write half is where an unusable config has to be reported, and it reports it.
-func mechanismBlock(path string) map[string]bool {
-	file, err := config.LoadFileConfig(path, os.ReadFile, func(string) {})
-	if err != nil {
-		return nil
-	}
-	return file.Mechanisms
-}
-
-// writeMechanismFor builds [tui.Options.WriteMechanism]: one line spliced into the `mechanisms:` block
-// and put in force on the same call. It is [settingsHost.Write]'s shape one level in — the splice,
-// the baseline re-take and the live apply in the order they are there — with the apply reaching the
-// dispatcher's `mechanisms` arm, which re-reads the whole block exactly as it does after an edit
-// made in $EDITOR.
-// The value handed to it is empty because that arm reads none: the block is a shape no single string
-// spells.
-//
-// The two halves fail differently and the seam says which, because the pane has two sentences for them
-// (ADR 0037 decision 1): a refused splice changed no file and answers (false, err); a splice that
-// landed under a failed apply answers (true, err), the file ahead of the session. It is named here
-// rather than closed over inline for applySettingFor's reason — the chain is the binary's own
-// behaviour and is pinned as such (wire_options_test.go).
-func writeMechanismFor(
-	configPath string,
-	refresh func(),
-	apply func(key, value string) (string, error),
-) func(id string, enabled bool) (bool, error) {
-	return func(id string, enabled bool) (bool, error) {
-		if err := config.SaveMechanismSetting(configPath, id, enabled); err != nil {
-			return false, err
-		}
-		refresh()
-		_, err := apply(settingKeyMechanisms, "")
-		return true, err
-	}
-}
-
 // ----------------------------------------------------------------------------
 // The host capabilities Options names as interfaces (ADR 0054)
 // ----------------------------------------------------------------------------
@@ -359,8 +288,8 @@ type settingsHost struct {
 	configPath string
 	// edits is the external-edit baseline every landed write re-takes (ADR 0041 decision 8).
 	edits *externalEdit
-	// apply is the live-apply dispatcher (wire_settings.go). It stays a func because the Mechanism
-	// toggle reaches the same dispatcher by catalogue id, on a path this seam has no method for.
+	// apply is the live-apply dispatcher (wire_settings.go). It stays a func because the root composes
+	// it out of the members this Driver holds, which is not a shape this seam could have as a method.
 	apply func(key, value string) (string, error)
 	// promptSeed is what the `system-prompt-text` editor opens on when the session's whole prompt
 	// resolution IS the embedded default ([liveSettings.promptEditorSeed], wire_settings.go) —

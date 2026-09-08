@@ -372,9 +372,9 @@ anything is written, with the reason on the row and your text still in the buffe
 else is ever written: apogee still makes no edit to that file you did not ask for.
 
 **And what is saved is applied — to the session you are in.** The `⏎` that persists a key
-also puts it into effect, so no setting waits for a restart: change `mode:`, `bypass:`, a
-mechanism switch, the web-search endpoint, the presentation keys or the model profile and the
-next thing apogee does uses it. The row keeps a ` *` after its value — `false *` — which says
+also puts it into effect, so no setting waits for a restart: change `mode:`, `bypass:`, the
+web-search endpoint, the presentation keys or the model profile and the next thing apogee does
+uses it. The row keeps a ` *` after its value — `false *` — which says
 *you changed this here, this session*; it is cleared only by a relaunch. A ` ~` in that same
 place — `false ~` — says the other thing: *a save of the config file moved this key under this
 session*, with no keypress here at all, and whichever of the two happened last is the one the row
@@ -417,20 +417,9 @@ acknowledgement that belongs with [that verb](configuration.md#auto-modes-blast-
 **moves the session** — the same switch `/server` performs, chosen from the same list, recorded
 the same way.
 
-**`mechanisms:` is the one block the pane opens itself.** `⏎` on that row opens a list of every
-catalogued mechanism with `on`/`off` beside each; `⏎` or `space` flips the highlighted one, writing
-and applying it on that keypress, and the list **stays open** so a posture is set in one visit. `esc`
-goes back. Switching one off writes `<id>: false` rather than deleting the line, and — as ever — a
-non-empty `mechanisms:` block means manual control, so the Validated set measured for the bound model
-is no longer applied on top. In a **shipped build that list is empty**, and says so in a row of
-prose — `no catalogued Mechanisms in this build — the Floor guards are the Session keys` — rather
-than as a blank box: the catalogue retired in v0.20.0
-([ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)), and
-rows come back the moment a bench Driver registers experimental ones of its own.
-
-The seven **[Floor guards](configuration.md)** that row points at are not in that list, because they
-are not switches you arm — they are on already. Each is an ordinary `on`/`off` row in the pane's
-**Session** section, edited in place like any other boolean and applied to the running session:
-`tool-call-repair`, `tool-call-salvage`, `tool-loop-breaker`, `empty-response-recovery`,
-`tool-use-enforcer`, `read-cache` and `tool-result-cap`.
+**The seven [Floor guards](configuration.md) are ordinary rows.** They are not switches you arm —
+they are on already — so each is an `on`/`off` row in the pane's **Session** section, edited in place
+like any other boolean and applied to the running session: `tool-call-repair`, `tool-call-salvage`,
+`tool-loop-breaker`, `empty-response-recovery`, `tool-use-enforcer`, `read-cache` and
+`tool-result-cap`.
 

@@ -23,7 +23,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mcp"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -155,12 +154,9 @@ type liveSettings struct {
 	// the entry the process launched with however often the human re-pointed the key.
 	subAgentsServer string
 
-	// manualIDs and mechanisms are the two halves of the `mechanisms:` block: the validated enabled
-	// ids the engine arms, and the block itself, whose mere non-emptiness is what suppresses a matched
-	// Validated set (whole-set-or-nothing, ADR 0016). They move together or the suppression rule and
-	// the enable list would describe different configs.
-	manualIDs  []apogee.MechanismID
-	mechanisms map[string]bool
+	// manualIDs is the validated enabled half of the `mechanisms:` block — an INPUT to the per-model
+	// resolution rather than a value the engine keeps, which is why it is held here at all.
+	manualIDs []apogee.MechanismID
 
 	// validatedEnable and validatedAlias are the `validated-sets:` block's own two keys — the surface's
 	// off-switch and its carry-over map — the other inputs resolveValidatedSet keys a match on.
@@ -284,7 +280,6 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		seatChoice:         opts.SubAgentsChoice,
 		subAgentsServer:    opts.SubAgentsServer,
 		manualIDs:          manualIDs,
-		mechanisms:         opts.Mechanisms,
 		validatedEnable:    opts.ValidatedSetsEnable,
 		validatedAlias:     opts.ValidatedSetsAlias,
 		systemPrompt:       opts.SystemPrompt,
@@ -630,16 +625,6 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 		s.entryCap != outputCap || s.entryReserve != reserve
 }
 
-// setMechanisms installs a re-read `mechanisms:` block: the validated enabled ids and the block
-// itself, together, because the block's mere non-emptiness is what suppresses a matched Validated set
-// (whole-set-or-nothing, ADR 0016). Written apart they would describe two different configs for as
-// long as one rebind takes.
-func (s *liveSettings) setMechanisms(ids []apogee.MechanismID, block map[string]bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.manualIDs, s.mechanisms = ids, block
-}
-
 // setModelProfiles installs a re-read `model-profiles:` map — the USER tier of the per-model
 // resolution (ADR 0044), which every later rebind and every scheduled Firing matches against. The
 // map alone is not a state the engine can be put into, so the key's apply pushes the resolved
@@ -706,8 +691,8 @@ func (s *liveSettings) setSubAgentsServer(name string) {
 }
 
 // setValidatedSets installs a re-read `validated-sets:` block — the surface's off-switch and its
-// carry-over map, the two inputs resolveValidatedSet keys a match on, moved together for
-// setMechanisms' reason.
+// carry-over map, the two inputs resolveValidatedSet keys a match on, moved together under one lock
+// so a match cannot be keyed half on one instant of the block and half on the next.
 func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -905,7 +890,6 @@ func (s *liveSettings) optionsLocked() config.Options {
 	// own bound over (firingSources hands that entry back beside this projection).
 	next.WorkingWindow = s.pinnedWorking
 	next.Servers = slices.Clone(s.servers)
-	next.Mechanisms = maps.Clone(s.mechanisms)
 	next.ValidatedSetsEnable = s.validatedEnable
 	next.ValidatedSetsAlias = maps.Clone(s.validatedAlias)
 	next.SystemPrompt = s.systemPrompt
@@ -990,7 +974,6 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	// exactly what a caller reading the copy needs — a Firing composes its Config from it.
 	base.ResponseReserve = config.ResolveResponseReserve(s.entryReserve, s.pinnedReserve)
 	base.Servers = s.servers
-	base.Mechanisms = s.mechanisms
 	base.ValidatedSetsEnable = s.validatedEnable
 	base.ValidatedSetsAlias = s.validatedAlias
 	base.SystemPrompt = s.systemPrompt
@@ -1552,21 +1535,6 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "mechanisms",
-		reaches: settingsApplier.rides,
-		apply: func(a settingsApplier, key, value string) (string, error) {
-			// Neither block is a value the engine holds either: they are INPUTS to the per-model
-			// resolution — the enable list and the whole-set-or-nothing suppression rule (ADR 0016) —
-			// so they land in the holder and are committed by the rebind, the one door a model change
-			// and a config change share (rideTheRebind).
-			notice, err := a.reloadMechanisms()
-			if err != nil {
-				return "", err
-			}
-			return notice, a.rideTheRebind()
-		},
-	},
-	{
 		key:     "validated-sets.enable",
 		reaches: settingsApplier.rides,
 		apply:   applyValidatedSets,
@@ -2104,29 +2072,6 @@ func (a settingsApplier) reloadServers() (bool, error) {
 		a.caps.relist(file.Servers)
 	}
 	return moved, nil
-}
-
-// reloadMechanisms re-reads the `mechanisms:` block and installs both halves of it. The ids are
-// derived through the same resolver startup uses (mechanisms.ResolveEnabled), which validates EVERY
-// key of the block — enabled and disabled alike — so a Mechanism id this build does not know is
-// refused here rather than silently arming nothing, exactly as it is at launch (ADR 0015 §1).
-//
-// It answers with the row's boundary note rather than nothing, because the one thing that resolver
-// tolerates in SILENCE is still worth a sentence to whoever just edited the block: a key naming a
-// RETIRED Mechanism arms nothing and is not an error, so the note is where it gets said. Startup says
-// the same lines on stderr; here they ride back to the pane, which is the only surface a live apply
-// has (the alt screen owns the terminal).
-func (a settingsApplier) reloadMechanisms() (string, error) {
-	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
-	if err != nil {
-		return "", err
-	}
-	ids, notices, err := mechanisms.ResolveEnabled(file.Mechanisms, mechanisms.KnownIDs())
-	if err != nil {
-		return "", err
-	}
-	a.live.setMechanisms(ids, file.Mechanisms)
-	return strings.Join(notices, " "), nil
 }
 
 // reloadValidatedSets re-reads the `validated-sets:` block. An absent off-switch resolves to ON —

@@ -86,7 +86,7 @@ type settingSection struct {
 // settingSections is that table, in registry order (pinned by
 // TestSettingSectionsOpenInRegistryOrder). context-files sits under the system prompt because that
 // is what it IS — the workspace files are folded into the standing system content — and bypass
-// opens Mechanisms because it is the Mechanisms off-switch, the floor the whole surface is measured
+// opens Reactions because it is the Reactions off-switch, the floor the whole surface is measured
 // against.
 var settingSections = []settingSection{
 	{Name: "Upstream", Opens: "servers"},
@@ -97,7 +97,7 @@ var settingSections = []settingSection{
 	{Name: "Session", Opens: "auto-compact"},
 	{Name: "Presentation", Opens: "present.auto-open"},
 	{Name: "Interface", Opens: "ui.spinner"},
-	{Name: "Mechanisms", Opens: "bypass"},
+	{Name: "Reactions", Opens: "bypass"},
 	{Name: "Model profiles", Opens: "model-profiles"},
 }
 

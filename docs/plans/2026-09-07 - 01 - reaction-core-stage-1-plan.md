@@ -320,7 +320,17 @@ go test -race -count=1 ./internal/agent/ && ! grep -n --exclude=selfreg_test.go 
 ```
 **Commit:** `test(agent): arming, sub-agent scoping and rebind tests use Reactions`
 
-## 10. `/settings`: the mechanisms row leaves the cmd side
+## 10. `/settings`: the mechanisms row leaves the cmd side — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the item's What line and its Regression guard disagree about `settingsrows.go`; the guard wins, as the plan's round-one check states. `settingKeyMechanisms` (`:63`), `pointerMechanismList` (`:58`) and their two uses (`:293`, `:311`) are KEPT here — item 11 claims the const pair and both uses — so this item's only edit to that file is the section rename at `:100` (`Mechanisms` → `Reactions`) and the doc comment above the table that spells the same name. `cmd/apogee/settingsrows_test.go` and `cmd/apogee/e2e_smoke_test.go` restate it.
+
+NOTES (2026-09-08): `cmd/apogee/wire_options_test.go` is DELETED whole rather than edited. Both of its tests (`TestWriteMechanismReportsWhichHalfFailed`, `TestListMechanismsOffersTheCatalogueNotTheBlock`) pin exactly the two seams this item removes, and nothing else lived in the file; the item's Files name it.
+
+NOTES (2026-09-08): the plan's `wire_settings.go:908` / `:993` deletions (`next.Mechanisms`, `base.Mechanisms`) are a behaviour delta the item text directs and that no test pins: a session launched with a non-empty `mechanisms:` block no longer suppresses a matched Validated set at a LIVE rebind (`validatedsets.go:152` over `rebindSpecFor`'s copy). Startup suppression is untouched — `wire_live.go:190` resolves over `w.opts`, not over the holder. In practice the effect is nil at `bc8b603d`: with the catalogue empty such a block arms nothing, and a Validated set assembled from an empty catalogue is refused before it arms anything either.
+
+NOTES (2026-09-08): comment prose inside this item's own listed files was reworded where the deletions made it false — `wire_options.go`'s "the Mechanism sub-list below does both", its "TWO seams reach it now" rationale for building the apply dispatcher ahead of the literal, and `settingsHost.apply`'s "It stays a func because the Mechanism toggle …"; `wire_settings.go`'s `setValidatedSets` doc, which cross-referenced the deleted `setMechanisms`; `settingsrows.go`'s section-table doc. `internal/mechanisms` and `os` leave `wire_options.go`'s imports, `internal/mechanisms` leaves `wire_settings.go`'s.
+
+NOTES (2026-09-08): `TestApplySettingRefusesEveryKeyItCannotReach` still passes for the `mechanisms` registry row, which survives to item 11: a key with no settings-table entry is refused by `applySettingFor`'s own lookup (`cannotApply`), which names the key, so the dispatcher's contract holds through the intermediate commit.
 
 **What:** ADR 0076 D1 ("the `/settings` mechanisms row is deleted"). `cmd/apogee/wire_options.go:222-231` (`ListMechanisms` closure), `:295-308` (`mechanismBlock`), `:325-337` (`writeMechanismFor`) deleted; `wire_settings.go:287,637,908,993` (`mechanisms` on `liveSettings`), `:1554-1567` (the apply row), `:2109-2129` (`reloadMechanisms`) deleted — `:2348` (`EnableMechanisms: enable` in the `RebindSpec`) goes in item 12; `settingsrows.go:63` (`settingKeyMechanisms`), `:293` (`pointerMechanismList`), `:311` deleted, `:100` section header renamed `{Name: "Reactions", Opens: "bypass"}`. `tui.MechanismToggle`, `ListMechanisms`, `WriteMechanism` stay declared (unused) until item 11. `docs/manual/commands.md:420-429` (the "`mechanisms:` is the one block the pane opens itself" paragraph) deleted; `:376` preamble reworded.
 

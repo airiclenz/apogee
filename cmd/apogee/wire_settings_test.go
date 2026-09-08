@@ -806,7 +806,6 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		PruneToolResults:   true,
 		ContextFiles:       []string{"AGENTS.md"},
 		Servers:            []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
-		Mechanisms:         map[string]bool{"codeinfo": true},
 		ValidatedSetsAlias: map[string]string{"label": "entry"},
 		// The `hooks:` list is the one key here that NO case below edits, and it is in the snapshot
 		// for exactly that reason: its own apply is a whole-list swap tested beside the arm, so what
@@ -1015,7 +1014,6 @@ func clobberOptions(opts config.Options) {
 	for i := range opts.Hooks {
 		opts.Hooks[i] = hooks.Hook{Name: "clobbered"}
 	}
-	clear(opts.Mechanisms)
 	clear(opts.ValidatedSetsAlias)
 	clear(opts.SystemPrompt.Models)
 }

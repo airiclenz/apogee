@@ -356,8 +356,8 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 		"present.host":          "Presentation",
 		"cursor-shape":          "Interface",
 		"editor":                "Interface",
-		"validated-sets.enable": "Mechanisms",
-		"validated-sets.alias":  "Mechanisms",
+		"validated-sets.enable": "Reactions",
+		"validated-sets.alias":  "Reactions",
 		"model-profiles":        "Model profiles",
 	} {
 		if got := byPath[path].Section; got != want {

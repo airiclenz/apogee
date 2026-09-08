@@ -93,7 +93,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	seen := walkSettings(t, drv)
 	for _, section := range []string{
 		"Upstream", "Autonomy", "System prompt", "Confinement", "Tools & skills",
-		"Session", "Presentation", "Interface", "Mechanisms", "Model profiles",
+		"Session", "Presentation", "Interface", "Reactions", "Model profiles",
 	} {
 		if !seen[section] {
 			t.Errorf("the settings pane has no %q section header", section)
