@@ -178,11 +178,13 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 			},
 		},
 		{
+			// One generation, not a bare switch: `bypass:` is a field of the value the one swap door
+			// takes (ADR 0076 A8), so what the row drives is SetReactions carrying it.
 			name: "bypass", key: "bypass", value: "true",
 			check: func(t *testing.T, spy *applySettingSpy) {
 				t.Helper()
-				if want := []bool{true}; !slices.Equal(spy.bypass, want) {
-					t.Errorf("SetBypass = %v, want %v", spy.bypass, want)
+				if len(spy.generations) != 1 || !spy.generations[0].Bypass {
+					t.Errorf("SetReactions = %+v, want one generation with Bypass on", spy.generations)
 				}
 			},
 		},
@@ -301,19 +303,23 @@ func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
 }
 
 // The seven Floor-guard keys are ONE engine seam and seven rows, so every apply has to carry the six
-// gates its own row does not name — the same shape of problem the context-files pair has, and the
-// reason both families need the holder as well as the engine. The failure this pins is the one a
-// row that composed a fresh FloorConfig from its own key alone would ship: a second flip that
-// silently puts the first guard back.
+// gates its own row does not name — and, since that seam takes a whole Generation (ADR 0076 A8), the
+// `bypass:` switch and the observe list beside them. That is the shape of problem the context-files
+// pair has, and the reason both families need the holder as well as the engine. The failure this
+// pins is the one a row that composed a fresh Generation from its own key alone would ship: a second
+// flip that silently puts the first guard back — and, now, an armed Reaction list that vanishes
+// because a guard moved.
 //
 // It also pins the NEGATION. The keys are positive in the file and the pane (`read-cache: false`
 // means the guard is gone) and negative at the engine (`DisableReadCache: true`), and one seam
 // turns one into the other.
-func TestApplySettingFloorGuardKeysCarryTheOtherFiveGates(t *testing.T) {
+func TestFloorRowAppliesOneGeneration(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
 	// A session running the whole floor, which is what every start resolves to: the seven keys
-	// default to true and nothing in this fixture opts out.
+	// default to true and nothing in this fixture opts out. The other two halves of the generation
+	// are set to something a lost field would show as: a bypassed session firing one Reaction.
+	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
 	live := newLiveSettings(config.Options{
 		ToolUseEnforcer:       true,
 		EmptyResponseRecovery: true,
@@ -322,17 +328,33 @@ func TestApplySettingFloorGuardKeysCarryTheOtherFiveGates(t *testing.T) {
 		ToolLoopBreaker:       true,
 		ToolResultCap:         true,
 		ReadCache:             true,
+		Bypass:                true,
+		Reactions:             boot,
 	})
 	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+
+	// Every toggle drives the ONE swap door, and each generation carries the two halves this row
+	// never named: the switch the session is on, and the list it is firing.
+	assertCarriesTheRest := func(t *testing.T, gen apogee.Generation) {
+		t.Helper()
+		if !gen.Bypass {
+			t.Error("the generation a Floor row applied carries Bypass off; want the switch the session is on")
+		}
+		if len(gen.Observe) != 1 || gen.Observe[0].ID != "boot" {
+			t.Errorf("the generation a Floor row applied carries Observe %+v, want the list the session is firing",
+				gen.Observe)
+		}
+	}
 
 	if _, err := apply("read-cache", "false"); err != nil {
 		t.Fatalf("apply read-cache=false: %v", err)
 	}
 	want := apogee.FloorConfig{DisableReadCache: true}
-	if len(spy.floors) != 1 || spy.floors[0] != want {
-		t.Fatalf("SetFloor = %+v, want one call carrying %+v — the other six guards stand",
-			spy.floors, want)
+	if len(spy.generations) != 1 || spy.generations[0].Floor != want {
+		t.Fatalf("SetReactions = %+v, want one call carrying %+v — the other six guards stand",
+			spy.generations, want)
 	}
+	assertCarriesTheRest(t, spy.generations[0])
 
 	// A second row moves, and the first row's opt-out is still gone: the gates are read back off the
 	// holder rather than composed from the key in hand.
@@ -340,18 +362,20 @@ func TestApplySettingFloorGuardKeysCarryTheOtherFiveGates(t *testing.T) {
 		t.Fatalf("apply tool-loop-breaker=false: %v", err)
 	}
 	want = apogee.FloorConfig{DisableReadCache: true, DisableToolLoopBreaker: true}
-	if len(spy.floors) != 2 || spy.floors[1] != want {
-		t.Fatalf("SetFloor = %+v, want the second call to carry %+v", spy.floors, want)
+	if len(spy.generations) != 2 || spy.generations[1].Floor != want {
+		t.Fatalf("SetReactions = %+v, want the second call to carry %+v", spy.generations, want)
 	}
+	assertCarriesTheRest(t, spy.generations[1])
 
 	// And back on again, which is the same claim in the other direction.
 	if _, err := apply("read-cache", "true"); err != nil {
 		t.Fatalf("apply read-cache=true: %v", err)
 	}
 	want = apogee.FloorConfig{DisableToolLoopBreaker: true}
-	if len(spy.floors) != 3 || spy.floors[2] != want {
-		t.Fatalf("SetFloor = %+v, want the third call to carry %+v", spy.floors, want)
+	if len(spy.generations) != 3 || spy.generations[2].Floor != want {
+		t.Fatalf("SetReactions = %+v, want the third call to carry %+v", spy.generations, want)
 	}
+	assertCarriesTheRest(t, spy.generations[2])
 
 	// The projection a Firing composes from says the same thing in the file's positive spelling, so
 	// an unattended run raised from this session runs the floor the human left it on.
@@ -362,6 +386,91 @@ func TestApplySettingFloorGuardKeysCarryTheOtherFiveGates(t *testing.T) {
 	}
 	if floor := floorFromOptions(got); floor != want {
 		t.Errorf("floorFromOptions(options()) = %+v, want the %+v the engine holds", floor, want)
+	}
+}
+
+// The `bypass` row is the Floor rows' other half: one field of the same generation, so its apply has
+// to carry the seven gates and the observe list it never names. A row that pushed a bare switch
+// would put every guard back and disarm every Reaction the session had.
+func TestBypassRowAppliesOneGeneration(t *testing.T) {
+	t.Parallel()
+	spy := &applySettingSpy{}
+	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
+	// A session that has already opted one guard out, so a generation composed from the switch alone
+	// would show as that guard coming back.
+	live := newLiveSettings(config.Options{
+		ToolUseEnforcer:       true,
+		EmptyResponseRecovery: true,
+		ToolCallRepair:        true,
+		ToolCallSalvage:       true,
+		ToolLoopBreaker:       true,
+		ToolResultCap:         true,
+		ReadCache:             false,
+		Reactions:             boot,
+	})
+	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+
+	if _, err := apply("bypass", "true"); err != nil {
+		t.Fatalf("apply bypass=true: %v", err)
+	}
+	if len(spy.generations) != 1 {
+		t.Fatalf("SetReactions = %+v, want exactly one generation", spy.generations)
+	}
+	gen := spy.generations[0]
+	if !gen.Bypass {
+		t.Error("the generation carries Bypass off; want the switch the row just moved")
+	}
+	if want := (apogee.FloorConfig{DisableReadCache: true}); gen.Floor != want {
+		t.Errorf("Floor = %+v, want %+v — the guard the session had already opted out of", gen.Floor, want)
+	}
+	if len(gen.Observe) != 1 || gen.Observe[0].ID != "boot" {
+		t.Errorf("Observe = %+v, want the list the session is firing", gen.Observe)
+	}
+
+	// And the projection a Firing composes from says the same, in the file's own spelling.
+	if got := live.options(); !got.Bypass || got.ReadCache {
+		t.Errorf("options() = bypass:%v read-cache:%v, want true/false", got.Bypass, got.ReadCache)
+	}
+
+	// Which is why the row now requires the holder as well as the engine, exactly as the seven Floor
+	// rows do: a Driver composed with an engine alone refuses the key by name rather than pushing a
+	// generation composed out of the one switch it was handed.
+	entry, ok := settingsEntryFor("bypass")
+	if !ok {
+		t.Fatal("the settings table has no `bypass` arm")
+	}
+	if entry.reaches(settingsApplier{engine: spy}) {
+		t.Error("the bypass arm claims to reach a Driver with no live holder")
+	}
+}
+
+// The negation between the file's seven positive keys and the engine's seven Disable… gates is
+// walked in BOTH directions now — the live holder keeps the Floor in the engine's spelling, and
+// everything composed out of the session reads config.Options — so the pair has to round-trip. A
+// gate that lost its inverse would come back as a guard the human never asked for.
+func TestOptionsFromFloorInvertsFloorFromOptions(t *testing.T) {
+	t.Parallel()
+	for _, positive := range []config.Options{
+		{}, // every guard opted out
+		{
+			ToolUseEnforcer: true, EmptyResponseRecovery: true, ToolCallRepair: true,
+			ToolCallSalvage: true, ToolLoopBreaker: true, ToolResultCap: true, ReadCache: true,
+		},
+		{ToolUseEnforcer: true, ToolCallSalvage: true, ReadCache: true},
+	} {
+		got := optionsFromFloor(floorFromOptions(positive))
+		// Compared key by key rather than whole, because config.Options carries slices: what the
+		// inverse promises is these seven fields and nothing else.
+		if got.ToolUseEnforcer != positive.ToolUseEnforcer ||
+			got.EmptyResponseRecovery != positive.EmptyResponseRecovery ||
+			got.ToolCallRepair != positive.ToolCallRepair ||
+			got.ToolCallSalvage != positive.ToolCallSalvage ||
+			got.ToolLoopBreaker != positive.ToolLoopBreaker ||
+			got.ToolResultCap != positive.ToolResultCap ||
+			got.ReadCache != positive.ReadCache {
+			t.Errorf("optionsFromFloor(floorFromOptions(%+v)) = %+v; the seven keys must survive the round trip",
+				positive, got)
+		}
 	}
 }
 
@@ -386,7 +495,11 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			note, err := applySettingFor(settingsApplier{engine: spy})(tt.key, tt.value)
+			// The holder rides along because the `bypass` row now reads the generation it moves one
+			// field of off it (ADR 0076 A8): without one the row would refuse for being unreachable
+			// rather than for the value it was handed, which is a different sentence.
+			applier := settingsApplier{engine: spy, live: newLiveSettings(config.Options{})}
+			note, err := applySettingFor(applier)(tt.key, tt.value)
 			if err == nil {
 				t.Fatalf("apply %s=%s: want a refusal naming the key, got note %q", tt.key, tt.value, note)
 			}
@@ -2946,7 +3059,12 @@ func TestApplySettingReactionsReplacesTheRunnerAndTheProjection(t *testing.T) {
 	}
 
 	live := newLiveSettings(config.Options{Reactions: boot})
-	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
+	// The REAL door, holder and all: the swap reaches the Runner through the engine that holds it
+	// (ADR 0076 A8), so what this drives is the composition root's own wiring rather than a second
+	// path into the same Runner.
+	engine := newLateEngine(domain.ModePlan, false)
+	engine.seedReactions(runner, apogee.Generation{Observe: boot})
+	apply := applySettingFor(settingsApplier{engine: engine, live: live, hooks: runner, configPath: path})
 	// The value is not read for this key — a list of blocks is a shape no single string spells — so
 	// what the pane persisted is the row's own summary.
 	if _, err := apply("reactions", "1 reaction"); err != nil {
@@ -2993,7 +3111,9 @@ func TestApplySettingReactionsRefusesABrokenFileWithoutMovingAnything(t *testing
 	}
 
 	live := newLiveSettings(config.Options{Reactions: boot})
-	apply := applySettingFor(settingsApplier{live: live, hooks: runner, configPath: path})
+	engine := newLateEngine(domain.ModePlan, false)
+	engine.seedReactions(runner, apogee.Generation{Observe: boot})
+	apply := applySettingFor(settingsApplier{engine: engine, live: live, hooks: runner, configPath: path})
 	if _, err := apply("reactions", "1 reaction"); err == nil {
 		t.Fatal("a reactions: block naming an unknown moment applied silently; want a refusal")
 	}
@@ -3002,20 +3122,78 @@ func TestApplySettingReactionsRefusesABrokenFileWithoutMovingAnything(t *testing
 	}
 }
 
-// The two members the arm dereferences are both required, so a Driver composed without either
-// refuses the key by name on the Update goroutine rather than panicking halfway through an edit the
-// file already carries (ADR 0031).
+// The three members the arm needs are all required, so a Driver composed without any of them refuses
+// the key by name on the Update goroutine rather than panicking halfway through an edit the file
+// already carries (ADR 0031) — or, for the Runner, reporting success for a list that would fire
+// nowhere.
 func TestApplySettingReactionsRefusesWithoutTheRunnerOrTheHolder(t *testing.T) {
 	t.Parallel()
 	entry, ok := settingsEntryFor("reactions")
 	if !ok {
 		t.Fatal("the settings table has no `reactions` arm; a reactions: edit could never reach the session")
 	}
-	if entry.reaches(settingsApplier{live: newLiveSettings(config.Options{})}) {
+	if entry.reaches(settingsApplier{live: newLiveSettings(config.Options{}), hooks: &reactions.Runner{}}) {
+		t.Error("the arm claims to reach a Driver with no engine")
+	}
+	if entry.reaches(settingsApplier{engine: &applySettingSpy{}, live: newLiveSettings(config.Options{})}) {
 		t.Error("the arm claims to reach a Driver with no Runner")
 	}
-	if entry.reaches(settingsApplier{hooks: &reactions.Runner{}}) {
+	if entry.reaches(settingsApplier{engine: &applySettingSpy{}, hooks: &reactions.Runner{}}) {
 		t.Error("the arm claims to reach a Driver with no live holder")
+	}
+}
+
+// A `reactions:` reload moves the observe half and NOTHING else: the Floor gates and `bypass:` cross
+// the swap exactly as the session was running them. They travel in the same value now (ADR 0076 A8),
+// so a reload that composed a generation out of the file's list alone would put back every guard the
+// human had opted out of and lift the floor they had set — a settings edit undoing two others.
+func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path,
+		"reactions:\n  - id: reloaded\n    on: [turn-finished]\n    run: [apogee-test-hook]\n")
+
+	// A session that has opted one guard out and switched the floor off — the two halves a reload
+	// must not touch.
+	live := newLiveSettings(config.Options{
+		ToolUseEnforcer:       true,
+		EmptyResponseRecovery: true,
+		ToolCallRepair:        true,
+		ToolCallSalvage:       true,
+		ToolLoopBreaker:       true,
+		ToolResultCap:         true,
+		ReadCache:             false,
+		Bypass:                true,
+		Reactions:             []domain.Reaction{hookEntry("boot", reactions.TurnFinished)},
+	})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{
+		engine: spy, live: live, hooks: &reactions.Runner{}, configPath: path,
+	})
+	if _, err := apply("reactions", "1 reaction"); err != nil {
+		t.Fatalf("apply reactions: %v", err)
+	}
+
+	if len(spy.generations) != 1 {
+		t.Fatalf("SetReactions = %+v, want exactly one generation", spy.generations)
+	}
+	gen := spy.generations[0]
+	if len(gen.Observe) != 1 || gen.Observe[0].ID != "reloaded" {
+		t.Errorf("Observe = %+v, want the one entry the re-read file lists", gen.Observe)
+	}
+	if want := (apogee.FloorConfig{DisableReadCache: true}); gen.Floor != want {
+		t.Errorf("Floor = %+v, want %+v — a reload moves no guard", gen.Floor, want)
+	}
+	if !gen.Bypass {
+		t.Error("Bypass = false; a reload moves no floor switch either")
+	}
+
+	// And the projection says the same three things, so a Firing raised after the reload is composed
+	// from the whole of what the session is running.
+	got := live.options()
+	if len(got.Reactions) != 1 || got.Reactions[0].ID != "reloaded" || got.ReadCache || !got.Bypass {
+		t.Errorf("options() = reactions:%+v read-cache:%v bypass:%v, want the reloaded list with the "+
+			"floor untouched", got.Reactions, got.ReadCache, got.Bypass)
 	}
 }
 

@@ -449,7 +449,21 @@ go test ./cmd/apogee/ -run 'LateEngine|SetReactions|Firing'
 
 **Commit:** `refactor(apogee): the Driver applies one Generation to the engine and the Runner`
 
-## 12. Settings rows and live reload on one generation
+## 12. Settings rows and live reload on one generation — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the `reactions` row's `reaches` is the engine, the Runner AND the holder, where the item says "the runner and holder as the `hooks` row did". The apply is now `a.engine.SetReactions(gen')` — the one door item 11 built — so the engine is dereferenced and has to be required; going straight to `Runner.Replace` instead would leave `lateEngine.observe` stale and make the next Floor toggle retire a Runner generation for a list that never moved. The Runner requirement is kept as the item asks: it is the half that actually fires, and a Driver without one would report an edit that armed nothing.
+
+NOTES (2026-09-08): `setFloorGuard` reads the seven keys back through `optionsFromFloor(s.gen.Floor)` rather than through `optionsLocked()`, so the flip costs no projection of the whole snapshot (servers, maps and all) and `optionsLocked`'s "one caller" contract stands unchanged. `floorFromOptions` is still the negation seam on the way back.
+
+NOTES (2026-09-08): `liveSettings.setHooks` is `setObserve` (it writes the generation's observe half now), which renames its two references in `cmd/apogee/schedule.go:123` and `cmd/apogee/schedule_test.go:1357,1388` — neither file is in the item's list, but the method has no other callers and both are its own name in prose and in code.
+
+NOTES (2026-09-08): `TestApplySettingFloorGuardKeysCarryTheOtherFiveGates` was RENAMED to `TestFloorRowAppliesOneGeneration` and re-expressed over `spy.generations` — the same three claims (six gates stand, the negation, the projection) plus the two the generation added (Bypass and the observe list ride unchanged). `TestApplySettingDrivesTheRightEngineSeam`'s `bypass` row now reads `spy.generations`, and `TestApplySettingRefusesWhatItCannotApply` composes a holder so its `bypass` case still refuses for the VALUE rather than for unreachability.
+
+NOTES (2026-09-08): the two reactions-reload tests drive the real `lateEngine` (`newLateEngine` + `seedReactions`) instead of composing an applier with no engine, which is what makes "the runner fired the reloaded entry" a claim about the shipped wiring rather than about a second path into the same Runner.
+
+NOTES (2026-09-08): `cmd/apogee/wire_boot.go` is in the item's Files list and needed no edit — its `Floor: floorFromOptions(w.opts)` and `Bypass: w.opts.Bypass` are the Config's, not the holder's, and `wire_live.go` already seeds the engine holder with the same three values `newLiveSettings` now seeds the generation from.
+
+NOTES (2026-09-08): `settingsrows.go` needed no edit either — the `reactions` row's read-only/⏎-opens-$EDITOR affordance falls out of `externallyEdited(k)` over the registry row item 8 added, and the section map already places it under Reactions. `TestReactionsRowOpensTheEditorOnTheKey` pins both ends (the row advertises the editor; `settingKeyLine` lands on the `reactions:` block).
 
 **What:** Depends on items 9 and 11. `liveSettings` holds `gen domain.Generation` in place of `floor`, `bypass` and `hooks`; the seven Floor rows and the `bypass` row compute `gen'` from the pane value (`floorFromOptions` stays the negation seam) and call `a.engine.SetReactions(gen')` — `reachesTheEngineAndTheHolder` loses its floor justification and is removed if nothing else uses it; `reloadHooks` becomes `reloadReactions`: `LoadFileConfig` → `gen' = gen with Observe = file.Reactions` → one apply; the `reactions` row's `apply` calls it, `reaches` requires the runner and holder as the `hooks` row did. Firing composition (`:858`) projects `s.gen.Observe`. Pane wiring for the `reactions` row: read-only, `externallyEdited` → "⏎ opens $EDITOR" via the existing `externalEdit.spec` (A3 — the machinery exists). Section map: `reactions` under Reactions.
 

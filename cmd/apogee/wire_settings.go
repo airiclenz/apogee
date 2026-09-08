@@ -65,14 +65,22 @@ type liveSettings struct {
 	// Nothing writes to it; the fields below are what a `/settings` commit moves.
 	boot config.Options
 
-	// hooks mirrors the `hooks:` list the session is running NOW (ADR 0073). It is held beside boot
-	// rather than among the pushed keys below because it is the only key whose live value lives in
-	// two places at once: the session's own Runner holds it (settingsApplier.hooks), and a Firing
-	// raised INSIDE the session builds a Runner of its own out of this projection — so a `hooks:`
-	// edit that reached the session and not the runs it raises would be exactly the drift ADR 0037
-	// abolished. It is written by the reload arm after Runner.Replace has accepted the list, so a
-	// refused edit leaves both the session and this mirror on the list that is actually running.
-	hooks []domain.Reaction
+	// gen is the Reaction surface as the session is running it NOW: the Floor enable set, the
+	// `bypass:` switch and the user-origin observe list, in the ONE value a live swap carries
+	// (ADR 0076 A8). It is held beside boot rather than among the pushed keys below because a
+	// generation is exactly what the engine seam takes — a row that knew only its own key would have
+	// to compose the other halves from somewhere, and composing them from the launch snapshot is how
+	// two guards flipped in one session come to disagree.
+	//
+	// The Floor gates are held NEGATIVE here, the engine's own spelling, because that is the shape
+	// the seam takes; floorFromOptions and optionsFromFloor are the one pair that turns the file's
+	// positive keys into it and back, so "off in the file" and "off in the pane" cannot come to mean
+	// two different things. The observe list lives here for the reason the rest of this holder
+	// exists: a Firing raised INSIDE the session builds a Runner of its own out of this projection,
+	// so a `reactions:` edit that reached the session and not the runs it raises would be exactly the
+	// drift ADR 0037 abolished. It is written by the reload arm only after the swap has committed, so
+	// a refused edit leaves both the session and this mirror on the list that is actually running.
+	gen apogee.Generation
 
 	// pinnedWindow is the `context-window:` key in tokens: > 0 is the user's pin, which outranks
 	// whatever the server reports (ADR 0024 decision 9), and 0 means "discover it, live".
@@ -204,27 +212,15 @@ type liveSettings struct {
 	allowHosts     []string
 	denyHosts      []string
 
-	// bypass, autoCompact and pruneToolResults mirror the three engine toggles that are in force the
-	// moment their apply returns (`bypass:`, `auto-compact:`, `prune-tool-results:`). The engine
-	// holds all three and nothing re-resolves them, so they are held for the four above's reason: an
-	// unattended run raised from this session must run the floor, the compaction and the pruning the
-	// human last chose, not the ones the process started with.
-	bypass           bool
+	// autoCompact and pruneToolResults mirror the two engine toggles that are in force the moment
+	// their apply returns (`auto-compact:`, `prune-tool-results:`) and travel no generation. The
+	// engine holds both and nothing re-resolves them, so they are held for the four above's reason:
+	// an unattended run raised from this session must run the compaction and the pruning the human
+	// last chose, not the ones the process started with. `bypass:` and the seven Floor-guard keys
+	// are the same kind of mirror and are held in the generation above, which is what their one seam
+	// takes.
 	autoCompact      bool
 	pruneToolResults bool
-
-	// And the seven Floor-guard keys beside them (ADR 0071), mirrored for the same reason and held
-	// POSITIVE — the spelling the file and the pane use — because domain.FloorConfig's negation is
-	// the engine's own contract and belongs at the seam alone (floorFromOptions below). The engine
-	// holds the live gates and nothing re-resolves them here, so an unattended run raised from this
-	// session runs the floor the human last chose rather than the one the process started with.
-	toolUseEnforcer       bool
-	emptyResponseRecovery bool
-	toolCallRepair        bool
-	toolCallSalvage       bool
-	toolLoopBreaker       bool
-	toolResultCap         bool
-	readCache             bool
 
 	// delegateMaxSteps mirrors `delegate-max-steps:`, which is the WRITE alone for THIS session —
 	// the bound is read off the file into the Config the engine was constructed with, and there is
@@ -282,27 +278,27 @@ func newLiveSettings(opts config.Options) *liveSettings {
 		modelProfiles:      opts.ModelProfiles,
 		rememberModel:      opts.RememberModel,
 		// And the keys this holder only MIRRORS — the tool set's four, the engine's two toggles, the
-		// seven Floor-guard gates, the inspector and the undo store — seeded from the same snapshot
-		// for the reason the rest are: a session nobody edits must hand back exactly the
-		// configuration it launched with.
+		// inspector and the undo store — seeded from the same snapshot for the reason the rest are: a
+		// session nobody edits must hand back exactly the configuration it launched with.
 		searchEndpoint:   opts.WebSearchEndpoint,
 		disabledTools:    opts.ToolsDisabled,
-		hooks:            opts.Reactions,
 		allowHosts:       opts.URLAllowHosts,
 		denyHosts:        opts.URLDenyHosts,
-		bypass:           opts.Bypass,
 		autoCompact:      opts.AutoCompact,
 		pruneToolResults: opts.PruneToolResults,
 		inspector:        opts.UI.Inspector,
 		undoSnapshots:    opts.UndoSnapshots,
 
-		toolUseEnforcer:       opts.ToolUseEnforcer,
-		emptyResponseRecovery: opts.EmptyResponseRecovery,
-		toolCallRepair:        opts.ToolCallRepair,
-		toolCallSalvage:       opts.ToolCallSalvage,
-		toolLoopBreaker:       opts.ToolLoopBreaker,
-		toolResultCap:         opts.ToolResultCap,
-		readCache:             opts.ReadCache,
+		// The Reaction surface as one generation, seeded from the very values the composition root
+		// hands the engine holder (wire_live.go): the seven Floor keys through their one negation
+		// seam, `bypass:`, and the observe list the Runner was built from. Seeded rather than left
+		// zero because the zero Generation is a DIFFERENT session — every guard on, nothing armed —
+		// and a first partial edit would install it over what the file asked for.
+		gen: apogee.Generation{
+			Floor:   floorFromOptions(opts),
+			Bypass:  opts.Bypass,
+			Observe: opts.Reactions,
+		},
 
 		delegateMaxSteps: opts.DelegateMaxSteps,
 	}
@@ -692,17 +688,38 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 	s.validatedEnable, s.validatedAlias = enable, alias
 }
 
-// setHooks installs the re-read `hooks:` list the session's Runner has just accepted, so a Firing
-// raised inside this session composes its own Runner from the Hooks the session is running rather
-// than the ones the process launched with (firingSources).
+// generation hands back the Reaction surface as the session is running it — the value a PARTIAL
+// edit modifies one field of, and the base the reload arm hangs a re-read observe list on. The
+// observe list comes back as a COPY, for options()' reason: the value travels to the engine seam and
+// on to a Runner that keeps it, and a caller that sorted or appended to the slice it was given would
+// be editing the list this session is firing.
+func (s *liveSettings) generation() apogee.Generation {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.generationLocked()
+}
+
+// generationLocked is generation's body, split out for the two writers below that must move one
+// field and hand the WHOLE value back under a single lock — the read and the write are one act on
+// purpose, since the engine seam takes all of it at once and an apply that read the other fields
+// outside the lock could restate what a concurrent apply had just moved.
+func (s *liveSettings) generationLocked() apogee.Generation {
+	gen := s.gen
+	gen.Observe = slices.Clone(s.gen.Observe)
+	return gen
+}
+
+// setObserve installs the re-read `reactions:` list the session's Runner has just accepted, so a
+// Firing raised inside this session composes its own Runner from the Reactions the session is
+// running rather than the ones the process launched with (firingSources).
 //
-// It is called AFTER Runner.Replace returned, never before, for setToolSet's reason: a refused list
-// leaves the session firing the Hooks it already had, and a mirror written ahead of the swap would
-// hand a Firing a list this session never ran.
-func (s *liveSettings) setHooks(list []domain.Reaction) {
+// It is called AFTER the swap returned, never before, for setToolSet's reason: a refused list leaves
+// the session firing the Reactions it already had, and a mirror written ahead of the swap would hand
+// a Firing a list this session never ran.
+func (s *liveSettings) setObserve(list []domain.Reaction) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.hooks = list
+	s.gen.Observe = list
 }
 
 // setToolSet mirrors the spec the live tool set was just BUILT from — the four keys that reach the
@@ -723,13 +740,18 @@ func (s *liveSettings) setToolSet(spec toolSetSpec) {
 	s.allowHosts, s.denyHosts = spec.allowHosts, spec.denyHosts
 }
 
-// setBypass mirrors the `bypass:` floor the engine has just been put on. The engine is the authority
-// on what the SESSION is running — this is the copy a Firing composed out of this session is armed
-// from, since it builds an Agent of its own that nothing pushed the toggle at.
-func (s *liveSettings) setBypass(on bool) {
+// setBypass moves `bypass:` on the held generation and hands back the WHOLE value the engine seam
+// must be re-seeded with — setFloorGuard's shape, for setFloorGuard's reason: one swap carries the
+// Floor gates and the observe list beside the switch, and a row that composed a fresh Generation
+// from its own key alone would take away every guard and every armed Reaction the session has.
+//
+// It is also the copy a Firing composed out of this session is armed from, since that Firing builds
+// an Agent of its own that nothing pushed the toggle at.
+func (s *liveSettings) setBypass(on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.bypass = on
+	s.gen.Bypass = on
+	return s.generationLocked()
 }
 
 // setAutoCompact mirrors the `auto-compact:` toggle, for setBypass' reason and on its terms.
@@ -747,33 +769,40 @@ func (s *liveSettings) setPruneToolResults(on bool) {
 	s.pruneToolResults = on
 }
 
-// setFloorGuard flips ONE Floor-guard key on the holder and hands back the WHOLE FloorConfig the
+// setFloorGuard flips ONE Floor-guard key on the holder and hands back the WHOLE Generation the
 // engine must be re-seeded with. The read and the write are one locked act on purpose: the engine
-// seam takes all seven values at once (SetFloor), so an apply that read the other six outside the
-// lock could re-arm a guard a concurrent apply had just taken away.
+// seam takes the seven gates, the `bypass:` switch and the observe list at once (SetReactions), so
+// an apply that read the rest outside the lock could re-arm a guard a concurrent apply had just
+// taken away.
+//
+// The key is moved in the FILE's positive spelling — the inverse out, the flip, the negation back —
+// so this row and a start-up read the same seven keys the same way round and neither has to spell
+// the negation a second time.
 //
 // An unknown key is a programming error the seven table rows cannot make, so it changes nothing and
-// the projection is handed back as it stands.
-func (s *liveSettings) setFloorGuard(key string, on bool) apogee.FloorConfig {
+// the generation is handed back as it stands.
+func (s *liveSettings) setFloorGuard(key string, on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	positive := optionsFromFloor(s.gen.Floor)
 	switch key {
 	case "tool-use-enforcer":
-		s.toolUseEnforcer = on
+		positive.ToolUseEnforcer = on
 	case "empty-response-recovery":
-		s.emptyResponseRecovery = on
+		positive.EmptyResponseRecovery = on
 	case "tool-call-repair":
-		s.toolCallRepair = on
+		positive.ToolCallRepair = on
 	case "tool-call-salvage":
-		s.toolCallSalvage = on
+		positive.ToolCallSalvage = on
 	case "tool-loop-breaker":
-		s.toolLoopBreaker = on
+		positive.ToolLoopBreaker = on
 	case "tool-result-cap":
-		s.toolResultCap = on
+		positive.ToolResultCap = on
 	case "read-cache":
-		s.readCache = on
+		positive.ReadCache = on
 	}
-	return floorFromOptions(s.optionsLocked())
+	s.gen.Floor = floorFromOptions(positive)
+	return s.generationLocked()
 }
 
 // floorFromOptions is the ONE negation seam between the seven positive config keys and the engine's
@@ -789,6 +818,25 @@ func floorFromOptions(o config.Options) apogee.FloorConfig {
 		DisableToolLoopBreaker:       !o.ToolLoopBreaker,
 		DisableToolResultCap:         !o.ToolResultCap,
 		DisableReadCache:             !o.ReadCache,
+	}
+}
+
+// optionsFromFloor is floorFromOptions' inverse: the seven gates read back into the positive keys a
+// file spells and a pane row shows. It exists because the live holder keeps the Floor in the
+// ENGINE's spelling now — that is what one generation carries — while everything composed out of
+// this session reads config.Options, so the negation has to be walkable in both directions.
+//
+// Only those seven fields are set; the rest of the value is the zero Options, and the caller
+// projects them onto whatever base it is answering for (optionsLocked).
+func optionsFromFloor(f apogee.FloorConfig) config.Options {
+	return config.Options{
+		ToolUseEnforcer:       !f.DisableToolUseEnforcer,
+		EmptyResponseRecovery: !f.DisableEmptyResponseRecovery,
+		ToolCallRepair:        !f.DisableToolCallRepair,
+		ToolCallSalvage:       !f.DisableToolCallSalvage,
+		ToolLoopBreaker:       !f.DisableToolLoopBreaker,
+		ToolResultCap:         !f.DisableToolResultCap,
+		ReadCache:             !f.DisableReadCache,
 	}
 }
 
@@ -855,23 +903,30 @@ func (s *liveSettings) optionsLocked() config.Options {
 	// The keys that are PUSHED at a seam and are in force the moment their apply returns. Nothing
 	// re-reads them from here; they are mirrored so this projection can answer for them at all.
 	next.WebSearchEndpoint = s.searchEndpoint
-	next.Reactions = slices.Clone(s.hooks)
 	next.ToolsDisabled = slices.Clone(s.disabledTools)
 	next.URLAllowHosts = slices.Clone(s.allowHosts)
 	next.URLDenyHosts = slices.Clone(s.denyHosts)
-	next.Bypass = s.bypass
 	next.AutoCompact = s.autoCompact
 	next.PruneToolResults = s.pruneToolResults
-	next.ToolUseEnforcer = s.toolUseEnforcer
-	next.EmptyResponseRecovery = s.emptyResponseRecovery
-	next.ToolCallRepair = s.toolCallRepair
-	next.ToolCallSalvage = s.toolCallSalvage
-	next.ToolLoopBreaker = s.toolLoopBreaker
-	next.ToolResultCap = s.toolResultCap
-	next.ReadCache = s.readCache
 	next.UI.Inspector = s.inspector
 	next.UndoSnapshots = s.undoSnapshots
 	next.DelegateMaxSteps = s.delegateMaxSteps
+
+	// And the Reaction surface, which is pushed as ONE value and comes back as three keys: the
+	// observe list, the `bypass:` switch, and the seven Floor gates in the FILE's positive spelling —
+	// optionsFromFloor being the inverse of the negation the seam takes, so an unattended run raised
+	// from this session runs the floor and the Reactions the human last chose rather than the ones
+	// the process started with.
+	next.Reactions = slices.Clone(s.gen.Observe)
+	next.Bypass = s.gen.Bypass
+	floor := optionsFromFloor(s.gen.Floor)
+	next.ToolUseEnforcer = floor.ToolUseEnforcer
+	next.EmptyResponseRecovery = floor.EmptyResponseRecovery
+	next.ToolCallRepair = floor.ToolCallRepair
+	next.ToolCallSalvage = floor.ToolCallSalvage
+	next.ToolLoopBreaker = floor.ToolLoopBreaker
+	next.ToolResultCap = floor.ToolResultCap
+	next.ReadCache = floor.ReadCache
 
 	// And the keys that are re-RESOLVED rather than pushed — the same values rebindInputs projects
 	// for a rebind, since a Firing and a rebind are two readings of one question: what would this
@@ -1009,10 +1064,11 @@ type settingsApplier struct {
 	// mcp is the session's live MCP connections: the one key whose apply is a reconnect rather than a
 	// write, and the source of half the tool set the door above swaps.
 	mcp *liveMCP
-	// hooks is the session's Hook Runner (ADR 0073), reached by exactly one key: a re-read `hooks:`
-	// list is swapped into it wholesale, the retired generation draining in the background. nil ⇒
-	// this Driver composed no Runner, so the key refuses on its own row rather than being
-	// dereferenced on the Update goroutine.
+	// hooks is the session's Reaction Runner (ADR 0073), which a re-read `reactions:` list is swapped
+	// into wholesale — through the engine's one generation door (ADR 0076 A8), which holds the Runner
+	// itself, so nothing here calls it. It is held as the `reactions` row's REACHABILITY: nil ⇒ this
+	// Driver composed no Runner and an armed list would fire nowhere, so the key refuses on its own
+	// row rather than reporting an edit that reached nothing.
 	hooks *reactions.Runner
 	// present is the presentation ladder, which rebuilds from a changed `present:` block and
 	// re-installs itself on the presenter the engine holds.
@@ -1497,28 +1553,32 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "bypass",
-		reaches: reachesTheEngine,
+		key: "bypass",
+		// The holder as well as the engine, for the seven Floor rows' reason: the switch is one field
+		// of the generation the single seam takes, so the row has to read the fields it does not name
+		// off the holder rather than compose a generation out of its own key.
+		reaches: reachesTheEngineAndTheHolder,
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			on, err := settingBool(key, value)
 			if err != nil {
 				return "", err
 			}
-			a.engine.SetBypass(on)
 			// The floor travels with the session onto the runs it raises, for `auto-compact:`'s
-			// reason: the engine holds it, and a Firing constructs one that nobody pushed it at.
-			if a.live != nil {
-				a.live.setBypass(on)
-			}
-			return "", nil
+			// reason: the engine holds it, and a Firing constructs one that nobody pushed it at — so
+			// the holder move and the engine swap are the one call, on applyFloorGuard's terms.
+			return "", a.engine.SetReactions(a.live.setBypass(on))
 		},
 	},
 	{
 		key: "reactions",
-		// The Runner is the seam and the holder is the mirror, so BOTH are required: an arm that
-		// moved only one of them would leave the session and the Firings it raises on two different
-		// lists (ADR 0073 §9 — one library at every root, composed from one list).
-		reaches: func(a settingsApplier) bool { return a.hooks != nil && a.live != nil },
+		// The engine holds the one swap door and the holder holds the generation it swaps, so both
+		// are required — and the RUNNER beside them, which is the half that actually fires: a Driver
+		// that composed none would take the edit, move the mirror and arm nothing, leaving the
+		// session and the Firings it raises on two different lists (ADR 0073 §9 — one library at
+		// every root, composed from one list).
+		reaches: func(a settingsApplier) bool {
+			return a.engine != nil && a.hooks != nil && a.live != nil
+		},
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// A list of blocks is a shape no single string spells, so the value the pane persisted
 			// is not read — the file layer is re-resolved exactly as startup resolved it, the
@@ -1863,16 +1923,20 @@ func applyUndoSnapshots(a settingsApplier, key, value string) (string, error) {
 }
 
 // applyFloorGuard is the shared apply behind all seven Floor-guard keys. It writes the one key onto
-// the holder and pushes the projection that read hands back at the single engine seam, so the six
-// keys this row does not name keep the values they had — the whole reason the write and the read are
-// one locked act inside setFloorGuard.
+// the holder and pushes the GENERATION that read hands back at the single engine seam, so the six
+// keys this row does not name — and the `bypass:` switch and the observe list beside them — keep the
+// values they had; the whole reason the write and the read are one locked act inside setFloorGuard.
+//
+// The refusal is the Runner's and cannot arrive here: a generation whose observe list did not move
+// never reaches the Runner (lateEngine.SetReactions), and the engine half of a swap takes booleans
+// and cannot fail. It is returned rather than discarded because that is the seam's contract, and a
+// row that swallowed a refusal would be a row that lies about an edit the file already carries.
 func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
 	on, err := settingBool(key, value)
 	if err != nil {
 		return "", err
 	}
-	a.engine.SetFloor(a.live.setFloorGuard(key, on))
-	return "", nil
+	return "", a.engine.SetReactions(a.live.setFloorGuard(key, on))
 }
 
 // reachesTheEngine reports whether the anytime-safe mutator class is composed: the keys that are
@@ -1882,8 +1946,9 @@ func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
 // reachesTheEngineAndTheHolder reports whether the engine and the startup snapshot's mutable half
 // are BOTH composed — the pair the two `context-files.` rows need, since either row installs the
 // switch and the names together and only the holder remembers the half the row did not carry, and
-// the pair the seven Floor-guard rows need for the same shape of reason: SetFloor takes all seven
-// gates and only the holder remembers the six the row did not carry.
+// the pair the seven Floor-guard rows and the `bypass` row need for the same shape of reason:
+// SetReactions takes one whole Generation and only the holder remembers the fields those rows did
+// not carry.
 func reachesTheEngineAndTheHolder(a settingsApplier) bool { return a.engine != nil && a.live != nil }
 
 // reachesTheHolder reports whether the live holder is composed. It is the whole of what two keys
@@ -2098,8 +2163,9 @@ func (a settingsApplier) reconnectMCP() error {
 // reloadReactions re-reads the `reactions:` block and moves the session onto it (ADR 0073 §9, ADR
 // 0076). It is reconnectMCP's shape for reconnectMCP's reason — only the FILE carries this key, so
 // resolving the file layer as startup resolved it IS most of the apply — and it differs in what it
-// does with the answer: the list is swapped into the running Runner, whose retired generation
-// finishes what it already holds in the background and then stops.
+// does with the answer: the re-read list is hung on the generation the session is RUNNING and pushed
+// through the one swap door, so the Floor gates and `bypass:` cross the edit untouched while the
+// Runner's retired generation finishes what it already holds in the background and then stops.
 //
 // A file that no longer parses is refused before anything is swapped, and so is a list the Runner
 // will not take (a malformed entry, an unresolvable `workspace:`): a broken edit costs the session
@@ -2108,18 +2174,20 @@ func (a settingsApplier) reconnectMCP() error {
 // startup act, because apogee does not rewrite a config file out from under a running session.
 //
 // The holder is written only once the swap has COMMITTED, so a refused edit leaves the session and
-// the runs it raises describing the same list. That is also why nothing here reports: Replace drains
-// the retired generation on a goroutine of its own, and this arm runs on the Update loop — a
+// the runs it raises describing the same list. That is also why nothing here reports: the swap
+// drains the retired generation on a goroutine of its own, and this arm runs on the Update loop — a
 // synchronous Report would deadlock the program against the send it is waiting for (bridge.go).
 func (a settingsApplier) reloadReactions() error {
 	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	if err := a.hooks.Replace(file.Reactions); err != nil {
+	gen := a.live.generation()
+	gen.Observe = file.Reactions
+	if err := a.engine.SetReactions(gen); err != nil {
 		return err
 	}
-	a.live.setHooks(file.Reactions)
+	a.live.setObserve(file.Reactions)
 	return nil
 }
 

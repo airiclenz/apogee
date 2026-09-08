@@ -120,7 +120,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 
 	// This Firing's own Hook Runner (ADR 0073), built from the `hooks:` list the SESSION is running
 	// now — the one firingSources hands over, which the config-watcher's reload arm keeps current
-	// (liveSettings.setHooks) — rather than the list the process launched with. A `hooks:` edit
+	// (liveSettings.setObserve) — rather than the list the process launched with. A `hooks:` edit
 	// applied mid-session therefore reaches the Firings that session raises, which is the same
 	// promise every other live key already carries into them (ADR 0037).
 	//

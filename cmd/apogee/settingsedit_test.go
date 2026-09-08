@@ -507,6 +507,38 @@ func TestSettingKeyLineFallsBackToTheCommentedExample(t *testing.T) {
 	}
 }
 
+// The `reactions:` block is a list of blocks no row can spell, so the pane will not write it: ⏎ on
+// that row hands the human the file itself, opened on the key's own line (ADR 0076 A3 — the
+// external-edit machinery the `mcp-servers:` block already uses). This is that affordance stated
+// from both ends: the row advertises the editor, and the jump lands on the block.
+func TestReactionsRowOpensTheEditorOnTheKey(t *testing.T) {
+	t.Parallel()
+	key, ok := config.LookupKey("reactions")
+	if !ok {
+		t.Fatal("the registry has no `reactions` row; the pane could not offer the block at all")
+	}
+	if key.Editable {
+		t.Error("the `reactions` row claims to be writable in the pane; a list of blocks is not a value a row can spell")
+	}
+	if !externallyEdited(key) {
+		t.Error("the `reactions` row offers no editor; a read-only key the pane cannot open is a key nobody can set")
+	}
+	if got := editPointer(key); got != pointerExternalEdit {
+		t.Errorf("editPointer = %q, want %q", got, pointerExternalEdit)
+	}
+	data := []byte(strings.Join([]string{
+		"mode: auto",
+		"reactions:",
+		"  - id: notify",
+		"    on: [turn-finished]",
+		"    run: [notify-send, done]",
+		"",
+	}, "\n"))
+	if got := settingKeyLine(data, "reactions"); got != 2 {
+		t.Errorf("settingKeyLine = %d, want 2 — the line the `reactions:` block itself sits on", got)
+	}
+}
+
 // A malformed document still opens — at the top, with no jump. "Your config is malformed" is a
 // reason to hand somebody the file, not to keep it from them.
 func TestSettingKeyLineIsSilentAboutADocumentItCannotParse(t *testing.T) {

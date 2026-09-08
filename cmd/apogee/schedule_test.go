@@ -1354,7 +1354,7 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 }
 
 // A Firing raised inside a session composes its Hooks from the list the session is running NOW —
-// the one a config reload wrote back through setHooks — and never from the list the process
+// the one a config reload wrote back through setObserve — and never from the list the process
 // launched with (ADR 0037: a Firing sees what the session sees). The two entries write different
 // markers, so a Runner built from the boot list fails on both halves at once.
 func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
@@ -1385,7 +1385,7 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	t.Cleanup(func() { runOnce = prevRunner })
 
 	live := newLiveSettings(config.Options{Reactions: []domain.Reaction{recorder("boot", bootMarker)}})
-	live.setHooks([]domain.Reaction{recorder("reloaded", reloadedMarker)})
+	live.setObserve([]domain.Reaction{recorder("reloaded", reloadedMarker)})
 
 	w := scheduleWiring{
 		roots:   roots,
