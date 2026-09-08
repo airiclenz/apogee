@@ -564,7 +564,23 @@ go test ./cmd/apogee/ ./internal/probe/
 
 **Commit:** `refactor(apogee): the validated-sets surface leaves the Driver`
 
-## 15. Delete the validated-sets surface — config, package and manual
+## 15. Delete the validated-sets surface — config, package and manual — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the `validated-sets:` strip is added to `configmigrate.go` in this item, as the item's own guard directs (item 9 shipped the `hooks:` fold and the `mechanisms:` strip only). It follows the `mechanisms:` idiom exactly: a `validatedSetsKey` const, a `validatedSets *blockSpan` on `legacyReactionsConfig`, a drop in the single-pass splice, and a `strippedValidated` bool on `reactionsFold` that adds the note fragment. Per the round-2 guard `validated-sets` is NOT passed to `sameApartFrom` — `fileConfig` has forgotten the key, so the comparison is already blind to it and the byte-level span is the strip's only reader; the verify's comment says so.
+
+NOTES (2026-09-08): two migration strings now name the third key they act on, because a file carrying only `validated-sets:` can reach both and the old wording would have been false there: `verifyReactionsFold`'s refusal became "changed more than hooks:, reactions:, mechanisms: and validated-sets:" (its pin in `configmigrate_test.go` moved with it), and `reactionsRefusal` now names `validated-sets:` in its sentence and in its by-hand instruction. No test pinned the second.
+
+NOTES (2026-09-08): `TestLoadFileConfigLeavesTheMechanismsKeyToStartup` became `TestLoadFileConfigLeavesTheRetiredKeysToStartup`, a two-case table — the live-re-read rule is now about both retired keys, and the `mechanisms:`-only name would have under-claimed it.
+
+NOTES (2026-09-08): the item's "a file without it untouched" test case is `TestMigrateLegacyConfigLeavesAModernFileAlone` (new): a file carrying `reactions:` and none of the retired keys comes back byte-identical, unannounced, with no backup.
+
+NOTES (2026-09-08): consequential edit — internal/config/defaults/config.yaml: made necessary by deleting the Validated-sets template block — the `mechanisms:` block's `CAVEAT (ADR 0016)` paragraph said a non-empty `mechanisms:` block suppresses a Validated set and pointed "see below" at the section this item deletes, so it would have shipped false and dangling. The `mechanisms:` block itself is item 16's.
+
+NOTES (2026-09-08): consequential edit — internal/config/configwrite_test.go: made necessary by deleting the template block — the seeded-template assertion pinned `# validated-sets:`; it now pins `# model-profiles:`, a line this plan does not touch (the item's own Tests section asks for exactly this re-pin).
+
+NOTES (2026-09-08): the comment sweep ran under the guard's grep (`internal/validated|Validated.set`). Beyond the files the item names it reached `cmd/apogee/wire_firing.go`, `cmd/apogee/probemodel_test.go`, `internal/domain/fingerprint.go`, `internal/library/{doc.go,fingerprint.go,fingerprint_test.go}` and `internal/probe/doc.go` — each named a Validated set as a live keying surface for the fingerprint label, and each now names what still keys on it (per-model settings, Library observations). `internal/mechanisms/retired.go`'s three hits are left: item 16 deletes that package whole and is not yet done.
+
+NOTES (2026-09-08): item 14's deferred handover is closed here as the DECISION directs — the two `validated-sets.` rows in `cmd/apogee/wire_settings.go`, their entry in `settingKeysWithNoMemberToReach` (`wire_settings_test.go`) and the `settingsrows_test.go` section/value/external-edit pins all go with the schema rows; `applyTheWriteAlone`'s comment loses the paragraph explaining them.
 
 **What:** Recast at the regression check (2026-09-08). Depends on item 14. Delete `fileConfig.ValidatedSets`, `validatedSetsConfig`, the two accessors (`config.go:910-925`), `Options.ValidatedSetsEnable`/`ValidatedSetsAlias`, the two `KeyRegistry` rows (:661-677), the template block (`defaults/config.yaml:961-985`), and `internal/validated/` whole (including `shipped.json`). `docs/manual/configuration.md`'s `## Per-model validated sets — validated-sets:` section (:803-843) is deleted and the retired-key block (:77-105) gains one sentence: the migration strips `validated-sets:` and says so. Closes bead `apogee-jwf` (closeout).
 

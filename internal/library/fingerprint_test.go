@@ -109,11 +109,11 @@ func TestResolverSatisfiesSeam(t *testing.T) {
 }
 
 // The middle rung: a stored behavioral record for this endpoint + advertised label resolves the
-// model at ConfidenceMedium — the tier that makes a Validated set auto-apply (ADR 0016 §5) and
-// the reason `apogee probe model` persists at all. The LABEL is untouched: the record promotes
-// the identity the model already had, it does not mint a second spelling of it (ADR 0021,
-// Amendment 2026-07-22). That is what keeps entry keys, aliases and Library observations
-// matching across the promotion — a relabelling here would demote every one of them.
+// model at ConfidenceMedium, which is the reason `apogee probe model` persists at all. The LABEL
+// is untouched: the record promotes the identity the model already had, it does not mint a second
+// spelling of it (ADR 0021, Amendment 2026-07-22). That is what keeps per-model settings and
+// Library observations matching across the promotion — a relabelling here would demote every one
+// of them.
 func TestResolveFingerprintBehavioralTier(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "probe")

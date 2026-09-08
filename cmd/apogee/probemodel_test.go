@@ -692,7 +692,7 @@ func TestProbeRecordLivesUnderTheApogeeHome(t *testing.T) {
 //
 // APOGEE_LIVE_MODEL pins the model; left empty, the battery probes whatever the server
 // advertises as active. It runs with --no-save, so an exploratory live run never silently
-// switches Validated-set automatism on for the owner's own machine (ADR 0021 §4).
+// promotes the model's identity on the owner's own machine (ADR 0021 §4).
 func TestProbeModelLiveSmoke(t *testing.T) {
 	endpoint := os.Getenv("APOGEE_LIVE_ENDPOINT")
 	if endpoint == "" {

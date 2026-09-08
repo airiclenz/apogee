@@ -1,6 +1,6 @@
 // Package library is Apogee's per-model identity substrate (CONTEXT "Library"). It holds two
-// things: a confidence-tagged ModelFingerprint resolver — the identity a Validated set is keyed
-// on — and the on-disk behavioral-probe record `apogee probe model` writes and that resolver
+// things: a confidence-tagged ModelFingerprint resolver — the identity every per-model setting is
+// keyed on — and the on-disk behavioral-probe record `apogee probe model` writes and that resolver
 // reads back.
 //
 // The confidence-tagged observation Store this package once carried went with the `library`

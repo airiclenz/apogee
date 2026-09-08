@@ -308,7 +308,7 @@ func wantDefaults() Options {
 		UseShippedSkills: true,
 		UseDefaultPrompt: true,
 		DelegateMaxSteps: defaultDelegateMaxSteps,
-		AutoTitle:        true, ValidatedSetsEnable: true, ContextFiles: []string{"AGENTS.md"},
+		AutoTitle:        true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
 }
@@ -539,7 +539,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"ContextWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
 		"ToolsDisabled": true,
 		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true, "Mechanisms": true,
-		"ValidatedSetsEnable": true, "ValidatedSetsAlias": true, "Present": true,
+		"Present":      true,
 		"SystemPrompt": true, "ContextFiles": true, "UI": true, "CursorShape": true,
 	}
 
@@ -597,8 +597,6 @@ func everyKeyFileConfig() fileConfig {
 		URLSafety:     &urlSafetyConfig{AllowHosts: []string{"example.com"}, DenyHosts: []string{"evil.example"}},
 		ModelProfiles: map[string]modelProfileConfig{"qwen": {ToolCallFormat: "xml"}},
 		Mechanisms:    map[string]bool{"decompose": true},
-		ValidatedSets: &validatedSetsConfig{Enable: boolptr(false),
-			Alias: map[string]string{"local": "qwen-30b"}},
 		Present: &presentConfig{AutoOpen: boolptr(false), Command: "open {path}", Port: 8080,
 			Host: "box.local"},
 		SystemPromptText: "be brief", SystemPromptFile: "prompt.md",
@@ -3393,33 +3391,6 @@ func TestApplyConfigNoMechanismsIsNil(t *testing.T) {
 	}
 }
 
-// The validated-sets config block parses into opts.validatedSetsEnable / opts.validatedSetsAlias
-// (ADR 0016 realisation): the §5 off-switch and the §3 explicit carry-over map. File-only, like
-// mechanisms, so this proves the config surface lands end-to-end.
-func TestApplyConfigValidatedSets(t *testing.T) {
-	t.Parallel()
-	home := testConfigHome(t, "")
-	const configYAML = `validated-sets:
-  enable: false
-  alias:
-    gemma-4-e4b-it-qat: gemma-4-e4b-it-qat
-    my-quant: gemma-4-e4b-it-qat
-`
-	writeConfigHome(t, home, configYAML)
-	opts := Options{ConfigDir: home}
-	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("ApplyConfig: %v", err)
-	}
-
-	if opts.ValidatedSetsEnable {
-		t.Errorf("opts.validatedSetsEnable = true; want false (explicit enable: false)")
-	}
-	wantAlias := map[string]string{"gemma-4-e4b-it-qat": "gemma-4-e4b-it-qat", "my-quant": "gemma-4-e4b-it-qat"}
-	if !reflect.DeepEqual(opts.ValidatedSetsAlias, wantAlias) {
-		t.Errorf("opts.validatedSetsAlias = %+v; want %+v", opts.ValidatedSetsAlias, wantAlias)
-	}
-}
-
 // The present config block parses into opts.present (ADR 0019): all four keys, file-only like
 // the blocks around it, so the composition root can build the ladder's mechanisms from them.
 func TestApplyConfigPresent(t *testing.T) {
@@ -4529,22 +4500,6 @@ func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 			t.Errorf("ApplyConfig with ui.spinner: %s: %v", style, err)
 		}
-	}
-}
-
-// With no validated-sets block, the surface defaults ON with no aliases — a matching set
-// applies (≥ medium confidence) or is offered (low) without any config.
-func TestApplyConfigNoValidatedSetsDefaultsOn(t *testing.T) {
-	t.Parallel()
-	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
-	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("ApplyConfig: %v", err)
-	}
-	if !opts.ValidatedSetsEnable {
-		t.Errorf("opts.validatedSetsEnable = false; want true (default on)")
-	}
-	if opts.ValidatedSetsAlias != nil {
-		t.Errorf("opts.validatedSetsAlias = %+v; want nil", opts.ValidatedSetsAlias)
 	}
 }
 

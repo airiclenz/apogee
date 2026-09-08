@@ -342,20 +342,18 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 
 	byPath := rowsByPath(t, rows)
 	for path, want := range map[string]string{
-		"servers":               "Upstream",
-		"mode":                  "Autonomy",
-		"context-files.names":   "System prompt",
-		"unconfined-hosts":      "Confinement",
-		"use-project-skills":    "Tools & skills",
-		"use-shipped-skills":    "Tools & skills",
-		"context-window":        "Session",
-		"present.host":          "Presentation",
-		"cursor-shape":          "Interface",
-		"editor":                "Interface",
-		"reactions":             "Reactions",
-		"validated-sets.enable": "Reactions",
-		"validated-sets.alias":  "Reactions",
-		"model-profiles":        "Model profiles",
+		"servers":             "Upstream",
+		"mode":                "Autonomy",
+		"context-files.names": "System prompt",
+		"unconfined-hosts":    "Confinement",
+		"use-project-skills":  "Tools & skills",
+		"use-shipped-skills":  "Tools & skills",
+		"context-window":      "Session",
+		"present.host":        "Presentation",
+		"cursor-shape":        "Interface",
+		"editor":              "Interface",
+		"reactions":           "Reactions",
+		"model-profiles":      "Model profiles",
 	} {
 		if got := byPath[path].Section; got != want {
 			t.Errorf("row %q is in section %q; want %q", path, got, want)
@@ -428,11 +426,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"editor":             "code -w",
 		"bypass":             "true",
 		"reactions":          noneSettingValue, // unset in the fixture: the lane is dormant by default
-		// The retired `validated-sets:` block, still in the schema and no longer read by anything:
-		// the fixture states neither key, so both rows read the zero value they were left at.
-		"validated-sets.enable": "false",
-		"validated-sets.alias":  noneSettingValue,
-		"model-profiles":        "1 model profile",
+		"model-profiles":     "1 model profile",
 	}
 	for path, wantValue := range want {
 		if got := byPath[path].Value; got != wantValue {
@@ -542,7 +536,7 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	// while this one fails when a new read-only key reaches the pane without anyone naming it here.
 	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
 		"system-prompt-layers", "model-profiles", "sub-agents-server", "tools.enabled",
-		"reactions", "validated-sets.alias"} {
+		"reactions"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}

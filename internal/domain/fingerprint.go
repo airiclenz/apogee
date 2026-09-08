@@ -21,8 +21,8 @@ const (
 	// because a live capability battery OBSERVED this model (native tool calls, structured
 	// output, a multi-step chain, the candidate-token distribution where the server exposes it)
 	// — a fuzzy feature match, never a hash of a response, which sampling alone would move. The
-	// tier moves and the Label does not, deliberately: the Label is the key the Library and the
-	// Validated-set match are filed under (ADR 0021, Amendment 2026-07-22). It is produced only
+	// tier moves and the Label does not, deliberately: the Label is the key the Library and every
+	// per-model setting are filed under (ADR 0021, Amendment 2026-07-22). It is produced only
 	// by a human running `apogee probe model`, which records a dated claim the resolver then
 	// reads back (ADR 0021 §3); nothing auto-probes, so no startup path can manufacture this
 	// tier as a side effect.

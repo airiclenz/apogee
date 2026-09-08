@@ -42,7 +42,7 @@ const (
 var batteryCapabilities = []Capability{CapNativeToolCall, CapStructuredJSON, CapMultiStepChain}
 
 // featureCode is the short token each observed capability contributes to the behavioral
-// fingerprint. Short because the label is a thing users paste into a validated-sets alias;
+// fingerprint. Short because the label is a thing users paste into their own config;
 // stable because it IS the identity (see BatteryVersion).
 var featureCode = map[Capability]string{
 	CapNativeToolCall: "tools",

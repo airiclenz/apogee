@@ -777,7 +777,7 @@ func TestMigrateSubAgentsServerRefusesANameNoEntryCarries(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The `hooks:` fold and the `mechanisms:` strip (ADR 0076 A6)
+// The `hooks:` fold and the `mechanisms:` / `validated-sets:` strips (ADR 0076 A6, A9)
 // ----------------------------------------------------------------------------
 
 // A `hooks:` block is FOLDED, not refused: the entries come back under `reactions:` in the place the
@@ -855,6 +855,17 @@ func TestMigrateLegacyConfigFoldsTheHooksBlock(t *testing.T) {
 				"  - name: other\n" +
 				"    endpoint: http://other:1111\n" +
 				"server: box\n",
+		},
+		{
+			name: "the inert validated-sets: block goes with them",
+			given: "mode: plan\n" +
+				"validated-sets:\n" +
+				"  enable: false\n" +
+				"  alias:\n" +
+				"    my-gemma: gemma-4\n" +
+				"context-window: 8000\n",
+			want: "mode: plan\n" +
+				"context-window: 8000\n",
 		},
 	}
 	for _, tt := range tests {
@@ -956,13 +967,21 @@ func TestMigrateLegacyConfigAnnouncesTheFold(t *testing.T) {
 				"the retired mechanisms: key was dropped (the catalogue is empty; the seven Floor " +
 					"keys are the only switches)",
 			},
-			absent: []string{"hooks: became reactions:", "approval-waiting", "Scripts must read"},
+			absent: []string{"hooks: became reactions:", "approval-waiting", "Scripts must read",
+				"validated-sets:"},
+		},
+		{
+			name:  "the inert validated-sets: block alone",
+			given: "validated-sets:\n  enable: false\n",
+			want:  []string{"the inert validated-sets: key was dropped"},
+			absent: []string{"hooks: became reactions:", "approval-waiting", "mechanisms:",
+				"Scripts must read"},
 		},
 		{
 			name:    "a fold with nothing retired beside it",
 			given:   "hooks:\n  - name: bell\n    events: [error]\n    command: [\"true\"]\n",
 			want:    []string{"hooks: became reactions: (1 entries)"},
-			absent:  []string{"approval-waiting", "mechanisms:"},
+			absent:  []string{"approval-waiting", "mechanisms:", "validated-sets:"},
 			scripts: true,
 		},
 	} {
@@ -1124,18 +1143,46 @@ func TestLoadFileConfigRefusesTheHooksBlockWithoutRewritingIt(t *testing.T) {
 	assertMigrationWroteNothing(t, path, given)
 }
 
-// A live re-read leaves a `mechanisms:` key exactly where it is rather than refusing over it: the
-// key still parses, it arms nothing either way, and the strip is a write a running session may not
-// make.
-func TestLoadFileConfigLeavesTheMechanismsKeyToStartup(t *testing.T) {
+// A live re-read leaves a `mechanisms:` or `validated-sets:` key exactly where it is rather than
+// refusing over it: neither key is read by anything either way, and the strip is a write a running
+// session may not make.
+func TestLoadFileConfigLeavesTheRetiredKeysToStartup(t *testing.T) {
 	t.Parallel()
-	given := "mechanisms:\n  grammar: true\n"
+	for _, given := range []string{
+		"mechanisms:\n  grammar: true\n",
+		"validated-sets:\n  enable: false\n",
+	} {
+		t.Run(given, func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, given)
+
+			if _, err := LoadFileConfig(path, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("LoadFileConfig: %v — a live re-read must not refuse over a key "+
+					"it may not strip", err)
+			}
+
+			assertMigrationWroteNothing(t, path, given)
+		})
+	}
+}
+
+// A file carrying none of the retired keys is not rewritten at all: the migration is a write, and a
+// configuration that has nothing to migrate must come back byte-identical with no backup beside it.
+func TestMigrateLegacyConfigLeavesAModernFileAlone(t *testing.T) {
+	t.Parallel()
+	given := "mode: plan\nreactions:\n  - id: bell\n    on: [error]\n    run: [\"true\"]\n"
 	path := writeMigrationConfig(t, given)
 
-	if _, err := LoadFileConfig(path, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("LoadFileConfig: %v — a live re-read must not refuse over a key it may not strip", err)
+	updated, note, err := migrateLegacyConfig(path, []byte(given), migrationClock, true)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
 	}
-
+	if string(updated) != given {
+		t.Errorf("a file with nothing to migrate was rewritten:\n%s", updated)
+	}
+	if note != "" {
+		t.Errorf("a file with nothing to migrate was announced: %q", note)
+	}
 	assertMigrationWroteNothing(t, path, given)
 }
 
@@ -1192,7 +1239,7 @@ func TestVerifyReactionsFoldRefusesEachWayTheEditCouldBeWrong(t *testing.T) {
 			before:  fileConfig{Mode: "plan"},
 			after:   fileConfig{Reactions: folded.Reactions, Mode: "auto"},
 			updated: "mode: auto\nreactions:\n  - id: notify\n    on: [error]\n    run: [\"true\"]\n",
-			want:    "changed more than hooks:, reactions: and mechanisms:",
+			want:    "changed more than hooks:, reactions:, mechanisms: and validated-sets:",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

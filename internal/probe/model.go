@@ -39,16 +39,16 @@ type Model struct {
 	Behavior string
 
 	// Save is filled in by the caller AFTER GatherModel returns, because what a record costs
-	// — which Validated sets it promotes, whether one already existed — is knowledge the
-	// composition root holds (it owns the validated-set entries and the apogee home), not the
-	// battery's. GatherModel never writes; the caller decides and records the outcome here.
+	// — where it lands, whether one already existed — is knowledge the composition root holds
+	// (it owns the apogee home), not the battery's. GatherModel never writes; the caller decides
+	// and records the outcome here.
 	Save SaveOutcome
 }
 
 // SaveOutcome is what happened to the fingerprint record, and it exists because ADR 0021 §4
 // makes the write the reason `probe model` is an ACT rather than a report: writing a Medium
-// fingerprint promotes a model from "a Validated set is offered" to "a Validated set is
-// applied" (ADR 0016 §5). Every field here is something the report must say out loud.
+// fingerprint promotes the model's identity from name-only to observed, for every per-model
+// setting keyed on it. Every field here is something the report must say out loud.
 //
 // Changed and Previous are DISPLAY strings the caller has already spelled, and it spells them in
 // the machine's LOCAL zone like every other instant this report prints. The record they describe

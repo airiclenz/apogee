@@ -82,7 +82,7 @@ func TestSaveHostAcknowledgement_SeedsAbsentConfigThenAppends(t *testing.T) {
 		"# apogee configuration — ~/.apogee/config.yaml",
 		"# confine-to-workspace: true",
 		"#   - id: \"devbox-a1b2c3\"                # this machine's host id (apogee prints it)",
-		"# validated-sets:",
+		"# model-profiles:",
 	} {
 		if !strings.Contains(got, doc) {
 			t.Errorf("the seeded template's documentation was lost: %q is gone", doc)

@@ -1569,20 +1569,6 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		// The two `validated-sets.` rows the registry still carries. The surface they used to drive is
-		// gone from this binary, so a committed edit has nothing left to dispatch and the write the
-		// pane already made is the whole of it (applyTheWriteAlone). The keys themselves leave the
-		// schema in the next step of the same removal.
-		key:     "validated-sets.enable",
-		reaches: reachesWithoutAMember,
-		apply:   applyTheWriteAlone,
-	},
-	{
-		key:     "validated-sets.alias",
-		reaches: reachesWithoutAMember,
-		apply:   applyTheWriteAlone,
-	},
-	{
 		key: "model-profiles",
 		// The engine for the swap and the binding for the model to resolve the map AGAINST — the one
 		// key that both pushes and re-resolves, so it needs a member from each class. The holder is
@@ -1801,9 +1787,7 @@ func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
 	// the reserve is read straight off the file into the budget the session opens with, and the
 	// retention rules are read while the session is being wired, so the store has already been swept
 	// by the time a pane can edit them. None of the three has a setter anywhere behind it — there is
-	// no seam this build could reach and none they are candidates for. The two `validated-sets.` rows
-	// arrive here for a different reason and only while the schema still carries the retired key: the
-	// surface they used to drive has left this binary, so there is no seam left at all.
+	// no seam this build could reach and none they are candidates for.
 	//
 	// So they take `editor`'s answer rather than the default refusal, for `editor`'s reason turned
 	// around: the write IS everything this session can do about the key, and a refusal would

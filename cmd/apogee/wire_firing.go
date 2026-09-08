@@ -141,13 +141,13 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	}
 
 	// The per-model half of the Config, resolved exactly as a rebind resolves it — the system prompt
-	// keys on the model (ADR 0023) and so does the Validated set (ADR 0016), so a Firing
+	// keys on the model (ADR 0023) and so does the model profile (ADR 0044), so a Firing
 	// must land in the state a session started on this model and this server would be in.
 	//
 	// The overlay onto the copy is rebindInputs' own (wire_settings.go), spelled here because two of
 	// the three Drivers have no live settings holder to spell it: the endpoint a run RESOLVES
 	// against and the endpoint it DIALS must be one value, or every input keyed on the endpoint —
-	// the probe record behind the identity ladder, and so the Validated-set decision above it —
+	// the probe record behind the identity ladder, and so the model name resolved off it —
 	// would be resolved against the startup server while the run talked to another one. The
 	// `response-reserve:` half is the same rule for the share: without it the spec would state the
 	// TOP-LEVEL share while the Config below divided the window by the entry's, and one

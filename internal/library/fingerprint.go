@@ -70,10 +70,10 @@ func ResolveFingerprint(modelID string) domain.ModelFingerprint {
 //
 // Note what the middle rung does and does not change. It changes the CONFIDENCE only; the label
 // is byte-identical to Low's (ADR 0021, Amendment 2026-07-22). That is deliberate: the label is
-// the key Validated-set entries, user aliases and Library observations are all filed under, so a
-// probe that re-spelled it would orphan every one of them — demoting the model at the moment the
-// user asked to promote it. Probing therefore does exactly one thing to this function's output:
-// it lifts Low to Medium, which is precisely the threshold ADR 0016 §5 auto-applies at.
+// the key per-model settings and Library observations are all filed under, so a probe that
+// re-spelled it would orphan every one of them — demoting the model at the moment the user asked
+// to promote it. Probing therefore does exactly one thing to this function's output: it lifts Low
+// to Medium.
 //
 // A defective stored record (unreadable, malformed, wrong schema version, battery-stale) is
 // skipped with a one-line stderr warning and the ladder simply continues to Low — the same

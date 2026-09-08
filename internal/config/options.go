@@ -368,15 +368,6 @@ type Options struct {
 	// retired roll, so a typo is still a loud refusal and a retired id still earns its notice.
 	Mechanisms map[string]bool
 
-	// validatedSetsEnable is the Validated-set surface's off-switch (ADR 0016 §5; default true)
-	// and validatedSetsAlias its explicit carry-over map (§3: runtime fingerprint label → entry
-	// key — an identity mapping is the low-confidence confirm, a differing one the transfer).
-	// Both are loaded from the config file only (`validated-sets:` block, no flag/env, like
-	// mechanisms). ApplyConfig sets them from settings; the composition root still matches and
-	// narrates, and the set it resolves arms nothing (ADR 0076 D11).
-	ValidatedSetsEnable bool
-	ValidatedSetsAlias  map[string]string
-
 	// present is the resolved `present:` block (ADR 0019) — the presentation ladder's config:
 	// auto-open, the command override, and the doc server's port and advertised host. Loaded from
 	// the config file only, like the blocks above. ApplyConfig sets it from the resolved settings;

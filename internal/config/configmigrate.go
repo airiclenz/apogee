@@ -109,8 +109,9 @@ func migrateLegacyConfig(path string, data []byte, now time.Time, mayFoldReactio
 		if rc.hasHooks {
 			return nil, "", liveReactionsRefusal(path)
 		}
-		// The retired `mechanisms:` key still parses, so a live re-read simply leaves it where it
-		// is: the strip is a WRITE, and the only thing a session gains by it is a rewritten file.
+		// The retired `mechanisms:` and `validated-sets:` keys are left exactly where they are on a
+		// live re-read: the strip is a WRITE, and the only thing a session gains by it is a
+		// rewritten file. Neither key is read by anything either way.
 		rc = legacyReactionsConfig{}
 	}
 	if lc.isEmpty() && !rc.needsRewrite() {
@@ -942,11 +943,14 @@ func sameServers(before, after []ServerEntry) bool {
 // survive (the block is re-rendered, not edited line by line); the note says so and the backup
 // keeps them.
 //
-// Riding along is the retired `mechanisms:` key, top-level and per-server. The catalogue it named
-// is gone (ADR 0071) and the key arms nothing, so it is STRIPPED rather than refused: a saved
-// configuration must not become a refusal, and a key that drives nothing must not keep looking as
-// if it does. The successor table below turns each stripped id into the Floor key that governs its
-// behaviour now, which is the whole of what the user needs to know.
+// Riding along are the two retired keys, on the same reasoning: the `mechanisms:` key (top-level
+// and per-server) whose catalogue is gone (ADR 0071), and the `validated-sets:` block whose
+// per-model surface left the tree with it (ADR 0076 A9). Neither arms anything, so both are
+// STRIPPED rather than refused: a saved configuration must not become a refusal, and a key that
+// drives nothing must not keep looking as if it does. The successor table below turns each
+// stripped catalogue id into the Floor key that governs its behaviour now, which is the whole of
+// what the user needs to know; a stripped `validated-sets:` block has no successor to name, since
+// there is no longer a per-model set for anything to apply.
 //
 // Both halves run ONLY at startup. A live re-read under a running session refuses instead
 // (liveReactionsRefusal): apogee does not rewrite a config file out from under a session.
@@ -967,14 +971,15 @@ var retiredMechanismSuccessors = map[string]string{
 	"tool_result_cap":          "tool-result-cap",
 }
 
-// hooksKey, reactionsKey and mechanismsKey are the three keys this migration reads and writes,
-// spelled once so the sniff, the splice and the notes cannot drift apart. `hooks` is deliberately
-// NOT a fileConfig tag any more — the schema has forgotten it, which is exactly why the sniff below
-// reads it off the node tree instead.
+// hooksKey, reactionsKey, mechanismsKey and validatedSetsKey are the four keys this migration reads
+// and writes, spelled once so the sniff, the splice and the notes cannot drift apart. `hooks` and
+// `validated-sets` are deliberately NOT fileConfig tags any more — the schema has forgotten both,
+// which is exactly why the sniff below reads them off the node tree instead.
 const (
-	hooksKey      = "hooks"
-	reactionsKey  = "reactions"
-	mechanismsKey = "mechanisms"
+	hooksKey         = "hooks"
+	reactionsKey     = "reactions"
+	mechanismsKey    = "mechanisms"
+	validatedSetsKey = "validated-sets"
 )
 
 // blockSpan is one top-level or per-entry block the migration removes: the 1-based line range from
@@ -989,23 +994,26 @@ type blockSpan struct {
 }
 
 // legacyReactionsConfig is the retired half of the schema this migration answers — and only that
-// half: the `hooks:` block ADR 0076 renamed and the `mechanisms:` blocks ADR 0071 emptied. It
-// exists for legacyFileConfig's reason one migration over: fileConfig no longer has a `hooks:`
-// field, so the block would be silently unread, and `mechanisms:` still parses but drives nothing.
+// half: the `hooks:` block ADR 0076 renamed, the `mechanisms:` blocks ADR 0071 emptied, and the
+// `validated-sets:` block ADR 0076 A9 deleted. It exists for legacyFileConfig's reason one
+// migration over: fileConfig no longer has a `hooks:` or a `validated-sets:` field, so those blocks
+// would be silently unread, and `mechanisms:` still parses but drives nothing.
 //
-// Nothing resolves from it. Its only job is to answer "does this file still carry either shape, and
-// where do those lines start and end" — the two facts the fold and the strip both need.
+// Nothing resolves from it. Its only job is to answer "does this file still carry any of those
+// shapes, and where do those lines start and end" — the two facts the fold and the strip both need.
 type legacyReactionsConfig struct {
 	hasHooks         bool
 	hasReactions     bool
 	hooks            *blockSpan
 	mechanisms       *blockSpan
 	serverMechanisms []blockSpan
+	validatedSets    *blockSpan
 }
 
 // needsRewrite reports whether the file carries anything this migration has to take out of it.
 func (rc legacyReactionsConfig) needsRewrite() bool {
-	return rc.hooks != nil || rc.mechanisms != nil || len(rc.serverMechanisms) > 0
+	return rc.hooks != nil || rc.mechanisms != nil || len(rc.serverMechanisms) > 0 ||
+		rc.validatedSets != nil
 }
 
 // readLegacyReactions locates the retired blocks in the file's node tree. The error it reports is
@@ -1035,6 +1043,7 @@ func readLegacyReactions(data []byte) (legacyReactionsConfig, error) {
 	var rc legacyReactionsConfig
 	rc.hooks = spanOf(root, hooksKey)
 	rc.mechanisms = spanOf(root, mechanismsKey)
+	rc.validatedSets = spanOf(root, validatedSetsKey)
 	rc.hasHooks = rc.hooks != nil
 	_, reactionsValue := mappingEntry(root, reactionsKey)
 	rc.hasReactions = reactionsValue != nil && !isNullNode(reactionsValue)
@@ -1081,11 +1090,13 @@ func spanOf(mapping *yaml.Node, key string) *blockSpan {
 
 // reactionsFold is what one run of this migration did, in the terms the startup note is written
 // from: how many `hooks:` entries were folded, whether any of them named the retired
-// `approval-waiting` spelling, and which retired catalogue ids were stripped.
+// `approval-waiting` spelling, which retired catalogue ids were stripped, and whether the inert
+// `validated-sets:` block went with them.
 type reactionsFold struct {
-	folded          int
-	renamedApproval bool
-	strippedIDs     []string
+	folded            int
+	renamedApproval   bool
+	strippedIDs       []string
+	strippedValidated bool
 }
 
 // foldLegacyReactions builds the migrated file: the `hooks:` block re-rendered as `reactions:` in
@@ -1166,7 +1177,11 @@ func spliceReactionsFold(data []byte, entries []legacyHookConfig, fold *reaction
 			return nil, err
 		}
 	}
+	if err := drop(rc.validatedSets); err != nil {
+		return nil, err
+	}
 	fold.strippedIDs = strippedMechanismIDs(rc)
+	fold.strippedValidated = rc.validatedSets != nil
 
 	var block []string
 	at := 0
@@ -1227,6 +1242,10 @@ func strippedMechanismIDs(rc legacyReactionsConfig) []string {
 // for: the parsed after says nothing about a `hooks:` the fold was supposed to take away. The
 // servers are compared with their `mechanisms:` maps blanked on both sides, for the same reason —
 // that map is what the strip removes, and sameApartFrom cannot reach inside a list.
+//
+// `validated-sets` is deliberately NOT a sameApartFrom path: fileConfig has forgotten the key, so
+// the comparison is already blind to it and naming it would only claim a field that no longer
+// exists. The byte-level span above is the strip's one and only reader.
 func verifyReactionsFold(before, after fileConfig, updated []byte, want []domain.Reaction) error {
 	rc, err := readLegacyReactions(updated)
 	if err != nil {
@@ -1243,8 +1262,9 @@ func verifyReactionsFold(before, after fileConfig, updated []byte, want []domain
 		return errors.New("the folded reactions: block does not fire what the hooks: block fired")
 	case !sameApartFrom(withoutServerMechanisms(before), withoutServerMechanisms(after),
 		reactionsKey, mechanismsKey):
-		//nolint:staticcheck // ST1005: ends with the mechanisms: key's own colon by design.
-		return errors.New("the edit would have changed more than hooks:, reactions: and mechanisms:")
+		//nolint:staticcheck // ST1005: ends with the validated-sets: key's own colon by design.
+		return errors.New("the edit would have changed more than hooks:, reactions:, mechanisms: " +
+			"and validated-sets:")
 	}
 	return nil
 }
@@ -1529,6 +1549,9 @@ func (f reactionsFold) note(path, backup string) string {
 	if len(f.strippedIDs) > 0 {
 		parts = append(parts, "the retired mechanisms: key was dropped ("+f.successorHint()+")")
 	}
+	if f.strippedValidated {
+		parts = append(parts, "the inert validated-sets: key was dropped")
+	}
 	parts = append(parts, "comments inside the old block did not survive")
 
 	note := fmt.Sprintf("apogee: rewrote %s — %s; backup at %s.",
@@ -1570,11 +1593,12 @@ func bothListsRefusal(path string) error {
 // reactionsRefusal is what the fold gives when it cannot be made safely: nothing has been written,
 // and the paste-able instruction is a complete answer on its own.
 func reactionsRefusal(path string, why error) error {
-	return fmt.Errorf("apogee: %s still uses the retired hooks: or mechanisms: keys — reactions: is "+
-		"the single observe list, and the mechanism catalogue is gone.\n\n"+
+	return fmt.Errorf("apogee: %s still uses the retired hooks:, mechanisms: or validated-sets: "+
+		"keys — reactions: is the single observe list, and the mechanism catalogue and the "+
+		"per-model validated sets are gone.\n\n"+
 		"apogee did not rewrite it for you because %v.\n\n"+
 		"Move the hooks: entries into reactions: (name: → id:, events: → on:, command: or webhook: "+
-		"→ run:) and delete hooks: and mechanisms: by hand.", path, why)
+		"→ run:) and delete hooks:, mechanisms: and validated-sets: by hand.", path, why)
 }
 
 // liveReactionsRefusal is what a LIVE re-read of a file still carrying `hooks:` gets. The fold is a

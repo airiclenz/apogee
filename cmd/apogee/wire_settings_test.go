@@ -550,13 +550,10 @@ const startupOnlyContract = "takes effect at the next start."
 // the session is being built, and say so in their Descriptions. `ui.inspector`,
 // `delegate-max-steps`, `working-window` and `undo-snapshots` still mirror their value onto the
 // live holder for the Firings a session raises, and do nothing at all where a Driver composed
-// none — which is why they are exempt rather than reaching for one. The two `validated-sets.` rows
-// are exempt for a third reason, and only until the schema drops them: the surface they drove has
-// left this binary, so the write is all that is left of the key.
+// none — which is why they are exempt rather than reaching for one.
 var settingKeysWithNoMemberToReach = []string{
 	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "working-window",
 	"undo-snapshots", "sessions.max-age", "sessions.max-count",
-	"validated-sets.enable", "validated-sets.alias",
 }
 
 // The five START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam

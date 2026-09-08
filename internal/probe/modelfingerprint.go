@@ -50,15 +50,14 @@ func Tier(b Battery) CapabilityTier {
 // raises the TIER of an identity the system already has; it does not mint a second, differently
 // spelled one (ADR 0021, Amendment 2026-07-22).
 //
-// That is the load-bearing decision, so it is worth stating why. The label is a KEY: Validated
-// -set entries are filed under it (ADR 0016 §3 — `gemma-4-e4b-it-qat`), users paste it into a
-// `validated-sets: alias:` entry, and the Library files its observations under it. A label that
+// That is the load-bearing decision, so it is worth stating why. The label is a KEY: every
+// per-model setting is filed under it (`model-profiles:`, `system-prompt-models:` — the spelling
+// is `gemma-4-e4b-it-qat`), and the Library files its observations under it too. A label that
 // also encoded the observed feature set would be a key that MOVES whenever the battery version,
 // the feature vector, or the server's willingness to expose logprobs moves — so the very act of
-// probing would orphan every entry, alias and observation for that model, demoting it instead of
+// probing would orphan every setting and observation for that model, demoting it instead of
 // promoting it. Keeping one key across the Low and Medium rungs means `apogee probe model` does
-// exactly the one thing ADR 0021 §4 promises: it flips a matching Validated set from OFFERED to
-// APPLIED, and changes nothing else.
+// exactly the one thing ADR 0021 §4 promises: it raises the tier, and changes nothing else.
 //
 // The behavioural evidence is not discarded — it becomes BehaviorSignature, recorded beside the
 // identity in the probe record. It is the thing compared across probes (a swapped model behind

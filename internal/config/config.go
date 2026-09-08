@@ -103,8 +103,8 @@ type SystemPromptLayer struct {
 }
 
 // SystemPromptSettings is the resolved system-prompt block (ADR 0023): the global prompt plus
-// the per-model overrides, keyed by the RESOLVED model name (the label the Validated-set surface
-// keys on too). It is one struct rather than three fields on [Options] for the same reason
+// the per-model overrides, keyed by the RESOLVED model name (the label the Library files its
+// observations under too). It is one struct rather than three fields on [Options] for the same reason
 // PresentSettings is: the keys describe ONE subsystem and travel together, from the on-disk block
 // through resolution to the composition root, where ResolveSystemPrompt collapses them into the
 // single template domain.Config carries.
@@ -187,8 +187,8 @@ const defaultContextFileName = "AGENTS.md"
 // and whether any of them exists is deliberately not a config-time question: discovery is the
 // feature, and the default name will not exist in every repo.
 type contextFilesSettings struct {
-	// enable is the block's off-switch, default TRUE (the validated-sets `enable` posture): a repo
-	// carrying an AGENTS.md is picked up with nothing configured, and `enable: false` opts out.
+	// enable is the block's off-switch, default TRUE: a repo carrying an AGENTS.md is picked up
+	// with nothing configured, and `enable: false` opts out.
 	enable bool
 	// names are the workspace-relative names to look for, in inclusion order. Default the one
 	// AGENTS.md; an explicitly EMPTY list means "no names", which is the other way to switch the
@@ -900,24 +900,6 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// The `validated-sets:` pair project on their own, the `url-safety:` lists' shape: a block
-		// that sets the switch alone leaves the alias map at its default, and the other way round.
-		row: mustKey("validated-sets.enable"),
-		fromFile: func(o *Options, fc fileConfig) {
-			o.ValidatedSetsEnable = fc.ValidatedSets == nil || fc.ValidatedSets.Enable == nil ||
-				*fc.ValidatedSets.Enable
-		},
-	},
-	{
-		row: mustKey("validated-sets.alias"),
-		fromFile: func(o *Options, fc fileConfig) {
-			o.ValidatedSetsAlias = nil
-			if fc.ValidatedSets != nil && len(fc.ValidatedSets.Alias) > 0 {
-				o.ValidatedSetsAlias = fc.ValidatedSets.Alias
-			}
-		},
-	},
-	{
 		// Ordered by pattern on the way in (toProfileEntries), so the same file always resolves to
 		// the same slice; the map is carried whole rather than merged pattern by pattern (ADR 0044).
 		row: mustKey("model-profiles"),
@@ -1479,12 +1461,6 @@ type fileConfig struct {
 	// roll's notices (internal/mechanisms). File-only (no flag/env), like mcp-servers. It is kept
 	// so a saved configuration naming a removed ID is tolerated rather than refused.
 	Mechanisms map[string]bool `yaml:"mechanisms"`
-	// ValidatedSets configures the Validated-set runtime surface (ADR 0016 and its 2026-07-19
-	// realisation). File-only (no flag/env), like mechanisms. Absent ⇒ the surface is ON with no
-	// aliases: a per-model set matching the resolved fingerprint auto-applies at ≥ medium
-	// confidence and is offered at low. A pointer so an absent block falls through to that
-	// default rather than being an explicit zero setting.
-	ValidatedSets *validatedSetsConfig `yaml:"validated-sets"`
 	// Present configures how a finished document is shown to the user (ADR 0019): the
 	// presentation ladder's auto-open switch, the application that stands in for the OS opener,
 	// and the doc server's port and advertised host. File-only (no flag/env), like the blocks
@@ -2122,16 +2098,6 @@ func ResolveResponseReserve(entry, session float64) float64 {
 	return 0
 }
 
-// validatedSetsConfig is the on-disk schema for the Validated-set surface (ADR 0016):
-// `enable` is the §5 off-switch (a pointer so an explicit `enable: false` is
-// distinguishable from an absent key, default true); `alias` is the §3 explicit
-// carry-over map, runtime fingerprint label → entry key. A dangling alias target is a
-// loud startup error (the ADR 0015 removed-ID posture — it is the user's own config).
-type validatedSetsConfig struct {
-	Enable *bool             `yaml:"enable"`
-	Alias  map[string]string `yaml:"alias"`
-}
-
 // presentConfig is the on-disk schema for the `present:` block (ADR 0019). It mirrors
 // PresentSettings with yaml tags; toPresentSettings maps it across so the on-disk shape and the
 // resolved value stay independently evolvable (as mcpServerConfig does for mcp.ServerConfig).
@@ -2201,8 +2167,7 @@ func (fc fileConfig) toSystemPromptSettings() SystemPromptSettings {
 
 // contextFilesConfig is the on-disk schema for the `context-files:` block: `enable` is the
 // off-switch (a pointer so an explicit `enable: false` is distinguishable from an absent key,
-// default true — the validated-sets posture), and `names` the workspace-relative names to look for
-// in inclusion order.
+// default true), and `names` the workspace-relative names to look for in inclusion order.
 //
 // `names` is a slice rather than a pointer because YAML already tells absent from empty here: an
 // absent (or null) key decodes to a nil slice and keeps the default [AGENTS.md], while an explicit

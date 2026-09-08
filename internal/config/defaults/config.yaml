@@ -967,31 +967,8 @@ ui:
 # The reducer that used to be recommended for a small context window, the oversized-tool-result
 # cap, is now the tool-result-cap Floor guard above and is already on.
 #
-# CAVEAT (ADR 0016): a non-empty mechanisms: block means manual control — a Validated set
-# matching your model (see below) is then NOT auto-applied; apogee prints a one-line notice
-# naming it instead. Leave this block commented out to let Validated sets apply automatically.
-#
 # mechanisms:
 #   <id>: true    # tolerated for a saved configuration; nothing here arms anything
-
-# =============================================================================
-# Validated sets (ADR 0016): per-model Mechanism sets bench-proven SAFE (non-inferior to
-# --bypass) on a specific model. When the model apogee resolves at startup matches an entry —
-# shipped with the binary, or your own under ~/.apogee/validated/ — the set applies
-# automatically at ≥ medium fingerprint confidence, and at low (name-only) confidence apogee
-# prints a one-line offer instead: paste the alias it names to confirm your model IS the one
-# measured. Your explicit mechanisms: block above always wins (a validated set applies whole
-# or not at all), and --bypass suppresses everything. Config-file only (no flag or env).
-#
-# NO ENTRY SHIPS WITH THIS BUILD. The one that did named fifteen catalogued Mechanisms and every
-# one of them retired in v0.20.0 (ADR 0071), so it had nothing left to enable; a set you measured
-# yourself, under ~/.apogee/validated/, applies exactly as it always did.
-#
-# validated-sets:
-#   enable: true                # the off-switch; default true
-#   alias:                      # explicit carry-over: runtime model label -> entry key
-#     # my-model-as-the-server-names-it: my-entry-key   # identity = "my model is what it says"
-#     # my-quant-of-that-model: my-entry-key            # transfer to a sibling quant (your call)
 
 # =============================================================================
 # Model profiles: how apogee equips and speaks to a model — the shape its tool calls arrive in, the

@@ -16,14 +16,13 @@
 // Upstream (native tool call, structured JSON, a multi-step tool chain, and a one-token
 // candidate-distribution probe) and, when the run completes, it earns the model's advertised
 // label a fingerprint at domain.ConfidenceMedium. The battery raises an identity's TIER; it
-// never re-spells it (ADR 0021, Amendment 2026-07-22) — the label is the key Validated-set
-// entries, aliases and Library observations are filed under. What was observed travels beside
+// never re-spells it (ADR 0021, Amendment 2026-07-22) — the label is the key every per-model
+// setting and every Library observation is filed under. What was observed travels beside
 // the identity as the BehaviorSignature: a fuzzy feature match, never a hash of a response,
 // which sampling alone would move (ADR 0021 §6). It still writes nothing itself: the
 // record is persisted by the composition root through internal/library, so `--no-save` is a
-// genuine off-switch rather than a rollback, and so the one act that promotes a model from
-// "a Validated set is offered" to "a Validated set is applied" (ADR 0016 §5) stays visible at
-// the command that performs it.
+// genuine off-switch rather than a rollback, and so the one act that promotes a model from a
+// name-only identity to an observed one stays visible at the command that performs it.
 //
 // The capability tier the model report carries is a REPORTED SIGNAL ONLY — nothing reads it.
 // Adaptive prompt complexity, the transform that would, is a follow-on recorded in the issue

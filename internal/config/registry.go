@@ -663,22 +663,6 @@ var KeyRegistry = []Key{
 		Structure: func(o Options) any { return o.Reactions },
 	},
 	{
-		// The block's off-switch is a row of its own, for the `context-files.*` reason: it is a bool
-		// the pane can write, and leaving it inside a structured summary would send a human to their
-		// editor to flip a single true/false. The alias map below stays structured — a map of model
-		// labels to entry keys is a shape no row holds.
-		Path: "validated-sets.enable", Kind: KindBool, Default: "true",
-		Editable: true,
-		Desc:     "Apply the Validated Mechanism set measured for the bound model when one matches.",
-		Read:     func(o Options) string { return boolValue(o.ValidatedSetsEnable) },
-	},
-	{
-		Path: "validated-sets.alias", Kind: KindStructured,
-		Desc:      "Explicit carry-over from a runtime model label to the Validated-set entry it applies.",
-		Read:      func(o Options) string { return countSummary(len(o.ValidatedSetsAlias), "alias") },
-		Structure: func(o Options) any { return o.ValidatedSetsAlias },
-	},
-	{
 		// Summarized by its COUNT, like every other block of entries no row can hold. What the summary
 		// does not say — which model each pattern matches, and what shape it gives it — is deliberate:
 		// a profile is per-model (ADR 0044), so no single line can name the one in force without
