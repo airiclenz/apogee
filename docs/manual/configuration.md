@@ -199,10 +199,9 @@ with **advise and shape Reactions of user or bench origin off** — exactly what
 while the Floor guards and the structural reducers stay on
 ([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)). **observe** and
 **gate** Reactions keep running too, because they change nothing the floor measures: a run under
-Bypass still fires your Hooks and still asks before it acts. The Validated set your bound model would
-otherwise be given is not applied either. On a stock install that changes nothing you can see, since
-nothing of user or bench origin is armed — the switch is the bench's control arm, and it earns its
-keep the moment a Driver arms Reactions of its own.
+Bypass still fires your observe Reactions and still asks before it acts. On a stock install that
+changes nothing you can see, since nothing of user or bench origin is armed — the switch is the
+bench's control arm, and it earns its keep the moment a Driver arms Reactions of its own.
 Bypass is the honest "model-shaping Reactions off" floor an armed Reaction is measured against on the
 bench ([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code
 path you can run yourself. What it never touches is the agent's structure and its floor — context
@@ -416,7 +415,7 @@ save the file — or use `⏎` on the `reactions:` row in [`/settings`](commands
 which opens your editor because no row can write a list this shape — and the running session swaps
 its reactions over. A headless run and the daemon read the list once, at start. The full reference —
 every payload field, the exec posture, the webhook contract, `workspace:` matching, and what happens
-when a reaction fails or falls behind — is on the [Hooks](hooks.md) page.
+when a reaction fails or falls behind — is on the [Reactions](reactions.md) page.
 
 ## Skills a repository ships — `use-project-skills:`
 

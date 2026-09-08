@@ -150,7 +150,7 @@ sub-agent's: the lines carry every depth, not just the top.
 ### The eighteen line kinds
 
 Sixteen of them are engine events, and the two frames are not. The names are snake_case on
-purpose — a [Hook event](hooks.md)'s kebab-case name for a neighbouring moment is a *different*
+purpose — a [Reaction notice](reactions.md)'s kebab-case name for a neighbouring moment is a *different*
 moment, and the case difference is the signal.
 
 | `event` | What it marks |

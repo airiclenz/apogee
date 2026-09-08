@@ -220,9 +220,9 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
   OS's supervisor, every firing saved as a session you can browse.
 - **Scriptable** — [`apogee headless`](docs/manual/headless.md) runs one prompt
   unattended with clean stdout and meaningful exit codes.
-- **Hooks** — run a command or POST a webhook when an exchange ends, a file changes or an
-  approval is waiting. Observe-only: a hook is told what happened and can change nothing,
-  and nothing it prints reaches the model. See [Hooks](docs/manual/hooks.md).
+- **Reactions** — run a command or POST a webhook when an exchange ends, a file changes or an
+  approval is waiting. Observe-only: a reaction is told what happened and can change nothing,
+  and nothing it prints reaches the model. See [Reactions](docs/manual/reactions.md).
 - **[`apogee probe`](docs/manual/probe.md)** reports what this host, model and terminal
   can actually do, without running an agent or calling a model.
 - **Deliverables you actually see** — a finished report is opened on your desktop, or
@@ -248,7 +248,7 @@ The [manual](docs/manual/README.md) carries the full reference:
 | [Commands](docs/manual/commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, `/settings` |
 | [Sessions](docs/manual/sessions.md) | Saving, resuming, browsing, renaming conversations |
 | [Configuration](docs/manual/configuration.md) | `config.yaml` end to end: servers, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
-| [Hooks](docs/manual/hooks.md) | Commands and webhooks fired on a session's events: payload, exec posture, webhooks |
+| [Reactions](docs/manual/reactions.md) | Commands and webhooks fired on what a session did: the notices, the payload, exec posture, webhooks |
 | [`apogee probe`](docs/manual/probe.md) | Diagnosing what a host, model, and terminal can do |
 | [`apogee headless`](docs/manual/headless.md) | One unattended prompt, for scripts |
 | [`apogee daemon`](docs/manual/daemon.md) | Standing schedules that outlive the session |

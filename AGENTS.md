@@ -5,7 +5,7 @@
 ## Where knowledge lives
 
 - `CONTEXT.md` — the domain language and concept map (Floor guards, Reactions, Moments, Bypass, Steps,   Turns, …). Terms used in code and docs are defined here; read the relevant   section before design work. Large — read sections, don't load it wholesale.
-- `docs/manual/` — the user-facing reference manual (commands, sessions, configuration, probe, headless, daemon, building). `README.md` is the plain-language front door; detail lives here, not there.
+- `docs/manual/` — the user-facing reference manual (commands, sessions, configuration, reactions, probe, headless, daemon, building). `README.md` is the plain-language front door; detail lives here, not there.
 - `docs/adr/` — architectural decision records. Settled questions live here; check for an ADR before re-opening one.
 - `docs/design/` — design contracts (confinement execution contract, MCP client, the `reaction-core-greenfield.md` collapse) plus the `tool-surface-findings.md` record; the mechanism catalogue is archived under `docs/design/archived/` and carries the retirement wave's per-row verdicts (ADR 0071) — historical, since the Reaction core superseded that surface (ADR 0076).
 - `docs/design/test-drivers.md` — how to drive the TUI, script an upstream and judge a frame in `go test`; a test step is manual only where its table says so.

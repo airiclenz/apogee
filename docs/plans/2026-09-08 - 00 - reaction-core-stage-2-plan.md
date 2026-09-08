@@ -684,7 +684,12 @@ test -f docs/manual/reactions.md && test ! -f docs/manual/hooks.md
 
 **Commit:** `docs(manual): hooks.md becomes reactions.md over the reactions: surface`
 
-## 19. Manual, README and agent guide: every other mention
+## 19. Manual, README and agent guide: every other mention — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the acceptance greps' exclusion range `configuration.md:(77-105)` is stale — item 16's "Keys apogee migrates for you" block landed at `docs/manual/configuration.md:139-169`. Verified with the sed-strip form the item's regression guard authorizes (`sed '/^## Keys apogee migrates for you$/,/^## Environment overrides$/d'` plus the `reactions.md` `## Migrating` strip): all three greps return zero live hits.
+NOTES (2026-09-09): the widened rule grep's surviving hits are all triaged exempt — `configuration.md:147,160,393,407,1501,1584` (migration prose, an example webhook URL, git hooks), `reactions.md:16,267-298` (the ADR filename and item 18's migration section), `AGENTS.md:23,113` (git/beads hooks).
+NOTES (2026-09-09): `AGENTS.md` carried no retired-name mention; its one edit adds `reactions` to the `docs/manual/` page list, which item 18's new page had left stale.
+NOTES (2026-09-09): three edited paragraphs were re-wrapped to the file's own column width (`docs/manual/probe.md`, `docs/manual/configuration.md`, `docs/manual/commands.md`) so no line is left orphaned mid-sentence; no other text changed.
 
 **What:** Depends on items 15, 16 and 18. Rule: every mention of `hooks.md`, the `hooks:` key, `APOGEE_HOOK`, `approval-waiting`, `validated-sets` or a live `mechanisms:` key in `README.md`, `docs/manual/**` and `AGENTS.md` is rewritten or removed — `grep -rn 'hooks\.md\|hooks:\|APOGEE_HOOK\|approval-waiting\|validated-sets\|mechanisms:' README.md AGENTS.md docs/manual/` finds them (git hooks in `AGENTS.md` are exempt). Known: `README.md:223-225, :251`; `docs/manual/README.md:12`; `docs/manual/commands.md:411-413` (editor-row list: `reactions:` replaces `hooks:` and `validated-sets: alias:`); `docs/manual/headless.md:156, :214`; `docs/manual/configuration.md` intro links and `:837, :843`.
 
