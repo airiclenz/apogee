@@ -38,7 +38,17 @@
 
 **Out of scope:** the repo layer, adoption pin, write deny (stage 2b, `apogee-089`) · `advise:`/`gate:` cells (stage 3, `apogee-rxj`) · headless line kinds for the five notices (`apogee-5cf`) · consolidating `wire_settings.go`'s file re-reads (`apogee-o60`) · the Floor rows' editability (`apogee-tbs`) · `mcp:` handlers (`apogee-03a`) · user shape(view) (`apogee-8za`) · VERSION/CHANGELOG release acts.
 
-## 1. Rename `internal/hooks` to `internal/reactions`
+## 1. Rename `internal/hooks` to `internal/reactions` — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): consequential edit — internal/tui/bridge.go: made necessary by the package rename (the `hooks.Options.Report` qualifier in a comment).
+
+NOTES (2026-09-08): consequential edit — internal/eventjson/writer.go: made necessary by the package rename (the `hooks.Runner` qualifier in a comment).
+
+NOTES (2026-09-08): consequential edit — internal/domain/reaction_test.go: made necessary by the package rename (the `hooks.Event` qualifier in a comment).
+
+NOTES (2026-09-08): the item's `hooks.` sweep was applied to package qualifiers only. Prose that ends a sentence on the word "hooks." and references to the FILE `hooks.go` (internal/config, internal/domain, internal/reactions) are untouched — file names are not renamed by this item and comment wording is item 21's.
+
+NOTES (2026-09-08): gofmt re-sorted the import block in every file whose `internal/hooks` import became `internal/reactions` (r sorts after p, before s); `gofmt -l .` is clean.
 
 **What:** `git mv internal/hooks internal/reactions`; package clause, every import path and every `hooks.` qualifier across the repo become `reactions`; the `"internal/hooks"` literal in `internal/tuitest/leak.go:40` becomes `"internal/reactions"`. No type, field, string or event changes — `Hook`, `APOGEE_HOOK_*`, the payload and the report lines are untouched here. Facade aliases in `apogee.go` keep their names, only their targets move.
 

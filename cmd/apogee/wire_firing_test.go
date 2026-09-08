@@ -14,9 +14,9 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/notice"
+	"github.com/airiclenz/apogee/internal/reactions"
 	// Aliased because the tests below hold a skills.Provider in a variable called `provider`,
 	// which shadows the package name inside those functions.
 	apiprovider "github.com/airiclenz/apogee/internal/provider"
@@ -1092,14 +1092,14 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 	t.Parallel()
 
 	roots := firingRoots(t)
-	list := []hooks.Hook{{
+	list := []reactions.Hook{{
 		Name:       "notify",
-		Events:     []hooks.Event{hooks.ExchangeFinished},
+		Events:     []reactions.Event{reactions.ExchangeFinished},
 		Webhook:    "https://hooks.example/fire",
 		HeadersEnv: map[string]string{"Authorization": "NOTIFY_TOKEN"},
 		Timeout:    time.Second,
 	}}
-	runner, err := firingHooks(list, roots.workspace, &hooks.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil)
+	runner, err := firingHooks(list, roots.workspace, &reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil)
 	if err != nil {
 		t.Fatalf("firingHooks: %v", err)
 	}

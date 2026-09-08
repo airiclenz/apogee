@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airiclenz/apogee/internal/hooks"
+	"github.com/airiclenz/apogee/internal/reactions"
 )
 
 // writeHooksConfig writes one config file holding the given body and returns its path.
@@ -55,11 +55,11 @@ hooks:
 	}
 
 	notify := opts.Hooks[0]
-	wantWorkspace, err := hooks.ResolveWorkspace(filepath.Join(home, "work"))
+	wantWorkspace, err := reactions.ResolveWorkspace(filepath.Join(home, "work"))
 	if err != nil {
 		t.Fatalf("resolve the expected workspace: %v", err)
 	}
-	if got, want := notify.Events, []hooks.Event{hooks.ExchangeFinished, hooks.Error}; !eventsEqual(got, want) {
+	if got, want := notify.Events, []reactions.Event{reactions.ExchangeFinished, reactions.Error}; !eventsEqual(got, want) {
 		t.Errorf("notify events = %v; want %v", got, want)
 	}
 	if got, want := strings.Join(notify.Command, " "), "notify-send apogee finished"; got != want {
@@ -93,7 +93,7 @@ hooks:
 }
 
 // eventsEqual compares two event lists element by element.
-func eventsEqual(got, want []hooks.Event) bool {
+func eventsEqual(got, want []reactions.Event) bool {
 	if len(got) != len(want) {
 		return false
 	}
@@ -234,7 +234,7 @@ func TestLoadFileConfigWithoutHooksResolvesNone(t *testing.T) {
 func TestHookEnvNamesDeduplicatesAndSorts(t *testing.T) {
 	t.Parallel()
 
-	opts := Options{Hooks: []hooks.Hook{
+	opts := Options{Hooks: []reactions.Hook{
 		{Name: "bell", HeadersEnv: map[string]string{"Authorization": "TOKEN_B", "X-Trace": "TOKEN_A"}},
 		{Name: "page", HeadersEnv: map[string]string{"Authorization": "TOKEN_B"}},
 		{Name: "quiet", HeadersEnv: map[string]string{"X-Blank": "  "}},

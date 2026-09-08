@@ -42,7 +42,7 @@ import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
-	"github.com/airiclenz/apogee/internal/hooks"
+	"github.com/airiclenz/apogee/internal/reactions"
 )
 
 // ----------------------------------------------------------------------------
@@ -601,7 +601,7 @@ type Session = domain.Session
 func DecodeSession(data []byte) (Session, error) { return domain.DecodeSession(data) }
 
 // ----------------------------------------------------------------------------
-// Hooks (internal/hooks) — observe-only Driver-side reactions (ADR 0073)
+// Hooks (internal/reactions) — observe-only Driver-side reactions (ADR 0073)
 // ----------------------------------------------------------------------------
 
 // Hook is one entry of the user's global `hooks:` list: the events it fires on, the one
@@ -610,29 +610,29 @@ func DecodeSession(data []byte) (Session, error) { return domain.DecodeSession(d
 // prints or answers reaches the model, the conversation or the Session record, and it can
 // neither veto nor delay the loop. It is unrelated to a seam Moment, which is where a Reaction
 // fires INSIDE the loop.
-type Hook = hooks.Hook
+type Hook = reactions.Hook
 
 // HookEvent names one of the five post-hoc moments a Hook may fire on, spelled as the
 // `events:` list spells it. It is the Hook vocabulary, not the engine's Event sum type.
-type HookEvent = hooks.Event
+type HookEvent = reactions.Event
 
 // HookPayload is the JSON document a fired Hook receives — on stdin for a command, as the
 // POST body for a webhook. Its field names are a documented contract for the user's script.
-type HookPayload = hooks.Payload
+type HookPayload = reactions.Payload
 
 // HookOptions are the facts a HookRunner cannot derive: the sink it decorates, the workspace
 // it is rooted in, the Schedule a Firing runs for, where failures are reported, and how a
 // Hook reaches the outside world.
-type HookOptions = hooks.Options
+type HookOptions = reactions.Options
 
 // HookRunner is the observe-only EventSink decorator that fires Hooks. A Driver installs one
 // as Config.Events, wrapping whatever sink it already had; Emit never blocks the loop, and
 // Close drains the workers within the grace its context allows.
-type HookRunner = hooks.Runner
+type HookRunner = reactions.Runner
 
 // NewHookRunner builds a HookRunner over a Hook list, keeping the entries active at the given
-// workspace and starting one worker per survivor. See internal/hooks for the contract.
-func NewHookRunner(list []Hook, o HookOptions) (*HookRunner, error) { return hooks.New(list, o) }
+// workspace and starting one worker per survivor. See internal/reactions for the contract.
+func NewHookRunner(list []Hook, o HookOptions) (*HookRunner, error) { return reactions.New(list, o) }
 
 // ----------------------------------------------------------------------------
 // Event lines (internal/eventjson) — the versioned JSONL rendering (ADR 0075)

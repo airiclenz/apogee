@@ -125,7 +125,7 @@ func (b *Bridge) NotifySchedule(ev schedule.Event) { b.prog.send(scheduleEventMs
 func (b *Bridge) NotifyRouting(note string) { b.prog.send(routingNoticeMsg{note: note}) }
 
 // NotifyHook carries one Hook's trouble into the running program — the reporter the composition root
-// installs as hooks.Options.Report (ADR 0073 §8). A Hook that failed, or a queue that dropped a
+// installs as reactions.Options.Report (ADR 0073 §8). A Hook that failed, or a queue that dropped a
 // firing, is told to the HUMAN and to nobody else: it is never an ErrorEvent, because a Hook
 // subscribed to `error` would then fire on its own failure and loop.
 //

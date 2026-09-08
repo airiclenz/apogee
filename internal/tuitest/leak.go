@@ -37,7 +37,7 @@ var leakMarkers = []string{
 	// A Hook's worker is started by the composition root rather than by the TUI (ADR 0073), so its
 	// stack names no other marker here — and a worker that outlives close() is exactly the leak
 	// this check exists for.
-	"internal/hooks",
+	"internal/reactions",
 }
 
 // leakGrace is how long a goroutine gets to notice it was told to stop. Teardown is asynchronous

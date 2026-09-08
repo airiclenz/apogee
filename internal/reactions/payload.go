@@ -1,4 +1,4 @@
-package hooks
+package reactions
 
 // ScheduleRef names the daemon or `/schedule` Schedule a Firing ran for. It is present only on a
 // Firing's payload — a TUI session and a plain headless run belong to no Schedule — so a Hook can

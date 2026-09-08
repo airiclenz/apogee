@@ -1,4 +1,4 @@
-package hooks
+package reactions
 
 import "github.com/airiclenz/apogee/internal/domain"
 

@@ -15,9 +15,9 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -186,7 +186,7 @@ func (w *rootWiring) resolveConfig() error {
 	// reconnect swaps it afterwards. Reading it through liveTools.lookup at call time is what makes
 	// the `file-changed` derivation follow the set the session is actually running, and what keeps
 	// the read off an unlocked pointer the Update goroutine writes.
-	runner, err := hooks.New(w.opts.Hooks, hooks.Options{
+	runner, err := reactions.New(w.opts.Hooks, reactions.Options{
 		Inner:     w.bridge.Sink(),
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
@@ -200,7 +200,7 @@ func (w *rootWiring) resolveConfig() error {
 			}
 			return tools.WorkspaceWriteTarget(tool, call)
 		},
-		Exec: hooks.DefaultExecutor(w.roots.workspace),
+		Exec: reactions.DefaultExecutor(w.roots.workspace),
 	})
 	if err != nil {
 		return err

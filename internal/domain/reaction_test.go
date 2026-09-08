@@ -19,7 +19,7 @@ var noopPreRequest = PreRequestFunc(func(context.Context, *Request) (Outcome, er
 // TestMomentValuesArePinnedLiterals pins all ten Moment spellings. The strings are the ones a
 // user writes in configuration and an observer reads off a ReactionFiredEvent, so changing one
 // breaks every configuration in the wild — the seams carry the retired hook-point values and the
-// notices the hooks.Event values, unchanged.
+// notices the reactions.Event values, unchanged.
 func TestMomentValuesArePinnedLiterals(t *testing.T) {
 	t.Parallel()
 

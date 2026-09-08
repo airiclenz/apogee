@@ -54,9 +54,9 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
@@ -90,7 +90,7 @@ var newConfiner = platform.NewConfiner
 // hookCloseGrace is how long a root gives its Hook Runner to finish what it is already running
 // before the context cancels the rest. It is the SAME five seconds at every root — this session,
 // a headless run, a daemon Firing — because a Hook must take the same worst case whether a human is
-// watching or not (ADR 0073 §7), and it matches the grace internal/hooks gives a generation retired
+// watching or not (ADR 0073 §7), and it matches the grace internal/reactions gives a generation retired
 // by a `hooks:` reload.
 const hookCloseGrace = 5 * time.Second
 
@@ -198,7 +198,7 @@ type rootWiring struct {
 	// whatever the `hooks:` list subscribes to is fired off the engine's path afterwards. It is built
 	// in resolveConfig — before the Config that carries it — and it is the ONE Runner this session
 	// has; a Firing raised inside the session composes its own (wire_firing.go).
-	hooks *hooks.Runner
+	hooks *reactions.Runner
 	// namer names an unnamed delegation out of band on the child's own Upstream (ADR 0068). It is
 	// held rather than left inside cfg because the `auto-title:` gate on it is live: the renderer
 	// flips it through tui.Options.OnAutoTitle when the pane or the file moves the key, long after

@@ -9,9 +9,9 @@ import (
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/reactions"
 )
 
 // Options holds the parsed root-command flags plus every value resolution writes back onto
@@ -330,7 +330,7 @@ type Options struct {
 	// composes over its event sink — loaded from the config file only (default-empty ⇒ no Runner
 	// fires anything). ApplyConfig sets it from settings; every root builds its Hook Runner from it,
 	// and the TUI re-reads it in place when the file changes.
-	Hooks []hooks.Hook
+	Hooks []reactions.Hook
 
 	// toolsDisabled and toolsEnabled are the resolved GLOBAL roster deltas (ADR 0057) — the built-in
 	// tools this config takes off the menu, and the ones it puts back on it. Loaded from the config

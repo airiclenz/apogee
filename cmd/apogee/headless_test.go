@@ -26,10 +26,10 @@ import (
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -3112,7 +3112,7 @@ func (s *recordingSink) Emit(e domain.Event) { s.events = append(s.events, e) }
 
 // requireHookShell skips a test that scripts its Hook with `sh`. What these tests prove is what the
 // headless Driver does with a fired Hook, never what the child itself does, so a host with no POSIX
-// shell has nothing here to prove (internal/hooks' own tests skip on the same terms).
+// shell has nothing here to prove (internal/reactions' own tests skip on the same terms).
 func requireHookShell(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -3133,13 +3133,13 @@ func hookHomeRecording(t *testing.T, marker string, events ...string) string {
 // readHookPayload decodes the payload one fired Hook recorded. The Runner is drained before the
 // command returns (runHeadless's deferred Close), so the file is there by the time a test looks —
 // no polling, and a missing file is a real failure rather than a race.
-func readHookPayload(t *testing.T, marker string) hooks.Payload {
+func readHookPayload(t *testing.T, marker string) reactions.Payload {
 	t.Helper()
 	raw, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatalf("the Hook wrote no payload: %v", err)
 	}
-	var payload hooks.Payload
+	var payload reactions.Payload
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("decode the Hook's payload %q: %v", raw, err)
 	}
@@ -3167,8 +3167,8 @@ func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
 	}
 
 	payload := readHookPayload(t, marker)
-	if payload.Event != hooks.ExchangeFinished {
-		t.Errorf("the Hook was fired for %q, want %q", payload.Event, hooks.ExchangeFinished)
+	if payload.Event != reactions.ExchangeFinished {
+		t.Errorf("the Hook was fired for %q, want %q", payload.Event, reactions.ExchangeFinished)
 	}
 	if payload.Hook != "record" {
 		t.Errorf("the payload names the Hook %q, want the entry's own name", payload.Hook)

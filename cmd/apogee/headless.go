@@ -502,7 +502,7 @@ func subAgentFrames(runs []run.SubAgentUsage) []eventjson.SubAgentUsage {
 // started a run still carries what the session had already loaded, and the frame reports it.
 func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, noSave bool, lines *eventjson.Writer) (run.Result, error) {
 	// Every line this command narrates leaves through ONE lock from here on. The Hook Runner built
-	// below reports a Hook's trouble on a Hook worker's goroutine (internal/hooks), while this
+	// below reports a Hook's trouble on a Hook worker's goroutine (internal/reactions), while this
 	// function is still writing its own notices and its closing summary on the goroutine it was
 	// called on — and Cobra's Print helpers hand both straight to the same io.Writer: a data race on
 	// that writer (`go test -race`), and interleaved bytes on a real terminal. Wrapping the command's
@@ -823,8 +823,8 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// Under `--format json` the encoder goes on TOP of that and never inside it, so the whole chain
 	// reads engine → serialEventSink → eventTap → encoder → prune notice → Hooks. Outermost is the
 	// only place it can correctly sit: writing an Event line is lossless and therefore BLOCKING
-	// (ADR 0075 decision 9), while a hooks.Runner's Report callback is documented must-not-block
-	// (internal/hooks), so an encoder installed inside the Runner would put a blocking stdout write
+	// (ADR 0075 decision 9), while a reactions.Runner's Report callback is documented must-not-block
+	// (internal/reactions), so an encoder installed inside the Runner would put a blocking stdout write
 	// on the one path that promises not to block — and a reader that stopped reading would stall the
 	// Hooks. Outermost also makes the stream complete: it sees every Event before any wrapper below
 	// it can decide to render, swallow or fail on one.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/airiclenz/apogee/internal/hooks"
+	"github.com/airiclenz/apogee/internal/reactions"
 )
 
 // defaultHookTimeout bounds an entry that spells no `timeout:`. Every Hook is bounded, because an
@@ -16,7 +16,7 @@ import (
 const defaultHookTimeout = 30 * time.Second
 
 // hookConfig is the on-disk schema for one entry of the global `hooks:` list. It mirrors
-// [hooks.Hook] with yaml tags and the two spellings only a FILE has — an event list written as
+// [reactions.Hook] with yaml tags and the two spellings only a FILE has — an event list written as
 // plain strings, and a timeout written as a duration like `30s` — which toHook maps across, so the
 // on-disk shape and the package's value type stay independently evolvable (mcpServerConfig's rule).
 //
@@ -41,14 +41,14 @@ type hookConfig struct {
 // symlinks evaluated). It reports the first thing it cannot map, naming the entry, so a user with
 // several Hooks is told which line to fix.
 //
-// It does NOT enforce the entry SHAPE — that is [hooks.Hook.Validate]'s, and validateHooks runs it
+// It does NOT enforce the entry SHAPE — that is [reactions.Hook.Validate]'s, and validateHooks runs it
 // over the mapped value so the shape rules live in one place for every root.
-func (h hookConfig) toHook() (hooks.Hook, error) {
-	var events []hooks.Event
+func (h hookConfig) toHook() (reactions.Hook, error) {
+	var events []reactions.Event
 	for _, name := range h.Events {
-		event, err := hooks.ParseEvent(name)
+		event, err := reactions.ParseEvent(name)
 		if err != nil {
-			return hooks.Hook{}, hookError(h.Name, "%v", err)
+			return reactions.Hook{}, hookError(h.Name, "%v", err)
 		}
 		events = append(events, event)
 	}
@@ -57,7 +57,7 @@ func (h hookConfig) toHook() (hooks.Hook, error) {
 	if spelled := strings.TrimSpace(h.Timeout); spelled != "" {
 		parsed, err := time.ParseDuration(spelled)
 		if err != nil {
-			return hooks.Hook{}, hookError(h.Name,
+			return reactions.Hook{}, hookError(h.Name,
 				"timeout: %q is not a duration — write it as `30s` or `2m`", spelled)
 		}
 		timeout = parsed
@@ -65,10 +65,10 @@ func (h hookConfig) toHook() (hooks.Hook, error) {
 
 	workspace, err := h.resolvedWorkspace()
 	if err != nil {
-		return hooks.Hook{}, err
+		return reactions.Hook{}, err
 	}
 
-	return hooks.Hook{
+	return reactions.Hook{
 		Name:       h.Name,
 		Events:     events,
 		Command:    h.Command,
@@ -91,7 +91,7 @@ func (h hookConfig) resolvedWorkspace() (string, error) {
 	if err != nil {
 		return "", hookError(h.Name, "workspace: %v", err)
 	}
-	resolved, err := hooks.ResolveWorkspace(expanded)
+	resolved, err := reactions.ResolveWorkspace(expanded)
 	if err != nil {
 		return "", hookError(h.Name, "%v", err)
 	}
@@ -100,11 +100,11 @@ func (h hookConfig) resolvedWorkspace() (string, error) {
 
 // toHooks maps the whole list, stopping at the first entry it cannot map. An empty list maps to
 // nil rather than an empty slice, so an absent block and an explicitly empty one resolve alike.
-func toHooks(list []hookConfig) ([]hooks.Hook, error) {
+func toHooks(list []hookConfig) ([]reactions.Hook, error) {
 	if len(list) == 0 {
 		return nil, nil
 	}
-	mapped := make([]hooks.Hook, 0, len(list))
+	mapped := make([]reactions.Hook, 0, len(list))
 	for _, entry := range list {
 		hook, err := entry.toHook()
 		if err != nil {
@@ -118,14 +118,14 @@ func toHooks(list []hookConfig) ([]hooks.Hook, error) {
 // validateHooks refuses a `hooks:` block that cannot be run, at PARSE time — beside
 // validateModelProfiles — so a mistyped event or a Hook with two actions is a startup refusal
 // naming the entry rather than a Hook that silently never fires. It is the mapping plus the two
-// shape checks the hooks package owns: [hooks.Hook.Validate] per entry, and [hooks.ValidateAll]
+// shape checks the hooks package owns: [reactions.Hook.Validate] per entry, and [reactions.ValidateAll]
 // for the uniqueness of the names every failure notice and payload keys on.
 func validateHooks(list []hookConfig) error {
 	mapped, err := toHooks(list)
 	if err != nil {
 		return err
 	}
-	return hooks.ValidateAll(mapped)
+	return reactions.ValidateAll(mapped)
 }
 
 // HookEnvNames is every environment variable name the resolved Hooks read a webhook header out of,

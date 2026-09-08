@@ -22,10 +22,10 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -290,7 +290,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// offline gate — or by a composition that failed — takes its workers down with it. A daemon runs
 	// for weeks; a Runner leaked per refused tick is a leak that accumulates.
 	hookRunner, err := firingHooks(w.opts.Hooks, roots.workspace,
-		&hooks.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName},
+		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName},
 		func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) })
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's hooks: %w", entry.Name, err)

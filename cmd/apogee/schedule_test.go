@@ -26,11 +26,11 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -1366,10 +1366,10 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	}
 	dir := t.TempDir()
 	bootMarker, reloadedMarker := filepath.Join(dir, "boot.json"), filepath.Join(dir, "reloaded.json")
-	recorder := func(name, marker string) hooks.Hook {
-		return hooks.Hook{
+	recorder := func(name, marker string) reactions.Hook {
+		return reactions.Hook{
 			Name:    name,
-			Events:  []hooks.Event{hooks.ExchangeFinished},
+			Events:  []reactions.Event{reactions.ExchangeFinished},
 			Command: []string{"sh", "-c", `cat > "$0"`, marker},
 			Timeout: 10 * time.Second,
 		}
@@ -1382,8 +1382,8 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prevRunner })
 
-	live := newLiveSettings(config.Options{Hooks: []hooks.Hook{recorder("boot", bootMarker)}})
-	live.setHooks([]hooks.Hook{recorder("reloaded", reloadedMarker)})
+	live := newLiveSettings(config.Options{Hooks: []reactions.Hook{recorder("boot", bootMarker)}})
+	live.setHooks([]reactions.Hook{recorder("reloaded", reloadedMarker)})
 
 	w := scheduleWiring{
 		roots:   roots,

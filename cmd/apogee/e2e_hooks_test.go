@@ -3,7 +3,7 @@ package main
 // Hooks end to end (ADR 0073): runs whose `hooks:` block actually runs a command and actually POSTs
 // a webhook, asserted from OUTSIDE apogee — a file on disk the command appended to, and an httptest
 // server the webhook reached. Everything below the composition root has unit tests in
-// internal/hooks; what these prove is the wiring the unit tests cannot see, and the promise that
+// internal/reactions; what these prove is the wiring the unit tests cannot see, and the promise that
 // costs the most to break: nothing a Hook does reaches the screen or the Session record.
 //
 // Three roots compose that wiring and each gets its own case: the driven TUI session, an
@@ -27,7 +27,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/hooks"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
@@ -52,12 +52,12 @@ const (
 // [hookReportPattern] — because a whitelist of prose stops biting the moment a report is reworded.
 var hookMarkers = []string{
 	"APOGEE_HOOK",
-	string(hooks.FileChanged), string(hooks.ExchangeFinished), string(hooks.ApprovalWaiting),
+	string(reactions.FileChanged), string(reactions.ExchangeFinished), string(reactions.ApprovalWaiting),
 }
 
 // hookReportPattern is the shape EVERY report the hooks path can put in front of a human takes: the
 // word `hook`, the Hook's configured name, and then a separator — a colon before a Runner message
-// (internal/hooks/runner.go:240, :397) or a space before the parenthesised event of a failure
+// (internal/reactions/runner.go:240, :397) or a space before the parenthesised event of a failure
 // (:363). Those reports reach a frame through Report → Bridge.NotifyHook → an ephemeral note,
 // and an unattended root's stderr the same way.
 //
@@ -161,9 +161,9 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 			"Hook fired while the human was still being waited on is untestable")
 	}
 	waiting := bell.first()
-	if waiting.payload.Event != hooks.ApprovalWaiting {
+	if waiting.payload.Event != reactions.ApprovalWaiting {
 		t.Errorf("the webhook received the %q event; want %q",
-			waiting.payload.Event, hooks.ApprovalWaiting)
+			waiting.payload.Event, reactions.ApprovalWaiting)
 	}
 	if waiting.payload.Tool != "write_file" {
 		t.Errorf("the approval-waiting payload names the tool %q; want write_file",
@@ -186,16 +186,16 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 	wantPath := filepath.Join(sess.Workspace(), "a.txt")
 	drv.WaitFor(func() bool {
 		fired := readHookPayloads(t, sink)
-		changed, ok := hookPayloadFor(fired, hooks.FileChanged)
+		changed, ok := hookPayloadFor(fired, reactions.FileChanged)
 		if !ok || changed.Path != wantPath {
 			return false
 		}
-		_, ok = hookPayloadFor(fired, hooks.ExchangeFinished)
+		_, ok = hookPayloadFor(fired, reactions.ExchangeFinished)
 		return ok
 	}, tuitest.Awaiting("the file-changed and exchange-finished payloads in the hook sink"))
 
 	fired := readHookPayloads(t, sink)
-	changed, _ := hookPayloadFor(fired, hooks.FileChanged)
+	changed, _ := hookPayloadFor(fired, reactions.FileChanged)
 	if changed.Tool != "write_file" {
 		t.Errorf("the file-changed payload names the tool %q; want write_file", changed.Tool)
 	}
@@ -333,8 +333,8 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 			len(fired), fired)
 	}
 	payload := fired[0]
-	if payload.Event != hooks.ExchangeFinished {
-		t.Errorf("the payload carries the %q event; want %q", payload.Event, hooks.ExchangeFinished)
+	if payload.Event != reactions.ExchangeFinished {
+		t.Errorf("the payload carries the %q event; want %q", payload.Event, reactions.ExchangeFinished)
 	}
 	if payload.Hook != hooksSinkName {
 		t.Errorf("the payload names the hook %q; want %q", payload.Hook, hooksSinkName)
@@ -424,7 +424,7 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 	}
 
 	fired := readHookPayloads(t, sink)
-	payload, ok := hookPayloadFor(fired, hooks.TurnFinished)
+	payload, ok := hookPayloadFor(fired, reactions.TurnFinished)
 	if !ok {
 		t.Fatalf("the hook sink holds no turn-finished payload; it holds:\n%+v", fired)
 	}
@@ -537,7 +537,7 @@ func rewriteHomeHooks(t *testing.T, home, entries string) {
 // concatenated JSON documents with no separator, so they are streamed rather than split; a trailing
 // document that is still being written stops the read, which is the ordinary state of a file a
 // worker may be appending to at this very moment.
-func readHookPayloads(t *testing.T, path string) []hooks.Payload {
+func readHookPayloads(t *testing.T, path string) []reactions.Payload {
 	t.Helper()
 
 	body, err := os.ReadFile(path)
@@ -547,10 +547,10 @@ func readHookPayloads(t *testing.T, path string) []hooks.Payload {
 		}
 		t.Fatalf("read the hook sink: %v", err)
 	}
-	var fired []hooks.Payload
+	var fired []reactions.Payload
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	for {
-		var payload hooks.Payload
+		var payload reactions.Payload
 		if err := decoder.Decode(&payload); err != nil {
 			return fired
 		}
@@ -559,19 +559,19 @@ func readHookPayloads(t *testing.T, path string) []hooks.Payload {
 }
 
 // hookPayloadFor answers the first payload carrying event, and whether there was one.
-func hookPayloadFor(fired []hooks.Payload, event hooks.Event) (hooks.Payload, bool) {
+func hookPayloadFor(fired []reactions.Payload, event reactions.Event) (reactions.Payload, bool) {
 	for _, payload := range fired {
 		if payload.Event == event {
 			return payload, true
 		}
 	}
-	return hooks.Payload{}, false
+	return reactions.Payload{}, false
 }
 
 // hookRequest is one POST a webhook Hook made: the payload it carried and the header whose value
 // came from the environment rather than the config file.
 type hookRequest struct {
-	payload hooks.Payload
+	payload reactions.Payload
 	token   string
 }
 
@@ -594,7 +594,7 @@ func newHookWebhook(t *testing.T) (*hookWebhook, *httptest.Server) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		var payload hooks.Payload
+		var payload reactions.Payload
 		if err := json.Unmarshal(body, &payload); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

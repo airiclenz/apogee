@@ -37,7 +37,7 @@ type Options struct {
 // a Driver installs it as Config.Events; Wrap gives it the sink it displaces, and every Event it
 // receives is forwarded there whether or not a line was written for it.
 //
-// Its place in the sink chain is the OUTERMOST wrapper, never inside a hooks.Runner: writing is
+// Its place in the sink chain is the OUTERMOST wrapper, never inside a reactions.Runner: writing is
 // lossless and therefore blocking (decision 9), while a Runner's Report callback is documented
 // must-not-block. The engine serializes emission for it (agent.serialEventSink), and the Writer
 // takes its own lock anyway so that a frame written by the Driver's goroutine can never interleave

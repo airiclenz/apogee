@@ -1,4 +1,4 @@
-// Package hooks is the Hook library: user-configured, observe-only reactions to the engine's
+// Package reactions is the Hook library: user-configured, observe-only reactions to the engine's
 // event stream, composed by every Driver from this one package so the TUI, `apogee headless`
 // and a daemon Firing fire the same `hooks:` list (ADR 0073).
 //
@@ -35,4 +35,4 @@
 // and the APOGEE_HOOK_* facts in the environment.
 // webhook.go POSTs the same document to a Hook's URL, with the literal and environment-resolved
 // headers it carries and no retry.
-package hooks
+package reactions

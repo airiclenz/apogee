@@ -19,9 +19,9 @@ import (
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
@@ -897,9 +897,9 @@ func TestDaemonFireStampsTheScheduleOnItsHookPayload(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fired.json")
 	harness := newDaemonFireHarness(t, config.Options{
 		Endpoint: "http://box.invalid",
-		Hooks: []hooks.Hook{{
+		Hooks: []reactions.Hook{{
 			Name:    "record",
-			Events:  []hooks.Event{hooks.ExchangeFinished},
+			Events:  []reactions.Event{reactions.ExchangeFinished},
 			Command: []string{"sh", "-c", `cat > "$0"`, marker},
 			Timeout: 10 * time.Second,
 		}},
@@ -930,9 +930,9 @@ func TestDaemonFireLogsAFailingHookAsOneSanitisedLine(t *testing.T) {
 
 	harness := newDaemonFireHarness(t, config.Options{
 		Endpoint: "http://box.invalid",
-		Hooks: []hooks.Hook{{
+		Hooks: []reactions.Hook{{
 			Name:    "record",
-			Events:  []hooks.Event{hooks.ExchangeFinished},
+			Events:  []reactions.Event{reactions.ExchangeFinished},
 			Command: []string{"sh", "-c", "printf 'boom 100%% done\\n' >&2; exit 1"},
 			Timeout: 10 * time.Second,
 		}},

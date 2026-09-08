@@ -10,10 +10,10 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -129,7 +129,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// scheduled run from the conversation it was raised beneath. The session's Runner keeps
 	// observing the session; the two never see each other's events.
 	hookRunner, err := firingHooks(opts.Hooks, w.roots.workspace,
-		&hooks.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.notifyHook)
+		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.notifyHook)
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: build the firing's hooks: %w", err)
 	}

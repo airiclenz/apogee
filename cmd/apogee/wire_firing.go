@@ -7,9 +7,9 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
 )
@@ -84,7 +84,7 @@ type firingInputs struct {
 	//
 	// nil is the legitimate absence — a Driver that raises no Hooks, and every composition test —
 	// and it leaves Config.Events nil exactly as it was before this key existed.
-	hooks *hooks.Runner
+	hooks *reactions.Runner
 }
 
 // firingConfig composes the construction surface EVERY unattended run is driven from: one prompt,
@@ -372,7 +372,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	}
 
 	// The Hook Runner this Driver built for this ONE Firing, installed as the run's Event sink (ADR
-	// 0073 §2). It is assigned after the literal rather than inside it because a nil *hooks.Runner
+	// 0073 §2). It is assigned after the literal rather than inside it because a nil *reactions.Runner
 	// boxed into the domain.EventSink interface is a NON-nil interface holding a nil pointer, and
 	// run.Once's own tap would then wrap a sink that panics on the first Event. A Driver that built
 	// no Runner leaves Events nil, which is what every composition test asserts.
@@ -550,8 +550,8 @@ func resolveFiringRouting(
 // The caller closes what comes back — [hookCloseGrace], the same grace the session gives (wire.go) —
 // and a returned error fails the Firing: a `hooks:` list this root cannot resolve is structural
 // configuration, exactly as an unreadable prompt is.
-func firingHooks(list []hooks.Hook, workspace string, sched *hooks.ScheduleRef, report func(string)) (*hooks.Runner, error) {
-	return hooks.New(list, hooks.Options{
+func firingHooks(list []reactions.Hook, workspace string, sched *reactions.ScheduleRef, report func(string)) (*reactions.Runner, error) {
+	return reactions.New(list, reactions.Options{
 		// Inner stays nil: a Firing's Config carries no sink of its own (firingConfig), so there is
 		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself
 		// wraps THIS Runner rather than being wrapped by it (headless's prune notice), which keeps the
@@ -560,12 +560,12 @@ func firingHooks(list []hooks.Hook, workspace string, sched *hooks.ScheduleRef, 
 		Schedule:    sched,
 		Report:      report,
 		WriteTarget: firingWriteTarget(workspace),
-		Exec:        hooks.DefaultExecutor(workspace),
+		Exec:        reactions.DefaultExecutor(workspace),
 	})
 }
 
 // firingWriteTarget answers whether one tool call wrote a file and where it landed — the seam the
-// `file-changed` derivation reads (hooks.WriteTarget).
+// `file-changed` derivation reads (reactions.WriteTarget).
 //
 // A Firing holds no live tool registry to ask: firingConfig leaves Config.Tools nil and the engine
 // builds its own, which no Driver has a handle on. So this builds a lookup-only roster of its own,
@@ -573,7 +573,7 @@ func firingHooks(list []hooks.Hook, workspace string, sched *hooks.ScheduleRef, 
 // writer marker each tool carries is read (tools.WorkspaceWriteTarget), so a roster assembled with
 // no host delegates answers identically to the one the engine runs — and nothing here is offered to
 // a model, dispatched, or reachable in any other way.
-func firingWriteTarget(workspace string) hooks.WriteTarget {
+func firingWriteTarget(workspace string) reactions.WriteTarget {
 	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{})
 	return func(call domain.ToolCall) (string, bool) {
 		tool, ok := registry.Lookup(call.Tool)

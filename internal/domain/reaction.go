@@ -34,8 +34,8 @@ const (
 	MomentHistoryRewrite Moment = "history-rewrite"  // edit conversation state
 )
 
-// The five notice Moments — the post-hoc points. The values are the hooks.Event spellings
-// (internal/hooks), unchanged: they are what a configured `events:` list already names.
+// The five notice Moments — the post-hoc points. The values are the reactions.Event spellings
+// (internal/reactions), unchanged: they are what a configured `events:` list already names.
 const (
 	MomentExchangeFinished Moment = "exchange-finished" // a Depth-0 Turn closed its Exchange
 	MomentTurnFinished     Moment = "turn-finished"     // a Depth-0 Turn boundary, whatever its status
@@ -45,7 +45,7 @@ const (
 )
 
 // allSeams is the seam vocabulary in loop order; allNotices is the notice vocabulary in the
-// order internal/hooks reports it.
+// order internal/reactions reports it.
 var (
 	allSeams = []Moment{
 		MomentPreRequest,

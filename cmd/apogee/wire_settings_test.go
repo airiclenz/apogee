@@ -18,10 +18,10 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/hooks"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -812,7 +812,7 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		// this test owes it is the other half — a holder nobody edited hands back the list the run
 		// launched with, so a Firing raised before any `/settings` commit fires the session's Hooks
 		// rather than none at all.
-		Hooks: []hooks.Hook{hookEntry("boot", hooks.TurnFinished)},
+		Hooks: []reactions.Hook{hookEntry("boot", reactions.TurnFinished)},
 	}
 
 	// The unedited case, asserted around every apply below: seeded from the snapshot, handed back as
@@ -1012,7 +1012,7 @@ func clobberOptions(opts config.Options) {
 		opts.ModelProfiles[i] = profiles.Entry{}
 	}
 	for i := range opts.Hooks {
-		opts.Hooks[i] = hooks.Hook{Name: "clobbered"}
+		opts.Hooks[i] = reactions.Hook{Name: "clobbered"}
 	}
 	clear(opts.ValidatedSetsAlias)
 	clear(opts.SystemPrompt.Models)
@@ -2856,7 +2856,7 @@ func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // recordingHookExec stands in for the command runner and the webhook sender, so a test can prove
-// WHICH Hooks a Runner is firing without a process or a socket — the reason hooks.Executor is the
+// WHICH Hooks a Runner is firing without a process or a socket — the reason reactions.Executor is the
 // package's one seam onto the outside world. It is written from a worker goroutine and read from the
 // test's, so the mutex is real.
 type recordingHookExec struct {
@@ -2869,7 +2869,7 @@ func newRecordingHookExec() *recordingHookExec {
 	return &recordingHookExec{done: make(chan string, 8)}
 }
 
-func (r *recordingHookExec) Run(ctx context.Context, h hooks.Hook, p hooks.Payload) error {
+func (r *recordingHookExec) Run(ctx context.Context, h reactions.Hook, p reactions.Payload) error {
 	r.mu.Lock()
 	r.fired = append(r.fired, h.Name)
 	r.mu.Unlock()
@@ -2880,7 +2880,7 @@ func (r *recordingHookExec) Run(ctx context.Context, h hooks.Hook, p hooks.Paylo
 	return nil
 }
 
-// hookQueueDepth mirrors the unexported queueDepth in internal/hooks (runner.go:19) — how many
+// hookQueueDepth mirrors the unexported queueDepth in internal/reactions (runner.go:19) — how many
 // pending firings ONE Hook may hold before the newest are dropped. A test that wants a real drop
 // has to name the count, not the threshold: the queue holds this many AND the worker holds one
 // more in flight, so anything up to hookQueueDepth+1 events is swallowed whole.
@@ -2897,7 +2897,7 @@ func newGatingHookExec() *gatingHookExec {
 	return &gatingHookExec{gate: make(chan struct{})}
 }
 
-func (g *gatingHookExec) Run(ctx context.Context, h hooks.Hook, p hooks.Payload) error {
+func (g *gatingHookExec) Run(ctx context.Context, h reactions.Hook, p reactions.Payload) error {
 	select {
 	case <-g.gate:
 	case <-ctx.Done():
@@ -2910,10 +2910,10 @@ func (g *gatingHookExec) release() { close(g.gate) }
 
 // hookEntry is the one shape every case below configures: a named Hook subscribed to one event, with
 // an argv action the recording executor never actually runs.
-func hookEntry(name string, event hooks.Event) hooks.Hook {
-	return hooks.Hook{
+func hookEntry(name string, event reactions.Event) reactions.Hook {
+	return reactions.Hook{
 		Name:    name,
-		Events:  []hooks.Event{event},
+		Events:  []reactions.Event{event},
 		Command: []string{"apogee-test-hook"},
 		Timeout: time.Second,
 	}
@@ -2926,11 +2926,11 @@ func hookEntry(name string, event hooks.Event) hooks.Hook {
 func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
-	boot := []hooks.Hook{hookEntry("boot", hooks.TurnFinished)}
+	boot := []reactions.Hook{hookEntry("boot", reactions.TurnFinished)}
 	exec := newRecordingHookExec()
-	runner, err := hooks.New(boot, hooks.Options{Workspace: workspace, Exec: exec})
+	runner, err := reactions.New(boot, reactions.Options{Workspace: workspace, Exec: exec})
 	if err != nil {
-		t.Fatalf("hooks.New: %v", err)
+		t.Fatalf("reactions.New: %v", err)
 	}
 	t.Cleanup(func() { _ = runner.Close(context.Background()) })
 
@@ -2973,11 +2973,11 @@ func TestApplySettingHooksReplacesTheRunnerAndTheProjection(t *testing.T) {
 func TestApplySettingHooksRefusesABrokenFileWithoutMovingAnything(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
-	boot := []hooks.Hook{hookEntry("boot", hooks.TurnFinished)}
+	boot := []reactions.Hook{hookEntry("boot", reactions.TurnFinished)}
 	exec := newRecordingHookExec()
-	runner, err := hooks.New(boot, hooks.Options{Workspace: workspace, Exec: exec})
+	runner, err := reactions.New(boot, reactions.Options{Workspace: workspace, Exec: exec})
 	if err != nil {
-		t.Fatalf("hooks.New: %v", err)
+		t.Fatalf("reactions.New: %v", err)
 	}
 	t.Cleanup(func() { _ = runner.Close(context.Background()) })
 
@@ -3008,7 +3008,7 @@ func TestApplySettingHooksRefusesWithoutTheRunnerOrTheHolder(t *testing.T) {
 	if entry.reaches(settingsApplier{live: newLiveSettings(config.Options{})}) {
 		t.Error("the arm claims to reach a Driver with no Runner")
 	}
-	if entry.reaches(settingsApplier{hooks: &hooks.Runner{}}) {
+	if entry.reaches(settingsApplier{hooks: &reactions.Runner{}}) {
 		t.Error("the arm claims to reach a Driver with no live holder")
 	}
 }
@@ -3024,7 +3024,7 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 	caller := make(chan struct{})
 	var offCaller atomic.Bool
 	// noteDrop reports the FIRST drop synchronously, on the goroutine that emitted it — the
-	// contract Report's own doc pins (internal/hooks/runner.go:62-64), and one this test yields
+	// contract Report's own doc pins (internal/reactions/runner.go:62-64), and one this test yields
 	// to rather than judges. So the caller-goroutine arm only becomes a failure once the emit
 	// loop is behind us; everything reported after that belongs to Replace's drain, which is the
 	// promise under test.
@@ -3047,11 +3047,11 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 		}
 	}
 	gate := newGatingHookExec()
-	runner, err := hooks.New([]hooks.Hook{hookEntry("boot", hooks.TurnFinished)}, hooks.Options{
+	runner, err := reactions.New([]reactions.Hook{hookEntry("boot", reactions.TurnFinished)}, reactions.Options{
 		Workspace: workspace, Exec: gate, Report: report,
 	})
 	if err != nil {
-		t.Fatalf("hooks.New: %v", err)
+		t.Fatalf("reactions.New: %v", err)
 	}
 	t.Cleanup(func() { _ = runner.Close(context.Background()) })
 
@@ -3064,7 +3064,7 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 	}
 	armed.Store(true)
 
-	if err := runner.Replace([]hooks.Hook{hookEntry("next", hooks.TurnFinished)}); err != nil {
+	if err := runner.Replace([]reactions.Hook{hookEntry("next", reactions.TurnFinished)}); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
 	close(caller)
@@ -3090,7 +3090,7 @@ func TestRootHookWriteTargetIsRaceSafeAcrossARosterSwap(t *testing.T) {
 	workspace := t.TempDir()
 	w := newRootWiring(config.Options{
 		Workspace: workspace,
-		Hooks:     []hooks.Hook{hookEntry("watcher", hooks.FileChanged)},
+		Hooks:     []reactions.Hook{hookEntry("watcher", reactions.FileChanged)},
 	}, domain.ModeAskBefore, stateRoots{config: t.TempDir(), workspace: workspace})
 	if err := w.resolveConfig(); err != nil {
 		t.Fatalf("resolveConfig: %v", err)
@@ -3143,7 +3143,7 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 		t.Fatal("the root built no hook Runner")
 	}
 	if w.cfg.Events != domain.EventSink(w.hooks) {
-		t.Fatalf("Config.Events = %T, want the root's own *hooks.Runner", w.cfg.Events)
+		t.Fatalf("Config.Events = %T, want the root's own *reactions.Runner", w.cfg.Events)
 	}
 	// And an Event emitted before wireSession has installed a tool set at all — the first beat of a
 	// cold start — is forwarded rather than dereferencing the registry the closure has not got.
@@ -3160,9 +3160,9 @@ func TestRootWiringScrubsHookHeaderVariables(t *testing.T) {
 	w := newRootWiring(config.Options{
 		Workspace: workspace,
 		Servers:   []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111", APIKeyEnv: "SERVER_KEY"}},
-		Hooks: []hooks.Hook{{
+		Hooks: []reactions.Hook{{
 			Name:       "notify",
-			Events:     []hooks.Event{hooks.TurnFinished},
+			Events:     []reactions.Event{reactions.TurnFinished},
 			Webhook:    "https://hooks.example.com/notify",
 			HeadersEnv: map[string]string{"Authorization": "HOOK_TOKEN"},
 			Timeout:    time.Second,
