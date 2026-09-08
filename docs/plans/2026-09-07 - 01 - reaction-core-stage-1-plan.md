@@ -614,7 +614,34 @@ go build ./... && go vet ./... && go test -race -count=1 ./internal/eventjson/ .
 ```
 **Commit:** `feat(eventjson)!: reaction_fired replaces mechanism_fired and floor_guard; event lines v2`
 
-## 20. CONTEXT.md: Reactions and Moments
+## 20. CONTEXT.md: Reactions and Moments — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the glossary held TWO entries titled **Hook event** — the one at `:156` (which
+actually described a Hook: the `hooks:` entry, the one-way runner) and the one at `:171` (the list
+of moments). The item names only `:156`, so both were consolidated into a single **Hook event**
+entry that opens "a notice Moment", keeps the five spellings and folds the Hook-composition prose in
+after them; the entry's one `#mechanism-and-hook-points` anchor is preserved, so the anchor count
+stays at twelve.
+
+NOTES (2026-09-08): beyond the item's named entries, four further sites were reworded under the
+item's prose rule, all naming retired machinery as live behaviour: the identity paragraph's
+"gated, self-regulating **Mechanism** lab surface can be armed" (`:5-7`); the hard-constraint
+sentence's "approximated by self-regulation (Adaptive Suppression + the Turn Budget)" (`:15`); the
+Floor-guard entry's "no strikes and no Turn-Budget throttle" (`:757`); and the delegate wrap-up
+floor's "never withdrawn by Adaptive Suppression" (`:636`).
+
+NOTES (2026-09-08): consequential edit — the **Off-ramp** retired-terms bullet claimed the
+`off-ramp` **Capability value** "survives in the descriptor enum"; this item retires the
+**Mechanism descriptor** entry that enum belonged to (and item 17 deleted the enum), so the sentence
+now says it went with the descriptor.
+
+NOTES (2026-09-08): the Self-regulation section keeps its `### Self-regulation` heading — nothing in
+the repo links `#self-regulation`, but the heading is the doc map's own entry for the term, so it is
+marked retired in place rather than deleted.
+
+NOTES (2026-09-08): the **Apogee** entry (`:29`) still says the agent "applies Mechanisms". It is
+outside this item's named sites and its bounding grep, and it predates this run — the **Mechanism**
+entry was already marked retired at `bc8b603d` while that line stood.
 
 **What:** Depends on item 17. `CONTEXT.md:1153` heading `### Mechanism and hook points` → `### Reactions and Moments`; all twelve `#mechanism-and-hook-points` anchors → `#reactions-and-moments` (`grep -c`). Entries: **Reaction** (`:1193`) and **Moment** (`:1210`) describe the shipped types (`domain.Reaction`, the five seam and five notice strings, `Outcome`, `fire`); **Post-response decision** (`:1235`) → retired, "say **Outcome**"; **Deferred Response Action vs Request-prep Hint** (`:1248`) rewritten in `Outcome.Defer` terms; **Mechanism descriptor** (`:1260`) → retired; **Floor guard** (`:751-793`) — the "FloorGuardEvent until then" sentence becomes `ReactionFiredEvent`; **Hook event** (`:156`) → "a notice Moment"; **Bypass mode** (`:10`) restated per D9; **Hook** (`:142`) names the `observe` cell. Prose rule: every sentence in `CONTEXT.md` naming `MechanismRegistry`, `EnableMechanisms`, `MechanismFiredEvent`, `FloorGuardEvent`, `HookPoint`, `runHooks`, `SetFloor`'s "guards-then-hooks" ladder or self-regulation (strikes, Turn Budget) as live behaviour is reworded or marked retired — `grep -n "MechanismRegistry\|EnableMechanisms\|FiredEvent\|HookPoint\|runHooks\|Turn Budget\|strikes" CONTEXT.md` finds them.
 

@@ -3,17 +3,19 @@
 Apogee is a terminal **coding agent** built for smaller local models — while working
 even better with bigger ones — that owns the full agentic loop — provider, tools,
 context, and sessions — and runs seven **Floor guards** inside that loop: engine behaviour
-every model runs with, above which a gated, self-regulating **Mechanism** lab surface can be
-armed for measurement.
+every model runs with, fired as builtin **Reactions** beside which the bench may arm one of its
+own for measurement.
 The hard constraint, inherited unchanged from the predecessor projects: **nothing Apogee puts in
 front of a model may make that model perform worse than the same agent without it.** That floor is
-**Bypass mode** (advise and shape Reactions off, structure and Floor guards on) —
+**Bypass mode** (every **advise** and **shape** Reaction of user or bench-armed origin off;
+builtins, **observe** and **gate** on) —
 **not** a naked model, because Budget, Compaction and Pruning are structural and load-bearing (a
 truly naked model just overflows its context window). The constraint is **proved at bench
 time** as a ground-truth, distributional non-inferiority gate against Bypass (see
-[ADR 0009](docs/adr/0009-the-ab-decision-rule.md)); in production it is only
-*approximated* by self-regulation (Adaptive Suppression + the Turn Budget), a weaker,
-proxy-based safety net — not the guarantee.
+[ADR 0009](docs/adr/0009-the-ab-decision-rule.md)); in production nothing approximates it any
+more — the self-regulating lab layer that once did (Adaptive Suppression + the Turn Budget)
+retired with the **Mechanism** surface, so a stock install runs the guards with nothing armed
+above them.
 
 This glossary is a fresh start, not a migration of `apogee-sim`'s `CONTEXT.md`. The
 predecessor project was *middleware* between a coding tool and a model; Apogee **is**
@@ -140,7 +142,7 @@ surface is this Driver's composition), "the scheduler" (that names the library b
 share, not this Driver).
 
 **Hook**:
-The colloquial alias for a **user**-origin **[Reaction](#mechanism-and-hook-points)** — "what
+The colloquial alias for a **user**-origin **[Reaction](#reactions-and-moments)** — "what
 other tools call a hook" — offered in the manual's introduction and nowhere else in the glossary
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D12). The
 observe-only Hook of [ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md)
@@ -153,30 +155,27 @@ _Avoid_: "Hook" as a glossary term (say **Reaction**, and name the class), "plug
 adds no capability to apogee), "trigger" (that names the `on:` half of a daemon Schedule's
 envelope).
 
-**Hook event**: an entry in the global
-`hooks:` list naming the event(s) it fires on and either an argv `command:` or a `webhook:` URL,
-optionally filtered to one `workspace:`. A Hook is composed by every **Driver** from one shared
-library over the engine's event stream, so the TUI, `apogee headless` and a daemon **Firing** fire
-the same list. It is strictly one-way: nothing a Hook prints, returns or answers reaches the model,
-the conversation or the Session record, and a Hook can neither veto nor delay the loop — the runner
-queues per Hook, in order, off the engine's path, and drops under overload rather than block. It is
-**not a Mechanism** and fires at no **Hook point**: it runs after the fact on the user's own machine,
-outside confinement, as the user's config rather than a model action. It is the
-fourth rung of the **[Reaction surface](#mechanism-and-hook-points)**. See
+**Hook event**:
+A **notice [Moment](#reactions-and-moments)** under its Driver-side name — one of the five
+after-the-fact, never model-visible points a **Hook** fires on: `exchange-finished` (a Depth-0 Turn
+closed its Exchange; carries faulted / step-capped), `turn-finished` (every Depth-0 Turn boundary,
+with its status), `file-changed` (a write tool succeeded, at any depth), `approval-waiting` (an
+**Approval** was raised, before its decision), `error` (an engine error, at any depth). The set is
+additive by design; a moment not on it is not a Hook event yet. Per-token, tool-call,
+sub-agent-phase, session-save, prune and usage moments are deliberately not in the first set.
+A **Hook** itself is an entry in the global `hooks:` list naming the event(s) it fires on and either
+an argv `command:` or a `webhook:` URL, optionally filtered to one `workspace:`, composed by every
+**Driver** from one shared library over the engine's event stream, so the TUI, `apogee headless`
+and a daemon **Firing** fire the same list. It is strictly one-way: nothing a Hook prints, returns
+or answers reaches the model, the conversation or the Session record, and a Hook can neither veto
+nor delay the loop — the runner queues per Hook, in order, off the engine's path, and drops under
+overload rather than block. That is the **observe** cell of the user row and nothing more: a Hook
+runs after the fact on the user's own machine, outside confinement, as the user's config rather
+than a model action. See
 [ADR 0073](docs/adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md).
 _Avoid_: "plugin" (a Hook adds no capability to apogee), "trigger" (that names the `on:` half of
-a daemon Schedule's envelope), "hook" for a **Mechanism** or an **Experimental hook** (those fire
-*inside* the loop at a Hook point and may act on the model; say "Mechanism" or "Experimental hook").
-
-**Hook event**:
-One of the named moments a **Hook** may fire on — all after the fact, none model-visible:
-`exchange-finished` (a Depth-0 Turn closed its Exchange; carries faulted / step-capped),
-`turn-finished` (every Depth-0 Turn boundary, with its status), `file-changed` (a write tool
-succeeded, at any depth), `approval-waiting` (an **Approval** was raised, before its decision),
-`error` (an engine error, at any depth). The set is additive by design; a moment not on it is not
-a Hook event yet. Per-token, tool-call, sub-agent-phase, session-save, prune and usage moments are
-deliberately not in the first set.
-_Avoid_: "hook point" (a Mechanism seam, not a Hook event).
+a daemon Schedule's envelope), "hook point" (retired — say seam **Moment**, which is not where a
+Hook fires).
 
 **Sub-agent**:
 A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with its
@@ -632,8 +631,8 @@ child's last visible text. The parent receives a non-error result whose first li
 partial, followed by that report, so Turns of real work are not thrown away, and what the
 parent reads is authored rather than scavenged from whatever the child happened to narrate
 alongside its last tool call. It is a **structural floor**
-([ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), not a Mechanism — it stays on
-under **Bypass** and is never withdrawn by Adaptive Suppression. Enforced in exactly one place,
+([ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), not an armed **Reaction** —
+it stays on under **Bypass** and nothing withdraws it at runtime. Enforced in exactly one place,
 `Agent.Run`.
 _Avoid_: "turn limit", "iteration cap" (the unit is the Step/Turn the model spends).
 
@@ -753,8 +752,8 @@ Plain **engine behaviour** that changes only what the model sees **after its own
 shapes the request **without steering it** — so it needs no per-model proof and cannot regress
 Bypass ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)).
 It is the **engine**-origin **shape (view)** column of the
-**[Reaction surface](#mechanism-and-hook-points)** matrix: a builtin **Reaction** with no catalogue
-row, no descriptor, no Capability, no strikes and no Turn-Budget throttle — the per-Turn `maxPostResponseRetries` bound
+**[Reaction surface](#reactions-and-moments)** matrix: a builtin **Reaction**, armed by nothing
+and throttled by nothing — the per-Turn `maxPostResponseRetries` bound
 is the only limiter the post-response guards share. **Seven ship, on in every arm** — Bypass
 included — each switched off by exactly one top-level, **file-only** boolean (no flag, no env;
 editable live in `/settings`) whose key names it:
@@ -785,17 +784,17 @@ editable live in `/settings`) whose key names it:
 The decision logic is **pure policy** in `internal/floor`; the seams that call it, the live on/off
 gate and the events a firing emits are `internal/agent`'s. `domain.FloorConfig` spells the seven as
 `Disable…` bools, so an embedder handing `New` a bare `Config` gets the **whole floor**. A firing
-reaches every Driver as a **Reaction firing** keyed by the guard's config key — `ReactionFiredEvent`
-once [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)'s core
-lands, `FloorGuardEvent` until then.
+reaches every Driver as one `ReactionFiredEvent` keyed by the guard's config key
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)).
 _Avoid_: "Mechanism" for a guard (a retired term — a guard is engine behaviour, never gated or
 self-regulating), "off-ramp" (the Capability that named two of them — see
 [Retired terms](#retired-terms)), "always-on Mechanism".
 
 **Bypass mode**:
-A `Config` flag **orthogonal to Agent mode** that turns off every **advise** and **shape**
-[Reaction](#mechanism-and-hook-points) of **user** or **bench-armed** origin — exactly what can move
-the floor — while leaving the agent's structure intact
+A `Config` flag **orthogonal to Agent mode** that skips every armed **advise**, **shape (view)**
+and **shape (work)** [Reaction](#reactions-and-moments) of **user** or **bench-armed** origin —
+exactly what can move the floor — while leaving the engine's own builtins and the agent's structure
+intact
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D9). It says
 nothing about the [Floor guards](#floor-guard), which stay on in **every** arm, so the floor is
 *functional* — a baseline that quit at the first stumble would pass the hard constraint trivially —
@@ -1150,13 +1149,13 @@ fresh** — no server-side state is restored (ADR 0008). The *client shape* is
 [docs/design/mcp-client.md](docs/design/mcp-client.md); the *gating* is ADR 0004/0008/0012.
 _Avoid_: "MCP plugin", "MCP proxy" (it is a client; there is no proxy).
 
-### Mechanism and hook points
+### Reactions and Moments
 
 **Reaction surface**:
 The **origin × class** policy matrix every *"apogee should react when X happens"* is placed in
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D2). Sibling
 to [ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md)'s placement rule for a
-new sentence of **guidance**; this one places a new **[Reaction](#mechanism-and-hook-points)**. One
+new sentence of **guidance**; this one places a new **[Reaction](#reactions-and-moments)**. One
 reaction takes exactly **one cell**:
 
 | origin ↓ / class → | observe | advise | gate | shape (view) | shape (work) |
@@ -1192,120 +1191,111 @@ of this surface, "Mechanism" (retired — see [Retired terms](#retired-terms)).
 
 **Reaction**:
 One `{id, origin, class, on: [Moments], handler}` — the single thing apogee does when the loop
-passes a **Moment**. Its **origin** is **engine** (a builtin such as a [Floor guard](#floor-guard),
-or a Go reaction the bench arms in-process through the facade) or **user** (an entry in the
-`reactions:` list); its **class** is one column of the **Reaction surface** matrix; its handler is
-a Go func, an argv list (`run:` / `advise:` / `gate:`) or a `webhook:`. The class picks the lane:
-observe runs on the async lane (one bounded queue per reaction, drop-newest, never waited on);
-advise, gate and shape run on the sync lane at the seam, engine before user, each under a recover
-boundary and its own deadline (`timeout:`). An entry may carry more than one class, and each handler
-runs under **its class's** trust posture: observe outside confinement as the user's config; advise
-and gate inside the workspace exec fence, advise output secret-redacted before the fence and the
-cap. A firing reaches every Driver as one `ReactionFiredEvent` keyed by id. The seven Floor-guard
-booleans stay the canonical switches for the builtins; a `hooks:` list reads as an alias of
-`reactions:` with a one-time notice.
+passes a **Moment**, shipped as `domain.Reaction`. Its **origin** is **engine** (a builtin such as
+a [Floor guard](#floor-guard), or a Go reaction the bench arms in-process through the facade) or
+**user**; its **class** is one column of the **Reaction surface** matrix. Its handler today is one
+of five **sealed** per-seam Go func types, one per seam **Moment**, so a reaction always names
+exactly one seam: `Validate` refuses an `On` list the handler cannot serve, an origin × class
+outside the matrix, a missing id, origin, class or handler, and an id another reaction already
+took. `TopLevelOnly` opts a reaction **out** of sub-agent inheritance — the zero value is inherited
+by every child agent; `Timeout` is carried for the non-Go handlers stage 2 adds and ignored by a Go
+one, which runs without a deadline exactly as a Floor guard does.
+The engine fires them with one `fire(ctx, moment, payload)` per seam — builtins first, then
+whatever is armed beside them, each under a recover boundary, an error ending the cascade at once
+and a panic reported and stepped over. Each returns one **`Outcome`**:
+`{Retry, Inject, Defer, Edited, Detail}`, whose zero value means "did nothing" and is not booked.
+Anything else is a firing, and it reaches every Driver as one `ReactionFiredEvent` keyed by id,
+under the action `retry`, else `defer`, else `intercept` when a shape reaction moved the working
+value's revision. The seven Floor-guard booleans stay the canonical switches for the builtins.
+Stage 2 adds the rest of the design: the `reactions:` list a user writes, argv
+(`run:` / `advise:` / `gate:`) and `webhook:` handlers, the per-class lanes and trust postures, and
+the `hooks:` alias notice. Until then the async observe lane is `internal/hooks`' own runner,
+unchanged
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D4).
 _Avoid_: "Hook" (the colloquial alias — see [Hook](#identity-and-shape)), "Mechanism" (retired),
 "plugin" (no Reaction adds a capability).
 
 **Moment**:
-A point the loop passes, on which a **Reaction** may fire. A **seam** Moment is in-loop and
-synchronous, its payload an editable working value: `pre-request`, `post-response`,
-`pre-tool-exec`, `post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload
-sealed: `exchange-finished`, `turn-finished`, `file-changed`, `approval-requested`,
-`approval-decided`, `error`, and additively more. Every seam publishes a notice when it closes, so
-observing a seam costs nothing extra; a reaction that must answer runs *before* the notice is
-published, never on the event stream.
+A point the loop passes, on which a **Reaction** may fire — `domain.Moment`, one string vocabulary
+of ten. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and its
+five are listed in the order a Turn passes them: `pre-request`, `post-response`, `pre-tool-exec`,
+`post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload sealed, and its
+five carry the **Hook event** spellings unchanged: `exchange-finished`, `turn-finished`,
+`file-changed`, `approval-waiting`, `error`. The strings are the contract — they are what a
+configuration names and what reaches an observer on a `ReactionFiredEvent` — and the set grows
+additively: the further notices ADR 0076 D1 describes, and the rule that every seam publishes a
+notice when it closes, land with stage 2's resolver.
 _Avoid_: "Hook point" (retired — a seam Moment is what it named), "Hook event" (a notice Moment),
 "stage", "phase".
 
 **Mechanism**:
 **Retired** by [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
 D12 — say **Reaction**. It named the gated, self-regulating lab surface (hook API, registry,
-`Config.EnableMechanisms`, `mechanisms:`) that
+enable set, `mechanisms:` key) that
 [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) had
 kept beside an empty catalogue; the core deletes that layer, the bench arms an **engine**-origin
 Reaction through the facade instead, and a `mechanisms:` key answers with the **retired roll**'s
 message. See [Retired terms](#retired-terms).
 
 **Hook point**:
-**Retired** by ADR 0076 D12 — say **seam [Moment](#mechanism-and-hook-points)**. The five
+**Retired** by ADR 0076 D12 — say **seam [Moment](#reactions-and-moments)**. The five
 positions it listed (`pre-request`, `post-response`, `pre-tool-exec`, `post-tool-result`,
 `history-rewrite`) are the seam Moments, unchanged in meaning.
 
 **Post-response decision**:
-The action a post-response Mechanism chooses: **retry** (re-call the Upstream now, **in
-place** — the correction rides `ActionRetry`'s `Inject` onto the in-flight request and
-re-streams **within the same Turn**, R1), **intercept** (alter the response before the loop
-acts on it), or **defer** (schedule a decision into the *next* request — a correction, or
-carried work a Mechanism consumes across coming Turns, such as a queue of
-decided-but-not-yet-delegated steps). Corrections deliver
-by **retry-in-place**: the loop owns the stream and can reset it (`StreamResetEvent`), so —
-unlike the proxy-era predecessor, which had already streamed the response downstream and could
-only defer — a streaming response is **not** forced to defer. `defer` remains available but the
-wave-1 repairs no longer use it.
-_Avoid_: "interceptor" (intercept is one decision, not the Mechanism).
+**Retired** by [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+D12 — say **`Outcome`**, the one shape every seam Reaction returns. The three actions it named
+survive as fields of it: **retry** (`Retry` — re-call the Upstream now, **in place**: the
+correction rides `Inject` onto the in-flight request and re-streams **within the same Turn**, R1),
+**intercept** (`Edited`, or any move of the working value's revision — alter the response before
+the loop acts on it) and **defer** (`Defer` — a correction, or carried work, scheduled into the
+*next* request). Corrections deliver by **retry-in-place**: the loop owns the stream and can reset
+it (`StreamResetEvent`), so — unlike the proxy-era predecessor, which had already streamed the
+response downstream and could only defer — a streaming response is **not** forced to defer.
+_Avoid_: "interceptor" (intercept is one action an Outcome reports, not a thing that acts).
 
 **Deferred Response Action vs Request-prep Hint**:
 Two sources of a pre-request injection, kept distinct because they are debugged
-differently. A **Deferred Response Action** is a *defer* decision made by a
-post-response Mechanism on the *previous* turn, consumed from session state this turn
+differently. A **Deferred Response Action** is an `Outcome.Defer` a post-response **Reaction**
+returned on the *previous* turn, consumed from session state this turn
 (look in **session state**). A **Request-prep Hint** is derived fresh from conversation
-history at the start of *this* request (look in **conversation history**). Both fire at
-the pre-request hook and are tracked uniformly as Mechanisms. A Deferred Response Action is
+history at the start of *this* request (look in **conversation history**). Both reach the model at
+the `pre-request` **Moment** and are tracked uniformly. A Deferred Response Action is
 **Exchange-scoped**: it is a decision about the *next request of the same conversation flow*, so
 the queue is cleared whenever an Exchange ends (a completed final answer, a fault, or an abort) and
 is truncated-then-restored when a cancelled Turn is rolled back — a stale directive never crosses
 an Exchange boundary or survives as two contradictory copies.
 
 **Mechanism descriptor**:
-Per-Mechanism metadata orthogonal to its hook point: `Capability` (off-ramp /
-proactive-nudge / response-repair — `off-ramp` survives as a lab value carried by no shipped row,
-since the two that carried it are [Floor guards](#floor-guard) now),
-`SuppressionPolicy` (exempt or strikes-3), and the
-stacking relations — the set of Mechanisms it is declared incompatible with, and the set
-it **requires** enabled (an enable-time constraint: switching a Mechanism on without its
-requirements is a config error, so dependent Mechanisms are benched and shipped as a
-stack). The single source of truth for which Mechanisms are exempt, which can co-fire,
-and which only make sense together.
-It is **catalogue data supplied when the Mechanism is registered**, not something a
-Mechanism says about itself: the catalogue holds one entry per Mechanism carrying its
-descriptor, its ordering constraints and the way to build it, and that one entry is
-read both by the running registry when the Mechanism is enabled and by the public
-catalogue query used to plan bench arms. A Mechanism and the description of it
-therefore cannot disagree.
+**Retired** by [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+D12 with the catalogue that held it. It named the per-Mechanism metadata orthogonal to a Mechanism's
+hook point — `Capability` (off-ramp / proactive-nudge / response-repair), `SuppressionPolicy`
+(exempt or strikes-3) and the stacking relations (the Mechanisms one was declared incompatible
+with, and the set it **required** enabled, so dependent Mechanisms were benched and shipped as a
+stack) — supplied as catalogue data when the Mechanism was registered rather than said by the
+Mechanism about itself, so the two could not disagree. A **Reaction** carries its whole identity
+instead (`{id, origin, class, on, handler}`), there is no catalogue holding a second copy of it,
+and nothing above the [Floor guards](#floor-guard) is stacked, exempted or throttled. See
+[Retired terms](#retired-terms).
 
 ### Self-regulation
 
-The runtime machinery that keeps a Mechanism from hurting the model — the operational
-half of the hard constraint. All of it is per-Session; a new Session starts clean.
+**Retired** by [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+D12, together with the **Mechanism** lab layer it regulated. It named the per-Session runtime
+machinery that kept a Mechanism from hurting the model — the operational half of the hard
+constraint: **Effectiveness tracking** (per-Mechanism bookkeeping that recorded each time a
+Mechanism *acted* and judged the **next** Turn for it three ways — **productive**, **harmful** or
+**neutral**, R3), **Adaptive Suppression** (the per-Mechanism withdrawal rule, striking on
+consecutive harmful Turns) and the **Turn Budget** (the global one). None of it ships. The
+[Floor guards](#floor-guard) need no throttle — each changes only what the model sees after its own
+failure, or shapes the request without steering it, which is what makes them engine behaviour at
+all — and a bench-armed **Reaction** is measured by the bench rather than policed at runtime.
 
-**Effectiveness tracking**:
-Per-Mechanism, per-Session bookkeeping that records each time a Mechanism **acts** — an
-intervention (a non-zero decision or a mutated working value), **not** a bare inspect-only
-invocation (R4, so `LoopView.Fired` counts actions, matching the sim's `FiredCounts`) — and
-judges the **next** Turn for it. That judgment is **three-way** (R3): a Turn is **productive**
-(a novel file read, or a successful write/action), **harmful** (a tool-result error), or
-**neutral** (neither), with productive winning when signals mix. The data behind Adaptive
-Suppression and the Turn Budget.
-
-An **empty final response** was a second harmful signal until the engine's empty-reply guard
-made it a **fault**: a reply with no visible text and no tool calls is an upstream failure — an
-aggregator's in-band error on an HTTP 200, a stream that ended before its first token — so the
-Turn faults visibly instead of committing a blank assistant message, and a faulted Turn is
-**discarded unjudged**. Self-regulation therefore never sees it. That is deliberate: the signal
-was a proxy for *the model going quiet*, and it now indicts the Upstream, not the Mechanism that
-fired the Turn before. The tool-result error is R3's harmful proxy alone.
-
-**Adaptive Suppression**:
-The **per-Mechanism** withdrawal rule: a Mechanism whose next Turn is judged **harmful** several
-consecutive times in a Session (a strike advances only on a harmful Turn; a neutral Turn freezes
-the count, R3) is suppressed for the rest of it, with a configurable clear-path that re-opens it
-on a productive Turn.
-
-**Turn Budget**:
-The **global** withdrawal rule: after several consecutive **harmful** Turns (the streak advances
-only on a harmful Turn; a neutral Turn freezes it, R3), all non-exempt Mechanisms are suppressed,
-cleared when productive activity resumes.
+One rule outlived the machinery and never belonged to it: an **empty final response** is a
+**fault**, not a signal. A reply with no visible text and no tool calls is an upstream failure — an
+aggregator's in-band error on an HTTP 200, a stream that ended before its first token — so the Turn
+faults visibly instead of committing a blank assistant message. It indicts the Upstream.
+See [Retired terms](#retired-terms).
 
 ### Context and history
 
@@ -1513,7 +1503,7 @@ The model's **own** checklist — the rows it wrote about its own work — held 
 [Session](#identity-and-shape) state and re-rendered into the standing system content on every
 request, so a decomposition survives **Compaction** and a `--resume`. The `task_list` tool is its
 **only** writer: the engine never appends a row, no `/command` edits one, and no
-[Mechanism](#mechanism-and-hook-points) injects one — which is what keeps it a tool rather than
+[Mechanism](#reactions-and-moments) injects one — which is what keeps it a tool rather than
 guided decomposition. One call carries the **complete** list and **replaces** it: the array of
 `{text, done}` it is given becomes the list, so ticking a row off is resending it with
 `done: true`, clearing it is sending `[]`, and there are **no item ids** to mint or remember. It
@@ -1710,7 +1700,7 @@ what **starts** a session — the first beat fires immediately and completes dis
 apogee paints before the server has answered and can be started **before** its server exists.
 **Rebind** is the heartbeat's apply half: `Agent.Rebind` swaps *all* the per-model bindings
 together — wire model id, [System prompt](#context-and-history) template, context window, and the
-[Mechanism](#mechanism-and-hook-points) set — at a **quiescent boundary** (idle, or deferred to the
+[Mechanism](#reactions-and-moments) set — at a **quiescent boundary** (idle, or deferred to the
 end of the running [Exchange](#turns-and-stepping)), never mid-Exchange. A configured
 `context-window:` is a **pin** the heartbeat never overrides; a `servers:` entry's `model`
 is a **trusted** id, never substituted: whenever it is set it is the active model verbatim, and an
@@ -1801,7 +1791,7 @@ external service" (it's a sibling Go module, not a running service).
 **Experimental hook**:
 **Retired** by [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
 D12 — say **bench-armed Reaction**: an **engine**-origin
-[Reaction](#mechanism-and-hook-points) the bench registers in-process through the facade to
+[Reaction](#reactions-and-moments) the bench registers in-process through the facade to
 measure a behaviour before anyone argues about shipping it. It never ships in the binary; the
 in-process heir to the bench's portable-tier Interventions (`system_addendum`, `inject_message`,
 `tool_filter`).
@@ -1859,16 +1849,17 @@ vocabulary can map forward:
   OpenAI chat schema to the Upstream, but that is an internal client concern, not a
   contract Apogee exposes.)
 - **Transform** / **Response Analyzer** / **Pre-pipeline Injector** (as the three
-  *kinds* of Mechanism) → retired as the taxonomy; Mechanisms are now classified by
-  [Hook point](#mechanism-and-hook-points). The distinctions that still matter survive
-  as attributes (post-response decisions; Deferred-Action vs Request-prep-Hint).
+  *kinds* of Mechanism) → retired as the taxonomy, with **Mechanism** itself; a
+  [Reaction](#reactions-and-moments) is classified by its origin × class cell and the Moments
+  it fires on. The distinctions that still matter survive as attributes (the **Outcome** a seam
+  Reaction returns; `Outcome.Defer` vs a hint derived fresh at `pre-request`).
 
 Three more were canonical here and retired by
 [ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md), which folds
 Floor guards, the Mechanism lab layer and Hooks into one **Reaction** core over **Moments** with an
-origin × class policy matrix: **Mechanism** → [Reaction](#mechanism-and-hook-points) (the lab layer
+origin × class policy matrix: **Mechanism** → [Reaction](#reactions-and-moments) (the lab layer
 is deleted; the bench arms an engine-origin Reaction through the facade); **Hook point** → seam
-[Moment](#mechanism-and-hook-points); **Experimental hook** → bench-armed Reaction. **Hook** is
+[Moment](#reactions-and-moments); **Experimental hook** → bench-armed Reaction. **Hook** is
 not retired but demoted to the colloquial alias for a user-origin Reaction, and **Bypass** now reads
 "advise and shape Reactions off" rather than "Mechanisms off".
 
@@ -1882,11 +1873,11 @@ naming one gets a message rather than an unknown-id failure, and the archived
 [catalogue](docs/design/archived/mechanism-catalogue.md) records the per-row verdict.
 
 - **Off-ramp** (Exempt Mechanism) → retired as a shipped concept: a Mechanism exempt from Adaptive
-  Suppression and the Turn Budget because suppressing it would leave the model with no way out of a
-  failed Turn. The two rows that carried the Capability — `empty_response_recovery` and
-  `tool_use_enforcer` — are Floor guards now, on in every arm, so there is no D1 default-off rule
-  left for them to be the exception to. The `off-ramp` **Capability value** survives in the
-  descriptor enum as lab vocabulary, carried by no shipped row.
+  Suppression and the Turn Budget — both retired with it — because suppressing it would leave the
+  model with no way out of a failed Turn. The two rows that carried the Capability —
+  `empty_response_recovery` and `tool_use_enforcer` — are Floor guards now, on in every arm, so
+  there is no D1 default-off rule left for them to be the exception to. The `off-ramp`
+  **Capability value** went with the descriptor when the lab layer was deleted.
 - **Library** (the cross-session, per-model **learning store** that observed completed Turns and
   injected qualifying observations through a pre-request Mechanism) → retired with the `library`
   Mechanism: nothing observes Turns or injects learned text any more, and `~/.apogee/library/` on
