@@ -3,18 +3,17 @@ package apogee_test
 // Bench-readiness proof (the ADR 0001 embedding contract, exercised in-repo). This is the
 // executable definition of "benchable": it drives the real Agent exactly the way apogee-sim
 // will — the public New / Resume / Submit / Step / Snapshot / Close surface over the real
-// provider client dialing a scripted OpenAI-compatible httptest model, catalogued Mechanisms
-// armed by ID through Config.EnableMechanisms, experimental hooks at all five hook points via
-// AddExperimental, isolated temp state roots — and asserts the contract holds. If a future
-// change breaks the way the bench drives apogee, this test breaks first.
+// provider client dialing a scripted OpenAI-compatible httptest model, engine-origin Reactions
+// armed at all five seam Moments through Config.Reactions, isolated temp state roots — and
+// asserts the contract holds. If a future change breaks the way the bench drives apogee, this
+// test breaks first.
 //
-// It arms every Mechanism through the PUBLIC enable surface (Config.EnableMechanisms +
-// AddExperimental, ADR 0015): it no longer builds the catalogue by hand and imports neither
-// internal/mechanisms nor internal/library, so a separate module (apogee-sim, which cannot
-// import internal/*) can now do everything this test does. The two internal imports that
-// remain — internal/session and internal/tools — are a separate concern: they inspect the
-// on-disk session schema and stock the tool menu, not the enable path, and neither is the
-// bare root module path, so ADR-0010's "internal never imports root" invariant is untouched.
+// It is the ADR 0031 invariant-4 proof ("benchable all the way up") over the Reaction core (ADR
+// 0076): a Driver that cannot import internal/* arms its instruments through Config.Reactions
+// alone and reads what they did off the ReactionFiredEvent stream. The two internal imports
+// that remain — internal/session and internal/tools — are a separate concern: they inspect the
+// on-disk session schema and stock the tool menu, not the arming path, and neither is the bare
+// root module path, so ADR-0010's "internal never imports root" invariant is untouched.
 
 import (
 	"context"
@@ -26,7 +25,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -53,20 +51,19 @@ const (
 		"6. write tests for the new behaviour.\n"
 )
 
-// allHooks is the complete five-point hook set the experimental probe is registered at.
-var allHooks = []apogee.HookPoint{
-	apogee.HookPreRequest,
-	apogee.HookPostResponse,
-	apogee.HookPreToolExec,
-	apogee.HookPostToolResult,
-	apogee.HookHistoryRewrite,
-}
+// benchSeams is the complete five-seam Moment set the probe Reactions are armed at, read off
+// the public vocabulary query rather than restated here — a seam added to the engine joins the
+// arms without editing this file.
+var benchSeams = apogee.Seams()
 
-// enabledMechanisms is the set the mechanisms-on arm enables via Config. It is EMPTY: the shipped
-// catalogue emptied in v0.20.0 (ADR 0071) — `library`, the last row, retired with the store it
-// read — so the registered experimental hook is the only actor the fired stream carries, at every
-// one of the five hook points.
-var enabledMechanisms []apogee.MechanismID
+// probeID is the id of the seam probe armed at Moment m. Ids are unique across the engine's
+// builtins and everything armed beside them, so the prefix keeps the probes clear of the seven
+// Floor guards, which fire at the same Moments.
+func probeID(m apogee.Moment) string { return "bench-probe-" + string(m) }
+
+// adviceProbeID is the second armed Reaction: an advise-class probe at pre-request whose only
+// job is to show what Bypass switches off (ADR 0076 D9).
+const adviceProbeID = "bench-probe-advice"
 
 // ----------------------------------------------------------------------------
 // The scripted OpenAI-compatible streaming model (one responder, both arms)
@@ -162,7 +159,7 @@ type sseFunc struct {
 }
 
 // ----------------------------------------------------------------------------
-// Fixtures: sink, approver, menu-padding tool, five-point experimental probe
+// Fixtures: sink, approver, menu-padding tool, five-seam Reaction probe
 // ----------------------------------------------------------------------------
 
 // recSink records every emitted Event. It is written only by the goroutine driving Step, so
@@ -180,7 +177,8 @@ func (allowAll) Approve(context.Context, apogee.ApprovalRequest) (apogee.Approva
 }
 
 // stubTool is an inert read-only tool that pads the menu to a realistic size for the arms. It
-// declares ReadOnly so it survives every mode's menu, and it is never called.
+// declares ReadOnly so it survives every mode's menu; the arms never call one, while the root
+// package's Example arms a Reaction over a stub standing in for list_dir.
 type stubTool struct{ name string }
 
 func (s stubTool) Name() string          { return s.name }
@@ -191,56 +189,84 @@ func (stubTool) Execute(context.Context, apogee.ToolCall) (apogee.ToolResult, er
 	return apogee.ToolResult{}, nil
 }
 
-// fivePointProbe implements all five hook interfaces, recording which points fired without
-// acting. Registered via AddExperimental at every point, it is the bench's own instrument:
-// dispatched at each hook point, always booked under the synthetic "experimental" ID, and never
-// Bypass-gated.
-type fivePointProbe struct{ seen map[apogee.HookPoint]int }
+// fiveSeamProbe is the bench's own instrument: one shared counter behind five engine-origin
+// Reactions, one per seam Moment. Each handler records that its seam was passed and returns a
+// NON-ZERO Outcome — the intercept a reaction books without moving the working value's revision
+// — so every invocation books exactly one ReactionFiredEvent. That is what makes the counters
+// and the event stream comparable, which is assertion 2's whole point.
+//
+// The probes are class observe: ADR 0076 D9 leaves observe (and gate) running under Bypass, so
+// the same instrument reads both arms. The advise probe below is what Bypass silences.
+type fiveSeamProbe struct{ seen map[apogee.Moment]int }
 
-func (p *fivePointProbe) RewriteHistory(context.Context, *apogee.Conversation) error {
-	p.seen[apogee.HookHistoryRewrite]++
-	return nil
+func (p *fiveSeamProbe) mark(m apogee.Moment) (apogee.Outcome, error) {
+	p.seen[m]++
+	return apogee.Outcome{Edited: true, Detail: "probe"}, nil
 }
 
-func (p *fivePointProbe) PreRequest(context.Context, *apogee.Request) error {
-	p.seen[apogee.HookPreRequest]++
-	return nil
+// reactions returns the five armed Reactions, one per seam, in loop order.
+func (p *fiveSeamProbe) reactions() []apogee.Reaction {
+	handlers := map[apogee.Moment]apogee.Handler{
+		apogee.MomentPreRequest: apogee.PreRequestFunc(
+			func(context.Context, *apogee.Request) (apogee.Outcome, error) {
+				return p.mark(apogee.MomentPreRequest)
+			}),
+		apogee.MomentPostResponse: apogee.PostResponseFunc(
+			func(context.Context, *apogee.Response) (apogee.Outcome, error) {
+				return p.mark(apogee.MomentPostResponse)
+			}),
+		apogee.MomentPreToolExec: apogee.PreToolExecFunc(
+			func(context.Context, apogee.LoopView, *apogee.ToolCallEdit) (apogee.Outcome, error) {
+				return p.mark(apogee.MomentPreToolExec)
+			}),
+		apogee.MomentPostToolResult: apogee.PostToolResultFunc(
+			func(context.Context, apogee.LoopView, apogee.ToolCall, *apogee.ToolResultEdit) (apogee.Outcome, error) {
+				return p.mark(apogee.MomentPostToolResult)
+			}),
+		apogee.MomentHistoryRewrite: apogee.HistoryRewriteFunc(
+			func(context.Context, *apogee.Conversation) (apogee.Outcome, error) {
+				return p.mark(apogee.MomentHistoryRewrite)
+			}),
+	}
+
+	armed := make([]apogee.Reaction, 0, len(benchSeams))
+	for _, m := range benchSeams {
+		armed = append(armed, apogee.Reaction{
+			ID:      probeID(m),
+			Origin:  apogee.OriginEngine,
+			Class:   apogee.ClassObserve,
+			On:      []apogee.Moment{m},
+			Handler: handlers[m],
+		})
+	}
+	return armed
 }
 
-func (p *fivePointProbe) PostResponse(context.Context, *apogee.Response) (apogee.PostResponseDecision, error) {
-	p.seen[apogee.HookPostResponse]++
-	return apogee.PostResponseDecision{}, nil
-}
-
-func (p *fivePointProbe) PreToolExec(context.Context, *apogee.ToolCallEdit, apogee.LoopView) error {
-	p.seen[apogee.HookPreToolExec]++
-	return nil
-}
-
-func (p *fivePointProbe) PostToolResult(context.Context, apogee.ToolCall, *apogee.ToolResultEdit, apogee.LoopView) error {
-	p.seen[apogee.HookPostToolResult]++
-	return nil
+// adviceProbe is one advise-class Reaction at pre-request. Under Bypass an armed advise reaction
+// goes quiet (ADR 0076 D9), so its presence in one arm's fired stream and absence from the
+// other's is the Bypass floor, asserted through the public event surface alone.
+func adviceProbe() apogee.Reaction {
+	return apogee.Reaction{
+		ID:     adviceProbeID,
+		Origin: apogee.OriginEngine,
+		Class:  apogee.ClassAdvise,
+		On:     []apogee.Moment{apogee.MomentPreRequest},
+		Handler: apogee.PreRequestFunc(func(context.Context, *apogee.Request) (apogee.Outcome, error) {
+			return apogee.Outcome{Edited: true, Detail: "advice"}, nil
+		}),
+	}
 }
 
 // ----------------------------------------------------------------------------
 // Builders
 // ----------------------------------------------------------------------------
 
-// armProbe returns a fresh MechanismRegistry carrying only the five-point experimental probe (via the
-// public AddExperimental) plus the probe itself. The catalogued Mechanisms are NOT built here — each
-// arm enables them by ID through Config.EnableMechanisms, and the engine builds them INTO this same
-// registry, so a catalogued+experimental combined arm co-fires from one registry. Each arm gets a
-// fresh registry so its probe counters never bleed into the other's.
-func armProbe(t *testing.T) (*apogee.MechanismRegistry, *fivePointProbe) {
-	t.Helper()
-	reg := apogee.NewMechanismRegistry()
-	probe := &fivePointProbe{seen: map[apogee.HookPoint]int{}}
-	for _, at := range allHooks {
-		if err := reg.AddExperimental(at, probe); err != nil {
-			t.Fatalf("add experimental hook at %q: %v", at, err)
-		}
-	}
-	return reg, probe
+// armProbe returns the arm one Agent is constructed with — the five seam probes plus the advise
+// probe — and the probe instance behind them. Each arm gets a FRESH probe so its counters never
+// bleed into the other's, exactly as each arm used to get a fresh registry.
+func armProbe() ([]apogee.Reaction, *fiveSeamProbe) {
+	probe := &fiveSeamProbe{seen: map[apogee.Moment]int{}}
+	return append(probe.reactions(), adviceProbe()), probe
 }
 
 // paddedRegistry returns a real list_dir plus enough inert stubs to give the arms a menu of
@@ -293,25 +319,50 @@ func runToQuiescence(t *testing.T, a *apogee.Agent, in apogee.UserInput) {
 // Small event helpers
 // ----------------------------------------------------------------------------
 
-func firedEvents(events []apogee.Event) []apogee.MechanismFiredEvent {
-	var out []apogee.MechanismFiredEvent
+// firedEvents is the ONE firing event of the Reaction core, filtered out of an arm's stream:
+// builtin Floor guards and armed Reactions alike book one of these when they act (ADR 0076 D1).
+func firedEvents(events []apogee.Event) []apogee.ReactionFiredEvent {
+	var out []apogee.ReactionFiredEvent
 	for _, e := range events {
-		if fe, ok := e.(apogee.MechanismFiredEvent); ok {
+		if fe, ok := e.(apogee.ReactionFiredEvent); ok {
 			out = append(out, fe)
 		}
 	}
 	return out
 }
 
-// firedIDsAt returns, in emission order, the Mechanism IDs of the fires at hook point at.
-func firedIDsAt(fires []apogee.MechanismFiredEvent, at apogee.HookPoint) []string {
+// probeFiresBySeam counts, per seam Moment, the firings booked by THAT seam's probe Reaction —
+// so the engine's own builtins, which fire at the same Moments under their own ids, and the
+// advise probe are both excluded.
+func probeFiresBySeam(fires []apogee.ReactionFiredEvent) map[apogee.Moment]int {
+	byMoment := map[apogee.Moment]int{}
+	for _, fe := range fires {
+		if fe.Reaction == probeID(fe.Moment) {
+			byMoment[fe.Moment]++
+		}
+	}
+	return byMoment
+}
+
+// firedIDs returns, in emission order, the reaction ids of the fires at Moment m.
+func firedIDs(fires []apogee.ReactionFiredEvent, m apogee.Moment) []string {
 	var ids []string
 	for _, fe := range fires {
-		if fe.Hook == at {
-			ids = append(ids, string(fe.Mechanism))
+		if fe.Moment == m {
+			ids = append(ids, fe.Reaction)
 		}
 	}
 	return ids
+}
+
+// containsID reports whether ids holds want.
+func containsID(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
 }
 
 func messageText(events []apogee.Event) string {
@@ -331,47 +382,45 @@ func messageText(events []apogee.Event) string {
 
 // TestBenchReadinessContract is the permanent regression proving apogee is drivable the way
 // apogee-sim will drive it: two arms from one scripted responder against isolated roots,
-// experimental hooks at all five points, snapshot/resume forks, deterministic mechanism order,
-// the Bypass floor, and no state bleeding across arms or forks.
+// engine-origin Reactions armed at all five seam Moments through Config.Reactions,
+// snapshot/resume forks, the Bypass floor, and no state bleeding across arms or forks.
 func TestBenchReadinessContract(t *testing.T) {
 	srv := benchModel()
 	defer srv.Close()
 
-	// --- Arm A: mechanisms on --------------------------------------------------
-	mechRoots := newRoots(t)
-	mechSink := &recSink{}
-	mechReg, mechProbe := armProbe(t)
-	mechArm, err := apogee.New(apogee.Config{
-		Endpoint:         srv.URL,
-		Model:            benchModelName,
-		Mode:             apogee.ModeAskBefore,
-		Approver:         allowAll{},
-		Events:           mechSink,
-		Mechanisms:       mechReg,
-		EnableMechanisms: enabledMechanisms,
-		Tools:            paddedRegistry(t, mechRoots.workspace),
-		WorkspaceDir:     mechRoots.workspace,
+	// --- Arm A: Reactions armed ------------------------------------------------
+	armedRoots := newRoots(t)
+	armedSink := &recSink{}
+	armedReactions, armedProbe := armProbe()
+	reactionArm, err := apogee.New(apogee.Config{
+		Endpoint:     srv.URL,
+		Model:        benchModelName,
+		Mode:         apogee.ModeAskBefore,
+		Approver:     allowAll{},
+		Events:       armedSink,
+		Reactions:    armedReactions,
+		Tools:        paddedRegistry(t, armedRoots.workspace),
+		WorkspaceDir: armedRoots.workspace,
 	})
 	if err != nil {
-		t.Fatalf("New (mechanisms-on arm): %v", err)
+		t.Fatalf("New (Reactions arm): %v", err)
 	}
-	defer func() { _ = mechArm.Close() }()
+	defer func() { _ = reactionArm.Close() }()
 
 	// --- Arm B: Bypass ---------------------------------------------------------
 	bypassRoots := newRoots(t)
 	bypassSink := &recSink{}
-	bypassReg, bypassProbe := armProbe(t)
+	bypassReactions, bypassProbe := armProbe()
 	bypassArm, err := apogee.New(apogee.Config{
-		Endpoint:         srv.URL,
-		Model:            benchModelName,
-		Mode:             apogee.ModeAskBefore,
-		Bypass:           true,
-		Approver:         allowAll{},
-		Events:           bypassSink,
-		Mechanisms:       bypassReg,
-		EnableMechanisms: enabledMechanisms,
-		Tools:            paddedRegistry(t, bypassRoots.workspace),
-		WorkspaceDir:     bypassRoots.workspace,
+		Endpoint:     srv.URL,
+		Model:        benchModelName,
+		Mode:         apogee.ModeAskBefore,
+		Bypass:       true,
+		Approver:     allowAll{},
+		Events:       bypassSink,
+		Reactions:    bypassReactions,
+		Tools:        paddedRegistry(t, bypassRoots.workspace),
+		WorkspaceDir: bypassRoots.workspace,
 	})
 	if err != nil {
 		t.Fatalf("New (Bypass arm): %v", err)
@@ -379,66 +428,77 @@ func TestBenchReadinessContract(t *testing.T) {
 	defer func() { _ = bypassArm.Close() }()
 
 	// Drive both arms through the same task to their quiescent boundaries.
-	runToQuiescence(t, mechArm, apogee.UserInput{Text: complexPrompt})
+	runToQuiescence(t, reactionArm, apogee.UserInput{Text: complexPrompt})
 	runToQuiescence(t, bypassArm, apogee.UserInput{Text: complexPrompt})
 
-	// === Assertion 1: deterministic mechanism order visible in the fired stream ===
-	// A hook that ACTS books a fire; an inspect-only Mechanism does not. With the catalogued
-	// pre-request shapers retired (ADR 0071), the experimental hook is the only actor left, so the
-	// stream is its repeats — one per pre-request pass, and nothing else interleaved.
-	mechFires := firedEvents(mechSink.events)
-	preIDs := firedIDsAt(mechFires, apogee.HookPreRequest)
-	if len(preIDs) == 0 {
-		t.Fatalf("pre-request fired stream = %v, want at least one [experimental] entry", preIDs)
-	}
-	for i, id := range preIDs {
-		if id != "experimental" {
-			t.Errorf("pre-request fired[%d] = %q, want %q (deterministic order: shapers in Ordered() order, then the experimental hook)", i, id, "experimental")
-		}
-	}
-	// === Assertion 2: R4 — only ACTED invocations book a fired event ===
-	// The shipped catalogue is empty (v0.20.0, ADR 0071), so every fire in the stream must be the
-	// experimental probe's: a catalogued name appearing here would mean a row booked a fire this
-	// build no longer carries.
-	for _, fe := range mechFires {
-		if fe.Mechanism != "experimental" {
-			t.Errorf("mechanisms-on arm booked a catalogued fire %q at %q; the shipped catalogue is empty", fe.Mechanism, fe.Hook)
+	armedFires := firedEvents(armedSink.events)
+
+	// === Assertion 1: one ReactionFiredEvent per armed seam ===
+	// Each of the five probes is armed on exactly one seam and acts on every invocation, so a
+	// seam with no firing booked under its probe's id is a seam the Reaction core never reached.
+	firesBySeam := probeFiresBySeam(armedFires)
+	for _, m := range benchSeams {
+		if firesBySeam[m] == 0 {
+			t.Errorf("no ReactionFiredEvent booked at %q; ids seen there: %v", m, firedIDs(armedFires, m))
 		}
 	}
 
-	// === Assertion 3: all five experimental hooks ran (both arms) ===
-	for _, probe := range []*fivePointProbe{mechProbe, bypassProbe} {
-		if len(probe.seen) != len(allHooks) {
-			t.Errorf("experimental probe fired at %d/%d hook points: %v", len(probe.seen), len(allHooks), probe.seen)
+	// === Assertion 2: R4 — an acted invocation books exactly one firing ===
+	// The probe counts its own invocations, so counters and events are directly comparable: an
+	// invocation that did not book, or a booking with no invocation behind it, breaks the rule
+	// that only ACTED invocations book a fire.
+	for _, m := range benchSeams {
+		if got, want := firesBySeam[m], armedProbe.seen[m]; got != want {
+			t.Errorf("probe at %q booked %d firings for %d invocations; R4: one acted invocation books one", m, got, want)
 		}
 	}
 
-	// === Assertion 4: the Bypass floor ===
-	// No non-exempt (indeed no catalogued) Mechanism fired under Bypass, yet the experimental
-	// hooks — the bench's own instruments — all ran (asserted above).
-	for _, fe := range firedEvents(bypassSink.events) {
-		if fe.Mechanism != "experimental" {
-			t.Errorf("Bypass arm booked a catalogued fire %q at %q; Bypass runs only off-ramps + experimental hooks", fe.Mechanism, fe.Hook)
+	// === Assertion 3: every firing is attributed, and engine-origin here ===
+	// Both legs of the cascade — the builtin Floor guards and the armed probes — are engine
+	// origin in these arms, and every firing names the Moment it fired at.
+	for _, fe := range armedFires {
+		if fe.Reaction == "" || fe.Moment == "" {
+			t.Errorf("unattributed firing: %+v", fe)
 		}
+		if fe.Origin != apogee.OriginEngine {
+			t.Errorf("firing %q at %q has origin %q, want %q", fe.Reaction, fe.Moment, fe.Origin, apogee.OriginEngine)
+		}
+	}
+
+	// === Assertion 4: the probes read both arms; Bypass silences advise (ADR 0076 D9) ===
+	// Observe-class Reactions keep running under Bypass — that is what lets one instrument read
+	// both arms — while the advise probe fires in the armed arm and goes quiet under Bypass.
+	for _, probe := range []*fiveSeamProbe{armedProbe, bypassProbe} {
+		if len(probe.seen) != len(benchSeams) {
+			t.Errorf("seam probe fired at %d/%d seams: %v", len(probe.seen), len(benchSeams), probe.seen)
+		}
+	}
+	if !containsID(firedIDs(armedFires, apogee.MomentPreRequest), adviceProbeID) {
+		t.Errorf("advise probe booked no firing in the armed arm; pre-request ids: %v",
+			firedIDs(armedFires, apogee.MomentPreRequest))
+	}
+	bypassFires := firedEvents(bypassSink.events)
+	if containsID(firedIDs(bypassFires, apogee.MomentPreRequest), adviceProbeID) {
+		t.Errorf("advise probe fired under Bypass; ADR 0076 D9 switches armed advise and shape Reactions off")
 	}
 
 	// === Assertion 5: agent-driven writes stay inside the injected roots ===
 	// Snapshot both arms, and prove a host-persisted session lands under the arm's own sessions root.
-	snapMech, err := mechArm.Snapshot()
+	snapArmed, err := reactionArm.Snapshot()
 	if err != nil {
-		t.Fatalf("Snapshot (mechanisms-on): %v", err)
+		t.Fatalf("Snapshot (Reactions arm): %v", err)
 	}
 	snapBypass, err := bypassArm.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot (Bypass): %v", err)
 	}
-	mechRec := session.Record{Meta: session.Meta{ID: "mechanisms-arm"}, Session: snapMech}
-	if err := session.NewStore(mechRoots.sessions).Save(mechRec); err != nil {
-		t.Fatalf("save mechanisms-on session: %v", err)
+	armedRec := session.Record{Meta: session.Meta{ID: "reactions-arm"}, Session: snapArmed}
+	if err := session.NewStore(armedRoots.sessions).Save(armedRec); err != nil {
+		t.Fatalf("save Reactions-arm session: %v", err)
 	}
-	mechSessPath := filepath.Join(mechRoots.sessions, mechRec.Meta.ID+".json")
-	if _, err := os.Stat(mechSessPath); err != nil {
-		t.Errorf("mechanisms-on session not written under %q: %v", mechRoots.sessions, err)
+	armedSessPath := filepath.Join(armedRoots.sessions, armedRec.Meta.ID+".json")
+	if _, err := os.Stat(armedSessPath); err != nil {
+		t.Errorf("Reactions-arm session not written under %q: %v", armedRoots.sessions, err)
 	}
 	bypassRec := session.Record{Meta: session.Meta{ID: "bypass-arm"}, Session: snapBypass}
 	if err := session.NewStore(bypassRoots.sessions).Save(bypassRec); err != nil {
@@ -446,10 +506,10 @@ func TestBenchReadinessContract(t *testing.T) {
 	}
 
 	// === Assertion 6: resumed forks diverge independently, in their own roots ===
-	// Two forks resume from the SAME mechanisms-on snapshot and continue with different inputs;
-	// the scripted model echoes each fork's own input, so their outputs diverge and never bleed.
-	forkA := resumeFork(t, srv.URL, snapMech, "follow-up-A")
-	forkB := resumeFork(t, srv.URL, snapMech, "follow-up-B")
+	// Two forks resume from the SAME armed snapshot and continue with different inputs; the
+	// scripted model echoes each fork's own input, so their outputs diverge and never bleed.
+	forkA := resumeFork(t, srv.URL, snapArmed, "follow-up-A")
+	forkB := resumeFork(t, srv.URL, snapArmed, "follow-up-B")
 	if !strings.Contains(forkA, "follow-up-A") || strings.Contains(forkA, "follow-up-B") {
 		t.Errorf("fork A output = %q, want its own input echoed and not fork B's", forkA)
 	}
@@ -462,10 +522,9 @@ func TestBenchReadinessContract(t *testing.T) {
 	if !strings.Contains(forkBypass, "follow-up-bypass") {
 		t.Errorf("fork of the Bypass arm did not continue independently: %q", forkBypass)
 	}
-
 }
 
-// resumeFork resumes a fork from snap into fresh isolated roots (no Mechanisms), continues it
+// resumeFork resumes a fork from snap into fresh isolated roots (nothing armed), continues it
 // with a close-marked follow-up carrying token, and returns the fork's rendered message text.
 func resumeFork(t *testing.T, endpoint string, snap apogee.Session, token string) string {
 	t.Helper()
@@ -494,162 +553,127 @@ func resumeFork(t *testing.T, endpoint string, snap apogee.Session, token string
 // Construction acceptance through the public enable surface (no live model)
 // ----------------------------------------------------------------------------
 
-// hermeticArm constructs an Agent for a construction-only assertion, arming Mechanisms by ID through
-// the public Config.EnableMechanisms into isolated temp roots with a discarding sink. New builds and
-// validates the named Mechanisms WITHOUT dialing the Endpoint, so the returned error (or nil) reports
-// exactly whether the arm is admissible — the fail-loud gate apogee-sim hits when it mis-plans an arm.
-func hermeticArm(t *testing.T, enable []apogee.MechanismID) (*apogee.Agent, error) {
+// hermeticArm constructs an Agent for a construction-only assertion, arming Reactions through the
+// public Config.Reactions into isolated temp roots with a discarding sink. New validates every
+// armed Reaction WITHOUT dialing the Endpoint, so the returned error (or nil) reports exactly
+// whether the arm is admissible — the fail-loud gate apogee-sim hits when it mis-plans an arm.
+func hermeticArm(t *testing.T, reactions []apogee.Reaction) (*apogee.Agent, error) {
 	t.Helper()
 	return apogee.New(apogee.Config{
-		Endpoint:         "http://localhost:11434",
-		Model:            benchModelName,
-		Mode:             apogee.ModeAskBefore,
-		Approver:         allowAll{},
-		Events:           &recSink{},
-		EnableMechanisms: enable,
-		WorkspaceDir:     t.TempDir(),
+		Endpoint:     "http://localhost:11434",
+		Model:        benchModelName,
+		Mode:         apogee.ModeAskBefore,
+		Approver:     allowAll{},
+		Events:       &recSink{},
+		Reactions:    reactions,
+		WorkspaceDir: t.TempDir(),
+	})
+}
+
+// observeAt is a well-formed engine-origin observe Reaction at Moment m, the shape the refusal
+// cases below deform one field at a time.
+func observeAt(id string, m apogee.Moment, handler apogee.Handler) apogee.Reaction {
+	return apogee.Reaction{
+		ID:      id,
+		Origin:  apogee.OriginEngine,
+		Class:   apogee.ClassObserve,
+		On:      []apogee.Moment{m},
+		Handler: handler,
+	}
+}
+
+// inertPreRequest is a handler that inspects and does nothing — enough to make a Reaction well
+// formed, so each refusal case below is about the field it deforms and nothing else.
+func inertPreRequest() apogee.Handler {
+	return apogee.PreRequestFunc(func(context.Context, *apogee.Request) (apogee.Outcome, error) {
+		return apogee.Outcome{}, nil
 	})
 }
 
 // TestBenchReadinessConstructionRefusals proves the campaign's fail-loud arms refuse construction
-// through the PUBLIC surface with a matchable sentinel: a bogus catalogue ID fails
-// apogee.ErrUnknownMechanism — the same startup gate the bench hits when it mis-plans an arm,
-// asserted only through errors.Is on the root sentinel. The two arms it used to carry have no
-// catalogued case left: the half-armed Requires stack lost its peer to a Floor guard, and the
-// incompatible pair lost its declarer when that row retired in v0.20.0 (ADR 0071).
-// ErrMissingRequirement and ErrIncompatibleMechanisms are proved over injected/synthetic registries
-// in apogee_test.go, internal/agent and internal/domain.
+// through the PUBLIC surface with a matchable sentinel: every mis-armed Reaction fails New with
+// apogee.ErrInvalidReaction — the same startup gate the bench hits when it mis-plans an arm,
+// asserted only through errors.Is on the root sentinel (ADR 0010: a separate module cannot import
+// internal/domain, so the root re-export must BE the sentinel). The four cases are the four ways
+// an arm is wrong: an unnamed reaction, a cell outside the Reaction surface matrix, a Moment the
+// sealed handler cannot serve, and an id the engine's own builtins already hold.
 func TestBenchReadinessConstructionRefusals(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name    string
-		enable  []apogee.MechanismID
-		wantErr error
+		name      string
+		reactions []apogee.Reaction
 	}{
 		{
-			name:    "unknown catalogue ID",
-			enable:  []apogee.MechanismID{"no_such_mechanism"},
-			wantErr: apogee.ErrUnknownMechanism,
+			name:      "no id",
+			reactions: []apogee.Reaction{observeAt("", apogee.MomentPreRequest, inertPreRequest())},
+		},
+		{
+			name: "a cell outside the Reaction surface matrix",
+			reactions: []apogee.Reaction{{
+				ID:      "user-shapes-work",
+				Origin:  apogee.OriginUser,
+				Class:   apogee.ClassShapeWork,
+				On:      []apogee.Moment{apogee.MomentPreRequest},
+				Handler: inertPreRequest(),
+			}},
+		},
+		{
+			name:      "a Moment the handler cannot serve",
+			reactions: []apogee.Reaction{observeAt("wrong-seam", apogee.MomentPostResponse, inertPreRequest())},
+		},
+		{
+			name:      "an id an engine builtin already holds",
+			reactions: []apogee.Reaction{observeAt("tool-loop-breaker", apogee.MomentPreRequest, inertPreRequest())},
 		},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			ag, err := hermeticArm(t, tc.enable)
+			ag, err := hermeticArm(t, tc.reactions)
 			if ag != nil {
 				_ = ag.Close()
 			}
-			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("New(EnableMechanisms=%v) error = %v, want errors.Is(err, %v)", tc.enable, err, tc.wantErr)
+			if !errors.Is(err, apogee.ErrInvalidReaction) {
+				t.Fatalf("New(Reactions=%v) error = %v, want errors.Is(err, ErrInvalidReaction)", tc.name, err)
 			}
 		})
 	}
 }
 
-// compatibleBaseStack computes a maximal enable set from the PUBLIC catalogue query the way the bench
-// plans a full-stack arm: walk apogee.CataloguedMechanisms() (already sorted) and greedily include
-// each ID unless it is IncompatibleWith one already chosen, then drop any whose Requires peers did not
-// survive — so the returned set carries no incompatible pair and no half-armed Requires stack, and New
-// accepts it. It is the base the leave-one-out arms subtract from, computed with nothing but the
-// public descriptor metadata.
-func compatibleBaseStack() []apogee.MechanismID {
-	catalogue := apogee.CataloguedMechanisms()
-	descByID := make(map[apogee.MechanismID]apogee.MechanismDescriptor, len(catalogue))
-	for _, d := range catalogue {
-		descByID[d.ID] = d
-	}
-
-	var base []apogee.MechanismID
-	for _, d := range catalogue {
-		conflict := false
-		for _, sel := range base {
-			if slices.Contains(d.IncompatibleWith, sel) || slices.Contains(descByID[sel].IncompatibleWith, d.ID) {
-				conflict = true
-				break
-			}
-		}
-		if !conflict {
-			base = append(base, d.ID)
-		}
-	}
-
-	// Drop any Mechanism whose required peers were excluded above, to a fixpoint (one drop can orphan
-	// another). Nothing here re-adds, so the loop terminates.
-	for {
-		kept := make([]apogee.MechanismID, 0, len(base))
-		for _, id := range base {
-			ok := true
-			for _, req := range descByID[id].Requires {
-				if !slices.Contains(base, req) {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				kept = append(kept, id)
-			}
-		}
-		if len(kept) == len(base) {
-			return kept
-		}
-		base = kept
-	}
-}
-
 // TestBenchReadinessLeaveOneOutArms proves the bench's leave-one-out planning idiom works entirely
-// over the public surface: a full-stack arm computed from apogee.CataloguedMechanisms() constructs,
-// and so does every arm that leaves one member out (dropping any stack that Requires it — the Requires
-// traversal, so no half-armed stack ever reaches New). These are the arms the campaign compares to
-// measure each Mechanism's marginal contribution; that every one is admissible is the contract.
+// over the public surface: the full five-seam arm constructs, and so does every arm that leaves one
+// member out. These are the arms the campaign compares to measure a Reaction's marginal
+// contribution; that every one of them is admissible is the contract. Nothing here consults a
+// catalogue — with the Reaction core a Driver composes its own arms, so the idiom reduces to
+// subtracting one entry from the Config.Reactions list it wrote.
 func TestBenchReadinessLeaveOneOutArms(t *testing.T) {
 	t.Parallel()
-	base := compatibleBaseStack()
-	if len(base) == 0 {
-		// The shipped catalogue emptied in v0.20.0 (ADR 0071): every row was promoted to a Floor
-		// guard or retired outright, so there is no full-stack arm left to subtract from and no
-		// leave-one-out arm to plan. The idiom itself is unchanged for an experimental catalogue a
-		// bench Driver registers.
-		t.Skip("the shipped catalogue is empty; no leave-one-out arms to plan (ADR 0071)")
-	}
+	base, _ := armProbe()
 
-	construct := func(t *testing.T, enable []apogee.MechanismID) {
+	construct := func(t *testing.T, arm []apogee.Reaction) {
 		t.Helper()
-		ag, err := hermeticArm(t, enable)
+		ag, err := hermeticArm(t, arm)
 		if err != nil {
-			t.Fatalf("New(EnableMechanisms=%v): %v", enable, err)
+			t.Fatalf("New with %d armed Reactions: %v", len(arm), err)
 		}
 		_ = ag.Close()
 	}
 
-	t.Run("full stack", func(t *testing.T) {
+	t.Run("full arm", func(t *testing.T) {
 		t.Parallel()
 		construct(t, base)
 	})
 
 	for _, leaveOut := range base {
-		leaveOut := leaveOut
-		t.Run("without "+string(leaveOut), func(t *testing.T) {
+		t.Run("without "+leaveOut.ID, func(t *testing.T) {
 			t.Parallel()
-			arm := make([]apogee.MechanismID, 0, len(base))
-			for _, id := range base {
-				if id == leaveOut || slices.Contains(descriptorFor(id).Requires, leaveOut) {
-					continue // the left-out Mechanism, and any stack that Requires it
+			arm := make([]apogee.Reaction, 0, len(base))
+			for _, r := range base {
+				if r.ID != leaveOut.ID {
+					arm = append(arm, r)
 				}
-				arm = append(arm, id)
 			}
 			construct(t, arm)
 		})
 	}
-}
-
-// descriptorFor returns the public descriptor of a catalogued Mechanism ID, or a zero descriptor if
-// the ID is not catalogued (the leave-one-out arms only ever pass IDs drawn from the catalogue query).
-func descriptorFor(id apogee.MechanismID) apogee.MechanismDescriptor {
-	for _, d := range apogee.CataloguedMechanisms() {
-		if d.ID == id {
-			return d
-		}
-	}
-	return apogee.MechanismDescriptor{}
 }

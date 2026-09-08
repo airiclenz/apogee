@@ -442,7 +442,21 @@ go build ./... && go test -race -count=1 ./internal/validated/ ./internal/agent/
 ```
 **Commit:** `refactor(apogee): delegation seats and validated sets stop arming Mechanisms`
 
-## 14. Root facade and the bench-readiness proof
+## 14. Root facade and the bench-readiness proof — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): `ErrInvalidReaction` was already exported on the facade by an earlier item, so this item only added its `example_test.go` completeness pin, in place of the four deleted mechanism sentinels.
+
+NOTES (2026-09-08): the `example_test.go` pin edit followed the item's RULE, not its line list — `:60` (`_ apogee.MechanismFiredEvent`) was KEPT because this item does not delete that alias (item 19 owns it); the deleted pins are the guard's known range `:97-111,146-148,205-220,233-236`.
+
+NOTES (2026-09-08): `Example_armReaction` drives a real firing rather than only constructing — it reuses this test package's scripted upstream (`benchModel`) and `stubTool` standing in for `list_dir`, so the `// Output:` block is an observed `ReactionFiredEvent` rendered in the header's ratified debug-view form. `discardSink` was deleted with the two Examples that used it and replaced by `reactionSink`.
+
+NOTES (2026-09-08): `TestBenchReadinessContract`'s Bypass arm needed a new assertion once the catalogue-fire assertions went. It arms a sixth reaction — an `advise` probe at pre-request — and asserts it fires in the armed arm and is silent under Bypass, which is ADR 0076 D9 stated through the public event surface; the five seam probes are `observe`, so one instrument still reads both arms as before.
+
+NOTES (2026-09-08): consequential edit — benchreadiness_test.go: `stubTool`'s "it is never called" comment made false by `Example_armReaction` calling one; reworded in the same hunk.
+
+NOTES (2026-09-08): `internal/domain/mechanism.go:396` and `internal/mechanisms/catalogue_test.go:106` still name the deleted `apogee.MechanismRegistry` / `apogee.CataloguedMechanisms()` aliases in prose. Left alone: item 17 (not yet done) deletes both files' subject matter.
+
+NOTES (2026-09-08): `docs/manual/configuration.md:81-82` still points a Go embedder at `apogee.CataloguedMechanisms()`, which this item deletes. Left alone: item 21 (Manual, README and AGENTS.md, not yet done) owns that paragraph, whose other half (`mechanisms:` and `Config.EnableMechanisms`) only becomes rewritable once items 17 and 19 land — a half-fix there would leave a less coherent page than the one item 21 rewrites.
 
 **What:** Recast at the regression check (2026-09-07). Depends on items 5, 6. `apogee.go:444-534` (the "Mechanisms & hook points" block: `HookPoint` + consts, the five hook interface aliases, `PostResponseDecision`, `PostResponseAction` + consts, `RegisteredMechanism`, `MechanismID`, `MechanismDescriptor`, `Capability`, `SuppressionPolicy`, `CataloguedMechanisms`, `OrderingConstraints`, `MechanismRegistry`, `NewMechanismRegistry`, `BuildMechanisms`) and `:696-712` (`ErrOrderingCycle`, `ErrIncompatibleMechanisms`, `ErrMissingRequirement`, `ErrUnknownMechanism`) deleted; `ErrInvalidReaction` exported; the `Config` doc (`:508,527,708` prose) rewritten around `Reactions`. `example_test.go`: `Example_enableMechanismStack` (`:259`) → `Example_armReaction` (an engine-origin `advise` reaction at `post-tool-result` armed through `Config.Reactions`, observed as `ReactionFiredEvent`); `Example_cataloguedMechanisms` (`:298`) and the compile pins at `:60,105-111,146-148,234,236` deleted. `apogee_test.go`: `TestNew_OrderingCycle`, `TestAddExperimental_WrongInterface`, `TestCataloguedMechanisms`, `TestEnableErrors_MatchableThroughRoot` → one `TestNew_InvalidReaction_MatchableThroughRoot`; `TestFacadeExportsEventLines` kept. `benchreadiness_test.go`: `TestBenchReadinessContract` (`:336`), `…ConstructionRefusals` (`:522`), `…LeaveOneOutArms` (`:605`) arm engine-origin reactions at all five seams through `Config.Reactions` — the ADR 0031 invariant-4 proof — and assert one `ReactionFiredEvent` per armed seam.
 

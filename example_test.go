@@ -9,13 +9,13 @@ package apogee_test
 // reference is a type declaration, a constant reference, or a function *value* — no method on
 // a panic-stub working value (Request / Response / Conversation / ToolRegistry) is ever called.
 //
-// The file also carries runnable godoc Examples for the public Mechanism enable surface (ADR
-// 0015). They are hermetic: construction builds and validates Mechanisms without dialing the
-// Endpoint, and the catalogue query is a pure read.
+// The file also carries a runnable godoc Example for the public Reaction arming surface (ADR
+// 0076): Config.Reactions armed against the scripted upstream this package already drives, so
+// what it shows is a real firing observed as a ReactionFiredEvent rather than a sketch.
 
 import (
+	"context"
 	"fmt"
-	"slices"
 
 	"github.com/airiclenz/apogee"
 )
@@ -94,21 +94,6 @@ var (
 	_ apogee.SearchHits
 	_ apogee.ToolRegistry
 	_ apogee.ExternalEffects
-	_ apogee.HookPoint
-	_ apogee.PreRequestHook
-	_ apogee.PostResponseHook
-	_ apogee.PreToolExecHook
-	_ apogee.PostToolResultHook
-	_ apogee.HistoryRewriter
-	_ apogee.PostResponseDecision
-	_ apogee.PostResponseAction
-	_ apogee.RegisteredMechanism
-	_ apogee.MechanismID
-	_ apogee.MechanismDescriptor
-	_ apogee.Capability
-	_ apogee.SuppressionPolicy
-	_ apogee.OrderingConstraints
-	_ apogee.MechanismRegistry
 	_ apogee.Role
 	_ apogee.Message
 	_ apogee.ToolDef
@@ -143,9 +128,6 @@ var (
 	_ = apogee.Resume
 	_ = apogee.IsReadOnly
 	_ = apogee.NewToolRegistry
-	_ = apogee.NewMechanismRegistry
-	_ = apogee.BuildMechanisms
-	_ = apogee.CataloguedMechanisms
 	_ = apogee.DecodeSession
 	_ = apogee.NewHookRunner
 	_ = apogee.NewEventLines
@@ -202,23 +184,6 @@ var (
 	_ = apogee.EffectNetwork
 	_ = apogee.EffectMCP
 
-	_ = apogee.HookPreRequest
-	_ = apogee.HookPostResponse
-	_ = apogee.HookPreToolExec
-	_ = apogee.HookPostToolResult
-	_ = apogee.HookHistoryRewrite
-
-	_ = apogee.ActionRetry
-	_ = apogee.ActionIntercept
-	_ = apogee.ActionDefer
-
-	_ = apogee.CapOffRamp
-	_ = apogee.CapProactiveNudge
-	_ = apogee.CapResponseRepair
-
-	_ = apogee.SuppressStrikesThree
-	_ = apogee.SuppressExempt
-
 	_ = apogee.RoleSystem
 	_ = apogee.RoleUser
 	_ = apogee.RoleAssistant
@@ -230,10 +195,7 @@ var (
 
 	_ = apogee.ErrAutoUnavailable
 	_ = apogee.ErrConfinementUnavailable
-	_ = apogee.ErrOrderingCycle
-	_ = apogee.ErrIncompatibleMechanisms
-	_ = apogee.ErrMissingRequirement
-	_ = apogee.ErrUnknownMechanism
+	_ = apogee.ErrInvalidReaction
 	_ = apogee.ErrSessionVersion
 	_ = apogee.ErrInputPending
 	_ = apogee.ErrNoOpenExchange
@@ -245,79 +207,93 @@ var (
 	_ = apogee.Version
 )
 
-// discardSink is a no-op EventSink so the Examples construct an Agent hermetically — construction
-// emits nothing and never dials the Endpoint.
-type discardSink struct{}
+// reactionSink is the host's observer, narrowed to the firings of ONE Reaction and rendering
+// each the way apogee's own debug view does: `reaction <id> @ <moment>: <action>`, with the
+// optional detail in brackets. Every other Event is dropped, so the example's output is the
+// armed Reaction's record and nothing else the loop happened to emit.
+type reactionSink struct {
+	watch string
+	fired []string
+}
 
-func (discardSink) Emit(apogee.Event) {}
+func (s *reactionSink) Emit(e apogee.Event) {
+	fired, ok := e.(apogee.ReactionFiredEvent)
+	if !ok || fired.Reaction != s.watch {
+		return
+	}
+	line := fmt.Sprintf("reaction %s @ %s: %s", fired.Reaction, fired.Moment, fired.Action)
+	if fired.Detail != "" {
+		line += " (" + fired.Detail + ")"
+	}
+	s.fired = append(s.fired, line)
+}
 
-// Example_enableMechanismStack arms catalogued Mechanisms by ID through Config.EnableMechanisms.
-// The arm must be internally compatible — a pair the catalogue declares IncompatibleWith fails New
-// with ErrIncompatibleMechanisms — so it is planned from CataloguedMechanisms() itself, keeping each
-// row only when it stacks with everything already chosen. Naming no ID keeps the example honest as
-// the catalogue changes.
-func Example_enableMechanismStack() {
-	catalogue := apogee.CataloguedMechanisms()
-	byID := make(map[apogee.MechanismID]apogee.MechanismDescriptor, len(catalogue))
-	for _, d := range catalogue {
-		byID[d.ID] = d
+// Example_armReaction arms one Reaction of the engine's own origin BESIDE the engine's builtins,
+// through Config.Reactions: an advise Reaction at the post-tool-result Moment, which appends a
+// note to every tool result before the model reads it. Arming is the whole surface — an id, the
+// origin × class cell it occupies, the Moments it fires on, and one of the five sealed Go
+// handlers — and a Reaction that ACTS books exactly one ReactionFiredEvent, which is what the
+// host's EventSink observes here.
+func Example_armReaction() {
+	upstream := benchModel()
+	defer upstream.Close()
+
+	menu := apogee.NewToolRegistry()
+	if err := menu.Register(stubTool{name: "list_dir"}); err != nil {
+		fmt.Println("register:", err)
+		return
 	}
 
-	var arm []apogee.MechanismID
-	for _, d := range catalogue {
-		if slices.ContainsFunc(arm, func(sel apogee.MechanismID) bool {
-			return slices.Contains(d.IncompatibleWith, sel) || slices.Contains(byID[sel].IncompatibleWith, d.ID)
-		}) {
-			continue // a row that refuses to stack with one already chosen
-		}
-		arm = append(arm, d.ID)
-	}
+	const reactionID = "result-note"
+	sink := &reactionSink{watch: reactionID}
 
-	cfg := apogee.Config{
-		Endpoint:         "http://localhost:11434",
-		Model:            "local-model",
-		Events:           discardSink{},
-		EnableMechanisms: arm,
-	}
-	ag, err := apogee.New(cfg)
+	ag, err := apogee.New(apogee.Config{
+		Endpoint: upstream.URL,
+		Model:    benchModelName,
+		Mode:     apogee.ModeAskBefore,
+		Approver: allowAll{},
+		Events:   sink,
+		Tools:    menu,
+		Reactions: []apogee.Reaction{{
+			ID:     reactionID,
+			Origin: apogee.OriginEngine,
+			Class:  apogee.ClassAdvise,
+			On:     []apogee.Moment{apogee.MomentPostToolResult},
+			Handler: apogee.PostToolResultFunc(func(
+				_ context.Context,
+				_ apogee.LoopView,
+				call apogee.ToolCall,
+				result *apogee.ToolResultEdit,
+			) (apogee.Outcome, error) {
+				result.SetContent(result.Content() + "\n[note] " + call.Tool + " ran under review.")
+				return apogee.Outcome{Detail: "noted " + call.Tool}, nil
+			}),
+		}},
+	})
 	if err != nil {
 		fmt.Println("construct:", err)
 		return
 	}
 	defer func() { _ = ag.Close() }()
 
-	fmt.Println("construct: ok")
-	// Output:
-	// construct: ok
-}
-
-// Example_cataloguedMechanisms plans an arm AROUND one Mechanism the way the bench does: keep the
-// Mechanism the arm is about, then drop every row declared incompatible with it, so no refused pair
-// reaches New. The subject is taken from CataloguedMechanisms() rather than named, so the idiom —
-// not any one row — is what the example shows.
-func Example_cataloguedMechanisms() {
-	catalogue := apogee.CataloguedMechanisms()
-	if len(catalogue) == 0 {
-		fmt.Println("no incompatible row survived the filter: true")
+	if err := ag.Submit(apogee.UserInput{Text: "list the workspace"}); err != nil {
+		fmt.Println("submit:", err)
 		return
 	}
-	armAbout := catalogue[0].ID
-
-	var arm []apogee.MechanismID
-	for _, d := range catalogue {
-		if d.ID != armAbout && slices.Contains(d.IncompatibleWith, armAbout) {
-			continue // a row that refuses to stack with the one this arm is about
+	for i := 0; i < 8; i++ {
+		res, err := ag.Step(context.Background())
+		if err != nil {
+			fmt.Println("step:", err)
+			return
 		}
-		arm = append(arm, d.ID)
-	}
-
-	clean := true
-	for _, d := range catalogue {
-		if d.ID != armAbout && slices.Contains(d.IncompatibleWith, armAbout) && slices.Contains(arm, d.ID) {
-			clean = false
+		if res.Status == apogee.StatusExchangeComplete {
+			break
 		}
 	}
-	fmt.Println("no incompatible row survived the filter:", clean)
+
+	for _, line := range sink.fired {
+		fmt.Println(line)
+	}
 	// Output:
-	// no incompatible row survived the filter: true
+	// reaction result-note @ post-tool-result: fired (noted list_dir)
 }

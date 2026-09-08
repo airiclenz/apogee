@@ -23,18 +23,6 @@ type nopSink struct{}
 
 func (nopSink) Emit(apogee.Event) {}
 
-// orderingMech is a minimal Mechanism hook carrying the ID and ordering constraints its
-// catalogue row is built from (mustAdd) — the trivial input the cycle gate needs. It
-// implements PreRequestHook so MechanismRegistry.Add accepts it (a Mechanism must hook
-// somewhere, ADR 0002).
-type orderingMech struct {
-	id     apogee.MechanismID
-	before []apogee.MechanismID
-	after  []apogee.MechanismID
-}
-
-func (orderingMech) PreRequest(context.Context, *apogee.Request) error { return nil }
-
 func validConfig() apogee.Config {
 	return apogee.Config{Endpoint: "http://localhost:0", Model: "test-model", Events: nopSink{}}
 }
@@ -85,35 +73,6 @@ func TestNew_NonAutoModeNeedsNoConfiner(t *testing.T) {
 	}
 }
 
-func TestNew_OrderingCycle(t *testing.T) {
-	t.Run("cyclic registry is rejected", func(t *testing.T) {
-		registry := apogee.NewMechanismRegistry()
-		// a must come after b, and b must come after a → a 2-cycle.
-		mustAdd(t, registry, orderingMech{id: "a", after: []apogee.MechanismID{"b"}})
-		mustAdd(t, registry, orderingMech{id: "b", after: []apogee.MechanismID{"a"}})
-
-		cfg := validConfig()
-		cfg.Mechanisms = registry
-
-		if _, err := apogee.New(cfg); !errors.Is(err, apogee.ErrOrderingCycle) {
-			t.Errorf("New err = %v, want ErrOrderingCycle", err)
-		}
-	})
-
-	t.Run("acyclic registry is accepted", func(t *testing.T) {
-		registry := apogee.NewMechanismRegistry()
-		mustAdd(t, registry, orderingMech{id: "a", before: []apogee.MechanismID{"b"}})
-		mustAdd(t, registry, orderingMech{id: "b"})
-
-		cfg := validConfig()
-		cfg.Mechanisms = registry
-
-		if _, err := apogee.New(cfg); err != nil {
-			t.Errorf("New(acyclic) = %v, want nil", err)
-		}
-	})
-}
-
 func TestNew_RequiresMinimumConfig(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -159,14 +118,6 @@ func TestNew_ModelMayBeBoundLater(t *testing.T) {
 	}
 }
 
-func TestAddExperimental_WrongInterface(t *testing.T) {
-	registry := apogee.NewMechanismRegistry()
-	// orderingMech implements PreRequestHook, not HistoryRewriter.
-	if err := registry.AddExperimental(apogee.HookHistoryRewrite, orderingMech{id: "x"}); err == nil {
-		t.Error("AddExperimental with mismatched hook point = nil error, want an error")
-	}
-}
-
 func TestSession_RoundTrip(t *testing.T) {
 	agent, err := apogee.New(validConfig())
 	if err != nil {
@@ -206,67 +157,26 @@ func TestResume_FutureVersion(t *testing.T) {
 	}
 }
 
-func mustAdd(t *testing.T, registry *apogee.MechanismRegistry, m orderingMech) {
-	t.Helper()
-	registered := apogee.RegisteredMechanism{
-		Descriptor: apogee.MechanismDescriptor{ID: m.id},
-		Ordering:   apogee.OrderingConstraints{Before: m.before, After: m.after},
-		Hook:       m,
-	}
-	if err := registry.Add(registered); err != nil {
-		t.Fatalf("Add(%s): %v", m.id, err)
-	}
-}
+// TestNew_InvalidReaction_MatchableThroughRoot proves the Reaction arming refusal is matchable
+// through the root re-export: an embedder outside the module cannot import internal/domain
+// (ADR 0010), so apogee.ErrInvalidReaction must BE the sentinel New wraps when Config.Reactions
+// carries a reaction the engine will not accept. The case is a reaction whose On list names a
+// Moment its sealed handler cannot serve — the mistake a host makes by hand, refused at
+// construction rather than silently never firing.
+func TestNew_InvalidReaction_MatchableThroughRoot(t *testing.T) {
+	cfg := validConfig()
+	cfg.Reactions = []apogee.Reaction{{
+		ID:     "wrong-seam",
+		Origin: apogee.OriginEngine,
+		Class:  apogee.ClassObserve,
+		On:     []apogee.Moment{apogee.MomentPostResponse},
+		Handler: apogee.PreRequestFunc(func(context.Context, *apogee.Request) (apogee.Outcome, error) {
+			return apogee.Outcome{}, nil
+		}),
+	}}
 
-// TestCataloguedMechanisms asserts the public catalogue query is REACHABLE and sorted by ID —
-// through the public surface only (no internal import), so it also guards that the descriptor
-// metadata is readable without building any Mechanism (ADR 0015 §3). The relations it used to read
-// off a named row are gone from the catalogue, and so is every row: the six Mechanisms every model
-// benefited from became Floor guards and the other fourteen retired outright in v0.20.0 (ADR 0071),
-// so the SHIPPED answer is an empty — but non-nil and well-formed — slice. The descriptor CONTRACT
-// — that the returned slices are clones of the catalogue's own — is pinned in internal/mechanisms
-// over a synthetic row, where a row with both edges non-empty can be registered whatever the
-// shipped catalogue holds.
-func TestCataloguedMechanisms(t *testing.T) {
-	got := apogee.CataloguedMechanisms()
-	if got == nil {
-		t.Fatal("CataloguedMechanisms() = nil, want an empty non-nil slice for the empty catalogue")
-	}
-
-	for i := 1; i < len(got); i++ {
-		if got[i-1].ID >= got[i].ID {
-			t.Errorf("CataloguedMechanisms() not strictly sorted/duplicate-free at %d: %q then %q",
-				i, got[i-1].ID, got[i].ID)
-		}
-	}
-}
-
-// TestEnableErrors_MatchableThroughRoot proves the enable-time sentinels are matchable through the
-// root re-exports: a half-armed Requires stack fails New with apogee.ErrMissingRequirement and a
-// bogus ID fails with apogee.ErrUnknownMechanism (ADR 0015 §4, locked decision 5). The half stack is
-// a registry a host injects rather than a catalogue pair: no catalogued row declares Requires any
-// more, its one declarer's peer having become a Floor guard, while the gate and the sentinel stay.
-func TestEnableErrors_MatchableThroughRoot(t *testing.T) {
-	half := validConfig()
-	registry := apogee.NewMechanismRegistry()
-	if err := registry.Add(apogee.RegisteredMechanism{
-		Descriptor: apogee.MechanismDescriptor{
-			ID:       "half_stack",
-			Requires: []apogee.MechanismID{"absent_peer"},
-		},
-		Hook: orderingMech{id: "half_stack"},
-	}); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-	half.Mechanisms = registry
-	if _, err := apogee.New(half); !errors.Is(err, apogee.ErrMissingRequirement) {
-		t.Errorf("New(half-stack) err = %v, want ErrMissingRequirement", err)
-	}
-
-	bogus := validConfig()
-	bogus.EnableMechanisms = []apogee.MechanismID{"no_such_mechanism"}
-	if _, err := apogee.New(bogus); !errors.Is(err, apogee.ErrUnknownMechanism) {
-		t.Errorf("New(bogus-id) err = %v, want ErrUnknownMechanism", err)
+	if _, err := apogee.New(cfg); !errors.Is(err, apogee.ErrInvalidReaction) {
+		t.Errorf("New(mis-seamed reaction) err = %v, want ErrInvalidReaction", err)
 	}
 }
 

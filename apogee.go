@@ -43,7 +43,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/hooks"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 )
 
 // ----------------------------------------------------------------------------
@@ -442,99 +441,6 @@ func NewToolRegistry() *ToolRegistry { return domain.NewToolRegistry() }
 type ExternalEffects = domain.ExternalEffects
 
 // ----------------------------------------------------------------------------
-// Mechanisms & hook points (internal/domain)
-// ----------------------------------------------------------------------------
-
-// HookPoint is where in the loop a Mechanism fires.
-type HookPoint = domain.HookPoint
-
-const (
-	HookPreRequest     = domain.HookPreRequest
-	HookPostResponse   = domain.HookPostResponse
-	HookPreToolExec    = domain.HookPreToolExec
-	HookPostToolResult = domain.HookPostToolResult
-	HookHistoryRewrite = domain.HookHistoryRewrite
-)
-
-// The five hook interfaces a Mechanism (or bench experimental hook) may implement.
-type (
-	PreRequestHook     = domain.PreRequestHook
-	PostResponseHook   = domain.PostResponseHook
-	PreToolExecHook    = domain.PreToolExecHook
-	PostToolResultHook = domain.PostToolResultHook
-	HistoryRewriter    = domain.HistoryRewriter
-)
-
-// PostResponseDecision is the action a post-response Mechanism chooses.
-type PostResponseDecision = domain.PostResponseDecision
-
-// PostResponseAction enumerates the post-response decisions.
-type PostResponseAction = domain.PostResponseAction
-
-const (
-	ActionRetry     = domain.ActionRetry
-	ActionIntercept = domain.ActionIntercept
-	ActionDefer     = domain.ActionDefer
-)
-
-// RegisteredMechanism is a catalogued Mechanism as the registry holds it: its descriptor
-// and ordering constraints — catalogue data supplied at registration — joined with the hook
-// that carries the behaviour.
-type RegisteredMechanism = domain.RegisteredMechanism
-
-// MechanismID is the canonical, stable identifier of a Mechanism.
-type MechanismID = domain.MechanismID
-
-// MechanismDescriptor is per-Mechanism metadata orthogonal to its hook point.
-type MechanismDescriptor = domain.MechanismDescriptor
-
-// Capability is what a Mechanism does — and what Bypass switches on.
-type Capability = domain.Capability
-
-const (
-	CapOffRamp        = domain.CapOffRamp
-	CapProactiveNudge = domain.CapProactiveNudge
-	CapResponseRepair = domain.CapResponseRepair
-)
-
-// SuppressionPolicy is how a Mechanism participates in self-regulation.
-type SuppressionPolicy = domain.SuppressionPolicy
-
-const (
-	SuppressStrikesThree = domain.SuppressStrikesThree
-	SuppressExempt       = domain.SuppressExempt
-)
-
-// CataloguedMechanisms returns a descriptor for every catalogued Mechanism, sorted by ID and
-// duplicate-free — the metadata needed to plan a Config.EnableMechanisms arm (each Mechanism's
-// Capability, SuppressionPolicy, and its IncompatibleWith / Requires stacking relations) WITHOUT
-// building any Mechanism. Each descriptor is a copy with its slice fields cloned, so a caller may
-// traverse and mutate the result freely (e.g. compute a leave-one-out arm by dropping an ID and
-// everything that Requires it). The catalogue's CONTENTS are data, not v1 contract — an ID may
-// change in a minor with a CHANGELOG notice — while this query and the descriptor shape are the
-// stable surface (ADR 0015 §3, locked decision 4).
-func CataloguedMechanisms() []MechanismDescriptor { return mechanisms.Descriptors() }
-
-// OrderingConstraints declares a Mechanism's position relative to others.
-type OrderingConstraints = domain.OrderingConstraints
-
-// MechanismRegistry is the injectable catalogue plus the bench's experimental slots.
-type MechanismRegistry = domain.MechanismRegistry
-
-// NewMechanismRegistry returns a registry seeded with the built-in catalogue.
-func NewMechanismRegistry() *MechanismRegistry { return domain.NewMechanismRegistry() }
-
-// BuildMechanisms builds the catalogued Mechanisms named by ids into a fresh registry and runs the
-// stacking gates over it — the same build New performs for Config.EnableMechanisms, for a host that
-// needs the registry rather than an Agent. The Delegation target's Mechanisms posture is what needs
-// one (ADR 0045): a routed sub-agent's catalogue is composed by the host, and Config.Mechanisms
-// takes a built registry. cfg supplies the roots and the model identity the build reads; hand each
-// child its own copy with MechanismRegistry.ForSubAgent. See internal/agent for the contract.
-func BuildMechanisms(cfg Config, ids []MechanismID) (*MechanismRegistry, error) {
-	return agent.BuildMechanisms(cfg, ids)
-}
-
-// ----------------------------------------------------------------------------
 // Reactions (internal/domain)
 // ----------------------------------------------------------------------------
 
@@ -772,26 +678,6 @@ var (
 	// when it cannot establish a confinement box for a subprocess, so dispatch gates
 	// the call through Approval instead of running it unconfined (ADR 0012).
 	ErrConfinementUnavailable = domain.ErrConfinementUnavailable
-
-	// ErrOrderingCycle is returned by New / registry Add when Mechanism ordering
-	// constraints form a cycle.
-	ErrOrderingCycle = domain.ErrOrderingCycle
-
-	// ErrIncompatibleMechanisms is returned by New when two registered Mechanisms
-	// declare each other incompatible (IncompatibleWith) — they must never co-fire.
-	ErrIncompatibleMechanisms = domain.ErrIncompatibleMechanisms
-
-	// ErrMissingRequirement is returned by New / Resume when a registered Mechanism declares a
-	// required peer (MechanismDescriptor.Requires) that is not itself registered — the dual of
-	// ErrIncompatibleMechanisms: where that refuses two Mechanisms that must never co-fire, this
-	// refuses one half of a benched stack (enable both or neither, ADR 0014 §4). Match with errors.Is.
-	ErrMissingRequirement = domain.ErrMissingRequirement
-
-	// ErrUnknownMechanism is returned by New / Resume when Config.EnableMechanisms names an ID that
-	// is not in the catalogue — a typo'd or deferred ID fails construction loudly rather than
-	// silently disabling a Mechanism (ADR 0015 §4). The wrapping error still names the known IDs;
-	// match the sentinel with errors.Is.
-	ErrUnknownMechanism = domain.ErrUnknownMechanism
 
 	// ErrSessionVersion is returned by Resume / DecodeSession for a snapshot whose
 	// schema version this build does not understand.
