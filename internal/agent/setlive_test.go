@@ -1,6 +1,7 @@
 package agent
 
-// The three anytime-safe setters the settings surface drives mid-session — SetBypass,
+// The anytime-safe setters the settings surface drives mid-session — SetReactions (and the
+// SetBypass wrapper over it),
 // SetCompactionEnabled and SetContextFiles (the SetMode/SetConfineToWorkspace class). What each
 // test pins is the CONSUMPTION BOUNDARY: Bypass lands at the next reaction evaluation, the
 // auto-Compaction gate at the next fold decision, and the context-file names only at the next
@@ -10,6 +11,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -95,6 +97,58 @@ func TestAgentSetBypassObservedByTheNextHookFire(t *testing.T) {
 	}
 	if offRamped != 2 {
 		t.Errorf("the observe Reaction fired %d times in total; want 2 — Bypass never switches observe off", offRamped)
+	}
+}
+
+// TestSetReactionsSwapsFloorAndBypassAtomically drives the ONE swap seam against a concurrent
+// cascade under the race detector. The generation is a compound value now — Floor and Bypass
+// under one lock, with the builtin ladder rebuilt from the Floor (ADR 0076 A8) — so the setter
+// races both the per-Moment Bypass read and the ladder read fire takes, which is what the old
+// per-field locks could not cover. It asserts nothing beyond "no data race and both halves
+// land": that is the whole point of a swap that must never be observed half applied.
+func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	const iters = 500
+	generations := []domain.Generation{
+		{},
+		{Bypass: true, Floor: domain.FloorConfig{DisableToolLoopBreaker: true}},
+		{Floor: domain.FloorConfig{DisableReadCache: true, DisableToolResultCap: true}},
+		{Bypass: true},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			a.SetReactions(generations[i%len(generations)])
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			if _, err := a.fire(context.Background(), domain.MomentPostResponse, postResponse(true)); err != nil {
+				t.Errorf("fire: %v", err)
+				return
+			}
+			_ = a.Generation()
+		}
+	}()
+	wg.Wait()
+
+	// The last generation installed is what the Agent runs, both halves of it.
+	want := domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableToolCallSalvage: true}}
+	a.SetReactions(want)
+	got := a.Generation()
+	if got.Floor != want.Floor || got.Bypass != want.Bypass {
+		t.Errorf("Generation() = %+v, want %+v", got, want)
+	}
+	if ids := builtinIDs(a); slices.Contains(ids, guardToolCallSalvage) {
+		t.Errorf("ladder = %v, want the salvage guard switched out of it", ids)
 	}
 }
 

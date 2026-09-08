@@ -387,7 +387,19 @@ go test ./cmd/apogee/ -run 'Settings|Docs|Hooks|Reactions'
 
 **Commit:** `feat(config)!: hooks: migrates itself into reactions:; the dead mechanisms: and validated-sets: keys are stripped`
 
-## 10. Agent: `SetReactions(gen)` and the builtin enable set
+## 10. Agent: `SetReactions(gen)` and the builtin enable set — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): `internal/agent/construct.go` is edited beyond the item's Files list — it seeds `gen` from `cfg.Bypass`/`cfg.Floor` (replacing the `bypass:`/`floor:` literal fields the item deletes) and calls the new `buildBuiltins(cfg.Floor)` / `armReactions(cfg.Reactions)` signatures; the item's change cannot compile without it.
+
+NOTES (2026-09-08): consequential edit — internal/agent/doc.go: made necessary by the enable set — the package map said builtins.go holds "the seven Floor guards … each reading its live gate", which the enable set makes false, and agent.go's setter list named Bypass/Floor rather than the one generation swap.
+
+NOTES (2026-09-08): `floorConfig()` is deleted rather than kept: with the handlers no longer gating themselves, its only remaining callers were `subagent.go` (now `Generation().Floor`) and `TestFloorGuard_ChildInheritsTheLiveFloor` (now `Generation()`, per the item's own test list).
+
+NOTES (2026-09-08): `armReactions` lost its `builtins` parameter and now reserves the new `guardIDs` (all seven keys, `floorguards.go`) — the guard paragraph's requirement, since a disabled guard is no longer in the builtins slice to reserve its own id from.
+
+NOTES (2026-09-08): `SetBypass`/`SetFloor` are read-modify-write wrappers and therefore not atomic against each other; the doc comments say so, and the caveat disappears with the setters at item 13. `SetReactions` itself never publishes a half-swapped generation.
+
+NOTES (2026-09-08): added `TestSetReactionsRebuildsTheLadderOnlyWhenTheFloorMoves` (the item's "a Bypass-only `SetReactions` leaves the ladder slice identical" test) under that name; the item did not name it.
 
 **What:** Depends on item 3. `internal/agent` gains `SetReactions(gen domain.Generation)` and `Generation() domain.Generation` under one `genMu`, replacing the separate `floorMu`/`bypassMu` holders; `Config.Bypass`/`Config.Floor` seed the initial generation. Builtins become an **enable set** (call): `buildBuiltins` returns only the guards whose boolean is on, and the ladder is rebuilt from the generation on every `SetReactions` — the handlers stop reading `a.floorConfig()` at fire time. Children inherit the parent's current generation (replaces `childCfg.Bypass = a.bypassEnabled()` and the floor inheritance). `SetBypass(bool)` and `SetFloor(FloorConfig)` remain as wrappers that read-modify-write the generation (call: old setters) until item 13. `Generation.Observe` is ignored by the agent in this stage (it is the Runner's) — stated in the doc comment.
 

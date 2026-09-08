@@ -146,7 +146,7 @@ func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.
 		})
 	}()
 
-	retried, err := a.fireLeg(ctx, turn, m, seam, a.builtins, true, &result, &fired)
+	retried, err := a.fireLeg(ctx, turn, m, seam, a.builtinLadder(), true, &result, &fired)
 	if err != nil {
 		return domain.Outcome{}, err
 	}
@@ -160,6 +160,16 @@ func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.
 		return domain.Outcome{}, err
 	}
 	return result, nil
+}
+
+// builtinLadder snapshots the builtin leg for one cascade. The slice is the enable set — only
+// the guards the live Generation's Floor leaves on — and a Floor swap REPLACES it wholesale
+// rather than mutating it in place (SetReactions), so one read under genMu gives the whole
+// cascade a consistent ladder even if the settings surface swaps mid-fire.
+func (a *Agent) builtinLadder() []armedReaction {
+	a.genMu.RLock()
+	defer a.genMu.RUnlock()
+	return a.builtins
 }
 
 // firePostToolResult fires the post-tool-result Moment for one finished call, letting reactions
@@ -452,18 +462,22 @@ func wrongHandler(m domain.Moment, h domain.Handler) error {
 
 // armReactions validates the Reactions a host armed on Config.Reactions and returns them in the
 // dispatcher's own shape. Every entry must be well formed (Reaction.Validate) and answer to an
-// ID no builtin and no earlier entry already holds: the ReactionFiredEvent, the identity
+// ID no Floor guard and no earlier entry already holds: the ReactionFiredEvent, the identity
 // projector and the provenance ledger all key on the ID, so two reactions sharing one name make
 // every attribution ambiguous. Either failure fails construction — an invalid or shadowed
 // reaction never silently does nothing.
-func armReactions(builtins []armedReaction, reactions []domain.Reaction) ([]armedReaction, error) {
+//
+// The reserved set is guardIDs — ALL seven guard keys, not the enable set the ladder currently
+// holds (floorguards.go). A guard the user switched off still owns its name: arming an entry
+// under it would be answered by the guard again the moment the Floor swaps back.
+func armReactions(reactions []domain.Reaction) ([]armedReaction, error) {
 	if len(reactions) == 0 {
 		return nil, nil
 	}
 
-	taken := make(map[string]bool, len(builtins)+len(reactions))
-	for _, b := range builtins {
-		taken[b.spec.ID] = true
+	taken := make(map[string]bool, len(guardIDs)+len(reactions))
+	for _, id := range guardIDs {
+		taken[id] = true
 	}
 
 	armed := make([]armedReaction, 0, len(reactions))

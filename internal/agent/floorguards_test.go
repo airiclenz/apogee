@@ -6,6 +6,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -219,7 +220,9 @@ func TestFloorGuard_LoopBreakerWinsOverRepair(t *testing.T) {
 }
 
 // The guards are the FLOOR: a sub-agent inherits the parent's live opt-outs at spawn, so a child
-// never runs with a floor its parent switched off (or without one its parent kept).
+// never runs with a floor its parent switched off (or without one its parent kept). The switch is
+// driven through SetReactions — the one live-swap seam (ADR 0076 A8) — and the child's own
+// generation is what the inheritance is read back from.
 func TestFloorGuard_ChildInheritsTheLiveFloor(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
@@ -227,18 +230,23 @@ func TestFloorGuard_ChildInheritsTheLiveFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	if got := parent.floorConfig(); got != (domain.FloorConfig{}) {
-		t.Fatalf("a bare Config seeds %+v, want the zero value (every guard on)", got)
+	if got := parent.Generation(); got.Floor != (domain.FloorConfig{}) || got.Bypass {
+		t.Fatalf("a bare Config seeds %+v, want the zero generation (every guard on, no Bypass)", got)
 	}
 
-	parent.SetFloor(domain.FloorConfig{DisableToolLoopBreaker: true})
+	want := domain.Generation{Floor: domain.FloorConfig{DisableToolLoopBreaker: true}, Bypass: true}
+	parent.SetReactions(want)
 	child, err := parent.newChildAgent("spawn-1", "survey the tree", "surveyor")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
-	want := domain.FloorConfig{DisableToolLoopBreaker: true}
-	if got := child.floorConfig(); got != want {
-		t.Errorf("child floor = %+v, want the parent's live %+v", got, want)
+	if got := child.Generation(); got.Floor != want.Floor || got.Bypass != want.Bypass {
+		t.Errorf("child generation = %+v, want the parent's live %+v", got, want)
+	}
+	// And the child's ladder is the parent's enable set, not the seven: the guard the parent
+	// switched off is absent from it rather than present-and-skipping.
+	if ids := builtinIDs(child); slices.Contains(ids, guardToolLoopBreaker) {
+		t.Errorf("child builtins = %v, want the tool-loop breaker absent", ids)
 	}
 }
 

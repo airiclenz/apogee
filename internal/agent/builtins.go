@@ -11,8 +11,8 @@ import (
 )
 
 // The engine's builtin Reactions: the seven Floor guards (ADR 0071, ADR 0076 D1). Each is a
-// domain.Reaction of engine origin and shape-view class, holding a thin handler that reads its
-// own gate off the LIVE Floor config and then calls the unchanged internal/floor policy
+// domain.Reaction of engine origin and shape-view class, holding a thin handler that calls the
+// unchanged internal/floor policy
 // function. The policy stays in internal/floor byte-for-byte; what lives here is only the
 // engine's half — when the guard is consulted, what its firing is called, and what it books.
 //
@@ -20,12 +20,15 @@ import (
 // a builtin fires FIRST at its Moment and is never switched off by Bypass, which is the whole
 // difference between the floor a model always gets and everything armed above it.
 //
-// Each handler reads a.floorConfig() at FIRE time rather than closing over a construction-time
-// value, so SetFloor keeps switching a guard off and on mid-session with no rebuild: a guard
-// switched off stops at the next Moment, one switched back on arms again, and nothing already
-// corrected is undone.
+// The ladder is an ENABLE SET (ADR 0076 A8): a guard whose gate is off is ABSENT from the slice
+// buildBuiltins returns rather than present-and-self-skipping, so no handler consults a Floor
+// gate at fire time. The firing sequence is identical either way — a disabled guard booked
+// nothing before — and the ladder is rebuilt from the live Generation whenever its Floor moves
+// (SetReactions), so a guard switched off stops at the next Moment, one switched back on arms
+// again, and nothing already corrected is undone.
 
-// buildBuiltins returns this Agent's builtin Reactions in the order they fire. Within
+// buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON — in the
+// order they fire. Within
 // post-response the order is ratified (ADR 0071): tool-call salvage, then the tool-loop breaker,
 // tool-call repair, empty-response recovery and the tool-use enforcer — the coarser "you are
 // going in circles" judgment before the finer "this call is malformed" one, then the two
@@ -36,23 +39,39 @@ import (
 // for no retry and does not stop the leg. Running it first is what makes the four below judge
 // the response the model MEANT, so a Turn whose only call was written into the text is answered
 // by dispatching that call rather than by a retry the model did not need.
-func (a *Agent) buildBuiltins() []armedReaction {
-	return []armedReaction{
-		engineBuiltin(guardToolCallSalvage, guardActionSalvage, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.salvageToolCall)),
-		engineBuiltin(guardToolLoopBreaker, guardActionRetry, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.breakToolLoop)),
-		engineBuiltin(guardToolCallRepair, guardActionRetry, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.repairToolCall)),
-		engineBuiltin(guardEmptyResponseRecovery, guardActionRetry, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.recoverEmptyResponse)),
-		engineBuiltin(guardToolUseEnforcer, guardActionRetry, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.enforceToolUse)),
-		engineBuiltin(guardReadCache, guardActionIntercept, domain.MomentPreToolExec,
-			domain.PreToolExecFunc(a.cacheRead)),
-		engineBuiltin(guardToolResultCap, guardActionCap, domain.MomentPreRequest,
-			domain.PreRequestFunc(a.capToolResults)),
+//
+// gates is the enable set's input, read ONCE here: a guard whose opt-out is set is skipped over,
+// which is the whole of how a Floor gate is honoured now. The relative order of the guards that
+// survive is untouched, so switching one off never reshuffles the rest.
+func (a *Agent) buildBuiltins(gates domain.FloorConfig) []armedReaction {
+	ladder := make([]armedReaction, 0, len(guardIDs))
+	enabled := func(off bool, r armedReaction) {
+		if !off {
+			ladder = append(ladder, r)
+		}
 	}
+	enabled(gates.DisableToolCallSalvage,
+		engineBuiltin(guardToolCallSalvage, guardActionSalvage, domain.MomentPostResponse,
+			domain.PostResponseFunc(a.salvageToolCall)))
+	enabled(gates.DisableToolLoopBreaker,
+		engineBuiltin(guardToolLoopBreaker, guardActionRetry, domain.MomentPostResponse,
+			domain.PostResponseFunc(a.breakToolLoop)))
+	enabled(gates.DisableToolCallRepair,
+		engineBuiltin(guardToolCallRepair, guardActionRetry, domain.MomentPostResponse,
+			domain.PostResponseFunc(a.repairToolCall)))
+	enabled(gates.DisableEmptyResponseRecovery,
+		engineBuiltin(guardEmptyResponseRecovery, guardActionRetry, domain.MomentPostResponse,
+			domain.PostResponseFunc(a.recoverEmptyResponse)))
+	enabled(gates.DisableToolUseEnforcer,
+		engineBuiltin(guardToolUseEnforcer, guardActionRetry, domain.MomentPostResponse,
+			domain.PostResponseFunc(a.enforceToolUse)))
+	enabled(gates.DisableReadCache,
+		engineBuiltin(guardReadCache, guardActionIntercept, domain.MomentPreToolExec,
+			domain.PreToolExecFunc(a.cacheRead)))
+	enabled(gates.DisableToolResultCap,
+		engineBuiltin(guardToolResultCap, guardActionCap, domain.MomentPreRequest,
+			domain.PreRequestFunc(a.capToolResults)))
+	return ladder
 }
 
 // engineBuiltin builds one builtin: an engine-origin, shape-view Reaction on the single Moment
@@ -101,9 +120,6 @@ func engineBuiltin(id, action string, on domain.Moment, handler domain.Handler) 
 // may hold several: snapshot, resume and tests stay stable across runs. The Detail names what
 // was read back out of the text, the one fact the reaction's id cannot carry.
 func (a *Agent) salvageToolCall(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	if a.floorConfig().DisableToolCallSalvage {
-		return domain.Outcome{}, nil
-	}
 	if a.wrapUp || !processing.IsNative(a.textParser) {
 		return domain.Outcome{}, nil
 	}
@@ -129,9 +145,6 @@ func (a *Agent) salvageToolCall(_ context.Context, resp *domain.Response) (domai
 // breakToolLoop is the tool-loop breaker (floor.ToolLoopBreak): a Turn repeating the previous
 // Turn's tool calls verbatim is re-streamed with a directive naming what it has already tried.
 func (a *Agent) breakToolLoop(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	if a.floorConfig().DisableToolLoopBreaker {
-		return domain.Outcome{}, nil
-	}
 	directive, fired := floor.ToolLoopBreak(resp)
 	if !fired {
 		return domain.Outcome{}, nil
@@ -144,9 +157,6 @@ func (a *Agent) breakToolLoop(_ context.Context, resp *domain.Response) (domain.
 // against the whole registry (registeredToolNames), not this Turn's menu, so a call the mode
 // merely WITHDREW is left for that mode to answer.
 func (a *Agent) repairToolCall(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	if a.floorConfig().DisableToolCallRepair {
-		return domain.Outcome{}, nil
-	}
 	correction, fired := floor.ToolCallRepair(resp, a.registeredToolNames())
 	if !fired {
 		return domain.Outcome{}, nil
@@ -157,9 +167,6 @@ func (a *Agent) repairToolCall(_ context.Context, resp *domain.Response) (domain
 // recoverEmptyResponse is the empty-response recovery (floor.RecoverEmpty): a Turn that produced
 // neither text nor a call is re-streamed with a nudge rather than faulting the Exchange.
 func (a *Agent) recoverEmptyResponse(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	if a.floorConfig().DisableEmptyResponseRecovery {
-		return domain.Outcome{}, nil
-	}
 	nudge, fired := floor.RecoverEmpty(resp)
 	if !fired {
 		return domain.Outcome{}, nil
@@ -171,9 +178,6 @@ func (a *Agent) recoverEmptyResponse(_ context.Context, resp *domain.Response) (
 // consecutive text-only Turn, having never called a tool, is re-streamed with a correction
 // naming the tools it was offered.
 func (a *Agent) enforceToolUse(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	if a.floorConfig().DisableToolUseEnforcer {
-		return domain.Outcome{}, nil
-	}
 	correction, fired := floor.EnforceToolUse(resp)
 	if !fired {
 		return domain.Outcome{}, nil
@@ -186,9 +190,6 @@ func (a *Agent) enforceToolUse(_ context.Context, resp *domain.Response) (domain
 // reshapes the pending call through the shared ToolCallEdit, the same wrapper every pre-tool-exec
 // reaction writes through, so the loop executes what the cascade left behind.
 func (a *Agent) cacheRead(_ context.Context, view domain.LoopView, call *domain.ToolCallEdit) (domain.Outcome, error) {
-	if a.floorConfig().DisableReadCache {
-		return domain.Outcome{}, nil
-	}
 	if !floor.CacheRead(view, call) {
 		return domain.Outcome{}, nil
 	}
@@ -200,9 +201,6 @@ func (a *Agent) cacheRead(_ context.Context, view domain.LoopView, call *domain.
 // conversation keeps every result whole, so a later Turn, a session snapshot and the rendered
 // transcript are unaffected by what the model was spared reading again.
 func (a *Agent) capToolResults(_ context.Context, req *domain.Request) (domain.Outcome, error) {
-	if a.floorConfig().DisableToolResultCap {
-		return domain.Outcome{}, nil
-	}
 	if capped := floor.CapToolResults(req); capped == 0 {
 		return domain.Outcome{}, nil
 	}

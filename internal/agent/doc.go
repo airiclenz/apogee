@@ -19,7 +19,8 @@
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
-// Submit, Step, Run, AbortExchange, Snapshot, and the setters for mode, Bypass, compaction,
+// Submit, Step, Run, AbortExchange, Snapshot, the one live-generation swap (SetReactions) the
+// Bypass and Floor setters wrap, and the setters for mode, compaction,
 // context files and the parallel-agent cap. construct.go is newAgent: the validation order
 // every construction path shares — required fields, then the ordering-cycle, incompatibility
 // and requirements gates, then the Auto/Confinement gate (ADR 0012). state.go is agentState,
@@ -31,12 +32,13 @@
 // and tool-call parsing, and the post-response retry cap. turn.go is turnLifecycle, the
 // Turn/Exchange state between quiescent boundaries (ADR 0007) and the exits that mutate the
 // conversation. floorguards.go is what the Floor guards keep outside internal/floor
-// (ADR 0071): the live per-guard opt-outs the settings surface swaps, and the config keys and
-// action labels a guard is known by. reactions.go is the Reaction dispatcher that succeeded the
+// (ADR 0071): the Floor half of the live-generation swap, the reserved guard ids, and the config
+// keys and action labels a guard is known by. reactions.go is the Reaction dispatcher that succeeded the
 // two ladders it replaced (ADR 0076): the one fire every seam calls, its two legs, the Bypass
 // gate, the recover boundary, the revision bracket and the ReactionFiredEvent a firing books.
-// builtins.go is the engine's own Reactions — the seven Floor guards as domain.Reaction values,
-// each reading its live gate and calling the unchanged internal/floor policy. wire.go is the
+// builtins.go is the engine's own Reactions — the Floor guards the live generation leaves ON, as
+// domain.Reaction values calling the unchanged internal/floor policy (the enable set,
+// ADR 0076 A8). wire.go is the
 // translation onto the provider seam: the domain request drained into a domain-free
 // provider.Request (ADR 0010). compact.go is conversation compaction — the explicit Compact,
 // the auto-compaction trigger and its allocation arithmetic, the emergency fold, the user bridge

@@ -5,7 +5,8 @@ import (
 )
 
 // The Floor guards' configuration keys, one per guard. The key is the guard's identity everywhere
-// outside internal/floor: it is what a user writes in config.yaml, what SetFloor switches, and the
+// outside internal/floor: it is what a user writes in config.yaml, what a Generation's Floor
+// switches, and the
 // id each guard's builtin Reaction fires under (builtins.go) — so an observer reading a
 // ReactionFiredEvent never has to map an internal name back to the switch that turns the behaviour
 // off.
@@ -32,26 +33,32 @@ const (
 	guardActionSalvage   = "salvage"
 )
 
-// SetFloor replaces the live Floor-guard gates for the rest of the session, mirroring
-// SetPruneToolResults. Each guard's builtin reads this value at fire time (builtins.go), so a guard
-// switched off stops at the next Moment and one switched back on arms again with no rebuild;
-// nothing already corrected is undone, the guards being decisions about a response that has already
-// been reviewed.
+// guardIDs is every Floor-guard key, in the ladder's firing order. It is the set armReactions
+// reserves (reactions.go) — ALL seven, whatever the enable set currently holds — so a
+// `reactions:` entry named after a guard the user switched OFF is refused just as loudly as one
+// named after a guard that is on: the id is the guard's identity whether or not it is armed
+// today, and a swap that turns the guard back on must never find its name already taken.
+var guardIDs = []string{
+	guardToolCallSalvage,
+	guardToolLoopBreaker,
+	guardToolCallRepair,
+	guardEmptyResponseRecovery,
+	guardToolUseEnforcer,
+	guardReadCache,
+	guardToolResultCap,
+}
+
+// SetFloor replaces the live Floor-guard gates for the rest of the session, leaving Bypass
+// exactly as it is. It is a read-modify-write wrapper over SetReactions, which carries the whole
+// contract — including the rebuild of the builtin ladder a moved Floor implies (the enable set)
+// and the transitional caveat SetBypass's own doc states.
 //
 // It takes the WHOLE FloorConfig rather than one flag at a time because the seven guards are read
 // as one value at each seam, and a caller that owns the settings surface owns all seven. It is safe to
 // call from another goroutine while a Step runs, like SetMode. A sub-agent spawned AFTER the switch
 // inherits the new value at spawn.
 func (a *Agent) SetFloor(gates domain.FloorConfig) {
-	a.floorMu.Lock()
-	a.floor = gates
-	a.floorMu.Unlock()
-}
-
-// floorConfig reports the live Floor-guard gates under the lock, so a builtin's decision is
-// race-free against a concurrent SetFloor. cfg.Floor is only the construction seed.
-func (a *Agent) floorConfig() domain.FloorConfig {
-	a.floorMu.RLock()
-	defer a.floorMu.RUnlock()
-	return a.floor
+	gen := a.Generation()
+	gen.Floor = gates
+	a.SetReactions(gen)
 }

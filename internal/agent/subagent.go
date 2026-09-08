@@ -520,12 +520,12 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	//                                                     (/confine may have moved it since construction)
 	childCfg.ScratchDir = a.ScratchDir() // and the parent's LIVE session scratch dir — a session
 	//                                      boundary may have moved it (SetScratchDir) since construction
-	childCfg.Bypass = a.bypassEnabled()                        // and the parent's LIVE Bypass, auto-Compaction and
-	childCfg.Context.CompactionEnabled = a.compactionEnabled() // Pruning gates, which the settings surface may have
-	childCfg.Context.PruneToolResults = a.pruneEnabled()       // swapped since construction
-	childCfg.Floor = a.floorConfig()                           // and the parent's LIVE Floor-guard
-	//                                                            opt-outs, so a child runs the same
-	//                                                            floor the parent is running (ADR 0071)
+	gen := a.Generation()        // the parent's LIVE Generation at spawn:
+	childCfg.Bypass = gen.Bypass // its Bypass and its Floor enable set, read as ONE value so a
+	childCfg.Floor = gen.Floor   // child never runs half of each (ADR 0076 A8) — and so it runs
+	//                              the same floor the parent is running (ADR 0071)
+	childCfg.Context.CompactionEnabled = a.compactionEnabled() // and the auto-Compaction and Pruning gates,
+	childCfg.Context.PruneToolResults = a.pruneEnabled()       // which the settings surface may have swapped
 	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the
 	// parent's context-file CONTENT verbatim below, because a sub-agent is not a session boundary.
 	childCfg.Tools = a.defaultSubAgentTools()

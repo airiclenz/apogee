@@ -47,10 +47,14 @@ import (
 // (Snapshot, Interject) are additionally valid at the boundary between two Steps of an open
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
-// anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetBypass,
-// SetCompactionEnabled, SetPruneToolResults, SetFloor, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
+// anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetReactions (and the
+// SetBypass / SetFloor wrappers over it),
+// SetCompactionEnabled, SetPruneToolResults, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
 // behind its own mutex, so the host (the settings surface, Shift+Tab, /confine) may call it
 // while a Step runs and the change lands at that field's next consumption boundary.
+// SetReactions is the one member that swaps a VALUE rather than a field — the Generation
+// carrying Bypass and the Floor enable set together (ADR 0076 A8) — for the reason genMu's own
+// comment gives below.
 type Agent struct {
 	cfg      domain.Config
 	upstream provider.Responder // provider seam (Decision C): fake in tests, real HTTP via New
@@ -62,6 +66,12 @@ type Agent struct {
 	// concatenated because the split IS the ladder: which leg a reaction is in decides whether
 	// Bypass may skip it and whether a post-response Retry takes the Turn away from the leg
 	// below.
+	//
+	// builtins is the ENABLE SET: a guard whose Floor boolean is off is ABSENT from the slice
+	// rather than self-skipping at fire time, so the ladder is rebuilt from the live Generation
+	// whenever its Floor moves. That makes it a live field, guarded by genMu below and replaced
+	// wholesale rather than mutated in place (SetReactions / builtinLadder). armed is fixed at
+	// construction and needs no lock.
 	builtins []armedReaction
 	armed    []armedReaction
 
@@ -125,26 +135,31 @@ type Agent struct {
 	scratchMu  sync.RWMutex
 	scratchDir string // live session scratch dir; seeded from cfg.ScratchDir, swappable via SetScratchDir
 
-	// bypassMu, compactionMu, pruneMu, floorMu and contextFilesMu guard the five settings the
-	// settings surface may swap mid-session (SetBypass / SetCompactionEnabled /
-	// SetPruneToolResults / SetFloor / SetContextFiles). They follow the modeMu
+	// genMu guards gen AND builtins above — the live Generation the settings surface swaps whole
+	// (SetReactions) and the builtin ladder derived from its Floor. It is the ONE member of the
+	// modeMu class that covers two fields, and the one that covers a compound value rather than a
+	// single flag: ADR 0037 D2's "one mutex, one field" rule is SUPERSEDED here by ADR 0076 A8,
+	// which makes Bypass and the Floor enable set one value a live swap carries. They stopped
+	// being independent facts the moment the ladder became derived from one of them, so a
+	// per-field lock could hand a reader a half-swapped generation — exactly what A8 exists to
+	// prevent. Generation.Observe is the RUNNER's and is never held here.
+	genMu sync.RWMutex
+	gen   domain.Generation // live Floor enable set + Bypass; seeded from cfg.Floor/cfg.Bypass, swapped via SetReactions
+
+	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
+	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
+	// follow the modeMu
 	// pattern to the letter — one mutex per field, named for the single field it guards, because the
-	// five are independent facts read at five different boundaries and never as one consistent
-	// tuple. Their cfg counterparts (cfg.Bypass, cfg.Context.CompactionEnabled,
-	// cfg.Context.PruneToolResults, cfg.Floor, cfg.ContextFiles)
+	// three are independent facts read at three different boundaries and never as one consistent
+	// tuple. Their cfg counterparts (cfg.Context.CompactionEnabled,
+	// cfg.Context.PruneToolResults, cfg.ContextFiles)
 	// stay the immutable construction seeds, so the whole-struct cfg copy a sub-agent spawn takes
 	// (newChildAgent) keeps reading fields nothing ever writes.
-	bypassMu sync.RWMutex
-	bypass   bool // live Bypass flag; seeded from cfg.Bypass, swappable via SetBypass
-
 	compactionMu sync.RWMutex
 	compaction   bool // live auto-Compaction gate; seeded from cfg.Context.CompactionEnabled, swappable via SetCompactionEnabled
 
 	pruneMu sync.RWMutex
 	prune   bool // live tool-result Pruning gate; seeded from cfg.Context.PruneToolResults, swappable via SetPruneToolResults
-
-	floorMu sync.RWMutex
-	floor   domain.FloorConfig // live Floor-guard opt-outs (ADR 0071); seeded from cfg.Floor, swappable via SetFloor
 
 	contextFilesMu   sync.RWMutex
 	contextFileNames []string // live workspace context-file names; seeded from cfg.ContextFiles, swappable via SetContextFiles
@@ -998,29 +1013,66 @@ func (a *Agent) closeUndoGroup() {
 	}
 }
 
-// SetBypass switches Bypass — the advise and shape Reactions of user or bench origin off, the
-// engine's own builtins and the structure on (ADR 0006, ADR 0076 D9) — on or off for the rest
-// of the session. It takes effect at the NEXT fire: the gate is consulted per armed Reaction per
-// Moment (bypassSkips), so nothing is rebuilt and a Turn already mid-flight starts honouring the
-// new value at its next Moment. The builtins and the structural machinery (Budget, Compaction,
-// the guardrails) are unaffected either way — Bypass has never governed them.
+// SetReactions installs one live Generation — the Floor enable set and Bypass — for the rest of
+// the session. It is the engine's ONE swap seam for both (ADR 0076 A8): SetBypass and SetFloor
+// are read-modify-write wrappers over it, so nothing downstream can observe a state that is half
+// one generation and half the next.
+//
+// gen.Observe is IGNORED here. The observe lane belongs to the Runner, and an agent takes only
+// Floor and Bypass out of a generation (domain.Generation); the Driver hands the SAME value to
+// both, which is what keeps the two halves of one swap in step.
+//
+// The builtin ladder is REBUILT from gen.Floor, because a Floor guard whose boolean is off is
+// absent from the ladder rather than self-skipping at fire time (the enable set, ADR 0076 A8):
+// the firing sequence is identical either way, a disabled guard having booked nothing before.
+// It is rebuilt only when the Floor actually MOVED — a Bypass-only swap leaves the slice exactly
+// as it was, so a ladder installed in place of the seven guards survives one.
+//
+// Bypass takes effect at the next fire, as it always has: the gate is consulted per armed
+// Reaction per Moment (bypassSkips), so a Turn already mid-flight starts honouring the new value
+// at its next Moment. The structural machinery (Budget, Compaction, the guardrails) is
+// unaffected either way — Bypass has never governed it.
 //
 // It is safe to call from another goroutine (the settings surface) while a Step runs, like
-// SetMode. A sub-agent spawned AFTER the switch inherits the new value (newChildAgent reads the
-// live flag at spawn); one already mid-flight keeps what it was spawned with.
+// SetMode. A sub-agent spawned AFTER the swap inherits the new generation (newChildAgent reads
+// it at spawn); one already mid-flight keeps what it was spawned with.
+func (a *Agent) SetReactions(gen domain.Generation) {
+	a.genMu.Lock()
+	defer a.genMu.Unlock()
+	if gen.Floor != a.gen.Floor {
+		a.builtins = a.buildBuiltins(gen.Floor)
+	}
+	a.gen.Floor, a.gen.Bypass = gen.Floor, gen.Bypass
+}
+
+// Generation reports the live Generation this Agent is running — the Floor enable set and Bypass
+// as SetReactions last installed them, seeded at construction from cfg.Floor and cfg.Bypass.
+// Observe is always empty: the agent never holds the observe lane.
+func (a *Agent) Generation() domain.Generation {
+	a.genMu.RLock()
+	defer a.genMu.RUnlock()
+	return a.gen
+}
+
+// SetBypass switches Bypass — the advise and shape Reactions of user or bench origin off, the
+// engine's own builtins and the structure on (ADR 0006, ADR 0076 D9) — on or off for the rest
+// of the session, leaving the Floor enable set exactly as it is. It is a read-modify-write
+// wrapper over SetReactions, which carries the whole contract — a transitional one, kept while
+// the Driver still drives the two halves separately, so two goroutines calling it and SetFloor
+// at the same instant may lose one edit. The generation itself is never half-swapped.
 func (a *Agent) SetBypass(enabled bool) {
-	a.bypassMu.Lock()
-	a.bypass = enabled
-	a.bypassMu.Unlock()
+	gen := a.Generation()
+	gen.Bypass = enabled
+	a.SetReactions(gen)
 }
 
 // bypassEnabled reports the live Bypass flag under the lock, so the worker goroutine's per-hook
-// read is race-free against a concurrent SetBypass. It is the ONE read seam for the flag: cfg.Bypass
-// is only the construction seed.
+// read is race-free against a concurrent SetReactions. It is the ONE read seam for the flag:
+// cfg.Bypass is only the construction seed.
 func (a *Agent) bypassEnabled() bool {
-	a.bypassMu.RLock()
-	defer a.bypassMu.RUnlock()
-	return a.bypass
+	a.genMu.RLock()
+	defer a.genMu.RUnlock()
+	return a.gen.Bypass
 }
 
 // SetCompactionEnabled switches the automatic, budget-driven Compaction trigger (the `auto-compact`

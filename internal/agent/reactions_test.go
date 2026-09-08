@@ -8,6 +8,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ func ladderAgent(t *testing.T, builtins, armed []domain.Reaction) (*Agent, *reco
 	for _, r := range builtins {
 		a.builtins = append(a.builtins, armedReaction{spec: r})
 	}
-	a.armed, err = armReactions(a.builtins, armed)
+	a.armed, err = armReactions(armed)
 	if err != nil {
 		t.Fatalf("armReactions: %v", err)
 	}
@@ -559,12 +560,23 @@ func TestInheritedReactionsDropsTopLevelOnly(t *testing.T) {
 // The builtins
 // ---------------------------------------------------------------------------
 
-// The seven Floor guards are well-formed engine-origin, shape-view Reactions, each on the seam
-// its handler serves and each booking under its own action label. Validate is what pins the
-// handler to the Moment, so a builtin wired to the wrong seam fails here rather than in the loop.
-func TestBuiltinReactionsAreTheSevenFloorGuards(t *testing.T) {
+// builtinIDs lists the ids of the ladder an Agent is CURRENTLY running, in firing order — the
+// enable set as SetReactions last rebuilt it.
+func builtinIDs(a *Agent) []string {
+	var ids []string
+	for _, b := range a.builtinLadder() {
+		ids = append(ids, b.spec.ID)
+	}
+	return ids
+}
+
+// With every guard on, the ladder is all seven: well-formed engine-origin, shape-view Reactions,
+// each on the seam its handler serves and each booking under its own action label. Validate is
+// what pins the handler to the Moment, so a builtin wired to the wrong seam fails here rather
+// than in the loop.
+func TestBuiltinReactionsAreTheSevenFloorGuardsWhenEveryGuardIsOn(t *testing.T) {
 	a, _ := ladderAgent(t, nil, nil)
-	builtins := a.buildBuiltins()
+	builtins := a.buildBuiltins(domain.FloorConfig{})
 
 	type want struct {
 		moment domain.Moment
@@ -608,6 +620,82 @@ func TestBuiltinReactionsAreTheSevenFloorGuards(t *testing.T) {
 		if b.action != w.action {
 			t.Errorf("%q: action = %q, want %q", b.spec.ID, b.action, w.action)
 		}
+	}
+}
+
+// A guard whose Floor boolean is off is ABSENT from the ladder rather than present and
+// self-skipping (the enable set, ADR 0076 A8): the guards around it keep their relative order,
+// and the firing sequence is unchanged because a disabled guard booked nothing before either.
+//
+// Its ID stays RESERVED all the same. armReactions reserves all seven guard keys whatever the
+// enable set holds, so a Config.Reactions entry named after a guard the user switched off is
+// refused exactly as loudly as one named after a guard that is on — the name must still be free
+// when the Floor swaps back.
+func TestBuiltinEnableSetDropsAGuardWhoseBooleanIsOff(t *testing.T) {
+	a, _ := ladderAgent(t, nil, nil)
+
+	full := a.buildBuiltins(domain.FloorConfig{})
+	trimmed := a.buildBuiltins(domain.FloorConfig{
+		DisableToolLoopBreaker: true,
+		DisableToolResultCap:   true,
+	})
+
+	var got, want []string
+	for _, b := range trimmed {
+		got = append(got, b.spec.ID)
+	}
+	for _, b := range full {
+		if b.spec.ID == guardToolLoopBreaker || b.spec.ID == guardToolResultCap {
+			continue
+		}
+		want = append(want, b.spec.ID)
+	}
+	assertOrder(t, "the enable set", got, want)
+
+	// The off guard's name is still taken, so an entry cannot answer to it.
+	cfg := baseConfig(&recordingSink{})
+	cfg.Floor.DisableToolLoopBreaker = true
+	cfg.Reactions = []domain.Reaction{{
+		ID:     guardToolLoopBreaker,
+		Origin: domain.OriginUser,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPostResponse},
+		Handler: domain.PostResponseFunc(func(context.Context, *domain.Response) (domain.Outcome, error) {
+			return domain.Outcome{}, nil
+		}),
+	}}
+
+	if _, err := newAgent(cfg, echoResponder{reply: "reply"}); !errors.Is(err, domain.ErrInvalidReaction) {
+		t.Errorf("newAgent = %v, want ErrInvalidReaction — an off guard still owns its id", err)
+	}
+}
+
+// A Bypass-only swap must NOT rebuild the ladder: whatever slice the Agent is running stays,
+// so anything holding it — a lab ladder installed in place of the seven guards, a cascade
+// mid-flight — survives the swap untouched. Only a moved Floor rebuilds, and then the ladder is
+// the enable set that Floor implies.
+func TestSetReactionsRebuildsTheLadderOnlyWhenTheFloorMoves(t *testing.T) {
+	log := &ladderLog{}
+	a, _ := ladderAgent(t, []domain.Reaction{probe(log, "installed", domain.ClassShapeView, nil)}, nil)
+
+	a.SetReactions(domain.Generation{Bypass: true})
+
+	assertOrder(t, "the ladder after a Bypass-only swap", builtinIDs(a), []string{"installed"})
+	if !a.Generation().Bypass {
+		t.Error("Bypass did not land")
+	}
+
+	a.SetReactions(domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableReadCache: true}})
+
+	ids := builtinIDs(a)
+	if slices.Contains(ids, "installed") {
+		t.Errorf("ladder = %v after a Floor swap, want it rebuilt from the guards", ids)
+	}
+	if slices.Contains(ids, guardReadCache) {
+		t.Errorf("ladder = %v after a Floor swap, want the read cache switched out of it", ids)
+	}
+	if len(ids) != len(guardIDs)-1 {
+		t.Errorf("ladder = %v, want the six guards the Floor leaves on", ids)
 	}
 }
 
