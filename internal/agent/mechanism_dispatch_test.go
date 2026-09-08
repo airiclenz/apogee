@@ -157,10 +157,10 @@ func (m panicMech) row() domain.RegisteredMechanism {
 }
 func (panicMech) PreRequest(context.Context, *domain.Request) error { panic("catalogued boom") }
 
-func mechanismFires(events []domain.Event) []domain.MechanismFiredEvent {
-	var out []domain.MechanismFiredEvent
+func mechanismFires(events []domain.Event) []domain.ReactionFiredEvent {
+	var out []domain.ReactionFiredEvent
 	for _, e := range events {
-		if fe, ok := e.(domain.MechanismFiredEvent); ok {
+		if fe, ok := e.(domain.ReactionFiredEvent); ok {
 			out = append(out, fe)
 		}
 	}
@@ -192,18 +192,18 @@ func TestCataloguedMechanismFiresUnderRealID(t *testing.T) {
 	fires := mechanismFires(sink.events)
 	found := false
 	for _, fe := range fires {
-		if fe.Mechanism == "greet" {
+		if fe.Reaction == "greet" {
 			found = true
-			if fe.Hook != domain.HookPreRequest {
-				t.Errorf("fired event hook = %q, want %q", fe.Hook, domain.HookPreRequest)
+			if fe.Moment != domain.MomentPreRequest {
+				t.Errorf("fired event moment = %q, want %q", fe.Moment, domain.MomentPreRequest)
 			}
 		}
-		if fe.Mechanism == experimentalMechanismID {
+		if fe.Reaction == string(experimentalMechanismID) {
 			t.Errorf("catalogued fire was attributed to the synthetic experimental ID, want %q", "greet")
 		}
 	}
 	if !found {
-		t.Errorf("no MechanismFiredEvent carried the catalogued ID %q; got %+v", "greet", fires)
+		t.Errorf("no ReactionFiredEvent carried the catalogued ID %q; got %+v", "greet", fires)
 	}
 }
 

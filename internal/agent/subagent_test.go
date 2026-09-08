@@ -220,7 +220,7 @@ func eventBaseOf(e domain.Event) (domain.EventBase, bool) {
 		return ev.EventBase, true
 	case domain.TurnEvent:
 		return ev.EventBase, true
-	case domain.MechanismFiredEvent:
+	case domain.ReactionFiredEvent:
 		return ev.EventBase, true
 	case domain.ErrorEvent:
 		return ev.EventBase, true

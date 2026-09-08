@@ -115,10 +115,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		a.pendingInput = nil
 	}
 
-	// History-rewrite hooks edit conversation state before it is projected (truncation,
-	// generative compaction). A recovered panic degrades the Turn with no Upstream call.
+	// The history-rewrite Moment: reactions edit conversation state before it is projected
+	// (truncation, generative compaction). An error degrades the Turn with no Upstream call.
 	beforeRewrite := a.conv.Len()
-	if err := a.runHistoryRewriteHooks(ctx, turn); err != nil {
+	if _, err := a.fire(ctx, domain.MomentHistoryRewrite, &a.conv); err != nil {
 		return a.turns.end(t, endAbandoned), nil
 	}
 	// Repair the cached Exchange boundary after a mid-Exchange history rewrite shrank the
@@ -152,9 +152,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		}
 	}
 
-	a.runPreRequestGuards(turn, t.req)
-
-	if err := a.runPreRequestHooks(ctx, turn, t.req); err != nil {
+	if _, err := a.fire(ctx, domain.MomentPreRequest, t.req); err != nil {
 		// The request was never sent, so degrade the Turn with no assistant message. The drained
 		// corrections need no re-queue here: the abandoned Exchange clears the whole deferred queue
 		// regardless (end → closeExchange → F6), so re-queuing them would be dead motion.
@@ -212,11 +210,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		case foldFolded:
 			// The fold rewrote the conversation and refold re-derived every stale local (rollback,
 			// req, deferred, deferredFloor) against the folded history, latching t.foldSpent.
-			// The pre-request floor and hooks run per REQUEST, so they run again over the rebuilt
-			// one and keep their pre-request failure semantics: no assistant message, Turn degraded (the
+			// The pre-request Moment runs per REQUEST, so it runs again over the rebuilt
+			// one and keeps its pre-request failure semantics: no assistant message, Turn degraded (the
 			// abandoned Exchange clears the deferred queue — F6).
-			a.runPreRequestGuards(turn, t.req)
-			if err := a.runPreRequestHooks(ctx, turn, t.req); err != nil {
+			if _, err := a.fire(ctx, domain.MomentPreRequest, t.req); err != nil {
 				return a.turns.end(t, endAbandoned), nil
 			}
 		}
@@ -452,28 +449,28 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 
 		resp := a.assembleResponse(turn, req.View(), reply, nativeCalls)
 
-		// The Floor guards run FIRST at this seam (ADR 0071): they are engine behaviour every
-		// model runs with, so a looping or malformed response is repaired before a catalogued
-		// Mechanism looks at it. A guard retry and a hook retry share one budget — the same Turn
-		// re-streams either way, and separating them would let the two spend it twice.
-		if retry, inject := a.runPostResponseGuards(turn, resp); retry && attempt < maxPostResponseRetries {
-			attempt++
-			a.applyRetry(turn, req, resp, inject)
-			continue
-		}
-
-		retry, inject, hookErr := a.runPostResponseHooks(ctx, turn, resp)
-		if hookErr != nil {
-			// A post-response hook panicked (recovered into an ErrorEvent): the model did
-			// reply, so proceed with the response as reviewed so far rather than abandon.
+		// The post-response Moment: one cascade, whose builtin Floor guards run FIRST (ADR 0071)
+		// because they are engine behaviour every model runs with, so a looping or malformed
+		// response is repaired before anything armed above them looks at it. Whoever asks, the
+		// retry is the SAME budget — the Turn re-streams either way, and separating them would let
+		// the ladder spend it twice — which is why the remaining budget rides the payload: it is
+		// what decides whether a builtin's retry takes the Turn away from the legs below.
+		out, fireErr := a.fire(ctx, domain.MomentPostResponse, domain.PostResponseMoment{
+			Resp:      resp,
+			Retryable: attempt < maxPostResponseRetries,
+		})
+		if fireErr != nil {
+			// A post-response reaction faulted (a panic is recovered into an ErrorEvent and the
+			// cascade goes on; only a returned error reaches here): the model did reply, so
+			// proceed with the response as reviewed so far rather than abandon.
 			return a.reviewedOutcome(turn, resp)
 		}
-		if retry && attempt < maxPostResponseRetries {
-			// The ActionRetry attempts are counted HERE rather than in the loop header because
-			// the transient-fault re-stream above loops back through that header too, and a blip
-			// must not spend a hook's retry budget: separate remedies, separate budgets.
+		if out.Retry && attempt < maxPostResponseRetries {
+			// The retry attempts are counted HERE rather than in the loop header because the
+			// transient-fault re-stream above loops back through that header too, and a blip must
+			// not spend a reaction's retry budget: separate remedies, separate budgets.
 			attempt++
-			a.applyRetry(turn, req, resp, inject)
+			a.applyRetry(turn, req, resp, out.Inject)
 			continue
 		}
 		return a.reviewedOutcome(turn, resp)

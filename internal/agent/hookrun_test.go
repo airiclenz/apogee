@@ -189,7 +189,7 @@ func driveCascade(t *testing.T, spec cascadeSpec) cascadeRun {
 func firesAt(events []domain.Event, id domain.MechanismID, at domain.HookPoint) int {
 	n := 0
 	for _, fe := range mechanismFires(events) {
-		if fe.Mechanism == id && fe.Hook == at {
+		if fe.Reaction == string(id) && fe.Moment == domain.Moment(at) {
 			n++
 		}
 	}
@@ -331,15 +331,15 @@ func assertBypassSkips(t *testing.T, at domain.HookPoint) {
 }
 
 // firePanickingSink is a host Events sink that faults the moment it is told about a fire: it
-// records every event and panics on the MechanismFiredEvent a booking emits.
+// records every event and panics on the ReactionFiredEvent a booking emits.
 type firePanickingSink struct {
 	events []domain.Event
 }
 
 func (s *firePanickingSink) Emit(e domain.Event) {
 	s.events = append(s.events, e)
-	if _, ok := e.(domain.MechanismFiredEvent); ok {
-		panic("firePanickingSink: deliberate panic on MechanismFiredEvent")
+	if _, ok := e.(domain.ReactionFiredEvent); ok {
+		panic("firePanickingSink: deliberate panic on ReactionFiredEvent")
 	}
 }
 

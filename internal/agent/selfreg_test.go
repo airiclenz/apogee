@@ -491,7 +491,7 @@ func TestPureQAndANeverStrikesNorTrips(t *testing.T) {
 }
 
 // TestNoOpInvocationNotBooked proves R4 at the loop level: an inspect-and-do-nothing
-// catalogued invocation is not a fire — no MechanismFiredEvent, Fired == 0, no strikes —
+// catalogued invocation is not a fire — no ReactionFiredEvent, Fired == 0, no strikes —
 // and therefore it is never withdrawn even through an all-harmful session.
 func TestNoOpInvocationNotBooked(t *testing.T) {
 	sink := &recordingSink{}
@@ -510,8 +510,8 @@ func TestNoOpInvocationNotBooked(t *testing.T) {
 		t.Errorf("inspect-only Mechanism dispatched %d times, want %d (unbooked invocations accrue no strikes)", invoked, turns)
 	}
 	for _, fe := range mechanismFires(sink.events) {
-		if fe.Mechanism == "watcher" {
-			t.Errorf("a no-op invocation emitted a MechanismFiredEvent: %+v", fe)
+		if fe.Reaction == "watcher" {
+			t.Errorf("a no-op invocation emitted a ReactionFiredEvent: %+v", fe)
 		}
 	}
 	if got := a.tracker.fireCounts["watcher"]; got != 0 {
@@ -524,7 +524,7 @@ func TestNoOpInvocationNotBooked(t *testing.T) {
 
 // TestFiredCountsVisibleToHook proves an ACTING Mechanism is booked — LoopView.Fired answers
 // from the tracker, live within one hook pass (a catalogued acted fire is visible to an
-// experimental hook firing after it), and the MechanismFiredEvent carries its ID.
+// experimental hook firing after it), and the ReactionFiredEvent carries its ID.
 func TestFiredCountsVisibleToHook(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
@@ -547,12 +547,12 @@ func TestFiredCountsVisibleToHook(t *testing.T) {
 	}
 	found := false
 	for _, fe := range mechanismFires(sink.events) {
-		if fe.Mechanism == "greet" {
+		if fe.Reaction == "greet" {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("no MechanismFiredEvent was emitted for the acting catalogued Mechanism")
+		t.Error("no ReactionFiredEvent was emitted for the acting catalogued Mechanism")
 	}
 }
 

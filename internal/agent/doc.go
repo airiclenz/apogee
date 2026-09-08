@@ -30,13 +30,13 @@
 // content, file and skill reference resolution, the streamed upstream call, response assembly
 // and tool-call parsing, and the post-response retry cap. turn.go is turnLifecycle, the
 // Turn/Exchange state between quiescent boundaries (ADR 0007) and the exits that mutate the
-// conversation and the self-regulator together. hookrun.go fires the hooks at each point —
-// catalogued Mechanisms first in the registry's total order, then the bench's experimental
-// hooks — each under one recover boundary and attributed by MechanismID. floorguards.go is the
-// engine half of the Floor guards (ADR 0071): the live per-guard opt-outs the settings surface
-// swaps, the seams that run internal/floor's decisions ahead of the hooks at each hook point, and
-// the FloorGuardEvent a firing books. reactions.go is the Reaction dispatcher that succeeds
-// both of those ladders (ADR 0076): the one fire the seams call, its two legs, the Bypass gate,
+// conversation and the self-regulator together. hookrun.go is the dispatcher's registry BRIDGE —
+// the catalogued Mechanisms in the registry's total order, then the bench's experimental hooks,
+// each under one recover boundary and attributed by MechanismID — the retired lab layer's last
+// leg, which dies with it. floorguards.go is what the Floor guards keep outside internal/floor
+// (ADR 0071): the live per-guard opt-outs the settings surface swaps, and the config keys and
+// action labels a guard is known by. reactions.go is the Reaction dispatcher that succeeds both
+// of those ladders (ADR 0076): the one fire every seam calls, its three legs, the Bypass gate,
 // the recover boundary, the revision bracket and the ReactionFiredEvent a firing books.
 // builtins.go is the engine's own Reactions — the seven Floor guards as domain.Reaction values,
 // each reading its live gate and calling the unchanged internal/floor policy. wire.go is the

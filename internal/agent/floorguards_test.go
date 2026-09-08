@@ -13,32 +13,41 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// hasGuardFire reports whether a FloorGuardEvent for guard with action was emitted.
+// hasGuardFire reports whether a ReactionFiredEvent for guard with action was emitted.
 func hasGuardFire(events []domain.Event, guard, action string) bool {
 	for _, e := range events {
-		if ge, ok := e.(domain.FloorGuardEvent); ok && ge.Guard == guard && ge.Action == action {
+		if re, ok := e.(domain.ReactionFiredEvent); ok && re.Reaction == guard && re.Action == action {
 			return true
 		}
 	}
 	return false
 }
 
-// guardFireCountFor counts the FloorGuardEvents attributed to guard, whatever the action.
+// guardFireCountFor counts the ReactionFiredEvents attributed to guard, whatever the action.
 func guardFireCountFor(events []domain.Event, guard string) int {
 	n := 0
 	for _, e := range events {
-		if ge, ok := e.(domain.FloorGuardEvent); ok && ge.Guard == guard {
+		if re, ok := e.(domain.ReactionFiredEvent); ok && re.Reaction == guard {
 			n++
 		}
 	}
 	return n
 }
 
+// firePreRequest drives the pre-request Moment the way the loop drives it, so a test that wants a
+// pre-request guard's effect on a request it built itself takes the same path a Turn takes.
+func firePreRequest(t *testing.T, a *Agent, req *domain.Request) {
+	t.Helper()
+	if _, err := a.fire(context.Background(), domain.MomentPreRequest, req); err != nil {
+		t.Fatalf("fire(pre-request): %v", err)
+	}
+}
+
 // A call to a tool the model was never shown is repaired and the Turn re-streams — with NO
 // catalogued Mechanism enabled and Bypass ON, which is exactly the posture the promotion is for:
 // the floor is what every model runs with, not a nudge a block switches on. The retried request
 // carries the superseded call and the correction, the corrected call is the one that dispatches,
-// and the firing is booked as a FloorGuardEvent naming the CONFIG KEY.
+// and the firing is booked as a ReactionFiredEvent naming the CONFIG KEY.
 func TestFloorGuard_ToolCallRepairRetriesUnderBypass(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
@@ -77,7 +86,7 @@ func TestFloorGuard_ToolCallRepairRetriesUnderBypass(t *testing.T) {
 	}
 
 	if !hasGuardFire(sink.events, guardToolCallRepair, guardActionRetry) {
-		t.Errorf("no FloorGuardEvent{Guard: %q, Action: %q}", guardToolCallRepair, guardActionRetry)
+		t.Errorf("no ReactionFiredEvent{Reaction: %q, Action: %q}", guardToolCallRepair, guardActionRetry)
 	}
 	calls := dispatchedCalls(sink.events)
 	if len(calls) != 1 || calls[0].ID != "c2" {
@@ -125,7 +134,7 @@ func TestFloorGuard_DisableToolCallRepairLetsTheBadCallThrough(t *testing.T) {
 
 // A Turn that repeats the previous Turn's exact tool call draws the loop-breaking directive — again
 // with no catalogued Mechanism and Bypass on — and the directive names the repeated tool. The
-// firing is a FloorGuardEvent under the tool-loop-breaker key; its own opt-out takes it away.
+// firing is a ReactionFiredEvent under the tool-loop-breaker key; its own opt-out takes it away.
 func TestFloorGuard_ToolLoopBreakerOnAnIdenticalRepeat(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -233,7 +242,7 @@ func TestFloorGuard_ChildInheritsTheLiveFloor(t *testing.T) {
 	}
 }
 
-// A guard fires on the model's OWN failure, so a clean Turn books nothing: no FloorGuardEvent at
+// A guard fires on the model's OWN failure, so a clean Turn books nothing: no ReactionFiredEvent at
 // all, and the response stands exactly as the model wrote it.
 func TestFloorGuard_CleanTurnBooksNoFiring(t *testing.T) {
 	sink := &recordingSink{}
@@ -250,8 +259,8 @@ func TestFloorGuard_CleanTurnBooksNoFiring(t *testing.T) {
 	runExchange(t, a, "read a.go")
 
 	for _, e := range sink.events {
-		if ge, ok := e.(domain.FloorGuardEvent); ok {
-			t.Errorf("a clean Turn booked a guard firing: %+v", ge)
+		if re, ok := e.(domain.ReactionFiredEvent); ok {
+			t.Errorf("a clean Turn booked a guard firing: %+v", re)
 		}
 	}
 	if !strings.Contains(mustLastMessageText(t, sink.events), "done") {
@@ -272,7 +281,7 @@ func mustLastMessageText(t *testing.T, events []domain.Event) string {
 // A third narration on an action request the model never acted on is corrected into a tool call —
 // with NO catalogued Mechanism enabled and Bypass ON. The retried request carries the superseded
 // narration followed by the "use a tool" correction (the sim's retryForToolUse shape), the corrected
-// call is the one that dispatches, and the firing is booked as a FloorGuardEvent naming the key.
+// call is the one that dispatches, and the firing is booked as a ReactionFiredEvent naming the key.
 func TestFloorGuard_ToolUseEnforcerRetriesUnderBypass(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
@@ -313,7 +322,7 @@ func TestFloorGuard_ToolUseEnforcerRetriesUnderBypass(t *testing.T) {
 		t.Errorf("retried request lacks the sim's tool-use directive: %+v", retried)
 	}
 	if !hasGuardFire(sink.events, guardToolUseEnforcer, guardActionRetry) {
-		t.Error("no FloorGuardEvent for the tool-use enforcer with the retry action")
+		t.Error("no ReactionFiredEvent for the tool-use enforcer with the retry action")
 	}
 	if ran != 1 {
 		t.Errorf("read_file ran %d times, want 1 (the corrected response acted)", ran)
@@ -383,7 +392,7 @@ func TestFloorGuard_EmptyReplyDrawsTheCompletionCheckNudge(t *testing.T) {
 		t.Errorf("retried request does not carry the completion-check nudge verbatim: %+v", second)
 	}
 	if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
-		t.Error("no FloorGuardEvent for the empty-response recovery with the retry action")
+		t.Error("no ReactionFiredEvent for the empty-response recovery with the retry action")
 	}
 	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "recovered" {
 		t.Errorf("final MessageEvent = %+v (ok=%v), want %q", me, ok, "recovered")
@@ -454,7 +463,7 @@ func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 			t.Errorf("retried request does not carry the nudge: %+v", responder.got[1].Messages)
 		}
 		if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
-			t.Error("no FloorGuardEvent for the empty-response recovery with the retry action")
+			t.Error("no ReactionFiredEvent for the empty-response recovery with the retry action")
 		}
 		if n := fireCountFor(sink.events, "lab_content_repair"); n != 0 {
 			t.Errorf("the catalogued row fired %d times; it must be withdrawn under Bypass + a tripped Turn Budget", n)
@@ -498,7 +507,7 @@ func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 			t.Errorf("retried request carries no correction: %+v", retried)
 		}
 		if !hasGuardFire(sink.events, guardToolUseEnforcer, guardActionRetry) {
-			t.Error("no FloorGuardEvent for the tool-use enforcer with the retry action")
+			t.Error("no ReactionFiredEvent for the tool-use enforcer with the retry action")
 		}
 		if n := fireCountFor(sink.events, "lab_content_repair"); n != 0 {
 			t.Errorf("the catalogued row fired %d times; it must be withdrawn under Bypass + a tripped Turn Budget", n)
@@ -593,7 +602,7 @@ func TestFloorGuard_ReadCacheCapsAnUnchangedReRead(t *testing.T) {
 				t.Fatalf("the read cache fired %d times, want %d", n, tc.wantFires)
 			}
 			if tc.wantFires > 0 && !hasGuardFire(sink.events, guardReadCache, guardActionIntercept) {
-				t.Errorf("no FloorGuardEvent{Guard: %q, Action: %q}", guardReadCache, guardActionIntercept)
+				t.Errorf("no ReactionFiredEvent{Reaction: %q, Action: %q}", guardReadCache, guardActionIntercept)
 			}
 		})
 	}
@@ -732,7 +741,7 @@ func TestFloorGuard_ToolResultCapTrimsAnOlderResultUnderBypass(t *testing.T) {
 				t.Fatalf("the tool-result cap fired %d times, want %d", n, tc.wantFires)
 			}
 			if tc.wantFires > 0 && !hasGuardFire(sink.events, guardToolResultCap, guardActionCap) {
-				t.Errorf("no FloorGuardEvent{Guard: %q, Action: %q}", guardToolResultCap, guardActionCap)
+				t.Errorf("no ReactionFiredEvent{Reaction: %q, Action: %q}", guardToolResultCap, guardActionCap)
 			}
 		})
 	}
@@ -848,11 +857,11 @@ func firstAssistantMessage(t *testing.T, a *Agent) domain.Message {
 	return domain.Message{}
 }
 
-// guardDetailFor returns the Detail of the first FloorGuardEvent attributed to guard, or "".
+// guardDetailFor returns the Detail of the first ReactionFiredEvent attributed to guard, or "".
 func guardDetailFor(events []domain.Event, guard string) string {
 	for _, e := range events {
-		if ge, ok := e.(domain.FloorGuardEvent); ok && ge.Guard == guard {
-			return ge.Detail
+		if re, ok := e.(domain.ReactionFiredEvent); ok && re.Reaction == guard {
+			return re.Detail
 		}
 	}
 	return ""
@@ -911,7 +920,7 @@ func TestFloorGuard_ToolCallSalvageRunsAFencedCallWrittenInText(t *testing.T) {
 	}
 
 	if !hasGuardFire(sink.events, guardToolCallSalvage, guardActionSalvage) {
-		t.Errorf("no FloorGuardEvent{Guard: %q, Action: %q}", guardToolCallSalvage, guardActionSalvage)
+		t.Errorf("no ReactionFiredEvent{Reaction: %q, Action: %q}", guardToolCallSalvage, guardActionSalvage)
 	}
 	if detail := guardDetailFor(sink.events, guardToolCallSalvage); detail != "salvaged read_file from content" {
 		t.Errorf("Detail = %q, want %q", detail, "salvaged read_file from content")

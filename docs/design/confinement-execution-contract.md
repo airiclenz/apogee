@@ -1118,11 +1118,11 @@ subprocess tool's.
 
 ### 10.4 Scope
 
-The permit is installed at **post-response only**, once per cascade, ahead of both the catalogued
-and the experimental hooks (`runPostResponseHooks`, `internal/agent/hookrun.go`). Pre-request,
-pre-tool-exec and post-tool-result get no permit, which under §10.2 keeps their existing "may not
-spawn" posture — the intended one. Widening to another hook point is a deliberate act: install the
-permit there and record the row here.
+The permit is installed at **post-response only**, once per cascade, ahead of every reaction that
+fires there — the engine's builtins, the armed Reactions and the registry bridge alike (`fire`,
+`internal/agent/reactions.go`). Pre-request, pre-tool-exec, post-tool-result and history-rewrite get
+no permit, which under §10.2 keeps their existing "may not spawn" posture — the intended one.
+Widening to another Moment is a deliberate act: install the permit there and record the row here.
 
 ### 10.5 The hook spawns through the tools funnel (amendment, 2026-08-20)
 

@@ -344,7 +344,7 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 		t.Fatalf("Turn status = %q, want %q (a tool Turn keeps the Exchange open)", res.Status, domain.StatusTurnComplete)
 	}
 	// The rewriter fired mid-Exchange (it dropped the middle and inserted the gap note).
-	if !hasEvent[domain.MechanismFiredEvent](sink.events) {
+	if !hasEvent[domain.ReactionFiredEvent](sink.events) {
 		t.Fatal("the history rewriter did not fire; the repair path is untested")
 	}
 

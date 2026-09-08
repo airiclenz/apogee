@@ -7,20 +7,22 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// Hook firing (ADR 0002/0003). At each hook point the loop dispatches the catalogued
-// Mechanisms FIRST — in the registry's deterministic total order (Ordered: topo-sorted
-// Before/After with a stable tiebreak by canonical ID, D4) and each under its real
-// MechanismID — then the bench's experimental hooks in registration order (unchanged).
-// This way the bench observes/perturbs the configured behaviour, not the other way round.
+// The registry BRIDGE (ADR 0002/0003; ADR 0076 D1, stage 1). The Reaction dispatcher's third leg:
+// after the engine's builtins and the Reactions armed on Config.Reactions, every seam Moment runs
+// the catalogued Mechanisms still held in the registry — in its deterministic total order (Ordered:
+// topo-sorted Before/After with a stable tiebreak by canonical ID, D4) and each under its real
+// MechanismID — then the bench's experimental hooks in registration order. This way the bench
+// observes/perturbs the configured behaviour, not the other way round.
 //
-// All five points run that cascade through ONE runner (runHooks): ordered → Bypass gate →
-// revision bracket → fire under the recover boundary → book outside it. What differs between
-// the points — which working value they edit, which of them builds a LoopView, which installs
-// the subprocess permit, which may short-circuit, which swallows a panic — lives in the five
-// thin adapters below, each a hookPointRun the runner reads.
+// It is a BRIDGE and not a home: the lab layer it serves is retired, and this leg dies with it
+// (stage 1 deletes the registry once the seams no longer need it). Until then the cascade below is
+// unchanged in substance — ordered → Bypass/self-regulation gate → revision bracket → fire under
+// the recover boundary → book outside it — and the dispatcher supplies what differs between the
+// five Moments (the working value, the LoopView, the subprocess permit) from the payload it already
+// resolved, so a registry row sees exactly what it saw when the seams called it directly.
 //
 // Every hook runs under the same recover boundary, so a panicking extension degrades to a
-// clean quiescent boundary instead of unwinding the host (ADR 0007); a MechanismFiredEvent
+// clean quiescent boundary instead of unwinding the host (ADR 0007); a ReactionFiredEvent
 // records each ACTED fire for attribution, under the firing Mechanism's ID (a
 // descriptor-less experimental hook carries the synthetic experimentalMechanismID).
 //
@@ -34,7 +36,7 @@ import (
 // Fired means ACTED (R4, phase-4-review-fixes item 4): each catalogued fire is bracketed — the
 // working value's Revision counter around the invocation, at all five points (Request, Response,
 // Conversation, and the tool stage's ToolCallEdit / ToolResultEdit), plus a non-zero post-response
-// Action — and recordFire + MechanismFiredEvent are booked only when the invocation intervened. An
+// Action — and recordFire + the firing event are booked only when the invocation intervened. An
 // inspect-and-do-nothing invocation is not a fire (apogee-sim's FiredCounts: interventions, not
 // invocations). Experimental hooks keep today's always-booked behaviour under the synthetic ID
 // (bench observability). Booked fires feed the Session ledger LoopView.Fired reads and the
@@ -58,7 +60,7 @@ func (a *Agent) skipUnderBypass(m domain.RegisteredMechanism) bool {
 // hookOutcome is what one hook invocation reports back to the runner, beyond the revision
 // bracket the runner takes itself.
 type hookOutcome struct {
-	// action labels the booked fire on the MechanismFiredEvent — firedAction at the four
+	// action labels the booked fire on the ReactionFiredEvent — firedAction at the four
 	// points with no action vocabulary, the hook's own domain.Action at post-response.
 	action string
 	// acted says the invocation intervened by its own account, whatever the revision bracket
@@ -70,8 +72,9 @@ type hookOutcome struct {
 }
 
 // hookPointRun is one hook point's adapter: everything the shared cascade needs that differs
-// between the five points. H is the point's hook interface — the runner dispatches exactly the
-// registered hooks implementing it.
+// between the five points. The dispatcher builds it per Moment from the seam payload it resolved
+// (reactions.go), so the runner stays seam-blind. H is the point's hook interface — the runner
+// dispatches exactly the registered hooks implementing it.
 type hookPointRun[H any] struct {
 	// at is the hook point being run, both the registry lookup key and the point a booked
 	// fire is attributed to.
@@ -81,7 +84,7 @@ type hookPointRun[H any] struct {
 	revision func() int
 	// fire invokes one hook against the point's working value and reports what it did. It
 	// runs inside the recover boundary, so it may also carry out the hook's decision (the
-	// post-response adapter routes ActionDefer / ActionRetry there).
+	// post-response bridge routes ActionDefer / ActionRetry there).
 	fire func(ctx context.Context, hook H) (hookOutcome, error)
 }
 
@@ -127,8 +130,7 @@ func runHooks[H any](a *Agent, ctx context.Context, turn int, run hookPointRun[H
 // acting (R4), an experimental one always (bench observability). A recovered panic returns
 // errHookPanicked and books nothing.
 //
-// The booking deliberately sits outside the boundary — the shape every hook point had before
-// the five runners collapsed into this one. a.fired reaches the HOST's Events sink, and a sink
+// The booking deliberately sits outside the boundary — the shape every hook point has always had. a.fired reaches the HOST's Events sink, and a sink
 // that panics is the host's fault: recovered here it would surface as errHookPanicked
 // attributed to the Mechanism whose hook had already returned cleanly, degrading the Turn in
 // an innocent Mechanism's name. Outside the boundary it unwinds to the host untouched.
@@ -174,122 +176,6 @@ func fireOneHook[H any](
 	return out, id == experimentalMechanismID || out.acted || run.revision() != before, nil
 }
 
-// runHistoryRewriteHooks lets each history-rewrite Mechanism/hook edit conversation state
-// before the request is built (truncation, compaction). The hooks mutate a.conv directly — it
-// is the history, and the point builds no LoopView. A recovered panic returns errHookPanicked
-// so the Turn degrades.
-func (a *Agent) runHistoryRewriteHooks(ctx context.Context, turn int) error {
-	return runHooks(a, ctx, turn, hookPointRun[domain.HistoryRewriter]{
-		at:       domain.HookHistoryRewrite,
-		revision: a.conv.Revision,
-		fire: func(ctx context.Context, hook domain.HistoryRewriter) (hookOutcome, error) {
-			return hookOutcome{action: firedAction}, hook.RewriteHistory(ctx, &a.conv)
-		},
-	})
-}
-
-// runPreRequestHooks fires the pre-request Mechanisms/hooks against the shared req — their
-// mutations compose in dispatch order — so AppendToSystem / InjectContext / SetTools reach the
-// Upstream request. A recovered panic returns errHookPanicked so the Turn degrades with no
-// Upstream call (no assistant message).
-func (a *Agent) runPreRequestHooks(ctx context.Context, turn int, req *domain.Request) error {
-	return runHooks(a, ctx, turn, hookPointRun[domain.PreRequestHook]{
-		at:       domain.HookPreRequest,
-		revision: req.Revision,
-		fire: func(ctx context.Context, hook domain.PreRequestHook) (hookOutcome, error) {
-			return hookOutcome{action: firedAction}, hook.PreRequest(ctx, req)
-		},
-	})
-}
-
-// runPostResponseHooks runs each post-response Mechanism/hook against resp in dispatch order.
-// ActionIntercept is expressed by the hook mutating resp in place (SetText / SetToolCallArguments)
-// — the loop reads resp back afterward. ActionDefer schedules its correction into the next request
-// (held in conversation state so it survives a snapshot). ActionRetry asks the loop to re-call the
-// Upstream and short-circuits the remaining hooks. retry reports whether a re-call was requested,
-// and inject carries the retrying decision's correction text so respondAndReview can append the
-// corrective exchange to the retried request (R1); err is non-nil only when a hook panicked
-// (recovered).
-//
-// A catalogued invocation is booked when it acted (R4): a non-zero Action, or an in-place
-// mutation of resp the Revision bracket catches.
-func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain.Response) (retry bool, inject string, err error) {
-	// Post-response is the ONE hook point whose Mechanisms may spawn a subprocess (no shipped row
-	// does since autofix retired; the door stays open for lab hooks — ADR 0071). The
-	// domain.SubprocessPermit is installed ONCE here, ahead of the
-	// cascade, so every post-response hook — catalogued and experimental alike — sees the same
-	// authorisation the ladder granted; outside Auto no permit is installed at all, which is the
-	// refusal default (confinement-execution-contract §10).
-	ctx = a.hookExecutionCtx(ctx)
-
-	err = runHooks(a, ctx, turn, hookPointRun[domain.PostResponseHook]{
-		at:       domain.HookPostResponse,
-		revision: resp.Revision,
-		fire: func(ctx context.Context, hook domain.PostResponseHook) (hookOutcome, error) {
-			decision, fireErr := hook.PostResponse(ctx, resp)
-			if fireErr != nil {
-				return hookOutcome{}, fireErr
-			}
-			switch decision.Action {
-			case domain.ActionRetry:
-				// The loop re-calls the Upstream with this correction; the cascade stops here.
-				retry, inject = true, decision.Inject
-			case domain.ActionDefer:
-				if decision.Inject != "" {
-					a.conv.Defer(decision.Inject)
-				}
-			}
-			// ActionIntercept (and the zero action): the hook already mutated resp; continue.
-			return hookOutcome{
-				action: string(decision.Action),
-				acted:  decision.Action != "",
-				stop:   decision.Action == domain.ActionRetry,
-			}, nil
-		},
-	})
-	if err != nil {
-		return false, "", err
-	}
-	return retry, inject, nil
-}
-
-// runPreToolExecHooks fires the pre-tool-exec Mechanisms/hooks against the pending call (which
-// they may reshape through the shared ToolCallEdit, so their mutations compose) and the loop
-// view built once for this cascade. The edit writes through to call, so the caller executes what
-// the cascade left behind. A recovered panic returns errHookPanicked so the caller skips the call
-// rather than running it against a half-applied decision.
-func (a *Agent) runPreToolExecHooks(ctx context.Context, turn int, call *domain.ToolCall) error {
-	view := a.loopView(turn)
-	edit := domain.NewToolCallEdit(call)
-	return runHooks(a, ctx, turn, hookPointRun[domain.PreToolExecHook]{
-		at:       domain.HookPreToolExec,
-		revision: edit.Revision,
-		fire: func(ctx context.Context, hook domain.PreToolExecHook) (hookOutcome, error) {
-			return hookOutcome{action: firedAction}, hook.PreToolExec(ctx, edit, view)
-		},
-	})
-}
-
-// runPostToolResultHooks fires the post-tool-result Mechanisms/hooks against the result (which
-// they may rewrite through the shared ToolResultEdit) before the model sees it, passing the
-// originating call (the tool name + arguments live there, not on the result) and the loop view
-// built once for this cascade. The edit writes through to result, so the loop commits what the
-// cascade left behind.
-func (a *Agent) runPostToolResultHooks(ctx context.Context, turn int, call domain.ToolCall, result *domain.ToolResult) {
-	view := a.loopView(turn)
-	edit := domain.NewToolResultEdit(result)
-	// The one point that swallows the panic instead of reporting it: a recovered panic stops
-	// the chain (already an ErrorEvent) and the loop proceeds with the result as-is, so there
-	// is nothing for the caller to decide.
-	_ = runHooks(a, ctx, turn, hookPointRun[domain.PostToolResultHook]{
-		at:       domain.HookPostToolResult,
-		revision: edit.Revision,
-		fire: func(ctx context.Context, hook domain.PostToolResultHook) (hookOutcome, error) {
-			return hookOutcome{action: firedAction}, hook.PostToolResult(ctx, call, edit, view)
-		},
-	})
-}
-
 // recoverHook returns a deferred closure that converts a hook panic into an ErrorEvent
 // attributed to the firing Mechanism's id and signals errHookPanicked through errp — the single
 // recover-at-extension-boundary primitive the runner shares across all five points (ADR 0007 /
@@ -307,17 +193,25 @@ func (a *Agent) recoverHook(turn int, id domain.MechanismID, errp *error) func()
 	}
 }
 
-// fired books one ACTED fire with self-regulation (the Session fire ledger LoopView.Fired
-// reads, and the fired-this-Turn set the NEXT Turn's outcome judges — R3/R4) and emits a
-// MechanismFiredEvent attributed to the firing Mechanism's id. The caller gates it: a
+// fired books one ACTED fire on the bridge leg: the self-regulation ledger (the Session fire
+// ledger LoopView.Fired reads, and the fired-this-Turn set the NEXT Turn's outcome judges — R3/R4)
+// and one ReactionFiredEvent attributed to the firing Mechanism's id. The caller gates it: a
 // catalogued invocation reaches here only when it intervened, while an experimental hook
 // (experimentalMechanismID) is booked on every invocation.
+//
+// The event is the Reaction core's ONE firing event (ADR 0076 D1), the same variant a builtin and
+// an armed Reaction book (reactions.go): a registry row arrives at the same Moment as everything
+// else on the ladder, so an observer should not have to know which leg it rode to read what it did.
+// The Origin is engine — a catalogued Mechanism and a bench hook are both the engine's own — and
+// the hook point converts to its Moment directly, the two vocabularies being the same five
+// spellings.
 func (a *Agent) fired(turn int, id domain.MechanismID, hook domain.HookPoint, action string) {
 	a.tracker.recordFire(id)
-	a.cfg.Events.Emit(domain.MechanismFiredEvent{
+	a.cfg.Events.Emit(domain.ReactionFiredEvent{
 		EventBase: a.base(turn),
-		Mechanism: id,
-		Hook:      hook,
+		Reaction:  string(id),
+		Origin:    domain.OriginEngine,
+		Moment:    domain.Moment(hook),
 		Action:    action,
 	})
 }

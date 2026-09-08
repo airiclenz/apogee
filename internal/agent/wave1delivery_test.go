@@ -96,26 +96,26 @@ func wireUserIndexContaining(msgs []provider.Message, substr string) int {
 	return -1
 }
 
-// firesBeforeStreamReset returns the MechanismFiredEvents emitted before the first
+// firesBeforeStreamReset returns the ReactionFiredEvents emitted before the first
 // StreamResetEvent — the fires of a retried Turn's failing pass.
-func firesBeforeStreamReset(events []domain.Event) []domain.MechanismFiredEvent {
-	var out []domain.MechanismFiredEvent
+func firesBeforeStreamReset(events []domain.Event) []domain.ReactionFiredEvent {
+	var out []domain.ReactionFiredEvent
 	for _, e := range events {
 		if _, ok := e.(domain.StreamResetEvent); ok {
 			break
 		}
-		if fe, ok := e.(domain.MechanismFiredEvent); ok {
+		if fe, ok := e.(domain.ReactionFiredEvent); ok {
 			out = append(out, fe)
 		}
 	}
 	return out
 }
 
-// fireCountFor counts the MechanismFiredEvents attributed to id.
+// fireCountFor counts the ReactionFiredEvents attributed to id.
 func fireCountFor(events []domain.Event, id domain.MechanismID) int {
 	n := 0
 	for _, fe := range mechanismFires(events) {
-		if fe.Mechanism == id {
+		if fe.Reaction == string(id) {
 			n++
 		}
 	}
@@ -162,8 +162,8 @@ func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 		t.Fatal("the repair guard did not retry (did the retry happen at all?)")
 	}
 	for _, fe := range firesBeforeStreamReset(sink.events) {
-		if fe.Mechanism == "lab_content_repair" || fe.Mechanism == "lab_formatter_repair" {
-			t.Errorf("%q fired in the failing pass (action %q); the guard retry must short-circuit the cascade", fe.Mechanism, fe.Action)
+		if fe.Reaction == "lab_content_repair" || fe.Reaction == "lab_formatter_repair" {
+			t.Errorf("%q fired in the failing pass (action %q); the guard retry must short-circuit the cascade", fe.Reaction, fe.Action)
 		}
 	}
 }

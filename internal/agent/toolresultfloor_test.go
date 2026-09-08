@@ -154,7 +154,7 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 // history; the guard edits only the request.
 //
 // The guard needs no arming: it is engine behaviour on by default (ADR 0071), so this drives the
-// pre-request seam the loop drives — runPreRequestGuards — over a stock Config.
+// pre-request Moment the loop drives — a.fire — over a stock Config.
 func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink)
@@ -185,7 +185,7 @@ func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 	}
 
 	req, _ := a.buildRequest(0)
-	a.runPreRequestGuards(0, req)
+	firePreRequest(t, a, req)
 	projected := req.State().Messages[2].Content
 	if len(projected) >= len(between) {
 		t.Fatalf("the tool-result cap did not cap the older result: %d chars projected, was %d", len(projected), len(between))
@@ -197,9 +197,9 @@ func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 		t.Error("the guard edited the conversation; it may only edit the projected request")
 	}
 
-	// The firing is booked as a FloorGuardEvent naming the guard's own config key.
+	// The firing is booked as a ReactionFiredEvent naming the guard's own config key.
 	if !hasGuardFire(sink.events, guardToolResultCap, guardActionCap) {
-		t.Errorf("no %q FloorGuardEvent; the seam capped without booking a firing", guardToolResultCap)
+		t.Errorf("no %q ReactionFiredEvent; the seam capped without booking a firing", guardToolResultCap)
 	}
 }
 
@@ -223,7 +223,7 @@ func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
 	a.appendToolResult(0, domain.ToolResult{CallID: "c2", Content: "small"})
 
 	req, _ := a.buildRequest(0)
-	a.runPreRequestGuards(0, req)
+	firePreRequest(t, a, req)
 	if got := req.State().Messages[2].Content; got != between {
 		t.Errorf("the opted-out guard still capped: %d chars projected, want the whole %d", len(got), len(between))
 	}

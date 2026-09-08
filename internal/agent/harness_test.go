@@ -175,8 +175,8 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	if !fired {
 		t.Error("experimental pre-request hook did not fire")
 	}
-	if !hasEvent[domain.MechanismFiredEvent](sink.events) {
-		t.Error("no MechanismFiredEvent emitted for the experimental hook")
+	if !hasEvent[domain.ReactionFiredEvent](sink.events) {
+		t.Error("no ReactionFiredEvent emitted for the experimental hook")
 	}
 	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != "hello from model" {
 		t.Errorf("MessageEvent = %+v (ok=%v), want Text=%q", me, ok, "hello from model")

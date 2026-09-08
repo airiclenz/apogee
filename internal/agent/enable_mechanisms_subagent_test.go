@@ -171,10 +171,10 @@ func gdMessageEventDepth(events []domain.Event, text string) int {
 	return -1
 }
 
-// hasFireAtDepth reports whether a MechanismFiredEvent for id was emitted at the given nesting Depth.
+// hasFireAtDepth reports whether a ReactionFiredEvent for id was emitted at the given nesting Depth.
 func hasFireAtDepth(events []domain.Event, id domain.MechanismID, depth int) bool {
 	for _, fe := range mechanismFires(events) {
-		if fe.Mechanism == id && fe.Depth == depth {
+		if fe.Reaction == string(id) && fe.Depth == depth {
 			return true
 		}
 	}

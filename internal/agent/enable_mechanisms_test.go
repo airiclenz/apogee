@@ -3,7 +3,7 @@ package agent
 // Construction-path coverage for Config.EnableMechanisms (ADR 0015 §1–2, plan item 2): the engine
 // builds each named catalogued Mechanism at New/Resume, merges it into Config.Mechanisms (a fresh
 // registry when nil), and fails construction on an unknown ID, an unmet Requires stack, or a
-// duplicate — all observed through the loop's own effects (MechanismFiredEvent, construction error),
+// duplicate — all observed through the loop's own effects (ReactionFiredEvent, construction error),
 // never the Agent's internals. The catalogued Mechanisms are built through the production catalogue,
 // the same seam the config surface drives, so these prove the real build-and-merge path end to end.
 
