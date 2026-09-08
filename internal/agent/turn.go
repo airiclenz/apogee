@@ -7,13 +7,11 @@ import (
 )
 
 // turnLifecycle owns the loop's Turn/Exchange lifecycle state — where the loop stands
-// between quiescent boundaries (ADR 0007) — and the exits that mutate it. It coordinates the
-// two collaborators the exits touch together: the conversation (rollback, deferred queue) and
-// the self-regulator (judge vs discard). Same-package, unexported: the Turn is the loop's
-// concept, not a public seam.
+// between quiescent boundaries (ADR 0007) — and the exits that mutate it. The collaborator the
+// exits touch is the conversation (rollback, deferred queue). Same-package, unexported: the Turn
+// is the loop's concept, not a public seam.
 type turnLifecycle struct {
-	conv    *domain.Conversation
-	tracker *selfRegulator
+	conv *domain.Conversation
 
 	index         int  // 0-based index of the next Turn (was Agent.turnIndex)
 	inExchange    bool // true between Submit and the Step that completes the Exchange
@@ -80,31 +78,26 @@ type turnRun struct {
 type turnEnd int
 
 const (
-	endTurnDone     turnEnd = iota // judged · advance · Exchange stays open   · StatusTurnComplete
-	endExchangeDone                // judged · advance · Exchange closes       · StatusExchangeComplete
-	endAbandoned                   // discarded · advance · Exchange closes    · StatusExchangeComplete + Faulted
-	endCancelled                   // discarded · roll back + restore deferred · no advance · Exchange stays open · StatusCancelled
-	endStepCapped                  // step-cap fallback · no judge · no advance · Exchange closes · StatusExchangeComplete + StepCapped
+	endTurnDone     turnEnd = iota // advance · Exchange stays open   · StatusTurnComplete
+	endExchangeDone                // advance · Exchange closes       · StatusExchangeComplete
+	endAbandoned                   // advance · Exchange closes       · StatusExchangeComplete + Faulted
+	endCancelled                   // roll back + restore deferred · no advance · Exchange stays open · StatusCancelled
+	endStepCapped                  // step-cap fallback · no advance · Exchange closes · StatusExchangeComplete + StepCapped
 )
 
 // end exits the Turn t on the row how names — the single table that replaced the three exit
-// helpers (completeTurn / abandonTurn / cancelTurn). Each dimension is expressed once: judge
-// (tracker.endTurn) vs discard (tracker.discardTurn), whether the Exchange closes, whether
-// the Turn counter advances, and whether the Turn FAULTED. It returns the boundary StepResult
-// (ADR 0007).
+// helpers (completeTurn / abandonTurn / cancelTurn). Each dimension is expressed once: whether
+// the Exchange closes, whether the Turn counter advances, and whether the Turn FAULTED. It
+// returns the boundary StepResult (ADR 0007).
 func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 	var status domain.StepStatus
 	var faulted bool
 	var stepCapped bool
 	switch how {
 	case endTurnDone, endExchangeDone:
-		// Resolve the completed Turn for self-regulation (R3, next-Turn judgment): this Turn's
-		// outcome judges the PREVIOUS Turn's fires — striking, freezing, or clearing — and this
-		// Turn's fires shift into the pending set the next Turn's outcome will judge. A tool-call
-		// Turn (endTurnDone) leaves the Exchange OPEN — StatusTurnComplete, the next Step calls the
-		// Upstream again with the tool results in context. A final no-tool reply (endExchangeDone)
-		// ends it — StatusExchangeComplete, awaiting the next Submit.
-		l.tracker.endTurn()
+		// A tool-call Turn (endTurnDone) leaves the Exchange OPEN — StatusTurnComplete, the next
+		// Step calls the Upstream again with the tool results in context. A final no-tool reply
+		// (endExchangeDone) ends it — StatusExchangeComplete, awaiting the next Submit.
 		if how == endExchangeDone {
 			// In practice the deferred queue is already empty here — a no-tool final answer ends
 			// the Exchange and F2 never re-defers there — so closeExchange's clear is the F6 backstop.
@@ -115,13 +108,9 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		}
 		l.index++
 	case endAbandoned:
-		// A faulted Turn (an Upstream fault or a recovered hook panic) produced no usable outcome,
-		// so self-regulation discards it WITHOUT judging — an infra fault neither strikes a
-		// Mechanism nor advances the Turn Budget, and this Turn's fires do not bleed into the next
-		// Turn's judgment. The pending set (the previous Turn's fires) stays in place for the next
-		// completed Turn to judge (R3). The Exchange ends (there is nothing to continue from) and
-		// the counter advances so resume does not re-run the failed Turn.
-		l.tracker.discardTurn()
+		// A faulted Turn (an Upstream fault or a recovered reaction panic) produced no usable
+		// outcome. The Exchange ends (there is nothing to continue from) and the counter advances
+		// so resume does not re-run the failed Turn.
 		// A deferral is a decision about the SAME flow's next request — closeExchange expires it
 		// with the faulted Exchange (F6), so any correction drained this Turn dies here.
 		l.closeExchange()
@@ -135,12 +124,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		status = domain.StatusExchangeComplete
 		faulted = true
 	case endCancelled:
-		// The Turn is rolled back and re-attempted on resume, so self-regulation discards it
-		// WITHOUT judging — the re-attempt repopulates the fired-this-Turn set and the proxy
-		// signals from scratch. The discard also rolls this Turn's novel-read keys back out of
-		// seenReads, so the mandated re-attempt regains its novelty credit; the pending set (the
-		// previous Turn's fires) stays in place for the re-attempt's outcome to judge (R3).
-		l.tracker.discardTurn()
+		// The Turn is rolled back and re-attempted on resume.
 		// Roll the conversation back to the boundary the Turn began at (dropping this Turn's
 		// assistant message and any tool results). Truncate the queue back to its pre-hooks floor
 		// before restoring: the cancelled Turn's own post-response deferrals (e.g. a shrunken
@@ -163,15 +147,13 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 	case endStepCapped:
 		// The delegate step cap's FALLBACK exit. The cap no longer ends the Exchange on this row in
 		// the ordinary case: finishAtStepCap (agent.go) spends one further tool-less Turn on the
-		// child's closing report, and THAT Turn ends through endExchangeDone — judged, counter
+		// child's closing report, and THAT Turn ends through endExchangeDone — counter
 		// advanced, Exchange closed — so a capped child now ends at cap+1 Turns and the boundary
 		// the parent reads is the wrap-up's own with StepCapped forced on. This row is what is
 		// left for the wrap-up that produced no boundary of its own: a loop-level error that gave
-		// up without closing the Exchange. Nothing completed here, so there is nothing to judge (a
-		// tracker.endTurn would rotate the pending set against an empty scratch and lose a
-		// judgment, R3) and nothing to advance past — the counter is left alone so the index keeps
-		// naming the next Turn rather than one beyond it, an off-by-one a Snapshot stores and a
-		// resume reads back (state.go). What is left is the Exchange half: close it (F6 — the
+		// up without closing the Exchange. Nothing completed here, so there is nothing to advance
+		// past — the counter is left alone so the index keeps naming the next Turn rather than one
+		// beyond it, an off-by-one a Snapshot stores and a resume reads back (state.go). What is left is the Exchange half: close it (F6 — the
 		// deferred queue dies with it) and report the same StatusExchangeComplete a real final
 		// answer does. NOT Faulted: nothing failed — the work up to the cap stands and the parent
 		// receives it — so StepCapped is the flag that tells a capped Exchange from a finished one.

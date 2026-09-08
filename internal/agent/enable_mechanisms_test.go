@@ -141,39 +141,3 @@ func TestReactions_ResumeArmsIdentically(t *testing.T) {
 		t.Errorf("resumeAgent err = %v, want ErrInvalidReaction; Reactions must be re-armed from Config, not session state", err)
 	}
 }
-
-// TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent: the host-facing half of the same build (ADR
-// 0045). A Delegation target's Mechanisms posture is composed by the HOST, which needs the registry
-// rather than an Agent, so BuildMechanisms hands one back off the very path New walks. The shipped
-// catalogue is empty since v0.20.0 (ADR 0071), so every id list resolves to an empty registry — and
-// the registry comes back fresh and unowned either way; a child takes a copy through ForSubAgent.
-func TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent(t *testing.T) {
-	cfg := baseConfig(&recordingSink{})
-
-	registry, err := BuildMechanisms(cfg, nil)
-	if err != nil {
-		t.Fatalf("BuildMechanisms with no ids: %v, want an empty registry", err)
-	}
-	if got := len(registry.Ordered(domain.HookPreRequest)); got != 0 {
-		t.Errorf("armed pre-request rows = %d, want 0 — the shipped catalogue is empty", got)
-	}
-	if sub := registry.ForSubAgent(); sub == registry {
-		t.Error("ForSubAgent handed back the same container; a child must never share the built one")
-	}
-}
-
-// TestBuildMechanisms_RefusesWhatConstructionRefuses: the error is the construction error, raised
-// where the host can still name the config that asked for it — an unknown ID wrapping
-// ErrUnknownMechanism, exactly as New refuses the same list. BuildMechanisms builds into a FRESH
-// registry and never reads the host's own, so the refusal it is checked on has to be one the
-// shipped catalogue can still trip: the incompatibility gate no longer qualifies, its last two
-// declarers having been promoted to Floor guards and retired outright in v0.20.0 (ADR 0071). The
-// gate itself is pinned over synthetic rows in internal/domain.
-func TestBuildMechanisms_RefusesWhatConstructionRefuses(t *testing.T) {
-	cfg := baseConfig(&recordingSink{})
-
-	_, err := BuildMechanisms(cfg, []domain.MechanismID{"no_such_mechanism"})
-	if !errors.Is(err, domain.ErrUnknownMechanism) {
-		t.Errorf("BuildMechanisms with an unknown ID = %v, want ErrUnknownMechanism", err)
-	}
-}

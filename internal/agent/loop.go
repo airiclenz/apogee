@@ -223,10 +223,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	if len(calls) == 0 || a.wrapUp {
 		// Final no-tool response: commit the assistant message and end the Exchange. It is
 		// necessarily substantive — an empty reply never reaches here, the empty-reply guard
-		// (reviewedOutcome) faults the Turn first — so it is a NEUTRAL Turn for self-regulation's
-		// next-Turn judgment (R3), whose harmful proxy is the tool-result error alone. The empty
-		// final used to be that judgment's second harmful signal; a faulted Turn is discarded
-		// unjudged, so the signal is gone rather than merely relocated (CONTEXT: Self-regulation).
+		// (reviewedOutcome) faults the Turn first.
 		//
 		// The wrap-up Turn (Agent.wrapUp) takes this exit WHATEVER the reply carries: its menu was
 		// withdrawn, so a model that asks for a tool anyway is asking for something the request
@@ -898,7 +895,7 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	if sys := a.standingSystem(); sys != "" {
 		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
 	}
-	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
+	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn, nil)
 	// The reply ceiling the engine states on the wire (ADR 0046), stamped HERE — after construction
 	// and before any pre-request hook sees the Request — for two reasons. It is the engine's own
 	// bound, so it holds under Bypass, where no hook runs at all; and being the loop's value rather
@@ -1448,7 +1445,7 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 // REQUEST-projection concern owned by buildRequest, while this view is "the conversation so
 // far" — which is why the profile's tool-instruction block is likewise absent from it.
 func (a *Agent) loopView(turn int) domain.LoopView {
-	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
+	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, nil)
 	// Stamped here too, on the same call as buildRequest's, so the two projections of one Turn
 	// never state different ceilings (ADR 0046). This one reaches no server — a LoopView is read by
 	// the tool-stage hooks and drained by nobody — so it is a consistency stamp, not a wire bound.

@@ -433,11 +433,10 @@ func TestFloorGuard_AlwaysEmptyTerminatesAtCap(t *testing.T) {
 }
 
 // ADR 0071 decision 1 at the dispatch level, carried onto the Reaction core: a Floor guard is an
-// engine builtin, so both recovery guards still fire with Bypass ON and the global Turn Budget
-// TRIPPED — the posture in which a co-armed shape-view Reaction (here a synthetic response-repair
-// one, the shape the retired content-repair Mechanisms had) is dropped before it is invoked (ADR
-// 0076 D9).
-func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
+// engine builtin, so both recovery guards still fire with Bypass ON — the posture in which a
+// co-armed shape-view Reaction (here a synthetic response-repair one, the shape the retired
+// content-repair Mechanisms had) is dropped before it is invoked (ADR 0076 D9).
+func TestFloorGuard_RecoveriesFireUnderBypass(t *testing.T) {
 	t.Run("empty-response-recovery", func(t *testing.T) {
 		sink := &recordingSink{}
 		cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
@@ -452,8 +451,6 @@ func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("newAgent: %v", err)
 		}
-		a.tracker.budgetTripped = true
-		a.tracker.harmfulStreak = turnBudgetLimit
 		runExchange(t, a, "please implement the parser")
 
 		if len(responder.got) != 2 {
@@ -490,8 +487,6 @@ func TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("newAgent: %v", err)
 		}
-		a.tracker.budgetTripped = true
-		a.tracker.harmfulStreak = turnBudgetLimit
 		runExchange(t, a, "please implement feature X")
 		runExchange(t, a, "continue")
 		runExchange(t, a, "please implement feature X now")

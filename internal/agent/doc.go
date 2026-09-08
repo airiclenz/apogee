@@ -30,14 +30,11 @@
 // content, file and skill reference resolution, the streamed upstream call, response assembly
 // and tool-call parsing, and the post-response retry cap. turn.go is turnLifecycle, the
 // Turn/Exchange state between quiescent boundaries (ADR 0007) and the exits that mutate the
-// conversation and the self-regulator together. hookrun.go is the dispatcher's registry BRIDGE —
-// the catalogued Mechanisms in the registry's total order, then the bench's experimental hooks,
-// each under one recover boundary and attributed by MechanismID — the retired lab layer's last
-// leg, which dies with it. floorguards.go is what the Floor guards keep outside internal/floor
+// conversation. floorguards.go is what the Floor guards keep outside internal/floor
 // (ADR 0071): the live per-guard opt-outs the settings surface swaps, and the config keys and
-// action labels a guard is known by. reactions.go is the Reaction dispatcher that succeeds both
-// of those ladders (ADR 0076): the one fire every seam calls, its three legs, the Bypass gate,
-// the recover boundary, the revision bracket and the ReactionFiredEvent a firing books.
+// action labels a guard is known by. reactions.go is the Reaction dispatcher that succeeded the
+// two ladders it replaced (ADR 0076): the one fire every seam calls, its two legs, the Bypass
+// gate, the recover boundary, the revision bracket and the ReactionFiredEvent a firing books.
 // builtins.go is the engine's own Reactions — the seven Floor guards as domain.Reaction values,
 // each reading its live gate and calling the unchanged internal/floor policy. wire.go is the
 // translation onto the provider seam: the domain request drained into a domain-free
@@ -46,9 +43,7 @@
 // that fold appends and the marker a summary cut at the output cap carries
 // (prompts/overflow-bridge.txt, prompts/summary-truncated.txt), and the summarizer's own fixed
 // sampling. prune.go is its cheap, non-generative twin: the Turn-boundary trigger that drives
-// internal/context.Prune over the committed history and reports the reclaim as a PruneEvent. selfreg.go is per-Session self-regulation: the proxy-signal
-// safety net that withdraws a Mechanism hurting the model, deliberately weaker than the
-// bench's A/B gate and reset on Resume.
+// internal/context.Prune over the committed history and reports the reclaim as a PruneEvent.
 //
 // The tool path. resolution.go computes the per-call Resolution — the complete verdict before
 // anything executes: the guardrail floor, the ladder-by-blast-radius table, the confinement

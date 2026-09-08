@@ -1,8 +1,8 @@
 package agent
 
 // Coverage for the full engine rebind (ADR 0024) and the deferred model binding it enables:
-// Agent.Rebind swaps the wire model, the system-prompt template, the context window, the
-// catalogued Mechanism set and the model profile (ADR 0044) together at a quiescent boundary,
+// Agent.Rebind swaps the wire model, the system-prompt template, the context window and the
+// model profile (ADR 0044) together at a quiescent boundary,
 // refuses mid-Exchange, and leaves every binding intact when the new spec fails a gate. The
 // white-box package placement is what lets these inject a fake Responder through newAgent and
 // read the resulting Budget and parse-seam collaborators directly.
@@ -102,7 +102,6 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 		t.Fatal("the cancelled Exchange is not open; the refusal below would prove nothing")
 	}
 
-	registry := a.registry
 	err = a.Rebind(RebindSpec{Model: "new-model", SystemPrompt: "the new prompt", MaxContextTokens: 16384})
 	if !errors.Is(err, domain.ErrInputPending) {
 		t.Errorf("Rebind mid-Exchange err = %v, want ErrInputPending", err)
@@ -115,9 +114,6 @@ func TestRebindRefusedMidExchange(t *testing.T) {
 	}
 	if got := a.budget().ContextLimit; got != 8192 {
 		t.Errorf("Budget.ContextLimit = %d after a refused Rebind, want 8192", got)
-	}
-	if a.registry != registry {
-		t.Error("the Mechanism registry was rebuilt by a refused Rebind")
 	}
 }
 
@@ -237,8 +233,8 @@ func TestNewAllowsEmptyModelSubmitRefuses(t *testing.T) {
 }
 
 // TestRebindRefusesUnbuildableSpecs covers the two specs Rebind cannot honour: one naming no
-// model (Rebind binds, it never unbinds) and one on an Agent whose Mechanism registry the host
-// supplied pre-built (it cannot be rebuilt for a new model without dropping the host's hooks).
+// model (Rebind binds, it never unbinds) and one whose model profile the processing seam cannot
+// translate.
 func TestRebindRefusesUnbuildableSpecs(t *testing.T) {
 	t.Run("empty model", func(t *testing.T) {
 		a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "unreached"})

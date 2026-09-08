@@ -3,15 +3,12 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
-	"slices"
 	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -28,31 +25,11 @@ var (
 
 // newAgent validates cfg and constructs a ready-to-Step Agent bound to up. The public
 // New delegates here with the real provider client; white-box tests inject a deterministic
-// fake. Validation order is deliberate: required fields, then the ordering-cycle,
-// incompatibility, and requirements gates (ADR 0003; ADR 0014 §4), then the Auto/Confinement
-// gate (ADR 0012 — FSWrite-only AutoEligible).
+// fake. Validation order is deliberate: required fields first, then the Auto/Confinement gate
+// (ADR 0012 — FSWrite-only AutoEligible), and finally the armed Reactions, which are validated
+// against the engine's own builtins once those exist (ADR 0076 D1).
 func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	if err := validateConfig(cfg); err != nil {
-		return nil, err
-	}
-
-	registry := cfg.Mechanisms
-	if registry == nil {
-		registry = domain.NewMechanismRegistry()
-	}
-	// Arm the catalogued Mechanisms named on Config.EnableMechanisms, merging them into registry
-	// BEFORE the ordering/incompatibility/requirements gates run over the whole graph (ADR 0015 §1–2).
-	// A build/merge failure (unknown ID, duplicate, hook-less) is a construction failure.
-	if err := buildEnabledMechanisms(cfg, registry); err != nil {
-		return nil, err
-	}
-	if err := registry.ValidateOrdering(); err != nil {
-		return nil, err
-	}
-	if err := registry.ValidateIncompatibilities(); err != nil {
-		return nil, err
-	}
-	if err := registry.ValidateRequirements(); err != nil {
 		return nil, err
 	}
 
@@ -103,7 +80,6 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	a := &Agent{
 		cfg:                cfg,
 		upstream:           up,
-		registry:           registry,
 		tools:              resolveTools(cfg),
 		ownsToolSet:        composesDefaultRoster(cfg), // …and whether the engine may RE-compose it when the model's roster axis changes (ADR 0057)
 		guards:             security.NewDefaultGuards(),
@@ -120,7 +96,6 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		delegation:         &delegationLatch{},                   // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045); newChildAgent replaces it with the parent's
 		textParser:         textParser,
 		stripper:           stripper,
-		tracker:            newSelfRegulator(),
 		tokens:             apogeectx.NewTokenEstimator(),
 		prompts:            domain.NewPromptSlot(),               // the one prompt surface this Agent tree queues on
 		journal:            undo.New(),                           // the per-Exchange undo record, empty and per-process (ADR 0051)
@@ -150,7 +125,6 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	// Agent owns what an ending Exchange costs — the undo journal's closing capture (ADR 0074).
 	a.turns = &turnLifecycle{
 		conv:          &a.conv,
-		tracker:       a.tracker,
 		compactFailed: &a.compactFailed,
 		onClose:       a.closeUndoGroup,
 	}
@@ -268,92 +242,6 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 		return ap
 	}
 	return &queuedApprover{slot: domain.NewPromptSlot(), inner: ap, cache: &approvalCache{}}
-}
-
-// buildEnabledMechanisms builds each Mechanism named on cfg.EnableMechanisms and Adds it into
-// registry — the merge target: the caller's Config.Mechanisms, or the fresh registry newAgent made
-// when that was nil — so catalogued Mechanisms and any pre-registered experimental hooks coexist in
-// one arm (ADR 0015 §2, locked decision 2). This is the single build path from Config to the live
-// registry: cmd/apogee/wire.go now only turns config.yaml into the Config.EnableMechanisms ID list
-// and leaves construction to here (ADR 0015 §1). IDs are built in sorted canonical order so a
-// build/register error is deterministic, and every ID is built with the same zero mechanisms.Deps
-// — so the build loop below is uniform for every ID and names no Mechanism. An unknown ID (Build
-// wraps domain.ErrUnknownMechanism), an ID
-// listed twice or already pre-built into the registry (the already-registered rejection), and a
-// hook-less Mechanism all propagate as construction failures.
-// An EMPTY list builds nothing: no catalogued row is on by default, and an embedder handing New a
-// Config with no EnableMechanisms gets its recovery guarantees from Config.Floor — the Floor guards
-// are engine behaviour rather than a catalogue arm (ADR 0071). A NON-EMPTY list is built exactly as
-// given: a resolved `mechanisms:` block arrives as the list it resolved to and stays that list.
-// Every Capability defaults off (D1). The ordering, incompatibility, and requirements gates then run
-// over the merged registry unchanged.
-//
-// It hands back nothing but an error. The one collaborator the engine ever derived — the Library
-// store, with a writer goroutine and a lifetime the Agent had to flush — went with the `library`
-// row in v0.20.0 (ADR 0071), so mechanisms.Deps is empty and a build opens nothing a caller must
-// hold.
-func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) error {
-	ids := slices.Clone(cfg.EnableMechanisms)
-	if len(ids) == 0 {
-		return nil
-	}
-	slices.Sort(ids)
-
-	for _, id := range ids {
-		m, err := mechanisms.Build(id, mechanisms.Deps{})
-		if err != nil {
-			return err
-		}
-		if err := registry.Add(m); err != nil {
-			// Add's rejections already carry the "apogee: " prefix the house convention puts on a
-			// returned error, so the enable-path context is appended rather than prefixed — wrapping
-			// would print the prefix twice (cmd/apogee/main.go prints a returned error verbatim). Same
-			// shape as the ErrUnknownMechanism wrap in internal/mechanisms: the prefixed error leads.
-			return fmt.Errorf("%w — while enabling mechanism %q", err, id)
-		}
-	}
-	return nil
-}
-
-// BuildMechanisms builds the catalogued Mechanisms named by ids into a registry of their own and
-// runs the three stacking gates over it — the SAME path New walks for Config.EnableMechanisms and
-// Rebind re-walks per model, exposed for a host that needs the REGISTRY rather than an Agent.
-//
-// The Delegation target is why one does (ADR 0045): a routed sub-agent's catalogue is resolved by
-// the host from the Sub-agent server's own `mechanisms:` posture, and Config.Mechanisms takes a
-// BUILT registry rather than an ID list, so the host has to build one. Going through here rather
-// than around it is what keeps ADR 0015 §2's split intact — the engine owns construction, the
-// catalogue owns the rows — and what keeps ADR 0031's benchable-all-the-way-up door open: a bench
-// Driver latching a target of its own can compose the posture without a config file or an Agent in
-// sight.
-//
-// cfg supplies what the build reads and nothing else. It is taken by value and its EnableMechanisms
-// is overwritten, so nothing the caller holds is touched.
-//
-// The registry comes back FRESH and owned by the caller. A per-child copy is
-// MechanismRegistry.ForSubAgent, the same live-state isolation an inherited catalogue crosses the
-// delegation boundary through — never the returned registry itself, which siblings would then share.
-//
-// An unknown ID, a Mechanism whose construction fails, and a set tripping the ordering,
-// incompatibility or requirements gates are all errors here: exactly the errors a Config carrying
-// those ids would have failed New with, raised where the host can still name the config that asked
-// for them.
-func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.MechanismRegistry, error) {
-	cfg.EnableMechanisms = ids
-	registry := domain.NewMechanismRegistry()
-	if err := buildEnabledMechanisms(cfg, registry); err != nil {
-		return nil, err
-	}
-	if err := registry.ValidateOrdering(); err != nil {
-		return nil, err
-	}
-	if err := registry.ValidateIncompatibilities(); err != nil {
-		return nil, err
-	}
-	if err := registry.ValidateRequirements(); err != nil {
-		return nil, err
-	}
-	return registry, nil
 }
 
 // resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;

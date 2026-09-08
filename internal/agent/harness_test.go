@@ -134,6 +134,21 @@ func baseConfig(sink domain.EventSink) domain.Config {
 	}
 }
 
+// stepOnce submits text and advances the loop exactly ONE Turn, returning that Turn's boundary
+// StepResult — the single-Turn counterpart of runExchange, for a test that needs to inspect the
+// loop between Turns rather than at the end of an Exchange.
+func stepOnce(t *testing.T, a *Agent, text string) domain.StepResult {
+	t.Helper()
+	if err := a.Submit(domain.UserInput{Text: text}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	return res
+}
+
 func firstMessageEvent(t *testing.T, events []domain.Event) (domain.MessageEvent, bool) {
 	t.Helper()
 	for _, e := range events {

@@ -492,7 +492,25 @@ NOTES (2026-09-08): beyond the item's two named sites, the intro's trailing ADR 
 ```
 **Commit:** `docs(manual): hooks page describes Hooks as observe Reactions`
 
-## 16. Delete the lab layer, agent side
+## 16. Delete the lab layer, agent side — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the item's Files are a floor; six more files in the package had to move for the deletions to build, each named in FILES above. `enable_mechanisms_test.go` loses its two `BuildMechanisms` tests (the function the item deletes); `construct_test.go` loses `TestBuildEnabledMechanismsEmptyListBuildsNothing`, `…NeverFloorsAHandedInRegistry` and `armedIDs` as the item's guard states; `rebind_test.go` loses the `a.registry` pins on the refused-rebind case; `harness_test.go` gains `stepOnce`, which lived in the deleted `selfreg_test.go` and is called from `apikey_test.go` and `construct_test.go`; `resolution.go` and `doc.go` are consequential-edit sites (below).
+
+NOTES (2026-09-08): `setlive_test.go` joins FILES because `skipUnderBypass` died with `hookrun.go`. `gateRow` and `TestAgentSetBypassFlipsTheGateBetweenEvaluations` are re-expressed over the surviving gate — a bare `domain.Reaction` and `bypassSkips`, with the ADR 0076 D9 class matrix (advise and shape-view skipped, observe not) replacing the retired Capability matrix — and `TestAgentAnytimeSettersConcurrent` probes the same accessor. The test function names are unchanged.
+
+NOTES (2026-09-08): deviation — one test function IS renamed, against the item's "never rename existing identifiers" rule: `floorguards_test.go`'s `TestFloorGuard_RecoveriesFireUnderBypassAndTrippedBudget` → `TestFloorGuard_RecoveriesFireUnderBypass`. The two `a.tracker.budgetTripped` / `harmfulStreak` seeds the item deletes ARE the tripped-budget half of that name, so leaving it would name a posture the engine can no longer be in. Nothing outside the file references the name.
+
+NOTES (2026-09-08): deviation — `subagent_test.go`'s `TestSubAgent_FaultedDelegationBooksNoProductiveWrite` is deleted whole, not just the `a.tracker.` / `observed()` block at `:618-627` the item's guard names. Every assertion in that test reads `selfRegView`; with the block gone the body would submit, run and assert nothing. Its sibling `TestSubAgent_CancelledChildRollsTheParentTurnBack` and the shared `faultedDelegationScripts` helper are untouched.
+
+NOTES (2026-09-08): `recoverHook` and the `firedAction` const (both `hookrun.go` residents the item's What keeps) move into `reactions.go`, since the item deletes the file they lived in and the dispatcher is their only remaining caller. `firedAction` joins `actionDefer` in one const block.
+
+NOTES (2026-09-08): consequential edit — internal/agent/doc.go: made necessary by deleting internal/agent/selfreg.go and internal/agent/hookrun.go — `TestDocMapNamesEveryFile` requires doc.go's map to name every non-test file and no more, so the two files' sentences are removed and `reactions.go`'s line reads "two legs" rather than three.
+
+NOTES (2026-09-08): consequential edit — internal/agent/resolution.go: made necessary by deleting internal/agent/selfreg.go — the read/write-class doc named `selfreg.go` as the tally that reads the effect declaration; there is no such tally now.
+
+NOTES (2026-09-08): three comments inside this item's own edit sites were left false by the deletions and are reworded here rather than left to item 22, whose `Mechanism\b|hook point|experimental hook|runHooks` grep does not reach them: `dispatch.go`'s `commitDelegation` doc (it listed "the self-regulation signal" as a step this item removed from that very function), `loop.go`'s final-no-tool-response comment (the neutral-Turn judgment prose), and the `resolution.go` line above. Everything item 22's grep DOES reach — `agent.go`'s `SetBypass` doc, `loop.go:22-26` and `:1128`, `dispatch.go:341` and `:1417` — is left to item 22, which is not yet done.
+
+NOTES (2026-09-08): pre-existing gap owned by item 18, untouched here — `internal/tui`'s `TestFoldEventCoversEveryEventVariant` still fails for the `domain.ReactionFiredEvent` foldCases row item 3 introduced. Already recorded on items 5 and 6; item 18's Files claim `internal/tui/fold_test.go`.
 
 **What:** Recast at the regression check (2026-09-07). Depends on items 8, 9, 12, 13, 14. Delete `internal/agent/selfreg.go` and `selfreg_test.go`; remove the bridge leg from `fire` and delete `hookrun.go` entirely; `construct.go:39-47,261-330` (registry build, `buildEnabledMechanisms`, `BuildMechanisms`, the three validations) deleted; `agent.go:57` (`registry`) deleted; `rebind.go:31-36,107-109,187,215` (`EnableMechanisms` on `RebindSpec`) deleted; `subagent.go:537-548` → the child config carries `parent.Reactions` with the `TopLevelOnly: true` ones dropped (`:646-647` went in item 13, with `delegationtarget.go:111`); `turn.go:16` (the `tracker` field), `turn.go:107,124,143` (`endTurn` / `discardTurn`), `agent.go:213-216`, `construct.go:123,141` and `dispatch.go:275,532` (`noteToolProductivity`) deleted; `loop.go:904,1454` pass `nil` where `a.tracker.fireCounts` was (the parameter itself goes in item 17). Test doubles referencing `selfRegView` / `observed()` go with `selfreg_test.go`.
 

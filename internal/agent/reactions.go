@@ -13,8 +13,7 @@ import (
 //
 // One ladder runs at every seam Moment, and fire below is the whole of it: the engine's own
 // builtins first — the seven Floor guards (builtins.go) — then the Reactions the host armed on
-// Config.Reactions, in registration order, and finally the registry BRIDGE that still carries the
-// retired lab layer (hookrun.go) until stage 1 deletes it. Each reaction is skipped or run, bracketed by the
+// Config.Reactions, in registration order. Each reaction is skipped or run, bracketed by the
 // working value's Revision counter, booked when it ACTED, and reported as one
 // ReactionFiredEvent. There is no second ladder and no second firing event: a Floor guard, a
 // bench instrument and (from stage 2) a user's entry are the same kind of thing arriving at the
@@ -37,18 +36,22 @@ import (
 //     the working value in place is booked whether or not it said so. An
 //     inspect-and-do-nothing invocation books nothing.
 //   - At post-response the first Retry STOPS THE LEG it fires in, whatever retry budget the loop
-//     has left: that is what both chains this replaces did (floorguards.go's first-guard-to-fire
-//     and hookrun.go's ActionRetry short-circuit), and the budget is a LOOP concern deciding only
-//     whether the Turn re-streams. The one place the budget reaches the cascade is the handover
+//     has left: that is what both chains this replaces did — the Floor guards' first-guard-to-fire
+//     and the retired hook runner's ActionRetry short-circuit — and the budget is a LOOP concern
+//     deciding only whether the Turn re-streams. The one place the budget reaches the cascade is the handover
 //     between the legs: a builtin Retry the loop WILL act on takes the Turn away from the armed
 //     leg, while one it cannot act on (budget spent) lets the armed leg run on the untouched
 //     response — today's fall-through in loop.go.
 
-// actionDefer labels a firing that scheduled a correction into the NEXT request. It completes
-// the action vocabulary the guard consts spell out (floorguards.go): one vocabulary, whoever
-// fired, because a reader of a ReactionFiredEvent should not have to know which ladder the
-// reaction came from to read what it did.
-const actionDefer = "defer"
+// The two action labels the dispatcher itself supplies. firedAction is what a firing is booked
+// under at the four Moments with no action vocabulary of their own; actionDefer labels a firing
+// that scheduled a correction into the NEXT request. Together with the guard consts
+// (floorguards.go) they are one vocabulary, whoever fired, because a reader of a
+// ReactionFiredEvent should not have to know which leg the reaction came from to read what it did.
+const (
+	firedAction = "fired"
+	actionDefer = "defer"
+)
 
 // errReactionSeam reports a dispatch the ENGINE got wrong — a payload that is not the Moment's
 // own, a handler that cannot serve it, or a Moment that is no seam at all. Every one of them is
@@ -87,22 +90,16 @@ type seamPayload struct {
 	// re-stream this Turn if a reaction asks it to — and false at every other Moment, none of
 	// which can ask.
 	retryable bool
-	// bridge runs the cascade's THIRD leg: the catalogued Mechanisms and experimental hooks the
-	// registry still holds (hookrun.go). It is built here, per Moment, from the same working
-	// value and LoopView the two legs above use, so a registry row sees exactly what it saw when
-	// the seams called it directly. It folds a post-response ActionRetry into result and dies
-	// with the lab layer.
-	bridge func(ctx context.Context, result *domain.Outcome) error
 }
 
 // fire runs the Reaction cascade for Moment m against payload and reports what the cascade did,
 // as one Outcome for the seam to act on. It is the engine's ONLY dispatcher: every seam calls it
 // and nothing else fires a reaction.
 //
-// Three legs run in turn — the builtins, the armed Reactions, then the registry bridge that still
-// carries the retired lab layer (hookrun.go) and dies with it. A post-response Retry the loop WILL
-// act on ends the cascade where it fires: the Turn is about to re-stream, so the legs below never
-// see the response being replaced. That is the one place the retry budget reaches the cascade.
+// Two legs run in turn — the builtins, then the armed Reactions. A post-response Retry the loop
+// WILL act on ends the cascade where it fires: the Turn is about to re-stream, so the leg below
+// never sees the response being replaced. That is the one place the retry budget reaches the
+// cascade.
 //
 // The returned Outcome aggregates the leg: Retry and its Inject come from the reaction that
 // asked for the re-stream (the last one to ask, when both legs did), and Edited is set when any
@@ -131,20 +128,12 @@ func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.
 		return domain.Outcome{}, err
 	}
 	if retried && seam.retryable {
-		// The loop will re-stream this Turn with the builtin's correction, so the legs below
-		// never see this response at all — they will see the retried one.
+		// The loop will re-stream this Turn with the builtin's correction, so the leg below
+		// never sees this response at all — it will see the retried one.
 		return result, nil
 	}
 
-	retried, err = a.fireLeg(ctx, turn, m, seam, a.armed, false, &result)
-	if err != nil {
-		return domain.Outcome{}, err
-	}
-	if retried && seam.retryable {
-		return result, nil
-	}
-
-	if err := seam.bridge(ctx, &result); err != nil {
+	if _, err := a.fireLeg(ctx, turn, m, seam, a.armed, false, &result); err != nil {
 		return domain.Outcome{}, err
 	}
 	return result, nil
@@ -235,6 +224,23 @@ func (a *Agent) fireOne(
 	return out, nil
 }
 
+// recoverHook returns a deferred closure that converts a reaction's panic into an ErrorEvent
+// attributed to the firing reaction's id and signals errHookPanicked through errp — the single
+// recover-at-extension-boundary primitive the dispatcher installs around every invocation
+// (ADR 0007 / ADR 0002).
+func (a *Agent) recoverHook(turn int, id domain.MechanismID, errp *error) func() {
+	return func() {
+		if r := recover(); r != nil {
+			a.cfg.Events.Emit(domain.ErrorEvent{
+				EventBase: a.base(turn),
+				Source:    string(id),
+				Err:       fmt.Sprintf("panic: %v", r),
+			})
+			*errp = errHookPanicked
+		}
+	}
+}
+
 // bookFiring records one ACTED firing: it carries out the reaction's decision that the
 // dispatcher owns (a deferred correction goes onto the conversation's queue), folds what the
 // seam must know into result, and emits the ReactionFiredEvent.
@@ -315,8 +321,8 @@ func (a *Agent) bypassSkips(r domain.Reaction) bool {
 
 // seamPayload resolves the Moment's payload into what the cascade reads it through. The five
 // cases are the whole of what differs between the seams — which working value is bracketed,
-// which handler type is called and with what, which builds a LoopView, and which registry leg the
-// bridge runs — so every other part of the dispatcher is seam-blind.
+// which handler type is called and with what, and which builds a LoopView — so every other part
+// of the dispatcher is seam-blind.
 //
 // A payload or handler that does not match the Moment is an engine bug and is refused here
 // rather than recovered, because attributing it to the reaction would blame the wrong party.
@@ -336,15 +342,6 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 				}
 				return fn(ctx, req)
 			},
-			bridge: func(ctx context.Context, _ *domain.Outcome) error {
-				return runHooks(a, ctx, turn, hookPointRun[domain.PreRequestHook]{
-					at:       domain.HookPreRequest,
-					revision: req.Revision,
-					fire: func(ctx context.Context, hook domain.PreRequestHook) (hookOutcome, error) {
-						return hookOutcome{action: firedAction}, hook.PreRequest(ctx, req)
-					},
-				})
-			},
 		}, nil
 
 	case domain.MomentPostResponse:
@@ -361,36 +358,6 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 					return domain.Outcome{}, wrongHandler(m, h)
 				}
 				return fn(ctx, p.Resp)
-			},
-			// The one bridge leg with an answer for the seam: a registry row's ActionRetry is
-			// the loop's retry, and ActionDefer is carried here exactly as the retired adapter
-			// carried it — inside the recover boundary, so a panic mid-decision books nothing.
-			bridge: func(ctx context.Context, result *domain.Outcome) error {
-				return runHooks(a, ctx, turn, hookPointRun[domain.PostResponseHook]{
-					at:       domain.HookPostResponse,
-					revision: p.Resp.Revision,
-					fire: func(ctx context.Context, hook domain.PostResponseHook) (hookOutcome, error) {
-						decision, err := hook.PostResponse(ctx, p.Resp)
-						if err != nil {
-							return hookOutcome{}, err
-						}
-						switch decision.Action {
-						case domain.ActionRetry:
-							// The loop re-calls the Upstream with this correction; the leg stops here.
-							result.Retry, result.Inject = true, decision.Inject
-						case domain.ActionDefer:
-							if decision.Inject != "" {
-								a.conv.Defer(decision.Inject)
-							}
-						}
-						// ActionIntercept (and the zero action): the hook already mutated resp.
-						return hookOutcome{
-							action: string(decision.Action),
-							acted:  decision.Action != "",
-							stop:   decision.Action == domain.ActionRetry,
-						}, nil
-					},
-				})
 			},
 		}, nil
 
@@ -409,15 +376,6 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 				}
 				return fn(ctx, view, edit)
 			},
-			bridge: func(ctx context.Context, _ *domain.Outcome) error {
-				return runHooks(a, ctx, turn, hookPointRun[domain.PreToolExecHook]{
-					at:       domain.HookPreToolExec,
-					revision: edit.Revision,
-					fire: func(ctx context.Context, hook domain.PreToolExecHook) (hookOutcome, error) {
-						return hookOutcome{action: firedAction}, hook.PreToolExec(ctx, edit, view)
-					},
-				})
-			},
 		}, nil
 
 	case domain.MomentPostToolResult:
@@ -435,15 +393,6 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 				}
 				return fn(ctx, view, p.Call, p.Edit)
 			},
-			bridge: func(ctx context.Context, _ *domain.Outcome) error {
-				return runHooks(a, ctx, turn, hookPointRun[domain.PostToolResultHook]{
-					at:       domain.HookPostToolResult,
-					revision: p.Edit.Revision,
-					fire: func(ctx context.Context, hook domain.PostToolResultHook) (hookOutcome, error) {
-						return hookOutcome{action: firedAction}, hook.PostToolResult(ctx, p.Call, p.Edit, view)
-					},
-				})
-			},
 		}, nil
 
 	case domain.MomentHistoryRewrite:
@@ -459,15 +408,6 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 					return domain.Outcome{}, wrongHandler(m, h)
 				}
 				return fn(ctx, conv)
-			},
-			bridge: func(ctx context.Context, _ *domain.Outcome) error {
-				return runHooks(a, ctx, turn, hookPointRun[domain.HistoryRewriter]{
-					at:       domain.HookHistoryRewrite,
-					revision: conv.Revision,
-					fire: func(ctx context.Context, hook domain.HistoryRewriter) (hookOutcome, error) {
-						return hookOutcome{action: firedAction}, hook.RewriteHistory(ctx, conv)
-					},
-				})
 			},
 		}, nil
 	}

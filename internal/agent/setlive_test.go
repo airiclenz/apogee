@@ -2,7 +2,7 @@ package agent
 
 // The three anytime-safe setters the settings surface drives mid-session — SetBypass,
 // SetCompactionEnabled and SetContextFiles (the SetMode/SetConfineToWorkspace class). What each
-// test pins is the CONSUMPTION BOUNDARY: Bypass lands at the next hook evaluation, the
+// test pins is the CONSUMPTION BOUNDARY: Bypass lands at the next reaction evaluation, the
 // auto-Compaction gate at the next fold decision, and the context-file names only at the next
 // session boundary — deliberately NOT at once, so a session keeps seeding byte-identical content.
 
@@ -16,27 +16,27 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// gateRow is a bare catalogued row: the Bypass gate reads nothing but the Capability, so no hook
+// gateRow is a bare armed Reaction: the Bypass gate reads nothing but the Class, so no handler
 // implementation is needed to probe it.
-func gateRow(id domain.MechanismID, capability domain.Capability) domain.RegisteredMechanism {
-	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: id, Capability: capability}}
+func gateRow(id string, class domain.Class) domain.Reaction {
+	return domain.Reaction{ID: id, Origin: domain.OriginUser, Class: class}
 }
 
 // TestAgentSetBypassFlipsTheGateBetweenEvaluations proves a runtime SetBypass changes the skip
-// decision on the SAME Agent with no rebuild, and that the off-ramp exemption (D5/ADR 0006) holds
-// on both sides of the flip: switching Bypass on never withdraws a recovery guarantee.
+// decision on the SAME Agent with no rebuild, and that the class exemption (ADR 0076 D9) holds on
+// both sides of the flip: switching Bypass on never withdraws an observe or gate Reaction.
 func TestAgentSetBypassFlipsTheGateBetweenEvaluations(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		title        string
-		capability   domain.Capability
+		class        domain.Class
 		wantUnderOff bool // skipped with Bypass off
 		wantUnderOn  bool // skipped with Bypass on
 	}{
-		{title: "proactive nudge", capability: domain.CapProactiveNudge, wantUnderOff: false, wantUnderOn: true},
-		{title: "response repair", capability: domain.CapResponseRepair, wantUnderOff: false, wantUnderOn: true},
-		{title: "off-ramp survives", capability: domain.CapOffRamp, wantUnderOff: false, wantUnderOn: false},
+		{title: "advise", class: domain.ClassAdvise, wantUnderOff: false, wantUnderOn: true},
+		{title: "shape (view)", class: domain.ClassShapeView, wantUnderOff: false, wantUnderOn: true},
+		{title: "observe survives", class: domain.ClassObserve, wantUnderOff: false, wantUnderOn: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.title, func(t *testing.T) {
@@ -45,22 +45,22 @@ func TestAgentSetBypassFlipsTheGateBetweenEvaluations(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
-			row := gateRow("probe", tc.capability)
+			row := gateRow("probe", tc.class)
 
-			if got := a.skipUnderBypass(row); got != tc.wantUnderOff {
-				t.Fatalf("skipUnderBypass at construction = %t, want %t", got, tc.wantUnderOff)
+			if got := a.bypassSkips(row); got != tc.wantUnderOff {
+				t.Fatalf("bypassSkips at construction = %t, want %t", got, tc.wantUnderOff)
 			}
 
 			a.SetBypass(true)
 
-			if got := a.skipUnderBypass(row); got != tc.wantUnderOn {
-				t.Fatalf("skipUnderBypass after SetBypass(true) = %t, want %t", got, tc.wantUnderOn)
+			if got := a.bypassSkips(row); got != tc.wantUnderOn {
+				t.Fatalf("bypassSkips after SetBypass(true) = %t, want %t", got, tc.wantUnderOn)
 			}
 
 			a.SetBypass(false)
 
-			if got := a.skipUnderBypass(row); got != tc.wantUnderOff {
-				t.Fatalf("skipUnderBypass after SetBypass(false) = %t, want %t again", got, tc.wantUnderOff)
+			if got := a.bypassSkips(row); got != tc.wantUnderOff {
+				t.Fatalf("bypassSkips after SetBypass(false) = %t, want %t again", got, tc.wantUnderOff)
 			}
 		})
 	}
@@ -207,7 +207,7 @@ func TestAgentAnytimeSettersConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	row := gateRow("probe", domain.CapProactiveNudge)
+	row := gateRow("probe", domain.ClassAdvise)
 
 	const iters = 1000
 	var wg sync.WaitGroup
@@ -223,7 +223,7 @@ func TestAgentAnytimeSettersConcurrent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
-			_ = a.skipUnderBypass(row)
+			_ = a.bypassSkips(row)
 			_ = a.shouldAutoCompact()
 			_ = a.contextFileList()
 			_, _ = a.newChildAgent("call_sub", "the delegated task", "") // the spawn seam reads the live Bypass and Compaction gates too

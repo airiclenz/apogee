@@ -269,11 +269,6 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 			return dispatchCancelled
 		}
 
-		// Feed this call's outcome to self-regulation's proxy signals (R3): a novel read or a
-		// successful write is the productive signal, an error result the harmful one. Ordering
-		// relative to the post-tool-result hooks is immaterial to their judgment — fires are
-		// judged by the NEXT Turn's outcome (next-Turn judgment), not this one's.
-		a.noteToolProductivity(call, result)
 		a.firePostToolResult(ctx, call, &result)
 		a.appendToolResult(turn, result)
 	}
@@ -287,12 +282,11 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 // A reply that asks for several delegations at once gets them at once, up to the bound server's
 // Parallel agents cap. The fan-out is deliberately NOT "run the whole per-call pipeline on N
 // goroutines": only the CHILD RUN is concurrent. Everything a delegation shares with its
-// siblings — the pre-tool-exec hooks, the guardrail probe and the Resolution, the audit record,
-// the self-regulation signals, the post-tool-result hooks, and the append into history — stays
-// on the dispatching goroutine, in emitted-call order, on either side of the pool. That is what
-// keeps the Agent's own state (registry, guards, tracker, conversation) single-goroutine while
-// N children run, and what makes the resulting history DETERMINISTIC regardless of which child
-// finishes first.
+// siblings — the pre-tool-exec Moment, the guardrail probe and the Resolution, the audit record,
+// the post-tool-result Moment, and the append into history — stays on the dispatching goroutine,
+// in emitted-call order, on either side of the pool. That is what keeps the Agent's own state
+// (reactions, guards, conversation) single-goroutine while N children run, and what makes the
+// resulting history DETERMINISTIC regardless of which child finishes first.
 //
 // The three phases are: prepare each call (serial), run the Delegate verdicts through a bounded
 // pool (concurrent), commit each call's result (serial). A cancellation is answered between the
@@ -515,8 +509,8 @@ func (a *Agent) emitSubAgentNamed(turn int, callID, name string) {
 }
 
 // commitDelegation lands one finished delegation: the audit record its verdict earns, the
-// self-regulation signal, the post-tool-result hooks, and the append into history — the same
-// sequence, in the same order, the serial path runs inline for every call. Running it here, one
+// post-tool-result Moment, and the append into history — the same sequence, in the same order,
+// the serial path runs inline for every call. Running it here, one
 // slot at a time in emitted-call order, is what makes the fan-out's history independent of
 // completion order.
 func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot) {
@@ -529,7 +523,6 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 		// verdict. A refused slot was already recorded by executeRefuse in the prepare phase.
 		a.recordExecuted(turn, slot.call, slot.verdict.auditDecision, slot.verdict.auditReason, slot.result)
 	}
-	a.noteToolProductivity(slot.call, slot.result)
 	a.firePostToolResult(ctx, slot.call, &slot.result)
 	a.appendToolResult(turn, slot.result)
 }

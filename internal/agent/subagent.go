@@ -379,9 +379,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		// only thing that tells them apart, and reporting it as a success would hand the parent
 		// model a placeholder — or, worse, stale mid-task text from an earlier child Turn
 		// (finalMessageText scans backwards for the last assistant message) — as the delegated
-		// result. An error result also books the delegation as HARMFUL rather than as a
-		// productive write for self-regulation (noteToolProductivity, R3), so a failure can no
-		// longer clear the parent's strikes and Turn Budget. The child's own ErrorEvent already
+		// result. The child's own ErrorEvent already
 		// reached the shared EventSink at Depth+1, so the human sees the cause — and the cause now
 		// rides the RESULT too, because "see the preceding error" addresses a reader the parent
 		// MODEL is not: it reads one tool result and has no transcript to look back through.
@@ -393,8 +391,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	case res.StepCapped:
 		// The engine STOPPED the child at its step cap (Agent.Run) — it was still asking for tools,
 		// so what it has is partial. That is not a failure and must not be reported as one: an error
-		// result would throw away Turns of real work AND book the delegation as harmful for
-		// self-regulation (noteToolProductivity, R3). So the parent gets a NON-error result whose
+		// result would throw away Turns of real work. So the parent gets a NON-error result whose
 		// first line is the marker saying the answer below is partial, followed by whatever the
 		// child last said out loud. The child's own ErrorEvent already told the human the cap hit.
 		//
@@ -533,21 +530,8 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the
 	// parent's context-file CONTENT verbatim below, because a sub-agent is not a session boundary.
 	childCfg.Tools = a.defaultSubAgentTools()
-	// The sub-agent inherits the parent's ALREADY-BUILT catalogue (a.registry — the parent's
-	// Config.Mechanisms merged with whatever Config.EnableMechanisms armed), so it fires the same
-	// catalogued + experimental Mechanisms; an explicit per-sub-agent catalogue is a later refinement
-	// (ADR 0013 leaves the default = the parent's). It inherits it through ForSubAgent rather than by
-	// pointer: siblings in a depth-0 fan-out run AT ONCE (ADR 0039), so the child gets a registry of
-	// its own — and a hook carrying live state gets a per-child instance, the same isolate-the-live-
-	// state / share-the-read-only-floor answer Guards.ForSubAgent gives one line down. A hook with
-	// nothing live to isolate is still inherited verbatim, so the delegation is unchanged for every
-	// Mechanism in today's catalogue. EnableMechanisms is cleared because those IDs are already built
-	// into the inherited registry — re-building them into it would trip the already-registered
-	// rejection and fail every sub-agent spawn.
-	childCfg.Mechanisms = a.registry.ForSubAgent()
-	childCfg.EnableMechanisms = nil
-	// The armed Reactions are inherited the same way and by the same rule — unconditionally,
-	// because a reaction the parent runs with is part of the posture the delegation inherits —
+	// The armed Reactions are inherited UNCONDITIONALLY, because a reaction the parent runs with
+	// is part of the posture the delegation inherits —
 	// with Reaction.TopLevelOnly as the one opt-out (ADR 0076). They are filtered HERE rather
 	// than at the child's dispatcher so the child's own construction re-validates exactly the
 	// set it will fire, and so a nested delegation inherits what its own parent kept. The

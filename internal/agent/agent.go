@@ -53,8 +53,7 @@ import (
 // while a Step runs and the change lands at that field's next consumption boundary.
 type Agent struct {
 	cfg      domain.Config
-	upstream provider.Responder        // provider seam (Decision C): fake in tests, real HTTP via New
-	registry *domain.MechanismRegistry // catalogued + experimental hooks driving the loop
+	upstream provider.Responder // provider seam (Decision C): fake in tests, real HTTP via New
 
 	// builtins are the engine's OWN Reactions — the seven Floor guards (builtins.go) — which
 	// fire first at every seam Moment and are never switched off by Bypass (ADR 0076 D1/D9).
@@ -221,16 +220,11 @@ type Agent struct {
 	// before (its own mode governs).
 	liveMode func() domain.Mode
 
-	// tracker is the per-Session self-regulation state (effectiveness tracking, Adaptive
-	// Suppression, the Turn Budget — internal/agent/selfreg.go). It is NOT serialized: Resume
-	// rebuilds it fresh via newAgent, the accepted v1 reset-on-resume posture (plan item 3).
-	tracker *selfRegulator
-
 	// tokens is the structural token accounting behind the Budget view: a chars→token estimator
-	// the loop calibrates against each Turn's server-reported usage (internal/context). Like the
-	// tracker it is per-Session and NOT serialized — a resumed Agent recalibrates from its first
-	// UsageEvent, reporting the default ratio and a zero Used until then. It is structural, not a
-	// Mechanism, so it stays live under Bypass (D5/D6).
+	// the loop calibrates against each Turn's server-reported usage (internal/context). It is
+	// per-Session and NOT serialized — a resumed Agent recalibrates from its first UsageEvent,
+	// reporting the default ratio and a zero Used until then. It is structural rather than a
+	// Reaction, so it stays live under Bypass (D5/D6).
 	tokens *apogeectx.TokenEstimator
 
 	// usage is THIS Agent's cumulative token accounting — the running sum every UsageEvent it
@@ -238,8 +232,8 @@ type Agent struct {
 	// instead of summing a stream (domain.UsageEvent). It counts this Agent's own calls only:
 	// newChildAgent builds a child through newAgent, which gives it a fresh zero tally, so a
 	// sub-agent's events carry CHILD-LOCAL totals and per-agent grouping stays with the observer,
-	// which already has the Depth and CallID stamps to group by. Like tokens and tracker it is
-	// per-Session and NOT serialized — a resumed Agent counts from zero.
+	// which already has the Depth and CallID stamps to group by. Like tokens it is per-Session
+	// and NOT serialized — a resumed Agent counts from zero.
 	usage usageTally
 
 	// prompts is the ONE prompt surface this Agent's Steps designate on their context

@@ -599,43 +599,6 @@ func TestSubAgent_TransientChildBlipStaysInsideTheDelegation(t *testing.T) {
 	}
 }
 
-// TestSubAgent_FaultedDelegationBooksNoProductiveWrite proves the second half of the same defect:
-// a failed delegation must not feed self-regulation the PRODUCTIVE signal (sub_agent is not
-// read-only, so a non-error result booked noteWrite), which cleared every strike, re-opened every
-// suppressed Mechanism and lifted the Turn Budget on the strength of a failure (R3).
-func TestSubAgent_FaultedDelegationBooksNoProductiveWrite(t *testing.T) {
-	sink := &recordingSink{}
-	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
-	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
-
-	a, err := newAgent(cfg, &scriptedResponder{scripts: faultedDelegationScripts()})
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
-	}
-	// Seed a Session that has been going badly: the Turn Budget is tripped and a Mechanism
-	// carries strikes. Only a PRODUCTIVE Turn clears those (selfRegulator.endTurn).
-	const probe = domain.MechanismID("probe")
-	a.tracker.harmfulStreak = turnBudgetLimit
-	a.tracker.budgetTripped = true
-	a.tracker.strikes[probe] = adaptiveSuppressStrikes - 1
-
-	_ = a.Submit(domain.UserInput{Text: "please research"})
-	if _, err := a.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	view := a.tracker.observed()
-	if !view.BudgetTripped {
-		t.Error("the Turn Budget was lifted by a FAILED delegation — a fault is not a productive write")
-	}
-	if view.HarmfulStreak < turnBudgetLimit {
-		t.Errorf("harmful streak = %d, want it held at or above %d (a fault never resets it)", view.HarmfulStreak, turnBudgetLimit)
-	}
-	if view.Strikes[probe] != adaptiveSuppressStrikes-1 {
-		t.Errorf("strikes[probe] = %d, want %d (a failed delegation clears nothing)", view.Strikes[probe], adaptiveSuppressStrikes-1)
-	}
-}
-
 // TestSubAgent_CancelledChildRollsTheParentTurnBack pins the neighbouring row the fault marker
 // must not disturb: a CANCELLED child still unwinds the parent Turn wholesale (D2) — no tool
 // result is surfaced at all, and the cancel is not reported as a fault. The serial path closes the

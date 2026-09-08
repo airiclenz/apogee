@@ -8,61 +8,19 @@ import (
 )
 
 // The exit table (item 2) is unit-testable in isolation: end() drives a turnLifecycle over a
-// scripted Conversation + selfRegulator with no fake responder and no scripted step() run — the
-// deepening's testability payoff. Each row below asserts the four dimensions end() owns (judge vs
-// discard, whether the Exchange closes, whether the counter advances, the conversation rewrite)
-// exactly as the three deleted helpers did — behavior is locked to today's.
-
-// seededTracker returns a selfRegulator whose pending set holds one fire ("prev") and whose
-// per-Turn scratch holds this Turn's fire ("cur") plus a novel read, so endTurn's rotation and
-// discardTurn's scratch-clear + read-rollback are both observable directly (same package).
-func seededTracker() *selfRegulator {
-	r := newSelfRegulator()
-	r.pendingJudgment[domain.MechanismID("prev")] = true
-	r.firedThisTurn[domain.MechanismID("cur")] = true
-	r.turnReads["read-key"] = true
-	r.seenReads["read-key"] = true
-	return r
-}
-
-// assertJudged checks endTurn ran: the pending set rotated to this Turn's fires and the scratch cleared.
-func assertJudged(t *testing.T, r *selfRegulator) {
-	t.Helper()
-	if !r.pendingJudgment[domain.MechanismID("cur")] {
-		t.Error("judged Turn: pending set did not rotate to this Turn's fire")
-	}
-	if r.pendingJudgment[domain.MechanismID("prev")] {
-		t.Error("judged Turn: previous fire lingered in the pending set after rotation")
-	}
-	if len(r.firedThisTurn) != 0 {
-		t.Error("judged Turn: per-Turn fired set was not cleared")
-	}
-}
-
-// assertDiscarded checks discardTurn ran: the pending set is intact, the scratch cleared, and the
-// novel read rolled back out of the Session ledger.
-func assertDiscarded(t *testing.T, r *selfRegulator) {
-	t.Helper()
-	if !r.pendingJudgment[domain.MechanismID("prev")] {
-		t.Error("discarded Turn: pending set was not left in place for the re-attempt to judge")
-	}
-	if len(r.firedThisTurn) != 0 {
-		t.Error("discarded Turn: per-Turn fired set was not cleared")
-	}
-	if r.seenReads["read-key"] {
-		t.Error("discarded Turn: this Turn's novel read was not rolled back out of seenReads")
-	}
-}
+// scripted Conversation with no fake responder and no scripted step() run — the deepening's
+// testability payoff. Each row below asserts the three dimensions end() owns (whether the
+// Exchange closes, whether the counter advances, the conversation rewrite) exactly as the three
+// deleted helpers did — behavior is locked to today's.
 
 func TestTurnEnd_Table(t *testing.T) {
 	past := time.Now().Add(-time.Millisecond) // guarantees Elapsed > 0
 
-	t.Run("endTurnDone judges, advances, leaves the Exchange open and the queue untouched", func(t *testing.T) {
+	t.Run("endTurnDone advances, leaves the Exchange open and the queue untouched", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
 		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
 		conv.Defer("pending-correction")
-		tracker := seededTracker()
-		l := &turnLifecycle{conv: conv, tracker: tracker, index: 5, inExchange: true}
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true}
 
 		res := l.end(&turnRun{turn: 5, start: past}, endTurnDone)
 
@@ -87,15 +45,13 @@ func TestTurnEnd_Table(t *testing.T) {
 		if l.conv.DeferredLen() != 1 {
 			t.Errorf("deferred queue len = %d, want 1 (untouched on endTurnDone)", l.conv.DeferredLen())
 		}
-		assertJudged(t, tracker)
 	})
 
-	t.Run("endExchangeDone judges, advances, closes the Exchange and clears the queue", func(t *testing.T) {
+	t.Run("endExchangeDone advances, closes the Exchange and clears the queue", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
 		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
 		conv.Defer("pending-correction")
-		tracker := seededTracker()
-		l := &turnLifecycle{conv: conv, tracker: tracker, index: 5, inExchange: true}
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true}
 
 		res := l.end(&turnRun{turn: 5, start: past}, endExchangeDone)
 
@@ -114,15 +70,13 @@ func TestTurnEnd_Table(t *testing.T) {
 		if l.conv.DeferredLen() != 0 {
 			t.Errorf("deferred queue len = %d, want 0 (closeExchange clears it — F6)", l.conv.DeferredLen())
 		}
-		assertJudged(t, tracker)
 	})
 
 	t.Run("endStepCapped closes the Exchange, marks the boundary partial and leaves the counter alone", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
 		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
 		conv.Defer("pending-correction")
-		tracker := seededTracker()
-		l := &turnLifecycle{conv: conv, tracker: tracker, index: 5, inExchange: true}
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true}
 
 		res := l.end(&turnRun{turn: 5, start: past}, endStepCapped)
 
@@ -146,18 +100,9 @@ func TestTurnEnd_Table(t *testing.T) {
 		if l.conv.DeferredLen() != 0 {
 			t.Errorf("deferred queue len = %d, want 0 (closeExchange clears it — F6)", l.conv.DeferredLen())
 		}
-		// Run reaches this row only AFTER endTurnDone judged the Turn that just completed, so the
-		// row must not judge it a second time: the pending set stays exactly as it was rather than
-		// rotating against an emptied scratch and losing a judgment (R3).
-		if !tracker.pendingJudgment[domain.MechanismID("prev")] {
-			t.Error("step-capped exit re-judged an already-judged Turn: the pending set rotated")
-		}
-		if !tracker.firedThisTurn[domain.MechanismID("cur")] {
-			t.Error("step-capped exit cleared the per-Turn scratch; the Turn was already resolved by endTurnDone")
-		}
 	})
 
-	t.Run("endAbandoned discards, advances, closes the Exchange and empties the queue", func(t *testing.T) {
+	t.Run("endAbandoned advances, closes the Exchange and empties the queue", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
 		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
 		// Two corrections sit on the queue — as if a deleted restoreDeferred had re-queued them.
@@ -165,8 +110,7 @@ func TestTurnEnd_Table(t *testing.T) {
 		// abandon was dead motion (agenda #4 / F6).
 		conv.Defer("drained-1")
 		conv.Defer("drained-2")
-		tracker := seededTracker()
-		l := &turnLifecycle{conv: conv, tracker: tracker, index: 5, inExchange: true}
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true}
 
 		res := l.end(&turnRun{turn: 5, start: past}, endAbandoned)
 
@@ -188,10 +132,9 @@ func TestTurnEnd_Table(t *testing.T) {
 		if l.conv.DeferredLen() != 0 {
 			t.Errorf("deferred queue len = %d, want 0 (abandon clears it; the pre-abandon restore was dead motion)", l.conv.DeferredLen())
 		}
-		assertDiscarded(t, tracker)
 	})
 
-	t.Run("endCancelled discards, rolls back, holds the counter and restores the queue exactly once", func(t *testing.T) {
+	t.Run("endCancelled rolls back, holds the counter and restores the queue exactly once", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
 		conv.Append(domain.Message{Role: domain.RoleSystem, Content: "sys"})  // idx 0
 		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})      // idx 1
@@ -201,8 +144,7 @@ func TestTurnEnd_Table(t *testing.T) {
 		deferredFloor := conv.DeferredLen()                                   // 0 — after the request drained the queue
 		conv.Defer("own-directive")                                           // the cancelled Turn's own post-response deferral (past the floor)
 
-		tracker := seededTracker()
-		l := &turnLifecycle{conv: conv, tracker: tracker, index: 5, inExchange: true}
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true}
 		t0 := &turnRun{turn: 7, start: past, rollback: rollback, deferred: []string{"drained-correction"}, deferredFloor: deferredFloor}
 
 		res := l.end(t0, endCancelled)
@@ -231,7 +173,6 @@ func TestTurnEnd_Table(t *testing.T) {
 		if !ok || len(got) != 1 || got[0] != "drained-correction" {
 			t.Errorf("deferred queue = %v (ok=%v), want exactly [drained-correction]", got, ok)
 		}
-		assertDiscarded(t, tracker)
 	})
 }
 
@@ -284,7 +225,7 @@ func TestReanchorAfterShrink_Clamp(t *testing.T) {
 			if conv.PrefixEnd() != 2 {
 				t.Fatalf("test setup: PrefixEnd() = %d, want 2", conv.PrefixEnd())
 			}
-			l := &turnLifecycle{conv: conv, tracker: newSelfRegulator(), inExchange: tc.inExchange, exchangeStart: tc.start}
+			l := &turnLifecycle{conv: conv, inExchange: tc.inExchange, exchangeStart: tc.start}
 			l.reanchorAfterShrink(tc.dropped)
 			if l.exchangeStart != tc.want {
 				t.Errorf("exchangeStart = %d, want %d", l.exchangeStart, tc.want)
@@ -295,7 +236,7 @@ func TestReanchorAfterShrink_Clamp(t *testing.T) {
 
 func TestOpenExchange(t *testing.T) {
 	conv := buildConv(3) // system, user, assistant — length 3
-	l := &turnLifecycle{conv: conv, tracker: newSelfRegulator()}
+	l := &turnLifecycle{conv: conv}
 
 	l.openExchange()
 
@@ -310,7 +251,7 @@ func TestOpenExchange(t *testing.T) {
 func TestAnchorAtBridge(t *testing.T) {
 	t.Run("mid-Exchange re-anchors to the just-appended bridge", func(t *testing.T) {
 		conv := buildConv(4) // the bridge is the last message
-		l := &turnLifecycle{conv: conv, tracker: newSelfRegulator(), inExchange: true, exchangeStart: 1}
+		l := &turnLifecycle{conv: conv, inExchange: true, exchangeStart: 1}
 
 		l.anchorAtBridge()
 
@@ -321,7 +262,7 @@ func TestAnchorAtBridge(t *testing.T) {
 
 	t.Run("outside an Exchange it is a no-op", func(t *testing.T) {
 		conv := buildConv(4)
-		l := &turnLifecycle{conv: conv, tracker: newSelfRegulator(), inExchange: false, exchangeStart: 1}
+		l := &turnLifecycle{conv: conv, inExchange: false, exchangeStart: 1}
 
 		l.anchorAtBridge()
 
