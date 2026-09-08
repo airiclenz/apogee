@@ -214,7 +214,37 @@ go test ./cmd/apogee/ -run 'TestE2EReactionIdentity|TestE2EEventLinesGolden'
 
 **Commit:** `feat(agent): fire publishes a sink-only SeamClosedEvent when every seam closes`
 
-## 7. The Runner matches the five seam-closing notices
+## 7. The Runner matches the five seam-closing notices — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the projector is a `project` FIELD on `matcher`, defaulted to
+`projectSeamValue` in `newMatcher`, rather than a package variable — the item's "test seam on the
+projector" without a global, and `newMatcher` is the package's only construction site.
+
+NOTES (2026-09-08): `projectSeamValue` answers nil for a seam/value pair the engine could not have
+produced (another seam's payload, a nil pointer, a notice in the `Seam` field), so the payload
+simply omits `value` rather than panicking on the engine's own goroutine; `matchSeamClosed`
+likewise ignores a `Seam` whose `Closing()` is the zero Moment, since a firing named by the empty
+string would be unroutable. Both are pinned by table tests beyond the item's named list.
+
+NOTES (2026-09-08): the `reactions` payload field is a COPY of the event's `Fired` slice, and the
+argument bytes of every projected tool call are copied too — the event's value is read-only and
+valid only during `Emit`, so nothing the payload keeps may point back into it. Both copies are
+pinned (in `TestMatchSeamClosedMapsEverySeamToItsNotice` and
+`TestSeamClosedProjectionIsTakenBeforeEmitReturns`).
+
+NOTES (2026-09-08): the pre-request projection carries messages and tool names only, as the item
+lists — the request's model, sampling and budget are left out. The tool MENU is reduced to names
+because the schemas would be several kilobytes of JSON on every request; stated in
+`projectToolNames`.
+
+NOTES (2026-09-08): the five goldens live in a new `TestSeamClosedPayloadJSONGolden` rather than as
+rows of `TestPayloadJSONGolden` — each case builds the real domain working value and projects it,
+so the goldens pin the projection and the wire shape together, which a hand-built `Payload` row
+could not. The pre-tool-exec case carries no fired ids, pinning `reactions`' omission on the
+ordinary pass.
+
+NOTES (2026-09-08): `docs/manual/hooks.md` documents the payload fields and is not touched here —
+items 18 and 19 own the manual, and neither is done.
 
 **What:** Depends on items 5 and 6. `match.go` maps `SeamClosedEvent` to `<seam>-finished` for subscribed entries, Depth-0 only like `matchTurn`. The payload gains `seam` (the seam's Moment), `reactions` (the fired ids, `omitempty`), and `value` — the JSON projection of the working value, built **inside `Emit`** before queueing and **only when an entry subscribes** (call: notice payload). Projections live in `payload.go`, one per seam: pre-request → the Request's messages (role, content, tool calls) and tool names; post-response → the Response text, tool calls, and `retryable`; pre-tool-exec → the ToolCall (id, name, arguments); post-tool-result → the ToolCall and the result text plus `is_error`; history-rewrite → the Conversation's messages. Unsubscribed seams cost one map lookup. Document on `Options` that `Value` is not retained past `Emit`.
 

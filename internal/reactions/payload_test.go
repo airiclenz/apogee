@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // TestPayloadJSONGolden pins the wire shape of every event's document. These field names are the
@@ -157,6 +159,138 @@ func TestPayloadEnv(t *testing.T) {
 
 			if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
 				t.Errorf("Env() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestSeamClosedPayloadJSONGolden pins the document a seam-closing notice delivers: the seam that
+// closed, the ids that acted during the pass, and the projection of the working value the pass
+// left behind. Like the goldens above these names are the contract a user's script reads, and
+// unlike them the "value" shape is per-seam — so each of the five is pinned on its own.
+func TestSeamClosedPayloadJSONGolden(t *testing.T) {
+	t.Parallel()
+
+	call := domain.ToolCall{ID: "call-2", Tool: "write_file", Arguments: json.RawMessage(`{"path":"main.go"}`)}
+	result := domain.ToolResult{CallID: "call-2", Content: "wrote 12 lines"}
+
+	cases := []struct {
+		name  string
+		seam  domain.Moment
+		fired []string
+		value any
+		want  string
+	}{
+		{
+			name:  "pre-request-finished",
+			seam:  domain.MomentPreRequest,
+			fired: []string{"context-files"},
+			value: domain.NewRequest("qwen", []domain.Message{
+				{Role: domain.RoleSystem, Content: "be brief"},
+				{Role: domain.RoleUser, Content: "fix the build"},
+			}, []domain.ToolDef{{Name: "read_file"}, {Name: "write_file"}}, domain.Budget{}, 3),
+			want: `"seam":"pre-request","reactions":["context-files"],` +
+				`"value":{"messages":[{"role":"system","content":"be brief"},` +
+				`{"role":"user","content":"fix the build"}],"tools":["read_file","write_file"]}}`,
+		},
+		{
+			name:  "post-response-finished",
+			seam:  domain.MomentPostResponse,
+			fired: []string{"tool-call-repair"},
+			value: domain.PostResponseMoment{
+				Resp: domain.NewResponse("running the tests", "", []domain.ToolCall{
+					{ID: "call-1", Tool: "terminal", Arguments: json.RawMessage(`{"command":"go test ./..."}`)},
+				}, domain.FinishToolCalls, nil),
+				Retryable: true,
+			},
+			want: `"seam":"post-response","reactions":["tool-call-repair"],` +
+				`"value":{"text":"running the tests","tool_calls":[{"id":"call-1","name":"terminal",` +
+				`"arguments":{"command":"go test ./..."}}],"retryable":true}}`,
+		},
+		{
+			name:  "pre-tool-exec-finished, the ordinary pass in which nothing acted",
+			seam:  domain.MomentPreToolExec,
+			fired: nil,
+			value: domain.NewToolCallEdit(&call),
+			want: `"seam":"pre-tool-exec",` +
+				`"value":{"id":"call-2","name":"write_file","arguments":{"path":"main.go"}}}`,
+		},
+		{
+			name:  "post-tool-result-finished",
+			seam:  domain.MomentPostToolResult,
+			fired: []string{"tool-result-cap"},
+			value: domain.ToolResultMoment{Call: call, Edit: domain.NewToolResultEdit(&result)},
+			want: `"seam":"post-tool-result","reactions":["tool-result-cap"],` +
+				`"value":{"call":{"id":"call-2","name":"write_file","arguments":{"path":"main.go"}},` +
+				`"content":"wrote 12 lines","is_error":false}}`,
+		},
+		{
+			name:  "history-rewrite-finished",
+			seam:  domain.MomentHistoryRewrite,
+			fired: []string{"prune"},
+			value: domain.NewConversation([]domain.Message{
+				{Role: domain.RoleUser, Content: "fix the build"},
+				{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{call}},
+				{Role: domain.RoleTool, ToolCallID: "call-2", Content: "wrote 12 lines"},
+			}),
+			want: `"seam":"history-rewrite","reactions":["prune"],` +
+				`"value":{"messages":[{"role":"user","content":"fix the build"},` +
+				`{"role":"assistant","tool_calls":[{"id":"call-2","name":"write_file",` +
+				`"arguments":{"path":"main.go"}}]},` +
+				`{"role":"tool","content":"wrote 12 lines","tool_call_id":"call-2"}]}}`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			payload := Payload{
+				Event: c.seam.Closing(), Reaction: "watch", Time: "2026-09-08T09:41:00Z",
+				Workspace: "/work/repo", Turn: 4,
+				Seam: c.seam, Reactions: c.fired, Value: projectSeamValue(c.seam, c.value),
+			}
+
+			encoded, err := json.Marshal(payload)
+
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			want := `{"event":"` + string(c.seam.Closing()) + `","reaction":"watch",` +
+				`"time":"2026-09-08T09:41:00Z","workspace":"/work/repo","depth":0,"turn":4,` + c.want
+			if string(encoded) != want {
+				t.Errorf("payload JSON =\n  %s\nwant\n  %s", encoded, want)
+			}
+		})
+	}
+}
+
+// TestProjectSeamValueRefusesAValueTheSeamDoesNotCarry — the projector reads a stream it did not
+// build, so a pair the engine could not have produced must cost an absent "value" rather than a
+// panic on the engine's own goroutine.
+func TestProjectSeamValueRefusesAValueTheSeamDoesNotCarry(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		seam  domain.Moment
+		value any
+	}{
+		{name: "another seam's payload", seam: domain.MomentPreRequest, value: domain.PostResponseMoment{}},
+		{name: "a nil request", seam: domain.MomentPreRequest, value: (*domain.Request)(nil)},
+		{name: "a nil conversation", seam: domain.MomentHistoryRewrite, value: (*domain.Conversation)(nil)},
+		{name: "a moment with no response", seam: domain.MomentPostResponse, value: domain.PostResponseMoment{}},
+		{name: "a moment with no edit", seam: domain.MomentPostToolResult, value: domain.ToolResultMoment{}},
+		{name: "no value at all", seam: domain.MomentPreToolExec, value: nil},
+		{name: "a notice rather than a seam", seam: domain.MomentTurnFinished, value: "anything"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := projectSeamValue(c.seam, c.value); got != nil {
+				t.Errorf("projectSeamValue = %#v, want nil", got)
 			}
 		})
 	}

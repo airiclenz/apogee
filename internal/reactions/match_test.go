@@ -2,6 +2,7 @@ package reactions
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -316,5 +317,123 @@ func assertEvents(t *testing.T, got []firing, want []Event) {
 		if got[i].Payload.Event != want[i] {
 			t.Errorf("payload [%d] event = %q, want %q", i, got[i].Payload.Event, want[i])
 		}
+	}
+}
+
+// TestMatchSeamClosedMapsEverySeamToItsNotice — a seam that finished passing reaches the notice
+// named after it, carrying the seam, the ids booked during the pass and the projected value.
+func TestMatchSeamClosedMapsEverySeamToItsNotice(t *testing.T) {
+	t.Parallel()
+
+	seams := []domain.Moment{
+		domain.MomentPreRequest,
+		domain.MomentPostResponse,
+		domain.MomentPreToolExec,
+		domain.MomentPostToolResult,
+		domain.MomentHistoryRewrite,
+	}
+
+	for _, seam := range seams {
+		t.Run(string(seam), func(t *testing.T) {
+			t.Parallel()
+
+			fired := []string{"context-files", "tool-call-repair"}
+			ev := domain.SeamClosedEvent{
+				EventBase: domain.EventBase{Turn: 4},
+				Seam:      seam,
+				Fired:     fired,
+			}
+
+			got := newMatcher(allSubscribed(), nil).match(ev)
+
+			assertEvents(t, got, []Event{seam.Closing()})
+			payload := got[0].Payload
+			if payload.Seam != seam {
+				t.Errorf("payload seam = %q, want %q", payload.Seam, seam)
+			}
+			if strings.Join(payload.Reactions, ",") != strings.Join(fired, ",") {
+				t.Errorf("payload reactions = %v, want %v", payload.Reactions, fired)
+			}
+			if payload.Turn != ev.Turn {
+				t.Errorf("payload turn = %d, want %d", payload.Turn, ev.Turn)
+			}
+			fired[0] = "rewritten after the match"
+			if payload.Reactions[0] != "context-files" {
+				t.Errorf("payload reactions[0] = %q — the ids were referenced, not copied", payload.Reactions[0])
+			}
+		})
+	}
+}
+
+// TestMatchSeamClosedFiresOnlyWhenSubscribed — the projection is the one expensive thing this
+// matcher does, so a seam nothing subscribes to must cost a map lookup and nothing else.
+func TestMatchSeamClosedFiresOnlyWhenSubscribed(t *testing.T) {
+	t.Parallel()
+
+	projections := 0
+	m := newMatcher(map[Event]bool{domain.MomentPreRequestFinished: true}, nil)
+	m.project = func(domain.Moment, any) any {
+		projections++
+		return "projected"
+	}
+	request := domain.NewRequest("qwen", nil, nil, domain.Budget{}, 1)
+
+	got := m.match(domain.SeamClosedEvent{Seam: domain.MomentPreRequest, Value: request})
+
+	assertEvents(t, got, []Event{domain.MomentPreRequestFinished})
+	if got[0].Payload.Value != "projected" {
+		t.Errorf("payload value = %v, want the projector's result", got[0].Payload.Value)
+	}
+	if projections != 1 {
+		t.Fatalf("the subscribed seam projected %d times, want 1", projections)
+	}
+
+	for _, seam := range []domain.Moment{
+		domain.MomentPostResponse,
+		domain.MomentPreToolExec,
+		domain.MomentPostToolResult,
+		domain.MomentHistoryRewrite,
+	} {
+		assertEvents(t, m.match(domain.SeamClosedEvent{Seam: seam, Value: request}), nil)
+	}
+
+	if projections != 1 {
+		t.Errorf("projections = %d, want 1 — an unsubscribed seam must not project its value", projections)
+	}
+}
+
+// TestMatchSeamClosedIsTopLevelOnly — a sub-agent crosses the same five seams on every step of
+// every delegation; a notice for each would bury the top-level pass a user asked to watch.
+func TestMatchSeamClosedIsTopLevelOnly(t *testing.T) {
+	t.Parallel()
+
+	projections := 0
+	m := newMatcher(allSubscribed(), nil)
+	m.project = func(domain.Moment, any) any {
+		projections++
+		return nil
+	}
+
+	ev := domain.SeamClosedEvent{
+		EventBase: domain.EventBase{Depth: 1, Turn: 2, CallID: "call-7"},
+		Seam:      domain.MomentPreToolExec,
+	}
+
+	assertEvents(t, m.match(ev), nil)
+
+	if projections != 0 {
+		t.Errorf("projections = %d, want 0 — a sub-agent's seam is not matched at all", projections)
+	}
+}
+
+// TestMatchSeamClosedIgnoresANoticeInTheSeamField — Closing answers the zero Moment for anything
+// that is not one of the five seams, and a firing named by the empty string would be unroutable.
+func TestMatchSeamClosedIgnoresANoticeInTheSeamField(t *testing.T) {
+	t.Parallel()
+
+	m := newMatcher(allSubscribed(), nil)
+
+	for _, moment := range []domain.Moment{domain.MomentTurnFinished, domain.Moment("")} {
+		assertEvents(t, m.match(domain.SeamClosedEvent{Seam: moment}), nil)
 	}
 }

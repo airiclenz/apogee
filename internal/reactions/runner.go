@@ -41,6 +41,12 @@ type Executor interface {
 // Options are the facts a Runner cannot derive: what it decorates, where it is rooted, who it
 // reports to, and how it reaches the outside world. Every field but Exec is optional, and the
 // zero value of each is the sensible absence rather than a fault.
+//
+// One contract runs through all of them: a [domain.SeamClosedEvent] carries the seam's LIVE
+// working value, valid only for the duration of Emit. The Runner projects it into the firing's
+// payload before that payload is queued and RETAINS NOTHING of it afterwards — no field here
+// ever sees the reference, and the document a worker runs with minutes later is a copy rather
+// than the loop's own state.
 type Options struct {
 	// Inner is the sink this Runner decorates. Every Event is forwarded to it FIRST, before any
 	// matching, so installing a Runner cannot change what the Driver below it sees. nil ⇒ the

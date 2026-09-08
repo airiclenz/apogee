@@ -35,6 +35,11 @@ type matcher struct {
 	subscribed  map[Event]bool
 	writeTarget WriteTarget
 	pending     map[string]pendingWrite
+
+	// project reduces a closed seam's working value to the payload's "value" document. It is a
+	// field rather than a direct call so a test can count the projections and prove an
+	// unsubscribed seam never reaches one; production always holds projectSeamValue.
+	project func(domain.Moment, any) any
 }
 
 // pendingWrite remembers the tool and destination of a write call whose result has not arrived.
@@ -51,6 +56,7 @@ func newMatcher(subscribed map[Event]bool, writeTarget WriteTarget) *matcher {
 		subscribed:  subscribed,
 		writeTarget: writeTarget,
 		pending:     make(map[string]pendingWrite),
+		project:     projectSeamValue,
 	}
 }
 
@@ -76,6 +82,8 @@ func (m *matcher) match(ev domain.Event) []firing {
 		return nil
 	case domain.ToolResultEvent:
 		return m.matchToolResult(e)
+	case domain.SeamClosedEvent:
+		return m.matchSeamClosed(e)
 	default:
 		return nil
 	}
@@ -140,6 +148,32 @@ func (m *matcher) matchApproval(ev domain.ApprovalEvent) []firing {
 	}
 	payload.applyBase(ev.EventBase)
 	return []firing{firingOf(event, payload)}
+}
+
+// matchSeamClosed maps a closed seam to the notice named after it — pre-request to
+// pre-request-finished, and so on for the other four (Moment.Closing). Only Depth 0 counts, for
+// matchTurn's reason: a sub-agent crosses the same five seams on every step of every delegation,
+// and a notice per crossing would bury the top-level pass a user asked to watch (ADR 0073 §4).
+//
+// The working value is projected HERE, on the engine's own goroutine inside its Emit call,
+// because the reference the event carries is valid only for that call — the loop resumes
+// mutating the value the moment Emit returns, and the firing this produces may not run for
+// minutes. A seam nothing subscribes to costs one map lookup and no projection at all.
+func (m *matcher) matchSeamClosed(ev domain.SeamClosedEvent) []firing {
+	if ev.Depth != 0 {
+		return nil
+	}
+	notice := ev.Seam.Closing()
+	if notice == "" || !m.wants(notice) {
+		return nil
+	}
+	payload := Payload{
+		Seam:      ev.Seam,
+		Reactions: append([]string(nil), ev.Fired...),
+		Value:     m.project(ev.Seam, ev.Value),
+	}
+	payload.applyBase(ev.EventBase)
+	return []firing{firingOf(notice, payload)}
 }
 
 // matchError maps a recovered engine fault, at any depth.

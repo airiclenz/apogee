@@ -21,9 +21,11 @@
 // Moments of the Reaction core under an alias (ADR 0076), Events/ParseEvent, and the
 // Validate/ValidateAll rules that refuse a malformed domain.Reaction with a sentence naming it.
 // payload.go is the JSON document a firing Hook receives on stdin or in a POST body — the
-// documented field contract, plus the small APOGEE_REACTION_* environment set Env derives from it.
+// documented field contract, the per-seam projections a seam-closing notice carries under
+// "value", plus the small APOGEE_REACTION_* environment set Env derives from it.
 // match.go is the pure mapping from one domain.Event to the Hook events it produces, built over
-// the SUBSCRIBED set so an unsubscribed event costs nothing.
+// the SUBSCRIBED set so an unsubscribed event costs nothing; it is also where a closed seam's
+// working value is projected, while the engine's Emit is still running.
 // workspace.go is the one path resolution the `workspace:` filter and the root's own workspace
 // are both compared through, so the two readings can never disagree.
 // runner.go is the sink decorator itself — the Executor seam, the per-Hook queues and workers,

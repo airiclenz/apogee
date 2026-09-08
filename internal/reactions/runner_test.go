@@ -2,6 +2,7 @@ package reactions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -646,5 +647,55 @@ func TestNewRefusesAMalformedList(t *testing.T) {
 	nameless := commandHook("", TurnFinished)
 	if _, err := New([]domain.Reaction{nameless}, Options{Workspace: t.TempDir(), Exec: newFakeExecutor()}); err == nil {
 		t.Fatal("New accepted a nameless entry")
+	}
+}
+
+// TestSeamClosedProjectionIsTakenBeforeEmitReturns — the value a SeamClosedEvent carries is the
+// loop's own working value, valid only for the duration of Emit. The Runner therefore projects it
+// while Emit is still running: the engine resumes mutating that value the instant Emit returns,
+// and the firing may not run for minutes, so a document that tracked the mutation would report a
+// pass that never happened.
+func TestSeamClosedProjectionIsTakenBeforeEmitReturns(t *testing.T) {
+	t.Parallel()
+
+	exec := newFakeExecutor()
+	runner, err := New([]domain.Reaction{commandHook("watch", domain.MomentHistoryRewriteFinished)}, Options{
+		Workspace: t.TempDir(), Exec: exec,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	conversation := domain.NewConversation([]domain.Message{{Role: domain.RoleUser, Content: "before the pass"}})
+	fired := []string{"prune"}
+
+	runner.Emit(domain.SeamClosedEvent{
+		EventBase: domain.EventBase{Turn: 4},
+		Seam:      domain.MomentHistoryRewrite,
+		Fired:     fired,
+		Value:     conversation,
+	})
+	conversation.SetMessageContent(0, "after the pass")
+	conversation.Append(domain.Message{Role: domain.RoleAssistant, Content: "and one more"})
+	fired[0] = "rewritten after the emit"
+	closeRunner(t, runner)
+
+	runs := exec.recorded()
+	if len(runs) != 1 {
+		t.Fatalf("ran %d firings, want 1", len(runs))
+	}
+	if runs[0].Event != domain.MomentHistoryRewriteFinished || runs[0].Seam != domain.MomentHistoryRewrite {
+		t.Errorf("firing = %q/%q, want history-rewrite-finished/history-rewrite", runs[0].Event, runs[0].Seam)
+	}
+	if strings.Join(runs[0].Reactions, ",") != "prune" {
+		t.Errorf("firing reactions = %v, want [prune] — the ids were referenced, not copied", runs[0].Reactions)
+	}
+	encoded, err := json.Marshal(runs[0].Value)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	const want = `{"messages":[{"role":"user","content":"before the pass"}]}`
+	if string(encoded) != want {
+		t.Errorf("firing value =\n  %s\nwant\n  %s", encoded, want)
 	}
 }
