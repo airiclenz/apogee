@@ -34,10 +34,11 @@ import (
 )
 
 // The environment a fired Hook is expected to inherit. A Hook's command is run with apogee's own
-// environment plus the payload's APOGEE_HOOK_* facts, which is what lets a one-line `sh -c` script
+// environment plus the payload's APOGEE_REACTION_* facts, which is what lets a one-line `sh -c` script
 // know where to write without the test rewriting the script for every temp directory.
 const (
-	hookSinkEnv     = "APOGEE_HOOK_SINK"
+	hookSinkEnv     = "APOGEE_TEST_SINK"
+	hookEnvSinkEnv  = "APOGEE_TEST_ENV_SINK"
 	hookTokenEnv    = "APOGEE_TEST_HOOK_TOKEN"
 	hookTokenValue  = "hook-token-not-in-the-config-file"
 	hookTokenHeader = "X-Apogee-Hook-Token"
@@ -51,12 +52,12 @@ const (
 // The reports a Hook can put on screen are NOT in this list. They are caught by shape instead — see
 // [hookReportPattern] — because a whitelist of prose stops biting the moment a report is reworded.
 var hookMarkers = []string{
-	"APOGEE_HOOK",
-	string(reactions.FileChanged), string(reactions.ExchangeFinished), string(reactions.ApprovalWaiting),
+	"APOGEE_REACTION",
+	string(reactions.FileChanged), string(reactions.ExchangeFinished), string(reactions.ApprovalRequested),
 }
 
 // hookReportPattern is the shape EVERY report the hooks path can put in front of a human takes: the
-// word `hook`, the Hook's configured name, and then a separator — a colon before a Runner message
+// word `reaction`, the entry's configured name, and then a separator — a colon before a Runner message
 // (internal/reactions/runner.go:240, :397) or a space before the parenthesised event of a failure
 // (:363). Those reports reach a frame through Report → Bridge.NotifyHook → an ephemeral note,
 // and an unattended root's stderr the same way.
@@ -70,11 +71,11 @@ func hookReportPattern(names ...string) *regexp.Regexp {
 	for _, name := range names {
 		quoted = append(quoted, regexp.QuoteMeta(name))
 	}
-	return regexp.MustCompile(`hook (` + strings.Join(quoted, "|") + `)[ :(]`)
+	return regexp.MustCompile(`reaction (` + strings.Join(quoted, "|") + `)[ :(]`)
 }
 
 // TestE2EHooksAbsenceCheckMatchesARenamedHooksReport is the bite the whitelist [hookReportPattern]
-// replaced never had. That whitelist spelled the reports out — "hook sink", "hook bell" — so it
+// replaced never had. That whitelist spelled the reports out — "reaction sink", "reaction bell" — so it
 // went blind on the one config change it exists to survive: a Hook renamed in the very block the
 // absence check is watching. The derived pattern follows the rename instead, and covers every
 // report shape the Runner emits rather than the two a whitelist happened to list.
@@ -85,11 +86,11 @@ func TestE2EHooksAbsenceCheckMatchesARenamedHooksReport(t *testing.T) {
 	pattern := hookReportPattern(renamed)
 
 	for _, report := range []string{
-		"hook " + renamed + ": dropped 3 events",
-		"hook " + renamed + ": dropped 1 event (queue full)",
-		"hook " + renamed + " (turn-finished): exit 1",
+		"reaction " + renamed + ": dropped 3 events",
+		"reaction " + renamed + ": dropped 1 event (queue full)",
+		"reaction " + renamed + " (turn-finished): exit 1",
 	} {
-		if strings.Contains(report, "hook "+hooksSinkName) {
+		if strings.Contains(report, "reaction "+hooksSinkName) {
 			t.Fatalf("the report %q still carries the whitelisted spelling, so it cannot prove "+
 				"that a rename is what the pattern buys", report)
 		}
@@ -121,7 +122,7 @@ func TestE2EHooksAbsenceCheckMatchesARenamedHooksReport(t *testing.T) {
 const smokeWriteReply = "Appended the smoke test line"
 
 // TestE2EHooksFireFromTheTUI drives the smoke journey with two Hooks configured — a command on
-// `file-changed` and `exchange-finished`, a webhook on `approval-waiting` — and asserts what each
+// `file-changed` and `exchange-finished`, a webhook on `approval-requested` — and asserts what each
 // of them received, from the outside: the file the command appended to, and the requests the
 // httptest server recorded.
 //
@@ -135,7 +136,9 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 	defer server.Close()
 
 	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	envSink := filepath.Join(t.TempDir(), "fired.env")
 	t.Setenv(hookSinkEnv, sink)
+	t.Setenv(hookEnvSinkEnv, envSink)
 	t.Setenv(hookTokenEnv, hookTokenValue)
 
 	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
@@ -154,23 +157,23 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 	submit(drv, `Append a line saying "smoke test" to a.txt.`)
 	drv.WaitText("Always allow this session")
 	drv.WaitFor(func() bool { return bell.count() > 0 },
-		tuitest.Awaiting("the approval-waiting webhook to arrive"))
+		tuitest.Awaiting("the approval-requested webhook to arrive"))
 
 	if _, _, ok := drv.Frame().Find("Always allow this session"); !ok {
 		t.Fatal("the approval pane was gone by the time the webhook arrived; the claim that the " +
 			"Hook fired while the human was still being waited on is untestable")
 	}
 	waiting := bell.first()
-	if waiting.payload.Event != reactions.ApprovalWaiting {
+	if waiting.payload.Event != reactions.ApprovalRequested {
 		t.Errorf("the webhook received the %q event; want %q",
-			waiting.payload.Event, reactions.ApprovalWaiting)
+			waiting.payload.Event, reactions.ApprovalRequested)
 	}
 	if waiting.payload.Tool != "write_file" {
-		t.Errorf("the approval-waiting payload names the tool %q; want write_file",
+		t.Errorf("the approval-requested payload names the tool %q; want write_file",
 			waiting.payload.Tool)
 	}
-	if waiting.payload.Hook != "bell" {
-		t.Errorf("the approval-waiting payload names the hook %q; want bell", waiting.payload.Hook)
+	if waiting.payload.Reaction != "bell" {
+		t.Errorf("the approval-requested payload names the hook %q; want bell", waiting.payload.Reaction)
 	}
 	if waiting.token != hookTokenValue {
 		t.Errorf("the webhook's %s header = %q; want the value headers-env named in the "+
@@ -206,6 +209,20 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 	if changed.Schedule != nil {
 		t.Errorf("a session's payload carries the schedule %+v; a TUI session belongs to none",
 			changed.Schedule)
+	}
+
+	// And the environment the command actually ran with, read by the exact names the executor sets:
+	// the script echoed $APOGEE_REACTION_EVENT and $APOGEE_REACTION_PATH, so the line it wrote is
+	// what those two variables held when the file-changed firing ran.
+	wantLine := string(reactions.FileChanged) + " " + wantPath
+	envLines, err := os.ReadFile(envSink)
+	if err != nil {
+		t.Fatalf("read the hook environment sink: %v", err)
+	}
+	if !strings.Contains(string(envLines), wantLine) {
+		t.Errorf("the fired command's environment sink holds\n%s\nwant a line %q — the executor "+
+			"sets APOGEE_REACTION_EVENT and APOGEE_REACTION_PATH under exactly those names",
+			envLines, wantLine)
 	}
 
 	// Nothing a Hook did reached the screen. The positive control comes first: an empty or
@@ -258,7 +275,7 @@ func TestE2EHooksReportAFailureAsAnEphemeralNote(t *testing.T) {
 	submit(drv, "What files are in this workspace?")
 	drv.WaitText("The workspace holds one file")
 
-	const failureLine = "hook failing"
+	const failureLine = "reaction failing"
 	drv.WaitText(failureLine)
 	drv.WaitQuiet(settled)
 	notice := drv.Frame()
@@ -319,7 +336,7 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 	stdout, stderr, workspace := headlessHooksAgainst(t, stub, hooksPrompt, hookBlockOf(
 		"  - name: "+hooksSinkName+"\n"+
 			"    events: [exchange-finished]\n"+
-			"    command: [sh, -c, 'cat >> \"$APOGEE_HOOK_SINK\"']\n"))
+			"    command: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"))
 
 	if got := strings.TrimSpace(stdout); got != hooksAnswer {
 		t.Errorf("stdout = %q; want the answer alone (%q)", stdout, hooksAnswer)
@@ -336,8 +353,8 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 	if payload.Event != reactions.ExchangeFinished {
 		t.Errorf("the payload carries the %q event; want %q", payload.Event, reactions.ExchangeFinished)
 	}
-	if payload.Hook != hooksSinkName {
-		t.Errorf("the payload names the hook %q; want %q", payload.Hook, hooksSinkName)
+	if payload.Reaction != hooksSinkName {
+		t.Errorf("the payload names the hook %q; want %q", payload.Reaction, hooksSinkName)
 	}
 	if payload.Workspace != workspace {
 		t.Errorf("the payload's workspace = %q; want the run's own %q", payload.Workspace, workspace)
@@ -395,7 +412,7 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 	writeConfigHome(t, h.home, hookBlockOf(
 		"  - name: "+hooksSinkName+"\n"+
 			"    events: [turn-finished]\n"+
-			"    command: [sh, -c, 'cat >> \"$APOGEE_HOOK_SINK\"']\n"+
+			"    command: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n"+
 			"  - name: "+hooksFailingName+"\n"+
 			"    events: [turn-finished]\n"+
 			"    command: [sh, -c, 'exit 1']\n")+
@@ -413,7 +430,7 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 
 	// The failing Hook's line, in the shape the Runner reports and the log's own sanitiser passed
 	// through: the Hook's name, the event it was fired by, and why it failed.
-	h.awaitLog(t, "hook "+hooksFailingName+" (turn-finished): exit 1")
+	h.awaitLog(t, "reaction "+hooksFailingName+" (turn-finished): exit 1")
 	// And the Firing landing, which is what makes the sink below final: a daemon drains a Firing's
 	// Hooks before the Outcome that prints this line is returned.
 	h.awaitLog(t, "completed "+hooksScheduleName)
@@ -444,7 +461,7 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 
 	// Once, and only once: the de-dup is what keeps a permanently broken Hook from filling a
 	// journal a supervisor reads for a week.
-	if n := strings.Count(h.out.String(), "hook "+hooksFailingName+" ("); n != 1 {
+	if n := strings.Count(h.out.String(), "reaction "+hooksFailingName+" ("); n != 1 {
 		t.Errorf("the failing hook left %d lines in the daemon log, want exactly one:\n%s",
 			n, h.out.String())
 	}
@@ -495,15 +512,21 @@ func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfi
 }
 
 // hookBlock is the `hooks:` block the first test runs with: the command Hook that appends every
-// payload it receives to $APOGEE_HOOK_SINK, and the webhook Hook whose only header is read from the
-// environment rather than written in the file.
+// payload it receives to $APOGEE_TEST_SINK and every firing's two headline environment facts to
+// $APOGEE_TEST_ENV_SINK, and the webhook Hook whose only header is read from the environment rather
+// than written in the file.
+//
+// The script names APOGEE_REACTION_EVENT and APOGEE_REACTION_PATH rather than reading the JSON on
+// its stdin, because those are the EXACT variable names the executor sets: a rename of either would
+// leave the line it writes blank, which is what the assertion in TestE2EHooksFireFromTheTUI reads.
 func hookBlock(webhook string) string {
 	return hookBlockOf(
 		"  - name: " + hooksSinkName + "\n" +
 			"    events: [file-changed, exchange-finished]\n" +
-			"    command: [sh, -c, 'cat >> \"$APOGEE_HOOK_SINK\"']\n" +
+			"    command: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"; " +
+			"echo \"$APOGEE_REACTION_EVENT $APOGEE_REACTION_PATH\" >> \"$APOGEE_TEST_ENV_SINK\"']\n" +
 			"  - name: " + hooksBellName + "\n" +
-			"    events: [approval-waiting]\n" +
+			"    events: [approval-requested]\n" +
 			"    webhook: " + webhook + "\n" +
 			"    headers-env:\n" +
 			"      " + hookTokenHeader + ": " + hookTokenEnv + "\n")

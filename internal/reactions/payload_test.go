@@ -20,57 +20,68 @@ func TestPayloadJSONGolden(t *testing.T) {
 		{
 			name: "turn-finished",
 			payload: Payload{
-				Event: TurnFinished, Hook: "notify", Time: "2026-09-06T09:41:00Z",
+				Event: TurnFinished, Reaction: "notify", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 0, Turn: 3,
 				Status: "turn-complete",
 			},
-			want: `{"event":"turn-finished","hook":"notify","time":"2026-09-06T09:41:00Z",` +
+			want: `{"event":"turn-finished","reaction":"notify","time":"2026-09-06T09:41:00Z",` +
 				`"workspace":"/work/repo","depth":0,"turn":3,"status":"turn-complete"}`,
 		},
 		{
 			name: "exchange-finished",
 			payload: Payload{
-				Event: ExchangeFinished, Hook: "notify", Time: "2026-09-06T09:41:00Z",
+				Event: ExchangeFinished, Reaction: "notify", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 0, Turn: 7,
 				Status: "exchange-complete", Faulted: true, StepCapped: true,
 			},
-			want: `{"event":"exchange-finished","hook":"notify","time":"2026-09-06T09:41:00Z",` +
+			want: `{"event":"exchange-finished","reaction":"notify","time":"2026-09-06T09:41:00Z",` +
 				`"workspace":"/work/repo","depth":0,"turn":7,"status":"exchange-complete",` +
 				`"faulted":true,"step_capped":true}`,
 		},
 		{
 			name: "file-changed",
 			payload: Payload{
-				Event: FileChanged, Hook: "fmt", Time: "2026-09-06T09:41:00Z",
+				Event: FileChanged, Reaction: "fmt", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 1, Turn: 2, CallID: "call-7",
 				Tool: "write_file", Path: "/work/repo/main.go",
 			},
-			want: `{"event":"file-changed","hook":"fmt","time":"2026-09-06T09:41:00Z",` +
+			want: `{"event":"file-changed","reaction":"fmt","time":"2026-09-06T09:41:00Z",` +
 				`"workspace":"/work/repo","depth":1,"turn":2,"call_id":"call-7",` +
 				`"tool":"write_file","path":"/work/repo/main.go"}`,
 		},
 		{
-			name: "approval-waiting",
+			name: "approval-requested",
 			payload: Payload{
-				Event: ApprovalWaiting, Hook: "bell", Time: "2026-09-06T09:41:00Z",
+				Event: ApprovalRequested, Reaction: "bell", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 1, Turn: 4, CallID: "call-2",
 				Tool: "terminal", Reason: "write", Remedy: "run `apogee doctor`",
 				SubAgentName: "docs sweep", Scope: "reads the package directory",
 			},
-			want: `{"event":"approval-waiting","hook":"bell","time":"2026-09-06T09:41:00Z",` +
+			want: `{"event":"approval-requested","reaction":"bell","time":"2026-09-06T09:41:00Z",` +
 				`"workspace":"/work/repo","depth":1,"turn":4,"call_id":"call-2","tool":"terminal",` +
 				`"reason":"write","remedy":"run ` + "`apogee doctor`" + `",` +
 				`"sub_agent_name":"docs sweep","scope":"reads the package directory"}`,
 		},
 		{
+			name: "approval-decided",
+			payload: Payload{
+				Event: ApprovalDecided, Reaction: "bell", Time: "2026-09-06T09:41:00Z",
+				Workspace: "/work/repo", Depth: 1, Turn: 4, CallID: "call-2",
+				Tool: "terminal", Reason: "write", Decision: "allow",
+			},
+			want: `{"event":"approval-decided","reaction":"bell","time":"2026-09-06T09:41:00Z",` +
+				`"workspace":"/work/repo","depth":1,"turn":4,"call_id":"call-2","tool":"terminal",` +
+				`"reason":"write","decision":"allow"}`,
+		},
+		{
 			name: "error",
 			payload: Payload{
-				Event: Error, Hook: "page", Time: "2026-09-06T09:41:00Z",
+				Event: Error, Reaction: "page", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 0, Turn: 1,
 				Schedule: &ScheduleRef{ID: "nightly", Name: "Nightly docs sweep"},
 				Source:   "terminal", Error: "exit status 1",
 			},
-			want: `{"event":"error","hook":"page","time":"2026-09-06T09:41:00Z",` +
+			want: `{"event":"error","reaction":"page","time":"2026-09-06T09:41:00Z",` +
 				`"workspace":"/work/repo","depth":0,"turn":1,` +
 				`"schedule":{"id":"nightly","name":"Nightly docs sweep"},` +
 				`"source":"terminal","error":"exit status 1"}`,
@@ -105,35 +116,35 @@ func TestPayloadEnv(t *testing.T) {
 		{
 			name: "a session firing carries no schedule",
 			payload: Payload{
-				Event: FileChanged, Hook: "fmt", Workspace: "/work/repo", Path: "/work/repo/main.go",
+				Event: FileChanged, Reaction: "fmt", Workspace: "/work/repo", Path: "/work/repo/main.go",
 			},
 			want: []string{
-				"APOGEE_HOOK_EVENT=file-changed",
-				"APOGEE_HOOK_NAME=fmt",
-				"APOGEE_HOOK_WORKSPACE=/work/repo",
-				"APOGEE_HOOK_PATH=/work/repo/main.go",
+				"APOGEE_REACTION_EVENT=file-changed",
+				"APOGEE_REACTION_NAME=fmt",
+				"APOGEE_REACTION_WORKSPACE=/work/repo",
+				"APOGEE_REACTION_PATH=/work/repo/main.go",
 			},
 		},
 		{
 			name: "a Firing carries the Schedule id and name",
 			payload: Payload{
-				Event: TurnFinished, Hook: "notify", Workspace: "/work/repo",
+				Event: TurnFinished, Reaction: "notify", Workspace: "/work/repo",
 				Schedule: &ScheduleRef{ID: "nightly", Name: "Nightly docs sweep"},
 			},
 			want: []string{
-				"APOGEE_HOOK_EVENT=turn-finished",
-				"APOGEE_HOOK_NAME=notify",
-				"APOGEE_HOOK_WORKSPACE=/work/repo",
-				"APOGEE_HOOK_SCHEDULE_ID=nightly",
-				"APOGEE_HOOK_SCHEDULE_NAME=Nightly docs sweep",
+				"APOGEE_REACTION_EVENT=turn-finished",
+				"APOGEE_REACTION_NAME=notify",
+				"APOGEE_REACTION_WORKSPACE=/work/repo",
+				"APOGEE_REACTION_SCHEDULE_ID=nightly",
+				"APOGEE_REACTION_SCHEDULE_NAME=Nightly docs sweep",
 			},
 		},
 		{
 			name:    "an unset fact is omitted rather than blanked",
-			payload: Payload{Event: Error, Hook: "page"},
+			payload: Payload{Event: Error, Reaction: "page"},
 			want: []string{
-				"APOGEE_HOOK_EVENT=error",
-				"APOGEE_HOOK_NAME=page",
+				"APOGEE_REACTION_EVENT=error",
+				"APOGEE_REACTION_NAME=page",
 			},
 		},
 	}

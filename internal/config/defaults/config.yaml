@@ -442,18 +442,19 @@ context-files:
 # file and the running session swaps its hooks over (a headless run and the daemon read the list
 # once, at start).
 #
-# The five events are:
+# The six events are:
 #   exchange-finished  a top-level exchange closed — the model answered, or the loop gave up
 #   turn-finished      every top-level turn boundary, whatever its outcome
 #   file-changed       a workspace write tool succeeded; the payload carries the path it landed on
-#   approval-waiting   an approval was raised and is waiting on you — fires BEFORE the decision
+#   approval-requested an approval was raised and is waiting on you — fires BEFORE the decision
+#   approval-decided   that same approval reached its verdict; the payload carries the decision
 #   error              a localised, recovered engine fault
 #
 # Each entry takes exactly ONE action: `command:` (an argv list, run DIRECTLY — no shell, so write
 # ["sh", "-c", "…"] when you want one) or `webhook:` (an absolute http(s) URL the payload is POSTed
 # to, once, with no retry). The payload is JSON on the command's stdin, and its headline facts are
-# in the environment too as APOGEE_HOOK_EVENT, APOGEE_HOOK_NAME, APOGEE_HOOK_WORKSPACE and
-# APOGEE_HOOK_PATH. A command runs OUTSIDE the workspace confinement with Apogee's whole
+# in the environment too as APOGEE_REACTION_EVENT, APOGEE_REACTION_NAME, APOGEE_REACTION_WORKSPACE
+# and APOGEE_REACTION_PATH. A command runs OUTSIDE the workspace confinement with Apogee's whole
 # environment — it is yours, at the same trust level as an `api-key-cmd:` above — and a program that
 # lives inside the workspace is refused, so the model cannot write the script its own hook runs. Its
 # stdout is ignored; a non-zero exit is reported to you and to nobody else. `timeout:` bounds the
@@ -464,7 +465,7 @@ context-files:
 #
 # hooks:
 #   - name: notify                       # unique; it is what a failure notice names
-#     events: [approval-waiting]         # one or more of the five above
+#     events: [approval-requested]       # one or more of the six above
 #     command: ["notify-send", "apogee is waiting for an answer"]
 #     timeout: 10s                       # optional; default 30s
 #   - name: ci-bell
@@ -473,7 +474,7 @@ context-files:
 #     headers:
 #       X-Source: apogee                 # a literal header value
 #     headers-env:
-#       Authorization: APOGEE_HOOK_TOKEN # the NAME of the variable holding the value
+#       Authorization: MY_WEBHOOK_TOKEN   # the NAME of the variable holding the value
 #     workspace: ~/code/apogee           # optional; fires in this workspace only
 
 # =============================================================================

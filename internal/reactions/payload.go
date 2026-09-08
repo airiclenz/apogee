@@ -1,18 +1,18 @@
 package reactions
 
 // ScheduleRef names the daemon or `/schedule` Schedule a Firing ran for. It is present only on a
-// Firing's payload — a TUI session and a plain headless run belong to no Schedule — so a Hook can
-// tell "the 6am docs sweep finished" from "the session I am sitting in finished".
+// Firing's payload — a TUI session and a plain headless run belong to no Schedule — so a reaction
+// can tell "the 6am docs sweep finished" from "the session I am sitting in finished".
 type ScheduleRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
 }
 
-// Payload is the JSON document a fired Hook receives — on stdin for a command, as the POST body
+// Payload is the JSON document a fired reaction receives — on stdin for a command, as the POST body
 // for a webhook. Its field names are a DOCUMENTED CONTRACT: a user's script reads them by name, so
 // they are renamed only by a deliberate, documented break.
 //
-// The first block is present on every event and identifies the firing: which Hook fired, on what,
+// The first block is present on every event and identifies the firing: which reaction fired, on what,
 // when, and in which run. Depth and Turn are the emitting agent's, so a Hook fired by a sub-agent
 // reports the child's nesting level rather than the top-level agent's, and CallID is that child's
 // run identity — the id of the sub_agent call that spawned it, empty at Depth 0. Every field after
@@ -23,12 +23,12 @@ type ScheduleRef struct {
 // trust as the screen (ADR 0073 §6).
 //
 // The matcher fills the event-derived fields; the runner stamps the identity ones it alone knows —
-// Hook, Time, Workspace and Schedule — as it hands the payload to each subscribing Hook.
+// Reaction, Time, Workspace and Schedule — as it hands the payload to each subscribing reaction.
 type Payload struct {
-	// Event is the Hook event that fired, spelled exactly as the `events:` list spells it.
+	// Event is the notice that fired, spelled exactly as the `events:` list spells it.
 	Event Event `json:"event"`
-	// Hook is the name of the entry that fired, the `name:` from its config row.
-	Hook string `json:"hook"`
+	// Reaction is the name of the entry that fired, the `name:` from its config row.
+	Reaction string `json:"reaction"`
 	// Time is when the firing was matched, RFC 3339 with seconds resolution or finer.
 	Time string `json:"time"`
 	// Workspace is the absolute, symlink-resolved workspace the run is rooted in.
@@ -53,22 +53,26 @@ type Payload struct {
 	StepCapped bool `json:"step_capped,omitempty"`
 
 	// Tool is the tool that wrote the file, or the tool whose call is waiting on an Approval.
-	// file-changed, approval-waiting.
+	// file-changed, approval-requested, approval-decided.
 	Tool string `json:"tool,omitempty"`
 	// Path is the absolute, symlink-resolved path the write landed on. file-changed.
 	Path string `json:"path,omitempty"`
 
-	// Reason is why the Approval was required, in the engine's own words. approval-waiting.
+	// Reason is why the Approval was required, in the engine's own words. approval-requested,
+	// approval-decided.
 	Reason string `json:"reason,omitempty"`
 	// Remedy is the optional one-line route out of the condition that forced the Approval.
-	// approval-waiting.
+	// approval-requested, approval-decided.
 	Remedy string `json:"remedy,omitempty"`
 	// SubAgentName is the display name of the child whose call is waiting, when it has one.
-	// approval-waiting.
+	// approval-requested, approval-decided.
 	SubAgentName string `json:"sub_agent_name,omitempty"`
 	// Scope is the optional statement of what the call reaches beyond what its arguments name.
-	// approval-waiting.
+	// approval-requested, approval-decided.
 	Scope string `json:"scope,omitempty"`
+	// Decision is the verdict the Approver returned, in the domain.ApprovalDecision spelling —
+	// `allow`, `deny` or `allow-for-session`. approval-decided.
+	Decision string `json:"decision,omitempty"`
 
 	// Source is what faulted — a tool name, a Reaction id, or "loop". error.
 	Source string `json:"source,omitempty"`
@@ -80,18 +84,18 @@ type Payload struct {
 // convenience for a one-line script that would otherwise pipe stdin through a JSON parser; the
 // full document is always on stdin as well.
 const (
-	EnvEvent        = "APOGEE_HOOK_EVENT"
-	EnvName         = "APOGEE_HOOK_NAME"
-	EnvWorkspace    = "APOGEE_HOOK_WORKSPACE"
-	EnvPath         = "APOGEE_HOOK_PATH"
-	EnvScheduleID   = "APOGEE_HOOK_SCHEDULE_ID"
-	EnvScheduleName = "APOGEE_HOOK_SCHEDULE_NAME"
+	EnvEvent        = "APOGEE_REACTION_EVENT"
+	EnvName         = "APOGEE_REACTION_NAME"
+	EnvWorkspace    = "APOGEE_REACTION_WORKSPACE"
+	EnvPath         = "APOGEE_REACTION_PATH"
+	EnvScheduleID   = "APOGEE_REACTION_SCHEDULE_ID"
+	EnvScheduleName = "APOGEE_REACTION_SCHEDULE_NAME"
 )
 
 // Env renders the payload's headline facts as `NAME=value` entries for a fired command's
 // environment, in a fixed order. A fact the payload does not carry is OMITTED rather than set
-// empty, so a script can test with `[ -n "$APOGEE_HOOK_PATH" ]` and a variable inherited from the
-// user's own environment is not silently blanked by a Hook that has nothing to put there.
+// empty, so a script can test with `[ -n "$APOGEE_REACTION_PATH" ]` and a variable inherited from
+// the user's own environment is not silently blanked by a reaction that has nothing to put there.
 func (p Payload) Env() []string {
 	env := make([]string, 0, 6)
 	add := func(name, value string) {
@@ -100,7 +104,7 @@ func (p Payload) Env() []string {
 		}
 	}
 	add(EnvEvent, string(p.Event))
-	add(EnvName, p.Hook)
+	add(EnvName, p.Reaction)
 	add(EnvWorkspace, p.Workspace)
 	add(EnvPath, p.Path)
 	if p.Schedule != nil {

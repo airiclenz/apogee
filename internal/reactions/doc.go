@@ -21,7 +21,7 @@
 // Moments of the Reaction core under an alias (ADR 0076), Events/ParseEvent, and the
 // Validate/ValidateAll rules that refuse a malformed domain.Reaction with a sentence naming it.
 // payload.go is the JSON document a firing Hook receives on stdin or in a POST body — the
-// documented field contract, plus the small APOGEE_HOOK_* environment set Env derives from it.
+// documented field contract, plus the small APOGEE_REACTION_* environment set Env derives from it.
 // match.go is the pure mapping from one domain.Event to the Hook events it produces, built over
 // the SUBSCRIBED set so an unsubscribed event costs nothing.
 // workspace.go is the one path resolution the `workspace:` filter and the root's own workspace
@@ -31,7 +31,7 @@
 // exec.go is the production Executor — DefaultExecutor's dispatch onto whichever action the entry
 // configured, and the one JSON encoding both actions send.
 // command.go runs a Hook's argv: the api-key-cmd exec posture, copied, with the payload on stdin
-// and the APOGEE_HOOK_* facts in the environment.
+// and the APOGEE_REACTION_* facts in the environment.
 // webhook.go POSTs the same document to a Hook's URL, with the literal and environment-resolved
 // headers it carries and no retry.
 package reactions

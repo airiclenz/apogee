@@ -35,15 +35,16 @@ const (
 )
 
 // The six standalone notice Moments — post-hoc points that report a fact of their own rather
-// than the closing of a seam. The first five values are the reactions.Event spellings
-// (internal/reactions), unchanged: they are what a configured `events:` list already names.
+// than the closing of a seam. Their values are the spellings a configured `events:` list names;
+// `approval-requested` reads as the phase of the ApprovalEvent it reports, beside the
+// `approval-decided` that ADR 0076 A6 admitted as the second half of the pair.
 const (
-	MomentExchangeFinished Moment = "exchange-finished" // a Depth-0 Turn closed its Exchange
-	MomentTurnFinished     Moment = "turn-finished"     // a Depth-0 Turn boundary, whatever its status
-	MomentFileChanged      Moment = "file-changed"      // a workspace-scoped write tool succeeded
-	MomentApprovalWaiting  Moment = "approval-waiting"  // an Approval was raised, before its decision
-	MomentApprovalDecided  Moment = "approval-decided"  // an Approval reached its verdict
-	MomentError            Moment = "error"             // a localised, recovered engine fault
+	MomentExchangeFinished  Moment = "exchange-finished"  // a Depth-0 Turn closed its Exchange
+	MomentTurnFinished      Moment = "turn-finished"      // a Depth-0 Turn boundary, whatever its status
+	MomentFileChanged       Moment = "file-changed"       // a workspace-scoped write tool succeeded
+	MomentApprovalRequested Moment = "approval-requested" // an Approval was raised, before its decision
+	MomentApprovalDecided   Moment = "approval-decided"   // an Approval reached its verdict
+	MomentError             Moment = "error"              // a localised, recovered engine fault
 )
 
 // The five SEAM-CLOSING notices — one per seam, spelled `<seam>-finished`. Each reports that its
@@ -76,7 +77,7 @@ var (
 		MomentExchangeFinished,
 		MomentTurnFinished,
 		MomentFileChanged,
-		MomentApprovalWaiting,
+		MomentApprovalRequested,
 		MomentApprovalDecided,
 		MomentError,
 		MomentPreRequestFinished,

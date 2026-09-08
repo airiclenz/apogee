@@ -458,12 +458,12 @@ const (
 // The six standalone notice Moments — post-hoc points that report a fact of their own, whose
 // payload is sealed.
 const (
-	MomentExchangeFinished = domain.MomentExchangeFinished
-	MomentTurnFinished     = domain.MomentTurnFinished
-	MomentFileChanged      = domain.MomentFileChanged
-	MomentApprovalWaiting  = domain.MomentApprovalWaiting
-	MomentApprovalDecided  = domain.MomentApprovalDecided
-	MomentError            = domain.MomentError
+	MomentExchangeFinished  = domain.MomentExchangeFinished
+	MomentTurnFinished      = domain.MomentTurnFinished
+	MomentFileChanged       = domain.MomentFileChanged
+	MomentApprovalRequested = domain.MomentApprovalRequested
+	MomentApprovalDecided   = domain.MomentApprovalDecided
+	MomentError             = domain.MomentError
 )
 
 // The five seam-closing notices — one per seam, reporting that its Reaction cascade ran to its

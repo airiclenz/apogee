@@ -947,7 +947,7 @@ func TestDaemonFireLogsAFailingHookAsOneSanitisedLine(t *testing.T) {
 
 	harness.fire(t, entryFor(t, "audit", daemon.Action{}))
 
-	const want = "hook record (exchange-finished): exit 1: boom 100% done"
+	const want = "reaction record (exchange-finished): exit 1: boom 100% done"
 	var found int
 	for _, line := range strings.Split(harness.logged.String(), "\n") {
 		if strings.Contains(line, want) {

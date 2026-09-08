@@ -157,7 +157,21 @@ go test ./internal/reactions/ ./internal/config/ . ./cmd/apogee/
 
 **Commit:** `refactor(reactions): the Runner takes domain.Reaction observe rows; the Hook type is deleted`
 
-## 5. The Runner's wording: `approval-requested`, `approval-decided`, `APOGEE_REACTION_*`, `reaction`
+## 5. The Runner's wording: `approval-requested`, `approval-decided`, `APOGEE_REACTION_*`, `reaction` — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the item's acceptance forbids any `APOGEE_HOOK` in `internal/config/defaults/config.yaml` and in any `.go` file, which reaches three names the item's prose did not enumerate (enumeration is a floor): the template's example webhook token variable `APOGEE_HOOK_TOKEN` is now `MY_WEBHOOK_TOKEN` — it is the user's own variable, never one apogee sets, so it must not wear the reserved prefix — and the test-owned sink and token variables `APOGEE_HOOK_SINK` / `APOGEE_HOOK_TEST_*` are now `APOGEE_TEST_SINK` / `APOGEE_TEST_*`.
+
+NOTES (2026-09-08): `internal/reactions` gained an `ApprovalDecided` Event constant beside the renamed `ApprovalRequested` — the package named five of the six standalone notices and `matchApproval` now needs the sixth to match on. Its doc comment moves from "the five named below" to "the six".
+
+NOTES (2026-09-08): `TestEventValuesArePinnedLiterals` now pins eleven, as the item asks: the six the package names through its own constants, the five seam-closing notices through the core's, since this package names no alias for them.
+
+NOTES (2026-09-08): beyond the item's named tests, two additions carry the new surface — an `approval-decided` inline golden in `TestPayloadJSONGolden` (the first pin of the `decision` field's JSON), and an environment-sink assertion in `TestE2EHooksFireFromTheTUI`: the sink entry's script now echoes `$APOGEE_REACTION_EVENT` and `$APOGEE_REACTION_PATH` to a second file, which is the item's "the exact names the executor sets" claim made from the outside.
+
+NOTES (2026-09-08): the template's `hooks:` comment block now lists six events rather than five, since `approval-decided` joins the list a user reads before writing `events:`.
+
+NOTES (2026-09-08): consequential edit — internal/reactions/doc.go: made necessary by the `APOGEE_HOOK_*` → `APOGEE_REACTION_*` rename, which the package doc named twice.
+
+NOTES (2026-09-08): the item asks the retired `approval-waiting` spelling to keep loading through `toHook` while forbidding that literal in any `.go` file. `toHook` compares against it as `"approval-"+"waiting"` — built from two pieces so the acceptance sweep cannot match it — with a comment that names the retired spelling without writing it whole, and the compatibility is pinned by `TestLoadFileConfigAcceptsThePreRenameApprovalEvent` in `internal/config/hooks_test.go`, which loads an `events:` list holding the retired name (same two-piece const) and asserts it resolves to `reactions.ApprovalRequested`.
 
 **What:** Depends on items 2 and 4. Hard rename, no aliases (A6): `domain.MomentApprovalWaiting` → `MomentApprovalRequested = "approval-requested"` (domain literal, `allNotices`, facade); `matchApproval` fires `approval-requested` on `ApprovalRequested` and `approval-decided` on `ApprovalDecided`, the latter's payload adding `decision` (the `domain.ApprovalDecision` spelling); `Payload.Hook` → `Payload.Reaction` (json `reaction`); env consts `APOGEE_REACTION_EVENT/NAME/WORKSPACE/PATH/SCHEDULE_ID/SCHEDULE_NAME`; report lines `reaction %s (%s): %v`, `reaction %s: dropped 1 event (queue full)`, `reaction %s: dropped %d events`; `ParseEvent`'s refusal `unknown reaction event %q — the events are …`; the closed-runner error names reactions. Every pinned test moves to the new spellings, including `cmd/apogee/e2e_hooks_test.go`, `headless_test.go`, `daemonfire_test.go`, `wire_settings_test.go`, `internal/config/hooks_test.go`, `internal/agent/dispatch_test.go` and the tui tests naming `approval-waiting` (`grep -rln 'approval-waiting\|APOGEE_HOOK\|"hook"' --include=*.go .`). The `hooks:` config key still accepts `approval-waiting` in `events:` for exactly one more item — `toHook` maps it to `approval-requested` so an unmigrated file keeps working until item 9 rewrites it.
 

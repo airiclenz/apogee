@@ -21,7 +21,7 @@ func TestEventsIsTheWholeVocabularyInOrder(t *testing.T) {
 	got := Events()
 
 	want := []Event{
-		"exchange-finished", "turn-finished", "file-changed", "approval-waiting",
+		"exchange-finished", "turn-finished", "file-changed", "approval-requested",
 		"approval-decided", "error", "pre-request-finished", "post-response-finished",
 		"pre-tool-exec-finished", "post-tool-result-finished", "history-rewrite-finished",
 	}
@@ -122,7 +122,7 @@ func TestHookValidateAcceptsTheValidShapes(t *testing.T) {
 		}()},
 		{"command on several events", func() domain.Reaction {
 			h := validHook()
-			h.On = []Event{TurnFinished, ExchangeFinished, FileChanged, ApprovalWaiting, Error}
+			h.On = []Event{TurnFinished, ExchangeFinished, FileChanged, ApprovalRequested, Error}
 			return h
 		}()},
 		{"webhook", webhookHook(domain.WebhookHandler{URL: "https://example.test/hook"})},
@@ -132,7 +132,7 @@ func TestHookValidateAcceptsTheValidShapes(t *testing.T) {
 		})},
 		{"webhook with env headers", webhookHook(domain.WebhookHandler{
 			URL:        "https://example.test/hook",
-			HeadersEnv: map[string]string{"Authorization": "APOGEE_HOOK_TOKEN"},
+			HeadersEnv: map[string]string{"Authorization": "MY_WEBHOOK_TOKEN"},
 		})},
 	}
 
@@ -174,7 +174,7 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 			h := validHook()
 			h.On = []Event{"turn-started"}
 			return h
-		}(), wantText: "unknown hook event"},
+		}(), wantText: "unknown reaction event"},
 		{name: "empty argv", hook: func() domain.Reaction {
 			h := validHook()
 			h.Handler = domain.ArgvHandler{}
@@ -395,10 +395,12 @@ func TestResolveWorkspaceLeavesANonLeadingTildeAlone(t *testing.T) {
 	}
 }
 
-// TestEventValuesArePinnedLiterals pins each Event constant to its exact spelling. The values
-// are a stable contract — they are what a user writes under `events:`, what reaches a fired
-// command as APOGEE_HOOK_EVENT, and now also the notice Moments of the Reaction core — so
-// re-homing the type behind an alias must not move a single byte.
+// TestEventValuesArePinnedLiterals pins each of the eleven events to its exact spelling. The
+// values are a stable contract — they are what a user writes under `events:`, what reaches a
+// fired command as APOGEE_REACTION_EVENT, and the notice Moments of the Reaction core — so
+// re-homing the type behind an alias must not move a single byte. The six this package names
+// are pinned through its own constants; the five seam-closing notices, which it names none of,
+// are pinned through the core's.
 func TestEventValuesArePinnedLiterals(t *testing.T) {
 	t.Parallel()
 
@@ -409,8 +411,14 @@ func TestEventValuesArePinnedLiterals(t *testing.T) {
 		{ExchangeFinished, "exchange-finished"},
 		{TurnFinished, "turn-finished"},
 		{FileChanged, "file-changed"},
-		{ApprovalWaiting, "approval-waiting"},
+		{ApprovalRequested, "approval-requested"},
+		{ApprovalDecided, "approval-decided"},
 		{Error, "error"},
+		{domain.MomentPreRequestFinished, "pre-request-finished"},
+		{domain.MomentPostResponseFinished, "post-response-finished"},
+		{domain.MomentPreToolExecFinished, "pre-tool-exec-finished"},
+		{domain.MomentPostToolResultFinished, "post-tool-result-finished"},
+		{domain.MomentHistoryRewriteFinished, "history-rewrite-finished"},
 	}
 	for _, pin := range pins {
 		if string(pin.got) != pin.want {
@@ -448,8 +456,8 @@ func TestParseEventErrorTextIsByteIdentical(t *testing.T) {
 	if err == nil {
 		t.Fatal("ParseEvent(\"turn-started\") returned no error, want one")
 	}
-	const want = `unknown hook event "turn-started" — the events are ` +
-		`exchange-finished, turn-finished, file-changed, approval-waiting, approval-decided, ` +
+	const want = `unknown reaction event "turn-started" — the events are ` +
+		`exchange-finished, turn-finished, file-changed, approval-requested, approval-decided, ` +
 		`error, pre-request-finished, post-response-finished, pre-tool-exec-finished, ` +
 		`post-tool-result-finished, history-rewrite-finished`
 	if err.Error() != want {

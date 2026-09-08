@@ -99,7 +99,8 @@ func TestMatchTurnBoundaryHonoursTheSubscribedSet(t *testing.T) {
 	assertEvents(t, onlyTurn, []Event{TurnFinished})
 }
 
-// TestMatchApproval — the RAISED gate is the event; the verdict is deliberately not one.
+// TestMatchApproval — both phases of one Approval are events: the raised gate, and the verdict it
+// reached, which the decided payload carries as "decision" (ADR 0076 A6).
 func TestMatchApproval(t *testing.T) {
 	t.Parallel()
 
@@ -117,8 +118,14 @@ func TestMatchApproval(t *testing.T) {
 		Phase:     domain.ApprovalDecided, Request: request, Decision: domain.ApprovalAllow,
 	})
 
-	assertEvents(t, requested, []Event{ApprovalWaiting})
-	assertEvents(t, decided, nil)
+	assertEvents(t, requested, []Event{ApprovalRequested})
+	assertEvents(t, decided, []Event{ApprovalDecided})
+	if verdict := decided[0].Payload.Decision; verdict != string(domain.ApprovalAllow) {
+		t.Errorf("approval-decided payload decision = %q, want %q", verdict, domain.ApprovalAllow)
+	}
+	if verdict := requested[0].Payload.Decision; verdict != "" {
+		t.Errorf("approval-requested payload decision = %q, want it empty — no verdict has been reached", verdict)
+	}
 	got := requested[0].Payload
 	if got.Tool != "terminal" || got.Reason != "write" || got.Remedy != "run `apogee doctor`" ||
 		got.SubAgentName != "docs sweep" || got.Scope != "reads the package directory" {

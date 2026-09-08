@@ -109,11 +109,23 @@ func (m *matcher) matchTurn(ev domain.TurnEvent) []firing {
 	return out
 }
 
-// matchApproval maps the REQUESTED phase alone: approval-waiting reports that a human is being
-// waited on, and the decided phase is deliberately not an event — a Hook that learned the verdict
-// could do nothing with it (ADR 0073 §2).
+// matchApproval maps BOTH phases of one Approval, each to the notice named after it:
+// approval-requested reports that a human is being waited on, approval-decided reports the verdict
+// that same request reached, carried on the payload as "decision". The decided phase was
+// deliberately not an event under ADR 0073 §2 — ADR 0076 A6 supersedes that: the two halves are one
+// pair, and a reaction that only learns a prompt was raised can never tell an answered one from an
+// abandoned one.
 func (m *matcher) matchApproval(ev domain.ApprovalEvent) []firing {
-	if ev.Phase != domain.ApprovalRequested || !m.wants(ApprovalWaiting) {
+	var event Event
+	switch ev.Phase {
+	case domain.ApprovalRequested:
+		event = ApprovalRequested
+	case domain.ApprovalDecided:
+		event = ApprovalDecided
+	default:
+		return nil
+	}
+	if !m.wants(event) {
 		return nil
 	}
 	payload := Payload{
@@ -123,8 +135,11 @@ func (m *matcher) matchApproval(ev domain.ApprovalEvent) []firing {
 		SubAgentName: ev.Request.SubAgentName,
 		Scope:        ev.Request.Scope,
 	}
+	if event == ApprovalDecided {
+		payload.Decision = string(ev.Decision)
+	}
 	payload.applyBase(ev.EventBase)
-	return []firing{firingOf(ApprovalWaiting, payload)}
+	return []firing{firingOf(event, payload)}
 }
 
 // matchError maps a recovered engine fault, at any depth.

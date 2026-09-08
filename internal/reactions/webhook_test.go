@@ -18,7 +18,7 @@ import (
 // for: the endpoint sees a POST of exactly the payload document, apogee's own two headers, the
 // entry's literal headers, and the `headers-env:` ones read out of the environment at send time.
 func TestWebhookSenderPostsTheJSONWithBothKindsOfHeader(t *testing.T) {
-	t.Setenv("APOGEE_HOOK_TEST_TOKEN", "s3cr3t")
+	t.Setenv("APOGEE_TEST_TOKEN", "s3cr3t")
 
 	type received struct {
 		method      string
@@ -45,7 +45,7 @@ func TestWebhookSenderPostsTheJSONWithBothKindsOfHeader(t *testing.T) {
 
 	payload := Payload{
 		Event:     ExchangeFinished,
-		Hook:      "ping",
+		Reaction:  "ping",
 		Time:      "2026-09-06T12:00:00Z",
 		Workspace: "/work/space",
 		Status:    "completed",
@@ -58,7 +58,7 @@ func TestWebhookSenderPostsTheJSONWithBothKindsOfHeader(t *testing.T) {
 		Handler: domain.WebhookHandler{
 			URL:        server.URL + "/fire",
 			Headers:    map[string]string{"X-Source": "apogee-test"},
-			HeadersEnv: map[string]string{"Authorization": "APOGEE_HOOK_TEST_TOKEN"},
+			HeadersEnv: map[string]string{"Authorization": "APOGEE_TEST_TOKEN"},
 		},
 		Timeout: 10 * time.Second,
 	}
@@ -131,7 +131,7 @@ func TestWebhookSenderRefusesToSendWhenTheHeaderVariableIsUnset(t *testing.T) {
 		On:     []Event{ExchangeFinished},
 		Handler: domain.WebhookHandler{
 			URL:        server.URL,
-			HeadersEnv: map[string]string{"Authorization": "APOGEE_HOOK_TEST_ABSENT_TOKEN"},
+			HeadersEnv: map[string]string{"Authorization": "APOGEE_TEST_ABSENT_TOKEN"},
 		},
 		Timeout: 10 * time.Second,
 	}
@@ -140,7 +140,7 @@ func TestWebhookSenderRefusesToSendWhenTheHeaderVariableIsUnset(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run with an unset header variable returned no error")
 	}
-	for _, want := range []string{"Authorization", "APOGEE_HOOK_TEST_ABSENT_TOKEN"} {
+	for _, want := range []string{"Authorization", "APOGEE_TEST_ABSENT_TOKEN"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to name %q", err, want)
 		}

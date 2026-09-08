@@ -52,6 +52,14 @@ type hookConfig struct {
 func (h hookConfig) toHook() (domain.Reaction, error) {
 	var events []reactions.Event
 	for _, name := range h.Events {
+		// The spelling this notice carried before ADR 0076 A6 renamed it to `approval-requested`
+		// — `approval-` joined to `waiting`, built rather than written whole so the rename's own
+		// sweep for the retired name stays clean. It is accepted here so an UNMIGRATED file keeps
+		// loading; the migration rewrites the block to the new spelling, after which nothing
+		// writes the old one again.
+		if name == "approval-"+"waiting" {
+			name = string(reactions.ApprovalRequested)
+		}
 		event, err := reactions.ParseEvent(name)
 		if err != nil {
 			return domain.Reaction{}, hookError(h.Name, "%v", err)

@@ -3172,8 +3172,8 @@ func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
 	if payload.Event != reactions.ExchangeFinished {
 		t.Errorf("the Hook was fired for %q, want %q", payload.Event, reactions.ExchangeFinished)
 	}
-	if payload.Hook != "record" {
-		t.Errorf("the payload names the Hook %q, want the entry's own name", payload.Hook)
+	if payload.Reaction != "record" {
+		t.Errorf("the payload names the Hook %q, want the entry's own name", payload.Reaction)
 	}
 	if payload.Schedule != nil {
 		t.Errorf("the payload carries a schedule block %+v; a plain headless run belongs to none",
@@ -3238,7 +3238,7 @@ func TestHeadlessReportsAFailingHookOnStderr(t *testing.T) {
 		t.Fatalf("headless: %v", err)
 	}
 
-	const want = "hook record (exchange-finished): exit 1: boom"
+	const want = "reaction record (exchange-finished): exit 1: boom"
 	if !strings.Contains(errOut, want) {
 		t.Errorf("stderr carries no failure line reading %q:\n%s", want, errOut)
 	}

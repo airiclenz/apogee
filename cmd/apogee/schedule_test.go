@@ -1403,8 +1403,8 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	}
 
 	payload := readHookPayload(t, reloadedMarker)
-	if payload.Hook != "reloaded" {
-		t.Errorf("the payload names the Hook %q, want the reloaded entry's own name", payload.Hook)
+	if payload.Reaction != "reloaded" {
+		t.Errorf("the payload names the Hook %q, want the reloaded entry's own name", payload.Reaction)
 	}
 	if payload.Schedule == nil || payload.Schedule.Name != "Nightly build" {
 		t.Errorf("the payload names the Schedule %+v, want the Firing's own", payload.Schedule)

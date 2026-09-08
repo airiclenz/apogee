@@ -36,7 +36,7 @@ import (
 //
 // The environment is inherited whole, deliberately: a notifier needs HOME, DISPLAY, the D-Bus
 // address and its agents' sockets, and this is the user's own command rather than one the model
-// chose (which is what internal/tools scrubs for). The APOGEE_HOOK_* facts are appended last, so
+// chose (which is what internal/tools scrubs for). The APOGEE_REACTION_* facts are appended last, so
 // they win over an inherited variable of the same name.
 const (
 	// waitGrace bounds the wait AFTER the deadline fired. Killing the process ends the process,

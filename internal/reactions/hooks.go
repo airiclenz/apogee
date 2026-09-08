@@ -16,12 +16,12 @@ import (
 // excludes the per-token, tool-call, sub-agent-phase, session-save, prune and usage moments
 // (ADR 0073 §4).
 //
-// Only the five named below have a constant here; the vocabulary itself is domain.Notices(), so
-// `approval-decided` and the five `<seam>-finished` closings are accepted under `events:` from the
-// same commit that added them to the core, and are matched by their spelling.
+// Only the six named below have a constant here; the vocabulary itself is domain.Notices(), so
+// the five `<seam>-finished` closings are accepted under `events:` from the same commit that added
+// them to the core, and are matched by their spelling.
 //
 // The string is the spelling a user writes in the `events:` list of a `hooks:` entry, so it is
-// also the value that reaches a fired command as APOGEE_HOOK_EVENT and the payload's "event"
+// also the value that reaches a fired command as APOGEE_REACTION_EVENT and the payload's "event"
 // field. It is a stable contract: renaming one breaks every configuration in the wild.
 type Event = domain.Moment
 
@@ -38,10 +38,13 @@ const (
 	// carries the tool and the absolute path the write landed on; a delete, copy or move reports
 	// its destination, because that is the path whose content changed.
 	FileChanged = domain.MomentFileChanged
-	// ApprovalWaiting fires when an Approval was RAISED — before its decision, while the human is
-	// still being waited on — so a Hook can ring a bell for a prompt nobody is watching. The
-	// verdict is deliberately not an event: a Hook that learned the answer could not act on it.
-	ApprovalWaiting = domain.MomentApprovalWaiting
+	// ApprovalRequested fires when an Approval was RAISED — before its decision, while the human is
+	// still being waited on — so a reaction can ring a bell for a prompt nobody is watching.
+	ApprovalRequested = domain.MomentApprovalRequested
+	// ApprovalDecided fires when that same Approval reached its verdict, which the payload carries
+	// as "decision". It is the second half of the pair ADR 0076 A6 admitted, superseding the
+	// earlier decision that the decided phase would deliberately not be an event.
+	ApprovalDecided = domain.MomentApprovalDecided
 	// Error fires on a localised, recovered engine fault at any depth. It is a Hook event and not
 	// an error value; the failures of the Hook machinery ITSELF never reach it, because a failing
 	// Hook that fired an `error` Hook would loop (ADR 0073 §8).
@@ -65,7 +68,7 @@ func ParseEvent(name string) (Event, error) {
 			return e, nil
 		}
 	}
-	return "", fmt.Errorf("unknown hook event %q — the events are %s", name, eventList())
+	return "", fmt.Errorf("unknown reaction event %q — the events are %s", name, eventList())
 }
 
 // eventList renders the vocabulary for an error message.

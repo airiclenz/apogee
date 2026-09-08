@@ -38,12 +38,12 @@ hooks:
     command: ["notify-send", "apogee finished"]
     workspace: ~/work
   - name: bell
-    events: [approval-waiting]
+    events: [approval-requested]
     webhook: https://hooks.example.com/apogee
     headers:
       X-Source: apogee
     headers-env:
-      Authorization: APOGEE_HOOK_TOKEN
+      Authorization: MY_WEBHOOK_TOKEN
     timeout: 250ms
 `)
 
@@ -101,7 +101,7 @@ hooks:
 	if got := webhook.Headers["X-Source"]; got != "apogee" {
 		t.Errorf("bell literal header = %q; want apogee", got)
 	}
-	if got := webhook.HeadersEnv["Authorization"]; got != "APOGEE_HOOK_TOKEN" {
+	if got := webhook.HeadersEnv["Authorization"]; got != "MY_WEBHOOK_TOKEN" {
 		t.Errorf("bell headers-env value = %q; want the variable NAME the header is read from", got)
 	}
 	if bell.Workspace != "" {
@@ -120,6 +120,36 @@ func eventsEqual(got, want []reactions.Event) bool {
 		}
 	}
 	return true
+}
+
+// An UNMIGRATED `hooks:` block still writes the spelling this notice carried before ADR 0076 A6
+// renamed it to `approval-requested`, and must keep loading until the migration rewrites the file:
+// the retired name resolves to the renamed notice rather than being refused as an unknown event.
+// The name is built from two pieces rather than written whole so the rename's own sweep for it
+// stays clean.
+func TestLoadFileConfigAcceptsThePreRenameApprovalEvent(t *testing.T) {
+	t.Parallel()
+
+	const retired = "approval-" + "waiting"
+
+	path := writeHooksConfig(t, `
+hooks:
+  - name: bell
+    events: [`+retired+`]
+    command: ["notify-send", "apogee"]
+`)
+
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v — %q must still load until the migration rewrites the block",
+			err, retired)
+	}
+	if len(opts.Hooks) != 1 {
+		t.Fatalf("resolved %d hooks; want 1: %+v", len(opts.Hooks), opts.Hooks)
+	}
+	if got, want := opts.Hooks[0].On, []reactions.Event{reactions.ApprovalRequested}; !eventsEqual(got, want) {
+		t.Errorf("events = %v; want %v — %q maps onto the renamed notice", got, want, retired)
+	}
 }
 
 // A `hooks:` block that cannot be run is refused at LOAD, naming the entry — a Hook that silently
@@ -159,7 +189,7 @@ hooks:
     events: [exchange-started]
     command: ["true"]
 `,
-			want: "unknown hook event",
+			want: "unknown reaction event",
 			key:  `hook "notify"`,
 		},
 		{

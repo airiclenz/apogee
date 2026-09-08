@@ -216,8 +216,8 @@ func TestRunnerKeepsOneHooksFiringsInOrder(t *testing.T) {
 		if run.Turn != i+1 {
 			t.Fatalf("firing %d carried turn %d, want %d — order was not preserved", i, run.Turn, i+1)
 		}
-		if run.Event != TurnFinished || run.Hook != "notify" {
-			t.Errorf("firing %d = %q/%q, want turn-finished/notify", i, run.Event, run.Hook)
+		if run.Event != TurnFinished || run.Reaction != "notify" {
+			t.Errorf("firing %d = %q/%q, want turn-finished/notify", i, run.Event, run.Reaction)
 		}
 	}
 }
@@ -254,9 +254,9 @@ func TestRunnerStampsTheIdentityFields(t *testing.T) {
 		t.Fatalf("ran %d firings, want 1", len(runs))
 	}
 	got := runs[0]
-	if got.Hook != "notify" || got.Workspace != resolved || got.Time != fixed.Format(time.RFC3339Nano) {
+	if got.Reaction != "notify" || got.Workspace != resolved || got.Time != fixed.Format(time.RFC3339Nano) {
 		t.Errorf("payload identity = %q/%q/%q, want notify/%q/%q",
-			got.Hook, got.Workspace, got.Time, resolved, fixed.Format(time.RFC3339Nano))
+			got.Reaction, got.Workspace, got.Time, resolved, fixed.Format(time.RFC3339Nano))
 	}
 	if got.Schedule == nil || got.Schedule.ID != "sched-1" || got.Schedule.Name != "docs sweep" {
 		t.Errorf("payload schedule = %#v, want the value New copied", got.Schedule)
@@ -282,8 +282,8 @@ func TestRunnerRunsHooksConcurrently(t *testing.T) {
 	runner.Emit(turnEvent(1))
 
 	names := map[string]bool{}
-	names[awaitStart(t, exec).Hook] = true
-	names[awaitStart(t, exec).Hook] = true
+	names[awaitStart(t, exec).Reaction] = true
+	names[awaitStart(t, exec).Reaction] = true
 	if !names["slow"] || !names["fast"] {
 		t.Fatalf("only %v started while both were blocked — the hooks are not concurrent", names)
 	}
@@ -364,7 +364,7 @@ func TestRunnerDropsTheNewestFiringWhenAHooksQueueIsFull(t *testing.T) {
 	}
 
 	lines := log.all()
-	want := []string{"hook wedged: dropped 1 event (queue full)", "hook wedged: dropped 1 events"}
+	want := []string{"reaction wedged: dropped 1 event (queue full)", "reaction wedged: dropped 1 events"}
 	if len(lines) != len(want) {
 		t.Fatalf("reported %v, want exactly %v", lines, want)
 	}
@@ -397,7 +397,7 @@ func TestRunnerReportsAFailureOnceUntilTheHookSucceeds(t *testing.T) {
 	closeRunner(t, runner)
 
 	lines := log.all()
-	want := "hook notify (turn-finished): exit 1: no such file"
+	want := "reaction notify (turn-finished): exit 1: no such file"
 	if len(lines) != 2 {
 		t.Fatalf("reported %v, want exactly two lines — the repeat is suppressed, the post-success one is not", lines)
 	}
@@ -429,7 +429,7 @@ func TestRunnerIgnoresAHookScopedToAnotherWorkspace(t *testing.T) {
 	closeRunner(t, runner)
 
 	runs := exec.recorded()
-	if len(runs) != 1 || runs[0].Hook != "mine" {
+	if len(runs) != 1 || runs[0].Reaction != "mine" {
 		t.Fatalf("ran %#v, want the scoped-here hook alone", runs)
 	}
 }
@@ -448,8 +448,8 @@ func TestReplaceStopsTheOldHookAndStartsTheNew(t *testing.T) {
 	}
 
 	runner.Emit(turnEvent(1))
-	if started := awaitStart(t, exec); started.Hook != "old" {
-		t.Fatalf("first firing went to %q, want old", started.Hook)
+	if started := awaitStart(t, exec); started.Reaction != "old" {
+		t.Fatalf("first firing went to %q, want old", started.Reaction)
 	}
 
 	if err := runner.Replace([]domain.Reaction{commandHook("new", TurnFinished)}); err != nil {
@@ -462,11 +462,11 @@ func TestReplaceStopsTheOldHookAndStartsTheNew(t *testing.T) {
 	if len(runs) != 2 {
 		t.Fatalf("ran %#v, want one firing each", runs)
 	}
-	if runs[0].Hook != "old" || runs[0].Turn != 1 {
-		t.Errorf("first run = %q/turn %d, want old/turn 1", runs[0].Hook, runs[0].Turn)
+	if runs[0].Reaction != "old" || runs[0].Turn != 1 {
+		t.Errorf("first run = %q/turn %d, want old/turn 1", runs[0].Reaction, runs[0].Turn)
 	}
-	if runs[1].Hook != "new" || runs[1].Turn != 2 {
-		t.Errorf("second run = %q/turn %d, want new/turn 2", runs[1].Hook, runs[1].Turn)
+	if runs[1].Reaction != "new" || runs[1].Turn != 2 {
+		t.Errorf("second run = %q/turn %d, want new/turn 2", runs[1].Reaction, runs[1].Turn)
 	}
 }
 
@@ -492,7 +492,7 @@ func TestReplaceRefusesAMalformedListAndKeepsRunning(t *testing.T) {
 	runner.Emit(turnEvent(1))
 	closeRunner(t, runner)
 
-	if runs := exec.recorded(); len(runs) != 1 || runs[0].Hook != "notify" {
+	if runs := exec.recorded(); len(runs) != 1 || runs[0].Reaction != "notify" {
 		t.Fatalf("ran %#v, want the surviving hook to have fired", runs)
 	}
 }

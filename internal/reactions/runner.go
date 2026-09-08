@@ -216,7 +216,7 @@ func (r *Runner) fanOut(set *hookSet, f firing, now string) {
 			continue
 		}
 		payload := f.Payload
-		payload.Hook = w.hook.ID
+		payload.Reaction = w.hook.ID
 		payload.Time = now
 		payload.Workspace = r.workspace
 		if r.schedule != nil {
@@ -237,7 +237,7 @@ func (r *Runner) fanOut(set *hookSet, f firing, now string) {
 func (r *Runner) noteDrop(w *worker) {
 	w.dropped.Add(1)
 	if w.dropReported.CompareAndSwap(false, true) {
-		r.emitReport(fmt.Sprintf("hook %s: dropped 1 event (queue full)", w.hook.ID))
+		r.emitReport(fmt.Sprintf("reaction %s: dropped 1 event (queue full)", w.hook.ID))
 	}
 }
 
@@ -258,7 +258,7 @@ func (r *Runner) Replace(list []domain.Reaction) error {
 	r.swapMu.Lock()
 	defer r.swapMu.Unlock()
 	if r.closed.Load() {
-		return errors.New("hooks: the runner is closed and cannot take a new hook list")
+		return errors.New("reactions: the runner is closed and cannot take a new reaction list")
 	}
 	set, err := r.buildSet(list)
 	if err != nil {
@@ -360,7 +360,7 @@ func (r *Runner) runOne(set *hookSet, w *worker, payload Payload) {
 		// failure line on every shutdown that killed a slow script.
 		return
 	}
-	line := fmt.Sprintf("hook %s (%s): %v", w.hook.ID, payload.Event, err)
+	line := fmt.Sprintf("reaction %s (%s): %v", w.hook.ID, payload.Event, err)
 	if line == w.lastFailure {
 		return
 	}
@@ -394,7 +394,7 @@ func (r *Runner) drainSet(set *hookSet, ctx context.Context) error {
 func (r *Runner) reportDrops(set *hookSet) {
 	for _, w := range set.workers {
 		if dropped := w.dropped.Load(); dropped > 0 {
-			r.emitReport(fmt.Sprintf("hook %s: dropped %d events", w.hook.ID, dropped))
+			r.emitReport(fmt.Sprintf("reaction %s: dropped %d events", w.hook.ID, dropped))
 		}
 	}
 }

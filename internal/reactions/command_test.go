@@ -38,7 +38,7 @@ func shellHook(name, script string) domain.Reaction {
 
 // TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment is the round trip the
 // command half exists for: the script gets the whole JSON document on stdin, byte for byte, and
-// the APOGEE_HOOK_* convenience facts in its environment — which is the contract a user's script
+// the APOGEE_REACTION_* convenience facts in its environment — which is the contract a user's script
 // is written against.
 func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t *testing.T) {
 	requireShell(t)
@@ -46,19 +46,19 @@ func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t 
 	dir := t.TempDir()
 	stdinFile := filepath.Join(dir, "stdin.json")
 	envFile := filepath.Join(dir, "env.txt")
-	t.Setenv("APOGEE_HOOK_TEST_STDIN_OUT", stdinFile)
-	t.Setenv("APOGEE_HOOK_TEST_ENV_OUT", envFile)
+	t.Setenv("APOGEE_TEST_STDIN_OUT", stdinFile)
+	t.Setenv("APOGEE_TEST_ENV_OUT", envFile)
 
 	payload := Payload{
 		Event:     FileChanged,
-		Hook:      "notify",
+		Reaction:  "notify",
 		Time:      "2026-09-06T12:00:00Z",
 		Workspace: "/work/space",
 		Tool:      "write_file",
 		Path:      "/work/space/main.go",
 		Schedule:  &ScheduleRef{ID: "sched-1", Name: "docs sweep"},
 	}
-	hook := shellHook("notify", `cat > "$APOGEE_HOOK_TEST_STDIN_OUT"; env > "$APOGEE_HOOK_TEST_ENV_OUT"`)
+	hook := shellHook("notify", `cat > "$APOGEE_TEST_STDIN_OUT"; env > "$APOGEE_TEST_ENV_OUT"`)
 
 	// DefaultExecutor rather than commandExecutor directly, so the dispatch on `command:` is
 	// exercised by the same test that proves what the command receives.
