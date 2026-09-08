@@ -16,8 +16,8 @@ import (
 // `/tmp/w` and `/private/tmp/w` are one workspace on macOS, and a filter that compared the two
 // literally would be silently inactive on exactly the platform where the temp root is a link.
 //
-// An EMPTY path is the unset filter: it resolves to "" with no error, so a Hook that scopes itself
-// to nothing is active everywhere without the caller special-casing it first.
+// An EMPTY path is the unset filter: it resolves to "" with no error, so a Reaction that scopes
+// itself to nothing is active everywhere without the caller special-casing it first.
 //
 // The `~` rule is config.ExpandUserPath's, reproduced here because this package depends on
 // internal/domain and internal/security alone; a `~` that is not leading is a legal filename

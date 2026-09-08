@@ -1072,7 +1072,7 @@ func TestTranscriptApprovalRecorded(t *testing.T) {
 
 // TestTranscriptApprovalRecordedOncePerApproval holds the transcript to ONE note per Approval now
 // that the engine announces each gate twice (domain.ApprovalPhase). The requested phase exists for
-// observers that want the wait itself — Hooks (ADR 0073) — and carries no verdict to render, so
+// observers that want the wait itself — Reactions (ADR 0073) — and carries no verdict to render, so
 // folding it too would double every approval line the human reads.
 func TestTranscriptApprovalRecordedOncePerApproval(t *testing.T) {
 	request := domain.ApprovalRequest{Tool: "write_file"}

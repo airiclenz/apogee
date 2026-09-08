@@ -197,18 +197,18 @@ func TestBridgeNotifyRoutingLandsAsAnEphemeralNote(t *testing.T) {
 	}
 }
 
-// TestBridgeNotifyHookLandsAsAnEphemeralNote holds the Hook reporter's whole promise on this side of
-// the seam (ADR 0073 §8): a failure sent from a Runner's worker goroutine reaches the Update loop as
-// a hookNoticeMsg, becomes one transcript note the human can read, and is NOT kept — nothing a Hook
-// does may reach the Session record, and a stored failure would come back on every resume as a claim
-// about a script nobody has run since.
+// TestBridgeNotifyHookLandsAsAnEphemeralNote holds the Reaction reporter's whole promise on this
+// side of the seam (ADR 0073 §8): a failure sent from a Runner's worker goroutine reaches the
+// Update loop as a hookNoticeMsg, becomes one transcript note the human can read, and is NOT kept —
+// nothing a Reaction does may reach the Session record, and a stored failure would come back on
+// every resume as a claim about a script nobody has run since.
 func TestBridgeNotifyHookLandsAsAnEphemeralNote(t *testing.T) {
 	t.Parallel()
 	prog := newStubProgram()
 	b := NewBridge()
 	b.Bind(prog)
 
-	const note = `hook "notify" failed: exit status 1: command not found`
+	const note = `reaction "notify" failed: exit status 1: command not found`
 	b.NotifyHook(note)
 
 	var sent []hookNoticeMsg
@@ -235,8 +235,8 @@ func TestBridgeNotifyHookLandsAsAnEphemeralNote(t *testing.T) {
 		t.Fatalf("decodeTranscript: %v", err)
 	}
 	for _, e := range entries {
-		if e.kind == entryNote && strings.Contains(e.text, "hook") {
-			t.Errorf("a hook notice survived the blob: %q", e.text)
+		if e.kind == entryNote && strings.Contains(e.text, "reaction") {
+			t.Errorf("a reaction notice survived the blob: %q", e.text)
 		}
 	}
 }

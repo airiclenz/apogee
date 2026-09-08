@@ -295,8 +295,8 @@ type ServerHost interface {
 
 	// Rebind re-resolves and applies the per-model bindings after the heartbeat observed the
 	// upstream serving a different model — or the same model in a different window. The binary owns
-	// the resolution (the per-model system prompt, ADR 0023; the validated set, ADR 0016; the
-	// mechanisms registry and the compaction budget) and the engine mutators; the TUI owns only
+	// the resolution (the per-model system prompt, ADR 0023; the window pin and the compaction
+	// budget) and the engine mutators; the TUI owns only
 	// WHEN, which is the whole of its half: at idle the moment the beat lands, or deferred to the
 	// exchange-terminal fold when a worker owns the engine — the quiescent boundary Agent.Rebind
 	// demands (ADR 0024). It returns what was actually BOUND, which is not always what was observed

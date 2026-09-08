@@ -14,13 +14,13 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// requireShell skips a test that scripts its Hook with `sh`. Every assertion in this file is about
-// what apogee does with a child process, not about the child itself, so a host with no POSIX shell
-// simply has nothing here to prove.
+// requireShell skips a test that scripts its Reaction with `sh`. Every assertion in this file is
+// about what apogee does with a child process, not about the child itself, so a host with no POSIX
+// shell simply has nothing here to prove.
 func requireShell(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("these tests script the Hook with sh; Windows has no POSIX shell to script it with")
+		t.Skip("these tests script the Reaction with sh; Windows has no POSIX shell to script it with")
 	}
 }
 
@@ -37,9 +37,9 @@ func shellHook(name, script string) domain.Reaction {
 }
 
 // TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment is the round trip the
-// command half exists for: the script gets the whole JSON document on stdin, byte for byte, and
-// the APOGEE_REACTION_* convenience facts in its environment — which is the contract a user's script
-// is written against.
+// command half exists for: the script gets the whole JSON document on stdin, byte for byte, and the
+// APOGEE_REACTION_* convenience facts in its environment — which is the contract a user's script is
+// written against.
 func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t *testing.T) {
 	requireShell(t)
 
@@ -91,7 +91,7 @@ func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t 
 }
 
 // TestCommandExecutorReportsTheExitStatusAndWhatTheCommandSaid proves the failure line carries
-// both halves of what a user needs to fix a broken Hook: the status it died with, and the
+// both halves of what a user needs to fix a broken Reaction: the status it died with, and the
 // complaint it printed on the way.
 func TestCommandExecutorReportsTheExitStatusAndWhatTheCommandSaid(t *testing.T) {
 	requireShell(t)
@@ -108,9 +108,9 @@ func TestCommandExecutorReportsTheExitStatusAndWhatTheCommandSaid(t *testing.T) 
 }
 
 // TestCommandExecutorReportsTheDeadlineRatherThanWaitingOnASleep is the bound that keeps one
-// wedged script from holding a Hook's worker — and, at shutdown, the whole grace period.
+// wedged script from holding a Reaction's worker — and, at shutdown, the whole grace period.
 //
-// The two cases are the two shapes a hung Hook takes. A command that IS the sleep dies with the
+// The two cases are the two shapes a hung Reaction takes. A command that IS the sleep dies with the
 // deadline and nothing else is owed. A wrapper-shaped one — a shell that spawned the sleep — leaves
 // a grandchild holding the stderr pipe it inherited, and the copy behind that pipe would block
 // forever; waitGrace is what bounds it, so this case must finish soon after the grace and never
@@ -151,7 +151,7 @@ func TestCommandExecutorReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T
 }
 
 // TestCommandExecutorRefusesAProgramInsideTheWorkspace is the exec fence: the model can write
-// files in the workspace, so a Hook that ran one of them would turn a file write into arbitrary
+// files in the workspace, so a Reaction that ran one of them would turn a file write into arbitrary
 // code execution on the user's machine.
 func TestCommandExecutorRefusesAProgramInsideTheWorkspace(t *testing.T) {
 	workspace := t.TempDir()
@@ -206,7 +206,7 @@ func TestCommandExecutorCutsAnOverlongComplaintDownToATail(t *testing.T) {
 	}
 }
 
-// readFile reads a file the scripted Hook wrote.
+// readFile reads a file the scripted Reaction wrote.
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	content, err := os.ReadFile(path)

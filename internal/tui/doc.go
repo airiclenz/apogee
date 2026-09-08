@@ -563,8 +563,7 @@
 // What a beat DOES about a changed upstream is the second act, [ServerHost.Rebind], and the split
 // between the two is the design: the heartbeat seam observes, the rebind seam applies, and the
 // binary owns everything in between — re-resolving the per-model system prompt (ADR 0023), the
-// validated set (ADR 0016), the mechanisms registry and the compaction budget, then driving
-// Agent.Rebind. This package decides only WHEN. [Model.observeBinding] measures each landed beat
+// window pin and the compaction budget, then driving Agent.Rebind. This package decides only WHEN. [Model.observeBinding] measures each landed beat
 // against the last OBSERVATION rather than against the binding — which is what lets a
 // `context-window:` pin outrank the server's window forever without the renderer knowing a pin
 // exists — and a change is applied at once when the engine is idle, or stashed as a latest-wins

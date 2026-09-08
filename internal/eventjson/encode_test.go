@@ -393,7 +393,7 @@ func TestKindsAreEighteen(t *testing.T) {
 		}
 	}
 	if strings.Contains(strings.Join(kinds, " "), "-") {
-		t.Errorf("Kinds() must be snake_case, not a Hook event's kebab-case: %v", kinds)
+		t.Errorf("Kinds() must be snake_case, not a notice Moment's kebab-case: %v", kinds)
 	}
 }
 

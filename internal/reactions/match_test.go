@@ -8,7 +8,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// allSubscribed is the set a run with a Hook on every event is built over.
+// allSubscribed is the set a run with a Reaction on every event is built over.
 func allSubscribed() map[Event]bool {
 	return SubscribedEvents([]domain.Reaction{{On: Events()}})
 }
@@ -86,7 +86,7 @@ func TestMatchTurnBoundary(t *testing.T) {
 	}
 }
 
-// TestMatchTurnBoundaryHonoursTheSubscribedSet — a run whose only Hook wants the closure never
+// TestMatchTurnBoundaryHonoursTheSubscribedSet — a run whose only Reaction wants the closure never
 // hears about the plain boundary, and the reverse.
 func TestMatchTurnBoundaryHonoursTheSubscribedSet(t *testing.T) {
 	t.Parallel()
@@ -200,7 +200,7 @@ func TestMatchFileChanged(t *testing.T) {
 }
 
 // TestMatchFileChangedIgnoresAnUnknownResult — a result whose call was never remembered (a read,
-// a call from before the Hook set was replaced) closes nothing and fires nothing.
+// a call from before the Reaction set was replaced) closes nothing and fires nothing.
 func TestMatchFileChangedIgnoresAnUnknownResult(t *testing.T) {
 	t.Parallel()
 
@@ -243,15 +243,15 @@ func TestMatchNeverAsksWriteTargetWhenFileChangedIsUnsubscribed(t *testing.T) {
 	assertEvents(t, m.match(domain.ToolResultEvent{Result: domain.ToolResult{CallID: call.ID}}), nil)
 
 	if calls != 0 {
-		t.Errorf("WriteTarget was invoked %d times, want 0 when no hook subscribes to file-changed", calls)
+		t.Errorf("WriteTarget was invoked %d times, want 0 when no reaction subscribes to file-changed", calls)
 	}
 	if len(m.pending) != 0 {
-		t.Errorf("pending = %d entries, want none when no hook subscribes to file-changed", len(m.pending))
+		t.Errorf("pending = %d entries, want none when no reaction subscribes to file-changed", len(m.pending))
 	}
 }
 
 // TestMatchWithNoActiveHookIsANoOpForEveryEvent — the ordinary case for a user who configured no
-// Hooks at all: the decorator is in the sink chain and costs one map length check per event.
+// Reactions at all: the decorator is in the sink chain and costs one map length check per event.
 func TestMatchWithNoActiveHookIsANoOpForEveryEvent(t *testing.T) {
 	t.Parallel()
 
@@ -268,7 +268,7 @@ func TestMatchWithNoActiveHookIsANoOpForEveryEvent(t *testing.T) {
 
 	for _, ev := range events {
 		if got := m.match(ev); len(got) != 0 {
-			t.Errorf("match(%T) = %v, want nothing with no active hook", ev, got)
+			t.Errorf("match(%T) = %v, want nothing with no active reaction", ev, got)
 		}
 	}
 
@@ -278,7 +278,7 @@ func TestMatchWithNoActiveHookIsANoOpForEveryEvent(t *testing.T) {
 }
 
 // TestMatchIgnoresEveryOtherVariant — the vocabulary is closed; an event outside it produces
-// nothing even when every Hook event is subscribed.
+// nothing even when every Reaction event is subscribed.
 func TestMatchIgnoresEveryOtherVariant(t *testing.T) {
 	t.Parallel()
 
@@ -295,7 +295,7 @@ func TestMatchIgnoresEveryOtherVariant(t *testing.T) {
 		},
 	} {
 		if got := m.match(ev); len(got) != 0 {
-			t.Errorf("match(%T) = %v, want nothing — it is not a hook event", ev, got)
+			t.Errorf("match(%T) = %v, want nothing — it is not a reaction event", ev, got)
 		}
 	}
 }

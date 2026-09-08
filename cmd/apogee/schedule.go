@@ -89,11 +89,11 @@ type scheduleWiring struct {
 	// Firing shows up in /sessions beside the conversations it ran beneath (items 2 and 7).
 	store *session.Store
 
-	// notifyHook is where a Hook's trouble is told (ADR 0073 §8); wired to Bridge.NotifyHook, the
-	// same seam this session's OWN Runner reports through, so a failing Hook reads identically
+	// notifyHook is where a Reaction's trouble is told (ADR 0073 §8); wired to Bridge.NotifyHook, the
+	// same seam this session's OWN Runner reports through, so a failing Reaction reads identically
 	// whether the session fired it or a Firing this session raised did. It is a seam rather than a
 	// direct call for the Bridge's reason: it is invoked from the Runner's worker goroutines, never
-	// from Update. nil leaves a Hook's failure silent, which is what a composition test wants.
+	// from Update. nil leaves a Reaction's failure silent, which is what a composition test wants.
 	notifyHook func(string)
 }
 
@@ -118,20 +118,20 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	binding := w.binding()
 	opts, entry := w.live.firingSources(binding)
 
-	// This Firing's own Hook Runner (ADR 0073), built from the `hooks:` list the SESSION is running
-	// now — the one firingSources hands over, which the config-watcher's reload arm keeps current
-	// (liveSettings.setObserve) — rather than the list the process launched with. A `hooks:` edit
-	// applied mid-session therefore reaches the Firings that session raises, which is the same
-	// promise every other live key already carries into them (ADR 0037).
+	// This Firing's own Reaction Runner (ADR 0073), built from the `reactions:` list the SESSION is
+	// running now — the one firingSources hands over, which the config-watcher's reload arm keeps
+	// current (liveSettings.setObserve) — rather than the list the process launched with. A
+	// `reactions:` edit applied mid-session therefore reaches the Firings that session raises, which
+	// is the same promise every other live key already carries into them (ADR 0037).
 	//
 	// Per Firing rather than per session, even though a session already holds a Runner of its own:
-	// this one stamps the Schedule the run belongs to onto every payload, so a Hook can tell a
+	// this one stamps the Schedule the run belongs to onto every payload, so a Reaction can tell a
 	// scheduled run from the conversation it was raised beneath. The session's Runner keeps
 	// observing the session; the two never see each other's events.
 	hookRunner, err := firingHooks(opts.Reactions, w.roots.workspace,
 		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.notifyHook)
 	if err != nil {
-		return schedule.Outcome{}, fmt.Errorf("apogee: build the firing's hooks: %w", err)
+		return schedule.Outcome{}, fmt.Errorf("apogee: build the firing's reactions: %w", err)
 	}
 	// Drained when the Firing ends, on the same five-second grace every root gives (ADR 0073 §7) and
 	// deferred here so a composition that failed below takes its workers down with it. The session

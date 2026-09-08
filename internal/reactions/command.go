@@ -16,7 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
-// The exec contract a Hook's `command:` runs under is the `api-key-cmd:` resolver's contract
+// The exec contract a Reaction's `command:` runs under is the `api-key-cmd:` resolver's contract
 // (internal/config's keyresolve.go, runKeyCommand/resolveKeyProgram), copied here because this
 // package depends on internal/domain and internal/security alone. internal/keystore's run.go
 // carries the same copy for the same reason; unifying the three is deliberately out of scope.
@@ -25,13 +25,13 @@ import (
 // splitting, no glob — so a character in a file path can never mean something. A user who wants a
 // pipeline writes ["sh", "-c", "…"] and owns that choice explicitly.
 //
-// Outside confinement, fenced at the program. A Hook is the USER's configuration rather than
+// Outside confinement, fenced at the program. A Reaction is the USER's configuration rather than
 // anything the model chose, so it runs unsandboxed like the key command does; what it may not do
 // is execute a file the model could have written, which is what security.ResolveProgram refuses
 // (ADR 0073 §6).
 //
 // No stdout, no terminal. Stdin is the payload JSON and nothing else; stdout is discarded, because
-// nothing a Hook prints may reach the model, the conversation or the Session record; stderr is
+// nothing a Reaction prints may reach the model, the conversation or the Session record; stderr is
 // kept only to quote back in the failure line the Driver reports.
 //
 // The environment is inherited whole, deliberately: a notifier needs HOME, DISPLAY, the D-Bus
@@ -60,7 +60,7 @@ const (
 // is the whole fence: everything else about one run comes from the entry and the firing.
 //
 // It is safe for concurrent use — it keeps no per-run state — which the Executor contract requires,
-// since one executor serves every Hook and each Hook has a worker of its own.
+// since one executor serves every Reaction and each Reaction has a worker of its own.
 type commandExecutor struct {
 	workspaceRoot string
 }

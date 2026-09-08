@@ -92,7 +92,7 @@ func validHook() domain.Reaction {
 	}
 }
 
-// webhookHook is the smallest webhook entry that passes.
+// webhookReaction is the smallest webhook entry that passes.
 func webhookHook(handler domain.WebhookHandler) domain.Reaction {
 	return domain.Reaction{
 		ID:      "post",
@@ -104,7 +104,7 @@ func webhookHook(handler domain.WebhookHandler) domain.Reaction {
 	}
 }
 
-// TestHookValidateAcceptsTheValidShapes covers the six shapes a `hooks:` entry may take: a bare
+// TestHookValidateAcceptsTheValidShapes covers the six shapes a `reactions:` entry may take: a bare
 // command, a command scoped to a workspace, a command on several events, a bare webhook, a
 // webhook with literal headers, and a webhook with env-referenced headers.
 func TestHookValidateAcceptsTheValidShapes(t *testing.T) {
@@ -149,8 +149,8 @@ func TestHookValidateAcceptsTheValidShapes(t *testing.T) {
 
 // TestHookValidateRefusesEachRule checks every rule of the entry shape this package still owns —
 // the exactly-one-action and headers-belong-to-a-webhook rules moved to the config layer with the
-// Hook struct, since a domain.Reaction carries one Handler — and that the message names the entry
-// so a user with several entries is told which line to fix.
+// Reaction struct, since a domain.Reaction carries one Handler — and that the message names the
+// entry so a user with several entries is told which line to fix.
 func TestHookValidateRefusesEachRule(t *testing.T) {
 	t.Parallel()
 
@@ -246,7 +246,7 @@ func TestHookValidateRefusesAReactionTheCoreRejects(t *testing.T) {
 }
 
 // TestValidateAllRefusesDuplicateNames — the name is the identity a failure notice, the de-dup
-// record and the payload's "hook" field all key on, so two entries may not share one.
+// record and the payload's "reaction" field all key on, so two entries may not share one.
 func TestValidateAllRefusesDuplicateNames(t *testing.T) {
 	t.Parallel()
 
@@ -446,8 +446,8 @@ func TestEventsAreTheNoticeMoments(t *testing.T) {
 }
 
 // TestParseEventErrorTextIsByteIdentical holds the refusal message to the byte. A misspelt event
-// name is the likeliest mistake in a `hooks:` block, so the sentence that lists the vocabulary is
-// user-facing text: it changes only when the vocabulary itself does, and then deliberately.
+// name is the likeliest mistake in a `reactions:` block, so the sentence that lists the vocabulary
+// is user-facing text: it changes only when the vocabulary itself does, and then deliberately.
 func TestParseEventErrorTextIsByteIdentical(t *testing.T) {
 	t.Parallel()
 

@@ -7,7 +7,7 @@ import (
 )
 
 // The eighteen line kinds of ADR 0075 §4 — sixteen Event variants plus the two frames that
-// bracket a run and are not Events. They are snake_case on purpose: a Hook event's kebab-case
+// bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 const (
 	kindToken             = "token"
@@ -221,7 +221,7 @@ type approvalData struct {
 	Decision string          `json:"decision"`
 }
 
-// turnData is the turn line: a Turn's quiescent boundary. Unlike the Hooks vocabulary's
+// turnData is the turn line: a Turn's quiescent boundary. Unlike the Reaction vocabulary's
 // turn-finished this is emitted at EVERY depth.
 type turnData struct {
 	Status     string `json:"status"`
@@ -243,7 +243,7 @@ type reactionFiredData struct {
 
 // errorData is the error line: a localised, recovered fault. The member is `err` because the tag
 // is the variant's own field name folded to snake_case — the mechanical rule this whole mapping
-// follows — and not the `error` a Hook event spells.
+// follows — and not the `error` a notice Moment spells.
 type errorData struct {
 	Source string `json:"source"`
 	Err    string `json:"err"`

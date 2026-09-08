@@ -170,16 +170,16 @@ func (w *rootWiring) resolveConfig() error {
 	// the switch is off (naming.go).
 	w.namer = newDelegationNamer(w.sessionNamingUpstream, w.routedNamingUpstream, w.opts.AutoTitle)
 
-	// This session's Hook Runner (ADR 0073), built HERE rather than beside the facilities above for
-	// two reasons that pull the same way: it can fail — a malformed `hooks:` entry or an unresolvable
-	// `workspace:` is structural configuration, and it fails the run the way an unreadable prompt does
-	// — and the Config below is where it is installed, so building it any later would either box a
-	// nil Runner into Events or leave a Runner the engine never emits into.
+	// This session's Reaction Runner (ADR 0073), built HERE rather than beside the facilities above
+	// for two reasons that pull the same way: it can fail — a malformed `reactions:` entry or an
+	// unresolvable `workspace:` is structural configuration, and it fails the run the way an
+	// unreadable prompt does — and the Config below is where it is installed, so building it any later
+	// would either box a nil Runner into Events or leave a Runner the engine never emits into.
 	//
 	// It DECORATES the Bridge's sink rather than replacing it: every Event reaches the renderer first
-	// and unconditionally (Runner.Emit forwards before it matches), so installing Hooks cannot change
-	// what the transcript sees. A run whose `hooks:` list is empty gets a Runner with no workers,
-	// which costs one atomic load per Event and nothing else.
+	// and unconditionally (Runner.Emit forwards before it matches), so installing Reactions cannot
+	// change what the transcript sees. A run whose `reactions:` list is empty gets a Runner with no
+	// workers, which costs one atomic load per Event and nothing else.
 	//
 	// The WriteTarget is a CLOSURE over the wiring rather than a value, because the tool registry it
 	// asks does not exist yet — wireSession installs it, and every `/settings` roster edit and MCP
@@ -216,9 +216,9 @@ func (w *rootWiring) resolveConfig() error {
 		APIKey: apiKey,
 		Mode:   w.mode,
 		Bypass: w.opts.Bypass,
-		// The Hook Runner built above, which DECORATES the Bridge's sink: the renderer sees every
-		// Event exactly as it did before this key existed, and the `hooks:` list is fired behind it
-		// (ADR 0073 §2 — observe-only, nothing a Hook does reaches the model or the record).
+		// The Reaction Runner built above, which DECORATES the Bridge's sink: the renderer sees every
+		// Event exactly as it did before this key existed, and the `reactions:` list is fired behind it
+		// (ADR 0073 §2 — observe-only, nothing a Reaction does reaches the model or the record).
 		Events:   w.hooks,
 		Approver: w.bridge.Approver(),
 		Asker:    w.bridge.Asker(),
@@ -262,7 +262,7 @@ func (w *rootWiring) resolveConfig() error {
 		// mid-session, and a scrub that followed the binding would leave the other entries' keys
 		// readable in every `terminal` / `python_exec` / `run_tests` child until it happened. Empty
 		// ⇒ apogee's own APOGEE_API_KEY alone, exactly the scrub before this key existed.
-		// A webhook Hook's `headers-env:` names variables holding a token too (ADR 0073 §6), and they
+		// A webhook Reaction's `headers-env:` names variables holding a token too (ADR 0073 §6), and they
 		// are scrubbed beside the key sources for exactly the same reason: a token readable out of a
 		// `terminal` child is a token the model can read.
 		SecretEnvVars: append(config.APIKeyEnvNames(w.opts), config.ReactionEnvNames(w.opts)...),

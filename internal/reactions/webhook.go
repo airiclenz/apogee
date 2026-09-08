@@ -16,10 +16,11 @@ import (
 )
 
 // maxResponseDrain bounds how much of a webhook's reply apogee reads before closing the body. The
-// body is read for one reason only — an unread connection cannot be reused, so a Hook firing every
-// Turn would open a fresh socket each time — and the content is never looked at, because nothing a
-// Hook answers may reach the model, the conversation or the Session record (ADR 0073 §1). A server
-// that streams a gigabyte back is therefore drained up to this bound and then hung up on.
+// body is read for one reason only — an unread connection cannot be reused, so a Reaction firing
+// every Turn would open a fresh socket each time — and the content is never looked at, because
+// nothing a Reaction answers may reach the model, the conversation or the Session record (ADR 0073
+// §1). A server that streams a gigabyte back is therefore drained up to this bound and then hung up
+// on.
 const maxResponseDrain = 64 << 10
 
 // webhookSender POSTs the payload to an entry's `webhook:` URL. It carries no state at all: the
@@ -31,7 +32,7 @@ const maxResponseDrain = 64 << 10
 type webhookSender struct{}
 
 // Run POSTs the payload as JSON and reports anything that was not a 2xx. There is NO RETRY, by
-// decision: a Hook is a post-hoc notification, a retry would fire the user's endpoint twice for
+// decision: a Reaction is a post-hoc notification, a retry would fire the user's endpoint twice for
 // one event, and a queue holding failed firings would outlive the run they belong to (ADR 0073 §6).
 //
 // The headers are resolved BEFORE the request is sent, so a `headers-env:` entry naming a variable

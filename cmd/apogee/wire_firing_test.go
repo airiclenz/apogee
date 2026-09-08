@@ -1044,9 +1044,9 @@ func TestFiringConfigBeatsTheSubAgentServerOnItsOwnEndpoint(t *testing.T) {
 	}
 }
 
-// The Hook Runner a Driver built for ONE Firing reaches the run, and the variables its webhook
+// The Reaction Runner a Driver built for ONE Firing reaches the run, and the variables its webhook
 // headers are read from reach the credential scrub. Both halves matter: a Runner the composer
-// dropped would leave a configured `hooks:` list silently dead at every unattended root, and a
+// dropped would leave a configured `reactions:` list silently dead at every unattended root, and a
 // header token left out of SecretEnvVars would be readable by the very model this run is about to
 // hand a `terminal` tool to.
 func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
@@ -1091,12 +1091,12 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 
 	if cfg.Events != domain.EventSink(runner) {
 		t.Errorf("cfg.Events = %v, want the Runner the Driver built — a Firing fires the "+
-			"`hooks:` list through the sink it was handed", cfg.Events)
+			"`reactions:` list through the sink it was handed", cfg.Events)
 	}
 	for _, want := range []string{"STARTUP_KEY", "NOTIFY_TOKEN"} {
 		if !slices.Contains(cfg.SecretEnvVars, want) {
 			t.Errorf("SecretEnvVars = %v, want it to carry %q — both the key sources and the "+
-				"Hook header sources are scrubbed out of a subprocess the model chose",
+				"Reaction header sources are scrubbed out of a subprocess the model chose",
 				cfg.SecretEnvVars, want)
 		}
 	}

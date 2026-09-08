@@ -8,11 +8,11 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// Event names one of the moments a Hook may fire on — the NOTICE Moments of the Reaction core,
-// which this name is an alias for (ADR 0076): the Hook vocabulary and the notice half of the
+// Event names one of the moments a Reaction may fire on — the NOTICE Moments of the Reaction core,
+// which this name is an alias for (ADR 0076): the Reaction vocabulary and the notice half of the
 // Moment vocabulary are one set, not two that happen to agree. Every one is POST-HOC: it reports
-// something that already happened, so a Hook reading it can change nothing about it. The set is
-// additive by design — a moment not named here is not a Hook event yet — and deliberately
+// something that already happened, so a Reaction reading it can change nothing about it. The set is
+// additive by design — a moment not named here is not a Reaction event yet — and deliberately
 // excludes the per-token, tool-call, sub-agent-phase, session-save, prune and usage moments
 // (ADR 0073 §4).
 //
@@ -20,7 +20,7 @@ import (
 // the five `<seam>-finished` closings are accepted under `events:` from the same commit that added
 // them to the core, and are matched by their spelling.
 //
-// The string is the spelling a user writes in the `events:` list of a `hooks:` entry, so it is
+// The string is the spelling a user writes in the `events:` list of a `reactions:` entry, so it is
 // also the value that reaches a fired command as APOGEE_REACTION_EVENT and the payload's "event"
 // field. It is a stable contract: renaming one breaks every configuration in the wild.
 type Event = domain.Moment
@@ -32,7 +32,7 @@ const (
 	ExchangeFinished = domain.MomentExchangeFinished
 	// TurnFinished fires at every Depth-0 Turn boundary, whatever the Turn's status. A Turn that
 	// closed its Exchange produces BOTH this and ExchangeFinished — the boundary is one fact and
-	// the closure another, and a Hook may want either without the other.
+	// the closure another, and a Reaction may want either without the other.
 	TurnFinished = domain.MomentTurnFinished
 	// FileChanged fires when a workspace-scoped write tool SUCCEEDED, at any depth. The payload
 	// carries the tool and the absolute path the write landed on; a delete, copy or move reports
@@ -45,23 +45,23 @@ const (
 	// as "decision". It is the second half of the pair ADR 0076 A6 admitted, superseding the
 	// earlier decision that the decided phase would deliberately not be an event.
 	ApprovalDecided = domain.MomentApprovalDecided
-	// Error fires on a localised, recovered engine fault at any depth. It is a Hook event and not
-	// an error value; the failures of the Hook machinery ITSELF never reach it, because a failing
-	// Hook that fired an `error` Hook would loop (ADR 0073 §8).
+	// Error fires on a localised, recovered engine fault at any depth. It is a Reaction event and not
+	// an error value; the failures of the Reaction machinery ITSELF never reach it, because a failing
+	// Reaction that fired an `error` Reaction would loop (ADR 0073 §8).
 	Error = domain.MomentError
 )
 
-// Events returns the Hook events in their documented order. It IS domain.Notices() — the two
+// Events returns the Reaction events in their documented order. It IS domain.Notices() — the two
 // vocabularies are one set rather than two that happen to agree, so a notice added to the Reaction
-// core is a Hook event from the same commit. The slice is a fresh copy, so a caller listing them
-// for a help text or a validation message cannot disturb the vocabulary.
+// core is a Reaction event from the same commit. The slice is a fresh copy, so a caller listing
+// them for a help text or a validation message cannot disturb the vocabulary.
 func Events() []Event {
 	return domain.Notices()
 }
 
 // ParseEvent turns one `events:` entry into an Event, refusing anything outside the vocabulary
 // with a message that lists what is allowed — a misspelt event name is the likeliest mistake in
-// a `hooks:` block, and a bare "invalid" would leave the user guessing at the spelling.
+// a `reactions:` block, and a bare "invalid" would leave the user guessing at the spelling.
 func ParseEvent(name string) (Event, error) {
 	for _, e := range domain.Notices() {
 		if string(e) == name {
@@ -89,10 +89,11 @@ func eventList() string {
 //
 // The exactly-one-action and headers-belong-to-a-webhook rules are NOT here: a domain.Reaction
 // carries one Handler, so those two rules live where both fields still coexist — the config
-// layer's own mapping (internal/config's hooks.go).
+// layer's own mapping (internal/config's reactions.go).
 func Validate(r domain.Reaction) error {
 	if strings.TrimSpace(r.ID) == "" {
-		return fmt.Errorf("hooks: an entry has no name: every hook needs a `name:` to be reported by")
+		return fmt.Errorf(
+			"reactions: an entry has no name: every reaction needs a `name:` to be reported by")
 	}
 	if len(r.On) == 0 {
 		return reactionError(r.ID, "no events: list at least one of %s under `events:`", eventList())
@@ -154,9 +155,9 @@ func reactionError(id string, format string, args ...any) error {
 	return fmt.Errorf("reaction %q: %s", id, fmt.Sprintf(format, args...))
 }
 
-// ValidateAll validates every entry and refuses duplicate names. Names must be unique because
-// they are the identity a failure notice, a de-dup record and the payload's "hook" field all key
-// on: two entries called "notify" would report as one.
+// ValidateAll validates every entry and refuses duplicate names. Names must be unique because they
+// are the identity a failure notice, a de-dup record and the payload's "reaction" field all key on:
+// two entries called "notify" would report as one.
 func ValidateAll(list []domain.Reaction) error {
 	seen := make(map[string]bool, len(list))
 	for _, r := range list {
@@ -164,7 +165,7 @@ func ValidateAll(list []domain.Reaction) error {
 			return err
 		}
 		if seen[r.ID] {
-			return reactionError(r.ID, "a second entry has this name — hook names must be unique")
+			return reactionError(r.ID, "a second entry has this name — reaction names must be unique")
 		}
 		seen[r.ID] = true
 	}

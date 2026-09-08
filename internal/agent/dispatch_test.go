@@ -2058,3 +2058,47 @@ func twoToolCallScript(a, b toolReq) []provider.Delta {
 		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The pre-tool-exec fault result — an announced string
+// ----------------------------------------------------------------------------
+
+// TestDispatchReportsAPreToolExecReactionFailure pins the exact tool-result text a faulted
+// pre-tool-exec Reaction leaves behind. That text is the whole content of the error result the
+// call is answered with, so it reaches the MODEL: it is an announced surface, and the vocabulary
+// it announces is the Reaction core's (ADR 0076) rather than the retired "hook" one.
+//
+// The call itself must not run. A cascade that ended half way left a half-applied decision behind,
+// and running the tool against it is exactly what the error result exists to prevent.
+func TestDispatchReportsAPreToolExecReactionFailure(t *testing.T) {
+	t.Parallel()
+
+	const want = "pre-tool-exec reaction failed"
+
+	ran := 0
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "read", readOnly: true, ran: &ran, result: "body"})
+	cfg.Reactions = []domain.Reaction{{
+		ID:     "faulty",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeWork,
+		On:     []domain.Moment{domain.MomentPreToolExec},
+		Handler: domain.PreToolExecFunc(
+			func(context.Context, domain.LoopView, *domain.ToolCallEdit) (domain.Outcome, error) {
+				return domain.Outcome{}, errors.New("deliberate")
+			}),
+	}}
+
+	driveToolCall(t, cfg, sink, "c1", "read", `{}`)
+
+	if ran != 0 {
+		t.Errorf("the tool ran %d times after the pre-tool-exec Reaction faulted, want 0", ran)
+	}
+	res, ok := lastToolResult(sink.events)
+	if !ok {
+		t.Fatal("no ToolResult recorded")
+	}
+	if !res.IsError || res.Content != want {
+		t.Errorf("result = %+v, want an IsError result whose content is exactly %q", res, want)
+	}
+}

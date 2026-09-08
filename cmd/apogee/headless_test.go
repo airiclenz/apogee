@@ -2424,7 +2424,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 // The prune is reported ONCE under json, on the stream, in the stream's vocabulary. The stderr
 // sentence the text path prints is the same fact in a second vocabulary, and a consumer reading a
 // machine stream has no use for it (ADR 0075 decision 6) — but the sink is still WRAPPED, not
-// dropped, which is what keeps the Hook Runner behind it fed.
+// dropped, which is what keeps the Reaction Runner behind it fed.
 func TestHeadlessFormatJSONSuppressesThePruneNotice(t *testing.T) {
 	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1},
 		emit: func(sink domain.EventSink) {
@@ -2459,8 +2459,9 @@ func TestHeadlessFormatJSONSuppressesThePruneNotice(t *testing.T) {
 
 // The encoder is the OUTERMOST sink the command composes and the prune-notice sink is what it
 // wraps. Both halves matter: outermost is the only place a lossless, blocking write may sit —
-// inside the Hook Runner it would block a callback documented not to block (ADR 0075 decision 9) —
-// and the wrap is what keeps every observer beneath it, the Hooks included, receiving Events.
+// inside the Reaction Runner it would block a callback documented not to block (ADR 0075 decision
+// 9) — and the wrap is what keeps every observer beneath it, the Reactions included, receiving
+// Events.
 func TestHeadlessFormatJSONEncoderIsOutermost(t *testing.T) {
 	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1}}
 	if _, _, err := headlessRun(t, stub, "--format", "json", "a prompt"); err != nil {
@@ -2715,7 +2716,7 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 		hardExit, interruptSignals = prevExit, prevSignals
 	})
 	// The runner the real one stands in for: it notices the cancellation, then holds — the state a
-	// run is in while it saves its record and drains its Hooks, and the only state in which a
+	// run is in while it saves its record and drains its Reactions, and the only state in which a
 	// second press means anything.
 	runOnce = func(ctx context.Context, _ run.Spec) (run.Result, error) {
 		<-ctx.Done()
@@ -3082,19 +3083,19 @@ type recordingSink struct{ events []domain.Event }
 
 func (s *recordingSink) Emit(e domain.Event) { s.events = append(s.events, e) }
 
-// requireHookShell skips a test that scripts its Hook with `sh`. What these tests prove is what the
-// headless Driver does with a fired Hook, never what the child itself does, so a host with no POSIX
-// shell has nothing here to prove (internal/reactions' own tests skip on the same terms).
+// requireHookShell skips a test that scripts its Reaction with `sh`. What these tests prove is what
+// the headless Driver does with a fired Reaction, never what the child itself does, so a host with
+// no POSIX shell has nothing here to prove (internal/reactions' own tests skip on the same terms).
 func requireHookShell(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("these tests script the Hook with sh; Windows has no POSIX shell to script it with")
+		t.Skip("these tests script the Reaction with sh; Windows has no POSIX shell to script it with")
 	}
 }
 
-// hookHomeRecording writes an apogee home whose one Hook subscribes to events and dumps the payload
-// it is handed onto marker, and returns that home. The script writes the document byte for byte, so
-// a test reads back exactly what the run put on the Hook's stdin.
+// hookHomeRecording writes an apogee home whose one Reaction subscribes to events and dumps the
+// payload it is handed onto marker, and returns that home. The script writes the document byte for
+// byte, so a test reads back exactly what the run put on the Reaction's stdin.
 func hookHomeRecording(t *testing.T, marker string, events ...string) string {
 	t.Helper()
 	return testConfigHome(t, fmt.Sprintf(
@@ -3102,26 +3103,26 @@ func hookHomeRecording(t *testing.T, marker string, events ...string) string {
 		strings.Join(events, ", "), marker))
 }
 
-// readHookPayload decodes the payload one fired Hook recorded. The Runner is drained before the
+// readHookPayload decodes the payload one fired Reaction recorded. The Runner is drained before the
 // command returns (runHeadless's deferred Close), so the file is there by the time a test looks —
 // no polling, and a missing file is a real failure rather than a race.
 func readHookPayload(t *testing.T, marker string) reactions.Payload {
 	t.Helper()
 	raw, err := os.ReadFile(marker)
 	if err != nil {
-		t.Fatalf("the Hook wrote no payload: %v", err)
+		t.Fatalf("the Reaction wrote no payload: %v", err)
 	}
 	var payload reactions.Payload
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("decode the Hook's payload %q: %v", raw, err)
+		t.Fatalf("decode the Reaction's payload %q: %v", raw, err)
 	}
 	return payload
 }
 
-// A headless run fires the `hooks:` list its config carries. This is the whole of what makes an
+// A headless run fires the `reactions:` list its config carries. This is the whole of what makes an
 // unattended run observable to a script the user configured: the Driver builds a Runner of its own
 // per run and installs it as the Config's sink, so the exchange boundary the engine announces
-// reaches the Hook.
+// reaches the Reaction.
 //
 // The payload carries NO schedule block: a plain headless run belongs to no Schedule, which is what
 // lets a script tell it apart from a daemon tick reading the same document.
@@ -3140,10 +3141,10 @@ func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
 
 	payload := readHookPayload(t, marker)
 	if payload.Event != reactions.ExchangeFinished {
-		t.Errorf("the Hook was fired for %q, want %q", payload.Event, reactions.ExchangeFinished)
+		t.Errorf("the Reaction was fired for %q, want %q", payload.Event, reactions.ExchangeFinished)
 	}
 	if payload.Reaction != "record" {
-		t.Errorf("the payload names the Hook %q, want the entry's own name", payload.Reaction)
+		t.Errorf("the payload names the Reaction %q, want the entry's own name", payload.Reaction)
 	}
 	if payload.Schedule != nil {
 		t.Errorf("the payload carries a schedule block %+v; a plain headless run belongs to none",
@@ -3187,10 +3188,10 @@ func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 	}
 }
 
-// A Hook that fails is reported to the HUMAN and nowhere else: on stderr, beside every other thing
-// this command narrates, and never on stdout, which carries the model's answer and nothing else. It
-// is never an ErrorEvent either (ADR 0073 §8) — a Hook subscribed to `error` would otherwise fire on
-// its own failure and loop.
+// A Reaction that fails is reported to the HUMAN and nowhere else: on stderr, beside every other
+// thing this command narrates, and never on stdout, which carries the model's answer and nothing
+// else. It is never an ErrorEvent either (ADR 0073 §8) — a Reaction subscribed to `error` would
+// otherwise fire on its own failure and loop.
 func TestHeadlessReportsAFailingHookOnStderr(t *testing.T) {
 	requireHookShell(t)
 
@@ -3213,6 +3214,6 @@ func TestHeadlessReportsAFailingHookOnStderr(t *testing.T) {
 		t.Errorf("stderr carries no failure line reading %q:\n%s", want, errOut)
 	}
 	if strings.TrimSpace(out) != "the answer" {
-		t.Errorf("stdout = %q, want the answer alone — a Hook's trouble never contaminates it", out)
+		t.Errorf("stdout = %q, want the answer alone — a Reaction's trouble never contaminates it", out)
 	}
 }

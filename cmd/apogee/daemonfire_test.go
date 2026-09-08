@@ -888,9 +888,9 @@ func TestDaemonFirePrewarmsEachWorkspaceOnce(t *testing.T) {
 	}
 }
 
-// The Schedule a Firing belongs to rides every payload its Hooks are handed. That is the whole
+// The Schedule a Firing belongs to rides every payload its Reactions are handed. That is the whole
 // reason a Runner is composed per FIRING rather than per daemon: two adopted schedules fire the
-// same `hooks:` list, and a script that could not tell them apart could not act on either.
+// same `reactions:` list, and a script that could not tell them apart could not act on either.
 func TestDaemonFireStampsTheScheduleOnItsHookPayload(t *testing.T) {
 	requireHookShell(t)
 
@@ -922,11 +922,11 @@ func TestDaemonFireStampsTheScheduleOnItsHookPayload(t *testing.T) {
 	}
 }
 
-// A Hook's trouble reaches the daemon log — this Driver's whole user interface (ADR 0034 decision
-// 10) — as ONE line, escape-stripped, with whatever the script said quoted literally. The `%` in the
-// tail is the point: the reporter goes through daemonLogWriter, which takes the line as DATA, so a
-// percent sign in someone else's stderr is a percent sign rather than a format verb eating the rest
-// of the sentence.
+// A Reaction's trouble reaches the daemon log — this Driver's whole user interface (ADR 0034
+// decision 10) — as ONE line, escape-stripped, with whatever the script said quoted literally. The
+// `%` in the tail is the point: the reporter goes through daemonLogWriter, which takes the line as
+// DATA, so a percent sign in someone else's stderr is a percent sign rather than a format verb
+// eating the rest of the sentence.
 func TestDaemonFireLogsAFailingHookAsOneSanitisedLine(t *testing.T) {
 	requireHookShell(t)
 

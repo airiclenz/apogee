@@ -1,8 +1,8 @@
-// Package reactions is the Hook library: user-configured, observe-only reactions to the engine's
-// event stream, composed by every Driver from this one package so the TUI, `apogee headless`
-// and a daemon Firing fire the same `hooks:` list (ADR 0073).
+// Package reactions is the Reaction library: user-configured, observe-only reactions to the
+// engine's event stream, composed by every Driver from this one package so the TUI, `apogee
+// headless` and a daemon Firing fire the same `reactions:` list (ADR 0073).
 //
-// A Hook is strictly one-way. Nothing it prints, returns or answers reaches the model, the
+// A Reaction is strictly one-way. Nothing it prints, returns or answers reaches the model, the
 // conversation or the Session record, and it can neither veto nor delay the loop: the package
 // decorates a domain.EventSink, so Emit returns nothing and there is no seam through which a
 // verdict could travel back. It is not a seam Reaction and fires at no seam: its events ARE the
@@ -20,20 +20,18 @@
 // hooks.go is the vocabulary and the entry shape — the five Event constants, which are the notice
 // Moments of the Reaction core under an alias (ADR 0076), Events/ParseEvent, and the
 // Validate/ValidateAll rules that refuse a malformed domain.Reaction with a sentence naming it.
-// payload.go is the JSON document a firing Hook receives on stdin or in a POST body — the
-// documented field contract, the per-seam projections a seam-closing notice carries under
-// "value", plus the small APOGEE_REACTION_* environment set Env derives from it.
-// match.go is the pure mapping from one domain.Event to the Hook events it produces, built over
-// the SUBSCRIBED set so an unsubscribed event costs nothing; it is also where a closed seam's
-// working value is projected, while the engine's Emit is still running.
-// workspace.go is the one path resolution the `workspace:` filter and the root's own workspace
-// are both compared through, so the two readings can never disagree.
-// runner.go is the sink decorator itself — the Executor seam, the per-Hook queues and workers,
-// the Driver-facing failure reporter, and the reload (Replace) and shutdown (Close) paths.
-// exec.go is the production Executor — DefaultExecutor's dispatch onto whichever action the entry
-// configured, and the one JSON encoding both actions send.
-// command.go runs a Hook's argv: the api-key-cmd exec posture, copied, with the payload on stdin
-// and the APOGEE_REACTION_* facts in the environment.
-// webhook.go POSTs the same document to a Hook's URL, with the literal and environment-resolved
-// headers it carries and no retry.
+// payload.go is the JSON document a firing Reaction receives on stdin or in a POST body — the
+// documented field contract, the per-seam projections a seam-closing notice carries under "value",
+// plus the small APOGEE_REACTION_* environment set Env derives from it. match.go is the pure
+// mapping from one domain.Event to the Reaction events it produces, built over the SUBSCRIBED set
+// so an unsubscribed event costs nothing; it is also where a closed seam's working value is
+// projected, while the engine's Emit is still running. workspace.go is the one path resolution the
+// `workspace:` filter and the root's own workspace are both compared through, so the two readings
+// can never disagree. runner.go is the sink decorator itself — the Executor seam, the per-Reaction
+// queues and workers, the Driver-facing failure reporter, and the reload (Replace) and shutdown
+// (Close) paths. exec.go is the production Executor — DefaultExecutor's dispatch onto whichever
+// action the entry configured, and the one JSON encoding both actions send. command.go runs a
+// Reaction's argv: the api-key-cmd exec posture, copied, with the payload on stdin and the
+// APOGEE_REACTION_* facts in the environment. webhook.go POSTs the same document to a Reaction's
+// URL, with the literal and environment-resolved headers it carries and no retry.
 package reactions

@@ -33,8 +33,8 @@ const (
 	dispatchConfinementUnavailable
 )
 
-// dispatchTools runs each requested tool call through the pre-tool-exec hooks, the Approval
-// gate, execution, and the post-tool-result hooks — appending each result to the
+// dispatchTools runs each requested tool call through the pre-tool-exec reactions, the Approval
+// gate, execution, and the post-tool-result reactions — appending each result to the
 // conversation as a tool message and emitting the observability events. Approval is
 // consulted here, AFTER the stream has closed (the §6 #6 resolution: stream fully, then
 // gate), so a blocking Approver never holds an open Upstream connection.
@@ -208,7 +208,7 @@ func (a *Agent) askedSeat(call domain.ToolCall) delegationSeat {
 // Depth 0 is the whole eligibility rule (decision 3): a child's own delegations stay serial
 // inline, so there is no slot accounting across levels and no way for a nested fan-out to hold
 // slots its own children need. It is one rule with two readers — the pool below sizes itself by
-// it through fanOutWidthFor, and buildRequest stamps it onto the hook-facing view
+// it through fanOutWidthFor, and buildRequest stamps it onto the reaction-facing view
 // (LoopView.ParallelAgents) so a Reaction synthesizing delegations batches by the same width the
 // engine will honour. That second reader is why such a batch needs nothing of its
 // own to follow a routed cap (ADR 0045 §5): its min(cap, remaining) reads the view, the view
@@ -247,7 +247,7 @@ func (a *Agent) delegationCap() int {
 }
 
 // dispatchSerially is the loop this dispatch has always been: one call at a time, each carried
-// from its ToolCallEvent through the hooks, the Resolution, execution, and into history before
+// from its ToolCallEvent through the reactions, the Resolution, execution, and into history before
 // the next call is looked at. It is the path every leaf tool takes, and the path a delegation
 // group takes whenever the fan-out width is 1 (cap < 2, depth > 0, or a single call), so those
 // cases keep today's behavior exactly.
@@ -260,7 +260,7 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 		if _, err := a.fire(ctx, domain.MomentPreToolExec, domain.NewToolCallEdit(&call)); err != nil {
 			// A pre-tool-exec reaction faulted: skip the call with an error result rather than
 			// running it against a half-applied decision.
-			a.appendToolResult(turn, errorToolResult(call.ID, "pre-tool-exec hook failed"))
+			a.appendToolResult(turn, errorToolResult(call.ID, "pre-tool-exec reaction failed"))
 			continue
 		}
 
@@ -304,8 +304,8 @@ type fanOutSlot struct {
 	// run marks a Delegate verdict: this slot's child still has to run through the pool. A
 	// refused (or unknown-tool, or hook-failed) slot already holds its final result.
 	run bool
-	// hookFailed marks a pre-tool-exec hook failure, whose result is appended WITHOUT the
-	// productivity signal and the post-tool-result hooks — the serial path's `continue`.
+	// hookFailed marks a pre-tool-exec reaction failure, whose result is appended WITHOUT the
+	// productivity signal and the post-tool-result reactions — the serial path's `continue`.
 	hookFailed bool
 	outcome    dispatchOutcome
 }
@@ -364,7 +364,7 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 		// Same disposition as the serial path: an error result, no child, and no postlude.
 		return fanOutSlot{
 			call:       call,
-			result:     errorToolResult(call.ID, "pre-tool-exec hook failed"),
+			result:     errorToolResult(call.ID, "pre-tool-exec reaction failed"),
 			hookFailed: true,
 		}
 	}

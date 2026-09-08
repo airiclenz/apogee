@@ -62,8 +62,8 @@ const (
 // The hard SECOND interrupt (hardExit, watchSecondInterrupt) is the one deliberate exception in
 // this command, and it is not a hole in the rule: a human pressing Ctrl-C twice is asking for the
 // wind-down ITSELF to stop, so that path skips the deferred teardown on purpose — no confinement
-// Close, no Hook drain, no closing frame — and every other exit in this file still travels as an
-// error through here.
+// Close, no Reaction drain, no closing frame — and every other exit in this file still travels as
+// an error through here.
 type exitError struct {
 	code int
 	err  error
@@ -132,7 +132,7 @@ const secondInterruptNotice = "apogee headless: second interrupt — exiting wit
 // with its record saved, its stderr prose printed and its closing frame written.
 //
 // The second press is a different request. Under `--format json` the wind-down can take real time
-// — a Turn that has to notice the cancellation, a record to write, Hooks draining on their five
+// — a Turn that has to notice the cancellation, a record to write, Reactions draining on their five
 // second grace — and a human watching a stream that has stopped moving has no way to tell a slow
 // teardown from a wedged one. So the second press is taken literally: one line on stderr and
 // [hardExit], skipping every deferred teardown in this command (ADR 0075 decision 9). Nothing is
@@ -184,7 +184,7 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 // `--format json` asks for: there the same pruning pass is already on stdout as a `prune` Event
 // line, and the stderr sentence would be the one fact told twice in two vocabularies (ADR 0075
 // decision 6). The sink is still WRAPPED under json rather than dropped, because dropping it would
-// drop the forward every observer behind it depends on — the Hook Runner included.
+// drop the forward every observer behind it depends on — the Reaction Runner included.
 //
 // Emit is never called concurrently: the engine serializes emission on its side ([domain.EventSink]).
 type pruneNoticeSink struct {
@@ -500,9 +500,9 @@ func subAgentFrames(runs []run.SubAgentUsage) []eventjson.SubAgentUsage {
 // It returns the Result beside the error because that funnel needs both: a refusal that never
 // started a run still carries what the session had already loaded, and the frame reports it.
 func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, noSave bool, lines *eventjson.Writer) (run.Result, error) {
-	// Every line this command narrates leaves through ONE lock from here on. The Hook Runner built
-	// below reports a Hook's trouble on a Hook worker's goroutine (internal/reactions), while this
-	// function is still writing its own notices and its closing summary on the goroutine it was
+	// Every line this command narrates leaves through ONE lock from here on. The Reaction Runner built
+	// below reports a Reaction's trouble on a Reaction worker's goroutine (internal/reactions), while
+	// this function is still writing its own notices and its closing summary on the goroutine it was
 	// called on — and Cobra's Print helpers hand both straight to the same io.Writer: a data race on
 	// that writer (`go test -race`), and interleaved bytes on a real terminal. Wrapping the command's
 	// error stream serialises the two at the only thing they share, so the reporter stays a plain
@@ -546,22 +546,22 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		return run.Result{}, notStarted(err)
 	}
 
-	// This run's own Hook Runner (ADR 0073), built as soon as the workspace it is rooted in is
-	// known — the `workspace:` filter that decides which Hooks are active here is compared against
+	// This run's own Reaction Runner (ADR 0073), built as soon as the workspace it is rooted in is
+	// known — the `workspace:` filter that decides which Reactions are active here is compared against
 	// exactly that path (firingHooks), so it cannot be built any earlier.
 	//
 	// It belongs to the RUN rather than to the process: an `apogee headless` invocation is one
 	// Firing, and building the Runner per Firing is what lets a daemon tick and a `/schedule` Firing
 	// stamp the Schedule they belong to onto the payload while this one stamps none.
 	//
-	// A Hook's trouble is reported on stderr, beside every other thing this command narrates: stdout
-	// is the model's answer and nothing else, and a Hook that failed is a fact about a script the
-	// user configured rather than anything the answer should carry.
+	// A Reaction's trouble is reported on stderr, beside every other thing this command narrates:
+	// stdout is the model's answer and nothing else, and a Reaction that failed is a fact about a
+	// script the user configured rather than anything the answer should carry.
 	//
-	// A malformed list fails the run before a token is spent. `hooks:` is validated when the config
-	// file is parsed, so what is left to fail here is a `workspace:` this host cannot resolve — and
-	// an unattended run that quietly fired nothing would be indistinguishable from one whose Hooks
-	// all ran.
+	// A malformed list fails the run before a token is spent. `reactions:` is validated when the
+	// config file is parsed, so what is left to fail here is a `workspace:` this host cannot resolve —
+	// and an unattended run that quietly fired nothing would be indistinguishable from one whose
+	// Reactions all ran.
 	hookRunner, err := firingHooks(opts.Reactions, roots.workspace, nil, func(line string) { cmd.PrintErrln(line) })
 	if err != nil {
 		return run.Result{}, notStarted(err)
@@ -611,12 +611,12 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		}()
 	}
 
-	// The Hooks are drained AFTER the run and BEFORE the confinement teardown above — defers run in
-	// reverse, and this one is registered second — so a Hook still holding an event this run
+	// The Reactions are drained AFTER the run and BEFORE the confinement teardown above — defers run
+	// in reverse, and this one is registered second — so a Reaction still holding an event this run
 	// produced finishes it while everything it was composed from still stands. The grace is the five
 	// seconds every root gives (ADR 0073 §7); what is still running when it expires is killed by the
 	// context, because a wedged script may not hold the shell's prompt. Close's own error is
-	// discarded: it says only that a Hook was killed at the deadline, the drop totals it wanted to
+	// discarded: it says only that a Reaction was killed at the deadline, the drop totals it wanted to
 	// report have already gone to stderr, and the run is over either way.
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
@@ -705,9 +705,9 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// mode, and no key resolver, skill catalog or width source of its own — a command that runs once
 	// has no longer-lived facility to share, so the composer's own defaults are exactly right here.
 	//
-	// What comes back beside the Config is the per-model rebind's narration: a validated set
-	// applying, being offered or being suppressed, and a built-in Model profile announcing itself.
-	// It goes to stderr, where it cannot contaminate the answer.
+	// What comes back beside the Config is the per-model rebind's narration: a built-in Model
+	// profile announcing itself, and the roster delta such a profile carries. It goes to stderr,
+	// where it cannot contaminate the answer.
 	entry := startupEntry(*opts)
 	cfg, routing, notices, err := firingConfig(cmd.Context(), firingInputs{
 		opts:     *opts,
@@ -796,19 +796,19 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// The one Event this Driver renders live. Everything else a headless run reports comes back on
 	// Result, but a prune happens MID-run and leaves no trace on the answer, so a human watching an
 	// unattended run would otherwise see a window quietly shrink with nothing said. The sink WRAPS
-	// whatever the Config already carries — the Hook Runner since ADR 0073 — rather than replacing
+	// whatever the Config already carries — the Reaction Runner since ADR 0073 — rather than replacing
 	// it, exactly as run.Once's own tap wraps this one in turn (run.Spec). The order that leaves is
-	// prune notice → Hooks → nothing: the renderer sees every Event first, and installing Hooks
-	// cannot change what this command prints.
+	// prune notice → Reactions → nothing: the renderer sees every Event first, and installing
+	// Reactions cannot change what this command prints.
 	//
 	// Under `--format json` the encoder goes on TOP of that and never inside it, so the whole chain
-	// reads engine → serialEventSink → eventTap → encoder → prune notice → Hooks. Outermost is the
-	// only place it can correctly sit: writing an Event line is lossless and therefore BLOCKING
-	// (ADR 0075 decision 9), while a reactions.Runner's Report callback is documented must-not-block
-	// (internal/reactions), so an encoder installed inside the Runner would put a blocking stdout write
-	// on the one path that promises not to block — and a reader that stopped reading would stall the
-	// Hooks. Outermost also makes the stream complete: it sees every Event before any wrapper below
-	// it can decide to render, swallow or fail on one.
+	// reads engine → serialEventSink → eventTap → encoder → prune notice → Reactions. Outermost is the
+	// only place it can correctly sit: writing an Event line is lossless and therefore BLOCKING (ADR
+	// 0075 decision 9), while a reactions.Runner's Report callback is documented must-not-block
+	// (internal/reactions), so an encoder installed inside the Runner would put a blocking stdout
+	// write on the one path that promises not to block — and a reader that stopped reading would stall
+	// the Reactions. Outermost also makes the stream complete: it sees every Event before any wrapper
+	// below it can decide to render, swallow or fail on one.
 	//
 	// The prune notice goes quiet in the same breath, for the reason on the type: the prune is
 	// already a `prune` line on stdout under json, and the stderr sentence would be the same fact

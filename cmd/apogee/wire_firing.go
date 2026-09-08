@@ -77,12 +77,13 @@ type firingInputs struct {
 	// is what hands it to the runner. The run's scratch dir is created under it, so a saved run and
 	// the working files its model left behind are one thing to find and one thing to sweep.
 	recordID string
-	// hooks is the Hook Runner this ONE Firing fires through (ADR 0073), built by the Driver from
+	// hooks is the Reaction Runner this ONE Firing fires through (ADR 0073), built by the Driver from
 	// firingHooks and closed by it when the Firing ends. It is a field rather than a branch for the
-	// file's own rule: the three Drivers differ in where a Hook's trouble is reported and in whether
-	// the run belongs to a Schedule at all, and both of those are decided before the Runner exists.
+	// file's own rule: the three Drivers differ in where a Reaction's trouble is reported and in
+	// whether the run belongs to a Schedule at all, and both of those are decided before the Runner
+	// exists.
 	//
-	// nil is the legitimate absence — a Driver that raises no Hooks, and every composition test —
+	// nil is the legitimate absence — a Driver that raises no Reactions, and every composition test —
 	// and it leaves Config.Events nil exactly as it was before this key existed.
 	hooks *reactions.Runner
 }
@@ -101,14 +102,14 @@ type firingInputs struct {
 //
 // Approver, Asker and Presenter are deliberately left nil: run.Once pins its own, and handing it
 // any of them is how a run acquires a human it does not have. Events is the ONE exception, and only
-// where the Driver built a Hook Runner (in.hooks): that Runner observes and forwards, so a Firing
-// gains no human from it — a Hook can read what the run did and nothing a Hook does reaches the
-// model, the conversation or the Session record (ADR 0073 §2). With no Runner it stays nil, exactly
-// as it was before the key existed. Tools is left nil too and
-// the engine builds its own registry — EXCEPT under `sub-agents-choice: model`, where the gate
-// shapes the sub_agent SCHEMA rather than anything on the Config the engine reads (ADR 0031), so a
-// Firing that must publish `run_on` has to hand over a roster assembled here. Either way a Firing
-// still reaches no external MCP server (ADR 0034): the assembled registry carries no MCP tools.
+// where the Driver built a Reaction Runner (in.hooks): that Runner observes and forwards, so a
+// Firing gains no human from it — a Reaction can read what the run did and nothing a Reaction does
+// reaches the model, the conversation or the Session record (ADR 0073 §2). With no Runner it stays
+// nil, exactly as it was before the key existed. Tools is left nil too and the engine builds its
+// own registry — EXCEPT under `sub-agents-choice: model`, where the gate shapes the sub_agent
+// SCHEMA rather than anything on the Config the engine reads (ADR 0031), so a Firing that must
+// publish `run_on` has to hand over a roster assembled here. Either way a Firing still reaches no
+// external MCP server (ADR 0034): the assembled registry carries no MCP tools.
 func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRouting, []string, error) {
 	// The bound entry's own `model:` unless the Driver overlaid one. On a launcher-fronted server an
 	// empty model is legitimate — it means "whatever is serving" — so this is a fallback, not a
@@ -313,11 +314,11 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		// one — the Driver-parity break ADR 0031 rules out. It is what gives `apogee undo
 		// <session-id>` something to reverse after a headless or scheduled run.
 		UndoSnapshots: in.opts.UndoSnapshots,
-		// Both halves of what the `terminal` tool may not read back out of the environment it
-		// inherits: the names an API key is resolved from, and the names a Hook's webhook header is
-		// (config.ReactionEnvNames). A Firing runs the same `reactions:` list a session does, so it has to
-		// scrub the same variables — a token the session hides would otherwise be readable by a
-		// model the moment the same configuration ran unattended.
+		// Both halves of what the `terminal` tool may not read back out of the environment it inherits:
+		// the names an API key is resolved from, and the names a Reaction's webhook header is
+		// (config.ReactionEnvNames). A Firing runs the same `reactions:` list a session does, so it has
+		// to scrub the same variables — a token the session hides would otherwise be readable by a model
+		// the moment the same configuration ran unattended.
 		SecretEnvVars: append(config.APIKeyEnvNames(in.opts), config.ReactionEnvNames(in.opts)...),
 		// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
 		// rather than off opts, so the run reads responses in the same shape a session on the same
@@ -371,15 +372,15 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		Floor: floorFromOptions(in.opts),
 	}
 
-	// The Hook Runner this Driver built for this ONE Firing, installed as the run's Event sink (ADR
-	// 0073 §2). It is assigned after the literal rather than inside it because a nil *reactions.Runner
-	// boxed into the domain.EventSink interface is a NON-nil interface holding a nil pointer, and
-	// run.Once's own tap would then wrap a sink that panics on the first Event. A Driver that built
-	// no Runner leaves Events nil, which is what every composition test asserts.
+	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink
+	// (ADR 0073 §2). It is assigned after the literal rather than inside it because a nil
+	// *reactions.Runner boxed into the domain.EventSink interface is a NON-nil interface holding a nil
+	// pointer, and run.Once's own tap would then wrap a sink that panics on the first Event. A Driver
+	// that built no Runner leaves Events nil, which is what every composition test asserts.
 	//
 	// It is the INNERMOST sink of the run: run.Once wraps whatever it is handed (eventTap), and the
 	// one Driver that renders an Event itself wraps this Runner in turn (headless's prune notice),
-	// so the renderer stays outermost and the Hooks stay invisible to it.
+	// so the renderer stays outermost and the Reactions stay invisible to it.
 	if in.hooks != nil {
 		cfg.Events = in.hooks
 	}
@@ -533,10 +534,10 @@ func resolveFiringRouting(
 		delegationStateNotice(name, target, "", nil)
 }
 
-// firingHooks builds the Hook Runner ONE unattended run fires through (ADR 0073). What it arms is
-// the OBSERVE half of the generation the root resolved (ADR 0076 A8) — for a Firing a live session
-// raises, the rows a `reactions:` apply last installed, since a Firing is composed out of the
-// session's live options rather than the file it launched with.
+// firingHooks builds the Reaction Runner ONE unattended run fires through (ADR 0073). What it arms
+// is the OBSERVE half of the generation the root resolved (ADR 0076 A8) — for a Firing a live
+// session raises, the rows a `reactions:` apply last installed, since a Firing is composed out of
+// the session's live options rather than the file it launched with.
 //
 // Every Firing root composes a Runner of its own — `apogee headless`, a daemon tick, the
 // `/schedule` picker inside a live session — because a Runner per Firing is what carries the
@@ -545,17 +546,17 @@ func resolveFiringRouting(
 //
 // It is one constructor rather than three literals for firingConfig's own reason: everything except
 // the four arguments is the same at every root, and three copies of it is three chances for one
-// `hooks:` list to mean two different things depending on which Driver read it.
+// `reactions:` list to mean two different things depending on which Driver read it.
 //
-// The caller closes what comes back — [hookCloseGrace], the same grace the session gives (wire.go) —
-// and a returned error fails the Firing: a `hooks:` list this root cannot resolve is structural
-// configuration, exactly as an unreadable prompt is.
+// The caller closes what comes back — [hookCloseGrace], the same grace the session gives (wire.go)
+// — and a returned error fails the Firing: a `reactions:` list this root cannot resolve is
+// structural configuration, exactly as an unreadable prompt is.
 func firingHooks(observe []domain.Reaction, workspace string, sched *reactions.ScheduleRef, report func(string)) (*reactions.Runner, error) {
 	return reactions.New(observe, reactions.Options{
 		// Inner stays nil: a Firing's Config carries no sink of its own (firingConfig), so there is
 		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself
 		// wraps THIS Runner rather than being wrapped by it (headless's prune notice), which keeps the
-		// renderer outermost and the Hooks invisible to it.
+		// renderer outermost and the Reactions invisible to it.
 		Workspace:   workspace,
 		Schedule:    sched,
 		Report:      report,

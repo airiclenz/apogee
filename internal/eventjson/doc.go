@@ -5,9 +5,9 @@
 // `{"event","v","seq","time","session","turn","depth","call_id","data"}` in that key order, every
 // member always present and null where the line has no value, with the emitting variant's own
 // members nested under `data` rather than flattened into the envelope. The kinds are snake_case
-// (`tool_call`, `sub_agent_phase`) and are deliberately a DIFFERENT vocabulary from a Hook event's
-// kebab-case: `turn-finished` is a Depth-0 moment, `turn` is every depth, and spelling them apart
-// is what stops a reader assuming the two streams are one.
+// (`tool_call`, `sub_agent_phase`) and are deliberately a DIFFERENT vocabulary from a notice
+// Moment's kebab-case: `turn-finished` is a Depth-0 moment, `turn` is every depth, and spelling
+// them apart is what stops a reader assuming the two streams are one.
 //
 // It shares no shape with internal/reactions. reactions.Payload is a flat document for five events and
 // `jq -r .path`; across sixteen variants a flat union becomes some sixty optional keys whose

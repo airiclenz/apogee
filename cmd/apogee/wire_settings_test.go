@@ -919,10 +919,10 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		PruneToolResults:  true,
 		ContextFiles:      []string{"AGENTS.md"},
 		Servers:           []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
-		// The `hooks:` list is the one key here that NO case below edits, and it is in the snapshot
+		// The `reactions:` list is the one key here that NO case below edits, and it is in the snapshot
 		// for exactly that reason: its own apply is a whole-list swap tested beside the arm, so what
 		// this test owes it is the other half — a holder nobody edited hands back the list the run
-		// launched with, so a Firing raised before any `/settings` commit fires the session's Hooks
+		// launched with, so a Firing raised before any `/settings` commit fires the session's Reactions
 		// rather than none at all.
 		Reactions: []domain.Reaction{hookEntry("boot", reactions.TurnFinished)},
 	}
@@ -932,7 +932,8 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 	assertBootHooks := func(t *testing.T, opts config.Options) {
 		t.Helper()
 		if len(opts.Reactions) != 1 || opts.Reactions[0].ID != "boot" {
-			t.Errorf("options().Reactions = %+v, want the one hook the run launched with", opts.Reactions)
+			t.Errorf("options().Reactions = %+v, want the one reaction the run launched with",
+				opts.Reactions)
 		}
 	}
 	// The list the `servers:` apply re-reads. Its second entry names a key SOURCE rather than a key,
@@ -2044,11 +2045,11 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	if _, err := rec.opts.Settings.Apply("mcp-servers", "none"); err != nil {
 		t.Errorf("Settings.Apply(mcp-servers): %v", err)
 	}
-	// And the fourth: the Hook Runner (ADR 0073). A member the root forgot to pass would refuse this
-	// key with the dispatcher's own "cannot be applied" in the running binary while the arm's own
+	// And the fourth: the Reaction Runner (ADR 0073). A member the root forgot to pass would refuse
+	// this key with the dispatcher's own "cannot be applied" in the running binary while the arm's own
 	// tests stayed green, so this is where the literal is proved. It is asked for the ABSENCE of that
-	// sentence rather than for success, because runRoot has already returned here and close() ends
-	// the Runner with everything else it opened: reaching a CLOSED Runner is the wiring being right.
+	// sentence rather than for success, because runRoot has already returned here and close() ends the
+	// Runner with everything else it opened: reaching a CLOSED Runner is the wiring being right.
 	if _, err := rec.opts.Settings.Apply("reactions", "none"); err != nil &&
 		strings.Contains(err.Error(), "cannot be applied") {
 		t.Errorf("Settings.Apply(reactions): %v; the composition root did not pass its Runner to the applier", err)
@@ -2968,13 +2969,13 @@ func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The `hooks:` list (ADR 0073)
+// The `reactions:` list (ADR 0073)
 // ----------------------------------------------------------------------------
 
 // recordingHookExec stands in for the command runner and the webhook sender, so a test can prove
-// WHICH Hooks a Runner is firing without a process or a socket — the reason reactions.Executor is the
-// package's one seam onto the outside world. It is written from a worker goroutine and read from the
-// test's, so the mutex is real.
+// WHICH Reactions a Runner is firing without a process or a socket — the reason reactions.Executor
+// is the package's one seam onto the outside world. It is written from a worker goroutine and read
+// from the test's, so the mutex is real.
 type recordingHookExec struct {
 	mu    sync.Mutex
 	fired []string
@@ -2997,8 +2998,8 @@ func (r *recordingHookExec) Run(ctx context.Context, h domain.Reaction, p reacti
 }
 
 // hookQueueDepth mirrors the unexported queueDepth in internal/reactions (runner.go:19) — how many
-// pending firings ONE Hook may hold before the newest are dropped. A test that wants a real drop
-// has to name the count, not the threshold: the queue holds this many AND the worker holds one
+// pending firings ONE Reaction may hold before the newest are dropped. A test that wants a real
+// drop has to name the count, not the threshold: the queue holds this many AND the worker holds one
 // more in flight, so anything up to hookQueueDepth+1 events is swallowed whole.
 const hookQueueDepth = 64
 
@@ -3024,8 +3025,8 @@ func (g *gatingHookExec) Run(ctx context.Context, h domain.Reaction, p reactions
 // release lets every parked and every subsequent firing through. It is called once.
 func (g *gatingHookExec) release() { close(g.gate) }
 
-// hookEntry is the one shape every case below configures: a named Hook subscribed to one event, with
-// an argv action the recording executor never actually runs.
+// hookEntry is the one shape every case below configures: a named Reaction subscribed to one event,
+// with an argv action the recording executor never actually runs.
 func hookEntry(name string, event reactions.Event) domain.Reaction {
 	return domain.Reaction{
 		ID:      name,
@@ -3313,7 +3314,7 @@ func TestRootHookWriteTargetIsRaceSafeAcrossARosterSwap(t *testing.T) {
 
 // The Runner is installed as Config.Events, which is what makes the whole feature reachable at all:
 // a root that built one and left the engine emitting into the Bridge's bare sink would run every
-// Hook never, and one that set Events to a Runner built later would box a nil pointer past
+// Reaction never, and one that set Events to a Runner built later would box a nil pointer past
 // apogee.New's required-Events check and nil-deref on the first Emit.
 func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 	t.Parallel()
@@ -3324,7 +3325,7 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 		t.Fatalf("resolveConfig: %v", err)
 	}
 	if w.hooks == nil {
-		t.Fatal("the root built no hook Runner")
+		t.Fatal("the root built no Reaction Runner")
 	}
 	if w.cfg.Events != domain.EventSink(w.hooks) {
 		t.Fatalf("Config.Events = %T, want the root's own *reactions.Runner", w.cfg.Events)
@@ -3335,9 +3336,9 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 	_ = w.hooks.Close(context.Background())
 }
 
-// A webhook Hook's `headers-env:` names a variable holding a token, and the execution tools drop it
-// from the environment they hand a subprocess for exactly the reason an `api-key-env:` variable is
-// dropped: a token a `terminal` child can read is a token the model can read.
+// A webhook Reaction's `headers-env:` names a variable holding a token, and the execution tools
+// drop it from the environment they hand a subprocess for exactly the reason an `api-key-env:`
+// variable is dropped: a token a `terminal` child can read is a token the model can read.
 func TestRootWiringScrubsHookHeaderVariables(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()

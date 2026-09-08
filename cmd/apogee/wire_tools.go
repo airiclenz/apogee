@@ -215,7 +215,7 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 
 // lookup resolves one tool out of the set the session is running NOW, under the mutex — the read a
 // caller outside the Update goroutine needs. webSearch above is the same read for a tool this root
-// re-points; this one is for a caller that only ASKS the set something: the Hook Runner's
+// re-points; this one is for a caller that only ASKS the set something: the Reaction Runner's
 // WriteTarget, which is handed a tool call on the engine's worker goroutine while a `/settings`
 // commit may be swapping the registry on the Update goroutine (rebuildWith writes t.current under
 // the same lock). Reading the pointer unlocked is a data race the -race build would fail on, and

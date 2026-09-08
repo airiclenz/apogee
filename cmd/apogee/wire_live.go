@@ -385,8 +385,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		skills:   w.skillProvider,
 		confiner: w.confiner,
 		store:    w.store,
-		// Where a Hook raised by one of this session's Firings reports its trouble (ADR 0073 §8):
-		// the same Bridge seam the session's own Runner reports through, so a failing Hook reads
+		// Where a Reaction raised by one of this session's Firings reports its trouble (ADR 0073 §8):
+		// the same Bridge seam the session's own Runner reports through, so a failing Reaction reads
 		// identically whichever of the two fired it.
 		notifyHook: w.bridge.NotifyHook,
 	}

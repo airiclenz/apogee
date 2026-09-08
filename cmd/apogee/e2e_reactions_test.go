@@ -1,16 +1,16 @@
 package main
 
-// Hooks end to end (ADR 0073): runs whose `hooks:` block actually runs a command and actually POSTs
-// a webhook, asserted from OUTSIDE apogee — a file on disk the command appended to, and an httptest
-// server the webhook reached. Everything below the composition root has unit tests in
-// internal/reactions; what these prove is the wiring the unit tests cannot see, and the promise that
-// costs the most to break: nothing a Hook does reaches the screen or the Session record.
+// Reactions end to end (ADR 0073): runs whose `reactions:` block actually runs a command and
+// actually POSTs a webhook, asserted from OUTSIDE apogee — a file on disk the command appended to,
+// and an httptest server the webhook reached. Everything below the composition root has unit tests
+// in internal/reactions; what these prove is the wiring the unit tests cannot see, and the promise
+// that costs the most to break: nothing a Reaction does reaches the screen or the Session record.
 //
-// Three roots compose that wiring and each gets its own case: the driven TUI session, an
-// unattended `apogee headless` run, and one daemon Firing. The last two are where the payload's
-// `schedule` field earns its keep — a Firing names the Schedule it ran for, a plain headless run
-// names none — and where a Hook's trouble has no transcript to land in and goes to stderr and to
-// the daemon log instead.
+// Three roots compose that wiring and each gets its own case: the driven TUI session, an unattended
+// `apogee headless` run, and one daemon Firing. The last two are where the payload's `schedule`
+// field earns its keep — a Firing names the Schedule it ran for, a plain headless run names none —
+// and where a Reaction's trouble has no transcript to land in and goes to stderr and to the daemon
+// log instead.
 
 import (
 	"bytes"
@@ -35,9 +35,10 @@ import (
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
-// The environment a fired Hook is expected to inherit. A Hook's command is run with apogee's own
-// environment plus the payload's APOGEE_REACTION_* facts, which is what lets a one-line `sh -c` script
-// know where to write without the test rewriting the script for every temp directory.
+// The environment a fired Reaction is expected to inherit. A Reaction's command is run with
+// apogee's own environment plus the payload's APOGEE_REACTION_* facts, which is what lets a
+// one-line `sh -c` script know where to write without the test rewriting the script for every temp
+// directory.
 const (
 	hookSinkEnv     = "APOGEE_TEST_SINK"
 	hookEnvSinkEnv  = "APOGEE_TEST_ENV_SINK"
@@ -46,26 +47,27 @@ const (
 	hookTokenHeader = "X-Apogee-Hook-Token"
 )
 
-// hookMarkers are the spellings a Hook would leave behind that no run's own vocabulary can
+// hookMarkers are the spellings a Reaction would leave behind that no run's own vocabulary can
 // produce: the environment a fired command inherits, and the event names its payload carries. None
 // of them may appear in a frame — or on the streams an unattended root writes — of a run whose
-// Hooks all succeeded (ADR 0073 §1).
+// Reactions all succeeded (ADR 0073 §1).
 //
-// The reports a Hook can put on screen are NOT in this list. They are caught by shape instead — see
-// [hookReportPattern] — because a whitelist of prose stops biting the moment a report is reworded.
+// The reports a Reaction can put on screen are NOT in this list. They are caught by shape instead —
+// see [hookReportPattern] — because a whitelist of prose stops biting the moment a report is
+// reworded.
 var hookMarkers = []string{
 	"APOGEE_REACTION",
 	string(reactions.FileChanged), string(reactions.ExchangeFinished), string(reactions.ApprovalRequested),
 }
 
-// hookReportPattern is the shape EVERY report the hooks path can put in front of a human takes: the
-// word `reaction`, the entry's configured name, and then a separator — a colon before a Runner message
-// (internal/reactions/runner.go:240, :397) or a space before the parenthesised event of a failure
-// (:363). Those reports reach a frame through Report → Bridge.NotifyHook → an ephemeral note,
-// and an unattended root's stderr the same way.
+// hookReportPattern is the shape EVERY report the reactions path can put in front of a human takes:
+// the word `reaction`, the entry's configured name, and then a separator — a colon before a Runner
+// message (internal/reactions/runner.go:240, :397) or a space before the parenthesised event of a
+// failure (:363). Those reports reach a frame through Report → Bridge.NotifyHook → an ephemeral
+// note, and an unattended root's stderr the same way.
 //
 // It is built from the names a case CONFIGURES rather than from the prose those sites happen to use
-// today, which is what keeps an absence check armed: renaming a Hook in the config re-aims the
+// today, which is what keeps an absence check armed: renaming a Reaction in the config re-aims the
 // pattern instead of silently un-arming it, and a report worded in some way nobody whitelisted —
 // a queue-drop line, say — still matches.
 func hookReportPattern(names ...string) *regexp.Regexp {
@@ -77,10 +79,10 @@ func hookReportPattern(names ...string) *regexp.Regexp {
 }
 
 // TestE2EHooksAbsenceCheckMatchesARenamedHooksReport is the bite the whitelist [hookReportPattern]
-// replaced never had. That whitelist spelled the reports out — "reaction sink", "reaction bell" — so it
-// went blind on the one config change it exists to survive: a Hook renamed in the very block the
-// absence check is watching. The derived pattern follows the rename instead, and covers every
-// report shape the Runner emits rather than the two a whitelist happened to list.
+// replaced never had. That whitelist spelled the reports out — "reaction sink", "reaction bell" —
+// so it went blind on the one config change it exists to survive: a Reaction renamed in the very
+// block the absence check is watching. The derived pattern follows the rename instead, and covers
+// every report shape the Runner emits rather than the two a whitelist happened to list.
 func TestE2EHooksAbsenceCheckMatchesARenamedHooksReport(t *testing.T) {
 	t.Parallel()
 
@@ -97,22 +99,22 @@ func TestE2EHooksAbsenceCheckMatchesARenamedHooksReport(t *testing.T) {
 				"that a rename is what the pattern buys", report)
 		}
 		if !pattern.MatchString(report) {
-			t.Errorf("the pattern %v misses %q, a report a renamed Hook would put on screen",
+			t.Errorf("the pattern %v misses %q, a report a renamed Reaction would put on screen",
 				pattern, report)
 		}
 	}
 
 	// And it stays silent about what the runs themselves say, which is what makes a match a
-	// finding rather than noise — the separator included: a Hook named `sink` does not make the
-	// word `sinks` a hook report.
+	// finding rather than noise — the separator included: a Reaction named `sink` does not make the
+	// word `sinks` a reaction report.
 	configured := hookReportPattern(hooksSinkName, hooksBellName, hooksFailingName)
 	for _, innocent := range []string{
 		hooksAnswer,
 		smokeWriteReply,
-		"the hook sinks are files the test reads",
+		"the reaction sinks are files the test reads",
 	} {
 		if report := configured.FindString(innocent); report != "" {
-			t.Errorf("the pattern reads %q in %q, which no Hook wrote", report, innocent)
+			t.Errorf("the pattern reads %q in %q, which no Reaction wrote", report, innocent)
 		}
 	}
 }
@@ -120,17 +122,17 @@ func TestE2EHooksAbsenceCheckMatchesARenamedHooksReport(t *testing.T) {
 // smokeWriteReply is what the smoke script answers the write prompt with
 // (testdata/stubllm/smoke.yaml), and so the one thing the TUI half's final frame is certain to
 // carry. The absence check uses it as its positive control: a frame that has lost it is not the
-// frame the journey produced, and its silence about Hooks would prove nothing.
+// frame the journey produced, and its silence about Reactions would prove nothing.
 const smokeWriteReply = "Appended the smoke test line"
 
-// TestE2EHooksFireFromTheTUI drives the smoke journey with two Hooks configured — a command on
+// TestE2EHooksFireFromTheTUI drives the smoke journey with two Reactions configured — a command on
 // `file-changed` and `exchange-finished`, a webhook on `approval-requested` — and asserts what each
 // of them received, from the outside: the file the command appended to, and the requests the
 // httptest server recorded.
 //
 // The webhook claim is made BEFORE the approval is answered, which is the whole point of the event:
-// a Hook that only learned about a waiting approval after the human dealt with it could not ring a
-// bell for the prompt nobody was watching.
+// a Reaction that only learned about a waiting approval after the human dealt with it could not
+// ring a bell for the prompt nobody was watching.
 func TestE2EHooksFireFromTheTUI(t *testing.T) {
 	bell, server := newHookWebhook(t)
 	// Closed by defer rather than t.Cleanup so it is torn down BEFORE the leak check and the
@@ -163,7 +165,7 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 
 	if _, _, ok := drv.Frame().Find("Always allow this session"); !ok {
 		t.Fatal("the approval pane was gone by the time the webhook arrived; the claim that the " +
-			"Hook fired while the human was still being waited on is untestable")
+			"Reaction fired while the human was still being waited on is untestable")
 	}
 	waiting := bell.first()
 	if waiting.payload.Event != reactions.ApprovalRequested {
@@ -175,14 +177,15 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 			waiting.payload.Tool)
 	}
 	if waiting.payload.Reaction != "bell" {
-		t.Errorf("the approval-requested payload names the hook %q; want bell", waiting.payload.Reaction)
+		t.Errorf("the approval-requested payload names the reaction %q; want bell",
+			waiting.payload.Reaction)
 	}
 	if waiting.token != hookTokenValue {
 		t.Errorf("the webhook's %s header = %q; want the value headers-env named in the "+
 			"environment", hookTokenHeader, waiting.token)
 	}
 
-	// The approval is answered, the write lands, and the command Hook receives the two events the
+	// The approval is answered, the write lands, and the command Reaction receives the two events the
 	// journey produced.
 	drv.WaitQuiet(settled)
 	drv.Type("a")
@@ -197,7 +200,7 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 		}
 		_, ok = hookPayloadFor(fired, reactions.ExchangeFinished)
 		return ok
-	}, tuitest.Awaiting("the file-changed and exchange-finished payloads in the hook sink"))
+	}, tuitest.Awaiting("the file-changed and exchange-finished payloads in the reaction sink"))
 
 	fired := readHookPayloads(t, sink)
 	changed, _ := hookPayloadFor(fired, reactions.FileChanged)
@@ -219,7 +222,7 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 	wantLine := string(reactions.FileChanged) + " " + wantPath
 	envLines, err := os.ReadFile(envSink)
 	if err != nil {
-		t.Fatalf("read the hook environment sink: %v", err)
+		t.Fatalf("read the reaction environment sink: %v", err)
 	}
 	if !strings.Contains(string(envLines), wantLine) {
 		t.Errorf("the fired command's environment sink holds\n%s\nwant a line %q — the executor "+
@@ -227,21 +230,21 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 			envLines, wantLine)
 	}
 
-	// Nothing a Hook did reached the screen. The positive control comes first: an empty or
+	// Nothing a Reaction did reached the screen. The positive control comes first: an empty or
 	// scrolled-away frame would satisfy every absence check below without proving anything, so the
 	// frame must first be shown to carry the reply the successful run put there.
 	drv.WaitQuiet(settled)
 	final := drv.Frame().String()
 	if !strings.Contains(final, smokeWriteReply) {
 		t.Fatalf("the final frame does not carry the run's own reply %q, so its silence about "+
-			"Hooks proves nothing:\n%s", smokeWriteReply, final)
+			"Reactions proves nothing:\n%s", smokeWriteReply, final)
 	}
 	if report := hookReportPattern(hooksSinkName, hooksBellName).FindString(final); report != "" {
-		t.Errorf("the final frame carries the hook report %q:\n%s", report, final)
+		t.Errorf("the final frame carries the reaction report %q:\n%s", report, final)
 	}
 	for _, marker := range hookMarkers {
 		if strings.Contains(final, marker) {
-			t.Errorf("the final frame carries the hook marker %q:\n%s", marker, final)
+			t.Errorf("the final frame carries the reaction marker %q:\n%s", marker, final)
 		}
 	}
 
@@ -250,10 +253,10 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 	}
 }
 
-// TestE2EHooksReportAFailureAsAnEphemeralNote is the other half of ADR 0073 §8: a Hook that refuses
-// to run is the human's business and nobody else's. The run's config is rewritten on disk to a Hook
-// that exits 1, the watcher applies it, and the next exchange fires it — the failure lands as ONE
-// transcript note and is absent from the record the session saved.
+// TestE2EHooksReportAFailureAsAnEphemeralNote is the other half of ADR 0073 §8: a Reaction that
+// refuses to run is the human's business and nobody else's. The run's config is rewritten on disk
+// to a Reaction that exits 1, the watcher applies it, and the next exchange fires it — the failure
+// lands as ONE transcript note and is absent from the record the session saved.
 func TestE2EHooksReportAFailureAsAnEphemeralNote(t *testing.T) {
 	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
 	if err != nil {
@@ -283,10 +286,10 @@ func TestE2EHooksReportAFailureAsAnEphemeralNote(t *testing.T) {
 	drv.WaitQuiet(settled)
 	notice := drv.Frame()
 	if n := rowsContaining(notice, failureLine); n != 1 {
-		t.Errorf("a failing hook left %d notice lines; want exactly one:\n%s", n, notice)
+		t.Errorf("a failing reaction left %d notice lines; want exactly one:\n%s", n, notice)
 	}
 	if row := rowContaining(t, notice, failureLine); !strings.Contains(row, "exit 1") {
-		t.Errorf("the hook notice %q does not say the command exited 1", row)
+		t.Errorf("the reaction notice %q does not say the command exited 1", row)
 	}
 
 	if err := sess.Quit(); err != nil {
@@ -298,25 +301,25 @@ func TestE2EHooksReportAFailureAsAnEphemeralNote(t *testing.T) {
 			t.Fatalf("read the session record %s: %v", saved.Name(), err)
 		}
 		if strings.Contains(string(body), failureLine) {
-			t.Errorf("the session record %s kept a hook notice; nothing a Hook does may reach it",
+			t.Errorf("the session record %s kept a reaction notice; nothing a Reaction does may reach it",
 				saved.Name())
 		}
 	}
 }
 
 // The unattended halves' conversation, restated from testdata/stubllm/hooks.yaml so an assertion
-// reads as the claim it makes. The answer shares no word with a Hook's own vocabulary — neither a
-// [hookMarkers] spelling nor a [hookReportPattern] shape — so finding it on stdout is finding the
+// reads as the claim it makes. The answer shares no word with a Reaction's own vocabulary — neither
+// a [hookMarkers] spelling nor a [hookReportPattern] shape — so finding it on stdout is finding the
 // model's reply and nothing else, which is what lets it serve as the absence check's positive
 // control.
 const (
 	hooksPrompt = "Say what both roots do."
 	hooksAnswer = "Both roots fired their hooks."
 
-	// The schedule the daemon half puts on the clock, and the Hooks the cases subscribe: one that
+	// The schedule the daemon half puts on the clock, and the Reactions the cases subscribe: one that
 	// records every payload it is handed, one that refuses to run at all, and the webhook the
 	// driven half rings. Every absence check derives its [hookReportPattern] from these same
-	// names, so renaming a Hook here re-aims the assertion rather than un-arming it.
+	// names, so renaming a Reaction here re-aims the assertion rather than un-arming it.
 	hooksScheduleName = "hook-probe"
 	hooksSinkName     = "sink"
 	hooksFailingName  = "noisy"
@@ -324,13 +327,13 @@ const (
 )
 
 // TestE2EHooksFireFromAHeadlessRun is the unattended half: no screen, no human, one prompt, and the
-// `exchange-finished` Hook still fires — with a payload that names the workspace the run was rooted
-// in and NO schedule, because a plain headless run belongs to none.
+// `exchange-finished` Reaction still fires — with a payload that names the workspace the run was
+// rooted in and NO schedule, because a plain headless run belongs to none.
 //
 // The stdout claim rides along because this is the only Driver that has one, and because it is the
-// contract a script piping apogee depends on (TestHeadlessAnswerLandsOnTheProcessStdout): a Hook
-// writes to its own sink and to nowhere else, so the answer stream is the answer alone even while a
-// Hook is firing off it.
+// contract a script piping apogee depends on (TestHeadlessAnswerLandsOnTheProcessStdout): a
+// Reaction writes to its own sink and to nowhere else, so the answer stream is the answer alone
+// even while a Reaction is firing off it.
 func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 	sink := filepath.Join(t.TempDir(), "fired.jsonl")
 	t.Setenv(hookSinkEnv, sink)
@@ -345,11 +348,11 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 		t.Errorf("stdout = %q; want the answer alone (%q)", stdout, hooksAnswer)
 	}
 
-	// The run is over, and a headless run drains its Hooks before it returns, so the sink is final:
-	// what is in it now is everything that ever fired.
+	// The run is over, and a headless run drains its Reactions before it returns, so the sink is
+	// final: what is in it now is everything that ever fired.
 	fired := readHookPayloads(t, sink)
 	if len(fired) != 1 {
-		t.Fatalf("the hook sink holds %d payloads, want exactly one for the run's one exchange:\n%+v",
+		t.Fatalf("the reaction sink holds %d payloads, want exactly one for the run's one exchange:\n%+v",
 			len(fired), fired)
 	}
 	payload := fired[0]
@@ -357,7 +360,7 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 		t.Errorf("the payload carries the %q event; want %q", payload.Event, reactions.ExchangeFinished)
 	}
 	if payload.Reaction != hooksSinkName {
-		t.Errorf("the payload names the hook %q; want %q", payload.Reaction, hooksSinkName)
+		t.Errorf("the payload names the reaction %q; want %q", payload.Reaction, hooksSinkName)
 	}
 	if payload.Workspace != workspace {
 		t.Errorf("the payload's workspace = %q; want the run's own %q", payload.Workspace, workspace)
@@ -367,26 +370,26 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 			payload.Schedule)
 	}
 
-	// Nothing a Hook did reached either stream. Hooks that succeed are silent, and the one that
-	// fired here did. The positive control comes first, for the reason the driven half has one: a
+	// Nothing a Reaction did reached either stream. Reactions that succeed are silent, and the one
+	// that fired here did. The positive control comes first, for the reason the driven half has one: a
 	// run that never produced any output at all would pass every absence check below.
 	if !strings.Contains(stdout, hooksAnswer) {
-		t.Fatalf("stdout does not carry the run's own answer %q, so its silence about Hooks "+
+		t.Fatalf("stdout does not carry the run's own answer %q, so its silence about Reactions "+
 			"proves nothing:\n%s", hooksAnswer, stdout)
 	}
 	reports := hookReportPattern(hooksSinkName)
 	if report := reports.FindString(stdout); report != "" {
-		t.Errorf("stdout carries the hook report %q:\n%s", report, stdout)
+		t.Errorf("stdout carries the reaction report %q:\n%s", report, stdout)
 	}
 	if report := reports.FindString(stderr); report != "" {
-		t.Errorf("stderr carries the hook report %q:\n%s", report, stderr)
+		t.Errorf("stderr carries the reaction report %q:\n%s", report, stderr)
 	}
 	for _, marker := range hookMarkers {
 		if strings.Contains(stdout, marker) {
-			t.Errorf("stdout carries the hook marker %q:\n%s", marker, stdout)
+			t.Errorf("stdout carries the reaction marker %q:\n%s", marker, stdout)
 		}
 		if strings.Contains(stderr, marker) {
-			t.Errorf("stderr carries the hook marker %q:\n%s", marker, stderr)
+			t.Errorf("stderr carries the reaction marker %q:\n%s", marker, stderr)
 		}
 	}
 }
@@ -395,12 +398,13 @@ func TestE2EHooksFireFromAHeadlessRun(t *testing.T) {
 // payload names the Schedule it ran for — the fact no other Driver's payload carries, and the whole
 // reason the Runner is built per Firing rather than per daemon (ADR 0073 §9).
 //
-// The second Hook refuses to run, because a daemon has no transcript to note a failure in and its
-// log IS its user interface (ADR 0034 decision 10). One line, once: a Hook that fails every Firing
-// for a week must not fill a journal.
+// The second Reaction refuses to run, because a daemon has no transcript to note a failure in and
+// its log IS its user interface (ADR 0034 decision 10). One line, once: a Reaction that fails every
+// Firing for a week must not fill a journal.
 //
-// It runs the REAL runner rather than the harness's stub, for the reason TestDaemonFaultedVerbColumn
-// runs it: the events a Hook fires off are the ENGINE's, and a stubbed runner emits none of them.
+// It runs the REAL runner rather than the harness's stub, for the reason
+// TestDaemonFaultedVerbColumn runs it: the events a Reaction fires off are the ENGINE's, and a
+// stubbed runner emits none of them.
 func TestDaemonFiringFiresHooks(t *testing.T) {
 	sink := filepath.Join(t.TempDir(), "fired.jsonl")
 	t.Setenv(hookSinkEnv, sink)
@@ -431,22 +435,23 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 	h.awaitLog(t, "1 schedule on the clock")
 	h.clock.tick()
 
-	// The failing Hook's line, in the shape the Runner reports and the log's own sanitiser passed
-	// through: the Hook's name, the event it was fired by, and why it failed.
+	// The failing Reaction's line, in the shape the Runner reports and the log's own sanitiser passed
+	// through: the Reaction's name, the event it was fired by, and why it failed.
 	h.awaitLog(t, "reaction "+hooksFailingName+" (turn-finished): exit 1")
 	// And the Firing landing, which is what makes the sink below final: a daemon drains a Firing's
-	// Hooks before the Outcome that prints this line is returned.
+	// Reactions before the Outcome that prints this line is returned.
 	h.awaitLog(t, "completed "+hooksScheduleName)
 
 	h.stop()
 	if err := wait(); err != nil {
-		t.Fatalf("the daemon returned %v; a fired Hook is not a daemon failure\n%s", err, h.errOut.String())
+		t.Fatalf("the daemon returned %v; a fired Reaction is not a daemon failure\n%s",
+			err, h.errOut.String())
 	}
 
 	fired := readHookPayloads(t, sink)
 	payload, ok := hookPayloadFor(fired, reactions.TurnFinished)
 	if !ok {
-		t.Fatalf("the hook sink holds no turn-finished payload; it holds:\n%+v", fired)
+		t.Fatalf("the reaction sink holds no turn-finished payload; it holds:\n%+v", fired)
 	}
 	if payload.Schedule == nil {
 		t.Fatalf("a Firing's payload carries no schedule; it must name the one it ran for:\n%+v", payload)
@@ -462,10 +467,10 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 			payload.Schedule.ID)
 	}
 
-	// Once, and only once: the de-dup is what keeps a permanently broken Hook from filling a
+	// Once, and only once: the de-dup is what keeps a permanently broken Reaction from filling a
 	// journal a supervisor reads for a week.
 	if n := strings.Count(h.out.String(), "reaction "+hooksFailingName+" ("); n != 1 {
-		t.Errorf("the failing hook left %d lines in the daemon log, want exactly one:\n%s",
+		t.Errorf("the failing reaction left %d lines in the daemon log, want exactly one:\n%s",
 			n, h.out.String())
 	}
 }
@@ -475,7 +480,7 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // TestE2EReactionsMigrateAHooksFileAtStartup is the migration journey: a home whose config.yaml is
-// still written in the retired schema — a `hooks:` block naming the retired approval event, the
+// still written in the retired schema — a `reactions:` block naming the retired approval event, the
 // `mechanisms:` key both top-level and on the server entry, and `validated-sets:` — booted at the
 // TUI root, which is where the fold runs and the only place it ever does.
 //
@@ -739,7 +744,7 @@ func sinkEntry(id string) string {
 // sweep that forbids the literal in Go source stays armed.
 const retiredApprovalSpelling = "approval-" + "waiting"
 
-// migratedReactionsBlock is the block the fold writes over the `hooks:` one in
+// migratedReactionsBlock is the block the fold writes over the `reactions:` one in
 // [legacyReactionsHome] — byte for byte, because "what did apogee put in my file" is a question a
 // user asks of the file and not of a parser. Both entry shapes are here: the argv list on one line,
 // and the webhook as the mapping the schema documents.
@@ -752,10 +757,10 @@ const migratedReactionsBlock = "reactions:\n" +
 	"    run:\n" +
 	"      url: https://example.invalid/apogee\n"
 
-// legacyReactionsHome writes an apogee home in the RETIRED schema: a `hooks:` block carrying both
-// entry shapes and the retired approval spelling, the `mechanisms:` key top-level and on the server
-// entry, and `validated-sets:`. It is written by hand rather than through [writeConfigHome] because
-// a per-server key sits inside a list item, which no helper can reach after the fact.
+// legacyReactionsHome writes an apogee home in the RETIRED schema: a `reactions:` block carrying
+// both entry shapes and the retired approval spelling, the `mechanisms:` key top-level and on the
+// server entry, and `validated-sets:`. It is written by hand rather than through [writeConfigHome]
+// because a per-server key sits inside a list item, which no helper can reach after the fact.
 func legacyReactionsHome(t *testing.T, stub *stubllm.Server) string {
 	t.Helper()
 
@@ -838,14 +843,14 @@ func messagesCarry(messages []any, want string) bool {
 // back the three things this file has to read: what the answer stream carried, what the run
 // narrated, and the workspace it was rooted in — the path a payload's `workspace` is asserted
 // against. extraConfig is written above the `servers:` block, which is how a case reaches a
-// file-only key such as `hooks:`.
+// file-only key such as `reactions:`.
 //
 // It is [headlessAgainst]'s twin rather than a call to it: that one returns stderr ALONE, pins the
-// naming journey's own prompt, and wraps the run's Event sink to drive a gate
-// (e2e_naming_test.go) — three things this file needs otherwise. Nothing else differs, the runner
-// least of all: it BINDS `runOnce` to the production [run.Once] and restores it after, because what
-// a Hook observes is exactly the engine's own event stream and a stubbed runner produces none of it
-// — a claim that has to rest on this helper's own code rather than on whatever ran before it.
+// naming journey's own prompt, and wraps the run's Event sink to drive a gate (e2e_naming_test.go)
+// — three things this file needs otherwise. Nothing else differs, the runner least of all: it BINDS
+// `runOnce` to the production [run.Once] and restores it after, because what a Reaction observes is
+// exactly the engine's own event stream and a stubbed runner produces none of it — a claim that has
+// to rest on this helper's own code rather than on whatever ran before it.
 func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfig string) (stdout, stderr, workspace string) {
 	t.Helper()
 
@@ -901,7 +906,7 @@ func hookBlock(webhook string) string {
 }
 
 // hookBlockOf wraps one or more already-indented entries in the `reactions:` key — the one spelling
-// the schema has since the migration folded `hooks:` away (ADR 0076 A6).
+// the schema has since the migration folded `reactions:` away (ADR 0076 A6).
 func hookBlockOf(entries string) string { return "reactions:\n" + entries }
 
 // rewriteHomeHooks replaces a home's whole `reactions:` block with entries, keeping everything the
@@ -925,7 +930,7 @@ func rewriteHomeHooks(t *testing.T, home, entries string) {
 	}
 }
 
-// readHookPayloads reads back what a command Hook appended to its sink. The payloads are
+// readHookPayloads reads back what a command Reaction appended to its sink. The payloads are
 // concatenated JSON documents with no separator, so they are streamed rather than split; a trailing
 // document that is still being written stops the read, which is the ordinary state of a file a
 // worker may be appending to at this very moment.
@@ -937,7 +942,7 @@ func readHookPayloads(t *testing.T, path string) []reactions.Payload {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		t.Fatalf("read the hook sink: %v", err)
+		t.Fatalf("read the reaction sink: %v", err)
 	}
 	var fired []reactions.Payload
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -960,22 +965,22 @@ func hookPayloadFor(fired []reactions.Payload, event reactions.Event) (reactions
 	return reactions.Payload{}, false
 }
 
-// hookRequest is one POST a webhook Hook made: the payload it carried and the header whose value
-// came from the environment rather than the config file.
+// hookRequest is one POST a webhook Reaction made: the payload it carried and the header whose
+// value came from the environment rather than the config file.
 type hookRequest struct {
 	payload reactions.Payload
 	token   string
 }
 
-// hookWebhook records what a webhook Hook POSTed. It is read from the test's goroutine while the
-// server writes from its own, so every field is behind the mutex.
+// hookWebhook records what a webhook Reaction POSTed. It is read from the test's goroutine while
+// the server writes from its own, so every field is behind the mutex.
 type hookWebhook struct {
 	mu       sync.Mutex
 	requests []hookRequest
 }
 
-// newHookWebhook starts a server that accepts a Hook's POST and remembers it. The caller closes the
-// server.
+// newHookWebhook starts a server that accepts a Reaction's POST and remembers it. The caller closes
+// the server.
 func newHookWebhook(t *testing.T) (*hookWebhook, *httptest.Server) {
 	t.Helper()
 

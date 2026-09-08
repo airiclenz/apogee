@@ -87,11 +87,11 @@ var _ tui.Engine = (*apogee.Agent)(nil)
 // drivable from one place, on every host, in both directions.
 var newConfiner = platform.NewConfiner
 
-// hookCloseGrace is how long a root gives its Hook Runner to finish what it is already running
-// before the context cancels the rest. It is the SAME five seconds at every root — this session,
-// a headless run, a daemon Firing — because a Hook must take the same worst case whether a human is
-// watching or not (ADR 0073 §7), and it matches the grace internal/reactions gives a generation retired
-// by a `hooks:` reload.
+// hookCloseGrace is how long a root gives its Reaction Runner to finish what it is already running
+// before the context cancels the rest. It is the SAME five seconds at every root — this session, a
+// headless run, a daemon Firing — because a Reaction must take the same worst case whether a human
+// is watching or not (ADR 0073 §7), and it matches the grace internal/reactions gives a generation
+// retired by a `reactions:` reload.
 const hookCloseGrace = 5 * time.Second
 
 // ----------------------------------------------------------------------------
@@ -193,11 +193,11 @@ type rootWiring struct {
 	bridge       *tui.Bridge
 	presentation *livePresentation
 	confiner     domain.Confiner
-	// hooks is this session's Hook Runner (ADR 0073): the observe-only decorator installed as
+	// hooks is this session's Reaction Runner (ADR 0073): the observe-only decorator installed as
 	// Config.Events over the Bridge's own sink, so every engine Event reaches the renderer first and
-	// whatever the `hooks:` list subscribes to is fired off the engine's path afterwards. It is built
-	// in resolveConfig — before the Config that carries it — and it is the ONE Runner this session
-	// has; a Firing raised inside the session composes its own (wire_firing.go).
+	// whatever the `reactions:` list subscribes to is fired off the engine's path afterwards. It is
+	// built in resolveConfig — before the Config that carries it — and it is the ONE Runner this
+	// session has; a Firing raised inside the session composes its own (wire_firing.go).
 	hooks *reactions.Runner
 	// namer names an unnamed delegation out of band on the child's own Upstream (ADR 0068). It is
 	// held rather than left inside cfg because the `auto-title:` gate on it is live: the renderer
@@ -256,13 +256,13 @@ func (w *rootWiring) close() {
 		w.configWatch.Stop()
 	}
 
-	// The Hooks go after the Firings and BEFORE the engine, for the Firings' own reason: a Hook is
-	// still holding an event this session produced, and it finishes it while everything it was
-	// composed from still stands. The grace is the five seconds every root gives (ADR 0073 §7), and
-	// what is still running when it expires is killed by the context — a wedged script may not hold
-	// the alternate screen down. A Hook killed at the deadline is reported by Close's error, which
-	// there is nowhere left to say: stderr belongs to the shell again the moment the TUI tears down,
-	// and the run is over either way.
+	// The Reactions go after the Firings and BEFORE the engine, for the Firings' own reason: a
+	// Reaction is still holding an event this session produced, and it finishes it while everything it
+	// was composed from still stands. The grace is the five seconds every root gives (ADR 0073 §7),
+	// and what is still running when it expires is killed by the context — a wedged script may not
+	// hold the alternate screen down. A Reaction killed at the deadline is reported by Close's error,
+	// which there is nowhere left to say: stderr belongs to the shell again the moment the TUI tears
+	// down, and the run is over either way.
 	if w.hooks != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
 		_ = w.hooks.Close(ctx)

@@ -18,12 +18,12 @@ type ScheduleRef struct {
 // for a webhook. Its field names are a DOCUMENTED CONTRACT: a user's script reads them by name, so
 // they are renamed only by a deliberate, documented break.
 //
-// The first block is present on every event and identifies the firing: which reaction fired, on what,
-// when, and in which run. Depth and Turn are the emitting agent's, so a Hook fired by a sub-agent
-// reports the child's nesting level rather than the top-level agent's, and CallID is that child's
-// run identity — the id of the sub_agent call that spawned it, empty at Depth 0. Every field after
-// that block is per-event and omitted when it does not apply, so a script can branch on "event"
-// and read only what that event carries.
+// The first block is present on every event and identifies the firing: which reaction fired, on
+// what, when, and in which run. Depth and Turn are the emitting agent's, so a Reaction fired by a
+// sub-agent reports the child's nesting level rather than the top-level agent's, and CallID is that
+// child's run identity — the id of the sub_agent call that spawned it, empty at Depth 0. Every
+// field after that block is per-event and omitted when it does not apply, so a script can branch on
+// "event" and read only what that event carries.
 //
 // The payload is NOT secret-scrubbed: it goes to the user's own command or URL, which is the same
 // trust as the screen (ADR 0073 §6).

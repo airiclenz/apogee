@@ -328,7 +328,7 @@ type PostResponseMoment struct {
 func (m PostResponseMoment) Revision() int { return m.Resp.Revision() }
 
 // Reaction is the single thing apogee does when the loop passes a Moment (CONTEXT: Reaction):
-// one {id, origin, class, on, handler}. Floor guards, the retired lab layer and Hooks
+// one {id, origin, class, on, handler}. Floor guards, the retired lab layer and user Reactions
 // are all one of these (ADR 0076 D1).
 type Reaction struct {
 	// ID is the reaction's stable identifier — the key an observer sees on a ReactionFiredEvent

@@ -12,25 +12,25 @@ import (
 )
 
 const (
-	// queueDepth is how many pending firings one Hook may hold. It is a BOUND, not a promise:
-	// a Hook slower than the events it subscribes to loses the newest firings rather than
+	// queueDepth is how many pending firings one Reaction may hold. It is a BOUND, not a promise:
+	// a Reaction slower than the events it subscribes to loses the newest firings rather than
 	// growing without limit, because the alternative — an unbounded queue behind an engine that
 	// emits under its own mutex — turns a wedged script into a memory leak (ADR 0073 §7).
 	queueDepth = 64
 
 	// drainGrace is how long a set of workers replaced by a config reload is given to finish
 	// what it is holding before the running jobs are cancelled. It matches the grace every root
-	// passes to Close, so a Hook takes the same worst case whether the run ended or the list did.
+	// passes to Close, so a Reaction takes the same worst case whether the run ended or the list did.
 	drainGrace = 5 * time.Second
 )
 
-// Executor runs one Hook's action for one firing: an argv command, a webhook POST, or — in a
+// Executor runs one Reaction's action for one firing: an argv command, a webhook POST, or — in a
 // test — a recording fake. It is the package's ONE seam over the outside world, so everything
 // above it (matching, queueing, reporting, shutdown) is provable without a process or a socket.
 //
-// Run is called from the Hook's own worker goroutine, one firing at a time per Hook but
-// concurrently across Hooks, so an implementation shared by several Hooks must be safe for
-// concurrent use. It is handed a context already bounded by the Hook's Timeout and cancelled
+// Run is called from the Reaction's own worker goroutine, one firing at a time per Reaction but
+// concurrently across Reactions, so an implementation shared by several Reactions must be safe for
+// concurrent use. It is handed a context already bounded by the Reaction's Timeout and cancelled
 // when the Runner is closing; it must return promptly once that context is done. A returned
 // error is REPORTED to the Driver and otherwise discarded — nothing an executor produces
 // reaches the model, the conversation or the Session record.
@@ -54,7 +54,7 @@ type Options struct {
 	Inner domain.EventSink
 
 	// Workspace is the run's workspace root. It is resolved through ResolveWorkspace once, and
-	// the result is both the payload's "workspace" field and the value a Hook's `workspace:`
+	// the result is both the payload's "workspace" field and the value a Reaction's `workspace:`
 	// filter is compared against — so the two readings can never disagree (ratified call C).
 	Workspace string
 
@@ -62,9 +62,9 @@ type Options struct {
 	// and absent everywhere else. A defensive copy is taken, so the caller may reuse its value.
 	Schedule *ScheduleRef
 
-	// Report receives one line per Hook failure and per drop, worded for a human. It is the ONLY
-	// way a Hook's trouble reaches anyone: a failing Hook never becomes an ErrorEvent, because a
-	// Hook subscribed to `error` would then fire on its own failure and loop (ADR 0073 §8).
+	// Report receives one line per Reaction failure and per drop, worded for a human. It is the ONLY
+	// way a Reaction's trouble reaches anyone: a failing Reaction never becomes an ErrorEvent, because
+	// a Reaction subscribed to `error` would then fire on its own failure and loop (ADR 0073 §8).
 	//
 	// It is called under the Runner's own mutex, so it need not be safe for concurrent use, and
 	// it is called from a worker goroutine and — on a queue drop — from the goroutine that called
@@ -76,7 +76,7 @@ type Options struct {
 	// event is ever derived (see newMatcher).
 	WriteTarget WriteTarget
 
-	// Exec runs a Hook's action. Required whenever at least one Hook is active at this root;
+	// Exec runs a Reaction's action. Required whenever at least one Reaction is active at this root;
 	// a Runner with nothing to run needs none.
 	Exec Executor
 
@@ -84,17 +84,17 @@ type Options struct {
 	Now func() time.Time
 }
 
-// Runner is the observe-only decorator that turns the engine's Event stream into fired Hooks. It
-// is what every Driver installs as Config.Events, wrapping whatever sink it already had.
+// Runner is the observe-only decorator that turns the engine's Event stream into fired Reactions.
+// It is what every Driver installs as Config.Events, wrapping whatever sink it already had.
 //
 // The contract that matters is that Emit NEVER BLOCKS and never fails: it runs on the engine's
 // own goroutine, under the tree-wide sink mutex (internal/agent's serialEventSink), so any wait
 // here is a wait for the whole agent tree. Matching is pure and bounded; delivery is a
-// non-blocking send onto a bounded per-Hook queue; everything slow — the command, the POST, the
-// timeout — happens on that Hook's own worker goroutine.
+// non-blocking send onto a bounded per-Reaction queue; everything slow — the command, the POST, the
+// timeout — happens on that Reaction's own worker goroutine.
 //
-// One worker per active Hook is deliberate: each Hook sees its events in order and cannot be
-// delayed by another Hook's slow script, which a single shared worker could not promise.
+// One worker per active Reaction is deliberate: each Reaction sees its events in order and cannot
+// be delayed by another Reaction's slow script, which a single shared worker could not promise.
 type Runner struct {
 	inner       domain.EventSink
 	workspace   string
@@ -144,18 +144,18 @@ type worker struct {
 	dropped      atomic.Int64
 	dropReported atomic.Bool
 
-	// lastFailure is the failure line most recently reported for this Hook, cleared by a
-	// success. It is how a Hook that fails every single Turn reports once rather than forever.
+	// lastFailure is the failure line most recently reported for this Reaction, cleared by a
+	// success. It is how a Reaction that fails every single Turn reports once rather than forever.
 	lastFailure string
 }
 
-// New builds a Runner over the given Hook list. The list is validated and reduced to the ones
-// ACTIVE at this root — a Hook whose `workspace:` resolves to a different directory is simply not
-// here — and one worker goroutine is started per survivor. A Runner with no active Hook is a
-// legitimate, cheap result: Emit then forwards and does nothing else.
+// New builds a Runner over the given Reaction list. The list is validated and reduced to the ones
+// ACTIVE at this root — a Reaction whose `workspace:` resolves to a different directory is simply
+// not here — and one worker goroutine is started per survivor. A Runner with no active Reaction is
+// a legitimate, cheap result: Emit then forwards and does nothing else.
 //
 // It fails when an entry is malformed (ValidateAll's message names the entry), when a workspace
-// path cannot be resolved, or when a Hook would have to run with no Options.Exec to run it.
+// path cannot be resolved, or when a Reaction would have to run with no Options.Exec to run it.
 func New(list []domain.Reaction, o Options) (*Runner, error) {
 	if err := ValidateAll(list); err != nil {
 		return nil, err
@@ -187,11 +187,11 @@ func New(list []domain.Reaction, o Options) (*Runner, error) {
 	return r, nil
 }
 
-// Emit forwards the Event to the decorated sink and then fires whatever Hooks it produced. The
-// forward comes FIRST and unconditionally: a Hook that panicked the matcher would otherwise be
+// Emit forwards the Event to the decorated sink and then fires whatever Reactions it produced. The
+// forward comes FIRST and unconditionally: a Reaction that panicked the matcher would otherwise be
 // able to swallow the Driver's own stream, and the decoration is meant to be invisible.
 //
-// It returns without matching at all when no Hook is active — the ordinary case for a user who
+// It returns without matching at all when no Reaction is active — the ordinary case for a user who
 // configured none — so an unhooked run pays one atomic load per Event and nothing more.
 func (r *Runner) Emit(e domain.Event) {
 	if r.inner != nil {
@@ -205,7 +205,7 @@ func (r *Runner) Emit(e domain.Event) {
 	if len(firings) == 0 {
 		return
 	}
-	// One reading of the clock per Event: two Hooks fired by the same event report the same
+	// One reading of the clock per Event: two Reactions fired by the same event report the same
 	// instant, which is what a human correlating two notifications expects.
 	now := r.now().Format(time.RFC3339Nano)
 	for _, f := range firings {
@@ -237,8 +237,8 @@ func (r *Runner) fanOut(set *hookSet, f firing, now string) {
 	}
 }
 
-// noteDrop counts a dropped firing and reports the FIRST one for this Hook. Only the first: a
-// Hook that is being outrun drops in bursts, and one line per dropped event would bury the
+// noteDrop counts a dropped firing and reports the FIRST one for this Reaction. Only the first: a
+// Reaction that is being outrun drops in bursts, and one line per dropped event would bury the
 // failure it is a symptom of. The total is reported once more when the set is drained.
 func (r *Runner) noteDrop(w *worker) {
 	w.dropped.Add(1)
@@ -247,10 +247,11 @@ func (r *Runner) noteDrop(w *worker) {
 	}
 }
 
-// Replace swaps the active Hook list — the config file changed under a live session — and drains
-// the previous generation in the BACKGROUND, so a reload never blocks the goroutine that noticed
-// the change. The new list is validated and re-filtered by workspace exactly as New's was, and a
-// failure leaves the running set untouched: a broken edit to `hooks:` costs the user nothing.
+// Replace swaps the active Reaction list — the config file changed under a live session — and
+// drains the previous generation in the BACKGROUND, so a reload never blocks the goroutine that
+// noticed the change. The new list is validated and re-filtered by workspace exactly as New's was,
+// and a failure leaves the running set untouched: a broken edit to `reactions:` costs the user
+// nothing.
 //
 // The previous generation finishes what it already holds (its in-flight job and its queue) under
 // the same grace Close gives, then stops. Firings the old matcher was still correlating — a write
@@ -282,12 +283,12 @@ func (r *Runner) Replace(list []domain.Reaction) error {
 }
 
 // Close stops intake, waits for every worker to finish what it holds until ctx expires, then
-// cancels whatever is still running. It is idempotent — whoever gets there first closes the
-// Runner, and a later caller gets the same answer — and it reports each Hook's drop total on the
-// way out, which is the only place the full count is ever stated.
+// cancels whatever is still running. It is idempotent — whoever gets there first closes the Runner,
+// and a later caller gets the same answer — and it reports each Reaction's drop total on the way
+// out, which is the only place the full count is ever stated.
 //
-// It returns ctx's error, wrapped, when a Hook was still running at the deadline: the run is over
-// either way, but a root that wants to say "a hook was killed" needs to be told.
+// It returns ctx's error, wrapped, when a Reaction was still running at the deadline: the run is
+// over either way, but a root that wants to say "a reaction was killed" needs to be told.
 func (r *Runner) Close(ctx context.Context) error {
 	r.closeOnce.Do(func() {
 		r.swapMu.Lock()
@@ -303,7 +304,7 @@ func (r *Runner) Close(ctx context.Context) error {
 	return r.closeErr
 }
 
-// buildSet reduces the list to the Hooks active at this root and starts a worker for each.
+// buildSet reduces the list to the Reactions active at this root and starts a worker for each.
 func (r *Runner) buildSet(list []domain.Reaction) (*hookSet, error) {
 	active := make([]domain.Reaction, 0, len(list))
 	for _, entry := range list {
@@ -317,7 +318,9 @@ func (r *Runner) buildSet(list []domain.Reaction) (*hookSet, error) {
 		active = append(active, entry)
 	}
 	if len(active) > 0 && r.exec == nil {
-		return nil, fmt.Errorf("hooks: %d hook(s) are active here but no executor was supplied to run them", len(active))
+		return nil, fmt.Errorf(
+			"reactions: %d reaction(s) are active here but no executor was supplied to run them",
+			len(active))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -340,8 +343,8 @@ func (r *Runner) buildSet(list []domain.Reaction) (*hookSet, error) {
 	return set, nil
 }
 
-// serve is one Hook's worker: it runs the Hook's firings in the order they were queued and exits
-// once the queue is closed AND emptied, so a drained generation still finishes what it holds.
+// serve is one Reaction's worker: it runs the Reaction's firings in the order they were queued and
+// exits once the queue is closed AND emptied, so a drained generation still finishes what it holds.
 func (r *Runner) serve(set *hookSet, w *worker) {
 	defer close(w.done)
 	for payload := range w.queue {
@@ -349,7 +352,7 @@ func (r *Runner) serve(set *hookSet, w *worker) {
 	}
 }
 
-// runOne runs one firing under the Hook's own timeout and reports a failure the Driver has not
+// runOne runs one firing under the Reaction's own timeout and reports a failure the Driver has not
 // already been told about.
 func (r *Runner) runOne(set *hookSet, w *worker, payload Payload) {
 	ctx, cancel := context.WithTimeout(set.ctx, w.hook.Timeout)
@@ -362,7 +365,7 @@ func (r *Runner) runOne(set *hookSet, w *worker, payload Payload) {
 	}
 	if set.ctx.Err() != nil {
 		// The generation was cancelled out from under this job — by a Close past its grace or a
-		// reload's drain. That is our own doing, not the Hook's, and reporting it would put a
+		// reload's drain. That is our own doing, not the Reaction's, and reporting it would put a
 		// failure line on every shutdown that killed a slow script.
 		return
 	}
@@ -375,7 +378,7 @@ func (r *Runner) runOne(set *hookSet, w *worker, payload Payload) {
 }
 
 // drainSet closes every queue, waits for the workers until ctx expires, then cancels what is
-// still running and states each Hook's drop total.
+// still running and states each Reaction's drop total.
 func (r *Runner) drainSet(set *hookSet, ctx context.Context) error {
 	for _, w := range set.workers {
 		close(w.queue)
@@ -391,12 +394,13 @@ func (r *Runner) drainSet(set *hookSet, ctx context.Context) error {
 	set.cancel()
 	r.reportDrops(set)
 	if expired {
-		return fmt.Errorf("hooks: gave up waiting for a hook to finish, cancelling it: %w", ctx.Err())
+		return fmt.Errorf(
+			"reactions: gave up waiting for a reaction to finish, cancelling it: %w", ctx.Err())
 	}
 	return nil
 }
 
-// reportDrops states the final count for every Hook that lost a firing.
+// reportDrops states the final count for every Reaction that lost a firing.
 func (r *Runner) reportDrops(set *hookSet) {
 	for _, w := range set.workers {
 		if dropped := w.dropped.Load(); dropped > 0 {

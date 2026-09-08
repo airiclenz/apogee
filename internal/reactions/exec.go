@@ -19,7 +19,7 @@ import (
 // the same value the Runner is given — and pass "" only where there is no workspace at all, which
 // leaves the fence to security.ResolveProgram's own defaults.
 //
-// The returned Executor is safe for concurrent use across every Hook at the root, which the
+// The returned Executor is safe for concurrent use across every Reaction at the root, which the
 // Executor contract requires.
 func DefaultExecutor(workspaceRoot string) Executor {
 	return defaultExecutor{
@@ -47,7 +47,7 @@ func (e defaultExecutor) Run(ctx context.Context, r domain.Reaction, p Payload) 
 
 // encodePayload renders the firing as the JSON document both halves send — on stdin for a command,
 // as the POST body for a webhook. It is one function so the two can never drift: a script that
-// learns to read the document from a command Hook reads the identical document from a webhook.
+// learns to read the document from a command Reaction reads the identical document from a webhook.
 func encodePayload(p Payload) ([]byte, error) {
 	body, err := json.Marshal(p)
 	if err != nil {

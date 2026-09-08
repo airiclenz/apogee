@@ -708,12 +708,12 @@ func (t *transcript) addNote(text string) {
 // happened in the session (a cancellation, a failed save, a server switch) belongs in addNote.
 //
 // Two notices are here for the OTHER half of that reason, and they do record something that
-// happened: the Sub-agent-server routing notice (foldRoutingNotice) and a Hook's failure or drop
-// (foldHookNotice, ADR 0073 §8). Both describe a state outside this conversation — which server is
-// taking delegations, which of the human's scripts refused to run — so a stored one is a claim
-// about a run nobody has made since the record was written, and it accumulates across resumes
-// exactly as a "resumed:" line would. Nothing a Hook does may reach the Session record at all,
-// which is what makes this the only seam a Hook notice can use.
+// happened: the Sub-agent-server routing notice (foldRoutingNotice) and a Reaction's failure or
+// drop (foldHookNotice, ADR 0073 §8). Both describe a state outside this conversation — which
+// server is taking delegations, which of the human's scripts refused to run — so a stored one is a
+// claim about a run nobody has made since the record was written, and it accumulates across resumes
+// exactly as a "resumed:" line would. Nothing a Reaction does may reach the Session record at all,
+// which is what makes this the only seam a Reaction notice can use.
 //
 // It escape-strips exactly as addNote does, and for a sharper reason: its two biggest callers word
 // their notice from a stored session title (resumeLoaded, replayResumed) and from the workspace
@@ -949,7 +949,7 @@ func (t *transcript) apply(e domain.Event) {
 	case domain.ApprovalEvent:
 		// One note per Approval, not two: the engine announces a gate at both of its phases, and
 		// only the decided one carries a verdict to render. The requested phase exists for
-		// observers that want the WAIT (Hooks, ADR 0073) and folds to nothing here.
+		// observers that want the WAIT (Reactions, ADR 0073) and folds to nothing here.
 		if e.Phase == domain.ApprovalDecided {
 			t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
 		}

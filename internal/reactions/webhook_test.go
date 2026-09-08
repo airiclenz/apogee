@@ -87,7 +87,8 @@ func TestWebhookSenderPostsTheJSONWithBothKindsOfHeader(t *testing.T) {
 }
 
 // TestWebhookSenderReportsANonSuccessStatus proves a refused POST becomes a failure line rather
-// than silence — a Hook whose endpoint answers 500 every time is a Hook that is not working.
+// than silence — a Reaction whose endpoint answers 500 every time is a Reaction that is not
+// working.
 func TestWebhookSenderReportsANonSuccessStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "the gateway is unwell", http.StatusServiceUnavailable)
@@ -151,7 +152,7 @@ func TestWebhookSenderRefusesToSendWhenTheHeaderVariableIsUnset(t *testing.T) {
 }
 
 // TestWebhookSenderReportsTheDeadlineOnAStalledEndpoint is the bound that keeps an endpoint which
-// accepts the connection and then says nothing from holding a Hook's worker forever.
+// accepts the connection and then says nothing from holding a Reaction's worker forever.
 func TestWebhookSenderReportsTheDeadlineOnAStalledEndpoint(t *testing.T) {
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

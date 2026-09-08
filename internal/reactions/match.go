@@ -15,22 +15,23 @@ const maxPendingWrites = 256
 // writes nothing inspectable, and the absolute, symlink-resolved destination otherwise.
 type WriteTarget func(domain.ToolCall) (string, bool)
 
-// firing is one Hook event a domain.Event produced, with the payload fields derivable from that
-// event. The runner stamps the rest — the Hook's name, the time, the workspace and the Schedule —
-// as it fans the firing out to each subscribing Hook.
+// firing is one Reaction event a domain.Event produced, with the payload fields derivable from that
+// event. The runner stamps the rest — the Reaction's name, the time, the workspace and the Schedule
+// — as it fans the firing out to each subscribing Reaction.
 type firing struct {
 	Event   Event
 	Payload Payload
 }
 
-// matcher maps one domain.Event to the Hook events it produces. It is pure in the sense that
+// matcher maps one domain.Event to the Reaction events it produces. It is pure in the sense that
 // matters: no clock, no filesystem, no network, no goroutine — the only state it keeps is the
 // bounded map correlating a write tool's call with its result.
 //
-// It is built over the SUBSCRIBED set — the union of every active Hook's events — and an event
-// that can only produce an unsubscribed Hook event costs nothing at all: no WriteTarget call, no
-// pending entry, no allocation. With no active Hook the subscribed set is empty and the matcher
-// is a no-op for every engine event, which is the ordinary case for a user who configured none.
+// It is built over the SUBSCRIBED set — the union of every active Reaction's events — and an event
+// that can only produce an unsubscribed Reaction event costs nothing at all: no WriteTarget call,
+// no pending entry, no allocation. With no active Reaction the subscribed set is empty and the
+// matcher is a no-op for every engine event, which is the ordinary case for a user who configured
+// none.
 type matcher struct {
 	subscribed  map[Event]bool
 	writeTarget WriteTarget
@@ -50,7 +51,7 @@ type pendingWrite struct {
 
 // newMatcher builds a matcher over the given subscribed set. writeTarget may be nil, in which
 // case no file-changed event is ever derived — a root that cannot resolve a write target is a
-// root whose file-changed Hooks simply never fire, rather than one that panics.
+// root whose file-changed Reactions simply never fire, rather than one that panics.
 func newMatcher(subscribed map[Event]bool, writeTarget WriteTarget) *matcher {
 	return &matcher{
 		subscribed:  subscribed,
@@ -60,11 +61,11 @@ func newMatcher(subscribed map[Event]bool, writeTarget WriteTarget) *matcher {
 	}
 }
 
-// wants reports whether any active Hook subscribes to e.
+// wants reports whether any active Reaction subscribes to e.
 func (m *matcher) wants(e Event) bool { return m.subscribed[e] }
 
-// match returns the Hook events ev produced, in the order they should be delivered. A Depth-0
-// Turn that closed its Exchange produces two — the boundary first, then the closure — so a Hook
+// match returns the Reaction events ev produced, in the order they should be delivered. A Depth-0
+// Turn that closed its Exchange produces two — the boundary first, then the closure — so a Reaction
 // subscribing to both sees them in that order.
 func (m *matcher) match(ev domain.Event) []firing {
 	if len(m.subscribed) == 0 {
@@ -90,7 +91,7 @@ func (m *matcher) match(ev domain.Event) []firing {
 }
 
 // matchTurn maps a Turn boundary. Only Depth 0 counts: a sub-agent runs the same loop and would
-// otherwise fire a turn-finished Hook for every step of every delegation (ADR 0073 §4).
+// otherwise fire a turn-finished Reaction for every step of every delegation (ADR 0073 §4).
 func (m *matcher) matchTurn(ev domain.TurnEvent) []firing {
 	if ev.Depth != 0 {
 		return nil
@@ -188,7 +189,7 @@ func (m *matcher) matchError(ev domain.ErrorEvent) []firing {
 
 // rememberWrite records a write call so its RESULT can be reported as a file-changed event —
 // the result alone carries no tool name and no arguments, and a call alone has not happened yet.
-// It is skipped entirely when no Hook subscribes to file-changed, so an unsubscribed run never
+// It is skipped entirely when no Reaction subscribes to file-changed, so an unsubscribed run never
 // calls WriteTarget and never grows the map.
 func (m *matcher) rememberWrite(ev domain.ToolCallEvent) {
 	if !m.wants(FileChanged) || m.writeTarget == nil || len(m.pending) >= maxPendingWrites {

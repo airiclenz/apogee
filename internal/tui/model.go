@@ -1009,7 +1009,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.foldRoutingNotice(msg)
 
 	case hookNoticeMsg:
-		// The Hook Runner reporting that one of the human's `hooks:` entries failed or lost a
+		// The Reaction Runner reporting that one of the human's `reactions:` entries failed or lost a
 		// firing to its queue (ADR 0073 §8): one ephemeral note, no state transition, and nothing
 		// the model or the record ever learns about.
 		return m.foldHookNotice(msg)
@@ -1944,13 +1944,13 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	return nil
 }
 
-// foldHookNotice folds one Hook failure or queue drop into the transcript as a single ephemeral
+// foldHookNotice folds one Reaction failure or queue drop into the transcript as a single ephemeral
 // note (ADR 0073 §8). It is foldRoutingNotice's twin (heartbeat.go): a record and not a gate — one
-// note, no state transition, no engine call — because a Hook is an observer of this session and its
-// trouble is the human's to know about, never the conversation's.
+// note, no state transition, no engine call — because a Reaction is an observer of this session and
+// its trouble is the human's to know about, never the conversation's.
 //
-// The note is EPHEMERAL for the routing notice's reason, sharpened: a Hook's failure describes a
-// script that ran at one moment of one session, so a stored one would come back on every resume
+// The note is EPHEMERAL for the routing notice's reason, sharpened: a Reaction's failure describes
+// a script that ran at one moment of one session, so a stored one would come back on every resume
 // claiming a failure nobody has seen since, and five resumes would keep five of them.
 func (m Model) foldHookNotice(msg hookNoticeMsg) (tea.Model, tea.Cmd) {
 	m.transcript.addEphemeralNote(msg.note)

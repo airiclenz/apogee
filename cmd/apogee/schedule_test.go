@@ -1291,8 +1291,8 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 	}
 }
 
-// A Firing raised inside a session composes its Hooks from the list the session is running NOW —
-// the one a config reload wrote back through setObserve — and never from the list the process
+// A Firing raised inside a session composes its Reactions from the list the session is running NOW
+// — the one a config reload wrote back through setObserve — and never from the list the process
 // launched with (ADR 0037: a Firing sees what the session sees). The two entries write different
 // markers, so a Runner built from the boot list fails on both halves at once.
 func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
@@ -1342,12 +1342,14 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 
 	payload := readHookPayload(t, reloadedMarker)
 	if payload.Reaction != "reloaded" {
-		t.Errorf("the payload names the Hook %q, want the reloaded entry's own name", payload.Reaction)
+		t.Errorf("the payload names the Reaction %q, want the reloaded entry's own name",
+			payload.Reaction)
 	}
 	if payload.Schedule == nil || payload.Schedule.Name != "Nightly build" {
 		t.Errorf("the payload names the Schedule %+v, want the Firing's own", payload.Schedule)
 	}
 	if _, err := os.Stat(bootMarker); err == nil {
-		t.Error("the boot list's Hook fired; a Firing must run the Hooks the session is running now")
+		t.Error("the boot list's Reaction fired; a Firing must run the Reactions the session " +
+			"is running now")
 	}
 }

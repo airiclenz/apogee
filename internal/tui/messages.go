@@ -214,18 +214,18 @@ type routingNoticeMsg struct {
 	note string
 }
 
-// hookNoticeMsg carries one Hook's failure or one queue's drop into the Update loop (ADR 0073 §8).
-// Like routingNoticeMsg it rides the late-bound programRef (bridge.go), because the Runner reports
-// from the worker goroutine it runs each Hook on.
+// hookNoticeMsg carries one Reaction's failure or one queue's drop into the Update loop (ADR 0073
+// §8). Like routingNoticeMsg it rides the late-bound programRef (bridge.go), because the Runner
+// reports from the worker goroutine it runs each Reaction on.
 //
 // The note arrives already WORDED for the same reason the routing notice does: it names an entry of
-// the `hooks:` file and quotes what a command said on its stderr, and neither the file nor the
+// the `reactions:` file and quotes what a command said on its stderr, and neither the file nor the
 // outside world is something this package knows about (ADR 0031). So the Runner words it and the
 // renderer only places it — escape-stripped on the way in, since the tail of a script's stderr is
 // as untrusted as terminal text gets.
 //
 // It is a REPORT and never a request: the fold appends one ephemeral note and moves nothing else.
-// EPHEMERAL because a Hook's failure describes a script that ran in THIS session — a stored one
+// EPHEMERAL because a Reaction's failure describes a script that ran in THIS session — a stored one
 // would come back on every resume as a claim about a run nobody made since.
 type hookNoticeMsg struct {
 	note string

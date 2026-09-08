@@ -35,7 +35,7 @@ type fakeExecutor struct {
 	gate chan struct{}
 
 	// errs is indexed by the order the runs arrive in, so a test can script a sequence of
-	// outcomes across one Hook's firings; a run past the end of the slice succeeds.
+	// outcomes across one Reaction's firings; a run past the end of the slice succeeds.
 	errs []error
 
 	// cancelled is closed by the first Run whose context is cancelled under it.
@@ -136,7 +136,7 @@ func awaitStart(t *testing.T, f *fakeExecutor) Payload {
 	case p := <-f.started:
 		return p
 	case <-time.After(awaitDeadline):
-		t.Fatal("no hook run started within the deadline")
+		t.Fatal("no reaction run started within the deadline")
 		return Payload{}
 	}
 }
@@ -155,7 +155,7 @@ func closeRunner(t *testing.T, r *Runner) {
 // Tests
 // ----------------------------------------------------------------------------
 
-// TestRunnerForwardsEveryEventToInner — the decoration is invisible: whatever the Hook list is,
+// TestRunnerForwardsEveryEventToInner — the decoration is invisible: whatever the Reaction list is,
 // the sink below the Runner sees the whole stream, matched events and unmatched ones alike.
 func TestRunnerForwardsEveryEventToInner(t *testing.T) {
 	t.Parallel()
@@ -190,7 +190,7 @@ func TestRunnerForwardsEveryEventToInner(t *testing.T) {
 	}
 }
 
-// TestRunnerKeepsOneHooksFiringsInOrder — a Hook sees its firings in the order the engine
+// TestRunnerKeepsOneHooksFiringsInOrder — a Reaction sees its firings in the order the engine
 // produced them, which is what a script appending to a log file depends on.
 func TestRunnerKeepsOneHooksFiringsInOrder(t *testing.T) {
 	t.Parallel()
@@ -223,7 +223,7 @@ func TestRunnerKeepsOneHooksFiringsInOrder(t *testing.T) {
 	}
 }
 
-// TestRunnerStampsTheIdentityFields — the payload a Hook receives carries the facts only the
+// TestRunnerStampsTheIdentityFields — the payload a Reaction receives carries the facts only the
 // Runner knows: which entry fired, when, in which workspace, and for which Schedule.
 func TestRunnerStampsTheIdentityFields(t *testing.T) {
 	t.Parallel()
@@ -264,9 +264,9 @@ func TestRunnerStampsTheIdentityFields(t *testing.T) {
 	}
 }
 
-// TestRunnerRunsHooksConcurrently — two Hooks fired by one event run at the same time, so a Hook
-// with a slow script cannot hold up another Hook's fast one. Both block; neither can proceed
-// until the gate opens, so a serial implementation never reaches the second start.
+// TestRunnerRunsHooksConcurrently — two Reactions fired by one event run at the same time, so a
+// Reaction with a slow script cannot hold up another Reaction's fast one. Both block; neither can
+// proceed until the gate opens, so a serial implementation never reaches the second start.
 func TestRunnerRunsHooksConcurrently(t *testing.T) {
 	t.Parallel()
 
@@ -286,7 +286,7 @@ func TestRunnerRunsHooksConcurrently(t *testing.T) {
 	names[awaitStart(t, exec).Reaction] = true
 	names[awaitStart(t, exec).Reaction] = true
 	if !names["slow"] || !names["fast"] {
-		t.Fatalf("only %v started while both were blocked — the hooks are not concurrent", names)
+		t.Fatalf("only %v started while both were blocked — the reactions are not concurrent", names)
 	}
 
 	close(exec.gate)
@@ -294,7 +294,7 @@ func TestRunnerRunsHooksConcurrently(t *testing.T) {
 }
 
 // TestEmitReturnsWhileAHookIsBlocked — Emit runs on the engine's goroutine under the tree-wide
-// sink mutex, so it must return whatever the Hook is doing. The executor never returns here.
+// sink mutex, so it must return whatever the Reaction is doing. The executor never returns here.
 func TestEmitReturnsWhileAHookIsBlocked(t *testing.T) {
 	t.Parallel()
 
@@ -376,8 +376,8 @@ func TestRunnerDropsTheNewestFiringWhenAHooksQueueIsFull(t *testing.T) {
 	}
 }
 
-// TestRunnerReportsAFailureOnceUntilTheHookSucceeds — a Hook that fails every Turn is news once,
-// not forever; a success in between makes the next failure news again.
+// TestRunnerReportsAFailureOnceUntilTheHookSucceeds — a Reaction that fails every Turn is news
+// once, not forever; a success in between makes the next failure news again.
 func TestRunnerReportsAFailureOnceUntilTheHookSucceeds(t *testing.T) {
 	t.Parallel()
 
@@ -431,11 +431,11 @@ func TestRunnerIgnoresAHookScopedToAnotherWorkspace(t *testing.T) {
 
 	runs := exec.recorded()
 	if len(runs) != 1 || runs[0].Reaction != "mine" {
-		t.Fatalf("ran %#v, want the scoped-here hook alone", runs)
+		t.Fatalf("ran %#v, want the scoped-here reaction alone", runs)
 	}
 }
 
-// TestReplaceStopsTheOldHookAndStartsTheNew — a config reload swaps the list: the outgoing Hook
+// TestReplaceStopsTheOldHookAndStartsTheNew — a config reload swaps the list: the outgoing Reaction
 // finishes what it already holds and takes nothing more, and the incoming one takes over.
 func TestReplaceStopsTheOldHookAndStartsTheNew(t *testing.T) {
 	t.Parallel()
@@ -471,7 +471,7 @@ func TestReplaceStopsTheOldHookAndStartsTheNew(t *testing.T) {
 	}
 }
 
-// TestReplaceRefusesAMalformedListAndKeepsRunning — a broken edit to `hooks:` costs the live
+// TestReplaceRefusesAMalformedListAndKeepsRunning — a broken edit to `reactions:` costs the live
 // session nothing: the running set is untouched and still fires.
 func TestReplaceRefusesAMalformedListAndKeepsRunning(t *testing.T) {
 	t.Parallel()
@@ -494,7 +494,7 @@ func TestReplaceRefusesAMalformedListAndKeepsRunning(t *testing.T) {
 	closeRunner(t, runner)
 
 	if runs := exec.recorded(); len(runs) != 1 || runs[0].Reaction != "notify" {
-		t.Fatalf("ran %#v, want the surviving hook to have fired", runs)
+		t.Fatalf("ran %#v, want the surviving reaction to have fired", runs)
 	}
 }
 
@@ -532,10 +532,10 @@ func TestCloseWithAnExpiredContextCancelsTheRunningHook(t *testing.T) {
 	select {
 	case <-exec.cancelled:
 	case <-time.After(awaitDeadline):
-		t.Fatal("the running hook's context was not cancelled")
+		t.Fatal("the running reaction's context was not cancelled")
 	}
 
-	// A job killed by our own shutdown is not a Hook failure, so it is not reported as one.
+	// A job killed by our own shutdown is not a Reaction failure, so it is not reported as one.
 	for _, line := range log.all() {
 		if strings.Contains(line, "wedged (turn-finished)") {
 			t.Errorf("shutdown reported a failure line %q", line)
@@ -570,7 +570,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 
 // TestRunnerWithNoHooksTouchesNothing is the regression guard: with an empty active set the
 // Runner forwards and returns, so the injected WriteTarget — the one call that reaches outside
-// this package on the engine's own goroutine — is never made. Replacing a file-changed Hook in
+// this package on the engine's own goroutine — is never made. Replacing a file-changed Reaction in
 // rebuilds the subscribed set, and the very next tool call asks for the target exactly once.
 func TestRunnerWithNoHooksTouchesNothing(t *testing.T) {
 	t.Parallel()
@@ -600,7 +600,7 @@ func TestRunnerWithNoHooksTouchesNothing(t *testing.T) {
 		runner.Emit(e)
 	}
 	if lookups != 0 {
-		t.Fatalf("the write target was looked up %d times with no hooks configured", lookups)
+		t.Fatalf("the write target was looked up %d times with no reactions configured", lookups)
 	}
 	if len(inner.events) != len(quiet) {
 		t.Fatalf("inner received %d events, want %d", len(inner.events), len(quiet))
@@ -623,24 +623,24 @@ func TestRunnerWithNoHooksTouchesNothing(t *testing.T) {
 	}
 }
 
-// TestNewRefusesAHookItCannotRun — a Runner that would have to fire a Hook with no executor is a
-// composition mistake, refused at construction rather than discovered at the first Turn.
+// TestNewRefusesAHookItCannotRun — a Runner that would have to fire a Reaction with no executor is
+// a composition mistake, refused at construction rather than discovered at the first Turn.
 func TestNewRefusesAHookItCannotRun(t *testing.T) {
 	t.Parallel()
 
 	if _, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{Workspace: t.TempDir()}); err == nil {
-		t.Fatal("New accepted an active hook with no executor")
+		t.Fatal("New accepted an active reaction with no executor")
 	}
 	// With nothing to run, no executor is needed.
 	runner, err := New(nil, Options{Workspace: t.TempDir()})
 	if err != nil {
-		t.Fatalf("New with no hooks: %v", err)
+		t.Fatalf("New with no reactions: %v", err)
 	}
 	closeRunner(t, runner)
 }
 
 // TestNewRefusesAMalformedList — the Runner validates what it is handed, so a root that skipped
-// the config layer's own check cannot start a Hook that could never fire correctly.
+// the config layer's own check cannot start a Reaction that could never fire correctly.
 func TestNewRefusesAMalformedList(t *testing.T) {
 	t.Parallel()
 
