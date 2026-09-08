@@ -74,7 +74,10 @@ type applySettingSpy struct {
 	prune      []bool
 	// floors records the WHOLE FloorConfig each Floor-guard apply pushed, which is the only way the
 	// "one key moved, the other six stood still" claim can be asserted: the seam takes all seven.
-	floors       []apogee.FloorConfig
+	floors []apogee.FloorConfig
+	// generations records every Generation pushed through the one swap door (ADR 0076 A8) — the
+	// Floor enable set, Bypass and the observe list in the single value a live swap carries.
+	generations  []apogee.Generation
 	contextFiles []contextFileChoice
 	swaps        []*apogee.ToolRegistry
 	profiles     []apogee.ModelProfile
@@ -92,6 +95,11 @@ func (s *applySettingSpy) SetCompactionEnabled(on bool) { s.compaction = append(
 func (s *applySettingSpy) SetPruneToolResults(on bool)  { s.prune = append(s.prune, on) }
 func (s *applySettingSpy) SetFloor(gates apogee.FloorConfig) {
 	s.floors = append(s.floors, gates)
+}
+
+func (s *applySettingSpy) SetReactions(gen apogee.Generation) error {
+	s.generations = append(s.generations, gen)
+	return nil
 }
 
 func (s *applySettingSpy) SetContextFiles(on bool, n []string) {
@@ -118,7 +126,7 @@ func (s *applySettingSpy) SetProfile(p apogee.ModelProfile) error {
 // should have touched nothing makes.
 func (s *applySettingSpy) drove() int {
 	return len(s.modes) + len(s.bypass) + len(s.compaction) + len(s.prune) + len(s.floors) +
-		len(s.contextFiles) + len(s.swaps) + len(s.profiles)
+		len(s.generations) + len(s.contextFiles) + len(s.swaps) + len(s.profiles)
 }
 
 // rebindProbe stands in for the composition root's own rebind closure ([tui.ServerHost.Rebind]): it

@@ -418,7 +418,19 @@ git diff --quiet d84dd988 -- cmd/apogee/testdata/eventlines/
 
 **Commit:** `feat(agent): one SetReactions generation swap; the Floor guards are an enable set`
 
-## 11. Driver: `lateEngine.SetReactions` and the `settingsEngine` seam
+## 11. Driver: `lateEngine.SetReactions` and the `settingsEngine` seam — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): `SetReactions` returns an `error` where the item spells `SetReactions(apogee.Generation)` on the interface. The Runner is the one half that can refuse a generation (a malformed entry, an unresolvable `workspace:`), and that refusal is the sentence the settings row shows today (`reloadReactions` returns `Replace`'s error); without a return, item 12's move of that reload onto this door would apply a refused `reactions:` edit silently. Floor and Bypass are booleans, so the engine half never fails.
+
+NOTES (2026-09-08): the guard's field-by-field comparison (id, `On`, `Workspace`, `Timeout`, the handler's argv/URL/headers) is one `reflect.DeepEqual` over the two observe lists — the handler is an interface over values carrying maps, which no comparison operator reaches, and `delegation.go:716` already asks whether a resolved server entry moved the same way. It is strictly stronger than the five fields, and its only failure direction is a spurious swap, never a dropped edit.
+
+NOTES (2026-09-08): the bind replay applies the engine half alone. The Runner exists from boot, independent of the Agent's lifetime, so `SetReactions` swapped its list when the edit happened whether or not anything was bound — which keeps the recorded observe list and the pending generation's in step, making a swap-rule branch at the bind dead code by construction. The rule holds; there is no branch for it.
+
+NOTES (2026-09-08): `newLateEngine` keeps its two arguments as the round-2 guard requires, and the Runner arrives through `seedReactions(runner, gen)` rather than a bare `w.engine.runner = w.hooks`: the holder needs the generation both halves are ALREADY running as well. Without that seed a partial edit (`SetBypass`, `SetFloor`, which read-modify-write the held generation) would read a zero base and re-enable every Floor guard the config file switched off, and the first Floor toggle of a session would drain a Runner whose list never moved.
+
+NOTES (2026-09-08): wire_firing.go's edit is the parameter and doc naming (`list` → `observe`, the doc naming the generation's observe half). `firingHooks` already receives `gen.Observe` — item 8 renamed `Options.Hooks` to `Options.Reactions`, which is what every Firing root passes, and item 12 makes that projection read `s.gen.Observe`. A `domain.Generation` signature would reach `daemonfire.go`, `headless.go`, `schedule.go` and `wire_firing_test.go`, none of which this item lists, and the Firing's Floor and Bypass already come from `in.opts` at the Config literal.
+
+NOTES (2026-09-08): `TestSetReactionsReportsTheRunnersRefusal` is beyond the item's named tests — the error return is new behaviour on the seam and the standards require a failure case for it; it also pins that a refused list is not recorded as applied, so a later identical edit still tries.
 
 **What:** Recast at the regression check (2026-09-08). Depends on item 10. `cmd/apogee/wire_engine.go`: `lateEngine.SetReactions(gen)` with a pre-engine `pendingGeneration` replay (the `pendingBypass`/floor replays fold into it); it applies `engine.SetReactions(gen)` then `runner.Replace(gen.Observe)` — the Runner keeps its one swap method, now called only from here. `settingsEngine` (`wire.go:326`) gains `SetReactions(apogee.Generation)`; `SetBypass`/`SetFloor` stay on the interface until item 13. The spy in `wire_helpers_test.go` records generations. Firings (`wire_firing.go`) build their Runner from `gen.Observe`.
 

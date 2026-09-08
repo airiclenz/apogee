@@ -222,6 +222,16 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// 0036 decision 3). Everything below this line wires against the holder and never learns which
 	// of the two happened — the seams are identical, and the engine is behind them either way.
 	w.engine = newLateEngine(w.mode, w.opts.ConfineToWorkspace)
+	// The Reaction surface's two halves, handed to the holder that swaps them together: the Runner
+	// built at boot (wire_boot.go), and the generation both are already running — the Floor gates and
+	// Bypass this run's Config was constructed with, and the observe list the Runner was built from.
+	// From here on ONE apply moves both (ADR 0076 A8), and a partial edit knows where the fields it
+	// does not touch stand.
+	w.engine.seedReactions(w.hooks, apogee.Generation{
+		Floor:   w.cfg.Floor,
+		Bypass:  w.cfg.Bypass,
+		Observe: w.opts.Reactions,
+	})
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on
 	// quit) and backs the /sessions browser. It owns id minting and the metadata policy — the

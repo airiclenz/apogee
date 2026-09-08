@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -110,8 +112,9 @@ func TestLateEngineReplaysThePruneGateAtTheBind(t *testing.T) {
 }
 
 // The Floor gates ride the same remember-then-install contract, with one difference worth pinning:
-// the seam takes the WHOLE FloorConfig rather than a gate at a time, so what the holder remembers is
-// where all seven stand — and a second edit made before the bind must not lose the first one's.
+// they are a FIELD of the generation the holder remembers rather than a value of their own (ADR 0076
+// A8), so what a Floor edit leaves behind is where all seven guards stand — and a second edit made
+// before the bind must not lose the first one's.
 func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 	t.Parallel()
 
@@ -121,18 +124,219 @@ func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 	engine.SetFloor(apogee.FloorConfig{DisableReadCache: true})
 	engine.SetFloor(apogee.FloorConfig{DisableReadCache: true, DisableToolResultCap: true})
 	want := apogee.FloorConfig{DisableReadCache: true, DisableToolResultCap: true}
-	if engine.pendingFloor == nil || *engine.pendingFloor != want {
-		t.Fatalf("pendingFloor = %+v; want %+v held for the bind", engine.pendingFloor, want)
+	if engine.pendingGeneration == nil || engine.pendingGeneration.Floor != want {
+		t.Fatalf("pendingGeneration = %+v; want the floor %+v held for the bind", engine.pendingGeneration, want)
+	}
+
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if got := engine.bound().Generation().Floor; got != want {
+		t.Errorf("the bound Agent's floor = %+v; want the gates held for the bind %+v", got, want)
+	}
+
+	// Past the bind the door stays open and stays anytime-safe, exactly as the prune gate's does.
+	engine.SetFloor(apogee.FloorConfig{})
+	if engine.pendingGeneration == nil || engine.pendingGeneration.Floor != (apogee.FloorConfig{}) {
+		t.Errorf("pendingGeneration after a bound edit = %+v; want the whole floor back on", engine.pendingGeneration)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The one generation swap (ADR 0076 A8)
+// ---------------------------------------------------------------------------
+
+// recordingRunner is the Reaction Runner's swap door as a witness: it writes down every list it was
+// handed and what the ENGINE was holding at that instant, which is how the order of the two applies
+// is pinned without a Runner — or the goroutines a Runner drains on — behind it.
+type recordingRunner struct {
+	engine *lateEngine
+	lists  [][]domain.Reaction
+	seen   []apogee.Generation
+	err    error
+}
+
+func (r *recordingRunner) Replace(list []domain.Reaction) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.lists = append(r.lists, list)
+	if agent := r.engine.bound(); agent != nil {
+		r.seen = append(r.seen, agent.Generation())
+	}
+	return nil
+}
+
+// observeReaction is one armable user-origin observe row — the shape a `reactions:` entry resolves
+// to — named so a test can tell two lists apart by their ids alone.
+func observeReaction(id string) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []domain.Moment{domain.MomentTurnFinished},
+		Handler: domain.ArgvHandler{Argv: []string{"true"}},
+		Timeout: time.Second,
+	}
+}
+
+// One generation reaches both halves of the Reaction surface, and it reaches them in ORDER: the
+// engine first, then the Runner. The order is what keeps the two halves readable as one swap — a
+// Runner firing the new list while the engine still runs the old Floor would be exactly the
+// half-swapped state the single value exists to abolish.
+func TestSetReactionsAppliesEngineThenRunner(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	runner := &recordingRunner{engine: engine}
+	engine.seedReactions(runner, apogee.Generation{})
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	gen := apogee.Generation{
+		Floor:   apogee.FloorConfig{DisableReadCache: true},
+		Bypass:  true,
+		Observe: []domain.Reaction{observeReaction("notify")},
+	}
+	if err := engine.SetReactions(gen); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
+
+	if len(runner.lists) != 1 || !reflect.DeepEqual(runner.lists[0], gen.Observe) {
+		t.Fatalf("the Runner was handed %+v; want exactly the generation's observe list", runner.lists)
+	}
+	if len(runner.seen) != 1 || runner.seen[0].Floor != gen.Floor || !runner.seen[0].Bypass {
+		t.Errorf("the engine held %+v when the Runner swapped; want the new generation already applied", runner.seen)
+	}
+}
+
+// A Floor- or Bypass-only generation reaches the engine ALONE. The Runner is not asked to swap a
+// list that did not move, because a Replace retires the running generation — draining its workers
+// and forgetting the firings it was still correlating — which is a real cost for an edit that never
+// touched the observe lane.
+func TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	armed := []domain.Reaction{observeReaction("notify")}
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	runner := &recordingRunner{engine: engine}
+	engine.seedReactions(runner, apogee.Generation{Observe: armed})
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	floorOnly := apogee.Generation{Floor: apogee.FloorConfig{DisableToolResultCap: true}, Observe: armed}
+	if err := engine.SetReactions(floorOnly); err != nil {
+		t.Fatalf("SetReactions(floor only): %v", err)
+	}
+	bypassOnly := floorOnly
+	bypassOnly.Bypass = true
+	if err := engine.SetReactions(bypassOnly); err != nil {
+		t.Fatalf("SetReactions(bypass only): %v", err)
+	}
+
+	if len(runner.lists) != 0 {
+		t.Errorf("the Runner was swapped %d times by generations that moved no observe row", len(runner.lists))
+	}
+	if got := engine.bound().Generation(); got.Floor != bypassOnly.Floor || !got.Bypass {
+		t.Errorf("the engine holds %+v; want both generations applied", got)
+	}
+
+	// And a list that DID move reaches it, so the skip above is the comparison and not a dead seam.
+	moved := bypassOnly
+	moved.Observe = []domain.Reaction{observeReaction("notify"), observeReaction("page")}
+	if err := engine.SetReactions(moved); err != nil {
+		t.Fatalf("SetReactions(moved list): %v", err)
+	}
+	if len(runner.lists) != 1 {
+		t.Errorf("the Runner was swapped %d times by an edited list; want exactly one", len(runner.lists))
+	}
+}
+
+// The generation rides the remember-then-install contract the mode and the gates ride: a `/settings`
+// edit committed before a server is chosen must reach the Agent the moment one is built, or the
+// session runs the whole way on the seed its Config carried. The Runner half needs no bind — it
+// exists from boot — so the swap the same call makes has already happened.
+func TestLateEngineReplaysThePendingGeneration(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	runner := &recordingRunner{engine: engine}
+	engine.seedReactions(runner, apogee.Generation{})
+
+	gen := apogee.Generation{
+		Floor:   apogee.FloorConfig{DisableToolCallRepair: true},
+		Bypass:  true,
+		Observe: []domain.Reaction{observeReaction("notify")},
+	}
+	if err := engine.SetReactions(gen); err != nil {
+		t.Fatalf("SetReactions while unbound: %v", err)
+	}
+	if len(runner.lists) != 1 {
+		t.Fatalf("the Runner was swapped %d times before the bind; want one — it runs without an Agent", len(runner.lists))
+	}
+	if engine.pendingGeneration == nil || engine.pendingGeneration.Floor != gen.Floor {
+		t.Fatalf("pendingGeneration = %+v; want %+v held for the bind", engine.pendingGeneration, gen)
 	}
 
 	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
-	// Past the bind the door stays open and stays anytime-safe, exactly as the prune gate's does.
-	engine.SetFloor(apogee.FloorConfig{})
-	if engine.pendingFloor == nil || *engine.pendingFloor != (apogee.FloorConfig{}) {
-		t.Errorf("pendingFloor after a bound edit = %+v; want the whole floor back on", engine.pendingFloor)
+	got := engine.bound().Generation()
+	if got.Floor != gen.Floor || !got.Bypass {
+		t.Errorf("the bound Agent's generation = %+v; want the Floor and Bypass held for the bind %+v", got, gen)
+	}
+	if len(runner.lists) != 1 {
+		t.Errorf("the Runner was swapped %d times; want the one swap the edit itself made", len(runner.lists))
+	}
+}
+
+// A holder with no Runner takes a generation and applies its engine half: a Firing root builds one
+// without a Runner, and a swap must skip the half that is not there rather than dereference it — the
+// way every call here skips a nil Agent.
+func TestSetReactionsWithoutARunner(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	gen := apogee.Generation{Bypass: true, Observe: []domain.Reaction{observeReaction("notify")}}
+	if err := engine.SetReactions(gen); err != nil {
+		t.Fatalf("SetReactions with no Runner: %v", err)
+	}
+	if engine.pendingGeneration == nil || !engine.pendingGeneration.Bypass {
+		t.Errorf("pendingGeneration = %+v; want the generation held for the bind", engine.pendingGeneration)
+	}
+}
+
+// A Runner that refuses the list refuses the APPLY: the error is the settings row's sentence, and
+// the holder must not record a list the Runner is not firing — a later identical edit has to try
+// again rather than skip the swap it never made.
+func TestSetReactionsReportsTheRunnersRefusal(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	refused := errors.New("reactions: workspace does not exist")
+	runner := &recordingRunner{engine: engine, err: refused}
+	engine.seedReactions(runner, apogee.Generation{})
+
+	gen := apogee.Generation{Observe: []domain.Reaction{observeReaction("notify")}}
+	if err := engine.SetReactions(gen); !errors.Is(err, refused) {
+		t.Fatalf("SetReactions err = %v; want the Runner's refusal", err)
+	}
+
+	runner.err = nil
+	if err := engine.SetReactions(gen); err != nil {
+		t.Fatalf("the second SetReactions: %v", err)
+	}
+	if len(runner.lists) != 1 {
+		t.Errorf("the Runner took %d lists; want the refused edit retried rather than skipped", len(runner.lists))
 	}
 }
 

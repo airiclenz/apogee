@@ -538,10 +538,15 @@ func resolveFiringRouting(
 		delegationStateNotice(name, target, "", nil)
 }
 
-// firingHooks builds the Hook Runner ONE unattended run fires through (ADR 0073). Every Firing root
-// composes one of its own — `apogee headless`, a daemon tick, the `/schedule` picker inside a live
-// session — because a Runner per Firing is what carries the Schedule a run belongs to onto every
-// payload it stamps, with no per-event plumbing to carry it there.
+// firingHooks builds the Hook Runner ONE unattended run fires through (ADR 0073). What it arms is
+// the OBSERVE half of the generation the root resolved (ADR 0076 A8) — for a Firing a live session
+// raises, the rows a `reactions:` apply last installed, since a Firing is composed out of the
+// session's live options rather than the file it launched with.
+//
+// Every Firing root composes a Runner of its own — `apogee headless`, a daemon tick, the
+// `/schedule` picker inside a live session — because a Runner per Firing is what carries the
+// Schedule a run belongs to onto every payload it stamps, with no per-event plumbing to carry it
+// there.
 //
 // It is one constructor rather than three literals for firingConfig's own reason: everything except
 // the four arguments is the same at every root, and three copies of it is three chances for one
@@ -550,8 +555,8 @@ func resolveFiringRouting(
 // The caller closes what comes back — [hookCloseGrace], the same grace the session gives (wire.go) —
 // and a returned error fails the Firing: a `hooks:` list this root cannot resolve is structural
 // configuration, exactly as an unreadable prompt is.
-func firingHooks(list []domain.Reaction, workspace string, sched *reactions.ScheduleRef, report func(string)) (*reactions.Runner, error) {
-	return reactions.New(list, reactions.Options{
+func firingHooks(observe []domain.Reaction, workspace string, sched *reactions.ScheduleRef, report func(string)) (*reactions.Runner, error) {
+	return reactions.New(observe, reactions.Options{
 		// Inner stays nil: a Firing's Config carries no sink of its own (firingConfig), so there is
 		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself
 		// wraps THIS Runner rather than being wrapped by it (headless's prune notice), which keeps the

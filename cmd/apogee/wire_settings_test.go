@@ -1966,8 +1966,11 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 	e.SetPruneToolResults(false)
 	e.SetContextFiles(true, []string{"AGENTS.md"})
 
-	if e.pendingBypass == nil || !*e.pendingBypass {
-		t.Errorf("pendingBypass = %v, want true held for the bind", e.pendingBypass)
+	// Bypass rides the generation the holder remembers rather than a pointer of its own (ADR 0076
+	// A8): one value carries where Bypass and all seven Floor guards stand, so a bind can never
+	// install a shape no apply asked for.
+	if e.pendingGeneration == nil || !e.pendingGeneration.Bypass {
+		t.Errorf("pendingGeneration = %+v, want Bypass held for the bind", e.pendingGeneration)
 	}
 	if e.pendingCompaction == nil || *e.pendingCompaction {
 		t.Errorf("pendingCompaction = %v, want false held for the bind", e.pendingCompaction)
@@ -1994,7 +1997,7 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 
 	// A holder nothing moved holds nothing: the Agent is then constructed from its Config alone.
 	fresh := newLateEngine(domain.ModeAskBefore, true)
-	if fresh.pendingBypass != nil || fresh.pendingCompaction != nil || fresh.pendingPrune != nil ||
+	if fresh.pendingGeneration != nil || fresh.pendingCompaction != nil || fresh.pendingPrune != nil ||
 		fresh.pendingContextFiles != nil || fresh.pendingProfile != nil {
 		t.Errorf("a fresh holder already carries overrides: %+v", fresh)
 	}
