@@ -12,8 +12,8 @@ package main
 //     presentation ladder, Confiner), the base [apogee.Config] built from them, and what this host's
 //     confinement posture says for itself on stderr.
 //   - wire_live.go — the live-session assembly: the MCP connections, the tool registry, the
-//     Mechanism list, the session store, the engine and Upstream holders and the bind that fills
-//     them, the live-settings holder, the config watcher, and the out-of-band work.
+//     retired-roll notices, the session store, the engine and Upstream holders and the bind
+//     that fills them, the live-settings holder, the config watcher, and the out-of-band work.
 //   - wire_verbs.go — the composition root's own verbs: the rebind, the beat wrapper, and the three
 //     ways a session arrives on or records an Upstream.
 //   - wire_options.go — the projection of all of it onto [tui.Options], the renderer's whole view.
@@ -206,8 +206,8 @@ type rootWiring struct {
 	namer *delegationNamer
 	cfg   apogee.Config
 
-	// The live session (wire_live.go). The tool registry and the Mechanism list are folded onto
-	// cfg above rather than held here — the engine reads them off the Config it is built from.
+	// The live session (wire_live.go). The tool registry is folded onto
+	// cfg above rather than held here — the engine reads it off the Config it is built from.
 	mcpSet        *liveMCP
 	toolSet       *liveTools
 	store         *session.Store

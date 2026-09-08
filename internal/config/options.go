@@ -361,21 +361,19 @@ type Options struct {
 	// because which model is bound is not a fact this file holds.
 	ModelProfiles []profiles.Entry
 
-	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), loaded from
-	// the config file only (default-empty ⇒ nothing armed: no catalogued row is on by default under
-	// D1, and the Floor guards the run still carries are Config.Floor's own top-level keys rather
-	// than entries of this block — ADR 0071). ApplyConfig
-	// sets it from settings; runRoot validates every key against the catalogue and folds the enabled
-	// IDs into apogee.Config.EnableMechanisms, which the engine builds catalogue rows from and merges
-	// into apogee.Config.Mechanisms (ADR 0015 §1).
+	// mechanisms is the retired `mechanisms:` block, loaded from the config file only
+	// (default-empty). It arms nothing: the catalogue it enabled rows from is gone, and the Floor
+	// guards the run still carries are Config.Floor's own top-level keys (ADR 0071, ADR 0076 D11).
+	// ApplyConfig sets it from settings; the composition root validates every key against the
+	// retired roll, so a typo is still a loud refusal and a retired id still earns its notice.
 	Mechanisms map[string]bool
 
 	// validatedSetsEnable is the Validated-set surface's off-switch (ADR 0016 §5; default true)
 	// and validatedSetsAlias its explicit carry-over map (§3: runtime fingerprint label → entry
 	// key — an identity mapping is the low-confidence confirm, a differing one the transfer).
 	// Both are loaded from the config file only (`validated-sets:` block, no flag/env, like
-	// mechanisms). ApplyConfig sets them from settings; runRoot matches and folds an applying
-	// set into apogee.Config.EnableMechanisms.
+	// mechanisms). ApplyConfig sets them from settings; the composition root still matches and
+	// narrates, and the set it resolves arms nothing (ADR 0076 D11).
 	ValidatedSetsEnable bool
 	ValidatedSetsAlias  map[string]string
 

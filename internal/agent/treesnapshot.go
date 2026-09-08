@@ -15,7 +15,7 @@ import (
 // The tracked-file mutation floor: git-status snapshots taken around every subprocess
 // tool call so the tool result can NAME the workspace files the command changed. It is
 // a structural floor in the ADR 0006 class — always on, in every mode including Bypass,
-// never a Mechanism, no gating and no config key — because a subprocess that silently
+// never a Reaction, no gating and no config key — because a subprocess that silently
 // clobbers a tracked file is exactly the failure the 2026-08-22 incident showed the
 // model cannot be trusted to notice on its own. The floor observes and reports; it
 // never blocks (that is confinement's job, ADR 0012).

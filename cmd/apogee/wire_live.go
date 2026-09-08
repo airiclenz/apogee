@@ -4,10 +4,10 @@ package main
 //
 // One function: every holder, host and seam the running session is built from, in the order the
 // startup has always built them — the MCP connections and the tool registry folded onto the base
-// Config, the Mechanism list the engine arms, the session store and the record a --resume restores,
-// the engine and Upstream holders and the one bind that fills them, the live-settings holder the
-// `/settings` edits move, the config watcher, and the out-of-band work (the launcher, the naming
-// call, the scheduler) that reads the binding rather than capturing it.
+// Config, the `mechanisms:` block's retired-roll notices, the session store and the record a
+// --resume restores, the engine and Upstream holders and the one bind that fills them, the
+// live-settings holder the `/settings` edits move, the config watcher, and the out-of-band work
+// (the launcher, the naming call, the scheduler) that reads the binding rather than capturing it.
 //
 // Nothing here is torn down here: everything closable lands on the wiring, and runRoot's single
 // deferred close ends it in reverse — which is what lets any step below return an error and still
@@ -162,7 +162,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		return err
 	}
 
-	// A `mechanisms:` key naming a RETIRED Mechanism is tolerated rather than refused (the id was
+	// A `mechanisms:` key naming a RETIRED id is tolerated rather than refused (the id was
 	// valid at the release before the removal), and this is the one caller that says so: startup runs
 	// before the alt screen, so a stderr line here reaches the human, where the same resolver running
 	// under the live `/settings` apply or per delegate would paint over the TUI. It sits beside the
@@ -281,11 +281,12 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	}
 
 	// The startup snapshot's MUTABLE half (ADR 0037): the `context-window:` pin, the `servers:` list,
-	// the manual Mechanism ids and the `validated-sets:`/`system-prompt-*` inputs — every value below
-	// that a committed `/settings` edit can now move mid-session. The seams that used to capture
-	// each of them by value read this holder instead, so the next thing that re-resolves — a rebind, a
-	// server switch, a scheduled Firing — sees what the human changed rather than what the process
-	// launched with. Seeded from opts, so a session nobody edits behaves exactly as it did.
+	// the `mechanisms:` ids the retired roll reads and the `validated-sets:`/`system-prompt-*`
+	// inputs — every value below that a committed `/settings` edit can now move mid-session. The
+	// seams that used to capture each of them by value read this holder instead, so the next thing
+	// that re-resolves — a rebind, a server switch, a scheduled Firing — sees what the human
+	// changed rather than what the process launched with. Seeded from opts, so a session nobody
+	// edits behaves exactly as it did.
 	//
 	// The servers this session can be moved to are derived from it the same way they always were: the
 	// `servers:` entries plus a synthesized row for the startup endpoint only when that endpoint came

@@ -23,7 +23,7 @@ import (
 // ----------------------------------------------------------------------------
 
 // Agent is a single embeddable Apogee agent instance. It owns the loop,
-// conversation state, tool dispatch, and Mechanism application. It holds no
+// conversation state, tool dispatch, and Reaction dispatch. It holds no
 // process-global state: every state root is injected through Config, so many
 // Agents can run in one process against isolated directories (the property the
 // bench relies on for isolation — ADR 0001). The root apogee package re-exports it
@@ -361,7 +361,7 @@ type Agent struct {
 	// Config.Delegation.MaxSteps, the `delegate-max-steps` key), and a sub_agent call's optional
 	// max_steps may lower it further for that one delegation — a top-level Agent is left at 0,
 	// because the main loop is the human's to stop and a delegate's is nobody's. Structural
-	// (ADR 0006), not a Mechanism: it stays on under Bypass. Run is the ONE enforcement site.
+	// (ADR 0006), not a Reaction: it stays on under Bypass. Run is the ONE enforcement site.
 	stepCap int
 
 	// wrapUp latches the ONE tool-less closing Turn a delegate stopped at its step cap is given
@@ -372,7 +372,7 @@ type Agent struct {
 	// cleared before the capped Exchange returns, so it never outlives the Exchange that raised it,
 	// and it is written on this Agent's own loop goroutine. Transient like turns.exchangeTurns: it is neither configured nor serialized,
 	// because a resumed session resumes at a boundary, never mid-wrap-up. Structural (ADR 0006),
-	// not a Mechanism: no config key, and it holds under Bypass.
+	// not a Reaction: no config key, and it holds under Bypass.
 	wrapUp bool
 
 	// midExchangeCompaction lifts shouldAutoCompact's Exchange-boundary-only gate (S2) for this
@@ -381,7 +381,7 @@ type Agent struct {
 	// contract, set by newChildAgent alone: a child's whole life is ONE Exchange, so a
 	// boundary-only trigger never fires for it however far its history outgrows the Budget, while
 	// the main loop keeps folding at Exchange boundaries only so bench arms stay comparable.
-	// Structural (ADR 0006), not a Mechanism: there is no config key and it stays on under Bypass.
+	// Structural (ADR 0006), not a Reaction: there is no config key and it stays on under Bypass.
 	midExchangeCompaction bool
 
 	// lastFault is the text of the most recent loop-level fault this Agent surfaced as an
@@ -457,8 +457,8 @@ func (t *usageTally) record(base domain.EventBase, model string, window, prompt,
 }
 
 // New constructs an Agent from cfg. It validates the configuration — including the
-// Auto-mode/Confinement gate (ADR 0004) and the Mechanism ordering graph (ADR 0003,
-// a constraint cycle is a startup error) — and returns an error rather than
+// Auto-mode/Confinement gate (ADR 0004) and the armed Reaction set (ADR 0076,
+// a duplicate or ill-formed id is a startup error) — and returns an error rather than
 // silently degrading a misconfigured surface. The root facade forwards apogee.New
 // here, binding the real OpenAI-compatible provider client at cfg.Endpoint (P1.1)
 // carrying cfg.APIKey — unconditionally, since an empty key sends no auth header — and,
@@ -579,7 +579,7 @@ func (a *Agent) Submit(in domain.UserInput) error {
 // returns at the next quiescent boundary with StepResult.Status == StatusCancelled
 // and conversation state left serializable — never half-streamed (ADR 0007).
 //
-// Recovery: a panic in a tool or Mechanism is caught at that extension boundary,
+// Recovery: a panic in a tool or Reaction is caught at that extension boundary,
 // converted to an ErrorEvent, and the loop degrades to the quiescent boundary
 // rather than unwinding into the host (ADR 0007 / ADR 0002). Step returns a non-nil
 // error only for loop-level faults the Agent itself cannot localise.
@@ -998,12 +998,12 @@ func (a *Agent) closeUndoGroup() {
 	}
 }
 
-// SetBypass switches Bypass — Mechanisms off, structure on (ADR 0006) — on or off for the rest
-// of the session. It takes effect at the NEXT hook fire: the gate is consulted per catalogued
-// Mechanism per hook point (skipUnderBypass, via skipMechanism), so nothing is rebuilt and a
-// Turn already mid-flight starts honouring the new value at its next hook point. Off-ramp
-// Mechanisms and the structural machinery (Budget, Compaction, the guardrails) are unaffected
-// either way — Bypass has never governed them.
+// SetBypass switches Bypass — the advise and shape Reactions of user or bench origin off, the
+// engine's own builtins and the structure on (ADR 0006, ADR 0076 D9) — on or off for the rest
+// of the session. It takes effect at the NEXT fire: the gate is consulted per armed Reaction per
+// Moment (bypassSkips), so nothing is rebuilt and a Turn already mid-flight starts honouring the
+// new value at its next Moment. The builtins and the structural machinery (Budget, Compaction,
+// the guardrails) are unaffected either way — Bypass has never governed them.
 //
 // It is safe to call from another goroutine (the settings surface) while a Step runs, like
 // SetMode. A sub-agent spawned AFTER the switch inherits the new value (newChildAgent reads the
@@ -1161,9 +1161,9 @@ func (a *Agent) contextFileList() []string {
 // persisted: an override is what a user asked for NOW, so the next session starts from the
 // profile again (ADR 0050).
 //
-// It is configuration rather than a Mechanism, so it holds under Bypass — Bypass turns the
-// Mechanisms off, while how hard the model thinks is a dial ON the request, the same class as the
-// reply ceiling (ADR 0046). And it is an engine door rather than TUI-local state so that any
+// It is configuration rather than a Reaction, so it holds under Bypass — Bypass turns the advise
+// and shape Reactions off, while how hard the model thinks is a dial ON the request, the same class
+// as the reply ceiling (ADR 0046). And it is an engine door rather than TUI-local state so that any
 // Driver reaches it — a bench sweeping the levels, a daemon taking it off an API (ADR 0031).
 //
 // It is safe to call from another goroutine while a Step runs, like SetMode: the wire projection
@@ -1262,7 +1262,7 @@ func (a *Agent) ClearContext() error {
 
 // RestoreSession swaps a prior Session snapshot into this LIVE Agent, replacing its conversation
 // and loop counters (turn index, in-Exchange flag, Exchange boundary, pending input) without a
-// rebuild — so the resolved tools, Mechanisms, and MCP wiring stand. It is the in-TUI resume
+// rebuild — so the resolved tools, Reactions, and MCP wiring stand. It is the in-TUI resume
 // primitive: the live-restore counterpart to construction-time Resume, letting the host switch
 // sessions without relaunching (ADR 0001's snapshot/resume feature, live variant).
 //

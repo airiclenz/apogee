@@ -141,7 +141,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	}
 
 	// The per-model half of the Config, resolved exactly as a rebind resolves it — the system prompt
-	// keys on the model (ADR 0023) and so does the validated Mechanism set (ADR 0016), so a Firing
+	// keys on the model (ADR 0023) and so does the Validated set (ADR 0016), so a Firing
 	// must land in the state a session started on this model and this server would be in.
 	//
 	// The overlay onto the copy is rebindInputs' own (wire_settings.go), spelled here because two of
@@ -386,7 +386,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 
 	// Where this run's delegations go, resolved off the same `sub-agents-server:` key a session
 	// resolves and handed back for the Driver to latch through run.Spec. It is resolved AFTER the
-	// Config above because the named entry's Mechanism catalogue is built out of it (subAgentCatalogue),
+	// Config above because the named entry's server is built against it (newSubAgentServer),
 	// and every way it can fail leaves the run unrouted with a notice — never an error.
 	routing, routingNotice := resolveFiringRouting(ctx, in, keys, cfg)
 	if routingNotice != "" {
@@ -489,9 +489,9 @@ type firingRouting struct {
 // nobody is watching, so refusing to start over a grunt box that is merely down would turn a
 // scheduled run into a silent gap in the record.
 //
-// base is the run's own composed Config, read for exactly what building the named entry's Mechanism
-// catalogue needs — the state roots, with that entry's endpoint and `model:` swapped on so the
-// identity a Library observation is filed under is the SUB-AGENT server's (subAgentCatalogue).
+// base is the run's own composed Config, carried for the reason the session's delegation holder
+// carries it: the per-seat posture it used to build retired with the catalogue itself
+// (ADR 0076 decision 11), and stage 2's per-seat `reactions:` resolver is what needs it back.
 func resolveFiringRouting(
 	ctx context.Context,
 	in firingInputs,
@@ -510,9 +510,9 @@ func resolveFiringRouting(
 		return firingRouting{}, missingNameNotice(name, entries)
 	}
 
-	// The same build a session's startup and its config reloads go through, so a routed Firing arms
-	// the entry's own `mechanisms:` map rather than inheriting the parent's by accident — and refuses
-	// the same defective maps, which here is a notice rather than the session's refusal to load.
+	// The same build a session's startup and its config reloads go through, so a routed Firing is
+	// refused the same defective `mechanisms:` maps a session is — which here is a notice rather
+	// than the session's refusal to load.
 	server, err := newSubAgentServer(entry, base)
 	if err != nil {
 		return firingRouting{}, delegationStateNotice(name, nil, "", err)

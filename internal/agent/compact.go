@@ -98,7 +98,7 @@ const foldStandDownSuffix = " — automatic folding stands down for the rest of 
 
 // autoCompact runs generative Compaction at a quiescent boundary when the conversation history has
 // outgrown its Budget allocation — the automatic, budget-driven trigger (Phase-4 item 9, CONTEXT:
-// Compaction "the default reducer"). It is STRUCTURAL, not a Mechanism (D6): it runs even under
+// Compaction "the default reducer"). It is STRUCTURAL, not a Reaction (D6): it runs even under
 // Bypass (the gate consults only cfg.Context.CompactionEnabled, never cfg.Bypass — a naked model
 // still overflows its window without it, decision 12) and is opted out only by the file-only
 // `auto-compact: false` config key. It runs the same Compact the /compact command drives (protected
@@ -237,7 +237,7 @@ func (a *Agent) shouldAutoCompact() bool {
 	// The placement is what makes it safe: the top of step() is a QUIESCENT Turn boundary — the
 	// previous Turn's tool calls are all answered — so the fold's prefix → summary Replace strands
 	// no tool result and role alternation holds. The main loop keeps the guard, so bench arms
-	// comparing Mechanisms against Bypass are unchanged by this exception.
+	// comparing Reactions against Bypass are unchanged by this exception.
 	if a.turns.inExchange && !a.midExchangeCompaction {
 		return false
 	}
@@ -270,9 +270,9 @@ func (a *Agent) shouldAutoCompact() bool {
 // conservative ceiling the emergency fold renders against
 // (compactUnknownWindowTranscriptTokens): the fold is what this trigger's fold-to-a-summary
 // actually costs, so a history the fold cannot render whole is precisely the history worth folding.
-// The substitution is the ENGINE's, deliberately: the Budget the hooks and Mechanisms see keeps its
+// The substitution is the ENGINE's, deliberately: the Budget the Reactions see keeps its
 // honest zero allocation, so nothing outside this file starts steering on a guessed window
-// (the catalogue's stated posture: never fire on a guess) or shows a fill against a window nobody reported.
+// (the standing posture: never fire on a guess) or shows a fill against a window nobody reported.
 func (a *Agent) historyExceedsAllocation() bool {
 	b := a.budget()
 	if b.History <= 0 {
@@ -333,7 +333,7 @@ var summaryTruncatedMarker = mustPrompt("summary-truncated.txt")
 // nothing changed and the Turn must give up exactly as it does today). It is the overflow-driven
 // Compaction trigger — the reactive twin of autoCompact's estimate-driven one — and, like it, it
 // is STRUCTURAL (D6/ADR 0006): the gates below never consult cfg.Bypass, because a naked model
-// overflows its window just as surely as a Mechanism-laden one.
+// overflows its window just as surely as a Reaction-laden one.
 //
 // It is the ONE fold allowed to run MID-EXCHANGE on the MAIN agent, deliberately amending S2's
 // Exchange-boundary-only rule for this path alone (a child agent lifts that rule for the

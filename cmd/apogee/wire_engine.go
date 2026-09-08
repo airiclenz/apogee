@@ -346,9 +346,10 @@ func (e *lateEngine) SetConfineToWorkspace(confine bool) {
 	}
 }
 
-// SetBypass switches Mechanisms off or back on for the rest of the session (the settings surface's
-// `bypass` key), remembered while unbound for SetMode's reason: the pane can be opened before a
-// server is chosen, and an edit that persisted must not be the only half that happened.
+// SetBypass switches the advise and shape Reactions off or back on for the rest of the session
+// (the settings surface's `bypass` key), remembered while unbound for SetMode's reason: the pane
+// can be opened before a server is chosen, and an edit that persisted must not be the only half
+// that happened.
 func (e *lateEngine) SetBypass(enabled bool) {
 	e.mu.Lock()
 	e.pendingBypass = &enabled

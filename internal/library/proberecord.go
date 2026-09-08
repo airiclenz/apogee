@@ -48,8 +48,8 @@ const (
 	// dirPerm and filePerm scope this package's on-disk state to the owner: a measured
 	// behavioural claim about the user's own endpoint is a private record, so neither the
 	// directory nor the file is group/world readable (the same posture as internal/session).
-	// They lived beside the Library store's writer until the `library` Mechanism retired
-	// (v0.20.0) and moved here with SaveProbeRecord, their one remaining consumer.
+	// They lived beside the Library store's writer until the `library` Mechanism retired in v0.20.0
+	// and moved here with SaveProbeRecord, their one remaining consumer.
 	dirPerm  os.FileMode = 0o700
 	filePerm os.FileMode = 0o600
 )

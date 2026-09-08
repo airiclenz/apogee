@@ -165,7 +165,7 @@ func newDaemonCommand() *cobra.Command {
 func runDaemon(ctx context.Context, opts *config.Options, changed func(string) bool,
 	out, errOut io.Writer, signals <-chan os.Signal) error {
 	// The same resolution a session performs (flag > env > file > default), so a Firing runs against
-	// the server, and with the Mechanisms, a session on this host would (ADR 0031). Notices go to
+	// the server, and with the Reactions, a session on this host would (ADR 0031). Notices go to
 	// stderr; the daemon's own narration goes to stdout, which is what a supervisor journals.
 	if err := config.ApplyConfig(opts, changed, os.Getenv, os.ReadFile, func(msg string) {
 		_, _ = fmt.Fprintln(errOut, msg)
@@ -221,12 +221,12 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 			_, _ = fmt.Fprintln(errOut, notice)
 		}
 	}()
-	// A `mechanisms:` key naming a Mechanism this release RETIRED is tolerated rather than refused
+	// A `mechanisms:` key naming an id this release RETIRED is tolerated rather than refused
 	// — it was valid at the release before the removal — and this is where the daemon says so:
 	// through the log, which is its whole user interface (ADR 0034 decision 10), not through the
 	// stderr a Firing never writes to. It is said once at startup, before the schedules file is
 	// loaded, because config.yaml is read once (ADR 0055): a daemon left running for weeks on a
-	// config still asking for a removed Mechanism would otherwise fire every entry with a posture
+	// config still asking for a removed id would otherwise fire every entry with a posture
 	// nobody was ever told about.
 	for _, notice := range retiredNotices {
 		log.line("%s", notice)

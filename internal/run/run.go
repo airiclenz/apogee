@@ -24,7 +24,7 @@ import (
 var ErrMode = errors.New("apogee: a firing runs in plan or auto mode only")
 
 // Spec is one Firing's complete input. The Config is composed by the CALLER — endpoint,
-// model, workspace, mode, confinement posture, tools, mechanisms — because only the caller
+// model, workspace, mode, confinement posture, tools, Reactions — because only the caller
 // knows the binding a Firing should run against; Once overrides just the delegates that
 // assume a human (see the package doc).
 type Spec struct {

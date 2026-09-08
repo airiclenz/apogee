@@ -188,7 +188,7 @@ type delegationWiring struct {
 	dialectAdvised bool
 	// base is the session's own Config, carried so a re-read `servers:` list assembles a new entry
 	// out of exactly what startup assembled the old one from. Nothing reads it today: the per-seat
-	// posture it used to build — the entry's own Mechanism catalogue — retired with the catalogue
+	// posture it used to build — the entry's own catalogue of rows — retired with the catalogue
 	// itself (ADR 0076 decision 11), and stage 2's per-seat `reactions:` resolver is what needs it
 	// back.
 	base apogee.Config

@@ -681,7 +681,17 @@ NOTES (2026-09-08): the paragraph replacing "a **present** `mechanisms:` map is 
 ```
 **Commit:** `docs(manual,agents): configuration and identity lines describe the Reaction core`
 
-## 22. Code comments: the retired vocabulary leaves the tree
+## 22. Code comments: the retired vocabulary leaves the tree — ✅ DONE (2026-09-08)
+
+NOTES (2026-09-08): the item's `\b`-anchored grep is a floor, not a ceiling — the plural "Mechanisms" and the lowercase "mechanisms" prose sitting inside the same comment blocks were reworded with them, so no half-converted comment is left behind (apogee.go's ADR list, agent/doc.go, state.go, subagent.go, compact.go, prune.go, wire.go, wire_live.go, wire_boot.go, headless.go, daemon.go, run/run.go).
+
+NOTES (2026-09-08): five comments described machinery the earlier items DELETED, so they were reworded to what the code does now rather than merely re-spelled: `internal/config/doc.go`'s package map named `configwrite_mechanism.go` (deleted); `agent.go:460`'s "Mechanism ordering graph (ADR 0003, a constraint cycle is a startup error)" is now the armed Reaction set's validation; `cmd/apogee/wire_firing.go` twice named `subAgentCatalogue` (deleted); `internal/context/doc.go` called History truncation a live off-by-default Mechanism (retired with the catalogue).
+
+NOTES (2026-09-08): `internal/config/config.go` and `cmd/apogee/validatedsets.go` were left untouched. The item's regression guard names them as kept-key territory and states their only `\b`-anchored hits are the four kept-key lines that stay; both files are excluded from the acceptance grep. Their remaining "Mechanisms" plurals all describe the still-parsed `mechanisms:` key, the retired roll or a quoted ADR line.
+
+NOTES (2026-09-08): `internal/floor/` was not opened at all — the header's byte-identity gate holds, and the survey's `toolnames.go:8` permission was dropped with it, as the item's regression guard requires. `internal/profiles/doc.go` also stayed out: the scoped grep returns nothing there.
+
+NOTES (2026-09-08): comment-only — `git diff` contains no added or removed non-comment line.
 
 **What:** Recast at the regression check (2026-09-07). Depends on item 19. Comments only, no behaviour. Prose rule: every comment in non-test Go under `internal/`, `cmd/` and `apogee.go` that describes a **Mechanism**, a **hook point**, an **experimental hook**, `runHooks`, self-regulation or the guards-then-hooks ladder as LIVE behaviour is reworded to Reaction / Moment terms; a comment recording history ("moved out of `internal/mechanisms` in v0.20.0", "retired in v0.20.0") stays. The grep that bounds it: `grep -rn -i "mechanism\|hook point\|experimental hook\|runHooks" --include=*.go internal/ cmd/ apogee.go | grep -v "_test.go\|internal/mechanisms/retired.go"`. Known sites from the survey: `internal/tui` (~30 comment lines: `presenter.go`, `tui.go`, `transcript.go`, `render.go`, `activity.go`, others), `internal/tools/doc.go:242`, `internal/library/doc.go:7-11`, `internal/syntaxcheck/syntaxcheck.go:4-7`, `internal/floor/toolnames.go:8` (comment only — `internal/floor` code stays byte-identical; a comment edit there is permitted ONLY at that line), `internal/run/run.go:27`, `internal/profiles/doc.go:28,37`, `cmd/apogee/{wire_tools,daemon,headless,wire_options,delegation,validatedsets}.go` comment sites, `internal/config/options.go:364-378`.
 

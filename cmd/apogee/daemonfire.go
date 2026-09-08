@@ -98,13 +98,13 @@ type daemonWiring struct {
 }
 
 // newDaemonWiring resolves everything about the HOST that every Firing of this daemon shares, and
-// fails before a clock is started when any of it is wrong: a `mechanisms:` key naming no Mechanism
+// fails before a clock is started when any of it is wrong: a `mechanisms:` key naming no known id
 // is a defect in the config the daemon must report at startup rather than at 3am in a saved record.
 //
 // The retired-id notices come back BESIDE the wiring rather than being printed here, for the reason
 // [daemonWiring.closeConfiner] returns its own: where a daemon's narration goes is the daemon's
 // decision (daemon.go), and a Firing's own stderr is not it. A caller that took the wiring and
-// dropped the lines would arm nothing and say nothing about a `mechanisms:` key naming a Mechanism
+// dropped the lines would arm nothing and say nothing about a `mechanisms:` key naming an id
 // this release retired.
 //
 // The adopted set starts empty. A daemon adopts its first file immediately after this, through the

@@ -55,7 +55,7 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 // entry means no effort key is emitted, so an out-of-the-box request stays byte-identical to the
 // pre-effort loop. It is resolved per request rather than latched at construction, so a mid-run
 // /effort lands on the next request, and it is deliberately blind to Bypass: how hard the model
-// thinks is configuration, not a Mechanism (SetEffortOverride).
+// thinks is configuration, not a Reaction (SetEffortOverride).
 func (a *Agent) resolvedEffort() domain.ThinkingEffort {
 	if override := a.effortOverrideValue(); override != "" {
 		return override

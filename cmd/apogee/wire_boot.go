@@ -120,8 +120,8 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 // and the four facilities above have already settled. It is the first step that can fail, and it
 // fails the run rather than degrading — a prompt that cannot be read is structural configuration.
 //
-// The tool registry and the Mechanism list are deliberately NOT here: both are folded onto the same
-// Config by the live-session assembly below, which is where the MCP connections they depend on are.
+// The tool registry is deliberately NOT here: it is folded onto the same
+// Config by the live-session assembly below, which is where the MCP connections it depends on are.
 func (w *rootWiring) resolveConfig() error {
 	// The system prompt this session STARTS with (ADR 0023), selected for the model as configured
 	// — which on a cold start is no model at all, so this selects the global template and the

@@ -11,7 +11,7 @@ import (
 
 // CapabilityTier is the ordinal summary of what a model can be ASKED to do, derived from the
 // battery's outcomes. It is a REPORTED SIGNAL ONLY (ADR 0021 §2): nothing in the system reads
-// it, no prompt adapts to it, and no Mechanism is gated on it. Adaptive prompt complexity —
+// it, no prompt adapts to it, and no Reaction is gated on it. Adaptive prompt complexity —
 // the transform that would consume it — is a follow-on recorded in the issue register precisely
 // because a model-facing transform owes the catalogue a bench campaign (ADR 0009), and
 // manufacturing a row we cannot yet fill would trade a real design for a placeholder.

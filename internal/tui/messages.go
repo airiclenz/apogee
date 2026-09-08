@@ -123,7 +123,7 @@ type cancelledMsg struct {
 }
 
 // errMsg is the worker's terminal Msg for a loop-level fault Submit or Step could not
-// localise. Recovered tool/Mechanism faults arrive as ErrorEvents through the sink (ADR
+// localise. Recovered tool/Reaction faults arrive as ErrorEvents through the sink (ADR
 // 0007), not here — errMsg is reserved for the rare error the drive loop itself returns.
 type errMsg struct {
 	Err error

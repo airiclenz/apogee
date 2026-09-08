@@ -672,7 +672,7 @@ type Engine interface {
 	// rejected with ErrInputPending.
 	AbortExchange()
 	// RestoreSession swaps a stored snapshot into the LIVE Agent without a rebuild, so tools,
-	// Mechanisms, and MCP wiring stand (the in-TUI resume primitive the /sessions browser drives).
+	// Reactions, and MCP wiring stand (the in-TUI resume primitive the /sessions browser drives).
 	// Like ClearContext it is called only at idle (no worker running) and refuses mid-Exchange
 	// (ErrInputPending); a corrupt or future-version snapshot returns an error and leaves the live
 	// conversation untouched. It does not touch the allow-for-session cache, mode, or confinement.
@@ -760,7 +760,7 @@ type Engine interface {
 	// again; any level in the widened effort vocabulary (domain.ThinkingEffort, ADR 0060) stands
 	// until another call moves it. Like SetMode it is goroutine-safe and takes effect on the NEXT
 	// request, which is exactly why /effort is safe to run while a worker works: the Turn already in
-	// flight is untouched. It is configuration rather than a Mechanism, so it holds under Bypass, and
+	// flight is untouched. It is configuration rather than a Reaction, so it holds under Bypass, and
 	// it is never persisted — a session intent that dies with the session.
 	SetEffortOverride(domain.ThinkingEffort)
 	// ThinkingEffort reports the two layers behind the effort the next request will carry: this
@@ -1053,9 +1053,9 @@ type Options struct {
 	// GenerateTitle names a Session record from a WINDOW of the user's requests, oldest first — the
 	// cosmetic, out-of-band naming completion (ADR 0022 addendum, 2026-07-31). The automatic call at
 	// first-prompt submit passes exactly one prompt, which is not a restriction but an identity: one
-	// is all that exists when it fires. It is NOT a Turn and NOT a Mechanism: it never goes through
+	// is all that exists when it fires. It is NOT a Turn and NOT a Reaction: it never goes through
 	// the Engine (whose single-goroutine contract it would otherwise break, ADR 0011), fires at no
-	// Hook point, emits no Token/Usage event, never enters the transcript, and nothing in the
+	// Moment, emits no Token/Usage event, never enters the transcript, and nothing in the
 	// conversation depends on its result. The binary backs it with its own provider.Client over the
 	// server and model this session is bound to AT CALL TIME, so a `/server` switch or a rebind
 	// carries the naming call with it; the renderer owns only WHEN it fires and whether the answer

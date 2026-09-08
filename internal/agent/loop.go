@@ -542,7 +542,7 @@ const cappedDelegateReplyErrFmt = "delegate's reply hit the output cap apogee se
 // splits by finish reason too (emptyReplyFault): a reply cut off at the engine's own output cap
 // names that cap instead of calling a 20k-token reply "empty". What the fault DOES is unchanged for
 // every reply and every depth — one ErrorEvent from source "loop", then turnFailed — so both splits
-// are messages, not a second control flow: no retry, no salvage of the reasoning, no Mechanism.
+// are messages, not a second control flow: no retry, no salvage of the reasoning, no Reaction.
 func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Response, turnOutcome, string) {
 	fault, faulted := a.replyFault(resp)
 	if !faulted {
@@ -1116,8 +1116,8 @@ func (a *Agent) refBound(refs int) int {
 // and, for a document, how many pages it had. The bound is the CALLER'S (refBound), not this
 // function's: one message's attached skill blocks and @file blocks divide a single allocation
 // between them, so neither kind is bounded generously merely because the other kind carried the
-// rest of the references. The floor is structural (ADR 0006), not a Mechanism:
-// it consults no config, is never disabled under Bypass, and self-regulation cannot withdraw it.
+// rest of the references. The floor is structural (ADR 0006), not a Reaction:
+// it consults no config and is never disabled under Bypass.
 // Like the tool floor it edits the conversation itself — the raw block never reaches history, and
 // so never reaches a snapshot or the rendered transcript. That is the price of a floor every later
 // reducer can rely on, and it is why the emergency fold's keep-the-most-recent-message rule can no
@@ -1307,7 +1307,7 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 // The two ceilings are deliberately separate. Window is the ADVERTISED window, the wall the server
 // enforces; ContextLimit is the WORKING room the session chose to live in — the smaller of the
 // advertised window and the `working-window:` key (ContextConfig.WorkingWindow), which is what the
-// Allocation is computed from and therefore what every reducer and Mechanism reading the Budget
+// Allocation is computed from and therefore what every reducer and Reaction reading the Budget
 // honours. They are the same number on a session that configures no working room, which is every
 // session that existed before the key did. A working window LARGER than the advertised one is
 // ignored rather than refused: the top-level key describes no particular server, so a session that

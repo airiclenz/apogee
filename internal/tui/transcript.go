@@ -472,7 +472,7 @@ func (t *transcript) continuesOpenRun(e entry, at int) bool {
 // isHostNote reports whether e is a host note: a note or a Firing block standing at depth 0 and
 // belonging to no run (addNote, addEphemeralNote, addFiring, and a top-level approval). Those are
 // the entries the program itself puts in the scrollback while the conversation is elsewhere, and
-// the ones place has to step over. A note carrying a run — an approval or a fired Mechanism inside
+// the ones place has to step over. A note carrying a run — an approval or a fired Reaction inside
 // a delegation — is that run's own record and stays exactly where its run puts it.
 func isHostNote(e entry) bool {
 	return e.kind.isHostNote() && e.depth == 0 && e.spawnCallID == ""

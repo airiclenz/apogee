@@ -114,7 +114,7 @@
 // confined call was allowed to WRITE cannot become the program a later unconfined call RUNS.
 // ResolveProgram beside it is that fence's complete form — resolve on PATH, refuse a relative
 // answer, then apply the refusal — and the ONLY exec entry, not merely the newest one: every site
-// resolves through it — the shells, the Mechanism door tools.RunHookSubprocess, MCP stdio, the
+// resolves through it — the shells, the Reaction door tools.RunHookSubprocess, MCP stdio, the
 // settings editor, git, python_exec, run_tests, diagnostics, rung 1's OS opener,
 // the keystore's store probe, internal/config's api-key command — so no site can
 // acquire a program without also acquiring the judgement on it. Exactly two exceptions are

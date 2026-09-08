@@ -35,8 +35,8 @@
 // binary. The assembly around them (the labelled context, the numbering, the elision marker) stays
 // in code.
 //
-// The SESSION naming call is NOT a Mechanism and NOT a Turn (ADR 0022 addendum, 2026-07-31): it
-// fires at no Hook point, never shapes the primary call, emits no events, and nothing breaks when
+// The SESSION naming call is NOT a Reaction and NOT a Turn (ADR 0022 addendum, 2026-07-31): it
+// fires at no Moment, never shapes the primary call, emits no events, and nothing breaks when
 // it fails. (ADR 0068 records its sibling one level down — the naming of a delegation the model
 // left unnamed — which keeps every one of those properties but the last-but-one: it announces its
 // result as a single SubAgentNamedEvent, because every Driver reads its runs off that stream.)
@@ -735,7 +735,7 @@ func FirstLine(s string) string {
 
 // DelegateLabel says WHICH delegation a display is reporting on: the short name the sub_agent call
 // gave it, falling back to the delegated task's first line when it gave none — which is every
-// delegation written before the name argument existed, and every one a Mechanism synthesises
+// delegation written before the name argument existed, and every one a Reaction synthesises
 // (a synthesized call names nothing). Both spellings go through FirstLine, so a name is folded to
 // one line exactly as a task is.
 //

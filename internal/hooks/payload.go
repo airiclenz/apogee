@@ -70,7 +70,7 @@ type Payload struct {
 	// approval-waiting.
 	Scope string `json:"scope,omitempty"`
 
-	// Source is what faulted — a tool name, a Mechanism id, or "loop". error.
+	// Source is what faulted — a tool name, a Reaction id, or "loop". error.
 	Source string `json:"source,omitempty"`
 	// Error is the fault's message. error.
 	Error string `json:"error,omitempty"`

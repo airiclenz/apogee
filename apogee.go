@@ -2,7 +2,7 @@
 //
 // Apogee is a terminal coding agent for small local LLMs that owns the full
 // agentic loop — build request, call the Upstream, parse the response, dispatch
-// tools, apply Mechanisms — and ships as both a product (the cmd/apogee TUI/CLI)
+// tools, fire Reactions — and ships as both a product (the cmd/apogee TUI/CLI)
 // and this reusable library. The TUI, the `apogee headless` CLI, and the
 // external bench (apogee-sim) are all consumers of this one package over the same
 // engine. Everything not in this package (and its sibling public subpackages) is
@@ -22,17 +22,17 @@
 //
 //	ADR 0001  embeddable, steppable, no ambient state; snapshot/resume + hygiene
 //	          (forking is the bench's, composed from these primitives — not exposed)
-//	ADR 0002  Tools are an open extension point; the Mechanism catalogue is curated
-//	ADR 0003  Mechanisms are a constraint-declared registry → deterministic total order
+//	ADR 0002  Tools are an open extension point; the Reaction set is curated
+//	ADR 0003  Reactions are declared where they fire, not a fixed pipeline
 //	ADR 0004  Auto mode requires Confinement, reported as a capability matrix
 //	ADR 0005  sub-agent privileges are always ≤ the parent's
-//	ADR 0006  Bypass mode — the honest "Mechanisms-off" floor
+//	ADR 0006  Bypass mode — the honest floor beneath the Reaction surface
 //	ADR 0007  Step / Turn / quiescent boundary; cancellation; recover-at-boundary
 //	ADR 0008  Tools are stateless across Turns; external effects are non-forkable
 //	ADR 0010  package layout: a domain core, an engine, and this thin root facade
 //
 // Stability: v0.x, no stability promise through Phase 3; v1.0.0 is cut at the end
-// of Phase 3. Events and hook points are additively extensible — a new variant is a
+// of Phase 3. Events and Moments are additively extensible — a new variant is a
 // minor bump (so consumers must treat the Event set and enums as open).
 package apogee
 
@@ -57,7 +57,7 @@ import (
 type Agent = agent.Agent
 
 // New constructs an Agent from cfg, validating the Auto/Confinement gate (ADR 0004)
-// and the Mechanism ordering graph (ADR 0003) before returning a ready-to-Step Agent.
+// and the armed Reaction set (ADR 0076) before returning a ready-to-Step Agent.
 //
 // The Agent it returns records undo in memory, for this process only (ADR 0051). A Driver that
 // wants `/undo` to survive a relaunch — and to cover subprocess and MCP writes — opens the
@@ -77,9 +77,8 @@ func Resume(cfg Config, snap Session) (*Agent, error) { return agent.Resume(cfg,
 
 // RebindSpec carries the per-model bindings Agent.Rebind swaps in when the Upstream starts
 // serving a different model — the wire model id, its system-prompt template, its context
-// window, the Mechanism set resolved for it, and its Model profile (ADR 0044). The host
-// computes it whole and applies it at a quiescent boundary. See internal/agent for the
-// contract.
+// window and its Model profile (ADR 0044). The host computes it whole and applies it at a
+// quiescent boundary. See internal/agent for the contract.
 type RebindSpec = agent.RebindSpec
 
 // UpstreamSpec carries the new Upstream target Agent.SwitchUpstream moves a session to — the
@@ -90,7 +89,7 @@ type UpstreamSpec = agent.UpstreamSpec
 
 // DelegationTarget carries the Sub-agent server every delegation routes to — its endpoint, key,
 // model, context window, Parallel-agents cap, resolved Model profile, the effort dialect it reads
-// a thinking-effort intent in, and the Bypass/Mechanisms posture its delegations run with
+// a thinking-effort intent in, and the Bypass posture its delegations run with
 // (ADR 0045). The host resolves it whole from its own discovery
 // and latches it with Agent.SetDelegationTarget, which is never idle-gated; nil clears it and
 // delegations fall back to this session's own Upstream. See internal/agent for the contract.
@@ -114,7 +113,7 @@ const SeatFallbackNote = agent.SeatFallbackNote
 // DelegateReportBlock is the engine-owned standing block every DELEGATED agent carries on its
 // standing system message — a child is told that the agent waiting on it receives only its final
 // reply, and is asked to report what it found, changed and left unfinished by path:line. It has no
-// config key and no Mechanism gate: it is on under Bypass, at every depth above 0, routed and
+// config key and no Reaction gate: it is on under Bypass, at every depth above 0, routed and
 // unrouted alike. Re-exported so a Driver can assert the text its model reads without re-typing
 // it. See internal/agent for the contract.
 const DelegateReportBlock = agent.DelegateReportBlock

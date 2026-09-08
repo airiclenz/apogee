@@ -125,8 +125,8 @@ type Config struct {
 
 	// Reactions are the Reactions armed BESIDE the engine's own builtins (ADR 0076 D1): the
 	// seven Floor guards fire first at every seam, then these, in registration order. A host
-	// arms a Go reaction here to observe or shape a Turn without touching the engine — which is
-	// what the bench does with an experimental hook today.
+	// arms a Go reaction here to observe or shape a Turn without touching the engine — the door
+	// that replaced the bench's experimental hook (ADR 0076).
 	//
 	// Each entry must pass Reaction.Validate at construction, and no entry may reuse a builtin's
 	// ID or another entry's: the ReactionFiredEvent, the identity projector and the provenance

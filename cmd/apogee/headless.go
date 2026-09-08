@@ -517,7 +517,7 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	}
 
 	// The same resolution a session performs (flag > env > file > default), so a headless run
-	// talks to the server, and runs with the Mechanisms, a session on this host would.
+	// talks to the server, and runs with the Reactions, a session on this host would.
 	if err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 		return run.Result{}, notStarted(err)
 	}
@@ -694,9 +694,9 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	if err != nil {
 		return run.Result{}, notStarted(err)
 	}
-	// A key naming a RETIRED Mechanism is tolerated rather than refused — it was valid at the
+	// A key naming a RETIRED id is tolerated rather than refused — it was valid at the
 	// release before the removal — and this is where this Driver says so. Without the line the run
-	// arms nothing and explains nothing: a script whose config still asks for a removed Mechanism
+	// arms nothing and explains nothing: a script whose config still asks for a removed id
 	// would keep paying for runs that quietly differ from the ones it was tuned on. It goes to
 	// stderr, beside the plaintext-key and confinement notices above, because stdout is the
 	// model's answer and nothing else.
@@ -1191,7 +1191,7 @@ func headlessTokens(n int) string {
 
 // headlessSubAgentTarget says WHICH delegation a sub-agent line is reporting on: the short name the
 // call gave it, falling back to the delegated task's first line when it gave none — which is every
-// delegation written before the name argument existed, and every one a Mechanism synthesises. The
+// delegation written before the name argument existed, and every one a Reaction synthesises. The
 // choice itself is title.DelegateLabel, the one rule every Driver's delegation display asks; this
 // Driver has no run header to paint, and still names a child exactly as the one that does.
 //

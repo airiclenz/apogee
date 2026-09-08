@@ -2,9 +2,9 @@
 // path implies and reports unambiguous breakage. It registers nothing, holds no package state,
 // decides nothing about the agent loop, and imports only the standard library — each caller
 // decides what a verdict means. It lived as internal/mechanisms/syntaxengine.go (and
-// syntaxcheck.go before ADR 0043) while the syntax Mechanism was its only consumer; it moved out
-// of internal/mechanisms so a consumer elsewhere can reach the checker without importing the
-// Mechanism registry.
+// syntaxcheck.go before ADR 0043) while the syntax check was a catalogued row; it moved out
+// of internal/mechanisms so a consumer elsewhere can reach the checker without importing that
+// package.
 package syntaxcheck
 
 import (

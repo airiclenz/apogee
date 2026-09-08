@@ -21,7 +21,7 @@ import (
 // asked; a bare /rename asked for later reads a bounded window of the session's user side instead
 // (runRename), so a session that moved on to another task can be named for where it ended up.
 //
-// The call is COSMETIC. It is not a Turn and not a Mechanism: it fires at no Hook point, never
+// The call is COSMETIC. It is not a Turn and not a Reaction: it fires at no Moment, never
 // shapes the primary call, never reaches the Engine (whose single-goroutine contract it would
 // otherwise break — ADR 0011), emits no Token/Usage event, enters no transcript entry, and moves no
 // gauge. Nothing in the conversation depends on it, which is exactly why every failure path here is

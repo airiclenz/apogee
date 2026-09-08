@@ -5,8 +5,8 @@
 // A Hook is strictly one-way. Nothing it prints, returns or answers reaches the model, the
 // conversation or the Session record, and it can neither veto nor delay the loop: the package
 // decorates a domain.EventSink, so Emit returns nothing and there is no seam through which a
-// verdict could travel back. It is NOT a Mechanism and fires at no seam: its events ARE the five
-// notice Moments of the Reaction core (ADR 0076) — it runs after the fact, on the user's own
+// verdict could travel back. It is not a seam Reaction and fires at no seam: its events ARE the
+// five notice Moments of the Reaction core (ADR 0076) — it runs after the fact, on the user's own
 // machine, outside confinement, as the user's config rather than a model action.
 //
 // One direction: this package imports internal/domain for the events it reads and

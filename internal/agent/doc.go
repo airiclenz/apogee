@@ -1,6 +1,6 @@
 // Package agent is the embeddable agent loop: it builds requests, calls the
-// Upstream, parses responses, dispatches tools, and applies Mechanisms at the
-// loop's hook points. It owns the Turn/Step state machine, the serializable
+// Upstream, parses responses, dispatches tools, and fires Reactions at the
+// loop's seam Moments. It owns the Turn/Step state machine, the serializable
 // conversation state, and typed Event emission, and holds no ambient process or
 // filesystem state — every state root is injected via Config. Sub-agent
 // orchestration (privileges ≤ parent) and the Plan / Ask-Before / Auto modes live

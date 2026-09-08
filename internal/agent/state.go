@@ -46,9 +46,9 @@ import (
 // and an older binary reading a newer snapshot preserves it as an unknown wire field and
 // writes it back untouched (domain.Message's Extra passthrough).
 //
-// The live delegates (Approver, Confiner, EventSink), the resolved tool/Mechanism
-// registries, and the allow-for-session approval cache are deliberately NOT serialized:
-// Resume re-supplies the delegates and registries afresh (ADR 0001), and a resumed Session
+// The live delegates (Approver, Confiner, EventSink), the resolved tool registry and
+// Reaction set, and the allow-for-session approval cache are deliberately NOT serialized:
+// Resume re-supplies the delegates and the sets afresh (ADR 0001), and a resumed Session
 // re-confirms allow-for-session grants rather than silently carrying a prior process's write
 // authorizations — the safer default for a human-in-the-loop gate. This is v1; a later schema
 // that needs the cache adds it under a new SessionVersion.

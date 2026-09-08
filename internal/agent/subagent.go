@@ -154,8 +154,8 @@ const (
 
 // parseDelegationSeat resolves the OPTIONAL `run_on` a sub_agent call may carry into the seat the
 // spawn is built for. The empty string is the absent ask and the only value the plain tool variant
-// can produce, so every call made against a schema without `run_on` — and every call the
-// Mechanisms synthesise — resolves to seatConfigured.
+// can produce, so every call made against a schema without `run_on` — and every call a
+// Reaction synthesises — resolves to seatConfigured.
 //
 // Anything else is refused rather than folded into the default: the two spellings are published in
 // the schema's own enum, so a third value is a model that read the menu wrong, and answering it
@@ -305,7 +305,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // which prompt and which cap the reply is cleaned to are the host's (ADR 0031, wire-silent engine)
 // — the sanitiser is the only shared piece, because a name that broke a status line would be the
 // engine's problem however it was produced. Config.Bypass is never consulted: naming is not a
-// Mechanism, so the Bypass floor has nothing to say about it (ADR 0022 addendum).
+// Reaction, so the Bypass floor has nothing to say about it (ADR 0022 addendum).
 //
 // Every failure is silent by contract: an error, a reply with nothing usable in it, or a name that
 // arrives after the run has been reported all leave the delegation wearing the task's first line,
@@ -466,20 +466,19 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 // SAME Upstream responder and EventSink" — and ADR 0045 reverses exactly that clause for the
 // Upstream half: when a Delegation target is LATCHED the spawn is ROUTED, and the child dials the
 // Sub-agent server on a provider client of its own, against that server's model, context window
-// (the parent's still, when the target names none) and model profile, with the Bypass and Mechanism
-// posture the flagged entry carries. With NO target
+// (the parent's still, when the target names none) and model profile, with the Bypass posture
+// the flagged entry carries. With NO target
 // latched — nothing flagged, the server unreachable, no model bound there — the child takes the
 // parent's Upstream verbatim, which is what every delegation did before routing existed, so the
 // fallback is not a degraded mode but the original one (ADR 0045 §4). Routing never widens
 // privilege: the Mode, Approver, Confiner, blast radius and tool bounds above are the parent's
-// whichever server answers, and only the two POSTURE keys ADR 0045 §2 puts on the flagged entry —
-// Bypass and the Mechanism catalogue, neither of which gates a tool — may differ, and only because
-// the host was configured to say so.
+// whichever server answers, and only the POSTURE key ADR 0045 §2 puts on the flagged entry —
+// Bypass, which gates no tool — may differ, and only because the host was configured to say so.
 //
 // spawnCallID is the id of the sub_agent tool call being served — the child's RUN IDENTITY,
 // stamped on every Event it emits (domain.EventBase.CallID). It is what tells one delegated
 // stream from another once siblings share a depth (ADR 0039), so it is threaded at
-// construction rather than at each emission: the child's own tools, Mechanisms and nested
+// construction rather than at each emission: the child's own tools, Reactions and nested
 // delegations all emit through its base() and inherit it for free.
 //
 // task is that same call's delegated task — the child's identity in WORDS rather than in ids, and
@@ -690,7 +689,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// delegation is ONE Exchange from its first Turn to its report, so the boundary the main loop's
 	// trigger waits for never arrives for a child — without this its history simply grows until the
 	// window is blown. Set on EVERY child, routed or not: it is the child's contract, not a
-	// Mechanism and not a per-server posture, so there is no key to disagree about.
+	// Reaction and not a per-server posture, so there is no key to disagree about.
 	child.midExchangeCompaction = true
 	child.callID = spawnCallID
 	// The Console privilege key, minted by the registry that compares it rather than taken from

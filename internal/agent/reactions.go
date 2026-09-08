@@ -456,7 +456,7 @@ func armReactions(builtins []armedReaction, reactions []domain.Reaction) ([]arme
 
 // inheritedReactions is the Reactions a sub-agent inherits from this set: all of them, minus the
 // ones that opted out. Inheritance is the DEFAULT — a zero-value Reaction fires in every child,
-// exactly as an armed Mechanism's membership is inherited unconditionally today (subagent.go) —
+// exactly as an armed Mechanism's membership was inherited before ADR 0076 (subagent.go) —
 // and Reaction.TopLevelOnly is the opt-out, for a reaction that would be wrong or wasteful at
 // depth.
 func inheritedReactions(reactions []domain.Reaction) []domain.Reaction {

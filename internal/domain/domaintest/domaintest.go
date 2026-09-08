@@ -77,7 +77,7 @@ func Call(id, tool string, args any) domain.ToolCall {
 }
 
 // ReadCall is a read_file tool call over path — the read-shaped progress signal the read-counting
-// scans (the empty-response recovery Floor guard, the read-loop Mechanism family) inspect.
+// scans (the empty-response recovery Floor guard, the read-loop Floor guards) inspect.
 func ReadCall(id, path string) domain.ToolCall {
 	return Call(id, "read_file", map[string]string{"path": path})
 }

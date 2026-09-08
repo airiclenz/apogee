@@ -325,7 +325,7 @@ const maxSubprocessErrorExcerptBytes = 256
 
 // RunHookSubprocess runs argv as one subprocess through the SAME funnel every execution tool goes
 // through (runSubprocess) and returns what the command wrote to standard output. It is the door a
-// HOOK spawns through — a Mechanism runs outside the per-call Resolution and carries a
+// REACTION spawns through — a Reaction runs outside the per-call Resolution and carries a
 // domain.SubprocessPermit instead (docs/design/confinement-execution-contract.md §10) — so its
 // subprocess gets every protection a tool's does rather than a hand-rolled exec.Command that has
 // none: the credential scrub (subprocessEnv — neither apogee's own key nor an operator-declared one

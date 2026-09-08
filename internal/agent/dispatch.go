@@ -209,7 +209,7 @@ func (a *Agent) askedSeat(call domain.ToolCall) delegationSeat {
 // inline, so there is no slot accounting across levels and no way for a nested fan-out to hold
 // slots its own children need. It is one rule with two readers — the pool below sizes itself by
 // it through fanOutWidthFor, and buildRequest stamps it onto the hook-facing view
-// (LoopView.ParallelAgents) so a Mechanism synthesizing delegations batches by the same width the
+// (LoopView.ParallelAgents) so a Reaction synthesizing delegations batches by the same width the
 // engine will honour. That second reader is why such a batch needs nothing of its
 // own to follow a routed cap (ADR 0045 §5): its min(cap, remaining) reads the view, the view
 // carries this number, and this number already knows which server the children will run on.
@@ -336,10 +336,10 @@ func (a *Agent) dispatchFanOut(ctx context.Context, turn, width int, calls []dom
 }
 
 // prepareDelegation carries one delegation as far as it can go WITHOUT running a child: it
-// surfaces the ToolCallEvent, runs the pre-tool-exec hooks, and computes the call's Resolution.
-// Everything here touches Agent-wide state (the Mechanism registry, the guardrails, the
-// self-regulation view), which is why it runs on the dispatching goroutine for every call in the
-// group before any child starts.
+// surfaces the ToolCallEvent, fires the pre-tool-exec Moment, and computes the call's Resolution.
+// Everything here touches Agent-wide state (the armed Reactions, the guardrails, the loop view),
+// which is why it runs on the dispatching goroutine for every call in the group before any
+// child starts.
 //
 // One consequence is deliberate and worth naming: siblings are resolved against the SAME
 // guardrail state, so a delegation cannot observe a breaker its sibling tripped. Concurrent
@@ -499,7 +499,7 @@ func (a *Agent) emitSubAgentPhase(
 // the naming goroutine touches no loop state of its own.
 //
 // It is the naming act's whole wire presence: no usage, no tokens, no Turn of its own. The call
-// that produced the name is neither a Mechanism nor an Exchange (ADR 0022 addendum), so nothing
+// that produced the name is neither a Reaction nor an Exchange (ADR 0022 addendum), so nothing
 // else about it belongs on the stream.
 func (a *Agent) emitSubAgentNamed(turn int, callID, name string) {
 	base := a.base(turn)
@@ -1345,7 +1345,7 @@ func pathWithin(abs, root string) bool {
 //
 // The same one-seam property is why the IsError flag is projected onto the committed message
 // here (domain.ToolOutcomeOf): the flag is the only authority on whether a call failed, and it
-// used to die at this line, leaving a history-scanning Mechanism to guess from the result text —
+// used to die at this line, leaving a history-scanning Reaction to guess from the result text —
 // which for a successful read IS a file body, error strings and all. Every route committing a
 // result gets the marker, so the guess is now only ever a legacy-record fallback.
 func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
@@ -1414,8 +1414,8 @@ func (a *Agent) clampToBound(content string, bound int) string {
 // exceed the ENTIRE History allocation is committed to the conversation as the shared elision
 // instead of whole.
 //
-// It is structural, not a Mechanism (ADR 0006's floor): it consults no config, is never disabled
-// under Bypass, and self-regulation cannot withdraw it. The tool-result-cap Floor guard is the
+// It is structural, not a Reaction (ADR 0006's floor): it consults no config and is never
+// disabled under Bypass. The tool-result-cap Floor guard is the
 // tighter working cap above it and cannot substitute for it — the guard caps only the turns BEFORE
 // the most recent tool call, so the freshly appended result (the one that overflows) is exactly the
 // one it never touches. Both are structural now, and the difference is WHAT each edits: the clamp

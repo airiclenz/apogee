@@ -47,7 +47,7 @@ const defaultReserveFraction = 0.20
 // much room each part gets"). SystemPrompt + FileContext + History sum to Window -
 // ResponseReserve, so every field sums to Window exactly. A zero Allocation (every field 0) means
 // the window is unknown — there is no basis to allocate. A consumer then either stays inert (every
-// window-gated Mechanism, which must never steer on a guess) or substitutes its own conservative
+// window-gated Reaction, which must never steer on a guess) or substitutes its own conservative
 // ceiling (the engine's structural bounds — internal/agent, ADR 0018); what it must NOT read it as
 // is "unbounded", which is what wedged an unbudgeted session (audit 2026-08-01).
 type Allocation struct {

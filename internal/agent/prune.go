@@ -12,9 +12,9 @@ import (
 // It is the cheap, NON-generative reducer of the pair, and it runs FIRST at every Turn boundary
 // (loop.go) for exactly that reason: relieving a history of file dumps the model has finished with
 // costs no upstream call, so an Exchange that pruning can rescue never pays for a summary. Like
-// Compaction it is STRUCTURAL rather than a Mechanism (D6, ADR 0006): the gate reads only
+// Compaction it is STRUCTURAL rather than a Reaction (D6, ADR 0006): the gate reads only
 // cfg.Context.PruneToolResults, never cfg.Bypass, because a naked model drowns in its own tool
-// output just as surely as a bench arm with every Mechanism on.
+// output just as surely as a bench arm with every Reaction on.
 //
 // Prefix-cache note (ADR 0023 §6). A prune rewrites COMMITTED history, so the upstream server's
 // prefix cache is invalidated once per prune — the whole reason internal/context prunes on a wide

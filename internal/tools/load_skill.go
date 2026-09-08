@@ -44,7 +44,7 @@ type loadSkillArgs struct {
 // mode, Plan included, which is where a model most wants a procedure before it touches anything.
 // It is NOT an ExternalEffectTool: the catalog is in this process, and there is nothing to stub.
 // It is default-ON and rides the ordinary roster lever (`tools.disabled:` / `tools.enabled:` and a
-// profile's `tools:` axis, ADR 0057); it is not a Mechanism, and Bypass does not touch it.
+// profile's `tools:` axis, ADR 0057); it is not a Reaction, and Bypass does not touch it.
 //
 // A nil SkillLookup means the tool is never registered (builtinTools omits it), so by construction
 // Execute always has a non-nil lookup; the defensive nil-check keeps a hand-built registry that

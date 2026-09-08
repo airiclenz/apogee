@@ -29,7 +29,7 @@ var errEmptyInterjection = errors.New("apogee: interjection is empty")
 // is in flight races the loop's own history writes.
 //
 // The message lands marked domain.Message.Interjected, so the derived Exchange opening —
-// and every Mechanism reading it — does not move: the remark joins the running Exchange's
+// and every Reaction reading it — does not move: the remark joins the running Exchange's
 // body instead of starting a new one (domain.CurrentExchange). It reaches the model on the
 // next Turn's request, after the tool results already in the tail; that user-after-tool
 // shape is legal OpenAI chat but breaks strict Gemma-class templates, an accepted posture

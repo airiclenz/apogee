@@ -7,7 +7,7 @@ package agent
 // and receives only the child's FINAL reply — and asks for that reply in the shape a parent can
 // act on: what was found, what changed, what is unfinished, cited by path:line rather than pasted.
 //
-// It is engine-owned with no config key and no Mechanism gate, wrapUpDirectiveFormat's precedent
+// It is engine-owned with no config key and no Reaction gate, wrapUpDirectiveFormat's precedent
 // (subagent.go): the child reads it as the contract for the reply it owes, so it is on under
 // Bypass, at every depth above 0, routed and unrouted alike, and no workspace can edit it out.
 //
