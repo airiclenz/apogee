@@ -19,6 +19,16 @@ point is a **minor** bump, not a breaking change.
   the exit waits for the record write to land, exactly as a clean quit's flush does. Pinned by a
   driven run that quits with the reply still held on the server. Closes bead `apogee-944`.
 
+- Fixed (tests): **two test surfaces left naming machinery the Reaction core deleted.** `cmd/apogee/settingsedit_test.go`
+  carried a `mechanisms:` case whose comment said an unknown mechanism id is refused by the startup producer; once the
+  `/settings` mechanisms row was retired the key had no settings-table entry at all, so the case passed on the
+  dispatcher's `cannotApply` miss instead and its comment was false. The case is gone (the refusal it invoked is pinned
+  where it belongs, in `internal/mechanisms/retired_test.go` and end-to-end in `cmd/apogee/wire_firing_test.go`), and the
+  test now says what it holds: `TestApplySettingValidatedSetsRideTheRebind`. `internal/agent/hookrun_test.go` outlived the
+  deletion of `hookrun.go` — its body had already been rewritten into the Reaction-cascade matrix — and is now
+  `internal/agent/reactioncascade_test.go` with `TestHookCascade` renamed `TestReactionCascade`. Closes beads
+  `apogee-ta5` and `apogee-tsx`.
+
 - Fixed (tests): **the Event-lines golden no longer fails on the length of its own temp directory.**
   `standing_tokens` is `ceil(len(standingSystem())/ratio)`, and the standing prompt spells the run's
   workspace and scratch dir — so although the golden redacts the temp PATH, the path's LENGTH stayed

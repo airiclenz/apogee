@@ -207,11 +207,11 @@ func hookPanicBooked(events []domain.Event, id string) bool {
 	return false
 }
 
-// TestHookCascade is the five-Moment × five-scenario matrix of the Reaction dispatcher: at every
+// TestReactionCascade is the five-Moment × five-scenario matrix of the Reaction dispatcher: at every
 // seam Moment, booking follows the acted probe and nothing else, a probe that reports acting
 // through its Outcome is booked on every invocation, a panic is contained the same way
 // everywhere, and Bypass drops a shape-class Reaction before it is ever invoked.
-func TestHookCascade(t *testing.T) {
+func TestReactionCascade(t *testing.T) {
 	cells := []struct {
 		name string
 		run  func(t *testing.T, m domain.Moment)

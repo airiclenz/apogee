@@ -4,12 +4,12 @@ package main
 //
 // Some keys the settings pane will not write on their row — a block whose shape no row can express, or a
 // value another command owns. `externallyEdited` in settingsrows.go states that set once as a predicate:
-// read-only, minus the confinement pair (`/confine`) and `mechanisms:` (its own toggle list). The pane edits
-// every one of them by handing the human the file itself, opened in their own editor on that key's line, and
-// re-reading it when they come back. Both halves are the binary's, for the reason every other settings seam is
-// (ADR 0011's thin renderer): where the config lives, which line a key sits on, which editor this
-// environment names and what the file's new text RESOLVES to are all the schema's business, and the
-// renderer that runs the command holds none of it.
+// read-only, minus the confinement pair (`/confine`). The pane edits every one of them by handing the human
+// the file itself, opened in their own editor on that key's line, and re-reading it when they come back.
+// Both halves are the binary's, for the reason every other settings seam is (ADR 0011's thin renderer):
+// where the config lives, which line a key sits on, which editor this environment names and what the file's
+// new text RESOLVES to are all the schema's business, and the renderer that runs the command holds none of
+// it.
 //
 // What crosses the seam is an argv and how to start it on the way out, and a list of changed keys on
 // the way back — no paths, no YAML, no precedence. Applying those keys is deliberately NOT here: the pane routes each

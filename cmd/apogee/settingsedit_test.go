@@ -386,10 +386,10 @@ func TestApplySettingServersInstallsTheReReadList(t *testing.T) {
 	}
 }
 
-// `mechanisms:` and `validated-sets:` are inputs to the per-model resolution rather than values the
-// engine holds, so both land in the holder and are committed by the rebind — the one door a model
-// change and a config change share.
-func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
+// `validated-sets:` is an input to the per-model resolution rather than a value the engine holds, so
+// it lands in the holder and is committed by the rebind — the one door a model change and a config
+// change share.
+func TestApplySettingValidatedSetsRideTheRebind(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
@@ -428,16 +428,6 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 	}
 	if len(probe.calls) != 2 {
 		t.Errorf("rebind drives = %+v, want the alias edit to ride the rebind too", probe.calls)
-	}
-
-	// A `mechanisms:` block naming an id this build does not have is refused by the startup producer,
-	// before it can replace a list that arms something.
-	writeSettingsFixture(t, path, "mechanisms:\n  no-such-mechanism: true\n")
-	if _, err := apply("mechanisms", "1 mechanism"); err == nil {
-		t.Fatal("apply of an unknown mechanism id: want the refusal, got none")
-	}
-	if len(probe.calls) != 2 {
-		t.Errorf("rebind drives = %+v, want no drive for a block that never installed", probe.calls)
 	}
 }
 
