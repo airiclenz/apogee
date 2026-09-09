@@ -176,9 +176,9 @@ func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "go"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
-	a.appendToolResult(0, domain.ToolResult{CallID: "c1", Content: between})
+	a.appendToolResult(0, domain.ToolResult{CallID: "c1", Content: between}, nil)
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "lookup"}}})
-	a.appendToolResult(0, domain.ToolResult{CallID: "c2", Content: "small"})
+	a.appendToolResult(0, domain.ToolResult{CallID: "c2", Content: "small"}, nil)
 
 	if got := a.conv.At(2).Content; got != between {
 		t.Errorf("the floor clamped a result under its threshold: %d chars committed, want the whole %d", len(got), len(between))
@@ -218,9 +218,9 @@ func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
 	between := numberedLines(200)
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "go"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
-	a.appendToolResult(0, domain.ToolResult{CallID: "c1", Content: between})
+	a.appendToolResult(0, domain.ToolResult{CallID: "c1", Content: between}, nil)
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "lookup"}}})
-	a.appendToolResult(0, domain.ToolResult{CallID: "c2", Content: "small"})
+	a.appendToolResult(0, domain.ToolResult{CallID: "c2", Content: "small"}, nil)
 
 	req, _ := a.buildRequest(0)
 	firePreRequest(t, a, req)

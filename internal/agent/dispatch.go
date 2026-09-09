@@ -260,7 +260,7 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 		if _, err := a.fire(ctx, domain.MomentPreToolExec, domain.NewToolCallEdit(&call)); err != nil {
 			// A pre-tool-exec reaction faulted: skip the call with an error result rather than
 			// running it against a half-applied decision.
-			a.appendToolResult(turn, errorToolResult(call.ID, "pre-tool-exec reaction failed"))
+			a.appendToolResult(turn, errorToolResult(call.ID, "pre-tool-exec reaction failed"), nil)
 			continue
 		}
 
@@ -269,8 +269,8 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 			return dispatchCancelled
 		}
 
-		a.firePostToolResult(ctx, call, &result)
-		a.appendToolResult(turn, result)
+		advised := a.firePostToolResult(ctx, call, &result)
+		a.appendToolResult(turn, result, advised)
 	}
 	return dispatchDone
 }
@@ -515,7 +515,7 @@ func (a *Agent) emitSubAgentNamed(turn int, callID, name string) {
 // completion order.
 func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot) {
 	if slot.hookFailed {
-		a.appendToolResult(turn, slot.result)
+		a.appendToolResult(turn, slot.result, nil)
 		return
 	}
 	if slot.run {
@@ -523,8 +523,8 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 		// verdict. A refused slot was already recorded by executeRefuse in the prepare phase.
 		a.recordExecuted(turn, slot.call, slot.verdict.auditDecision, slot.verdict.auditReason, slot.result)
 	}
-	a.firePostToolResult(ctx, slot.call, &slot.result)
-	a.appendToolResult(turn, slot.result)
+	advised := a.firePostToolResult(ctx, slot.call, &slot.result)
+	a.appendToolResult(turn, slot.result, advised)
 }
 
 // resolveAndExecute gathers the facts one tool call is decided from — the registry lookup, the
@@ -1393,14 +1393,30 @@ func pathWithin(abs, root string) bool {
 // used to die at this line, leaving a history-scanning Reaction to guess from the result text —
 // which for a successful read IS a file body, error strings and all. Every route committing a
 // result gets the marker, so the guess is now only ever a legacy-record fallback.
-func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
+//
+// advised is the post-tool-result cascade's advise slot (reactions.go) — the spans this result's
+// message carries as a fenced trailer, nil for the two routes that commit a result no cascade ran
+// on (a pre-tool-exec fault, a hook-failed delegation slot).
+func (a *Agent) appendToolResult(turn int, result domain.ToolResult, advised []advice) {
 	result.Content = a.clampToolResult(result.Content)
-	a.conv.Append(domain.Message{
+	msg := domain.Message{
 		Role:        domain.RoleTool,
 		Content:     result.Content,
 		ToolCallID:  result.CallID,
 		ToolOutcome: domain.ToolOutcomeOf(result.IsError),
-	})
+	}
+	// The advise slot the post-tool-result cascade filled, rendered in ladder order AFTER the
+	// clamp: a trailer is guidance for the next Step, so it must not be what the structural floor
+	// elides, and its offset must measure the content as committed. WithAdvice stamps each span's
+	// Offset from the message as it stands — past the clamp and past every earlier fence — so the
+	// ledger keeps pointing at its own fence however many spans land.
+	for _, adv := range advised {
+		msg = msg.WithAdvice(adv.span, adv.text)
+	}
+	a.conv.Append(msg)
+	// The event carries the tool's own result, never the trailer: advice is a model-facing
+	// injection, so what an observer records, the transcript shows and the session record keeps is
+	// the output the tool actually produced.
 	a.cfg.Events.Emit(domain.ToolResultEvent{EventBase: a.base(turn), Result: result})
 }
 

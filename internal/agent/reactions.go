@@ -11,7 +11,7 @@ import (
 
 // The Reaction dispatcher (ADR 0076 D1; docs/design/reaction-core-greenfield.md §9.2).
 //
-// One ladder runs at every seam Moment, and fire below is the whole of it: the engine's own
+// One ladder runs at every seam Moment, and fireCascade below is the whole of it: the engine's own
 // builtins first — the seven Floor guards (builtins.go) — then the Reactions the host armed on
 // Config.Reactions, in registration order. Each reaction is skipped or run, bracketed by the
 // working value's Revision counter, booked when it ACTED, and reported as one
@@ -43,14 +43,16 @@ import (
 //     leg, while one it cannot act on (budget spent) lets the armed leg run on the untouched
 //     response — today's fall-through in loop.go.
 
-// The two action labels the dispatcher itself supplies. firedAction is what a firing is booked
-// under at the four Moments with no action vocabulary of their own; actionDefer labels a firing
-// that scheduled a correction into the NEXT request. Together with the guard consts
+// The three action labels the dispatcher itself supplies. firedAction is what a firing is booked
+// under at the Moments with no action vocabulary of their own; actionDefer labels a firing
+// that scheduled a correction into the NEXT request; actionAdvise labels one that handed the model
+// a fenced trailer on the closing tool result. Together with the guard consts
 // (floorguards.go) they are one vocabulary, whoever fired, because a reader of a
 // ReactionFiredEvent should not have to know which leg the reaction came from to read what it did.
 const (
-	firedAction = "fired"
-	actionDefer = "defer"
+	firedAction  = "fired"
+	actionDefer  = "defer"
+	actionAdvise = "advise"
 )
 
 // errReactionSeam reports a dispatch the ENGINE got wrong — a payload that is not the Moment's
@@ -68,6 +70,17 @@ type armedReaction struct {
 	// action labels a builtin's firing. Empty for an armed Reaction — reactionAction derives
 	// the label from what the Outcome says it did.
 	action string
+}
+
+// advice is one advise Reaction's contribution at the tool-result Moment: the ledger row the
+// injection is attributed through and the capped text that lands inside its fence. The two travel
+// together because neither is readable alone — a span with no text names nothing, and text with no
+// span cannot be fenced, since every word of the fence header is derived from the span
+// (domain.RenderAdvice). The dispatcher collects them in ladder order; the seam that commits the
+// tool result renders them onto it (appendToolResult, dispatch.go).
+type advice struct {
+	span domain.AdviceSpan
+	text string
 }
 
 // revisioned is all the dispatcher needs of a seam payload: the working value's mutation
@@ -92,9 +105,10 @@ type seamPayload struct {
 	retryable bool
 }
 
-// fire runs the Reaction cascade for Moment m against payload and reports what the cascade did,
-// as one Outcome for the seam to act on. It is the engine's ONLY dispatcher: every seam calls it
-// and nothing else fires a reaction.
+// fireCascade runs the Reaction cascade for Moment m against payload and reports what the cascade
+// did — one Outcome for the seam to act on, plus the advise slot below. It is the engine's ONLY
+// dispatcher: every seam reaches it, through fire or firePostToolResult, and nothing else fires a
+// reaction.
 //
 // Two legs run in turn — the builtins, then the armed Reactions. A post-response Retry the loop
 // WILL act on ends the cascade where it fires: the Turn is about to re-stream, so the leg below
@@ -110,12 +124,17 @@ type seamPayload struct {
 // seam-closing notices are built on. The one dispatch that emits nothing is the engine bug
 // seamPayload refuses below: no ladder ran, the Moment may be no seam at all, and the payload is
 // by definition not the one the event promises to carry.
-func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, error) {
+//
+// The second return is the ADVISE SLOT (ADR 0076 D6): the spans the cascade's advise reactions
+// contributed, in ladder order, for the seam to render onto the closing tool result. It is empty
+// at every Moment but post-tool-result, and empty there too under Bypass, which switches advise
+// off before a handler is ever called.
+func (a *Agent) fireCascade(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, []advice, error) {
 	turn := a.turns.index
 
 	seam, err := a.seamPayload(turn, m, payload)
 	if err != nil {
-		return domain.Outcome{}, err
+		return domain.Outcome{}, nil, err
 	}
 
 	// Post-response is the ONE seam whose reactions may spawn a subprocess, so the ladder's
@@ -127,6 +146,7 @@ func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.
 	}
 
 	var result domain.Outcome
+	var collected []advice
 
 	// The seam closes exactly ONCE per fire call, and it closes whatever the cascade did: the
 	// deferred emit below covers the ordinary return, the retry hand-back, and an error that
@@ -146,20 +166,28 @@ func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.
 		})
 	}()
 
-	retried, err := a.fireLeg(ctx, turn, m, seam, a.builtinLadder(), true, &result, &fired)
+	retried, err := a.fireLeg(ctx, turn, m, seam, a.builtinLadder(), true, &result, &fired, &collected)
 	if err != nil {
-		return domain.Outcome{}, err
+		return domain.Outcome{}, nil, err
 	}
 	if retried && seam.retryable {
 		// The loop will re-stream this Turn with the builtin's correction, so the leg below
 		// never sees this response at all — it will see the retried one.
-		return result, nil
+		return result, collected, nil
 	}
 
-	if _, err := a.fireLeg(ctx, turn, m, seam, a.armed, false, &result, &fired); err != nil {
-		return domain.Outcome{}, err
+	if _, err := a.fireLeg(ctx, turn, m, seam, a.armed, false, &result, &fired, &collected); err != nil {
+		return domain.Outcome{}, nil, err
 	}
-	return result, nil
+	return result, collected, nil
+}
+
+// fire runs the cascade for a seam that carries no advise slot and reports the Outcome alone.
+// Four of the five Moments are such seams: only the closing tool result has somewhere to put a
+// trailer, so only firePostToolResult calls fireCascade directly.
+func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, error) {
+	out, _, err := a.fireCascade(ctx, m, payload)
+	return out, err
 }
 
 // builtinLadder snapshots the builtin leg for one cascade. The slice is the enable set — only
@@ -179,11 +207,17 @@ func (a *Agent) builtinLadder() []armedReaction {
 // It is the ONE seam that swallows the cascade's error rather than dispositioning it: a fault there
 // has already surfaced as its own event, the tool has already run, and the loop simply commits the
 // result as it stands — so there is nothing left for the caller to decide.
-func (a *Agent) firePostToolResult(ctx context.Context, call domain.ToolCall, result *domain.ToolResult) {
-	_, _ = a.fire(ctx, domain.MomentPostToolResult, domain.ToolResultMoment{
+//
+// It returns the advise slot the cascade filled, in ladder order, for the caller to hand to
+// appendToolResult: the trailer is rendered onto the committed MESSAGE rather than onto the
+// ToolResult, so what an observer, the audit record and the session record carry is the tool's own
+// output and nothing else.
+func (a *Agent) firePostToolResult(ctx context.Context, call domain.ToolCall, result *domain.ToolResult) []advice {
+	_, advised, _ := a.fireCascade(ctx, domain.MomentPostToolResult, domain.ToolResultMoment{
 		Call: call,
 		Edit: domain.NewToolResultEdit(result),
 	})
+	return advised
 }
 
 // fireLeg runs one leg of a Moment's cascade and reports whether a post-response Retry stopped
@@ -198,6 +232,7 @@ func (a *Agent) fireLeg(
 	builtin bool,
 	result *domain.Outcome,
 	fired *[]string,
+	advised *[]advice,
 ) (bool, error) {
 	for _, r := range leg {
 		if !slices.Contains(r.spec.On, m) {
@@ -213,6 +248,14 @@ func (a *Agent) fireLeg(
 		}
 		if !acted(out) {
 			continue
+		}
+
+		// An advise injection is collected before it is booked, so the firing's Detail is the
+		// CAPPED text the model will read rather than whatever the handler returned — what
+		// apogee-sim hashes to attribute an effect is then the same string the fence carries.
+		if adv, ok := adviceOf(turn, m, r.spec, out); ok {
+			*advised = append(*advised, adv)
+			out.Detail = adv.text
 		}
 
 		a.bookFiring(turn, m, r, out, result, fired)
@@ -301,7 +344,7 @@ func (a *Agent) bookFiring(
 
 	label := r.action
 	if label == "" {
-		label = reactionAction(m, out)
+		label = reactionAction(m, r.spec, out)
 	}
 	*fired = append(*fired, r.spec.ID)
 	a.cfg.Events.Emit(domain.ReactionFiredEvent{
@@ -318,15 +361,52 @@ func (a *Agent) bookFiring(
 // re-stream, carried a correction, deferred one, or edited the working value — the last term
 // covering both a handler that said so and a revision the bracket saw move. Everything else is
 // an inspect-and-do-nothing invocation, which is not a firing.
+//
+// "Carried a correction" is what makes an advise reaction a firing at the tool-result seam: its
+// Inject is the trailer text and no Retry accompanies it there, so the Inject term alone books it.
 func acted(out domain.Outcome) bool {
 	return out.Retry || out.Inject != "" || out.Defer != "" || out.Edited
 }
 
+// isAdvice reports whether this ACTED Outcome is an advise injection — the one firing that both
+// books under actionAdvise and contributes a span to the advise slot. All three terms are
+// necessary: the class says the reaction is allowed to speak to the model, the Moment says there
+// is a tool result to speak on, and a non-empty Inject is the text itself. A builtin never
+// satisfies it (every one is class shape-view), so the engine's own leg contributes no advice.
+func isAdvice(m domain.Moment, r domain.Reaction, out domain.Outcome) bool {
+	return m == domain.MomentPostToolResult && r.Class == domain.ClassAdvise && out.Inject != ""
+}
+
+// adviceOf turns one advise firing into the slot entry the tool-result seam renders, and reports
+// whether the firing was one at all. Every field of the ledger row comes from the REACTION and the
+// cascade — id, origin, Moment, Turn — and none from the handler, which is what makes the fence
+// header unforgeable: a handler printing its own "[advice — reaction …]" line lands inside the
+// fence rather than beside it. The text is capped here (domain.CapAdvice), once, so the cap cannot
+// be bypassed by a route that renders a span itself. Offset is left zero: the message stamps it
+// when the fence is appended (domain.Message.WithAdvice).
+func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) (advice, bool) {
+	if !isAdvice(m, r, out) {
+		return advice{}, false
+	}
+	return advice{
+		span: domain.AdviceSpan{
+			Reaction: r.ID,
+			Origin:   r.Origin,
+			Moment:   m,
+			Turn:     turn,
+		},
+		text: domain.CapAdvice(out.Inject),
+	}, true
+}
+
 // reactionAction is the label an ARMED reaction's firing is booked under. Post-response is the
-// one Moment with an action vocabulary of its own, in the precedence the header ratifies; the
-// other four have none, so a firing there is simply "fired". A builtin never reaches here — it
-// carries its own label.
-func reactionAction(m domain.Moment, out domain.Outcome) string {
+// one Moment with an action vocabulary of its own, in the precedence the header ratifies; an
+// advise injection at the tool-result seam is the other named action; the rest have none, so a
+// firing there is simply "fired". A builtin never reaches here — it carries its own label.
+func reactionAction(m domain.Moment, r domain.Reaction, out domain.Outcome) string {
+	if isAdvice(m, r, out) {
+		return actionAdvise
+	}
 	if m != domain.MomentPostResponse {
 		return firedAction
 	}

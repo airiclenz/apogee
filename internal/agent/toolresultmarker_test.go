@@ -24,8 +24,8 @@ func TestAppendToolResultCommitsTheOutcomeMarker(t *testing.T) {
 	// The success carries error-shaped text (a file body quoting an error string) and the failure
 	// carries none, so only the marker can tell them apart — exactly the case text sniffing got
 	// backwards.
-	a.appendToolResult(0, domain.ToolResult{CallID: "ok", Content: "[File: e.go]\nreturn fmt.Errorf(\"error: does not exist\")"})
-	a.appendToolResult(0, domain.ToolResult{CallID: "bad", Content: "gone.go", IsError: true})
+	a.appendToolResult(0, domain.ToolResult{CallID: "ok", Content: "[File: e.go]\nreturn fmt.Errorf(\"error: does not exist\")"}, nil)
+	a.appendToolResult(0, domain.ToolResult{CallID: "bad", Content: "gone.go", IsError: true}, nil)
 
 	if got := a.conv.At(2).ToolOutcome; got != domain.ToolOutcomeSucceeded {
 		t.Errorf("committed IsError:false result carries ToolOutcome %q, want %q", got, domain.ToolOutcomeSucceeded)
@@ -45,7 +45,7 @@ func TestToolOutcomeMarkerSurvivesSnapshotResume(t *testing.T) {
 	}
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "go"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file"}}})
-	a.appendToolResult(0, domain.ToolResult{CallID: "c1", Content: "no such file: gone.go", IsError: true})
+	a.appendToolResult(0, domain.ToolResult{CallID: "c1", Content: "no such file: gone.go", IsError: true}, nil)
 
 	snap, err := a.Snapshot()
 	if err != nil {
