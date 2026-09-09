@@ -99,12 +99,17 @@ func (a *Agent) applyGates(ctx context.Context, turn int, call domain.ToolCall, 
 	return a.gateAsk(verdict, askID, askReason)
 }
 
-// gateReactions is the ladder of gate reactions this Agent runs, in arming order. Bypass is not
-// consulted: it switches off what a reaction says to the MODEL, and a gate speaks to the human
-// about what the model is about to do (ADR 0076 D9).
+// gateReactions is the ladder of gate reactions this Agent runs, in arming order: the
+// construction-time set first, then the live sync lane the user's `reactions:` file arms through
+// SetReactions (armedLadder, reactions.go). Reading the same ladder the seam cascade reads is what
+// keeps one entry's gate and the same entry's advise in one order, and it is read ONCE per fold so
+// a swap landing mid-fold cannot change the list being walked.
+//
+// Bypass is not consulted: it switches off what a reaction says to the MODEL, and a gate speaks to
+// the human about what the model is about to do (ADR 0076 D9).
 func (a *Agent) gateReactions() []domain.Reaction {
 	var gates []domain.Reaction
-	for _, r := range a.armed {
+	for _, r := range a.armedLadder() {
 		if r.spec.Class == domain.ClassGate && slices.Contains(r.spec.On, domain.MomentPreToolExec) {
 			gates = append(gates, r.spec)
 		}

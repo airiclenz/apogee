@@ -216,7 +216,10 @@ go test ./internal/agent/ -run 'TestGate|TestDispatch|TestApprov'
 
 **Commit:** `feat(agent): user gate reactions run as an Approver stage at pre-tool-exec — deny, ask or nothing`
 
-## 8. Agent: `SetReactions` arms the `Sync` lane live
+## 8. Agent: `SetReactions` arms the `Sync` lane live — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the armed leg is joined per cascade by a new `armedLadder` (construction-time `a.armed`, then the live `Generation.Sync`), read once by both `fireCascade` and `gateReactions`, so a swap landing mid-fire cannot lengthen or shorten a ladder already being walked.
+NOTES (2026-09-09): `inheritedReactions` became variadic over lists (`inheritedReactions(a.cfg.Reactions, gen.Sync)`) so a child inherits both armed routes in ladder order without either caller's backing array being written through; the child holds them as its own construction-time set, which is what keeps a later parent swap out of a running child.
 
 **What:** Recast at the regression check (2026-09-09). Depends on items 6, 7. `Agent.SetReactions` (`agent.go:1038`) stores `gen.Sync` beside Floor and Bypass under `genMu`; the armed leg (`reactions.go:159`, `fireLeg`) and `applyGates` iterate the construction-time list (`a.armed`, bench/engine) followed by the generation's Sync list; `Generation()` returns it. `armReactions` (`:473`) stays construction-only. A Sync id colliding with a construction-time id is not checked (a bench arm and a config file never co-exist — writer's call, stated in the doc comment). `inheritedReactions` (`subagent.go:539`) hands children the current Sync list at spawn; a later swap does not reach a running child (same as Floor today). Facade doc for `Generation` updated.
 

@@ -71,6 +71,11 @@ type Agent struct {
 	// whenever its Floor moves. That makes it a live field, guarded by genMu below and replaced
 	// wholesale rather than mutated in place (SetReactions / builtinLadder). armed is fixed at
 	// construction and needs no lock.
+	//
+	// armed is not the WHOLE armed leg any more: the user's `reactions:` file arms its advise and
+	// gate entries LIVE, through the Generation's Sync lane (SetReactions), and the leg a cascade
+	// fires is armed followed by that list (armedLadder). armed stays the construction-time route
+	// alone — the bench arm and the embedder's Config.Reactions.
 	builtins []armedReaction
 	armed    []armedReaction
 
@@ -143,7 +148,7 @@ type Agent struct {
 	// per-field lock could hand a reader a half-swapped generation — exactly what A8 exists to
 	// prevent. Generation.Observe is the RUNNER's and is never held here.
 	genMu sync.RWMutex
-	gen   domain.Generation // live Floor enable set + Bypass; seeded from cfg.Floor/cfg.Bypass, swapped via SetReactions
+	gen   domain.Generation // live Floor enable set + Bypass + the user's sync lane; seeded from cfg.Floor/cfg.Bypass, swapped via SetReactions
 
 	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
 	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
@@ -1017,9 +1022,20 @@ func (a *Agent) closeUndoGroup() {
 // caller moving a single field reads Generation, edits its copy and hands the whole value back,
 // so nothing downstream can observe a state that is half one generation and half the next.
 //
-// gen.Observe is IGNORED here. The observe lane belongs to the Runner, and an agent takes only
-// Floor and Bypass out of a generation (domain.Generation); the Driver hands the SAME value to
-// both, which is what keeps the two halves of one swap in step.
+// gen.Observe is IGNORED here. The observe lane belongs to the Runner, and an agent takes Floor,
+// Bypass and the SYNC lane out of a generation (domain.Generation); the Driver hands the SAME
+// value to both, which is what keeps the two halves of one swap in step.
+//
+// gen.Sync is the user's advise and gate list, and it is TAKEN — this is the seam that arms the
+// sync lane live. It is stored beside Floor and Bypass under the same lock, so a reader never sees
+// one entry's gate armed against another generation's Bypass, and it REPLACES the previous list
+// wholesale: a caller dropping a reaction hands back a Generation without it. The armed leg of a
+// cascade is then the construction-time list (Config.Reactions — the bench and embedder route)
+// followed by this one, in that order (armedLadder, reactions.go). A Sync id that collides with a
+// construction-time id is NOT rejected: the two routes never co-exist in a Driver apogee ships —
+// cmd/apogee arms the user's file through here and never sets Config.Reactions — so the collision
+// this would guard against cannot be configured, and refusing a swap at fire time has nowhere to
+// report the refusal to.
 //
 // The builtin ladder is REBUILT from gen.Floor, because a Floor guard whose boolean is off is
 // absent from the ladder rather than self-skipping at fire time (the enable set, ADR 0076 A8):
@@ -1041,12 +1057,16 @@ func (a *Agent) SetReactions(gen domain.Generation) {
 	if gen.Floor != a.gen.Floor {
 		a.builtins = a.buildBuiltins(gen.Floor)
 	}
-	a.gen.Floor, a.gen.Bypass = gen.Floor, gen.Bypass
+	a.gen.Floor, a.gen.Bypass, a.gen.Sync = gen.Floor, gen.Bypass, gen.Sync
 }
 
-// Generation reports the live Generation this Agent is running — the Floor enable set and Bypass
-// as SetReactions last installed them, seeded at construction from cfg.Floor and cfg.Bypass.
+// Generation reports the live Generation this Agent is running — the Floor enable set, Bypass and
+// the sync lane as SetReactions last installed them, seeded at construction from cfg.Floor and
+// cfg.Bypass with an empty Sync (Config.Reactions is the OTHER route and is not folded in here).
 // Observe is always empty: the agent never holds the observe lane.
+//
+// It is the read half of the read-edit-hand-back idiom SetReactions documents, so a caller moving
+// one field carries the sync lane through untouched.
 func (a *Agent) Generation() domain.Generation {
 	a.genMu.RLock()
 	defer a.genMu.RUnlock()

@@ -564,6 +564,12 @@ type Reaction = domain.Reaction
 // Generation is the whole live shape of the engine at one moment — the Floor enable set, Bypass
 // and the two user lanes, observe and sync — applied as ONE value, so nothing downstream reads a
 // half-swapped state.
+//
+// A Driver hands the SAME value to both halves of the engine, and each takes the lane that is its
+// own: Agent.SetReactions arms Floor, Bypass and Sync — the advise and gate entries the loop runs
+// inline — and ignores Observe, which belongs to the observe Runner. Moving one field means
+// reading Agent.Generation, editing the copy and handing the whole value back, so a swap never
+// silently drops the lane it was not about.
 type Generation = domain.Generation
 
 // ----------------------------------------------------------------------------

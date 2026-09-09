@@ -536,7 +536,16 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// set it will fire, and so a nested delegation inherits what its own parent kept. The
 	// engine's builtins are not carried at all: the child builds its own from its own
 	// Config.Floor, which the LIVE parent value above just seeded.
-	childCfg.Reactions = inheritedReactions(a.cfg.Reactions)
+	//
+	// BOTH armed routes travel: the parent's construction-time set and the LIVE sync lane the
+	// user's `reactions:` file arms through SetReactions, read from the one Generation snapshot
+	// taken above so the child never runs one entry's gate against another generation's Bypass.
+	// They arrive on the child as ONE Config.Reactions, which is the child's own construction-time
+	// route — so a later swap on the parent does not reach a child already running, exactly as a
+	// later Floor swap does not (the sub-agent contract's spawn-time rule). A gate the parent is
+	// running is therefore still asked about every call the child makes, which is what makes an
+	// `ask` on a delegation safe to defer to the child.
+	childCfg.Reactions = inheritedReactions(a.cfg.Reactions, gen.Sync)
 
 	// ROUTING (ADR 0045). The latch is snapshotted ONCE, here, and everything below reads that one
 	// value: a beat landing mid-spawn must never build half a child from each target. A nil

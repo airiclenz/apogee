@@ -182,7 +182,7 @@ func (a *Agent) fireCascade(ctx context.Context, m domain.Moment, payload any) (
 		return result, collected, nil
 	}
 
-	if _, err := a.fireLeg(ctx, turn, m, seam, a.armed, false, &result, &fired, &collected); err != nil {
+	if _, err := a.fireLeg(ctx, turn, m, seam, a.armedLadder(), false, &result, &fired, &collected); err != nil {
 		return domain.Outcome{}, nil, err
 	}
 	return result, collected, nil
@@ -194,6 +194,45 @@ func (a *Agent) fireCascade(ctx context.Context, m domain.Moment, payload any) (
 func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, error) {
 	out, _, err := a.fireCascade(ctx, m, payload)
 	return out, err
+}
+
+// armedLadder snapshots the ARMED leg for one cascade or one gate fold: the construction-time
+// Reactions (Config.Reactions — the bench arm and the embedder's own set, fixed at New) followed
+// by the live Generation's sync lane (the user's `reactions:` file, swapped in by SetReactions).
+// The order is the ladder's: the host's own set is asked first, exactly as it was before the sync
+// lane existed, and the user's file fires after it.
+//
+// The two lists are held apart rather than merged at swap time because they have different
+// lifetimes — one is validated once at construction, the other is replaced whole whenever the
+// settings surface hands over a new Generation — and are joined HERE, once per cascade, so a swap
+// landing mid-fire cannot lengthen or shorten a ladder that is already being walked. The sync
+// entries carry no builtin action label: they are armed Reactions, labelled from the Outcome they
+// return like every other one (armedReaction).
+//
+// The common case allocates nothing: with no sync lane armed the construction-time slice is
+// returned as it stands, which is what every bench arm and every host that never calls
+// SetReactions gets.
+func (a *Agent) armedLadder() []armedReaction {
+	sync := a.syncReactions()
+	if len(sync) == 0 {
+		return a.armed
+	}
+	ladder := make([]armedReaction, 0, len(a.armed)+len(sync))
+	ladder = append(ladder, a.armed...)
+	for _, r := range sync {
+		ladder = append(ladder, armedReaction{spec: r})
+	}
+	return ladder
+}
+
+// syncReactions reads the live sync lane under the lock, so the worker goroutine's per-cascade read
+// is race-free against a settings surface calling SetReactions. It is the ONE read seam for the
+// lane, the sibling of bypassEnabled and builtinLadder; the slice itself is never mutated in
+// place, so the value returned stays valid for the whole cascade that read it.
+func (a *Agent) syncReactions() []domain.Reaction {
+	a.genMu.RLock()
+	defer a.genMu.RUnlock()
+	return a.gen.Sync
 }
 
 // builtinLadder snapshots the builtin leg for one cascade. The slice is the enable set — only
@@ -704,18 +743,28 @@ func armReactions(reactions []domain.Reaction) ([]armedReaction, error) {
 	return armed, nil
 }
 
-// inheritedReactions is the Reactions a sub-agent inherits from this set: all of them, minus the
-// ones that opted out. Inheritance is the DEFAULT — a zero-value Reaction fires in every child,
-// exactly as an armed Mechanism's membership was inherited before ADR 0076 (subagent.go) —
-// and Reaction.TopLevelOnly is the opt-out, for a reaction that would be wrong or wasteful at
-// depth.
-func inheritedReactions(reactions []domain.Reaction) []domain.Reaction {
-	kept := make([]domain.Reaction, 0, len(reactions))
-	for _, r := range reactions {
-		if r.TopLevelOnly {
-			continue
+// inheritedReactions is the Reactions a sub-agent inherits from the parent's armed routes: all of
+// them, minus the ones that opted out. Inheritance is the DEFAULT — a zero-value Reaction fires in
+// every child, exactly as an armed Mechanism's membership was inherited before ADR 0076
+// (subagent.go) — and Reaction.TopLevelOnly is the opt-out, for a reaction that would be wrong or
+// wasteful at depth.
+//
+// It takes the routes as SEPARATE lists — the parent's construction-time Config.Reactions and its
+// live Generation.Sync — and joins them in ladder order into one fresh slice, so the child fires
+// them in the order the parent does and neither caller's backing array can be written through.
+func inheritedReactions(lists ...[]domain.Reaction) []domain.Reaction {
+	total := 0
+	for _, list := range lists {
+		total += len(list)
+	}
+	kept := make([]domain.Reaction, 0, total)
+	for _, list := range lists {
+		for _, r := range list {
+			if r.TopLevelOnly {
+				continue
+			}
+			kept = append(kept, r)
 		}
-		kept = append(kept, r)
 	}
 	if len(kept) == 0 {
 		return nil
