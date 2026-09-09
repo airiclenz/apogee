@@ -72,7 +72,11 @@ go test ./internal/domain/ -run 'TestReaction|TestGeneration|TestSplitLanes'
 
 **Commit:** `feat(domain): argv handlers serve the advise and gate classes; Outcome carries a gate decision; Generation gains the Sync lane`
 
-## 2. Domain: the advice span, its fence and the resume strip
+## 2. Domain: the advice span, its fence and the resume strip — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the strip is implemented ONCE, in `Message.MarshalJSON` (via the new `Message.recordContent`), rather than at two independent sites — `Conversation.MarshalJSON` marshals its messages through `Message.MarshalJSON`, so the item's two named sites are one code path; both carry a doc sentence saying so.
+NOTES (2026-09-09): `internal/domain/doc.go`'s file-count sentence moves "Twenty-three files" → "Twenty-four files" alongside the new `advice.go` map entry.
+NOTES (2026-09-09): `WithAdvice` ignores the caller's `Offset` and stamps it from the message's own length, and copies the ledger slice, matching `WithExtra`'s no-shared-backing contract.
 
 **What:** New `internal/domain/advice.go`: `AdviceSpan{Reaction string; Origin Origin; Moment Moment; Turn int; Offset int}` (Offset = byte index in the message Content where the span's fence begins); `const AdviceCap = 8 << 10`; `func RenderAdvice(span AdviceSpan, text string) string` producing exactly `"\n\n[advice — reaction " + id + " (" + origin + " origin) at " + moment + ", turn " + n + "]\n" + text + "\n[end advice — " + id + "]"`; `func CapAdvice(text string) string` cutting at `AdviceCap` bytes on a rune boundary and appending `"\n[advice truncated at 8 KiB]"` when it cut. `Message` (`internal/domain/hooks.go`) gains `Advice []AdviceSpan` with `json:"-"`; `Message.WithAdvice(span, text)` appends the rendered fence to Content and records the span. The strip: `Conversation.MarshalJSON` (`hooks.go:924`) and the message wire struct at `hooks.go:143-159` write `Content[:spans[0].Offset]` for a message with spans — a session record never carries an advice span, so a resume has nothing to drop. The fence header is derived from the span, never from handler output.
 

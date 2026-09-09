@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-three files, grouped by which part of the language each one carries.
+// Twenty-four files, grouped by which part of the language each one carries.
 //
 // The construction surface and the session envelope. config.go is Config, the whole
 // construction surface (ADR 0001), plus the mode ladder it opens on — Mode, ParseMode,
@@ -48,7 +48,10 @@
 // exchange.go derives the current Exchange's boundary from the conversation instead of
 // caching it, skipping the Interjection that is deliberately not an opening. budget.go is
 // the Budget's pure token arithmetic — the ONE chars-to-token conversion every estimator and
-// token-gated reader delegates to.
+// token-gated reader delegates to. advice.go is the advise slot's substrate — the AdviceSpan
+// of the provenance ledger a Message carries, the fence rendered from that provenance rather
+// than from handler output, the 8 KiB cap, and the strip that keeps a span out of every
+// session record (ADR 0076 D6).
 //
 // The Reaction core. reaction.go is the one vocabulary every seam speaks
 // (ADR 0076): the Moment set with its seam and notice halves, the Origin and Class axes of

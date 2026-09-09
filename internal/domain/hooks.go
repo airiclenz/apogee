@@ -102,6 +102,13 @@ type Message struct {
 	// explicitly, so the marker never reaches a provider request.
 	Interjected bool
 
+	// Advice is the provenance ledger of the advice spans injected into Content — one row
+	// per advise Reaction that fenced text onto this message, in the order they landed
+	// (advice.go). It is runtime-only and deliberately NOT serialized: MarshalJSON writes
+	// Content up to the first span's fence, so a session record carries no advice and a
+	// resume has nothing to drop (ADR 0076 D6).
+	Advice []AdviceSpan `json:"-"`
+
 	// extra carries preserved unknown wire fields (reasoning_content, tool_choice,
 	// thinking, …) read through Extra. It is populated by Message's own JSON decoder
 	// (UnmarshalJSON collects unknown siblings) and by WithExtra; a Message built as a
@@ -139,6 +146,10 @@ func (m Message) WithExtra(key string, v json.RawMessage) Message {
 // sibling fields in extra are flattened alongside these at the top level (not nested), so
 // a serialized message matches the OpenAI chat shape a provider emits and a future field
 // round-trips untouched.
+//
+// Content is the RECORD content, not necessarily the live one: MarshalJSON fills it from
+// Message.recordContent, which cuts at the first advice span's fence. The Advice ledger has
+// no field here at all — spans are ephemeral by construction (advice.go).
 type messageJSON struct {
 	Role       Role       `json:"role"`
 	Content    string     `json:"content,omitempty"`
@@ -179,6 +190,12 @@ func isKnownMessageKey(key string) bool {
 // entry can never shadow a real field. A Message with no extras takes the fast path and
 // marshals straight from messageJSON.
 //
+// Advice spans are stripped here, at the one encoder every persisted Message crosses (a
+// Conversation marshals its messages through this method): the Content written is
+// recordContent — everything before the first fence — so no session record carries advice
+// and a resume never re-reads it. A message with no spans marshals byte-identically to one
+// written before the ledger existed.
+//
 // The preserved siblings are spliced on in sorted key order rather than via a map marshal,
 // so the wire bytes are deterministic regardless of Go's map iteration order — snapshots
 // containing reasoning_content (or any other Extra) are byte-reproducible, which a later
@@ -186,7 +203,7 @@ func isKnownMessageKey(key string) bool {
 func (m Message) MarshalJSON() ([]byte, error) {
 	known, err := json.Marshal(messageJSON{
 		Role:        m.Role,
-		Content:     m.Content,
+		Content:     m.recordContent(),
 		ToolCalls:   m.ToolCalls,
 		ToolCallID:  m.ToolCallID,
 		Interjected: m.Interjected,
@@ -810,11 +827,16 @@ func (c *Conversation) AssistantBoundaries() []int {
 
 // SetMessageContent edits one message's content in place by index. An out-of-range
 // index is a no-op.
+//
+// Rewriting the content invalidates any advice spans the message carried — the prune
+// replaces an old tool result with a much shorter stub through this method — so a ledger
+// the new content no longer reaches is dropped rather than left pointing past the end.
 func (c *Conversation) SetMessageContent(i int, content string) {
 	if i < 0 || i >= len(c.messages) {
 		return
 	}
 	c.messages[i].Content = content
+	c.messages[i].dropStaleAdvice()
 	c.revision++
 }
 
@@ -925,7 +947,9 @@ type conversationJSON struct {
 	Deferred []string  `json:"deferred,omitempty"`
 }
 
-// MarshalJSON serializes the Conversation (messages + pending deferred corrections).
+// MarshalJSON serializes the Conversation (messages + pending deferred corrections). Each
+// message goes through Message.MarshalJSON, so the advice strip applies here too: a record
+// written from a Conversation carries every message's pre-advice content and no span.
 func (c *Conversation) MarshalJSON() ([]byte, error) {
 	return json.Marshal(conversationJSON{Messages: c.messages, Deferred: c.deferred})
 }

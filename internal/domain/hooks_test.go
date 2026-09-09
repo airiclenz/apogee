@@ -832,3 +832,104 @@ func equalRoles(a, b []Role) bool {
 	}
 	return true
 }
+
+// TestMessageAdviceNeverReachesTheRecord pins the session-record strip at the message
+// encoder: an advised message serializes as the content it carried BEFORE the fence, with no
+// trace of the span, while a message with no ledger serializes exactly as it always did.
+func TestMessageAdviceNeverReachesTheRecord(t *testing.T) {
+	bare := Message{Role: RoleTool, Content: "3 files changed", ToolCallID: "call-1", ToolOutcome: ToolOutcomeSucceeded}
+
+	plain, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	const want = `{"role":"tool","content":"3 files changed","tool_call_id":"call-1","tool_outcome":"ok"}`
+	if string(plain) != want {
+		t.Errorf("unadvised Message JSON = %s, want %s", plain, want)
+	}
+
+	advised := bare.WithAdvice(
+		AdviceSpan{Reaction: "lint", Origin: OriginUser, Moment: MomentPostToolResult, Turn: 3},
+		"two findings",
+	)
+
+	data, err := json.Marshal(advised)
+	if err != nil {
+		t.Fatalf("Marshal advised: %v", err)
+	}
+	if string(data) != string(plain) {
+		t.Errorf("advised Message JSON = %s, want the unadvised bytes %s", data, plain)
+	}
+	if bytes.Contains(data, []byte("advice")) {
+		t.Errorf("an advice span reached the record: %s", data)
+	}
+
+	var restored Message
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if restored.Content != bare.Content || len(restored.Advice) != 0 {
+		t.Errorf("resumed message = %q with %d spans, want %q with none",
+			restored.Content, len(restored.Advice), bare.Content)
+	}
+}
+
+// TestConversationAdviceStrippedFromTheRecord walks the whole record path: a Conversation
+// holding one advised tool result persists the bare content, and a resume from that record
+// carries no advice to re-read.
+func TestConversationAdviceStrippedFromTheRecord(t *testing.T) {
+	conv := NewConversation([]Message{
+		{Role: RoleUser, Content: "run the linter"},
+		Message{Role: RoleTool, Content: "exit 0", ToolCallID: "call-1"}.WithAdvice(
+			AdviceSpan{Reaction: "lint", Origin: OriginUser, Moment: MomentFileChanged, Turn: 1},
+			"style drift in two files",
+		),
+	})
+
+	data, err := json.Marshal(conv)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if bytes.Contains(data, []byte("style drift")) || bytes.Contains(data, []byte("[advice")) {
+		t.Errorf("advice persisted into the session record: %s", data)
+	}
+
+	var restored Conversation
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if restored.Len() != 2 {
+		t.Fatalf("restored %d messages, want 2", restored.Len())
+	}
+	if got := restored.At(1).Content; got != "exit 0" {
+		t.Errorf("restored tool content = %q, want %q", got, "exit 0")
+	}
+	if spans := restored.At(1).Advice; len(spans) != 0 {
+		t.Errorf("restored %d advice spans, want none", len(spans))
+	}
+}
+
+// TestConversationAdviceSurvivesAPrunedMessage covers the prune's path: the stub written
+// through SetMessageContent is shorter than the fence's offset, so the ledger is dropped and
+// the record is written whole instead of slicing past the end.
+func TestConversationAdviceSurvivesAPrunedMessage(t *testing.T) {
+	conv := NewConversation([]Message{
+		Message{Role: RoleTool, Content: "a long tool result", ToolCallID: "call-1"}.WithAdvice(
+			AdviceSpan{Reaction: "lint", Origin: OriginUser, Moment: MomentPostToolResult, Turn: 1},
+			"two findings",
+		),
+	})
+
+	conv.SetMessageContent(0, "[pruned]")
+
+	if spans := conv.At(0).Advice; len(spans) != 0 {
+		t.Errorf("ledger kept %d stale spans after the prune, want none", len(spans))
+	}
+	data, err := json.Marshal(conv)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"content":"[pruned]"`)) {
+		t.Errorf("pruned message JSON = %s, want the stub written whole", data)
+	}
+}
