@@ -189,6 +189,33 @@ func isAllowedCell(origin Origin, class Class) bool {
 	return false
 }
 
+// GateVerdict is the answer a gate reaction gives about a pending tool call (ADR 0076 D2). It is
+// the first stdout line a user's gate command writes and the value a Go gate handler sets, so the
+// three spellings are a stable contract on both sides.
+type GateVerdict string
+
+const (
+	// GateAllow says nothing about the call: a gate may say No, never Yes, so the mode ladder's own
+	// verdict stands unchanged (ADR 0049 §4).
+	GateAllow GateVerdict = "allow"
+	// GateDeny refuses the call outright.
+	GateDeny GateVerdict = "deny"
+	// GateAsk raises the call to the human, whatever the mode ladder decided on its own. It is also
+	// where every unreadable answer lands — an empty, unparseable, failing or timed-out gate asks.
+	GateAsk GateVerdict = "ask"
+)
+
+// GateDecision is one gate reaction's answer: the verdict and the reason behind it. The ZERO value
+// is "no verdict" — the reaction gave no answer, so it changed nothing.
+type GateDecision struct {
+	// Verdict is allow, deny or ask. The ZERO GateVerdict means the reaction gave no verdict.
+	Verdict GateVerdict
+	// Reason is the human-facing explanation a gate offers for its verdict — the lines its command
+	// wrote after the verdict line. It reaches the person being asked and NEVER the model, so a
+	// gate cannot smuggle instructions into the conversation through it.
+	Reason string
+}
+
 // Outcome is what one fired Reaction reports back, in one shape for every seam. The ZERO value
 // means "did nothing": a reaction that returns it is not booked as a firing and emits no event.
 type Outcome struct {
@@ -208,11 +235,16 @@ type Outcome struct {
 	// set it explicitly without moving a revision, which is the same act as the retired
 	// intercept decision. Either way the firing is booked.
 	//
-	// It is the last term of the firing rule the dispatcher applies:
-	// acted = Retry || Inject != "" || Defer != "" || Edited || the revision moved. The action a
-	// firing is reported under follows the same order — "retry" when Retry, else "defer" when
-	// Defer, else "intercept" when Edited or the revision moved.
+	// It is one term of the firing rule the dispatcher applies:
+	// acted = Retry || Inject != "" || Defer != "" || Edited || Gate.Verdict != "" || the revision
+	// moved. The action a firing is reported under follows the same order — "retry" when Retry,
+	// else "defer" when Defer, else "intercept" when Edited or the revision moved.
 	Edited bool
+	// Gate is the verdict a gate reaction gives about the pending tool call at pre-tool-exec — the
+	// Approver stage of the Reaction surface (ADR 0076 D2). A non-empty Gate.Verdict is an act like
+	// any other, so the firing is booked; the ZERO GateDecision is silence. Only a reaction of
+	// class gate sets it: every other class leaves it zero.
+	Gate GateDecision
 	// Detail is optional supporting text a renderer may show verbatim or ignore. It is per
 	// FIRING, not per reaction — a guard that names what it salvaged computes it each time.
 	Detail string
@@ -221,11 +253,12 @@ type Outcome struct {
 // Handler is the behaviour a Reaction runs. It is SEALED — only the types declared below
 // implement it — so Validate can check that the reaction's On list agrees with what its handler
 // can actually be called with. Two kinds share the seal: the five per-seam Go func types, each
-// naming exactly one seam, and the async-lane handlers ArgvHandler and WebhookHandler, which run
-// out of process on NOTICE Moments and so name no seam at all. Stage 3's MCP handler joins here.
+// naming exactly one seam, and the out-of-process handlers ArgvHandler and WebhookHandler, which
+// name no seam at all — their On list, checked against their class, says where they fire. An MCP
+// handler is the kind still to join them.
 type Handler interface {
-	// seam reports the one seam Moment this handler serves, or the ZERO Moment for an async-lane
-	// handler, which serves notices only. Unexported: it is the seal.
+	// seam reports the one seam Moment this handler serves, or the ZERO Moment for an
+	// out-of-process handler, which names no seam of its own. Unexported: it is the seal.
 	seam() Moment
 }
 
@@ -255,22 +288,23 @@ func (PreToolExecFunc) seam() Moment    { return MomentPreToolExec }
 func (PostToolResultFunc) seam() Moment { return MomentPostToolResult }
 func (HistoryRewriteFunc) seam() Moment { return MomentHistoryRewrite }
 
-// ArgvHandler runs a command out of process when a NOTICE Moment fires — the async lane a user's
-// `run:` argv list arms (ADR 0076 D2). Argv[0] is the executable and the rest its arguments;
-// nothing goes through a shell, so no quoting or expansion happens on the way. The Moment's
-// payload reaches the command through its environment, and whatever it writes is ignored: an
-// observe reaction changes nothing the model sees, which is why this handler takes that class
-// alone.
+// ArgvHandler runs a command out of process when a Moment fires — what a user's `run:` argv list
+// arms (ADR 0076 D2). Argv[0] is the executable and the rest its arguments; nothing goes through a
+// shell, so no quoting or expansion happens on the way. The Moment's payload reaches the command
+// through its environment. It serves three of the user's classes, and the class decides both where
+// it may fire and what its output is worth: observe fires on notices and its output is ignored;
+// advise fires at post-tool-result or file-changed and its stdout becomes the fenced trailer;
+// gate fires at pre-tool-exec and its first stdout line is the verdict.
 type ArgvHandler struct {
-	// Argv is the command and its arguments. Validate seals the KIND only — that an argv handler
-	// reacts to notices as class observe — while the Runner refuses an empty list, since running
-	// it is the Runner's job and the refusal belongs where the attempt is.
+	// Argv is the command and its arguments. Validate seals the KIND only — that the handler's
+	// class and Moments agree — while the Runner refuses an empty list, since running it is the
+	// Runner's job and the refusal belongs where the attempt is.
 	Argv []string
 }
 
 // WebhookHandler POSTs the Moment's payload to a URL when a NOTICE Moment fires — the other half
-// of the async lane (ADR 0076 D2). The response is discarded exactly as an ArgvHandler's output
-// is: nothing an observe reaction returns reaches the model.
+// of the async observe lane (ADR 0076 D2). Unlike an ArgvHandler it takes class observe alone, so
+// its response is discarded: nothing an observe reaction returns reaches the model.
 type WebhookHandler struct {
 	// URL is the endpoint the payload is POSTed to.
 	URL string
@@ -282,19 +316,36 @@ type WebhookHandler struct {
 	HeadersEnv map[string]string
 }
 
-// seam reports the ZERO Moment: an argv handler reacts to notices, and a notice closes no seam.
+// seam reports the ZERO Moment: an argv handler names no seam — its class and On list decide
+// where it fires.
 func (ArgvHandler) seam() Moment { return "" }
 
 // seam reports the ZERO Moment: a webhook handler reacts to notices, and a notice closes no seam.
 func (WebhookHandler) seam() Moment { return "" }
 
-// isAsyncHandler reports whether the handler is one of the async-lane kinds. Validate keys the
-// observe rules on the handler KIND and not on the class, because class observe is also open to
-// a Go handler — the bench arms those — and a Go handler keeps the per-seam rule.
+// isAsyncHandler reports whether the handler is one of the out-of-process kinds. Validate keys the
+// per-class Moment rules on the handler KIND and not on the class alone, because every class an
+// argv handler takes is also open to a Go handler — the bench arms those — and a Go handler keeps
+// the per-seam rule.
 func isAsyncHandler(h Handler) bool {
 	switch h.(type) {
 	case ArgvHandler, WebhookHandler:
 		return true
+	}
+	return false
+}
+
+// servesClass reports whether an out-of-process handler serves the class. An argv command serves
+// three of the user's cells — observe, advise and gate (ADR 0076 D2) — while a webhook serves
+// observe alone: its response is discarded, so it has no way to advise or to gate. It answers
+// only for the two out-of-process kinds; a Go handler is never asked, since its rule is the
+// per-seam one.
+func servesClass(h Handler, class Class) bool {
+	switch h.(type) {
+	case ArgvHandler:
+		return class == ClassObserve || class == ClassAdvise || class == ClassGate
+	case WebhookHandler:
+		return class == ClassObserve
 	}
 	return false
 }
@@ -345,8 +396,10 @@ type Reaction struct {
 	On []Moment
 	// Handler is the behaviour — one of the five Go func types above.
 	Handler Handler
-	// Timeout is the deadline a non-Go handler runs under. A Go handler IGNORES it: the engine's
-	// own reactions run without a deadline, exactly as today's Floor guards do.
+	// Timeout is the deadline a non-Go handler runs under, on both lanes — the async observe lane
+	// and the sync advise and gate lane, whose handlers hold the loop while they run. A Go handler
+	// IGNORES it: the engine's own reactions run without a deadline, exactly as today's Floor
+	// guards do.
 	Timeout time.Duration
 	// Workspace narrows a path-bearing notice to one workspace root: set, the reaction fires only
 	// for a path inside that root; empty, it fires for every workspace. Like Timeout it belongs to
@@ -392,8 +445,11 @@ func (r Reaction) Validate() error {
 		return fmt.Errorf("%w %q: fires on no Moment", ErrInvalidReaction, r.ID)
 	}
 
+	// The sentence names observe as the class served because a webhook is the only handler a
+	// configuration can push into this refusal: an argv command already serves every class a user
+	// entry can carry, so the argv side is reachable from the engine's own arming alone.
 	async := isAsyncHandler(r.Handler)
-	if async && r.Class != ClassObserve {
+	if async && !servesClass(r.Handler, r.Class) {
 		return fmt.Errorf(
 			"%w %q: run: a command or webhook reacts as class %q, not %q",
 			ErrInvalidReaction, r.ID, ClassObserve, r.Class,
@@ -408,17 +464,34 @@ func (r Reaction) Validate() error {
 		seen[m] = true
 
 		if async {
-			switch {
-			case m.IsSeam():
-				return fmt.Errorf(
-					"%w %q: run: reacts to notices; %q is a seam",
-					ErrInvalidReaction, r.ID, m,
-				)
-			case !m.IsNotice():
-				return fmt.Errorf(
-					"%w %q: run: reacts to notices; %q is not one",
-					ErrInvalidReaction, r.ID, m,
-				)
+			switch r.Class {
+			case ClassAdvise:
+				if m != MomentPostToolResult && m != MomentFileChanged {
+					return fmt.Errorf(
+						"%w %q: advise: reacts at post-tool-result or file-changed; %q is neither",
+						ErrInvalidReaction, r.ID, m,
+					)
+				}
+			case ClassGate:
+				if m != MomentPreToolExec {
+					return fmt.Errorf(
+						"%w %q: gate: reacts at pre-tool-exec; %q is not it",
+						ErrInvalidReaction, r.ID, m,
+					)
+				}
+			default:
+				switch {
+				case m.IsSeam():
+					return fmt.Errorf(
+						"%w %q: run: reacts to notices; %q is a seam",
+						ErrInvalidReaction, r.ID, m,
+					)
+				case !m.IsNotice():
+					return fmt.Errorf(
+						"%w %q: run: reacts to notices; %q is not one",
+						ErrInvalidReaction, r.ID, m,
+					)
+				}
 			}
 			continue
 		}
@@ -434,8 +507,8 @@ func (r Reaction) Validate() error {
 }
 
 // Generation is the whole live shape of the engine at one moment: the Floor enable set, Bypass,
-// and the user-origin observe list. It is the ONE value a live swap carries (ADR 0076 A8),
-// replacing the three separate swap idioms — each with its own setter and its own lock — that
+// and the user-origin observe and sync lists. It is the ONE value a live swap carries (ADR 0076
+// A8), replacing the three separate swap idioms — each with its own setter and its own lock — that
 // preceded it, so nothing downstream can read a half-swapped state.
 type Generation struct {
 	// Floor is the Floor guard enable set: which of the seven structural guards are switched off.
@@ -444,14 +517,21 @@ type Generation struct {
 	// on under it.
 	Bypass bool
 	// Observe is the async-lane observe list the Runner fires. The AGENT ignores it: the observe
-	// lane is the Runner's, and an agent takes only Floor and Bypass out of a generation.
+	// lane is the Runner's, and an agent takes Floor, Bypass and the sync lane out of a generation.
 	Observe []Reaction
+	// Sync is the user's advise and gate list — the lane the AGENT runs inside the loop, where a
+	// handler holds the Turn while it runs and its output reaches the model or the Approver. The
+	// RUNNER ignores it, exactly as the agent ignores Observe.
+	Sync []Reaction
 }
 
 // Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what
-// is wrong. Floor and Bypass are booleans and cannot be malformed, so every check is about
-// Observe: each entry validates on its own, each is class observe — the lane takes nothing else —
-// and no two share an ID, which is what a firing is reported under.
+// is wrong. Floor and Bypass are booleans and cannot be malformed, so every check is about the
+// two lanes: each entry validates on its own, each takes a class its lane accepts — observe for
+// the Runner's lane, advise or gate for the sync lane, which is the user's alone — and no two
+// entries WITHIN one lane share an ID, which is what a firing is reported under. The same ID may
+// appear in both lanes: one configured entry resolves to up to one reaction per class and they
+// all carry the entry's id.
 func (g Generation) Validate() error {
 	seen := make(map[string]bool, len(g.Observe))
 	for _, r := range g.Observe {
@@ -469,5 +549,46 @@ func (g Generation) Validate() error {
 		}
 		seen[r.ID] = true
 	}
+
+	seenSync := make(map[string]bool, len(g.Sync))
+	for _, r := range g.Sync {
+		if err := r.Validate(); err != nil {
+			return err
+		}
+		if r.Origin != OriginUser {
+			return fmt.Errorf(
+				"%w %q: the sync list takes origin %q, not %q",
+				ErrInvalidReaction, r.ID, OriginUser, r.Origin,
+			)
+		}
+		if r.Class != ClassAdvise && r.Class != ClassGate {
+			return fmt.Errorf(
+				"%w %q: the sync list takes class %q or %q, not %q",
+				ErrInvalidReaction, r.ID, ClassAdvise, ClassGate, r.Class,
+			)
+		}
+		if seenSync[r.ID] {
+			return fmt.Errorf("%w: the sync list names %q twice", ErrInvalidReaction, r.ID)
+		}
+		seenSync[r.ID] = true
+	}
 	return nil
+}
+
+// SplitLanes divides one reaction list into the two lanes a Generation carries: class observe
+// goes to the async lane the Runner fires, classes advise and gate to the sync lane the Agent
+// runs inside the loop. Order is preserved within each lane, so a cascade fires in the order the
+// configuration file wrote. A class outside those three occupies neither lane and is dropped —
+// a configured entry resolves to nothing else, and Generation.Validate would refuse one in either
+// list. Each result is nil when its lane is empty.
+func SplitLanes(list []Reaction) (observe, sync []Reaction) {
+	for _, r := range list {
+		switch r.Class {
+		case ClassObserve:
+			observe = append(observe, r)
+		case ClassAdvise, ClassGate:
+			sync = append(sync, r)
+		}
+	}
+	return observe, sync
 }

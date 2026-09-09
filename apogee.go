@@ -501,6 +501,19 @@ const (
 	ClassShapeWork = domain.ClassShapeWork
 )
 
+// GateVerdict is the answer a gate reaction gives about a pending tool call: allow, deny or ask.
+type GateVerdict = domain.GateVerdict
+
+const (
+	GateAllow = domain.GateAllow
+	GateDeny  = domain.GateDeny
+	GateAsk   = domain.GateAsk
+)
+
+// GateDecision is one gate reaction's answer — the verdict and the human-facing reason behind it.
+// The zero value is "no verdict"; the reason never reaches the model.
+type GateDecision = domain.GateDecision
+
 // Outcome is what one fired Reaction reports back, in one shape for every seam; the zero value
 // means it did nothing.
 type Outcome = domain.Outcome
@@ -519,8 +532,9 @@ type (
 	HistoryRewriteFunc = domain.HistoryRewriteFunc
 )
 
-// The two async-lane handler types — a command and a webhook. Both run out of process on NOTICE
-// Moments as class observe, so neither names a seam the way the five Go func types above do.
+// The two out-of-process handler types — a command and a webhook. Neither names a seam the way
+// the five Go func types above do: a command serves the user's observe, advise and gate classes,
+// a webhook serves observe alone.
 type (
 	ArgvHandler    = domain.ArgvHandler
 	WebhookHandler = domain.WebhookHandler
@@ -539,7 +553,8 @@ type PostResponseMoment = domain.PostResponseMoment
 type Reaction = domain.Reaction
 
 // Generation is the whole live shape of the engine at one moment — the Floor enable set, Bypass
-// and the observe list — applied as ONE value, so nothing downstream reads a half-swapped state.
+// and the two user lanes, observe and sync — applied as ONE value, so nothing downstream reads a
+// half-swapped state.
 type Generation = domain.Generation
 
 // ----------------------------------------------------------------------------

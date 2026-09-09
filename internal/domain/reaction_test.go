@@ -7,6 +7,7 @@ package domain
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -373,13 +374,13 @@ func TestReactionValidateAcceptsEverySeamHandler(t *testing.T) {
 	}
 }
 
-// TestReactionValidateAppliesTheObserveRulesToAnAsyncHandler walks the rules the argv and
-// webhook handlers brought in. They key on the handler KIND, not the class: an async handler
-// reacts to notices only and takes class observe alone, while a Go handler keeps the per-seam
-// rule for every class — which is why the bench's class-observe Go reactions still validate. The
-// refusals are pinned by their exact text: they are what a user reads when their `run:` entry
-// names the wrong Moment.
-func TestReactionValidateAppliesTheObserveRulesToAnAsyncHandler(t *testing.T) {
+// TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler walks the rules the argv and
+// webhook handlers brought in. They key on the handler KIND, not the class alone: an argv handler
+// serves observe on notices, advise at post-tool-result or file-changed and gate at pre-tool-exec,
+// while a webhook stays observe-only and a Go handler keeps the per-seam rule for every class —
+// which is why the bench's class-observe Go reactions still validate. The refusals are pinned by
+// their exact text: they are what a user reads when their `run:` entry names the wrong Moment.
+func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 	t.Parallel()
 
 	argv := ArgvHandler{Argv: []string{"/usr/bin/notify", "--quiet"}}
@@ -458,7 +459,27 @@ func TestReactionValidateAppliesTheObserveRulesToAnAsyncHandler(t *testing.T) {
 			wantErr: `apogee: invalid reaction "notify": run: reacts to notices; "turn-done" is not one`,
 		},
 		{
-			name: "an argv handler outside class observe is refused",
+			name: "an argv handler advising at post-tool-result validates",
+			reaction: Reaction{
+				ID:      "advise",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentPostToolResult, MomentFileChanged},
+				Handler: argv,
+			},
+		},
+		{
+			name: "an argv handler gating at pre-tool-exec validates",
+			reaction: Reaction{
+				ID:      "gate",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{MomentPreToolExec},
+				Handler: argv,
+			},
+		},
+		{
+			name: "an argv handler advising on another notice is refused",
 			reaction: Reaction{
 				ID:      "notify",
 				Origin:  OriginUser,
@@ -466,7 +487,40 @@ func TestReactionValidateAppliesTheObserveRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentTurnFinished},
 				Handler: argv,
 			},
-			wantErr: `apogee: invalid reaction "notify": run: a command or webhook reacts as class "observe", not "advise"`,
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`,
+		},
+		{
+			name: "an argv handler advising on another seam is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentPostToolResult, MomentPreRequest},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result or file-changed; "pre-request" is neither`,
+		},
+		{
+			name: "an argv handler gating anywhere else is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{MomentPostToolResult},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "notify": gate: reacts at pre-tool-exec; "post-tool-result" is not it`,
+		},
+		{
+			name: "an argv handler gating on a spelling outside the vocabulary is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{"pre-tool"},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "notify": gate: reacts at pre-tool-exec; "pre-tool" is not it`,
 		},
 		{
 			name: "a webhook handler outside class observe is refused",
@@ -626,6 +680,134 @@ func TestGenerationValidateAcceptsAnObserveListAndRefusesTheRest(t *testing.T) {
 				t.Errorf("Generation.Validate() = %q, want %q", got, c.wantErr)
 			}
 		})
+	}
+}
+
+// TestGenerationValidateGuardsTheSyncLane pins what the sync lane adds beyond the rules each
+// entry already answers for itself: the lane is the user's alone, it takes advise or gate and
+// nothing else, and it refuses a repeated ID of its own. The last case is the one a configured
+// entry actually produces — the SAME id in both lanes, because one entry resolves to up to one
+// reaction per class and they all carry the entry's id.
+func TestGenerationValidateGuardsTheSyncLane(t *testing.T) {
+	t.Parallel()
+
+	argv := ArgvHandler{Argv: []string{"/usr/bin/react"}}
+	entry := func(id string, origin Origin, class Class, on Moment) Reaction {
+		return Reaction{ID: id, Origin: origin, Class: class, On: []Moment{on}, Handler: argv}
+	}
+	observe := func(id string) Reaction {
+		return entry(id, OriginUser, ClassObserve, MomentTurnFinished)
+	}
+	advise := func(id string) Reaction {
+		return entry(id, OriginUser, ClassAdvise, MomentPostToolResult)
+	}
+	gate := func(id string) Reaction {
+		return entry(id, OriginUser, ClassGate, MomentPreToolExec)
+	}
+
+	cases := []struct {
+		name    string
+		gen     Generation
+		wantErr string
+	}{
+		{
+			name: "an advise and a gate entry",
+			gen:  Generation{Sync: []Reaction{advise("first"), gate("second")}},
+		},
+		{
+			name: "one id in both lanes",
+			gen: Generation{
+				Observe: []Reaction{observe("watch")},
+				Sync:    []Reaction{advise("watch"), gate("guard")},
+			},
+		},
+		{
+			name:    "an observe entry in the sync lane",
+			gen:     Generation{Sync: []Reaction{observe("notify")}},
+			wantErr: `apogee: invalid reaction "notify": the sync list takes class "advise" or "gate", not "observe"`,
+		},
+		{
+			name:    "an engine-origin entry in the sync lane",
+			gen:     Generation{Sync: []Reaction{entry("builtin", OriginEngine, ClassAdvise, MomentPostToolResult)}},
+			wantErr: `apogee: invalid reaction "builtin": the sync list takes origin "user", not "engine"`,
+		},
+		{
+			name:    "a repeated ID within the sync lane",
+			gen:     Generation{Sync: []Reaction{advise("advice"), advise("advice")}},
+			wantErr: `apogee: invalid reaction: the sync list names "advice" twice`,
+		},
+		{
+			name:    "a sync entry that does not validate",
+			gen:     Generation{Sync: []Reaction{entry("notify", OriginUser, ClassGate, MomentTurnFinished)}},
+			wantErr: `apogee: invalid reaction "notify": gate: reacts at pre-tool-exec; "turn-finished" is not it`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := c.gen.Validate()
+
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Generation.Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Generation.Validate() = nil, want %q", c.wantErr)
+			}
+			if !errors.Is(err, ErrInvalidReaction) {
+				t.Errorf("Generation.Validate() = %v, want it to wrap ErrInvalidReaction", err)
+			}
+			if got := err.Error(); got != c.wantErr {
+				t.Errorf("Generation.Validate() = %q, want %q", got, c.wantErr)
+			}
+		})
+	}
+}
+
+// TestSplitLanesDividesByClassAndKeepsOrder pins the divider a Driver uses to turn one resolved
+// list into a Generation's two lanes: observe on one side, advise and gate on the other, each in
+// the order the list carried them, and a class belonging to neither lane dropped.
+func TestSplitLanesDividesByClassAndKeepsOrder(t *testing.T) {
+	t.Parallel()
+
+	argv := ArgvHandler{Argv: []string{"/usr/bin/react"}}
+	entry := func(id string, class Class) Reaction {
+		return Reaction{ID: id, Origin: OriginUser, Class: class, Handler: argv}
+	}
+
+	list := []Reaction{
+		entry("a", ClassObserve),
+		entry("b", ClassGate),
+		entry("c", ClassAdvise),
+		entry("d", ClassObserve),
+		entry("e", ClassShapeView),
+		entry("f", ClassGate),
+	}
+
+	observe, sync := SplitLanes(list)
+
+	ids := func(list []Reaction) []string {
+		out := make([]string, 0, len(list))
+		for _, r := range list {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+	if got, want := ids(observe), []string{"a", "d"}; !slices.Equal(got, want) {
+		t.Errorf("observe lane = %v, want %v", got, want)
+	}
+	if got, want := ids(sync), []string{"b", "c", "f"}; !slices.Equal(got, want) {
+		t.Errorf("sync lane = %v, want %v", got, want)
+	}
+
+	observe, sync = SplitLanes(nil)
+
+	if observe != nil || sync != nil {
+		t.Errorf("SplitLanes(nil) = %v, %v, want both nil", observe, sync)
 	}
 }
 

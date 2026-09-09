@@ -161,8 +161,8 @@ func TestResume_FutureVersion(t *testing.T) {
 // through the root re-export: an embedder outside the module cannot import internal/domain
 // (ADR 0010), so apogee.ErrInvalidReaction must BE the sentinel New wraps when Config.Reactions
 // carries a reaction the engine will not accept. Two cases, one per handler kind: a Go handler
-// whose On list names a Moment it cannot serve, and an argv handler pointed at a seam — the
-// async lane reacts to notices only. Both are the mistake a host makes by hand, refused at
+// whose On list names a Moment it cannot serve, and an argv handler of class observe pointed at a
+// seam — that class reacts to notices only. Both are the mistake a host makes by hand, refused at
 // construction rather than silently never firing.
 func TestNew_InvalidReaction_MatchableThroughRoot(t *testing.T) {
 	cfg := validConfig()
