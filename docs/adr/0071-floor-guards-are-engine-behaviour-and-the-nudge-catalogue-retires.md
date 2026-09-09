@@ -248,3 +248,23 @@ is native-profile only, so apogee "deliberately renders no tool text and parses 
 expected back — and not the floor. That seam is exactly what this guard sits behind: it leaves the
 parse seam alone and recovers the call the server passed through as visible content, which is the
 failure that entry recorded.
+
+## Amendment (2026-09-09) — the `/settings` row
+
+**Decision 5's seven keys — the 2026-09-07 amendment already reads its "six" as seven — are
+file-only in the sense that matters, and its "no `/settings` toggle" is withdrawn.** The seven
+`tool-use-enforcer`, `empty-response-recovery`, `tool-call-repair`, `tool-loop-breaker`,
+`tool-result-cap`, `read-cache` and `tool-call-salvage` keys ship as `/settings` rows and stay
+that way. Nothing else in D5 changes.
+
+The row is admitted because it is the deliberate act D5 was protecting, not an exception to it.
+What D5 refused was a floor switched off by accident: a flag on a command line, an env var
+inherited from a shell, a posture nobody chose. A `/settings` toggle is none of those — a user
+opens the settings screen, walks to the guard's row and switches it, which is the same
+considered edit as opening `config.yaml`, reached by a route that shows them the key's name and
+its default on the way. **"No flag, no env" stands**, and with it the property D5 was written
+for: no invocation and no environment can silently lower the floor.
+
+The shipped surface is therefore correct as it stands and does not move: the seven registry rows
+keep `Editable: true`, and `CONTEXT.md` §Floor guard keeps recording each key as "file-only
+boolean (no flag, no env; editable live in `/settings`)". This ADR yields to them.

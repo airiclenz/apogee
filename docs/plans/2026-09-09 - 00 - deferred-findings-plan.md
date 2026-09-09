@@ -334,7 +334,7 @@ list for the literal `fmt / vet / build / test` and keep the old name if it is p
 
 **Commit:** `build: drop the go vet step golangci-lint already runs from check and CI`
 
-## 10. ADR 0071 Decision 5 admits the `/settings` row
+## 10. ADR 0071 Decision 5 admits the `/settings` row — ✅ DONE (2026-09-09)
 
 **What.** Closes `apogee-tbs`. `docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md:148-153` says the Floor guard
 keys are "File-only: no flag, no `/settings` toggle", while `internal/config/registry.go` ships all seven
