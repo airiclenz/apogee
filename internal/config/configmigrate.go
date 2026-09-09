@@ -1568,6 +1568,7 @@ func (f reactionsFold) successorHint() string {
 // returned: two lists under two names is a hand migration in progress, and finishing it for the
 // user would either duplicate an id or reorder a lane they were arranging deliberately.
 func bothListsRefusal(path string) error {
+	//nolint:staticcheck // ST1005: a refusal that closes with a paragraph break and the fix in prose.
 	return fmt.Errorf("apogee: %s has both hooks: and reactions: — reactions: is the single list "+
 		"(hooks: was its earlier name).\n\n"+
 		"apogee did not fold hooks: in for you because reactions: already exists.\n\n"+
@@ -1578,6 +1579,7 @@ func bothListsRefusal(path string) error {
 // reactionsRefusal is what the fold gives when it cannot be made safely: nothing has been written,
 // and the paste-able instruction is a complete answer on its own.
 func reactionsRefusal(path string, why error) error {
+	//nolint:staticcheck // ST1005: a refusal that closes with a paragraph break and the fix in prose.
 	return fmt.Errorf("apogee: %s still uses the retired hooks:, mechanisms: or validated-sets: "+
 		"keys — reactions: is the single observe list, and the mechanism catalogue and the "+
 		"per-model validated sets are gone.\n\n"+
@@ -1591,6 +1593,7 @@ func reactionsRefusal(path string, why error) error {
 // running session, so the re-read refuses, writes nothing, and leaves the session firing the list
 // it already had.
 func liveReactionsRefusal(path string) error {
+	//nolint:staticcheck // ST1005: a refusal that closes with the fix in prose.
 	return fmt.Errorf("apogee: %s still has a hooks: block, and apogee does not rewrite a config "+
 		"file while a session is running — hooks: becomes reactions: at startup. Restart apogee to "+
 		"let it fold the block in, or move the entries into reactions: yourself (name: → id:, "+

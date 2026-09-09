@@ -93,10 +93,10 @@ func eventList() string {
 func Validate(r domain.Reaction) error {
 	if strings.TrimSpace(r.ID) == "" {
 		return fmt.Errorf(
-			"reactions: an entry has no name: every reaction needs a `name:` to be reported by")
+			"reactions: an entry has no id: every reaction needs an `id:` to be reported by")
 	}
 	if len(r.On) == 0 {
-		return reactionError(r.ID, "no events: list at least one of %s under `events:`", eventList())
+		return reactionError(r.ID, "no moments: list at least one of %s under `on:`", eventList())
 	}
 	for _, e := range r.On {
 		if _, err := ParseEvent(string(e)); err != nil {
@@ -120,7 +120,7 @@ func validateHandler(r domain.Reaction) error {
 	switch handler := r.Handler.(type) {
 	case domain.ArgvHandler:
 		if len(handler.Argv) == 0 || strings.TrimSpace(handler.Argv[0]) == "" {
-			return reactionError(r.ID, "command: the first element is the program to run and must not be blank")
+			return reactionError(r.ID, "run: the first element is the program to run and must not be blank")
 		}
 		return nil
 	case domain.WebhookHandler:
@@ -135,11 +135,11 @@ func validateWebhook(id string, handler domain.WebhookHandler) error {
 	parsed, err := url.Parse(handler.URL)
 	switch {
 	case err != nil:
-		return reactionError(id, "webhook: %q is not a URL: %v", handler.URL, err)
+		return reactionError(id, "run: url: %q is not a URL: %v", handler.URL, err)
 	case parsed.Scheme != "http" && parsed.Scheme != "https":
-		return reactionError(id, "webhook: %q must be an absolute http:// or https:// URL", handler.URL)
+		return reactionError(id, "run: url: %q must be an absolute http:// or https:// URL", handler.URL)
 	case parsed.Host == "":
-		return reactionError(id, "webhook: %q names no host", handler.URL)
+		return reactionError(id, "run: url: %q names no host", handler.URL)
 	}
 	for header, envName := range handler.HeadersEnv {
 		if strings.TrimSpace(envName) == "" {

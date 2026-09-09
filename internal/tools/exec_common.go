@@ -352,8 +352,8 @@ const maxSubprocessErrorExcerptBytes = 256
 //
 // secretEnv names the operator-declared credential variables to drop beside apogee's own — the
 // same `api-key-env:` names (ADR 0047) the execution tools take from HostTools.SecretEnvVars,
-// carried to a hook on mechanisms.Deps.SecretEnvVars and handed in here. A hook's child therefore
-// scrubs exactly what a tool's child scrubs; nil names none and leaves the fixed half alone.
+// handed in here by whichever caller opens this door. A hook's child therefore scrubs exactly what
+// a tool's child scrubs; nil names none and leaves the fixed half alone.
 //
 // The returned output is the child's stdout ALONE, never interleaved with its diagnostics, so a
 // caller consuming it as a payload gets exactly the bytes the command produced. err is non-nil for

@@ -160,16 +160,16 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 		wantText string
 		unnamed  bool
 	}{
-		{name: "no name", hook: func() domain.Reaction {
+		{name: "no id", hook: func() domain.Reaction {
 			h := validHook()
 			h.ID = "  "
 			return h
-		}(), wantText: "no name", unnamed: true},
-		{name: "no events", hook: func() domain.Reaction {
+		}(), wantText: "no id", unnamed: true},
+		{name: "no moments", hook: func() domain.Reaction {
 			h := validHook()
 			h.On = nil
 			return h
-		}(), wantText: "no events"},
+		}(), wantText: "no moments"},
 		{name: "unknown event", hook: func() domain.Reaction {
 			h := validHook()
 			h.On = []Event{"turn-started"}
