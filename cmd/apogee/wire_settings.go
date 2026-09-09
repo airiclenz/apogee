@@ -1712,7 +1712,7 @@ func (a settingsApplier) readmitMCP(before toolSetSpec) string {
 	// Only the FILE names an MCP server (no flag, no environment variable), so the set to partition
 	// is read exactly as reconnectMCP reads it. A file that no longer parses leaves the connections
 	// where they are and says so, for the reason above: this half cannot fail the row.
-	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := a.fileConfig()
 	if err != nil {
 		return mcpNoteFor(mcpReconnectFailed(err))
 	}
@@ -2018,6 +2018,25 @@ func (a settingsApplier) rideTheRebind() error {
 	return err
 }
 
+// fileConfig re-reads the config file this session resolved and answers its file layer — the one
+// place that knows how a `/settings` apply reads the file the pane has just written to.
+//
+// Every structured key's apply starts here for the same reason: only the FILE carries those keys —
+// no flag and no environment variable names a prompt, an upstream, an MCP server, a Reaction or a
+// model profile — so resolving the file layer exactly as startup resolved it IS how the pane
+// re-resolves them, and the loader answers with the same Options resolution starts from.
+//
+// Nothing is cached across applies: a row applies against the file as it is at that moment. The
+// migration notice is dropped rather than surfaced — a file still in the retired schema was already
+// migrated and announced at launch, and this read happens after the pane has just written to it.
+//
+// A file that no longer parses is reported back unchanged: what a refusal COSTS differs per key —
+// connections that stay where they are, a list nothing displaces — so each caller says that in its
+// own words rather than being answered for here.
+func (a settingsApplier) fileConfig() (config.Options, error) {
+	return config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+}
+
 // reloadSystemPrompt re-reads the `system-prompt-*` block from the config file and installs it on the
 // holder, validate-then-commit: a block the file cannot express — both spellings of one prompt at
 // once, an entry with neither — is refused before it displaces a prompt that works.
@@ -2028,7 +2047,7 @@ func (a settingsApplier) rideTheRebind() error {
 // still in the retired schema was already migrated and announced at launch, and this read happens
 // after the pane has just written to it.
 func (a settingsApplier) reloadSystemPrompt() error {
-	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := a.fileConfig()
 	if err != nil {
 		return err
 	}
@@ -2052,7 +2071,7 @@ func (a settingsApplier) reloadSystemPrompt() error {
 // or its reply ceiling (setServers' own answer) — which is what tells the caller a rebind has to ride
 // this apply. A refusal reports false with the error: nothing was installed, so nothing moved.
 func (a settingsApplier) reloadServers() (bool, error) {
-	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := a.fileConfig()
 	if err != nil {
 		return false, err
 	}
@@ -2097,7 +2116,7 @@ func (a settingsApplier) reloadServers() (bool, error) {
 // A file that no longer parses is refused before anything is dialled, so a typo in an unrelated key
 // cannot cost the session the servers it is talking to.
 func (a settingsApplier) reconnectMCP() error {
-	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := a.fileConfig()
 	if err != nil {
 		return err
 	}
@@ -2122,7 +2141,7 @@ func (a settingsApplier) reconnectMCP() error {
 // drains the retired generation on a goroutine of its own, and this arm runs on the Update loop — a
 // synchronous Report would deadlock the program against the send it is waiting for (bridge.go).
 func (a settingsApplier) reloadReactions() error {
-	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := a.fileConfig()
 	if err != nil {
 		return err
 	}
@@ -2158,7 +2177,7 @@ func (a settingsApplier) reloadReactions() error {
 // there is nothing to resolve against and the holder carries the change alone, rideTheRebind's own
 // posture: the first beat that binds a model resolves it in.
 func (a settingsApplier) reloadModelProfiles() error {
-	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := a.fileConfig()
 	if err != nil {
 		return err
 	}

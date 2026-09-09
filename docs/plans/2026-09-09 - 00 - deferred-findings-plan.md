@@ -268,7 +268,15 @@ mutating its value after `Emit` and asserting the golden projection unchanged.
 
 **Commit:** `test(reactions): the Runner projects every seam's value onto the fired entry`
 
-## 8. One re-read of the config file per `/settings` apply
+## 8. One re-read of the config file per `/settings` apply — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the extracted method returns `(config.Options, error)`, not the item's literal
+`(*config.FileConfig, error)` — `config.LoadFileConfig` has returned `config.Options` since the
+2026-08-20 engine-architecture plan, and every one of the six callers already binds that type.
+
+NOTES (2026-09-09): `docs/adr/0076-…:294` ("consolidating the five independent `LoadFileConfig(a.configPath, …)`
+re-reads … is **out of scope** — … a bead carries it") is left as written: it records ADR 0076 A8's own
+scope at the time, and the bead it names is the one this item closes, so the sentence stays true as history.
 
 **What.** Closes `apogee-o60`. `cmd/apogee/wire_settings.go` calls
 `config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})` at six sites — `readmitMCP` (:1715),

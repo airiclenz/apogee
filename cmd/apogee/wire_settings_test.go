@@ -3403,3 +3403,55 @@ func TestRootWiringScrubsHookHeaderVariables(t *testing.T) {
 		}
 	}
 }
+
+// Every structured key's apply re-reads the config file through [settingsApplier.fileConfig], so a
+// file the loader can no longer parse has to cost each of the six callers exactly what it cost them
+// before they shared one read: the loader's own sentence, dressed only where that caller dresses it.
+func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("servers: [\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, loadErr := config.LoadFileConfig(path, os.ReadFile, func(string) {})
+	if loadErr == nil {
+		t.Fatal("the fixture parses; want a file the loader refuses")
+	}
+	want := loadErr.Error()
+
+	// Only the members the refusal path itself reaches are composed: each reload answers before it
+	// touches the holder, and readmitMCP only needs an MCP holder to exist to get as far as the read.
+	a := settingsApplier{configPath: path, mcp: &liveMCP{}}
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{"reloadSystemPrompt", a.reloadSystemPrompt},
+		{"reloadServers", func() error {
+			moved, err := a.reloadServers()
+			if moved {
+				t.Error("reloadServers reported a moved token bound off a file it refused")
+			}
+			return err
+		}},
+		{"reconnectMCP", a.reconnectMCP},
+		{"reloadReactions", a.reloadReactions},
+		{"reloadModelProfiles", a.reloadModelProfiles},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil {
+				t.Fatalf("%s applied an unparseable file; want the loader's refusal", tc.name)
+			}
+			if got := err.Error(); got != want {
+				t.Errorf("%s error = %q, want the loader's own sentence %q", tc.name, got, want)
+			}
+		})
+	}
+
+	// readmitMCP is the one caller that dresses the refusal rather than returning it: this half cannot
+	// fail the row, so a file it cannot parse leaves the connections where they are and says so.
+	if got, wantNote := a.readmitMCP(toolSetSpec{}), mcpNoteFor(mcpReconnectFailed(loadErr)); got != wantNote {
+		t.Errorf("readmitMCP note = %q, want %q", got, wantNote)
+	}
+}
