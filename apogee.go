@@ -548,6 +548,15 @@ type ToolResultMoment = domain.ToolResultMoment
 // retry budget left.
 type PostResponseMoment = domain.PostResponseMoment
 
+// SeamPayload is the JSON document a SYNC-lane reaction — a user's advise or gate command — reads
+// on its standard input: the observe payload's identity block under the same keys, plus the
+// pending call's arguments and the tool result the Moment carries. SeamResult is its `result`
+// member. The keys are a documented contract for the user's script.
+type (
+	SeamPayload = domain.SeamPayload
+	SeamResult  = domain.SeamResult
+)
+
 // Reaction is the single thing apogee does when the loop passes a Moment: one
 // {id, origin, class, on, handler}, validated against the Reaction surface matrix.
 type Reaction = domain.Reaction

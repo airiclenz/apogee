@@ -378,6 +378,19 @@ type PostResponseMoment struct {
 // Revision forwards to the response — the working value a post-response reaction reshapes.
 func (m PostResponseMoment) Revision() int { return m.Resp.Revision() }
 
+// The class default deadlines a SYNC-lane handler runs under when its entry sets no `timeout:`
+// of its own (ADR 0076 D7). They are shorter than the observe lane's 30s because these handlers
+// HOLD THE LOOP: a gate stands between the decision to run a tool and its execution, with a human
+// waiting on the answer, and an advise command stands between a tool result and the model reading
+// it. A Reaction.Timeout of its own overrides the default for every reaction of its entry.
+const (
+	// DefaultAdviseTimeout is the deadline a class-advise handler runs under by default.
+	DefaultAdviseTimeout = 10 * time.Second
+	// DefaultGateTimeout is the deadline a class-gate handler runs under by default. It is the
+	// shorter of the two: a gate's timeout escalates to `ask`, so the person is waiting on it.
+	DefaultGateTimeout = 5 * time.Second
+)
+
 // Reaction is the single thing apogee does when the loop passes a Moment (CONTEXT: Reaction):
 // one {id, origin, class, on, handler}. Floor guards, the retired lab layer and user Reactions
 // are all one of these (ADR 0076 D1).

@@ -355,6 +355,13 @@ const maxSubprocessErrorExcerptBytes = 256
 // handed in here by whichever caller opens this door. A hook's child therefore scrubs exactly what
 // a tool's child scrubs; nil names none and leaves the fixed half alone.
 //
+// extraEnv is the caller's own "KEY=value" additions, appended AFTER the scrub so they win over an
+// inherited spelling of the same key — the headline facts a fired reaction finds its Moment under
+// (domain.SeamPayload.Env, reactions.Payload.Env), which is why the door takes them at all: the
+// full document is on stdin, and these are the convenience a one-line script reads instead of
+// parsing it. They are appended, never substituted, so a variable the caller does not name is
+// exactly what the scrub left. nil adds nothing.
+//
 // The returned output is the child's stdout ALONE, never interleaved with its diagnostics, so a
 // caller consuming it as a payload gets exactly the bytes the command produced. err is non-nil for
 // a cancelled context, a refused confinement, a timeout, a wedged output drain and any non-zero
@@ -366,6 +373,7 @@ func RunHookSubprocess(
 	dir string,
 	workspaceRoot string,
 	secretEnv []string,
+	extraEnv []string,
 	timeout time.Duration,
 	stdin string,
 ) (string, error) {
@@ -382,7 +390,7 @@ func RunHookSubprocess(
 		dir:         dir,
 		timeout:     timeout,
 		stdin:       stdin,
-		env:         subprocessEnv(secretEnv),
+		env:         subprocessEnv(secretEnv, extraEnv...),
 		splitStdout: true,
 	})
 	if err != nil {

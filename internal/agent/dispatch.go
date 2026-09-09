@@ -712,6 +712,9 @@ func (a *Agent) confinementBox() domain.ConfinementBox {
 // tightened mid-delegation loses the permit exactly as it loses the matching tool verdict
 // (ADR 0013). The box comes from confinementBox(), the same live-scratch fold resolutionInput
 // uses, so a hook-spawned process is fenced identically to a subprocess tool's.
+//
+// The table above is the POST-RESPONSE row and nothing wider: a user-origin sync reaction has its
+// own minting site (syncPermitCtx below), whose row has no mode term at all.
 func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
 	if a.effectiveMode() != domain.ModeAuto {
 		return ctx
@@ -728,6 +731,48 @@ func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
 			Box:      a.confinementBox(),
 		},
 	})
+}
+
+// errConfinementUnavailable is what syncPermitCtx answers when the operator asked for workspace
+// confinement and the host cannot provide it: there is no permit to mint, so the reaction's
+// command is never spawned. It is the sync lane's one refusal, and it is deliberately a plain
+// sentence — it reaches the user through the Driver's report line, where "the host has no
+// confinement backend" is the whole of what they can act on.
+var errConfinementUnavailable = errors.New("workspace confinement is unavailable on this host")
+
+// syncPermitCtx returns ctx wrapped with the domain.SubprocessPermit a USER-ORIGIN SYNC reaction —
+// class advise or gate — spawns its command under, or the refusal that stops the spawn
+// (docs/design/confinement-execution-contract.md §10.4). It is the sync-lane sibling of
+// hookExecutionCtx above, and their rows differ on purpose:
+//
+//	| confine-to-workspace | fs caps     | installed                                    |
+//	|----------------------|-------------|----------------------------------------------|
+//	| off                  | —           | permit, nil Confinement (unfenced)           |
+//	| on                   | available   | permit carrying the workspace box, and the   |
+//	|                      |             | matching Confinement handle for the funnel   |
+//	| on                   | unavailable | nothing — errConfinementUnavailable          |
+//
+// The MODE is not a term. A user's sync reaction is the user's own configuration rather than
+// anything the model chose, so the ladder — which exists to bound what the MODEL may reach — has
+// no verdict to give about it, and the reaction fires in Plan exactly as it fires in Auto (ADR 0076
+// D8). What is left of the ladder's row is the fence itself: with `confine-to-workspace` on the
+// command runs inside the same box a subprocess tool would have been confined to, and a host that
+// cannot build that box gets no unfenced fallback.
+//
+// The Confinement handle is installed BESIDE the permit because the two are read by different
+// halves of the funnel: tools.RunHookSubprocess resolves argv[0] against the box on ctx
+// (ConfinementFromContext) and internal/subprocess confines the cmd from it, while the permit is
+// the authorisation the spawn itself is checked against.
+func (a *Agent) syncPermitCtx(ctx context.Context) (context.Context, error) {
+	if !a.ConfineToWorkspace() {
+		return domain.WithSubprocessPermit(ctx, domain.SubprocessPermit{}), nil
+	}
+	if !a.fsConfinementAvailable() {
+		return nil, errConfinementUnavailable
+	}
+	conf := domain.Confinement{Confiner: a.cfg.Confiner, Box: a.confinementBox()}
+	ctx = domain.WithSubprocessPermit(ctx, domain.SubprocessPermit{Confinement: &conf})
+	return domain.WithConfinement(ctx, conf), nil
 }
 
 // writeEscapeCtx returns ctx carrying the domain.WriteEscapePermit this verdict authorises, or ctx

@@ -106,6 +106,18 @@ type Config struct {
 	Namer  DelegationNamer
 	Events EventSink // where typed Events are pushed; required
 
+	// Report is where the engine writes a one-line operational report the USER should see but the
+	// MODEL should not: a sync-lane reaction whose command failed, timed out or could not be
+	// spawned. It is the in-loop twin of the observe lane's report seam (RunnerOptions.Report), so
+	// a Driver renders both failures the same way, and it carries no Event semantics of its own —
+	// the firing is booked separately as a ReactionFiredEvent with Action "failed".
+	//
+	// nil (the default) DROPS the line: a Driver with nowhere to put it — the bench, an embedder,
+	// every test that composes a bare Config — is byte-identical to one built before this field
+	// existed. It may be called from the loop goroutine, so a Driver that renders on another one
+	// hands the line over rather than blocking on it.
+	Report func(msg string)
+
 	// Inspector arms the raw-protocol capture (`ui.inspector` in config.yaml): with it set, the
 	// engine observes the Upstream client's own bytes and reports each model call's request body
 	// and response payload to Events as a WireEvent, stamped with the emitting Agent's identity

@@ -134,6 +134,7 @@ func TestRunHookSubprocessScrubsApogeeCredentials(t *testing.T) {
 		"",
 		t.TempDir(),
 		nil,
+		nil,
 		30*time.Second,
 		"",
 	)
@@ -168,6 +169,7 @@ func TestRunHookSubprocessScrubsTheConfiguredSecretNames(t *testing.T) {
 		"",
 		t.TempDir(),
 		[]string{"apogee_test_provider_key"},
+		nil,
 		30*time.Second,
 		"",
 	)
@@ -194,6 +196,7 @@ func TestRunHookSubprocessReturnsStdoutAloneAndFeedsStdin(t *testing.T) {
 		"",
 		t.TempDir(),
 		nil,
+		nil,
 		30*time.Second,
 		"payload\n",
 	)
@@ -219,6 +222,7 @@ func TestRunHookSubprocessFailsOnANonZeroExit(t *testing.T) {
 		[]string{"/bin/sh", "-c", `echo "cannot parse input" >&2; exit 3`},
 		"",
 		t.TempDir(),
+		nil,
 		nil,
 		30*time.Second,
 		"",
@@ -311,6 +315,7 @@ func TestRunHookSubprocessRefusesAProgramInsideTheWorkspace(t *testing.T) {
 		"",
 		root,
 		nil,
+		nil,
 		30*time.Second,
 		"",
 	)
@@ -347,6 +352,7 @@ func TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath(t *testing.T)
 		"",
 		t.TempDir(),
 		nil,
+		nil,
 		30*time.Second,
 		"",
 	)
@@ -358,5 +364,34 @@ func TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath(t *testing.T)
 	}
 	if out != want {
 		t.Errorf("child argv[0] = %q, want the looked-up program %q", out, want)
+	}
+}
+
+// TestRunHookSubprocessAppendsTheCallersExtraEnv pins the door's extraEnv route: the caller's own
+// "KEY=value" entries reach the child, and they are appended AFTER the scrub, so a name the caller
+// sets wins over the same name inherited from apogee's own environment. It is what carries the
+// headline facts a fired reaction's one-line script reads instead of parsing the document on stdin.
+func TestRunHookSubprocessAppendsTheCallersExtraEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the env route it pins is platform-independent")
+	}
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_REACTION_EVENT", "inherited-and-overridden")
+
+	out, err := RunHookSubprocess(
+		context.Background(),
+		[]string{"/bin/sh", "-c", `printf 'event=[%s] name=[%s]' "$APOGEE_REACTION_EVENT" "$APOGEE_REACTION_NAME"`},
+		"",
+		t.TempDir(),
+		nil,
+		[]string{"APOGEE_REACTION_EVENT=file-changed", "APOGEE_REACTION_NAME=watcher"},
+		30*time.Second,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("RunHookSubprocess: %v", err)
+	}
+	if want := "event=[file-changed] name=[watcher]"; out != want {
+		t.Errorf("child saw %q, want %q — the caller's extras are appended last and win", out, want)
 	}
 }

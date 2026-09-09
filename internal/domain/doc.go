@@ -58,7 +58,10 @@
 // the Reaction surface matrix, the Reaction itself with its Validate, the one Outcome shape every
 // seam folds to, the sealed Handler in both its kinds — the per-seam Go funcs and the async argv
 // and webhook handlers that react to notices — the Generation one live swap carries, and the two
-// seam payloads that carry a revision the dispatcher can bracket.
+// seam payloads that carry a revision the dispatcher can bracket. seampayload.go is the
+// document the SYNC lane's out-of-process handlers read on stdin — the observe payload's
+// identity block under the same JSON keys, plus the pending call's arguments and the tool
+// result — with the four environment variables a one-line script reads instead of parsing it.
 //
 // Tools and confinement. tools.go is the open Tool extension point (ADR 0002) with ToolCall,
 // ToolResult, the ToolRegistry, and the marker interfaces the dispatch disposition reads —

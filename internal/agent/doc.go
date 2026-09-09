@@ -38,7 +38,10 @@
 // gate, the recover boundary, the revision bracket and the ReactionFiredEvent a firing books.
 // builtins.go is the engine's own Reactions — the Floor guards the live generation leaves ON, as
 // domain.Reaction values calling the unchanged internal/floor policy (the enable set,
-// ADR 0076 A8). wire.go is the
+// ADR 0076 A8). syncexec.go is the SYNC lane's out-of-process executor — the one door a user's
+// advise or gate command is spawned through while the loop waits on it, owning the permit, the
+// class default deadline, the payload document and the failure report so the seams that call it
+// see only (stdout, err). wire.go is the
 // translation onto the provider seam: the domain request drained into a domain-free
 // provider.Request (ADR 0010). compact.go is conversation compaction — the explicit Compact,
 // the auto-compaction trigger and its allocation arithmetic, the emergency fold, the user bridge
