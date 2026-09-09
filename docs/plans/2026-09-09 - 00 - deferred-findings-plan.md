@@ -43,7 +43,10 @@ consolidation, the `go vet` redundancy, the ADR 0071 D5 / `/settings` disagreeme
 - `apogee-ed5` (parallel e2e — its own plan), `apogee-7ui` (needs a measured CI run), `apogee-3h4` (unreproduced flake), `apogee-5cf` (open until a consumer asks), every `parked` bead and the `apogee-304` bench arms.
 - Any change to what a Floor guard, Reaction or Driver announces; any new config key; any version identifier.
 
-## 1. The five `run:` / `run: url:` / `headers-env:` refusals are pinned with their key prefix
+## 1. The five `run:` / `run: url:` / `headers-env:` refusals are pinned with their key prefix — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the new `url.Parse` row sits before the `relative webhook` row so the six webhook rows
+follow `validateWebhook`'s own switch order; no existing row moved.
 
 **What.** Closes `apogee-yk9`. `TestHookValidateRefusesEachRule` (`internal/reactions/hooks_test.go:154-227`)
 pins only message tails — `must not be blank`, `absolute http:// or https:// URL`, … — so the key

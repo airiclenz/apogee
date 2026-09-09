@@ -2,6 +2,8 @@ package reactions
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,8 +153,21 @@ func TestHookValidateAcceptsTheValidShapes(t *testing.T) {
 // the exactly-one-action and headers-belong-to-a-webhook rules moved to the config layer with the
 // Reaction struct, since a domain.Reaction carries one Handler — and that the message names the
 // entry so a user with several entries is told which line to fix.
+//
+// Every refusal this package emits itself is pinned on the WHOLE sentence it announces, key prefix
+// and quoted operand included — never a tail substring that would survive a rewording of `run:`,
+// `run: url:` or `headers-env:`. The rules the core owns keep their shorter markers: their wording
+// belongs to internal/domain, not here.
 func TestHookValidateRefusesEachRule(t *testing.T) {
 	t.Parallel()
+
+	// The unparseable URL's refusal quotes net/url's own error text, so the expectation is built
+	// from that error rather than copied: a stdlib rewording must not fail this test.
+	const unparseableURL = "http://[::1"
+	_, parseErr := url.Parse(unparseableURL)
+	if parseErr == nil {
+		t.Fatalf("url.Parse(%q) returned no error, want the one the refusal quotes", unparseableURL)
+	}
 
 	cases := []struct {
 		name     string
@@ -179,22 +194,25 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 			h := validHook()
 			h.Handler = domain.ArgvHandler{}
 			return h
-		}(), wantText: "must not be blank"},
+		}(), wantText: "run: the first element is the program to run and must not be blank"},
 		{name: "blank argv[0]", hook: func() domain.Reaction {
 			h := validHook()
 			h.Handler = domain.ArgvHandler{Argv: []string{"   ", "done"}}
 			return h
-		}(), wantText: "must not be blank"},
+		}(), wantText: "run: the first element is the program to run and must not be blank"},
+		{name: "unparseable webhook url", hook: webhookHook(domain.WebhookHandler{URL: unparseableURL}),
+			wantText: fmt.Sprintf("run: url: %q is not a URL: %v", unparseableURL, parseErr)},
 		{name: "relative webhook", hook: webhookHook(domain.WebhookHandler{URL: "example.test/hook"}),
-			wantText: "absolute http:// or https:// URL"},
+			wantText: `run: url: "example.test/hook" must be an absolute http:// or https:// URL`},
 		{name: "non-http webhook", hook: webhookHook(domain.WebhookHandler{URL: "ftp://example.test/hook"}),
-			wantText: "absolute http:// or https:// URL"},
+			wantText: `run: url: "ftp://example.test/hook" must be an absolute http:// or https:// URL`},
 		{name: "hostless webhook", hook: webhookHook(domain.WebhookHandler{URL: "https:///hook"}),
-			wantText: "names no host"},
+			wantText: `run: url: "https:///hook" names no host`},
 		{name: "blank headers-env value", hook: webhookHook(domain.WebhookHandler{
 			URL:        "https://example.test/hook",
 			HeadersEnv: map[string]string{"Authorization": " "},
-		}), wantText: "maps to no environment variable name"},
+		}), wantText: `headers-env: "Authorization" maps to no environment variable name — ` +
+			"the value is the NAME of the variable holding the header, not the header itself"},
 		{name: "zero timeout", hook: func() domain.Reaction {
 			h := validHook()
 			h.Timeout = 0
