@@ -63,8 +63,8 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 │   confine-to-workspace  true         · use /confine                                          │
 │   unconfined-hosts      none         · use /confine                                          │
 │                                                                                              │
-│   Model profile                                                                              │
-│   model-profile         native       · ⏎ opens $EDITOR                                       │
+│   Model profiles                                                                             │
+│   model-profiles        native       · ⏎ opens $EDITOR                                       │
 │                                                                                              │
 │ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -81,7 +81,7 @@ collapse away entirely on a configuration with nothing overridden and nothing re
 
 The mockup is **abridged**: it shows five of the pane's ten sections. In the built pane
 `Tools & skills`, `Session`, `Presentation`, `Interface` and `Reactions` sit between `Confinement`
-and `Model profile`, in that order, and a section is a run over the registry's own order rather than
+and `Model profiles`, in that order, and a section is a run over the registry's own order rather than
 a per-key label — so a key added to the registry inherits the section it was inserted into.
 
 ### An edited row
@@ -166,9 +166,9 @@ A paste lands here with its lines intact, which is what this field is for.
 ### The external edit (`· ⏎ opens $EDITOR`)
 
 The fifth key class has no field at all: the keys no row writes — `servers`, `sub-agents-server`,
-`mcp-servers`, `system-prompt-models`, `system-prompt-layers`, `tools.enabled`, `model-profile` —
-carry the `· ⏎ opens $EDITOR` pointer in their last cell, and `⏎` opens the file itself on that
-key's line where the editor takes a line argument.
+`mcp-servers`, `system-prompt-models`, `system-prompt-layers`, `tools.enabled`, `reactions`,
+`model-profiles` — carry the `· ⏎ opens $EDITOR` pointer in their last cell, and `⏎` opens the file
+itself on that key's line where the editor takes a line argument.
 
 Which editor is a **four-rung ladder** (ADR 0041): the `editor` config key, then `$VISUAL`, then
 `$EDITOR`, then the platform's default opener (`open`, `xdg-open`, `cmd /c start`). The pointer's
