@@ -325,11 +325,12 @@ type Options struct {
 	// the config file only (default-empty ⇒ MCP dormant). ApplyConfig sets it from settings.
 	MCPServers []mcp.ServerConfig
 
-	// reactions is the resolved global user-origin observe list (ADR 0076) — the reactions a root
-	// composes over its Moment sink — loaded from the config file only (default-empty ⇒ no Runner
-	// fires anything). It is the ONE lane both user-origin blocks resolve into: the `reactions:`
-	// list and the `hooks:` block it succeeds. ApplyConfig sets it from settings; every root builds
-	// its Runner from it, and the TUI re-reads it in place when the file changes.
+	// reactions is the resolved global user-origin list (ADR 0076) — every Reaction the `reactions:`
+	// block and the `hooks:` block it succeeds arm, BOTH lanes in one list, loaded from the config
+	// file only (default-empty ⇒ nothing fires). One entry contributes one Reaction per action key
+	// it spells, all under its id, so a Driver splits the list ([domain.SplitLanes]) into the observe
+	// lane its Runner fires and the sync lane its Agent runs. ApplyConfig sets it from settings, and
+	// the TUI re-reads it in place when the file changes.
 	Reactions []domain.Reaction
 
 	// toolsDisabled and toolsEnabled are the resolved GLOBAL roster deltas (ADR 0057) — the built-in

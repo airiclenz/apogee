@@ -20,13 +20,14 @@ func writeReactionsConfig(t *testing.T, body string) string {
 	return path
 }
 
-// A `reactions:` block resolves entry for entry onto the user-origin observe Reactions a root's
-// Runner fires: origin and class stamped, the `on:` list read as Moments, the one action `run:`
-// spells turned into the handler that runs it — a sequence into an argv command, a mapping into a
-// webhook — an absent `timeout:` defaulted to the ratified 30s and a spelled one parsed,
-// `workspace:` reduced to the comparable spelling with its leading `~` expanded, and a parked entry
-// dropped rather than armed. The home directory is moved for the case rather than read, so the `~`
-// rule is asserted against a path this test owns.
+// A `reactions:` block resolves onto the user-origin Reactions a root arms: origin and class
+// stamped, the `on:` list read as Moments, each action key turned into the handler that runs it —
+// `run:` as a sequence into an argv command and as a mapping into a webhook, `gate:` as the argv of
+// the command whose verdict the Approver reads — an absent `timeout:` defaulted per CLASS (30s
+// observe, 5s gate, since a person waits on a gate) and a spelled one parsed, `workspace:` reduced
+// to the comparable spelling with its leading `~` expanded, and a parked entry dropped rather than
+// armed. The home directory is moved for the case rather than read, so the `~` rule is asserted
+// against a path this test owns.
 func TestLoadFileConfigResolvesTheReactionsBlock(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -50,6 +51,13 @@ reactions:
     on: [turn-finished]
     run: ["true"]
     enabled: false
+  - id: warden
+    on: [pre-tool-exec]
+    gate: ["./scripts/guard.sh", "--strict"]
+  - id: quick-warden
+    on: [pre-tool-exec]
+    gate: ["./scripts/guard.sh"]
+    timeout: 2s
 `)
 
 	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
@@ -57,8 +65,8 @@ reactions:
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
 
-	if len(opts.Reactions) != 2 {
-		t.Fatalf("resolved %d reactions; want the 2 armed entries (the parked one is dropped): %+v",
+	if len(opts.Reactions) != 4 {
+		t.Fatalf("resolved %d reactions; want the 4 armed entries (the parked one is dropped): %+v",
 			len(opts.Reactions), opts.Reactions)
 	}
 
@@ -113,6 +121,27 @@ reactions:
 	}
 	if bell.Workspace != "" {
 		t.Errorf("second workspace = %q, want the unset filter for an entry naming none", bell.Workspace)
+	}
+
+	warden := opts.Reactions[2]
+	if warden.ID != "warden" || warden.Class != domain.ClassGate {
+		t.Errorf("third entry is %q/%s, want the gate reaction %q arms", warden.ID, warden.Class, "warden")
+	}
+	gateArgv, ok := warden.Handler.(domain.ArgvHandler)
+	if !ok {
+		t.Fatalf("third handler = %T; want a domain.ArgvHandler for a `gate:` sequence", warden.Handler)
+	}
+	if len(gateArgv.Argv) != 2 || gateArgv.Argv[0] != "./scripts/guard.sh" || gateArgv.Argv[1] != "--strict" {
+		t.Errorf("third argv = %v, want the two elements the sequence spells", gateArgv.Argv)
+	}
+	if warden.Timeout != domain.DefaultGateTimeout {
+		t.Errorf("third timeout = %v, want the %v a gate spelling none takes — shorter than the %v an "+
+			"observe entry takes, because a person waits on a verdict",
+			warden.Timeout, domain.DefaultGateTimeout, defaultReactionTimeout)
+	}
+
+	if quick := opts.Reactions[3]; quick.Timeout != 2*time.Second {
+		t.Errorf("fourth timeout = %v, want the 2s the entry spells over the class default", quick.Timeout)
 	}
 }
 
@@ -174,9 +203,19 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 			want: `reaction "coach": advise: is not yet shipped (ADR 0076 stage 3)`,
 		},
 		{
-			name: "gate: is spelled",
-			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate: [\"decide\"]\n",
-			want: `reaction "warden": gate: is not yet shipped (ADR 0076 stage 3)`,
+			name: "gate: is a bare string",
+			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate: decide\n",
+			want: `reaction "warden": gate: is an argv list`,
+		},
+		{
+			name: "gate: is a webhook mapping",
+			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate:\n      url: https://example.com/\n",
+			want: `reaction "warden": gate: is an argv list`,
+		},
+		{
+			name: "gate: reacts at a Moment it cannot take",
+			body: "reactions:\n  - id: warden\n    on: [post-tool-result]\n    gate: [\"decide\"]\n",
+			want: `invalid reaction "warden": gate: reacts at pre-tool-exec; "post-tool-result" is not it`,
 		},
 		{
 			name: "the id is a Floor guard's key",

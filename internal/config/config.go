@@ -1400,12 +1400,13 @@ type fileConfig struct {
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
 	MCPServers []mcpServerConfig `yaml:"mcp-servers"`
-	// Reactions is the global list of user-origin observe Reactions (ADR 0076): each entry names
-	// the Moments it fires on under `on:` and the one action it takes under `run:`, an argv list run
-	// out of confinement or a webhook mapping the JSON payload is POSTed to. Absent/empty ⇒ the
-	// feature is dormant (nothing runs, no error). Nothing a Reaction of this class does reaches the
-	// model, the conversation or the Session record, so an entry is never part of what a run
-	// produces — only of what a machine is told about it.
+	// Reactions is the global list of user-origin Reactions (ADR 0076): each entry names the Moments
+	// it fires on under `on:` and the actions it takes under `run:` — an argv list run out of
+	// confinement or a webhook mapping the JSON payload is POSTed to, both of class observe — and
+	// under `gate:`, an argv list whose verdict the Approver reads. Absent/empty ⇒ the feature is
+	// dormant (nothing runs, no error). Nothing an observe Reaction does reaches the model, the
+	// conversation or the Session record, so such an entry is never part of what a run produces —
+	// only of what a machine is told about it.
 	//
 	// The retired `hooks:` block this replaces is FOLDED into this key at startup, once, and the
 	// change is announced (configmigrate.go): the schema no longer has that field, so an unfolded

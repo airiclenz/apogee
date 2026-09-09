@@ -30,10 +30,10 @@
 // once — its type, default, env var, flag, validator, /settings visibility, and the projections
 // that read its value back out of a resolved [Options] — guarded as a bijection with fileConfig,
 // so a key added to the schema breaks the build gate until it is described. reactions.go is the
-// `reactions:` block — the on-disk shape of one user-origin observe Reaction, its mapping onto the
-// value internal/reactions fires, the whole-list refusal parseConfigFile runs over it, its
-// projection onto the Options, and the environment variable names its webhook headers read
-// (ADR 0076). defaults.go is the starter config embedded from defaults/config.yaml and seeded on
+// `reactions:` block — the on-disk shape of one user-origin Reaction, its mapping onto the values
+// internal/reactions and the agent fire (one per action key the entry spells), the whole-list
+// refusal parseConfigFile runs over it, its projection onto the Options, and the environment
+// variable names its webhook headers read (ADR 0076). defaults.go is the starter config embedded from defaults/config.yaml and seeded on
 // first run, plus the seed-if-absent write everything else reuses. configsplice.go is the line and
 // node machinery every write into config.yaml shares — read, parse for positions, cut and rejoin
 // the text, verify the result against the original, replace the file atomically — which is what
