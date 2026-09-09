@@ -278,13 +278,12 @@ dist:
 	@cd $(DIST_DIR) && $(SHA256) *.tar.gz *.zip > SHA256SUMS
 	@echo "dist OK -> $(DIST_DIR)/ ($(words $(CROSS_TARGETS)) archives + SHA256SUMS)"
 
-## check: the Phase-2 acceptance gate (fmt-check, vet, lint, build, vulncheck, race tests, ADR-0010, cross, --help)
+## check: the Phase-2 acceptance gate (fmt-check, lint, build, vulncheck, race tests, ADR-0010, cross, --help)
 .PHONY: check
 check:
 	@echo "==> gofmt (must be empty)"
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "needs gofmt:"; echo "$$out"; exit 1; fi
-	@echo "==> go vet"
-	@go vet ./...
+# Plain `go vet ./...` has no step of its own: golangci-lint's standard set runs govet.
 	@echo "==> go vet (windows build tag: the Windows-tagged tests must still compile)"
 	@GOOS=windows go vet ./internal/platform/... ./internal/probe/...
 	@echo "==> golangci-lint"

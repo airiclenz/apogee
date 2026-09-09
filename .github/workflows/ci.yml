@@ -1,6 +1,6 @@
 name: CI
 
-# Phase-0 CI (docs/plans/phase-0-detail-plan.md §2). Gates formatting + vetting now,
+# Phase-0 CI (docs/plans/phase-0-detail-plan.md §2). Gates formatting now,
 # tests as they land (the capstone harness, P0.6). Cross-compiles the v1 platform matrix
 # so the single static binary keeps building everywhere, Windows fast-follow included.
 # Two further gates run as jobs of their own: `lint` (golangci-lint over the module) and
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   check:
-    name: fmt / vet / build / test
+    name: fmt / build / test
     runs-on: ubuntu-latest
     steps:
       # Actions are pinned by commit SHA with the release tag in the comment beside it.
@@ -46,8 +46,6 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
-      - name: go vet
-        run: go vet ./...
       - name: go build
         run: go build ./...
       - name: go test (race)

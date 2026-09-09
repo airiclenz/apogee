@@ -24,7 +24,7 @@ A `Makefile` wraps the common Go invocations:
 | `make vulncheck` | Run `govulncheck` over the dependency graph — needs the network |
 | `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
 | `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
-| `make check` | The full acceptance gate — gofmt, vet, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
+| `make check` | The full acceptance gate — gofmt, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
 | `make release-smoke VERSION=v0.18.0` | Verify a **published** release from the outside (see [Releasing](#releasing)) |
 | `make help` | List every target |
 

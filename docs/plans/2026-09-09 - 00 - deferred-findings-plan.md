@@ -300,7 +300,13 @@ unchanged and green.
 
 **Commit:** `refactor(wire): the settings applier re-reads the config file through one method`
 
-## 9. The plain `go vet ./...` leaves `make check` and CI
+## 9. The plain `go vet ./...` leaves `make check` and CI — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the CI job was renamed `fmt / vet / build / test` → `fmt / build / test` per the
+dispatch DECISION (the literal name is not a pinned required status check).
+
+NOTES (2026-09-09): the `check` recipe's new one-line note about the linter covering plain vet is a
+make comment (column 0, no leading tab) rather than a recipe line, so `make -n check` does not print it.
 
 **What.** Closes `apogee-ilh`. `.golangci.yml` runs `default: standard`, which includes `govet`, so
 `Makefile:286-287` (`==> go vet` in `check`) and `.github/workflows/ci.yml:49-50` duplicate `make lint`.
