@@ -359,7 +359,11 @@ amendment (ADR 0071:219-225) already carries, in its first line, and changes not
 
 **Commit:** `docs(adr): ADR 0071 D5 admits the /settings row for the seven Floor guard keys`
 
-## 11. The settings-screen layout spec stops naming the retired `validated-sets.alias` and `mechanisms` keys
+## 11. The settings-screen layout spec stops naming the retired `validated-sets.alias` and `mechanisms` keys — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): consequential edit — docs/layout/settings-screen-layout.md:204 "The sixth key class" reads "The fifth" now: made necessary by deleting the Mechanism list section, which was one of the counted classes.
+
+NOTES (2026-09-09): folded in two further retired-`mechanisms` sites in the same file that the item's two enumerated sites did not name (the acceptance grep is lowercase, so neither is caught by it): `:83` and `:234` called the pane's ninth settings section `Mechanisms`; it ships as `Reactions` (`cmd/apogee/settingsrows.go:89`, `cmd/apogee/e2e_smoke_test.go:95-96`). Both now read `Reactions`.
 
 **What.** Closes `apogee-jwf` (its deletion sweep landed in stage 2; CONTEXT.md:1830 already reads
 "Validated set → gone"). The one live mention left is the layout spec:
