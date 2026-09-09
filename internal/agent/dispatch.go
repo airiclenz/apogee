@@ -384,10 +384,15 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 	}
 
 	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call, tool, a.guardExemptions())))
+	// The gate stage: the user's own reactions may tighten what the ladder decided, never loosen
+	// it (gate.go). An ask leaves a delegation's verdict standing — the child inherits the gate
+	// and asks on the calls that actually execute — so only a deny changes the answer here.
+	verdict = a.applyGates(ctx, turn, call, verdict)
 	if verdict.kind != resolveDelegate {
 		// resolve() answers a sub_agent call with Delegate or Refuse and nothing else (its row 2:
 		// a Tier-2 force is deliberately not applied to a delegation, so no Gate or Confine can
-		// reach here) — so this is the guard hard-refuse and the depth-bound refusal.
+		// reach here) — so this is the guard hard-refuse, the depth-bound refusal, and a gate
+		// reaction's deny, which is the one further way a delegation is refused (gate.go).
 		return fanOutSlot{call: call, verdict: verdict, result: a.executeRefuse(turn, call, verdict)}
 	}
 	return fanOutSlot{call: call, verdict: verdict, run: true}
@@ -569,6 +574,10 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 	}
 
 	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call, tool, a.guardExemptions())))
+	// The gate stage, on the same seam and in the same order as the fan-out's prepare phase runs
+	// it: the user's gate reactions fold their answer into the ladder's verdict — a deny refuses
+	// the call, an ask forces the Approver — before anything executes (gate.go).
+	verdict = a.applyGates(ctx, turn, call, verdict)
 
 	switch verdict.kind {
 	case resolveRefuse:

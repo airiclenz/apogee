@@ -54,7 +54,10 @@
 // anything executes: the guardrail floor, the ladder-by-blast-radius table, the confinement
 // capability check, and the precomputed fallback for what only run time can reveal.
 // dispatch.go executes it: the serial and depth-0 fan-out paths, the run/gate/confine/delegate/
-// refuse arms, Approval, result clamping, and the audit records. treesnapshot.go is the
+// refuse arms, Approval, result clamping, and the audit records. gate.go is the user's stage of
+// that Approver — the gate reactions asked after resolve() and before anything runs, their
+// allow/deny/ask protocol, and the fold that lets them tighten the ladder's verdict and never
+// loosen it (ADR 0076 D2). treesnapshot.go is the
 // tracked-file mutation floor around subprocess calls — the git-status snapshots taken before
 // and after each run and the warning line naming what changed (always on, ADR 0006 class).
 // subagent.go is the sub-agent

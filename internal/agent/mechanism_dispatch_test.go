@@ -184,9 +184,13 @@ func TestArmedReactionFiresUnderItsOwnID(t *testing.T) {
 }
 
 // TestBypassGate is the five-seam Bypass dispatch matrix (phase-4-review-fixes item 5, recast on
-// ADR 0076 D9): at EVERY seam Moment an armed observe or gate Reaction survives Bypass, while
-// advise, shape-view and shape-work are dropped before they are ever invoked — and all five
-// dispatch when Bypass is off.
+// ADR 0076 D9): at EVERY seam Moment an armed observe Reaction survives Bypass, while advise,
+// shape-view and shape-work are dropped before they are ever invoked — and all of them dispatch
+// when Bypass is off.
+//
+// A GATE survives Bypass too, but it is answered by the Approver stage rather than by the seam
+// cascade (gate.go's applyGates), so pre-tool-exec is the ONE Moment it dispatches at and the
+// cascade skips it everywhere — under Bypass and without it alike.
 func TestBypassGate(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -204,11 +208,12 @@ func TestBypassGate(t *testing.T) {
 			type subject struct {
 				class   domain.Class
 				counts  map[domain.Moment]int
-				dropped bool // whether Bypass switches this class off (D9)
+				dropped bool          // whether Bypass switches this class off (D9)
+				onlyAt  domain.Moment // non-empty: the ONE Moment this class dispatches at
 			}
 			subjects := map[string]*subject{
 				"observe":    {class: domain.ClassObserve},
-				"gate":       {class: domain.ClassGate},
+				"gate":       {class: domain.ClassGate, onlyAt: domain.MomentPreToolExec},
 				"advise":     {class: domain.ClassAdvise, dropped: true},
 				"shape-view": {class: domain.ClassShapeView, dropped: true},
 				"shape-work": {class: domain.ClassShapeWork, dropped: true},
@@ -224,7 +229,7 @@ func TestBypassGate(t *testing.T) {
 			for name, s := range subjects {
 				for _, m := range allSeamMoments {
 					gated := s.counts[m] == 0
-					want := tt.bypass && s.dropped
+					want := (tt.bypass && s.dropped) || (s.onlyAt != "" && m != s.onlyAt)
 					if gated != want {
 						t.Errorf("[%s] class %s dispatched %d times (bypass=%v), want gated=%v",
 							m, name, s.counts[m], tt.bypass, want)

@@ -241,6 +241,15 @@ func (a *Agent) fireLeg(
 	advised *[]advice,
 ) (bool, error) {
 	for _, r := range leg {
+		// A GATE never fires here. Its whole cell is the Approver stage applyGates runs after
+		// resolve() (gate.go), which is the only place a verdict can be folded into — and the
+		// only place that can be, since a gate's command answers with a decision this cascade has
+		// no field to carry. Routing one through here would assert a PreToolExecFunc against that
+		// command and fail EVERY tool call with "pre-tool-exec reaction failed"; a Go gate
+		// handler, which would pass the assertion, would have its verdict booked twice.
+		if r.spec.Class == domain.ClassGate {
+			continue
+		}
 		if !subscribes(r.spec, m) {
 			continue
 		}
@@ -385,8 +394,13 @@ func (a *Agent) bookFiring(
 //
 // "Carried a correction" is what makes an advise reaction a firing at the tool-result seam: its
 // Inject is the trailer text and no Retry accompanies it there, so the Inject term alone books it.
+//
+// "Gave a verdict" is the gate cell's term, and the gate STAGE is its only reader (gate.go's
+// callGateFunc): an Outcome whose Gate.Verdict is the only thing set carries no correction, no
+// deferral and no edit, so without this term a Go gate handler's deny would read as an
+// inspect-and-do-nothing invocation and be dropped. The zero GateDecision stays silence.
 func acted(out domain.Outcome) bool {
-	return out.Retry || out.Inject != "" || out.Defer != "" || out.Edited
+	return out.Retry || out.Inject != "" || out.Defer != "" || out.Edited || out.Gate.Verdict != ""
 }
 
 // isAdvice reports whether this ACTED Outcome is an advise injection — the one firing that both

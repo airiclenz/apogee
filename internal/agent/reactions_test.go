@@ -357,6 +357,10 @@ func TestFireBuiltinRetryHandsOverOnlyWhenTheBudgetIsSpent(t *testing.T) {
 // Bypass (ADR 0076 D9) switches off ARMED advise and shape reactions and nothing else: observe
 // and gate stay on because neither can make a model do worse, and a builtin is never withdrawn
 // at all. A skipped reaction is SILENT — it is never invoked and books nothing.
+//
+// A gate stays on under Bypass but never reaches THIS cascade: its cell is the Approver stage
+// applyGates runs after resolve() (gate.go), so the cascade skips class gate at every seam and
+// TestGateDenyStillDeniesUnderBypass is where its survival under Bypass is pinned.
 func TestFireBypassMatrix(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -365,7 +369,7 @@ func TestFireBypassMatrix(t *testing.T) {
 		wantRun bool
 	}{
 		{name: "armed observe survives", class: domain.ClassObserve, wantRun: true},
-		{name: "armed gate survives", class: domain.ClassGate, wantRun: true},
+		{name: "an armed gate never reaches the cascade", class: domain.ClassGate},
 		{name: "armed advise is skipped", class: domain.ClassAdvise},
 		{name: "armed shape-view is skipped", class: domain.ClassShapeView},
 		{name: "armed shape-work is skipped", class: domain.ClassShapeWork},
