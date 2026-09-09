@@ -512,6 +512,106 @@ func TestApplyConfigMigratesTheRetiredKeys(t *testing.T) {
 	}
 }
 
+// The fold the OTHER startup retirement makes, driven where a session actually makes it: the
+// migration is pinned at migrateLegacyConfig above and LoadFileConfig refuses a `hooks:` file
+// outright, so ApplyConfig — the one caller that resolves with migration allowed — is the only
+// place the whole journey happens, and the only place that proves the folded entries reach the
+// Options a run is built from.
+func TestApplyConfigFoldsTheHooksBlock(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	// The `servers:`/`server:` pair rides along because a startup with no server to select is
+	// refused (StartupUndetermined) whatever the fold did, which would hide the fold behind an
+	// unrelated error.
+	given := "servers:\n" +
+		"  - name: box\n" +
+		"    endpoint: http://box:1111\n" +
+		"\n" +
+		"server: box\n" +
+		"\n" +
+		"hooks:\n" +
+		"  - name: notify\n" +
+		"    events: [approval-waiting, turn-finished]\n" +
+		"    command: [\"notify-send\", \"waiting\"]\n" +
+		"    timeout: 10s\n"
+	path := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(path, []byte(given), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var notes []string
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, func(msg string) { notes = append(notes, msg) }); err != nil {
+		t.Fatalf("a config carrying the retired hooks: block was refused instead of folded: %v", err)
+	}
+
+	// (a) The entries the run fires from are the ones the old block described.
+	if len(opts.Reactions) != 1 {
+		t.Fatalf("resolved %d reactions; want the one the hooks: block described: %+v",
+			len(opts.Reactions), opts.Reactions)
+	}
+	got := opts.Reactions[0]
+	if got.ID != "notify" {
+		t.Errorf("id = %q; want the old name:", got.ID)
+	}
+	if len(got.On) != 2 || got.On[0] != domain.MomentApprovalRequested ||
+		got.On[1] != domain.MomentTurnFinished {
+		t.Errorf("on = %v; want the retired approval spelling rewritten and the order kept", got.On)
+	}
+	if got.Timeout != 10*time.Second {
+		t.Errorf("timeout = %v; want the 10s the entry spelled", got.Timeout)
+	}
+	if got.Handler == nil {
+		t.Error("the folded entry carries no handler; the command: argv did not become a run:")
+	}
+
+	// (b) And the file the user owns is the live schema now, not the retired one.
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the migrated config: %v", err)
+	}
+	for _, want := range []string{"reactions:", "- id: notify", "on: [approval-requested, turn-finished]",
+		"run: [notify-send, waiting]"} {
+		if !strings.Contains(string(onDisk), want) {
+			t.Errorf("the rewritten file does not carry %q:\n%s", want, onDisk)
+		}
+	}
+	for _, absent := range []string{"hooks:", "name: notify", "events:", "command:"} {
+		if strings.Contains(string(onDisk), absent) {
+			t.Errorf("the rewritten file still carries the retired %q:\n%s", absent, onDisk)
+		}
+	}
+
+	// (c) The one line that tells the user their file was rewritten, and what their own scripts
+	// have to change — the same sentence migrateLegacyConfig's announcement test reads.
+	if len(notes) != 1 {
+		t.Fatalf("startup notices = %q; want exactly the one fold line", notes)
+	}
+	for _, want := range []string{
+		"hooks: became reactions: (1 entries)",
+		"approval-waiting is now approval-requested",
+		`Scripts must read APOGEE_REACTION_* (was APOGEE_HOOK_*) and the payload's "reaction" ` +
+			`field (was "hook").`,
+		path,
+	} {
+		if !strings.Contains(notes[0], want) {
+			t.Errorf("the fold announcement does not carry %q: %s", want, notes[0])
+		}
+	}
+
+	// And the launch after it neither migrates nor announces anything again.
+	second := Options{ConfigDir: home}
+	if err := ApplyConfig(&second, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, func(msg string) { t.Errorf("the second launch announced %q", msg) }); err != nil {
+		t.Fatalf("the folded config was refused on the next launch: %v", err)
+	}
+	if len(second.Reactions) != 1 || second.Reactions[0].ID != got.ID {
+		t.Errorf("the second launch resolved %+v; want the first launch's one %q entry",
+			second.Reactions, got.ID)
+	}
+}
+
 // The other retirement that is a refusal rather than a fold: the global `model-profile:` block of
 // ADR 0044. The user's own block comes back nested under a pattern placeholder, so the fix is a
 // paste plus the one thing only they know — which models it was written for — and a bare key, which

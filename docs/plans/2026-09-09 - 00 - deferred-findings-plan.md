@@ -148,7 +148,11 @@ bound; asserts the Observe roster moved (recording exec) and Floor/Bypass did no
 
 **Commit:** `test(wire): the reactions-row reload test swaps Observe on the real late engine`
 
-## 4. `ApplyConfig` itself folds a `hooks:` block
+## 4. `ApplyConfig` itself folds a `hooks:` block — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): (b) asserts the rewritten file by containment (`reactions:`/`- id:`/`on:`/`run:` present, `hooks:`/`name:`/`events:`/`command:` gone) plus a second `ApplyConfig` launch that announces nothing — the byte golden of the rewrite is already pinned by `TestMigrateLegacyConfigFoldsTheHooksBlock`.
+
+NOTES (2026-09-09): the fold notice's backup path is not asserted — `ApplyConfig` dates the backup with the live clock, not the fixed `migrationClock` the migrateLegacyConfig tests name their backup with; the notice's config path and its three fold sentences are asserted instead.
 
 **What.** Closes `apogee-zqs`. The fold is pinned at `migrateLegacyConfig` directly
 (`configmigrate_test.go:788,906,1020`), `LoadFileConfig` REFUSES a `hooks:` file (`parseConfigFile(..., false)`,
