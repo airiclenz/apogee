@@ -180,7 +180,9 @@ reads a returned `note`, so the assertion helpers are followed, not the channel.
 
 **Commit:** `test(config): ApplyConfig itself is driven through the hooks: fold`
 
-## 5. The headless fixtures speak the live `reactions:` schema; one test keeps the fold journey
+## 5. The headless fixtures speak the live `reactions:` schema; one test keeps the fold journey — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the new test proves the rewrite by asserting the live rendering (`reactions:` and `id: record` present, `name: record` gone) rather than by spelling the retired key in the assertion — a literal `"hooks:"` there would have made the item's own acceptance grep return 2.
 
 **What.** Closes `apogee-d8q`. `hookHomeRecording` (`cmd/apogee/headless_test.go:3099-3104`) and the
 fixture in `TestHeadlessReportsAFailingHookOnStderr` (`:3198`) still write

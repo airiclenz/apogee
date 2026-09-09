@@ -3099,7 +3099,7 @@ func requireHookShell(t *testing.T) {
 func hookHomeRecording(t *testing.T, marker string, events ...string) string {
 	t.Helper()
 	return testConfigHome(t, fmt.Sprintf(
-		"hooks:\n  - name: record\n    events: [%s]\n    command: [\"sh\", \"-c\", \"cat > \\\"$0\\\"\", %q]\n",
+		"reactions:\n  - id: record\n    on: [%s]\n    run: [\"sh\", \"-c\", \"cat > \\\"$0\\\"\", %q]\n",
 		strings.Join(events, ", "), marker))
 }
 
@@ -3195,8 +3195,8 @@ func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 func TestHeadlessReportsAFailingHookOnStderr(t *testing.T) {
 	requireHookShell(t)
 
-	home := testConfigHome(t, "hooks:\n  - name: record\n    events: [exchange-finished]\n"+
-		"    command: [\"sh\", \"-c\", \"echo boom >&2; exit 1\"]\n")
+	home := testConfigHome(t, "reactions:\n  - id: record\n    on: [exchange-finished]\n"+
+		"    run: [\"sh\", \"-c\", \"echo boom >&2; exit 1\"]\n")
 	stub := &stubRunner{
 		res: run.Result{FinalText: "the answer", Turns: 1},
 		emit: func(sink domain.EventSink) {
@@ -3215,5 +3215,44 @@ func TestHeadlessReportsAFailingHookOnStderr(t *testing.T) {
 	}
 	if strings.TrimSpace(out) != "the answer" {
 		t.Errorf("stdout = %q, want the answer alone — a Reaction's trouble never contaminates it", out)
+	}
+}
+
+// The one headless test still written in the RETIRED `hooks:` shape, and it is here for the journey
+// rather than the schema: a config file a user has not touched since before ADR 0076 renamed the
+// lane is folded by the startup pass (ApplyConfig → ResolveOptions → migrateLegacyConfig), and the
+// run then fires what the folded list says. Every other fixture in this file speaks the live
+// `reactions:` schema, so this is the only place the end-to-end fold is exercised from a command.
+func TestHeadlessFoldsARetiredHooksBlockOnStart(t *testing.T) {
+	requireHookShell(t)
+
+	marker := filepath.Join(t.TempDir(), "folded.json")
+	home := testConfigHome(t, fmt.Sprintf(
+		"hooks:\n  - name: record\n    events: [exchange-finished]\n"+
+			"    command: [\"sh\", \"-c\", \"cat > \\\"$0\\\"\", %q]\n", marker))
+	stub := &stubRunner{emit: func(sink domain.EventSink) {
+		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	}}
+
+	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "explain this repo"); err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	payload := readHookPayload(t, marker)
+	if payload.Event != reactions.ExchangeFinished {
+		t.Errorf("the folded Reaction was fired for %q, want %q", payload.Event, reactions.ExchangeFinished)
+	}
+	if payload.Reaction != "record" {
+		t.Errorf("the payload names the Reaction %q, want the folded entry's id", payload.Reaction)
+	}
+
+	rewritten, err := os.ReadFile(filepath.Join(home, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read the rewritten config: %v", err)
+	}
+	got := string(rewritten)
+	if !strings.Contains(got, "reactions:") || !strings.Contains(got, "id: record") ||
+		strings.Contains(got, "name: record") {
+		t.Errorf("the home file was not rewritten to the live schema:\n%s", got)
 	}
 }
