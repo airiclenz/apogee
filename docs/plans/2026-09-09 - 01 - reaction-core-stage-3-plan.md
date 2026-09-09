@@ -287,7 +287,10 @@ go test ./cmd/apogee/ -run 'TestReactionsRow|TestLateEngine|TestSetReactions' &&
 
 **Commit:** `feat(driver): the reactions: file arms both lanes, sync failures reach the notice line, /settings counts entries`
 
-## 11. Journey: a `gate:` entry in the user's file denies and asks headless and in the TUI
+## 11. Journey: a `gate:` entry in the user's file denies and asks headless and in the TUI — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the `--format json` helper variant is `headlessHooksArgs` — `headlessHooksAgainst` keeps its signature and became a one-line wrapper over it, so the two journeys share the one runner that binds `runOnce` to the production `run.Once`.
+NOTES (2026-09-09): `testdata/stubllm/reactions.yaml` was not touched — its `tool_result: list_dir` Turn matches on the tool NAME, so a refused call still reaches it and no new turn was needed for any of the three journeys.
 
 **What:** Recast at the regression check (2026-09-09). Depends on item 10. In `cmd/apogee/e2e_reactions_test.go`, over `stubllm` scripting `list_dir {"path":"."}` then a reply (`testdata/stubllm/reactions.yaml` shape): (a) headless, `~/.apogee/config.yaml` with `- id: warden / on: [pre-tool-exec] / gate: ["sh", "-c", "echo deny"]` — the tool result the stub receives on its next request is exactly `tool call denied by reaction warden` and the headless line stream carries `reaction_fired` with `"action":"deny"`; (b) headless with `echo ask` — the next tool message the stub receives is `tool call denied by approver` (the unattended denier at `internal/run/run.go:291`), the stream carries `reaction_fired` `"action":"ask"` followed by an `approval` line with `"decision":"deny"`, the run continues to the reply and exits 0 with the stderr summary `denied: 1`; (c) TUI (`tuitest` driver, `TestE2EHooksFireFromTheTUI` shape) with `printf 'ask\nlooks risky\n'` in Ask-Before mode — the approval pop-up frame contains `reaction warden asks: looks risky`.
 

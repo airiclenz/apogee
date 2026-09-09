@@ -730,6 +730,213 @@ func TestE2EReactionsReloadSwapsTheArmedList(t *testing.T) {
 	}
 }
 
+// The gate journeys' conversation and vocabulary, restated from testdata/stubllm/reactions.yaml so
+// an assertion reads as the claim it makes: one prompt that makes the model call a tool, and the
+// reply it gives once that call has been answered — refused or not, because the script matches on
+// the tool's NAME and a refusal is still that tool's result.
+//
+// The reaction is named once here and read everywhere, engine-authored sentences included: a gate's
+// model-facing refusal names the reaction and nothing else (internal/agent/gate.go:38), and its
+// human-facing question names the reaction and then whatever the script said (:310) — so renaming
+// the entry re-aims every assertion below rather than un-arming one.
+const (
+	gatePrompt = "What files are in this workspace?"
+	gateAnswer = "Both roots fired their reactions."
+
+	gateWardenName = "warden"
+	gateAskReason  = "looks risky"
+
+	// What the model reads when the gate says no, and what the HUMAN reads when it asks. The two
+	// are deliberately different sentences: a gate's reason is written for the person being asked
+	// and never reaches the conversation, which is the whole of why a gate cannot smuggle
+	// instructions into the model through a refusal it manufactured.
+	gateDenial   = "tool call denied by reaction " + gateWardenName
+	gateQuestion = "reaction " + gateWardenName + " asks: " + gateAskReason
+
+	// The unattended denier's own refusal (internal/run/run.go:291). An `ask` that reached a
+	// headless run ends here rather than at finishGate's no-Approver sentence: an unattended root
+	// installs a denying Approver, so the Approver is consulted and says no.
+	gateApproverDenial = "tool call denied by approver"
+)
+
+// TestE2EGateDeniesAHeadlessToolCall is the gate cell's first journey: a `gate:` entry in the
+// user's own config.yaml refuses a call the mode ladder had already allowed, and the model reads
+// the engine's refusal where the tool's output would have been.
+//
+// The claim is made on what the STUB received rather than on anything apogee printed. A refusal
+// that never reached the conversation would look identical from inside the Agent, and the tool
+// message on the next request is the only place the model's own view of the call is visible from
+// out here.
+func TestE2EGateDeniesAHeadlessToolCall(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	stdout, _, _ := headlessHooksArgs(t, stub, gatePrompt, gateConfig("echo deny"),
+		"--format", formatJSON)
+
+	if got := gateToolResult(t, stub); got != gateDenial {
+		t.Errorf("the model was handed the tool result %q; want the gate's refusal %q",
+			got, gateDenial)
+	}
+
+	lines := jsonEventLines(t, stdout)
+	fired := gateFirings(t, lines)
+	if want := []string{"deny"}; !slices.Equal(fired, want) {
+		t.Errorf("the stream booked the gate firings %v; want %v — one firing, naming what the "+
+			"gate decided", fired, want)
+	}
+}
+
+// TestE2EGateAsksInAHeadlessRun is the same entry saying `ask` where nobody is watching. An `ask`
+// is not a verdict of its own: it hands the call to the human whatever the ladder said, and an
+// unattended run's human is the denier that refuses every gate without parking. So the firing books
+// `ask`, the approval that follows books `deny`, and the run goes on to its answer rather than
+// dying — a Plan run that reached for something and was told no did its job and says so in the
+// summary.
+func TestE2EGateAsksInAHeadlessRun(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	stdout, stderr, _ := headlessHooksArgs(t, stub, gatePrompt, gateConfig("echo ask"),
+		"--format", formatJSON)
+
+	if got := gateToolResult(t, stub); got != gateApproverDenial {
+		t.Errorf("the model was handed the tool result %q; want the unattended denier's refusal %q "+
+			"— an ask is answered by the Approver, not by the gate", got, gateApproverDenial)
+	}
+
+	// The order is the claim: the gate asked, and only then was the human's stand-in consulted.
+	// A `deny` decision that preceded the firing would be some other gate closing the call.
+	lines := jsonEventLines(t, stdout)
+	asked := gateFirstIndex(t, lines, "reaction_fired", "action", "ask")
+	decided := gateFirstIndex(t, lines, "approval", "decision", string(domain.ApprovalDeny))
+	if asked < 0 {
+		t.Fatalf("the stream carries no reaction_fired line booking an ask:\n%s", stdout)
+	}
+	if decided < 0 {
+		t.Fatalf("the stream carries no approval line deciding deny:\n%s", stdout)
+	}
+	if decided < asked {
+		t.Errorf("the deny approval is line %d and the gate's ask is line %d; the approval must "+
+			"follow the ask that forced it", decided+1, asked+1)
+	}
+
+	// The run reached its own end: the answer the script gives once the call has been answered,
+	// the closing frame's success, and the one line a script greps counting the refusal.
+	_, data := finishedFrame(t, lines)
+	wantExitCode(t, data, 0)
+	if got, _ := data["final_text"].(string); !strings.Contains(got, gateAnswer) {
+		t.Errorf("the closing frame's final_text = %q; want the reply %q the run continued to",
+			got, gateAnswer)
+	}
+	if !strings.Contains(stderr, "denied: 1") {
+		t.Errorf("the run's summary does not count the refusal:\n%s", stderr)
+	}
+}
+
+// TestE2EGateAsksInTheTUI is the third root, and the only one with a person in it: the same `ask`
+// in front of a human puts the gate's own words on the approval pane. The second and later lines of
+// a gate's stdout are a reason for the human and for nobody else, so this frame is the one place in
+// the whole surface where they are visible — which is why the journey is driven rather than
+// asserted on an ApprovalRequest inside the Agent.
+//
+// The mode is named rather than left to the default: `list_dir` is a read, and a read is allowed
+// without asking in every mode on the ladder, so the pane in front of the human here exists because
+// a gate asked for it and for no other reason.
+func TestE2EGateAsksInTheTUI(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, gateConfig(`printf 'ask\nlooks risky\n'`),
+		"--mode", string(domain.ModeAskBefore))
+
+	submit(drv, gatePrompt)
+	drv.WaitText(gateQuestion)
+
+	if _, _, ok := drv.Frame().Find("Always allow this session"); !ok {
+		t.Fatalf("the gate's words are on screen but the approval menu is not, so the frame "+
+			"carrying them is not the approval pane:\n%s", drv.Frame().String())
+	}
+
+	// Answered, so the session ends the way every other driven case does rather than being quit
+	// out from under a pending question.
+	drv.WaitQuiet(settled)
+	drv.Type("a")
+	drv.WaitText(gateAnswer)
+	drv.WaitQuiet(settled)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// gateConfig is the config a gate journey runs with: the `warden` entry armed at `pre-tool-exec`
+// with script as its gate command, above a `confine-to-workspace: false`.
+//
+// The confinement key is not incidental. A user-origin sync reaction spawns under a
+// SubprocessPermit whose box is the workspace when the fence is ON, and a host whose kernel offers
+// no confinement capabilities then refuses the permit outright — the gate would fail and every
+// journey below would read an `ask` it never scripted. Off, the permit carries no box and the
+// handler spawns on any host; the fenced case is internal/agent's own unit test.
+//
+// script is written into a YAML flow scalar, so its single quotes are doubled here rather than in
+// every caller — a gate's protocol puts its reason on the second line, and `printf` is how a one
+// line `sh -c` says that.
+func gateConfig(script string) string {
+	return "confine-to-workspace: false\n" +
+		hookBlockOf("  - id: "+gateWardenName+"\n"+
+			"    on: ["+string(domain.MomentPreToolExec)+"]\n"+
+			"    gate: [sh, -c, '"+strings.ReplaceAll(script, "'", "''")+"']\n")
+}
+
+// gateToolResult is the tool message the stub was handed on the request that FOLLOWED the gated
+// call: the model's own view of what happened to it. The script's second Turn matches on the tool's
+// NAME, so a refused call still reaches it — which is what makes the run continue far enough for
+// this message to be sent at all.
+func gateToolResult(t *testing.T, stub *stubllm.Server) string {
+	t.Helper()
+
+	reqs := stub.Requests()
+	if len(reqs) < 2 {
+		t.Fatalf("the stub answered %d requests; want the tool Turn and the one carrying its "+
+			"result", len(reqs))
+	}
+	messages := reqs[1].Messages
+	last := messages[len(messages)-1]
+	if last.ToolCallID == "" {
+		t.Fatalf("the second request's last message is a %q message rather than a tool result: %+v",
+			last.Role, last)
+	}
+	return last.Content
+}
+
+// gateFirings is the action every reaction_fired line booked, in stream order. The whole line is
+// reduced to its action because that is the gate's answer: which verdict the fold read off the
+// script's stdout.
+func gateFirings(t *testing.T, lines []map[string]any) []string {
+	t.Helper()
+
+	var actions []string
+	for i, line := range lines {
+		if line["event"] == "reaction_fired" {
+			if id := stringMember(t, i, line, "reaction"); id != gateWardenName {
+				t.Fatalf("line %d books a firing for %q; the run armed only %q",
+					i+1, id, gateWardenName)
+			}
+			actions = append(actions, stringMember(t, i, line, "action"))
+		}
+	}
+	return actions
+}
+
+// gateFirstIndex is the position of the first line of kind whose data member holds want, or -1.
+// The POSITION rather than the line, because what the asking journey claims is an order.
+func gateFirstIndex(t *testing.T, lines []map[string]any, kind, member, want string) int {
+	t.Helper()
+
+	for i, line := range lines {
+		if line["event"] == kind && stringMember(t, i, line, member) == want {
+			return i
+		}
+	}
+	return -1
+}
+
 // sinkEntry is one `reactions:` entry, named, that appends every payload it is handed to the shared
 // sink. The NAME is what the reload journey reads back: two entries writing to one file are told
 // apart by the payload's own `reaction` field, which is the field a firing is attributed by.
@@ -853,6 +1060,17 @@ func messagesCarry(messages []any, want string) bool {
 // to rest on this helper's own code rather than on whatever ran before it.
 func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfig string) (stdout, stderr, workspace string) {
 	t.Helper()
+	return headlessHooksArgs(t, stub, prompt, extraConfig)
+}
+
+// headlessHooksArgs is [headlessHooksAgainst] with extra command-line arguments, which is the whole
+// of what the gate journeys need beyond it: a `reaction_fired` line exists only under
+// `--format json` (cmd/apogee/headless.go:390 — text mode prints nothing at all for a
+// ReactionFiredEvent, :178), so a case reading the stream has to ask for it, and `--config`,
+// `--workspace` and the prompt are still this helper's own.
+func headlessHooksArgs(t *testing.T, stub *stubllm.Server, prompt, extraConfig string,
+	extra ...string) (stdout, stderr, workspace string) {
+	t.Helper()
 
 	prev := runOnce
 	runOnce = run.Once
@@ -876,7 +1094,9 @@ func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfi
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"--config", home, "--workspace", workspace, prompt})
+	args := []string{"--config", home, "--workspace", workspace}
+	args = append(args, extra...)
+	cmd.SetArgs(append(args, prompt))
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("headless: %v\n%s", err, errBuf.String())
 	}
