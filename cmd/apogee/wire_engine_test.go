@@ -128,9 +128,6 @@ func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 	if err := engine.SetReactions(apogee.Generation{Floor: want}); err != nil {
 		t.Fatalf("SetReactions: %v", err)
 	}
-	if engine.pendingGeneration == nil || engine.pendingGeneration.Floor != want {
-		t.Fatalf("pendingGeneration = %+v; want the floor %+v held for the bind", engine.pendingGeneration, want)
-	}
 
 	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
 		t.Fatalf("Bind: %v", err)
@@ -139,12 +136,17 @@ func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 		t.Errorf("the bound Agent's floor = %+v; want the gates held for the bind %+v", got, want)
 	}
 
-	// Past the bind the door stays open and stays anytime-safe, exactly as the prune gate's does.
-	if err := engine.SetReactions(apogee.Generation{}); err != nil {
+	// Past the bind the door stays open and stays anytime-safe, exactly as the prune gate's does —
+	// and what the holder remembered is read where the session actually reads it, off the bound
+	// Agent. A settings row hands the WHOLE generation back with one guard bit moved
+	// (liveSettings.setFloorGuard), so that is the shape the edit takes here too.
+	moved := apogee.Generation{Floor: want}
+	moved.Floor.DisableToolCallRepair = true
+	if err := engine.SetReactions(moved); err != nil {
 		t.Fatalf("SetReactions: %v", err)
 	}
-	if engine.pendingGeneration == nil || engine.pendingGeneration.Floor != (apogee.FloorConfig{}) {
-		t.Errorf("pendingGeneration after a bound edit = %+v; want the whole floor back on", engine.pendingGeneration)
+	if got := engine.bound().Generation().Floor; got != moved.Floor {
+		t.Errorf("the bound Agent's floor after a bound edit = %+v; want the moved gates %+v", got, moved.Floor)
 	}
 }
 
@@ -260,6 +262,36 @@ func TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged(t *testing.T) {
 	if len(runner.lists) != 1 {
 		t.Errorf("the Runner was swapped %d times by an edited list; want exactly one", len(runner.lists))
 	}
+
+	// And the same skip is the RETAINED-BITS property read from the other side: a Floor-only swap
+	// off an armed generation must leave Bypass and the observe roster exactly where they stand.
+	// Observe is not carried by Agent.Generation(), so the roster is read where it actually lands —
+	// the Runner's Replace witness, which must record nothing further — and Bypass off the bound
+	// Agent, alongside the one Floor bit that did move.
+	t.Run("FloorSwapLeavesBypassAndObserveAlone", func(t *testing.T) {
+		swapsBefore := len(runner.lists)
+		roster := runner.lists[swapsBefore-1]
+
+		floorOnlyOffTheArmed := moved
+		floorOnlyOffTheArmed.Floor.DisableReadCache = true
+		if err := engine.SetReactions(floorOnlyOffTheArmed); err != nil {
+			t.Fatalf("SetReactions(floor only off the armed generation): %v", err)
+		}
+
+		if len(runner.lists) != swapsBefore {
+			t.Errorf("a Floor-only swap moved the Runner %d more times; want none", len(runner.lists)-swapsBefore)
+		}
+		if !reflect.DeepEqual(runner.lists[len(runner.lists)-1], roster) {
+			t.Errorf("the roster the Runner is firing = %+v; want the armed roster untouched %+v", runner.lists[len(runner.lists)-1], roster)
+		}
+		got := engine.bound().Generation()
+		if !got.Bypass {
+			t.Errorf("Bypass = %v after a Floor-only swap; want the armed value carried", got.Bypass)
+		}
+		if got.Floor != floorOnlyOffTheArmed.Floor {
+			t.Errorf("the bound Agent's floor = %+v; want the moved guard %+v", got.Floor, floorOnlyOffTheArmed.Floor)
+		}
+	})
 }
 
 // The generation rides the remember-then-install contract the mode and the gates ride: a `/settings`

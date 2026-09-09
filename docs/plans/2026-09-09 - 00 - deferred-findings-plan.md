@@ -77,7 +77,9 @@ does not exist there).
 
 **Commit:** `test(reactions): pin the entry refusals on their full run:/run: url:/headers-env: sentences`
 
-## 2. The late-engine Floor replay test asserts what the bind observes, not `pendingGeneration`
+## 2. The late-engine Floor replay test asserts what the bind observes, not `pendingGeneration` — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the retained-bits half lands as the subtest `FloorSwapLeavesBypassAndObserveAlone` extending `TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged` (the item's Tests section), so the rewritten `TestLateEngineReplaysTheFloorGatesAtTheBind` keeps only the replay property and its post-bind door, both read off `bound().Generation()`; its post-bind swap now hands the armed generation back with one guard bit flipped instead of an empty generation.
 
 **What.** Closes `apogee-370`. `TestLateEngineReplaysTheFloorGatesAtTheBind`
 (`cmd/apogee/wire_engine_test.go:118-149`) reads the unexported `engine.pendingGeneration`
