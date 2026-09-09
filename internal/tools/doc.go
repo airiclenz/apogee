@@ -271,7 +271,7 @@
 //
 // # The package spine, one line each
 //
-// Twelve files register no tool. tools.go is the shared toolSpec (name, description, JSON
+// Thirteen files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
 // including okSummary, which attaches the structured half. registry.go is HostTools, the
 // two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
@@ -332,6 +332,13 @@
 // changed. It lives here rather than in either tool so the two cannot grow parallel staging
 // code paths, and its header owns the undo interplay both of them reference (/undo restores
 // worktree bytes, never the index).
+// redact.go is RedactSecrets, the OUTPUT side of the credential scrub whose input side is
+// exec_common.go's subprocessEnv: a pure replacement of every configured secret's current value
+// with "[redacted]", longest value first so a prefix never leaves the longer one's tail behind.
+// It is the sibling of network.go's redactRequestURL — that one keeps a request URL out of an
+// error string, this one keeps an `api-key-env:` value out of any text apogee passes on — and it
+// registers nothing, so a caller outside this package (a sync Reaction's stdout) reaches it as a
+// plain function.
 //
 // And doc.go this map.
 package tools

@@ -94,7 +94,11 @@ go test ./internal/domain/ -run 'TestAdvice|TestConversation|TestMessage'
 
 **Commit:** `feat(domain): the advice span, its provenance-derived fence, the 8 KiB cap and the session-record strip`
 
-## 3. `tools.RedactSecrets`: an output-side value redactor
+## 3. `tools.RedactSecrets`: an output-side value redactor — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): doc.go carries no redaction note at `:252` (the Network paragraph names no redaction), so `redact.go` is named at the end of the "package spine, one line each" list — the map's home for files that register no tool — with an explicit cross-reference to `network.go`'s `redactRequestURL`; `docmap_test.go` passes.
+NOTES (2026-09-09): consequential edit — internal/tools/doc.go: "Twelve files register no tool" became "Thirteen", made necessary by adding redact.go to that list.
+NOTES (2026-09-09): `go build ./...` over the working tree fails on another item's in-flight work (`internal/domain/reaction.go:434: undefined: servesClass`, items 1/2 running concurrently); left untouched. This item was built, vetted and tested in a throwaway `git archive HEAD` copy carrying only these three files — `go build ./... && go vet ./internal/tools/` green, `go test ./internal/tools/` fully green.
 
 **What:** New `internal/tools/redact.go`: `func RedactSecrets(text string, secretEnv []string) string` replaces every occurrence of the current value of each named env var (via `os.LookupEnv`; empty or unset values skipped; longest value first so a prefix never leaves a tail) with `[redacted]`. No change to the terminal tool or `subprocessEnv`. Pure function, no I/O beyond the env read.
 
