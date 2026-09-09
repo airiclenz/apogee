@@ -106,6 +106,11 @@ func webhookHook(handler domain.WebhookHandler) domain.Reaction {
 	}
 }
 
+// unparseableURL returns a URL net/url cannot parse — the host's bracket is never closed. It is a
+// function rather than a constant because staticcheck's SA1007 reads a constant operand of
+// url.Parse and reports the very malformation the refusal table is here to exercise.
+func unparseableURL() string { return "http://[::1" }
+
 // TestHookValidateAcceptsTheValidShapes covers the six shapes a `reactions:` entry may take: a bare
 // command, a command scoped to a workspace, a command on several events, a bare webhook, a
 // webhook with literal headers, and a webhook with env-referenced headers.
@@ -163,10 +168,10 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 
 	// The unparseable URL's refusal quotes net/url's own error text, so the expectation is built
 	// from that error rather than copied: a stdlib rewording must not fail this test.
-	const unparseableURL = "http://[::1"
-	_, parseErr := url.Parse(unparseableURL)
+	badURL := unparseableURL()
+	_, parseErr := url.Parse(badURL)
 	if parseErr == nil {
-		t.Fatalf("url.Parse(%q) returned no error, want the one the refusal quotes", unparseableURL)
+		t.Fatalf("url.Parse(%q) returned no error, want the one the refusal quotes", badURL)
 	}
 
 	cases := []struct {
@@ -200,8 +205,8 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 			h.Handler = domain.ArgvHandler{Argv: []string{"   ", "done"}}
 			return h
 		}(), wantText: "run: the first element is the program to run and must not be blank"},
-		{name: "unparseable webhook url", hook: webhookHook(domain.WebhookHandler{URL: unparseableURL}),
-			wantText: fmt.Sprintf("run: url: %q is not a URL: %v", unparseableURL, parseErr)},
+		{name: "unparseable webhook url", hook: webhookHook(domain.WebhookHandler{URL: badURL}),
+			wantText: fmt.Sprintf("run: url: %q is not a URL: %v", badURL, parseErr)},
 		{name: "relative webhook", hook: webhookHook(domain.WebhookHandler{URL: "example.test/hook"}),
 			wantText: `run: url: "example.test/hook" must be an absolute http:// or https:// URL`},
 		{name: "non-http webhook", hook: webhookHook(domain.WebhookHandler{URL: "ftp://example.test/hook"}),
