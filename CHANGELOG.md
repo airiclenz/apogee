@@ -10,6 +10,52 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Fixed (tests): **the five entry refusals `internal/reactions` owns are pinned on their whole sentences.**
+  `TestHookValidateRefusesEachRule` compared only message tails — `must not be blank`, `absolute http:// or
+  https:// URL`, `names no host`, `maps to no environment variable name` — so the `run:`, `run: url:` and
+  `headers-env:` key prefixes the Reaction core reworded onto them were unpinned and a further rewording would
+  have passed silently. The six handler and webhook rows now carry the FULL announced sentence, quoted operand
+  included, and the `url.Parse` branch (`hooks.go:138`, `run: url: %q is not a URL: %v`) gains the case it never
+  had: an unclosed-bracket host whose expectation is built from net/url's own error rather than copied, so a
+  stdlib rewording does not fail the test either. Eleven rows become twelve; the id, moments, event and timeout
+  rows keep their shorter markers, whose wording `internal/domain` owns. Closes bead `apogee-yk9`.
+
+- The late-engine Floor replay test now asserts through the bound Agent's `Generation()` instead of the unexported `pendingGeneration`, and the retained-bits property — a Floor-only swap leaving Bypass and the observe roster alone — is pinned as a subtest of `TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged`.
+
+- The `/settings` reactions-row reload test now drives the real engine holder — a seeded, bound
+  `lateEngine` over a live Reaction Runner — so its one-swap-door claim is made against what the
+  session actually runs: the new roster is witnessed firing through the Runner, and the Floor gates
+  and `bypass:` are read back off the bound Agent's own `Generation()`.
+
+- `ApplyConfig` — the startup pass that folds a retired `hooks:` block into `reactions:` — is now
+  driven end to end by a test: the folded entries reach `Options.Reactions`, the file on disk comes
+  back in the live schema, and the one fold notice is announced through the startup callback.
+
+- The headless Reaction tests now write the live `reactions:` / `id:` / `on:` / `run:` schema, so they exercise the shape apogee ships rather than the startup migration; a single new test keeps the retired `hooks:` block on the end-to-end fold journey.
+
+- The post-response seam's once-per-attempt closure across a retry hand-back is pinned by a test: a Turn whose first response trips a retrying Floor guard closes the seam twice, the first closure carrying only the guard and the second the armed leg.
+
+- Tests: the Runner-level seam-projection test is a table over all five seam Moments — each row emits that seam's own working value, mutates it the instant `Emit` returns and still asserts the golden projection reached the firing; a seam added to `domain.Seams()` without a row fails the table.
+
+- Changed (internal): **the `/settings` applier re-reads the config file through one method.** The six
+  structured-key applies — `readmitMCP`, `reloadSystemPrompt`, `reloadServers`, `reconnectMCP`,
+  `reloadReactions`, `reloadModelProfiles` — each spelled out `config.LoadFileConfig(a.configPath,
+  os.ReadFile, func(string) {})` themselves, so how a pane re-reads the file it has just written was
+  stated six times over. One unexported `settingsApplier.fileConfig()` now knows it, and all six route
+  through it. Nothing about the applies changed: no caching across applies, each caller keeps its own
+  error handling and its announced text byte-for-byte, and a new test drives all six against an
+  unparseable file to hold that. Closes bead `apogee-o60`.
+
+- `make check` and CI no longer run a plain `go vet ./...` step: `.golangci.yml`'s standard
+  set already includes `govet`, so `make lint` covered it twice. The Windows-tagged
+  `GOOS=windows go vet` step, the standalone `make vet` target and CI's Windows compile job
+  all stay; the step lists in the `check` comment, `docs/manual/building.md` and the CI job
+  name (`fmt / build / test`) now name the steps that actually run.
+
+- ADR 0071 Decision 5 is amended: its "no `/settings` toggle" is withdrawn — the seven Floor guard keys ship as `/settings` rows, and "no flag, no env" stands. Documentation only; no behaviour change.
+
+- The settings-screen layout spec no longer documents the retired `validated-sets.alias` and `mechanisms` config keys: the `Mechanism list` sub-pane section is deleted, `validated-sets.alias` is dropped from the `⏎ opens $EDITOR` key list, and the pane's settings section is named `Reactions`, as shipped.
+
 - **⌃c⌃c during an answer no longer loses the whole session.** A quit requested while the model was
   still working deferred the exit until the worker unwound (C4) and then left without writing the
   record, on the reasoning that the per-Turn snapshots had already captured every completed Turn —
