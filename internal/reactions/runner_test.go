@@ -655,47 +655,158 @@ func TestNewRefusesAMalformedList(t *testing.T) {
 // while Emit is still running: the engine resumes mutating that value the instant Emit returns,
 // and the firing may not run for minutes, so a document that tracked the mutation would report a
 // pass that never happened.
+//
+// The projection is per-seam, so the proof is too: one row per Moment domain.Seams() returns,
+// each carrying that seam's own working value — the same inputs TestSeamClosedPayloadJSONGolden
+// pins — mutated the instant Emit returns and still asserted to reach the firing as the
+// pre-mutation document. A seam added to the vocabulary without a row here fails the table.
 func TestSeamClosedProjectionIsTakenBeforeEmitReturns(t *testing.T) {
 	t.Parallel()
 
-	exec := newFakeExecutor()
-	runner, err := New([]domain.Reaction{commandHook("watch", domain.MomentHistoryRewriteFinished)}, Options{
-		Workspace: t.TempDir(), Exec: exec,
+	request := domain.NewRequest("qwen", []domain.Message{
+		{Role: domain.RoleSystem, Content: "be brief"},
+		{Role: domain.RoleUser, Content: "fix the build"},
+	}, []domain.ToolDef{{Name: "read_file"}, {Name: "write_file"}}, domain.Budget{}, 3)
+
+	response := domain.NewResponse("running the tests", "", []domain.ToolCall{
+		{ID: "call-1", Tool: "terminal", Arguments: json.RawMessage(`{"command":"go test ./..."}`)},
+	}, domain.FinishToolCalls, nil)
+
+	pendingCall := domain.ToolCall{ID: "call-2", Tool: "write_file", Arguments: json.RawMessage(`{"path":"main.go"}`)}
+	callEdit := domain.NewToolCallEdit(&pendingCall)
+
+	ranCall := domain.ToolCall{ID: "call-2", Tool: "write_file", Arguments: json.RawMessage(`{"path":"main.go"}`)}
+	result := domain.ToolResult{CallID: "call-2", Content: "wrote 12 lines"}
+	resultEdit := domain.NewToolResultEdit(&result)
+
+	conversation := domain.NewConversation([]domain.Message{
+		{Role: domain.RoleUser, Content: "fix the build"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{ranCall}},
+		{Role: domain.RoleTool, ToolCallID: "call-2", Content: "wrote 12 lines"},
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
+
+	cases := []struct {
+		seam   domain.Moment
+		fired  []string
+		value  any
+		mutate func()
+		want   string
+	}{
+		{
+			seam:  domain.MomentPreRequest,
+			fired: []string{"context-files"},
+			value: request,
+			mutate: func() {
+				request.SetMessageContent(0, "after the pass")
+				request.SetTools([]domain.ToolDef{{Name: "terminal"}})
+			},
+			want: `{"messages":[{"role":"system","content":"be brief"},` +
+				`{"role":"user","content":"fix the build"}],"tools":["read_file","write_file"]}`,
+		},
+		{
+			seam:  domain.MomentPostResponse,
+			fired: []string{"tool-call-repair"},
+			value: domain.PostResponseMoment{Resp: response, Retryable: true},
+			mutate: func() {
+				response.SetText("after the pass")
+				response.AppendToolCall(domain.ToolCall{ID: "call-9", Tool: "read_file"})
+			},
+			want: `{"text":"running the tests","tool_calls":[{"id":"call-1","name":"terminal",` +
+				`"arguments":{"command":"go test ./..."}}],"retryable":true}`,
+		},
+		{
+			seam:  domain.MomentPreToolExec,
+			fired: []string{"call-guard"},
+			value: callEdit,
+			mutate: func() {
+				callEdit.SetTool("terminal")
+				callEdit.SetArguments(json.RawMessage(`{"command":"after the pass"}`))
+			},
+			want: `{"id":"call-2","name":"write_file","arguments":{"path":"main.go"}}`,
+		},
+		{
+			seam:  domain.MomentPostToolResult,
+			fired: []string{"tool-result-cap"},
+			value: domain.ToolResultMoment{Call: ranCall, Edit: resultEdit},
+			mutate: func() {
+				resultEdit.SetContent("after the pass")
+				resultEdit.SetIsError(true)
+			},
+			want: `{"call":{"id":"call-2","name":"write_file","arguments":{"path":"main.go"}},` +
+				`"content":"wrote 12 lines","is_error":false}`,
+		},
+		{
+			seam:  domain.MomentHistoryRewrite,
+			fired: []string{"prune"},
+			value: conversation,
+			mutate: func() {
+				conversation.SetMessageContent(0, "after the pass")
+				conversation.Append(domain.Message{Role: domain.RoleAssistant, Content: "and one more"})
+			},
+			want: `{"messages":[{"role":"user","content":"fix the build"},` +
+				`{"role":"assistant","tool_calls":[{"id":"call-2","name":"write_file",` +
+				`"arguments":{"path":"main.go"}}]},` +
+				`{"role":"tool","content":"wrote 12 lines","tool_call_id":"call-2"}]}`,
+		},
 	}
 
-	conversation := domain.NewConversation([]domain.Message{{Role: domain.RoleUser, Content: "before the pass"}})
-	fired := []string{"prune"}
+	// Every seam the vocabulary carries is covered: a sixth Moment added to domain.Seams()
+	// without a row above lands here rather than shipping unprojected.
+	seams := domain.Seams()
+	if len(cases) != len(seams) {
+		t.Fatalf("table covers %d seams, domain.Seams() returns %d", len(cases), len(seams))
+	}
+	covered := make(map[domain.Moment]bool, len(cases))
+	for _, c := range cases {
+		covered[c.seam] = true
+	}
+	for _, seam := range seams {
+		if !covered[seam] {
+			t.Fatalf("seam %q has no row in the table", seam)
+		}
+	}
 
-	runner.Emit(domain.SeamClosedEvent{
-		EventBase: domain.EventBase{Turn: 4},
-		Seam:      domain.MomentHistoryRewrite,
-		Fired:     fired,
-		Value:     conversation,
-	})
-	conversation.SetMessageContent(0, "after the pass")
-	conversation.Append(domain.Message{Role: domain.RoleAssistant, Content: "and one more"})
-	fired[0] = "rewritten after the emit"
-	closeRunner(t, runner)
+	for _, c := range cases {
+		t.Run(string(c.seam), func(t *testing.T) {
+			t.Parallel()
 
-	runs := exec.recorded()
-	if len(runs) != 1 {
-		t.Fatalf("ran %d firings, want 1", len(runs))
-	}
-	if runs[0].Event != domain.MomentHistoryRewriteFinished || runs[0].Seam != domain.MomentHistoryRewrite {
-		t.Errorf("firing = %q/%q, want history-rewrite-finished/history-rewrite", runs[0].Event, runs[0].Seam)
-	}
-	if strings.Join(runs[0].Reactions, ",") != "prune" {
-		t.Errorf("firing reactions = %v, want [prune] — the ids were referenced, not copied", runs[0].Reactions)
-	}
-	encoded, err := json.Marshal(runs[0].Value)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	const want = `{"messages":[{"role":"user","content":"before the pass"}]}`
-	if string(encoded) != want {
-		t.Errorf("firing value =\n  %s\nwant\n  %s", encoded, want)
+			exec := newFakeExecutor()
+			runner, err := New([]domain.Reaction{commandHook("watch", c.seam.Closing())}, Options{
+				Workspace: t.TempDir(), Exec: exec,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			wantFired := c.fired[0]
+			runner.Emit(domain.SeamClosedEvent{
+				EventBase: domain.EventBase{Turn: 4},
+				Seam:      c.seam,
+				Fired:     c.fired,
+				Value:     c.value,
+			})
+			c.mutate()
+			c.fired[0] = "rewritten after the emit"
+			closeRunner(t, runner)
+
+			runs := exec.recorded()
+			if len(runs) != 1 {
+				t.Fatalf("ran %d firings, want 1", len(runs))
+			}
+			if runs[0].Event != c.seam.Closing() || runs[0].Seam != c.seam {
+				t.Errorf("firing = %q/%q, want %q/%q", runs[0].Event, runs[0].Seam, c.seam.Closing(), c.seam)
+			}
+			if strings.Join(runs[0].Reactions, ",") != wantFired {
+				t.Errorf("firing reactions = %v, want [%s] — the ids were referenced, not copied",
+					runs[0].Reactions, wantFired)
+			}
+			encoded, err := json.Marshal(runs[0].Value)
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			if string(encoded) != c.want {
+				t.Errorf("firing value =\n  %s\nwant\n  %s", encoded, c.want)
+			}
+		})
 	}
 }

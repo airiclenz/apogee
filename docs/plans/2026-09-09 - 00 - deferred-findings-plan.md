@@ -238,7 +238,9 @@ acting `postResponseReaction` armed; two closings, `Fired` = builtin id then bui
 
 **Commit:** `test(agent): the post-response seam closes once per attempt across a retry`
 
-## 7. Runner-level coverage for all five seam value projections
+## 7. Runner-level coverage for all five seam value projections — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the pre-tool-exec row carries a one-id `fired` list rather than the golden's `nil`, so every row keeps the "ids were referenced, not copied" proof (`fired[0]` rewritten after `Emit`); the item pins the seam's Value inputs, not its `Fired` list.
 
 **What.** Closes `apogee-fso`. `TestSeamClosedProjectionIsTakenBeforeEmitReturns`
 (`internal/reactions/runner_test.go:658-699`) is the only Runner-level test of the `value` projection
