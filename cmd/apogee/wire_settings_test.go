@@ -3148,8 +3148,23 @@ func TestApplySettingReactionsRefusesWithoutTheRunnerOrTheHolder(t *testing.T) {
 // the swap exactly as the session was running them. They travel in the same value now (ADR 0076 A8),
 // so a reload that composed a generation out of the file's list alone would put back every guard the
 // human had opted out of and lift the floor they had set — a settings edit undoing two others.
+//
+// It is driven against the REAL holder, not a spy: a one-swap-door claim made against a stand-in
+// that records the value handed to it proves only what the arm composed, never what the session ends
+// up running. So the two halves are witnessed where they actually live — the observe list through
+// the Runner that fires it, and the Floor gates and Bypass through the Agent the bind installed
+// them on.
 func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 	t.Parallel()
+	workspace := t.TempDir()
+	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
+	exec := newRecordingHookExec()
+	runner, err := reactions.New(boot, reactions.Options{Workspace: workspace, Exec: exec})
+	if err != nil {
+		t.Fatalf("reactions.New: %v", err)
+	}
+	t.Cleanup(func() { _ = runner.Close(context.Background()) })
+
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeSettingsFixture(t, path,
 		"reactions:\n  - id: reloaded\n    on: [turn-finished]\n    run: [apogee-test-hook]\n")
@@ -3165,23 +3180,44 @@ func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 		ToolResultCap:         true,
 		ReadCache:             false,
 		Bypass:                true,
-		Reactions:             []domain.Reaction{hookEntry("boot", reactions.TurnFinished)},
+		Reactions:             boot,
 	})
-	spy := &applySettingSpy{}
+	engine := newLateEngine(domain.ModePlan, false)
+	t.Cleanup(func() { _ = engine.Close() })
+	engine.seedReactions(runner, apogee.Generation{
+		Floor:   apogee.FloorConfig{DisableReadCache: true},
+		Bypass:  true,
+		Observe: boot,
+	})
+	// And BOUND, which the neighbours above have no reason to be: the seeded generation is replayed
+	// onto the Agent the bind constructs, so the session is running the same Floor and Bypass the
+	// `config.Options` above report — and Generation() has something to answer with afterwards.
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
 	apply := applySettingFor(settingsApplier{
-		engine: spy, live: live, hooks: &reactions.Runner{}, configPath: path,
+		engine: engine, live: live, hooks: runner, configPath: path,
 	})
 	if _, err := apply("reactions", "1 reaction"); err != nil {
 		t.Fatalf("apply reactions: %v", err)
 	}
 
-	if len(spy.generations) != 1 {
-		t.Fatalf("SetReactions = %+v, want exactly one generation", spy.generations)
+	// The observe half MOVED, witnessed where a roster is real: a Turn boundary reaches the entry the
+	// re-read file lists, never the boot one the retired generation was firing.
+	runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	select {
+	case name := <-exec.done:
+		if name != "reloaded" {
+			t.Errorf("the runner fired %q; want the reaction the reload installed", name)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no reaction fired after the reload; the runner is still on the boot list")
 	}
-	gen := spy.generations[0]
-	if len(gen.Observe) != 1 || gen.Observe[0].ID != "reloaded" {
-		t.Errorf("Observe = %+v, want the one entry the re-read file lists", gen.Observe)
-	}
+
+	// And the other two did NOT: the Agent this session is running still has the guard the human
+	// opted out of and the floor switch they threw.
+	gen := engine.bound().Generation()
 	if want := (apogee.FloorConfig{DisableReadCache: true}); gen.Floor != want {
 		t.Errorf("Floor = %+v, want %+v — a reload moves no guard", gen.Floor, want)
 	}

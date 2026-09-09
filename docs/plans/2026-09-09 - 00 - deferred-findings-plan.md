@@ -114,7 +114,9 @@ than a duplicate of it.
 
 **Commit:** `test(wire): the Floor replay test reads the bound Generation, not pendingGeneration`
 
-## 3. `TestReactionsRowReloadSwapsObserveOnly` drives the real `lateEngine`
+## 3. `TestReactionsRowReloadSwapsObserveOnly` drives the real `lateEngine` — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the item's second acceptance grep (`sed -n '3140,3210p' … | grep -c applySettingSpy` → 0) uses a line window written against the pre-rewrite file; it spans the neighbour `TestApplySettingReactionsRefusesWithoutTheRunnerOrTheHolder`, whose spy uses the item explicitly keeps (`:3139`, `:3142`), so it now returns 1. The rewritten test itself is spy-free: `awk 'NR>=3147 && NR<=3235' cmd/apogee/wire_settings_test.go | grep -c applySettingSpy` → 0.
 
 **What.** Closes `apogee-3xx`. `cmd/apogee/wire_settings_test.go:3151-3199` drives
 `apply("reactions", …)` against `applySettingSpy`, so its one-swap-door claim is never made against
