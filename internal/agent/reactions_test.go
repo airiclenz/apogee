@@ -14,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/domain/domaintest"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ---------------------------------------------------------------------------
@@ -922,4 +923,80 @@ func TestFireEmitsSeamClosedAfterAReturnedError(t *testing.T) {
 	}
 	assertOrder(t, "invocations", log.calls, []string{"acted", "broke"})
 	assertSeamClosed(t, sink, domain.MomentPostResponse, payload, []string{"acted"})
+}
+
+// postResponseClosings narrows a recorded stream's seam closings to the post-response Moment —
+// the one seam a single Turn can pass more than once, since a retry hands the Turn back for
+// another attempt.
+func postResponseClosings(events []domain.Event) []domain.SeamClosedEvent {
+	var out []domain.SeamClosedEvent
+	for _, sc := range seamClosings(events) {
+		if sc.Seam == domain.MomentPostResponse {
+			out = append(out, sc)
+		}
+	}
+	return out
+}
+
+// armedSeamWatcher is an armed post-response Reaction that ACTS on every pass it gets. Bypass is
+// off wherever it is used, so its id appearing in a closure's Fired list is the proof the armed
+// leg was reached at all — and its absence, the proof the leg was skipped.
+func armedSeamWatcher(id string) domain.Reaction {
+	return postResponseReaction(id, func(context.Context, *domain.Response) (domain.Outcome, error) {
+		return domain.Outcome{Edited: true}, nil
+	})
+}
+
+// The post-response seam closes once per ATTEMPT, not once per Turn: the deferred emit sits on
+// `fire`, and the retry hand-back is a return from `fire` like every other (ADR 0076 A5). So a
+// Turn whose first response trips a retrying Floor guard and whose second stands closes the seam
+// TWICE — the first closure carrying only the guard that asked for the re-stream, because the
+// hand-back returns before the armed leg is reached, and the second carrying the armed leg that
+// finally got its pass.
+func TestPostResponseSeamClosesOncePerAttemptAcrossARetry(t *testing.T) {
+	t.Run("retry then success", func(t *testing.T) {
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "42"})
+		cfg.Reactions = []domain.Reaction{armedSeamWatcher("watcher")}
+		responder := &captureAllResponder{scripts: [][]provider.Delta{
+			toolCallScript("c1", "frobnicate", `{}`), // not in the menu — the repair guard re-streams
+			contentScript("done"),                    // the retried attempt, which stands
+		}}
+
+		a, err := newAgent(cfg, responder)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		runExchange(t, a, "look it up")
+
+		closed := postResponseClosings(sink.events)
+
+		if len(closed) != 2 {
+			t.Fatalf("post-response closings = %d, want 2 — one per attempt", len(closed))
+		}
+		assertOrder(t, "Fired (first attempt)", closed[0].Fired, []string{guardToolCallRepair})
+		assertOrder(t, "Fired (retried attempt)", closed[1].Fired, []string{"watcher"})
+	})
+
+	t.Run("single pass", func(t *testing.T) {
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "42"})
+		cfg.Reactions = []domain.Reaction{armedSeamWatcher("watcher")}
+		responder := &captureAllResponder{scripts: [][]provider.Delta{
+			contentScript("done"), // no guard trips — one attempt, one closure
+		}}
+
+		a, err := newAgent(cfg, responder)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		runExchange(t, a, "look it up")
+
+		closed := postResponseClosings(sink.events)
+
+		if len(closed) != 1 {
+			t.Fatalf("post-response closings = %d, want 1 for a single-pass Turn", len(closed))
+		}
+		assertOrder(t, "Fired", closed[0].Fired, []string{"watcher"})
+	})
 }

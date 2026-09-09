@@ -205,7 +205,9 @@ callers at `:3138`, `:3173` unchanged); `TestHeadlessFoldsARetiredHooksBlockOnSt
 
 **Commit:** `test(headless): the Reaction fixtures use the live reactions: schema; one test keeps the fold`
 
-## 6. `SeamClosedEvent` closes once per attempt across the post-response retry hand-back
+## 6. `SeamClosedEvent` closes once per attempt across the post-response retry hand-back — ✅ DONE (2026-09-09)
+
+NOTES (2026-09-09): the two helpers the test needs — `postResponseClosings` (narrows `seamClosings` to the post-response Moment) and `armedSeamWatcher` (an acting armed `postResponseReaction`) — are new in `reactions_test.go` beside the test; the item named only the test.
 
 **What.** Closes `apogee-boe`. `internal/agent/reactions.go:153` (`if retried && seam.retryable`) hands
 a retried post-response Turn back to the loop; the deferred emit at `:141-148` makes the seam close
