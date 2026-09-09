@@ -175,6 +175,19 @@ func (r *recordingRunner) Replace(list []domain.Reaction) error {
 	return nil
 }
 
+// gateReaction is one armable user-origin gate row — the shape a `reactions:` entry's `gate:` key
+// resolves to, which the Agent runs and the Runner never sees.
+func gateReaction(id string) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassGate,
+		On:      []domain.Moment{domain.MomentPreToolExec},
+		Handler: domain.ArgvHandler{Argv: []string{"/bin/sh", "-c", "echo deny"}},
+		Timeout: time.Second,
+	}
+}
+
 // observeReaction is one armable user-origin observe row — the shape a `reactions:` entry resolves
 // to — named so a test can tell two lists apart by their ids alone.
 func observeReaction(id string) domain.Reaction {
@@ -262,6 +275,27 @@ func TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged(t *testing.T) {
 	if len(runner.lists) != 1 {
 		t.Errorf("the Runner was swapped %d times by an edited list; want exactly one", len(runner.lists))
 	}
+
+	// And the SYNC lane lands on the same side of that comparison. The Runner never fires an advise
+	// or a gate row, so an edit that armed one and left the observe rows alone must reach the Agent
+	// and retire nothing.
+	t.Run("SyncOnlySwapReachesTheAgentAndNotTheRunner", func(t *testing.T) {
+		swapsBefore := len(runner.lists)
+
+		syncOnly := moved
+		syncOnly.Sync = []domain.Reaction{gateReaction("warden")}
+		if err := engine.SetReactions(syncOnly); err != nil {
+			t.Fatalf("SetReactions(sync only): %v", err)
+		}
+
+		if len(runner.lists) != swapsBefore {
+			t.Errorf("a sync-only swap moved the Runner %d more times; want none", len(runner.lists)-swapsBefore)
+		}
+		got := engine.bound().Generation()
+		if len(got.Sync) != 1 || got.Sync[0].ID != "warden" {
+			t.Errorf("the bound Agent's sync lane = %+v; want the one gate the swap armed", got.Sync)
+		}
+	})
 
 	// And the same skip is the RETAINED-BITS property read from the other side: a Floor-only swap
 	// off an armed generation must leave Bypass and the observe roster exactly where they stand.

@@ -562,7 +562,13 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// config file is parsed, so what is left to fail here is a `workspace:` this host cannot resolve —
 	// and an unattended run that quietly fired nothing would be indistinguishable from one whose
 	// Reactions all ran.
-	hookRunner, err := firingHooks(opts.Reactions, roots.workspace, nil, func(line string) { cmd.PrintErrln(line) })
+	//
+	// The list is DIVIDED first (ADR 0076 A8): the Runner takes the observe half, and the sync half —
+	// the advise and gate entries the loop runs — is latched onto the Firing's own spec below, which
+	// is the one route it takes into an unattended run.
+	reportReaction := func(line string) { cmd.PrintErrln(line) }
+	observeReactions, syncReactions := domain.SplitLanes(opts.Reactions)
+	hookRunner, err := firingHooks(observeReactions, roots.workspace, nil, reportReaction)
 	if err != nil {
 		return run.Result{}, notStarted(err)
 	}
@@ -717,6 +723,7 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		mode:     mode,
 		recordID: recordID,
 		hooks:    hookRunner,
+		report:   reportReaction,
 	})
 	if err != nil {
 		return run.Result{}, notStarted(err)
@@ -842,10 +849,14 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// headless run delegates to the `sub-agents-server:` entry exactly as a session does, and both
 	// fields are nil when no key named one — the unrouted floor every Firing had before this.
 	res, runErr := runOnce(ctx, run.Spec{
-		Config:           cfg,
-		Prompt:           prompt,
-		Store:            store,
-		RecordID:         recordID,
+		Config:   cfg,
+		Prompt:   prompt,
+		Store:    store,
+		RecordID: recordID,
+		// The sync half of the `reactions:` list this run resolved, armed on the Agent run.Once
+		// builds before its first Step: a `gate:` answers this run's very first tool call, and its
+		// trouble reaches the same stderr line the Runner's does (Config.Report, firingConfig).
+		Sync:             syncReactions,
 		DelegationTarget: routing.target,
 		DelegationSeat:   routing.seat,
 	})

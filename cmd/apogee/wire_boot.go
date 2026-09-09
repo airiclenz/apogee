@@ -186,7 +186,13 @@ func (w *rootWiring) resolveConfig() error {
 	// reconnect swaps it afterwards. Reading it through liveTools.lookup at call time is what makes
 	// the `file-changed` derivation follow the set the session is actually running, and what keeps
 	// the read off an unlocked pointer the Update goroutine writes.
-	runner, err := reactions.New(w.opts.Reactions, reactions.Options{
+	//
+	// It is handed the OBSERVE half alone (ADR 0076 A8). One `reactions:` file resolves to both
+	// lanes in one list, and the sync half — the advise and gate entries the AGENT runs inside the
+	// loop — is armed through the generation the engine holder is seeded with (wire_live.go), which
+	// is the one route it takes into this session.
+	observe, _ := domain.SplitLanes(w.opts.Reactions)
+	runner, err := reactions.New(observe, reactions.Options{
 		Inner:     w.bridge.Sink(),
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
@@ -219,7 +225,12 @@ func (w *rootWiring) resolveConfig() error {
 		// The Reaction Runner built above, which DECORATES the Bridge's sink: the renderer sees every
 		// Event exactly as it did before this key existed, and the `reactions:` list is fired behind it
 		// (ADR 0073 §2 — observe-only, nothing a Reaction does reaches the model or the record).
-		Events:   w.hooks,
+		Events: w.hooks,
+		// Where a SYNC-lane reaction's trouble is said out loud — a gate or advise command that
+		// failed, timed out or could not be spawned. It is the same seam the Runner reports the
+		// observe lane's failures through (Report above), so one `reactions:` file's trouble reads
+		// the same way whichever lane it came from.
+		Report:   w.bridge.NotifyHook,
 		Approver: w.bridge.Approver(),
 		Asker:    w.bridge.Asker(),
 		// The namer built above: an unnamed delegation is named out of band on the CHILD's own

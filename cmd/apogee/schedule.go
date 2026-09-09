@@ -128,7 +128,12 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// this one stamps the Schedule the run belongs to onto every payload, so a Reaction can tell a
 	// scheduled run from the conversation it was raised beneath. The session's Runner keeps
 	// observing the session; the two never see each other's events.
-	hookRunner, err := firingHooks(opts.Reactions, w.roots.workspace,
+	//
+	// The list is DIVIDED first (ADR 0076 A8): the Runner takes the observe half, and the sync half —
+	// the advise and gate entries the loop runs — is latched onto the Firing's own spec below, which
+	// is the one route it takes into an unattended run.
+	observeReactions, syncReactions := domain.SplitLanes(opts.Reactions)
+	hookRunner, err := firingHooks(observeReactions, w.roots.workspace,
 		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.notifyHook)
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: build the firing's reactions: %w", err)
@@ -189,6 +194,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		},
 		recordID: recordID,
 		hooks:    hookRunner,
+		report:   w.notifyHook,
 	})
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's bindings: %w", err)
@@ -204,6 +210,10 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		ScheduleName: f.ScheduleName,
 		Store:        w.store,
 		RecordID:     recordID,
+		// The sync half of the `reactions:` list this session is running, armed on the Agent run.Once
+		// builds before its first Step, so a `gate:` the session answers to answers for the Firings it
+		// raises too.
+		Sync: syncReactions,
 		// The routing the composer resolved off the LIVE Options above, latched through run.Spec's
 		// seam (internal/run): a Firing raised in this session delegates to the entry the session
 		// delegates to, including one a `/sub-agents-server` pick moved it to since launch

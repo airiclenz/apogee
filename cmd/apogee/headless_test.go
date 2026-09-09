@@ -3152,6 +3152,34 @@ func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
 	}
 }
 
+// A headless run arms the SYNC half of that same list on the Agent it runs. The Driver splits its
+// resolved `reactions:` block, hands the observe rows to the Runner it built and the advise and gate
+// rows to run.Spec — the one route a Firing has, since it holds no Agent to push them onto. Read at
+// the seam the Driver fills: a `gate:` dropped here would leave a configured gate silently answering
+// nothing at every unattended root.
+func TestHeadlessArmsTheSyncLaneOnTheFiringsSpec(t *testing.T) {
+	home := testConfigHome(t,
+		"reactions:\n"+
+			"  - id: record\n    on: [exchange-finished]\n    run: [\"true\"]\n"+
+			"  - id: warden\n    on: [pre-tool-exec]\n    gate: [\"/bin/sh\", \"-c\", \"echo deny\"]\n")
+	stub := &stubRunner{}
+
+	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "explain this repo"); err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	if len(stub.spec.Sync) != 1 || stub.spec.Sync[0].ID != "warden" {
+		t.Errorf("Spec.Sync = %+v, want the file's one gate: entry and nothing else", stub.spec.Sync)
+	}
+	if stub.spec.Config.Reactions != nil {
+		t.Errorf("Config.Reactions = %+v, want nil — the sync lane takes ONE route into a Firing",
+			stub.spec.Config.Reactions)
+	}
+	if stub.spec.Config.Report == nil {
+		t.Error("Config.Report is nil; a gate that could not be spawned would fail silently")
+	}
+}
+
 // The `file-changed` derivation at a root that holds no tool registry. firingConfig leaves
 // Config.Tools nil and the engine builds its own, so the Driver has nothing to ask where a write
 // landed — it builds a lookup-only roster instead (firingWriteTarget), and this is the proof that

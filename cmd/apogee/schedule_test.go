@@ -1292,7 +1292,7 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 }
 
 // A Firing raised inside a session composes its Reactions from the list the session is running NOW
-// — the one a config reload wrote back through setObserve — and never from the list the process
+// — the one a config reload wrote back through setReactionLanes — and never from the list the process
 // launched with (ADR 0037: a Firing sees what the session sees). The two entries write different
 // markers, so a Runner built from the boot list fails on both halves at once.
 func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
@@ -1323,7 +1323,7 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	t.Cleanup(func() { runOnce = prevRunner })
 
 	live := newLiveSettings(config.Options{Reactions: []domain.Reaction{recorder("boot", bootMarker)}})
-	live.setObserve([]domain.Reaction{recorder("reloaded", reloadedMarker)})
+	live.setReactionLanes([]domain.Reaction{recorder("reloaded", reloadedMarker)}, nil)
 
 	w := scheduleWiring{
 		roots:   roots,
@@ -1351,5 +1351,65 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	if _, err := os.Stat(bootMarker); err == nil {
 		t.Error("the boot list's Reaction fired; a Firing must run the Reactions the session " +
 			"is running now")
+	}
+}
+
+// The SYNC half of that same promise: the `gate:` and `advise:` entries the session is answering to
+// travel with a Firing it raises. They reach the run through the Spec rather than the Runner (a
+// Firing builds its Agent inside run.Once), so this asserts the seam the Driver actually fills —
+// the observe lane must not leak into it, and the sync lane must not be dropped on the floor.
+func TestScheduleFiringCarriesTheSessionsSyncLane(t *testing.T) {
+	t.Parallel()
+
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	gate := domain.Reaction{
+		ID:      "warden",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassGate,
+		On:      []reactions.Event{domain.MomentPreToolExec},
+		Handler: domain.ArgvHandler{Argv: []string{"/bin/sh", "-c", "echo deny"}},
+		Timeout: 5 * time.Second,
+	}
+	observe := domain.Reaction{
+		ID:      "notify",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []reactions.Event{reactions.ExchangeFinished},
+		Handler: domain.ArgvHandler{Argv: []string{"apogee-test-hook"}},
+		Timeout: time.Second,
+	}
+
+	stub := &stubRunner{}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	live := newLiveSettings(config.Options{})
+	live.setReactionLanes([]domain.Reaction{observe}, []domain.Reaction{gate})
+
+	w := scheduleWiring{
+		roots:   roots,
+		live:    live,
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 1 },
+	}
+	if _, err := w.fire(context.Background(), schedule.Firing{
+		ScheduleID:   "sch-1-abcd",
+		ScheduleName: "Nightly build",
+		Prompt:       "check the build",
+		Mode:         domain.ModePlan,
+	}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	if len(stub.spec.Sync) != 1 || stub.spec.Sync[0].ID != "warden" {
+		t.Errorf("Spec.Sync = %+v, want the session's one gate: entry and nothing else", stub.spec.Sync)
+	}
+	if stub.spec.Config.Reactions != nil {
+		t.Errorf("Config.Reactions = %+v, want nil — the sync lane takes ONE route into a Firing, "+
+			"and a list written to both would arm every entry twice", stub.spec.Config.Reactions)
 	}
 }

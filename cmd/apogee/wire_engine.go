@@ -88,7 +88,8 @@ type lateEngine struct {
 	pendingPrune        *bool
 	pendingContextFiles *contextFileChoice
 	// pendingGeneration is the whole live shape of the Reaction surface — the Floor enable set,
-	// Bypass, and the user-origin observe list — as the last apply left it (ADR 0076 A8). It is ONE
+	// Bypass, and the user-origin observe and sync lists — as the last apply left it (ADR 0076 A8).
+	// It is ONE
 	// pointer where the Floor gates and Bypass were two, because they are one value now: a
 	// generation is what a live swap carries, and a holder remembering its halves separately could
 	// hand a bind a shape no apply ever asked for. nil means nothing was ever installed here, on the
@@ -97,7 +98,7 @@ type lateEngine struct {
 	// guard the config file switched off.
 	pendingGeneration *apogee.Generation
 	// observe is the observe list the Runner is ALREADY firing — what a new generation's list is
-	// compared against, so a Floor- or Bypass-only edit never retires a Runner generation whose list
+	// compared against, so a Floor-, Bypass- or sync-only edit never retires a Runner generation whose list
 	// did not move: a Replace drains the previous generation and forgets the firings it was still
 	// correlating, which is a real cost to pay for an edit that did not touch it.
 	observe []domain.Reaction
@@ -188,8 +189,9 @@ func newLateEngine(mode apogee.Mode, confineToWorkspace bool) *lateEngine {
 // seedReactions hands the holder the two things a Generation moves that are resolved BEFORE it
 // exists: the Reaction Runner this session fires its observe list through (wire_boot.go), and the
 // generation both halves are already running — the Floor gates and Bypass the Config was
-// constructed with, and the list the Runner was built from. The composition root calls it once,
-// right after the holder is made (wire_live.go).
+// constructed with, the observe list the Runner was built from, and the sync lane the bind will arm
+// on the Agent it constructs. The composition root calls it once, right after the holder is made
+// (wire_live.go).
 //
 // It is what makes a PARTIAL edit honest. A settings row that moves one field of the generation
 // hands the WHOLE value back (liveSettings.setBypass, setFloorGuard), so a holder never told
@@ -225,9 +227,12 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	agent.SetMode(e.mode)
 	agent.SetConfineToWorkspace(e.confine)
 	agent.SetEffortOverride(e.effort)
-	// The generation the settings surface last installed, Floor and Bypass in one value. Only the
-	// ENGINE half is replayed here: the Runner exists from boot, independent of the Agent's
-	// lifetime, so SetReactions swapped its list at the moment the edit happened — bound or not.
+	// The generation the settings surface last installed — the Floor enable set, Bypass and the sync
+	// lane in one value. Only the ENGINE half is replayed here: the Runner exists from boot,
+	// independent of the Agent's lifetime, so SetReactions swapped its list at the moment the edit
+	// happened — bound or not. It is also how the file's `advise:` and `gate:` entries FIRST reach a
+	// session's Agent: the composition root seeds them here (wire_live.go) and this replay arms them
+	// on the Agent the bind constructs.
 	if gen := e.pendingGeneration; gen != nil {
 		agent.SetReactions(*gen)
 	}
@@ -457,17 +462,20 @@ func (e *lateEngine) SetPruneToolResults(enabled bool) {
 }
 
 // SetReactions installs one Generation across both halves of the Reaction surface: the engine, which
-// runs the Floor enable set and Bypass, and the Runner, which fires the user-origin observe list
-// (ADR 0076 A8). It is the ONE live-swap door, replacing the three idioms that preceded it, so
-// nothing downstream can read a half-swapped shape. Remembered while unbound for SetMode's reason —
-// the engine half is replayed at the bind, and the Runner half needs no replay because the Runner
-// exists from boot.
+// runs the Floor enable set, Bypass and the user-origin SYNC lane — the advise and gate entries the
+// loop runs — and the Runner, which fires the user-origin observe list (ADR 0076 A8). It is the ONE
+// live-swap door, replacing the three idioms that preceded it, so nothing downstream can read a
+// half-swapped shape. Remembered while unbound for SetMode's reason — the engine half is replayed at
+// the bind, and the Runner half needs no replay because the Runner exists from boot.
 //
-// The two applies are ORDERED, engine then Runner, and the Runner is reached only when the observe
+// The two applies are ORDERED, engine then Runner, and the Runner is reached only when the OBSERVE
 // list actually moved: a Floor gate toggled in `/settings` must not retire a Runner generation,
-// which drains the old workers and forgets the firings they were still correlating. The list is
-// recorded as applied only once Replace has COMMITTED, so a refused swap leaves the session firing
-// exactly what it was firing and a later identical apply still tries.
+// which drains the old workers and forgets the firings they were still correlating. The sync lane
+// is weighed by exactly that rule and lands on the other side of it — the Runner never fires a sync
+// Reaction, so an edit that armed or dropped a `gate:` and left the observe rows alone reaches the
+// Agent and stops there, retiring nothing. The observe list is recorded as applied only once Replace
+// has COMMITTED, so a refused swap leaves the session firing exactly what it was firing and a later
+// identical apply still tries.
 //
 // The returned error is the Runner's alone — a list it will not take (a malformed entry, an
 // unresolvable `workspace:`), which is the sentence the settings row shows the human. The engine

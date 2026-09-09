@@ -658,8 +658,8 @@ var KeyRegistry = []Key{
 		// Reactions following the file.
 		Path: "reactions", Kind: KindStructured,
 		Editable:  false,
-		Desc:      "Commands and webhooks run when a Moment closes; observe-only, never seen by the model.",
-		Read:      func(o Options) string { return countSummary(len(o.Reactions), "reaction") },
+		Desc:      "Commands run when a Moment closes or a seam fires; advise text reaches the model fenced, a gate answers before the Approver does.",
+		Read:      func(o Options) string { return countSummary(distinctReactionIDs(o.Reactions), "reaction") },
 		Structure: func(o Options) any { return o.Reactions },
 	},
 	{
@@ -961,6 +961,18 @@ func validateSettingMode(value string) error {
 
 // boolValue spells a bool the way the config file spells it.
 func boolValue(v bool) string { return strconv.FormatBool(v) }
+
+// distinctReactionIDs counts the ENTRIES a `reactions:` block spells, not the Reactions they
+// resolved to. One entry contributes one Reaction per action key it carries, all under its own id
+// (ADR 0076 — the resolved list is both lanes in one), so counting the list would answer "2
+// reactions" for the single block the human wrote and read as a miscount of their own file.
+func distinctReactionIDs(list []domain.Reaction) int {
+	ids := make(map[string]struct{}, len(list))
+	for _, r := range list {
+		ids[r.ID] = struct{}{}
+	}
+	return len(ids)
+}
 
 // countSummary summarizes a structured block by how much is in it ("3 servers"). Zero returns
 // EMPTY rather than "0 servers", so a surface's own rule for an empty block ("none") is what the

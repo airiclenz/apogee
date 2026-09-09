@@ -278,9 +278,14 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// The drain is deferred here rather than after the composition below, so a Firing refused by the
 	// offline gate — or by a composition that failed — takes its workers down with it. A daemon runs
 	// for weeks; a Runner leaked per refused tick is a leak that accumulates.
-	hookRunner, err := firingHooks(w.opts.Reactions, roots.workspace,
-		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName},
-		func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) })
+	//
+	// The list is DIVIDED first (ADR 0076 A8): the Runner takes the observe half, and the sync half —
+	// the advise and gate entries the loop runs — is latched onto the Firing's own spec below, which
+	// is the one route it takes into an unattended run.
+	reportReaction := func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) }
+	observeReactions, syncReactions := domain.SplitLanes(w.opts.Reactions)
+	hookRunner, err := firingHooks(observeReactions, roots.workspace,
+		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, reportReaction)
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's reactions: %w", entry.Name, err)
 	}
@@ -357,6 +362,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		mode:     f.Mode,
 		recordID: recordID,
 		hooks:    hookRunner,
+		report:   reportReaction,
 	})
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)
@@ -416,6 +422,10 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		ScheduleName: f.ScheduleName,
 		Store:        w.store,
 		RecordID:     recordID,
+		// The sync half of the `reactions:` list this daemon resolved, armed on the Agent run.Once
+		// builds before its first Step, so a `gate:` answers a scheduled run's tool calls exactly as
+		// it answers a session's.
+		Sync: syncReactions,
 		// The routing the composer resolved off this daemon's own Options, latched through run.Spec's
 		// seam (internal/run): a scheduled Firing delegates to the `sub-agents-server:` entry exactly
 		// as a session does, and both fields are nil when no key named one.

@@ -344,6 +344,22 @@ func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.Pre
 
 // ---------------------------------------------------------------------------
 
+// denyingGate is one user-origin `gate:` entry over argv, as a `reactions:` file resolves it,
+// answering `deny` to every call it is asked about. It is the cheapest possible proof that the
+// sync lane a Spec carried is armed on the Agent: a gate that never ran cannot refuse anything.
+func denyingGate(id string) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassGate,
+		On:      []domain.Moment{domain.MomentPreToolExec},
+		Handler: domain.ArgvHandler{Argv: []string{"/bin/sh", "-c", "echo deny"}},
+		Timeout: 5 * time.Second,
+	}
+}
+
+// ---------------------------------------------------------------------------
+
 // notingTool is a read-only tool with a trivial, quotable outcome. It exists so a scripted
 // Firing can exercise the ordinary tool-call/tool-result pair in Plan mode — the class the
 // ladder runs rather than gates — without a gate, a subprocess or a file on disk.

@@ -21,6 +21,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -192,10 +193,19 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// Bypass this run's Config was constructed with, and the observe list the Runner was built from.
 	// From here on ONE apply moves both (ADR 0076 A8), and a partial edit knows where the fields it
 	// does not touch stand.
+	//
+	// The `reactions:` file arms BOTH lanes, so the resolved list is divided here and each half
+	// seeded under its own name: the observe rows the Runner was built from (wire_boot.go), and the
+	// sync rows — advise and gate — the Agent runs inside the loop, which reach it when the bind
+	// replays this generation onto it. That replay is the ONE route the sync lane takes into a
+	// session, which is why nothing writes Config.Reactions: a list written to both would arm every
+	// entry twice.
+	observe, sync := domain.SplitLanes(w.opts.Reactions)
 	w.engine.seedReactions(w.hooks, apogee.Generation{
 		Floor:   w.cfg.Floor,
 		Bypass:  w.cfg.Bypass,
-		Observe: w.opts.Reactions,
+		Observe: observe,
+		Sync:    sync,
 	})
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on

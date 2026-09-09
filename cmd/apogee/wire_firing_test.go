@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1099,6 +1102,90 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 				"Reaction header sources are scrubbed out of a subprocess the model chose",
 				cfg.SecretEnvVars, want)
 		}
+	}
+}
+
+// The in-loop twin of that Runner's report seam: where a SYNC-lane reaction's trouble is said out
+// loud (domain.Config.Report). It is the SAME function the Driver hands its Runner, so one
+// `reactions:` file's failures read the same way whichever lane they came from — and a Driver that
+// narrates nowhere leaves the field nil, which drops the line exactly as a bare Config does.
+func TestFiringConfigWiresTheSyncLanesReporter(t *testing.T) {
+	t.Parallel()
+
+	roots := firingRoots(t)
+	var said []string
+	in := firingInputs{
+		opts:     config.Options{},
+		entry:    config.ServerEntry{Endpoint: "http://box.example/v1"},
+		apiKey:   "sk-test",
+		roots:    roots,
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		beat:     firingBeat,
+		recordID: "2026-09-09T09-00-00-firing",
+		report:   func(msg string) { said = append(said, msg) },
+	}
+
+	cfg, _, _, err := firingConfig(context.Background(), in)
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+	if cfg.Report == nil {
+		t.Fatal("cfg.Report is nil; a gate that could not be spawned would fail silently at an " +
+			"unattended root")
+	}
+	cfg.Report(`reaction "warden": gate: timed out`)
+	if len(said) != 1 || said[0] != `reaction "warden": gate: timed out` {
+		t.Errorf("the Driver was told %v, want the one line the engine wrote", said)
+	}
+
+	in.report = nil
+	bare, _, _, err := firingConfig(context.Background(), in)
+	if err != nil {
+		t.Fatalf("firingConfig without a reporter: %v", err)
+	}
+	if bare.Report != nil {
+		t.Error("cfg.Report is set on a Driver that narrates nowhere; the field must stay nil")
+	}
+}
+
+// The sync lane takes exactly ONE route into a run: the Driver splits its resolved `reactions:`
+// list, hands the observe half to a Reaction Runner and the sync half to run.Spec.Sync. A
+// composition root that ALSO wrote domain.Config.Reactions — the engine's own construction-time
+// set — would arm every user entry twice, so the second route is closed by rule and this is the
+// rule. It reads the source rather than a Config value because the claim is about every wiring
+// site at once, including ones added later.
+func TestNoWiringSiteWritesConfigReactions(t *testing.T) {
+	t.Parallel()
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the package dir: %v", err)
+	}
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		// Parsed rather than grepped so a comment that NAMES the rule cannot trip it: what the
+		// rule forbids is a struct field written in a literal, which is an AST node.
+		parsed, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			kv, ok := n.(*ast.KeyValueExpr)
+			if !ok {
+				return true
+			}
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Reactions" {
+				t.Errorf("%s writes a Reactions field in a composite literal; the user's list "+
+					"reaches a run through the observe Runner and run.Spec.Sync, never through "+
+					"Config.Reactions", fset.Position(kv.Pos()))
+			}
+			return true
+		})
 	}
 }
 

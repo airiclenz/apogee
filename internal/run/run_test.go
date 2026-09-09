@@ -286,6 +286,100 @@ func TestOnceDeniesAGatedActionWithoutParking(t *testing.T) {
 	}
 }
 
+// TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep pins the ONE route a `reactions:` file's advise
+// and gate entries take into an unattended run (ADR 0076 A8). A Firing holds no Agent the Driver
+// can reach — Once constructs it — so the lane rides the Spec and Once installs it through the
+// live swap door before the prompt is submitted. Witnessed at the earliest place it can fail: the
+// run's VERY FIRST tool call, which the gate must already be answering.
+//
+// A read-only tool in Plan mode is deliberate: the mode ladder runs that class, so a call that
+// does not execute was stopped by the gate and nothing else.
+func TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep(t *testing.T) {
+	t.Parallel()
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(notingTool{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		if req.lastRoleIs(domain.RoleTool) {
+			writeFinal(w, "I could not note it")
+			return
+		}
+		writeToolCall(w, "call_1", "note_something", `{"note":"hello"}`)
+	})
+
+	spec := planSpec(up.url, "note something for me")
+	spec.Config.Tools = registry
+	spec.Sync = []domain.Reaction{denyingGate("warden")}
+
+	// A generous deadline rather than a bare Background: a gate that never answered would hang
+	// the package rather than failing the assertion below.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	res, err := Once(ctx, spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	reqs := up.requests()
+	if len(reqs) != 2 {
+		t.Fatalf("the server answered %d requests, want 2 (the refused tool Turn, then the final Turn)", len(reqs))
+	}
+	if !reqs[1].lastTextHas("tool call denied by reaction warden") {
+		t.Errorf("the tool result read %q; want the gate's refusal — Spec.Sync never reached the Agent",
+			reqs[1].Texts[len(reqs[1].Texts)-1])
+	}
+	if res.FinalText != "I could not note it" {
+		t.Errorf("Result.FinalText = %q, want the answer the refused call led to", res.FinalText)
+	}
+}
+
+// TestOnceWithoutASyncLaneGatesNothing is the other half of that seam: an empty Spec.Sync is what
+// every Firing carried before the field existed, so the same call runs untouched. Without it a
+// gate that silently never fired would pass the test above by accident.
+func TestOnceWithoutASyncLaneGatesNothing(t *testing.T) {
+	t.Parallel()
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(notingTool{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		if req.lastRoleIs(domain.RoleTool) {
+			writeFinal(w, "noted")
+			return
+		}
+		writeToolCall(w, "call_1", "note_something", `{"note":"hello"}`)
+	})
+
+	spec := planSpec(up.url, "note something for me")
+	spec.Config.Tools = registry
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	res, err := Once(ctx, spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	reqs := up.requests()
+	if len(reqs) != 2 {
+		t.Fatalf("the server answered %d requests, want 2 (the tool Turn, then the final Turn)", len(reqs))
+	}
+	if !reqs[1].lastTextHas("noted: hello") {
+		t.Errorf("the tool result read %q; want the tool's own outcome — an unarmed lane gated a call",
+			reqs[1].Texts[len(reqs[1].Texts)-1])
+	}
+	if res.FinalText != "noted" {
+		t.Errorf("Result.FinalText = %q, want the answer the executed call led to", res.FinalText)
+	}
+}
+
 // TestOncePinsAskerAndPresenterOff proves the pin is Once's, not the caller's: a Spec whose
 // Config supplies both human-facing delegates still runs with ask_user and present_document
 // unregistered, so nothing inside a Firing can rendezvous with a human.

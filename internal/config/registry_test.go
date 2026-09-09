@@ -304,6 +304,47 @@ func TestSkillSuggestionsRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 	}
 }
 
+// The `reactions` row summarises the human's FILE, and since ADR 0076 one entry in that file
+// resolves to one Reaction per action key it carries — all sharing the entry's own id. So the row
+// counts distinct ids: an entry that armed two classes is still one block the human wrote, and a
+// row reading "2 reactions" over a one-entry file would read as a miscount of their own config.
+// The description is pinned word for word beside it because it is the one sentence /settings gives
+// a human about what the two lanes actually do.
+func TestReactionsRowCountsEntriesNotResolvedReactions(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("reactions")
+	if !ok {
+		t.Fatal("no registry row for reactions; /settings could not show the key at all")
+	}
+
+	const wantDesc = "Commands run when a Moment closes or a seam fires; advise text reaches the " +
+		"model fenced, a gate answers before the Approver does."
+	if row.Desc != wantDesc {
+		t.Errorf("reactions Desc = %q, want %q", row.Desc, wantDesc)
+	}
+
+	// One entry spelling two action keys: two resolved Reactions, one id, one block in the file.
+	twoLanes := Options{Reactions: []domain.Reaction{
+		{ID: "warden", Origin: domain.OriginUser, Class: domain.ClassObserve},
+		{ID: "warden", Origin: domain.OriginUser, Class: domain.ClassGate},
+	}}
+	if got := row.Read(twoLanes); got != "1 reaction" {
+		t.Errorf("read of a one-entry file arming two lanes = %q, want \"1 reaction\"", got)
+	}
+
+	twoEntries := Options{Reactions: []domain.Reaction{
+		{ID: "warden", Origin: domain.OriginUser, Class: domain.ClassGate},
+		{ID: "notify", Origin: domain.OriginUser, Class: domain.ClassObserve},
+	}}
+	if got := row.Read(twoEntries); got != "2 reactions" {
+		t.Errorf("read of a two-entry file = %q, want \"2 reactions\"", got)
+	}
+	if got := row.Read(Options{}); got != "" {
+		t.Errorf("read of a session with no reactions: block = %q, want the empty summary", got)
+	}
+}
+
 // The `bypass` row's description is a CLAIM about what a session keeps when the flag is on, and it
 // is the sentence /settings renders beside the toggle — the one statement of Bypass a human meets
 // without reading a manual. Since ADR 0076 the answer has two halves: the advise and shape

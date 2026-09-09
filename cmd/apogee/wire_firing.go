@@ -86,6 +86,15 @@ type firingInputs struct {
 	// nil is the legitimate absence — a Driver that raises no Reactions, and every composition test —
 	// and it leaves Config.Events nil exactly as it was before this key existed.
 	hooks *reactions.Runner
+	// report is where a SYNC-lane reaction's trouble is said out loud — a `gate:` or `advise:`
+	// command that failed, timed out or could not be spawned (domain.Config.Report). It is the SAME
+	// function the Driver hands its Runner for the observe lane's failures, so one `reactions:`
+	// file's trouble reads the same way whichever lane it came from and wherever this Driver
+	// narrates: stderr for headless, the daemon log, the session's notice line for `/schedule`.
+	//
+	// nil DROPS the line, exactly as domain.Config.Report's own default does — every composition
+	// test, and a Driver with nowhere to put it.
+	report func(msg string)
 }
 
 // firingConfig composes the construction surface EVERY unattended run is driven from: one prompt,
@@ -383,6 +392,13 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// so the renderer stays outermost and the Reactions stay invisible to it.
 	if in.hooks != nil {
 		cfg.Events = in.hooks
+	}
+	// And the in-loop twin of that Runner's own report seam: where the SYNC lane's failures are
+	// said out loud. It is assigned beside the sink rather than in the literal so the two stay one
+	// decision — a Driver that narrates a Reaction's trouble narrates it for both lanes, in one
+	// voice — and a Driver that passed neither leaves both nil, which is what a bare composition is.
+	if in.report != nil {
+		cfg.Report = in.report
 	}
 
 	// Where this run's delegations go, resolved off the same `sub-agents-server:` key a session

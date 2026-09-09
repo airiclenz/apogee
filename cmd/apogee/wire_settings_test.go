@@ -3234,6 +3234,90 @@ func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 	}
 }
 
+// The other half of that reload: a `gate:` entry the human added to the file is armed on the Agent
+// the session is RUNNING, and the projection a Firing composes from carries it too. The sync lane
+// takes exactly one route into a session — the generation, through the swap door — so a reload that
+// wrote only the observe half would leave a gate the file arms answering nothing at all.
+func TestReactionsRowReloadArmsTheSyncLaneOnTheBoundAgent(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
+	runner, err := reactions.New(boot, reactions.Options{Workspace: workspace, Exec: newRecordingHookExec()})
+	if err != nil {
+		t.Fatalf("reactions.New: %v", err)
+	}
+	t.Cleanup(func() { _ = runner.Close(context.Background()) })
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path,
+		"reactions:\n"+
+			"  - id: notify\n    on: [turn-finished]\n    run: [apogee-test-hook]\n"+
+			"  - id: warden\n    on: [pre-tool-exec]\n    gate: [/bin/sh, -c, \"echo deny\"]\n")
+
+	live := newLiveSettings(config.Options{Reactions: boot})
+	engine := newLateEngine(domain.ModePlan, false)
+	t.Cleanup(func() { _ = engine.Close() })
+	engine.seedReactions(runner, apogee.Generation{Observe: boot})
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	apply := applySettingFor(settingsApplier{
+		engine: engine, live: live, hooks: runner, configPath: path,
+	})
+	if _, err := apply("reactions", "2 reactions"); err != nil {
+		t.Fatalf("apply reactions: %v", err)
+	}
+
+	// The Agent this session is running now answers to the gate the file added.
+	gen := engine.bound().Generation()
+	if len(gen.Sync) != 1 || gen.Sync[0].ID != "warden" || gen.Sync[0].Class != domain.ClassGate {
+		t.Fatalf("Generation().Sync = %+v, want the one gate: entry the reload armed", gen.Sync)
+	}
+	if len(gen.Observe) != 0 {
+		t.Errorf("Generation().Observe = %+v, want empty — the agent never holds the observe lane", gen.Observe)
+	}
+
+	// And the projection folds BOTH lanes back into the one key they were resolved from, so a Firing
+	// raised after the reload splits them again and runs the gate too.
+	ids := map[string]domain.Class{}
+	for _, r := range live.options().Reactions {
+		ids[r.ID] = r.Class
+	}
+	if len(ids) != 2 || ids["notify"] != domain.ClassObserve || ids["warden"] != domain.ClassGate {
+		t.Errorf("options().Reactions = %+v, want both lanes of the re-read file", ids)
+	}
+}
+
+// generation() is the read half of the read-edit-hand-back idiom every settings row swaps through,
+// so both lanes must come back as COPIES: a caller that appended to what it was handed would write
+// through into the roster this holder still reports to the Firings the session raises.
+func TestLiveSettingsGenerationClonesBothLanes(t *testing.T) {
+	t.Parallel()
+
+	observe := []domain.Reaction{hookEntry("notify", reactions.TurnFinished)}
+	sync := []domain.Reaction{{
+		ID: "warden", Origin: domain.OriginUser, Class: domain.ClassGate,
+		On:      []reactions.Event{domain.MomentPreToolExec},
+		Handler: domain.ArgvHandler{Argv: []string{"/bin/sh", "-c", "echo deny"}},
+		Timeout: time.Second,
+	}}
+	live := newLiveSettings(config.Options{Reactions: append(slices.Clone(observe), sync...)})
+
+	gen := live.generation()
+	if len(gen.Observe) != 1 || len(gen.Sync) != 1 {
+		t.Fatalf("generation() = %+v, want the boot list divided into one row per lane", gen)
+	}
+	gen.Observe[0].ID = "clobbered"
+	gen.Sync[0].ID = "clobbered"
+
+	again := live.generation()
+	if again.Observe[0].ID != "notify" || again.Sync[0].ID != "warden" {
+		t.Errorf("generation() = %+v after a caller wrote through its result; both lanes must be clones",
+			again)
+	}
+}
+
 // Replace runs on the UPDATE goroutine — the pane's ⏎ and the config watcher's own fold both land
 // there — while Report goes to the Bridge, whose send BLOCKS until Update takes the message. A
 // Replace that reported the retired generation's drop totals on the caller's goroutine would

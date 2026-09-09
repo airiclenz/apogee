@@ -246,6 +246,7 @@ type liveSettings struct {
 // two rows are formatted from (settingsrows.go): the two spellings of "off" collapse into an empty
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
 func newLiveSettings(opts config.Options) *liveSettings {
+	observe, sync := domain.SplitLanes(opts.Reactions)
 	return &liveSettings{
 		boot:          opts,
 		pinnedWindow:  opts.ContextWindow,
@@ -284,13 +285,15 @@ func newLiveSettings(opts config.Options) *liveSettings {
 
 		// The Reaction surface as one generation, seeded from the very values the composition root
 		// hands the engine holder (wire_live.go): the seven Floor keys through their one negation
-		// seam, `bypass:`, and the observe list the Runner was built from. Seeded rather than left
-		// zero because the zero Generation is a DIFFERENT session — every guard on, nothing armed —
-		// and a first partial edit would install it over what the file asked for.
+		// seam, `bypass:`, and the two lanes the resolved `reactions:` list divides into — the
+		// observe rows the Runner was built from and the sync rows the Agent runs. Seeded rather
+		// than left zero because the zero Generation is a DIFFERENT session — every guard on,
+		// nothing armed — and a first partial edit would install it over what the file asked for.
 		gen: apogee.Generation{
 			Floor:   floorFromOptions(opts),
 			Bypass:  opts.Bypass,
-			Observe: opts.Reactions,
+			Observe: observe,
+			Sync:    sync,
 		},
 
 		delegateMaxSteps: opts.DelegateMaxSteps,
@@ -690,20 +693,29 @@ func (s *liveSettings) generation() apogee.Generation {
 func (s *liveSettings) generationLocked() apogee.Generation {
 	gen := s.gen
 	gen.Observe = slices.Clone(s.gen.Observe)
+	// The sync lane is cloned for the observe lane's reason and not quite: an apply that moved one
+	// field hands the WHOLE value back through the engine's swap door, where it reaches the Agent
+	// and is held for the rest of the session — so a caller appending to what it was handed would
+	// write through into the roster this holder still reports.
+	gen.Sync = slices.Clone(s.gen.Sync)
 	return gen
 }
 
-// setObserve installs the re-read `reactions:` list the session's Runner has just accepted, so a
-// Firing raised inside this session composes its own Runner from the Reactions the session is
-// running rather than the ones the process launched with (firingSources).
+// setReactionLanes installs BOTH halves of the re-read `reactions:` list the session has just
+// accepted — the observe rows its Runner fires and the sync rows its Agent runs — so a Firing
+// raised inside this session composes from the Reactions the session is running rather than the
+// ones the process launched with (firingSources).
+//
+// Both lanes move together because one file arms both: a mirror that carried only the observe half
+// would hand a Firing a `gate:` the session had already dropped, or drop one it had just armed.
 //
 // It is called AFTER the swap returned, never before, for setToolSet's reason: a refused list leaves
 // the session firing the Reactions it already had, and a mirror written ahead of the swap would hand
 // a Firing a list this session never ran.
-func (s *liveSettings) setObserve(list []domain.Reaction) {
+func (s *liveSettings) setReactionLanes(observe, sync []domain.Reaction) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.gen.Observe = list
+	s.gen.Observe, s.gen.Sync = observe, sync
 }
 
 // setToolSet mirrors the spec the live tool set was just BUILT from — the four keys that reach the
@@ -897,11 +909,16 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.DelegateMaxSteps = s.delegateMaxSteps
 
 	// And the Reaction surface, which is pushed as ONE value and comes back as three keys: the
-	// observe list, the `bypass:` switch, and the seven Floor gates in the FILE's positive spelling —
+	// reaction list, the `bypass:` switch, and the seven Floor gates in the FILE's positive spelling —
 	// optionsFromFloor being the inverse of the negation the seam takes, so an unattended run raised
 	// from this session runs the floor and the Reactions the human last chose rather than the ones
 	// the process started with.
-	next.Reactions = slices.Clone(s.gen.Observe)
+	//
+	// The key holds BOTH lanes in one list, which is what the resolved `reactions:` key is
+	// (config.Options.Reactions), so the two the generation keeps apart are folded back together
+	// here — a Firing raised from this session splits them again for its own two halves, and one
+	// that saw only the observe half would run without the `gate:` the session is answering to.
+	next.Reactions = append(slices.Clone(s.gen.Observe), s.gen.Sync...)
 	next.Bypass = s.gen.Bypass
 	floor := optionsFromFloor(s.gen.Floor)
 	next.ToolUseEnforcer = floor.ToolUseEnforcer
@@ -2145,12 +2162,13 @@ func (a settingsApplier) reloadReactions() error {
 	if err != nil {
 		return err
 	}
+	observe, sync := domain.SplitLanes(file.Reactions)
 	gen := a.live.generation()
-	gen.Observe = file.Reactions
+	gen.Observe, gen.Sync = observe, sync
 	if err := a.engine.SetReactions(gen); err != nil {
 		return err
 	}
-	a.live.setObserve(file.Reactions)
+	a.live.setReactionLanes(observe, sync)
 	return nil
 }
 

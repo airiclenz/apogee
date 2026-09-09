@@ -73,6 +73,19 @@ type Spec struct {
 	// (ADR 0031): the Driver resolves the target, this seam only carries it.
 	DelegationTarget *agent.DelegationTarget
 
+	// Sync is the sync lane this Firing arms — the advise and gate Reactions the user's
+	// `reactions:` file resolved to (ADR 0076 A8), which the AGENT runs inside the loop. It is
+	// the ONE route the lane takes into a Firing: a Driver splits its resolved list
+	// ([domain.SplitLanes]), hands the observe half to its Reaction Runner and this half here,
+	// and never writes Config.Reactions — that field is the engine's own construction-time set,
+	// and a list written to both would arm every entry twice.
+	//
+	// It is a field of its own rather than part of the Config because a Firing has no
+	// post-construction seam: Once builds the Agent itself, so the only way a Driver can reach
+	// the live swap door is to hand the lane over here and let Once apply it. nil ⇒ nothing is
+	// armed and the run is byte-for-byte what it was before this field existed.
+	Sync []domain.Reaction
+
 	// DelegationSeat is what the orientation block TELLS the model about that far seat — the
 	// host's own words for it (ADR 0069). nil ⇒ the block names only the session seat. It is
 	// carried independently of the target above, because the two are different kinds of fact:
@@ -298,6 +311,21 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		return Result{}, fmt.Errorf("apogee: construct the firing's agent: %w", err)
 	}
 	defer func() { _ = a.Close() }()
+
+	// The sync lane the caller armed (Spec.Sync), installed through the live swap door before the
+	// first Step so a gate answers the run's very first tool call and an advise span reaches its
+	// very first tool result. It goes through the read-edit-hand-back idiom SetReactions documents
+	// rather than a bare literal: the generation also carries the Floor enable set and Bypass that
+	// agent.New just seeded from the Config, and a value composed here would put both back to their
+	// zero — every guard on, Bypass off — under a caller that had switched them.
+	//
+	// An empty lane is left alone rather than handed over, so a Firing that arms nothing makes no
+	// swap at all.
+	if len(spec.Sync) > 0 {
+		gen := a.Generation()
+		gen.Sync = spec.Sync
+		a.SetReactions(gen)
+	}
 
 	// What the workspace context files contributed, read HERE and held: this is session
 	// construction, the boundary an interactive session takes the same measure at, and the
