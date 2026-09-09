@@ -23,10 +23,10 @@ import (
 // on.
 const maxResponseDrain = 64 << 10
 
-// webhookSender POSTs the payload to an entry's `webhook:` URL. It carries no state at all: the
-// client is built per send because its Timeout is the ENTRY's, and a client with no Transport of
-// its own uses http.DefaultTransport — so every entry still shares one connection pool rather than
-// opening a fresh socket for each firing.
+// webhookSender POSTs the payload to an entry's `run: url:` webhook. It carries no state at all:
+// the client is built per send because its Timeout is the ENTRY's, and a client with no Transport
+// of its own uses http.DefaultTransport — so every entry still shares one connection pool rather
+// than opening a fresh socket for each firing.
 //
 // It is safe for concurrent use, which the Executor contract requires.
 type webhookSender struct{}

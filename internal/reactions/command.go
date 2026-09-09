@@ -16,7 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
-// The exec contract a Reaction's `command:` runs under is the `api-key-cmd:` resolver's contract
+// The exec contract a Reaction's `run:` argv runs under is the `api-key-cmd:` resolver's contract
 // (internal/config's keyresolve.go, runKeyCommand/resolveKeyProgram), copied here because this
 // package depends on internal/domain and internal/security alone. internal/keystore's run.go
 // carries the same copy for the same reason; unifying the three is deliberately out of scope.
@@ -56,7 +56,7 @@ const (
 	maxErrorStderr = 240
 )
 
-// commandExecutor runs an entry's `command:` argv. It holds only the workspace root, because that
+// commandExecutor runs an entry's `run:` argv. It holds only the workspace root, because that
 // is the whole fence: everything else about one run comes from the entry and the firing.
 //
 // It is safe for concurrent use — it keeps no per-run state — which the Executor contract requires,

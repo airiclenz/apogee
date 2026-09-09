@@ -336,10 +336,10 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 		}
 	})
 
-	// A delegation REFUSED at the depth bound or failed by a hook never runs, so its started phase
-	// never comes — but its result does (internal/agent/dispatch.go). A rule reading the missing
-	// phase alone would leave that row queued for the rest of the session; being over is the other
-	// thing that ends the state (subAgentScheduled).
+	// A delegation REFUSED at the depth bound or failed by a reaction never runs, so its started
+	// phase never comes — but its result does (internal/agent/dispatch.go). A rule reading the
+	// missing phase alone would leave that row queued for the rest of the session; being over is
+	// the other thing that ends the state (subAgentScheduled).
 	//
 	// What changes with it is the row's WORDS and not its ▶: the refusal takes the slot the one
 	// queued word held, and the reading behind the row moves from the child's view to the prompt
@@ -791,8 +791,8 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 
 // refusedDelegation folds a delegation that NEVER RAN: the call, then the refusal its result
 // carried, with nothing at all between them. It is the shape agent.runSubAgent returns at the depth
-// bound, on a hook failure and on a construct error — the delegation is over and left no span, so
-// subAgentFramed frames it by neither of its answers and it is drawn as an ordinary tool block.
+// bound, on a reaction failure and on a construct error — the delegation is over and left no span,
+// so subAgentFramed frames it by neither of its answers and it is drawn as an ordinary tool block.
 func refusedDelegation(tr *transcript, id, task string) {
 	subAgentCall(tr, id, task, 0)
 	subAgentReport(tr, id, refusedResult, 0)

@@ -17,10 +17,10 @@ import (
 // (ADR 0073 §4).
 //
 // Only the six named below have a constant here; the vocabulary itself is domain.Notices(), so
-// the five `<seam>-finished` closings are accepted under `events:` from the same commit that added
+// the five `<seam>-finished` closings are accepted under `on:` from the same commit that added
 // them to the core, and are matched by their spelling.
 //
-// The string is the spelling a user writes in the `events:` list of a `reactions:` entry, so it is
+// The string is the spelling a user writes in the `on:` list of a `reactions:` entry, so it is
 // also the value that reaches a fired command as APOGEE_REACTION_EVENT and the payload's "event"
 // field. It is a stable contract: renaming one breaks every configuration in the wild.
 type Event = domain.Moment
@@ -59,7 +59,7 @@ func Events() []Event {
 	return domain.Notices()
 }
 
-// ParseEvent turns one `events:` entry into an Event, refusing anything outside the vocabulary
+// ParseEvent turns one `on:` entry into an Event, refusing anything outside the vocabulary
 // with a message that lists what is allowed — a misspelt event name is the likeliest mistake in
 // a `reactions:` block, and a bare "invalid" would leave the user guessing at the spelling.
 func ParseEvent(name string) (Event, error) {

@@ -31,9 +31,9 @@ type ScheduleRef struct {
 // The matcher fills the event-derived fields; the runner stamps the identity ones it alone knows —
 // Reaction, Time, Workspace and Schedule — as it hands the payload to each subscribing reaction.
 type Payload struct {
-	// Event is the notice that fired, spelled exactly as the `events:` list spells it.
+	// Event is the notice that fired, spelled exactly as the `on:` list spells it.
 	Event Event `json:"event"`
-	// Reaction is the name of the entry that fired, the `name:` from its config row.
+	// Reaction is the id of the entry that fired, the `id:` from its config row.
 	Reaction string `json:"reaction"`
 	// Time is when the firing was matched, RFC 3339 with seconds resolution or finer.
 	Time string `json:"time"`

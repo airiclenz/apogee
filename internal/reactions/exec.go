@@ -9,8 +9,8 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// DefaultExecutor is the Executor every Driver installs: it runs an entry's `command:` argv or
-// POSTs its `webhook:` URL, picking by whichever handler the entry carries. A domain.Reaction holds
+// DefaultExecutor is the Executor every Driver installs: it runs an entry's `run:` argv or POSTs
+// its `run: url:` webhook, picking by whichever handler the entry carries. A domain.Reaction holds
 // exactly one, so the choice is a fact of the entry rather than a preference expressed here.
 //
 // workspaceRoot is the exec fence, and only the command half uses it: a program that lives inside

@@ -35,7 +35,7 @@ const (
 )
 
 // The six standalone notice Moments — post-hoc points that report a fact of their own rather
-// than the closing of a seam. Their values are the spellings a configured `events:` list names;
+// than the closing of a seam. Their values are the spellings a configured `on:` list names;
 // `approval-requested` reads as the phase of the ApprovalEvent it reports, beside the
 // `approval-decided` that ADR 0076 A6 admitted as the second half of the pair.
 const (
@@ -290,7 +290,7 @@ func (WebhookHandler) seam() Moment { return "" }
 
 // isAsyncHandler reports whether the handler is one of the async-lane kinds. Validate keys the
 // observe rules on the handler KIND and not on the class, because class observe is also open to
-// a Go handler — the bench arms those — and a Go handler keeps the per-seam rule (ADR 0076 A6).
+// a Go handler — the bench arms those — and a Go handler keeps the per-seam rule.
 func isAsyncHandler(h Handler) bool {
 	switch h.(type) {
 	case ArgvHandler, WebhookHandler:

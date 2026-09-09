@@ -312,14 +312,14 @@ func subAgentHidesPrompt(tv toolView) bool {
 // unframedSubAgentView is what an EXPANDED delegation that NEVER RAN shows of itself: the prompt it
 // carried, over whatever its result left behind.
 //
-// A delegation refused at the depth bound, failed by a hook before its first event, or lost to a
-// construct error (agent.runSubAgent) is over with nothing behind it, so [subAgentFramed] frames it
-// by neither of its answers and it is drawn as the ordinary tool block it is. That framing is right
-// and is not what this changes — a frame opened over an empty span would enclose nothing and be
-// closed again by the very next row. What it left with nowhere to go is the PROMPT: the framed
-// reading paints it inside the frame, so an unframed delegation showed what any tool block shows and
-// never what it was asked. Here the prompt is the block's BODY instead, which is the one place an
-// unframed block has for it.
+// A delegation refused at the depth bound, failed by a reaction before its first event, or lost to
+// a construct error (agent.runSubAgent) is over with nothing behind it, so [subAgentFramed] frames
+// it by neither of its answers and it is drawn as the ordinary tool block it is. That framing is
+// right and is not what this changes — a frame opened over an empty span would enclose nothing and
+// be closed again by the very next row. What it left with nowhere to go is the PROMPT: the framed
+// reading paints it inside the frame, so an unframed delegation showed what any tool block shows
+// and never what it was asked. Here the prompt is the block's BODY instead, which is the one place
+// an unframed block has for it.
 //
 // The header's own text does not stand in for it. Target carries the task's first line clipped to
 // the branch's budget, or the delegation's NAME where one was given (subAgentTarget), so on a named
@@ -515,19 +515,20 @@ const scheduledSummary = "scheduled"
 // the request and the start there is a row on screen with no work behind it — which is exactly what
 // it is made to say (scheduledSubAgentView).
 //
-// Three facts end it, and each is a different producer's word. The delegation's own STARTED phase is
-// the engine's (domain.SubAgentPhaseEvent), emitted the instant a worker dequeues the job — the
+// Three facts end it, and each is a different producer's word. The delegation's own STARTED phase
+// is the engine's (domain.SubAgentPhaseEvent), emitted the instant a worker dequeues the job — the
 // signal this state exists to wait for. Its being OVER is the second: a delegation refused at the
-// depth bound or failed by a hook never runs and so is never started, yet its result still arrives
-// (dispatch.go), and a row left "scheduled" over a delegation that already answered would say so
-// forever. The third is its being FRAMED (subAgentFramed) — a run standing behind it, or a reader
-// having opened it. That one is the answer for a producer that emits no phases at all: a hand-built
-// test transcript, a record replayed from a session written before the phase existed. A delegation
-// with entries behind it has manifestly started whatever it announced, and one that is OPEN was
-// expandable when the click landed, which a scheduled row never is. Reading all three is what lets
-// one rule serve every producer — the discipline subAgentReported follows for the other end of the
-// same life — and being framed and being scheduled are mutually exclusive by construction, which is
-// what keeps the queued row out of the reading that would draw it a frame (renderSubAgentGroup).
+// depth bound or failed by a reaction never runs and so is never started, yet its result still
+// arrives (dispatch.go), and a row left "scheduled" over a delegation that already answered would
+// say so forever. The third is its being FRAMED (subAgentFramed) — a run standing behind it, or a
+// reader having opened it. That one is the answer for a producer that emits no phases at all: a
+// hand-built test transcript, a record replayed from a session written before the phase existed. A
+// delegation with entries behind it has manifestly started whatever it announced, and one that is
+// OPEN was expandable when the click landed, which a scheduled row never is. Reading all three is
+// what lets one rule serve every producer — the discipline subAgentReported follows for the other
+// end of the same life — and being framed and being scheduled are mutually exclusive by
+// construction, which is what keeps the queued row out of the reading that would draw it a frame
+// (renderSubAgentGroup).
 func subAgentScheduled(head paintInput, span int) bool {
 	if !head.headsRun() {
 		return false
