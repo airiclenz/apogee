@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The Reaction dispatcher (ADR 0076 D1; docs/design/reaction-core-greenfield.md §9.2).
@@ -97,8 +99,12 @@ type revisioned interface {
 // tool-stage seams build their LoopView a single time for the whole cascade, as the hook runner
 // they replace did.
 type seamPayload struct {
-	work   revisioned
-	invoke func(ctx context.Context, h domain.Handler) (domain.Outcome, error)
+	work revisioned
+	// invoke calls one reaction at this Moment. It takes the whole REACTION rather than its
+	// Handler alone because a handler is not always the whole of what the call needs: the sync
+	// lane's out-of-process routes read the reaction's class, id, `on:` list and deadline to
+	// decide what document they hand their command and what deadline it dies at.
+	invoke func(ctx context.Context, r domain.Reaction) (domain.Outcome, error)
 	// retryable is the loop's remaining retry budget at post-response — true when the loop will
 	// re-stream this Turn if a reaction asks it to — and false at every other Moment, none of
 	// which can ask.
@@ -235,7 +241,7 @@ func (a *Agent) fireLeg(
 	advised *[]advice,
 ) (bool, error) {
 	for _, r := range leg {
-		if !slices.Contains(r.spec.On, m) {
+		if !subscribes(r.spec, m) {
 			continue
 		}
 		if !builtin && a.bypassSkips(r.spec) {
@@ -266,6 +272,21 @@ func (a *Agent) fireLeg(
 	return false, nil
 }
 
+// subscribes reports whether reaction r fires at Moment m. The ordinary answer is its own `on:`
+// list, and the one exception is the ADVISE lane's file-changed narrowing: file-changed is no seam
+// of its own but post-tool-result with two further conditions on the call, so a reaction that
+// listed it runs at post-tool-result and is narrowed there, where the tool and its result are in
+// hand (adviseDocument). On the OBSERVE lane file-changed stays the notice Moment it always was —
+// the Runner matches it off the Event stream and never reaches this cascade — which is why the
+// widening is scoped to class advise rather than applied to the Moment.
+func subscribes(r domain.Reaction, m domain.Moment) bool {
+	if slices.Contains(r.On, m) {
+		return true
+	}
+	return m == domain.MomentPostToolResult && r.Class == domain.ClassAdvise &&
+		slices.Contains(r.On, domain.MomentFileChanged)
+}
+
 // fireOne invokes one reaction under the recover boundary, brackets it with the working value's
 // Revision counter, and reports the Outcome the booking is decided from. A recovered panic comes
 // back as "did nothing, no error", which is what keeps the cascade going.
@@ -289,7 +310,7 @@ func (a *Agent) fireOne(
 	defer a.recoverHook(turn, r.ID, &panicErr)()
 
 	before := seam.work.Revision()
-	out, err = seam.invoke(ctx, r.Handler)
+	out, err = seam.invoke(ctx, r)
 	if err != nil {
 		return domain.Outcome{}, err
 	}
@@ -399,6 +420,95 @@ func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) 
 	}, true
 }
 
+// adviseArgv is the USER half of the advise slot: one `advise:` entry's command runs out of
+// process while the loop waits, and what it printed becomes the trailer the model reads
+// (ADR 0076 D2, D6). It is called from the post-tool-result seam alone — the only Moment with a
+// closing tool result to fence a trailer onto.
+//
+// It is FAIL-OPEN in all three directions (D7), and each of them costs the Turn nothing: a call
+// this entry does not concern — a file-changed entry on a call that changed no file — contributes
+// nothing and books nothing; a command that failed, timed out or was refused a permit contributes
+// nothing and is reported once, through the sync lane's own reporter and one "failed" firing; a
+// command that printed nothing contributes nothing, so an entry that only sometimes has something
+// to say is silent the rest of the time rather than injecting an empty fence.
+//
+// Standard output is REDACTED before it is anything else. It is the one place a configured
+// secret's value can re-enter apogee from a process the scrub kept it out of, and the redaction
+// has to land before the text is capped, fenced, booked as a firing's Detail, or written to a
+// transcript. The CAP is not applied here: every advise route meets it once, downstream, where the
+// span is collected (adviceOf), so no route can render a span that skipped it.
+func (a *Agent) adviseArgv(
+	ctx context.Context,
+	turn int,
+	r domain.Reaction,
+	p domain.ToolResultMoment,
+) (domain.Outcome, error) {
+	doc, fires := a.adviseDocument(r, p)
+	if !fires {
+		return domain.Outcome{}, nil
+	}
+
+	stdout, err := a.runSyncArgv(ctx, turn, r, doc)
+	if err != nil {
+		a.reportReaction(turn, r.ID, doc.Event, err)
+		return domain.Outcome{}, nil
+	}
+
+	text := tools.RedactSecrets(stdout, a.cfg.SecretEnvVars)
+	if text == "" {
+		return domain.Outcome{}, nil
+	}
+	return domain.Outcome{Inject: text}, nil
+}
+
+// adviseDocument builds the stdin document one advise command receives for a finished tool call,
+// and reports whether this entry fires on this call at all. The executor stamps the identity block
+// over what is returned here (runSyncArgv), so what this function settles is the MOMENT's half
+// alone: which Moment fired, on which tool, over which arguments and result, and — for
+// file-changed — which file.
+//
+// The Moment reported is the one the ENTRY subscribed to, not the seam it ran at. An entry that
+// listed file-changed sees `file-changed` with `path` set whenever the call was a successful
+// workspace write; one that listed file-changed ALONE does not fire on any other call, which is
+// what the narrowing buys a user who wants to react to edits and not to reads. An entry that
+// listed post-tool-result sees that Moment and no path, because that seam closes on every call.
+//
+// The path is tools.WorkspaceWriteTarget's — the same resolution the blast-radius ladder judged
+// the call by and the same one the observe lane's file-changed firing carries (internal/reactions'
+// WriteTarget), so a user watching one file through both lanes is told one name. It is
+// deliberately neither a.resolvedPath, which is empty for an ordinary in-workspace write because
+// it is the DISCLOSURE twin and speaks only when the resolution differs from the argument, nor
+// classifyWriteTarget's escape target, which is empty inside the fence.
+func (a *Agent) adviseDocument(r domain.Reaction, p domain.ToolResultMoment) (domain.SeamPayload, bool) {
+	doc := domain.SeamPayload{
+		Event:     domain.MomentPostToolResult,
+		Tool:      p.Call.Tool,
+		Arguments: append(json.RawMessage(nil), p.Call.Arguments...),
+		Result:    &domain.SeamResult{Content: p.Edit.Content(), IsError: p.Edit.IsError()},
+	}
+	if !slices.Contains(r.On, domain.MomentFileChanged) {
+		return doc, true
+	}
+	if path, ok := a.writtenPath(p.Call); ok && !p.Edit.IsError() {
+		doc.Event, doc.Path = domain.MomentFileChanged, path
+		return doc, true
+	}
+	// The call changed no file. An entry that also listed post-tool-result still hears the seam
+	// close; one that listed file-changed alone hears nothing.
+	return doc, slices.Contains(r.On, domain.MomentPostToolResult)
+}
+
+// writtenPath is the absolute, symlink-resolved path a workspace-scoped write tool's call lands
+// on, and false for every call that writes nothing inspectable — an unknown tool included, exactly
+// as such a tool classifies as nothing everywhere else the registry is consulted this late.
+func (a *Agent) writtenPath(call domain.ToolCall) (string, bool) {
+	tool, ok := a.lookupTool(call.Tool)
+	if !ok {
+		return "", false
+	}
+	return tools.WorkspaceWriteTarget(tool, call)
+}
+
 // reactionAction is the label an ARMED reaction's firing is booked under. Post-response is the
 // one Moment with an action vocabulary of its own, in the precedence the header ratifies; an
 // advise injection at the tool-result seam is the other named action; the rest have none, so a
@@ -451,10 +561,10 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 		}
 		return seamPayload{
 			work: req,
-			invoke: func(ctx context.Context, h domain.Handler) (domain.Outcome, error) {
-				fn, ok := h.(domain.PreRequestFunc)
+			invoke: func(ctx context.Context, r domain.Reaction) (domain.Outcome, error) {
+				fn, ok := r.Handler.(domain.PreRequestFunc)
 				if !ok {
-					return domain.Outcome{}, wrongHandler(m, h)
+					return domain.Outcome{}, wrongHandler(m, r.Handler)
 				}
 				return fn(ctx, req)
 			},
@@ -468,10 +578,10 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 		return seamPayload{
 			work:      p,
 			retryable: p.Retryable,
-			invoke: func(ctx context.Context, h domain.Handler) (domain.Outcome, error) {
-				fn, ok := h.(domain.PostResponseFunc)
+			invoke: func(ctx context.Context, r domain.Reaction) (domain.Outcome, error) {
+				fn, ok := r.Handler.(domain.PostResponseFunc)
 				if !ok {
-					return domain.Outcome{}, wrongHandler(m, h)
+					return domain.Outcome{}, wrongHandler(m, r.Handler)
 				}
 				return fn(ctx, p.Resp)
 			},
@@ -485,10 +595,10 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 		view := a.loopView(turn)
 		return seamPayload{
 			work: edit,
-			invoke: func(ctx context.Context, h domain.Handler) (domain.Outcome, error) {
-				fn, ok := h.(domain.PreToolExecFunc)
+			invoke: func(ctx context.Context, r domain.Reaction) (domain.Outcome, error) {
+				fn, ok := r.Handler.(domain.PreToolExecFunc)
 				if !ok {
-					return domain.Outcome{}, wrongHandler(m, h)
+					return domain.Outcome{}, wrongHandler(m, r.Handler)
 				}
 				return fn(ctx, view, edit)
 			},
@@ -502,10 +612,16 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 		view := a.loopView(turn)
 		return seamPayload{
 			work: p,
-			invoke: func(ctx context.Context, h domain.Handler) (domain.Outcome, error) {
-				fn, ok := h.(domain.PostToolResultFunc)
+			invoke: func(ctx context.Context, r domain.Reaction) (domain.Outcome, error) {
+				// The user's advise cell is the one route at this seam that leaves the
+				// process: its handler is a command, not a Go func, so it is dispatched
+				// before the Go handler assertion rather than failing it.
+				if _, argv := r.Handler.(domain.ArgvHandler); argv && r.Class == domain.ClassAdvise {
+					return a.adviseArgv(ctx, turn, r, p)
+				}
+				fn, ok := r.Handler.(domain.PostToolResultFunc)
 				if !ok {
-					return domain.Outcome{}, wrongHandler(m, h)
+					return domain.Outcome{}, wrongHandler(m, r.Handler)
 				}
 				return fn(ctx, view, p.Call, p.Edit)
 			},
@@ -518,10 +634,10 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 		}
 		return seamPayload{
 			work: conv,
-			invoke: func(ctx context.Context, h domain.Handler) (domain.Outcome, error) {
-				fn, ok := h.(domain.HistoryRewriteFunc)
+			invoke: func(ctx context.Context, r domain.Reaction) (domain.Outcome, error) {
+				fn, ok := r.Handler.(domain.HistoryRewriteFunc)
 				if !ok {
-					return domain.Outcome{}, wrongHandler(m, h)
+					return domain.Outcome{}, wrongHandler(m, r.Handler)
 				}
 				return fn(ctx, conv)
 			},
