@@ -1202,6 +1202,21 @@ every rename it made.
 _Avoid_: "Hook" (the colloquial alias — see [Hook](#identity-and-shape)), "Mechanism" (retired),
 "plugin" (no Reaction adds a capability).
 
+**Context-fill notice**:
+The engine-origin **advise** **[Reaction](#reactions-and-moments)** (`context-fill-notice`,
+[ADR 0077](docs/adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md)) that
+tells the model, as a fenced trailer on the closing tool result, how far its conversation has
+climbed toward the **[Compaction](#context-and-history)** line — the **[Budget](#context-and-history)**'s
+History allocation, the very compare the automatic fold reads, so notice and fold can never
+disagree — as a percentage of that line beside the tokens used and the window. It fires at three
+fixed rungs (50, 75, 90), each once per climb and re-armed when a fold drops the fill; at 90 a
+**[Sub-agent](#identity-and-shape)** is also told to stop and report what remains. Off by default
+and switched by one top-level, file-only boolean, off under **Bypass**, silent while no window is
+known, inherited by every child agent. It is **not** a **[Floor guard](#floor-guard)**: it exists to
+steer, so it lives above the floor and waits for evidence to ship on.
+_Avoid_: "context gauge" (the human's TUI fill bar, measured against the advertised window),
+"compaction warning" (it reports a fact at rungs long before any fold), "budget notice".
+
 **Moment**:
 A point the loop passes, on which a **Reaction** may fire — `domain.Moment`, one string vocabulary
 of sixteen. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and

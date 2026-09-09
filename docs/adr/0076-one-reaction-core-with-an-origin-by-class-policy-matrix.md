@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 10's "builtins appear by id with `enabled:`" amended by ADR 0077
 ---
 
 # One Reaction core: an origin × class policy matrix replaces the four-rung Reaction surface
