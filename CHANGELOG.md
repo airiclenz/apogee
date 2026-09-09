@@ -171,6 +171,142 @@ point is a **minor** bump, not a breaking change.
   Mechanism roster it gated is gone and shipping a key that arms nothing is the failure the config
   parser's own comment warns about. Doctrine only — no code changes yet.
 
+- Changed (internal): **`internal/hooks` is now `internal/reactions`.** The package that runs
+  user-configured, observe-only reactions moved to the name the Reaction core gives it (ADR 0076):
+  the package clause, every import path and every `hooks.` qualifier in the tree say `reactions`,
+  and the leak guard's package list names `internal/reactions`. Nothing else moved — the `Hook`
+  type, the `hooks:` config key, the `APOGEE_HOOK_*` environment names, the payload keys and the
+  report lines are byte-identical, and the `apogee` facade aliases keep their names.
+
+- The Reaction core's notice vocabulary grew from five Moments to eleven: `approval-decided`, and one `<seam>-finished` closing notice per seam (`pre-request-finished`, `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished`, `history-rewrite-finished`). A `hooks:` entry may name any of them under `events:`; the six new spellings do not fire yet.
+- Added `domain.SeamClosedEvent`, reporting that a seam's Reaction cascade ran to its end, with the seam's working value carried read-only for the duration of `Emit`. Like `WireEvent` it is sink-only: it never reaches the headless `--format json` stream and consumes no sequence number there.
+
+- **Observe handlers, `Reaction.Workspace` and the `Generation` value (stage 2).** `internal/domain` gains the async lane's two handler kinds — `ArgvHandler` (a command and its arguments, run out of process, never through a shell) and `WebhookHandler` (a URL with literal and environment-sourced headers) — both sealed beside the five per-seam Go funcs and both naming NO seam, because they react to notice Moments. `Reaction` gains `Workspace`, the scope filter that narrows a path-bearing notice to one workspace root. `Reaction.Validate` keys its new rules on the handler KIND and not on the class: an argv or webhook handler takes class observe alone and every `On` entry must be a notice (`reaction "notify": run: reacts to notices; "pre-request" is a seam`), while a Go handler keeps today's per-seam rule for every class — so an in-process observe reaction still arms. `Generation{Floor, Bypass, Observe}` is the one value a live swap carries (ADR 0076 A8), with a `Validate` of its own over the observe list: every entry valid, every entry class observe, no repeated ID. All of it is re-exported from the root facade. Nothing fires the new handlers yet — no behaviour changes.
+
+- **The observe lane runs on `domain.Reaction`.** `internal/reactions`' own `Hook` struct is gone:
+  `New`, `Replace`, `Validate`/`ValidateAll`, `SubscribedEvents`, the `Executor` seam and both
+  executors take a `domain.Reaction` (`name:` → `ID`, `events:` → `On`, `command:` → an
+  `ArgvHandler`, `webhook:`+`headers:`/`headers-env:` → a `WebhookHandler`, plus `Workspace` and
+  `Timeout`), and `config.Options.Hooks` is `[]domain.Reaction`. A `hooks:` row now resolves to the
+  user-origin, class-observe Reaction the Reaction core defines (ADR 0076), so the entries a Driver
+  fires and the entries the engine validates are one type rather than two shapes that agreed by
+  hand. Per-entry validation is the package's own runnable checks — a name, a known event, a
+  runnable action, a bounded timeout — re-keyed on `reaction "…":` and then `domain.Reaction`'s own,
+  while the two rules only a FILE can break (exactly one of `command:`/`webhook:`, and headers
+  belonging to a webhook) moved into the config layer's mapping, which is the only place both keys
+  still coexist. Every event name, environment variable, payload field and report line is unchanged,
+  so a configured `hooks:` block and the scripts it fires are untouched. The engine facade renames
+  with the type: `HookOptions`, `HookRunner`, `NewHookRunner` and `HookPayload` are now
+  `RunnerOptions`, `ReactionRunner`, `NewReactionRunner` and `ReactionPayload`, and the `Hook` and
+  `HookEvent` aliases are deleted — a Hook is a `Reaction` and a hook event is a `Moment`.
+
+- **A user Reaction's wording is the Reaction core's, not the Hook layer's** (ADR 0076 A6, a hard
+  rename with no aliases). The `approval-waiting` notice is now `approval-requested`, and the verdict
+  it used to withhold is reported by a second notice, `approval-decided`, whose payload carries
+  `decision` (`allow`, `deny` or `allow-for-session`) — a reaction that only learned a prompt was
+  raised could never tell an answered one from an abandoned one. A fired command's convenience
+  environment facts are now `APOGEE_REACTION_EVENT`, `APOGEE_REACTION_NAME`,
+  `APOGEE_REACTION_WORKSPACE`, `APOGEE_REACTION_PATH`, `APOGEE_REACTION_SCHEDULE_ID` and
+  `APOGEE_REACTION_SCHEDULE_NAME` (were `APOGEE_HOOK_*`), and the payload's `"hook"` field — the name
+  of the entry that fired — is now `"reaction"`. The report lines a failure or a queue drop puts in
+  front of you read `reaction <name> (<event>): …` and `reaction <name>: dropped …`, and an
+  unrecognised `events:` entry is refused with `unknown reaction event …`. An existing `hooks:` block
+  that still writes `approval-waiting` keeps loading — it is read as `approval-requested` — so a
+  configuration in the wild does not break before the file migrates itself; scripts reading
+  `APOGEE_HOOK_*` or the payload's `"hook"` field must be updated.
+
+- **Every seam pass now reports itself.** The Reaction dispatcher publishes one `SeamClosedEvent`
+  each time a seam finishes passing — naming the seam, the ids of the reactions booked as firings
+  during the pass (in firing order), and the seam's own working value by reference. It is emitted
+  once per pass whatever the cascade did: after an ordinary return, after a post-response retry
+  hands the Turn back, after a reaction returned an error, and just as readily under Bypass or with
+  nothing armed at all, because "the seam passed and nothing happened" is the fact an observer most
+  often wants. The event is sink-only — it never reaches the headless line contract — and is what
+  the five seam-closing notices are built on.
+
+- **The five seam-closing notices now reach a reaction, carrying the working value.** A
+  `reactions:` entry subscribing to `pre-request-finished`, `post-response-finished`,
+  `pre-tool-exec-finished`, `post-tool-result-finished` or `history-rewrite-finished` fires when
+  that seam finishes passing at the top level, and its payload carries three new fields: `seam`
+  (the in-loop point, in the Moment's own spelling), `reactions` (the ids booked as firings during
+  the pass, in firing order, absent when nothing acted) and `value` — a JSON projection of what the
+  pass left behind. Each seam projects its own shape: the outgoing messages and tool names at
+  pre-request, the response text, tool calls and `retryable` at post-response, the pending call at
+  pre-tool-exec, the call plus the result text and `is_error` at post-tool-result, and the whole
+  conversation at history-rewrite. The projection is taken while the engine's `Emit` is still
+  running and is a full copy, so a script reading it minutes later sees the pass as it happened
+  rather than the loop's current state. A sub-agent's seams are not reported — a delegation crosses
+  the same five on every step — and a seam nothing subscribes to costs one map lookup and no
+  projection at all.
+
+- **`reactions:` is the config key for user-origin Reactions.** The global list a session fires when
+  a Moment closes is now written under `reactions:`, with `id:`, the Moments under `on:`, and one
+  action under `run:` — an argv list run directly, or a mapping `{url:, headers:, headers-env:}` the
+  JSON payload is POSTed to. Two spellings are new: `enabled: false` parks an entry without deleting
+  it, and an entry whose `id:` is one of the seven Floor-guard keys is refused, since a guard is
+  switched off with its own top-level key. `advise:` and `gate:` are reserved for the classes a
+  later release ships and are refused today, as is a seam under `on:`. `hooks:` is the earlier name
+  of the same list and keeps loading; both blocks resolve into the one lane, with ids unique across
+  them. The `/settings` pane gains a read-only `reactions` row under `bypass`, in its Reactions
+  section, and `docs/manual/configuration.md` documents the block.
+
+- A config file still carrying the retired `hooks:` block is now folded into `reactions:` at
+  startup, once, and the change is announced with the backup it kept: `name:` becomes `id:`,
+  `events:` becomes `on:` (with `approval-waiting` rewritten to `approval-requested`), and
+  `command:`/`webhook:` become the one `run:` key. Comments written inside the old block survive
+  only in the backup. The retired `mechanisms:` key — top-level and per-server — is stripped at the
+  same time, with the note naming the Floor guard key that governs each promoted row now. A file
+  carrying BOTH `hooks:` and `reactions:` is refused rather than folded, and a `/settings` re-read
+  never rewrites the file: the fold is a startup act.
+
+- The engine now carries Bypass and the seven Floor-guard gates as one live **Generation** swapped through a single seam (`Agent.SetReactions`), so a settings change can never be observed half applied. A Floor guard switched off is now absent from the builtin ladder rather than skipping itself at every Moment; its config key stays reserved either way, so a `reactions:` entry can never take a disabled guard's name. Sub-agents inherit the parent's whole live generation at spawn.
+
+- The Driver now moves the Reaction surface as one value: a `/settings` commit hands the engine holder a single **Generation** (the Floor enable set, Bypass, and the user-origin observe list), which applies it to the engine and then swaps the Reaction Runner's list — and swaps the Runner **only** when that list actually moved, so toggling a Floor guard no longer retires a Runner generation that was still correlating firings. A Runner refusing a list now fails the apply with its own sentence rather than swapping half of one.
+
+- The `/settings` rows now reach that one door: the seven Floor-guard rows, the `bypass` row and the `reactions` row each read the **Generation** the session is running off the live holder, move their own field of it, and apply the whole value in a single swap. A Floor guard toggled mid-session therefore leaves the Reaction Runner alone, a `bypass` flip no longer restates the guards the human had opted out of, and a `reactions:` reload swaps the observe list without touching either — where three separate idioms could each undo the others' work. The `bypass` row now needs the live holder as well as the engine, so a Driver composed without one refuses the key by name.
+
+- `SetBypass` and `SetFloor` are gone from the engine and from the Driver's live-apply seam: one `SetReactions` generation swap is now the only door the Reaction surface moves through, so nothing downstream can observe a Floor enable set and a Bypass flag that are half one generation and half the next (ADR 0076 A8).
+
+- `apogee probe model` no longer claims a Validated set is promoted, offered or suppressed by the record it writes: the surface it reported on is gone from the binary, and the effect line now ends at "this model now resolves at medium confidence". Startup, a rebind and a scheduled Firing no longer resolve or narrate a Validated set either.
+
+- **Removed:** the per-model **Validated set** surface. `validated-sets:` leaves the config schema, `/settings` loses its two rows, and `internal/validated` (with the empty shipped roster) leaves the tree — the surface had armed nothing since the mechanism catalogue retired in v0.20.0 (ADR 0076 A9). A config file still carrying `validated-sets:` is **migrated** at startup rather than refused: the block is stripped alongside `mechanisms:`, the previous bytes are kept as a timestamped backup, and the one-line startup notice says `the inert validated-sets: key was dropped`. `docs/manual/configuration.md` loses its Validated-sets section.
+
+- **The `mechanisms:` key and `internal/mechanisms` are deleted** (ADR 0076 A6). `fileConfig.Mechanisms`, `ServerEntry.Mechanisms`, `Options.Mechanisms` and the one registry-free `keyAccessor` that carried the key are gone from the schema, so the two bijection guards (`TestKeyAccessorsBindDescribedKeys`, `walkSchema`) carry no exemption any more. The retired roll goes with them: the four start-up `RetiredNotices` call sites (`wire_live.go`, `headless.go`, `daemonfire.go`, `delegation.go`) and the notices they printed are deleted, `newDaemonWiring` no longer returns a notice list, and `newSubAgentServer` — whose only failure mode was a defective per-seat map — can no longer fail. A saved configuration is unaffected: the startup migration still strips the block off the file's bytes and still names each promoted row's successor Floor key (`retiredMechanismSuccessors`, `internal/config/configmigrate.go`), which is now the whole of what a `mechanisms:` key means. `internal/config/defaults/config.yaml` loses the key's commented block and its two mentions; `docs/manual/configuration.md` gains a `## Keys apogee migrates for you` section covering the `hooks:` fold, the `mechanisms:` strip and the `validated-sets:` strip, and `docs/manual/headless.md` and `docs/manual/daemon.md` lose the notice they described.
+
+- End-to-end coverage for the stage-2 reaction surface: a config file still written in the retired
+  `hooks:`/`mechanisms:`/`validated-sets:` schema is folded at startup and its migrated entry fires;
+  `approval-decided` carries the human's verdict; the `pre-request-finished` and
+  `post-tool-result-finished` notices reach a command entry's stdin with the seam's working value;
+  and editing `reactions:` under a running session swaps the armed list rather than adding to it.
+
+- The manual's Hooks page is now `docs/manual/reactions.md` and documents the shipped `reactions:` surface: the entry schema (`id:`, `on:`, `run:` as an argv list or a webhook mapping, `workspace:`, `timeout:`, `enabled:`, and the reserved `advise:`/`gate:`), all eleven notices including the five seam-closing ones and the `value` projection each carries, the `APOGEE_REACTION_*` environment set and the `reaction` payload field, and a "Migrating from `hooks:`" section quoting the startup migration note and the two changes a script must make itself.
+
+- The manual, `README.md` and the agent guide speak `reactions:`: the Hooks page is linked as
+  [Reactions](docs/manual/reactions.md) everywhere, the `/settings` editor-row list names
+  `reactions:` in place of `hooks:` and the deleted `validated-sets: alias:`, the headless
+  line-kind note points at a Reaction notice, and the last Validated-set sentences leave
+  `docs/manual/probe.md` and the Bypass paragraph in `docs/manual/configuration.md`.
+
+- `CONTEXT.md` follows the Reaction core into stage 2: **Moment** lists the eleven notices,
+  including the five seam-closing ones and their full-working-value posture; **Reaction** carries
+  the `reactions:` entry shape, the `Generation` swap and the `hooks:` fold; **Hook event**,
+  **Validated set** and **Curation** move to Retired terms. ADR 0016 is marked superseded by
+  ADR 0076 (amendment A9), ADR 0073's decisions 4, 6, 8 and 9 gain stage-2 pointer notes, and
+  `docs/design/reaction-core-greenfield.md` §9.1 marks its delivered rows.
+
+- The wording a user or a model can see now says **reaction** rather than "hook" everywhere the
+  Reaction core replaced one: a pre-tool-exec Reaction that faults answers the call with
+  `pre-tool-exec reaction failed`, the Runner's own refusals and the two Firing composers name
+  `reactions:`, and the code comments across `internal/reactions`, the composition root, the
+  renderer's notice path and the headless event-line encoder speak the same vocabulary. Migration
+  text that must name the retired `hooks:` key, `approval-waiting` and `APOGEE_HOOK_*` keeps it.
+
+- A `reactions:` entry that apogee refuses is now told about in the schema apogee actually reads: an
+  entry with no id names `id:` (was `name:`), an entry with an empty moment list names `on:` (was
+  `events:`), and a blank program or a malformed webhook URL names `run:` and `run: url:` (were
+  `command:` and `webhook:`). The old spellings were retired when `hooks:` became `reactions:`, so a
+  user following the refusal was being told to write keys the loader now rejects.
+
 ## [0.21.0] — 2026-09-07
 
 ### Added
