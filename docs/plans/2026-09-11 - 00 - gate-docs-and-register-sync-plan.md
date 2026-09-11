@@ -62,7 +62,7 @@ Sites (rule: every sentence in these files claiming observe-only, "can change no
 
 **Commit:** `docs(reactions): the manual, README, template and CONTEXT.md describe the shipped gate: cell; advise: stays reserved`
 
-## 2. `reloadServers` row fails on its own subtest (`apogee-itk`)
+## 2. `reloadServers` row fails on its own subtest (`apogee-itk`) — ✅ DONE (2026-09-11)
 
 **What:** Fixes `apogee-itk`: in `cmd/apogee/wire_settings_test.go` `TestSettingsApplierReloadsRefuseAnUnparseableFile` (:3494), the `reloadServers` row's closure (:3514-3520) calls `t.Error` on the parent `*testing.T` from inside the `t.Run` subtest (:3525). Change the table's `run` field to `func(t *testing.T) error`, pass the subtest's `t` at the call site, and wrap the bare method-value rows (`a.reloadSystemPrompt`, `a.reconnectMCP`, `a.reloadReactions`, `a.reloadModelProfiles`) so they ignore `t`. No behaviour change beyond attribution.
 **Files:** `cmd/apogee/wire_settings_test.go`

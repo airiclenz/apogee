@@ -3506,24 +3506,25 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 	// Only the members the refusal path itself reaches are composed: each reload answers before it
 	// touches the holder, and readmitMCP only needs an MCP holder to exist to get as far as the read.
 	a := settingsApplier{configPath: path, mcp: &liveMCP{}}
+	// Each row takes the subtest's t so a row-specific failure is attributed to its own subtest.
 	for _, tc := range []struct {
 		name string
-		run  func() error
+		run  func(t *testing.T) error
 	}{
-		{"reloadSystemPrompt", a.reloadSystemPrompt},
-		{"reloadServers", func() error {
+		{"reloadSystemPrompt", func(*testing.T) error { return a.reloadSystemPrompt() }},
+		{"reloadServers", func(t *testing.T) error {
 			moved, err := a.reloadServers()
 			if moved {
 				t.Error("reloadServers reported a moved token bound off a file it refused")
 			}
 			return err
 		}},
-		{"reconnectMCP", a.reconnectMCP},
-		{"reloadReactions", a.reloadReactions},
-		{"reloadModelProfiles", a.reloadModelProfiles},
+		{"reconnectMCP", func(*testing.T) error { return a.reconnectMCP() }},
+		{"reloadReactions", func(*testing.T) error { return a.reloadReactions() }},
+		{"reloadModelProfiles", func(*testing.T) error { return a.reloadModelProfiles() }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.run()
+			err := tc.run(t)
 			if err == nil {
 				t.Fatalf("%s applied an unparseable file; want the loader's refusal", tc.name)
 			}
