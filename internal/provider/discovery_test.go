@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // modelsServer serves a canned /v1/models payload and records that request. Any other path
@@ -932,7 +933,12 @@ func TestDiscoverTransportFailureIsLabelled(t *testing.T) {
 	endpoint := closed.URL
 	closed.Close() // nothing listens on that port any more
 
-	_, err := NewClient(endpoint, "").Discover(context.Background())
+	// The bound is generous on purpose: this test runs alongside every other package's tests
+	// under the race-instrumented shard script, and a loopback reply that arrives late must be
+	// judged on what it said, never failed by the 5s default expiring first (apogee-3h4).
+	const generous = 60 * time.Second
+
+	_, err := NewClient(endpoint, "", WithDiscoveryTimeout(generous)).Discover(context.Background())
 	if err == nil {
 		t.Fatal("Discover succeeded against a closed listener, want error")
 	}
@@ -981,7 +987,7 @@ func TestDiscoverTransportFailureIsLabelled(t *testing.T) {
 			srv := httptest.NewServer(tc.handler)
 			t.Cleanup(srv.Close)
 
-			_, err := NewClient(srv.URL, "").Discover(context.Background())
+			_, err := NewClient(srv.URL, "", WithDiscoveryTimeout(generous)).Discover(context.Background())
 			if err == nil {
 				t.Fatalf("Discover succeeded on %s, want error", tc.name)
 			}
@@ -991,5 +997,31 @@ func TestDiscoverTransportFailureIsLabelled(t *testing.T) {
 					"unusable reply rather than an absent box", err)
 			}
 		})
+	}
+}
+
+// TestDiscoverDeadlineIsATransportError pins the timeout surface: a server that never answers
+// within the configured WithDiscoveryTimeout bound is a failure the server never saw, so it is a
+// *TransportError with context.DeadlineExceeded still reachable through the chain — the finding the
+// heartbeat and the unattended Drivers act on. The bound is the option's, not the 5s default, which
+// is what lets a test pin it in milliseconds.
+func TestDiscoverDeadlineIsATransportError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done() // hold the reply until the client gives up
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := NewClient(srv.URL, "", WithDiscoveryTimeout(50*time.Millisecond)).Discover(context.Background())
+	if err == nil {
+		t.Fatal("Discover succeeded against a server that never answered, want error")
+	}
+	var transport *TransportError
+	if !errors.As(err, &transport) {
+		t.Fatalf("error %v is not a *TransportError; a deadline is a failure the server never saw", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error %v does not wrap context.DeadlineExceeded; the deadline must stay reachable through the chain", err)
 	}
 }

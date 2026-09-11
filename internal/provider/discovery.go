@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// discoveryTimeout bounds a discovery probe so a hung server cannot stall construction
-// (matches the TS oracle's DISCOVERY_TIMEOUT_MS).
+// discoveryTimeout is the default bound on a discovery probe, so a hung server cannot stall
+// construction (matches the TS oracle's DISCOVERY_TIMEOUT_MS); WithDiscoveryTimeout overrides it.
 const discoveryTimeout = 5 * time.Second
 
 // DiscoveredModel is one model the Upstream advertises. ContextWindow is 0 when the
@@ -147,7 +147,11 @@ type EffortSupport struct {
 // Both payloads are read once more for the thinking-effort tell described on EffortSupport, and a
 // dialect this Client was built with (WithEffortDialect) overrides whatever they said.
 func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
-	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	deadline := c.discoveryDeadline
+	if deadline <= 0 {
+		deadline = discoveryTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
 	info, err := c.discoverModels(ctx)

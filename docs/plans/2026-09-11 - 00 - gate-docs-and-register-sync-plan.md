@@ -93,7 +93,7 @@ NOTES (2026-09-11): the four-string containment loop over the rewritten file was
 
 **Commit:** `fix(config): TestApplyConfigFoldsTheHooksBlock asserts the notice's backup path and the rewritten bytes`
 
-## 4. Discovery's deadline is injectable so the rate-limited row cannot time out under shard load (`apogee-3h4`)
+## 4. Discovery's deadline is injectable so the rate-limited row cannot time out under shard load (`apogee-3h4`) — ✅ DONE (2026-09-11)
 
 **What:** Fixes `apogee-3h4`: `TestDiscoverTransportFailureIsLabelled/rate_limited` (`internal/provider/discovery_test.go:928-995`) flaked once under `scripts/test-shards.sh` (race-instrumented, ~8 concurrent `go test` processes). The row's only failure path is `c.httpClient.Do` erroring — there are no retries, sleeps or shared limiters on the discovery path — and the only error a healthy loopback `httptest` server can yield is the hard-coded `discoveryTimeout = 5 * time.Second` (`discovery.go:15`) expiring under load. Make it a field on `Client` set by a new `WithDiscoveryTimeout(d time.Duration) Option` (zero/unset keeps 5s; the constant stays as the default), `Discover` (`:149-156`) reads the field. `TestDiscoverTransportFailureIsLabelled` builds its client with `WithDiscoveryTimeout(60 * time.Second)`. Add one unit test that `Discover` against a handler which sleeps past a 50ms configured deadline returns an error satisfying `errors.As(err, &TransportError)` and `errors.Is(err, context.DeadlineExceeded)` — pinning the timeout surface the flake lived on. The bead closes with reason "deadline path removed from the test; cause inferred, not observed" (item 5).
 **Files:** `internal/provider/discovery.go`, `internal/provider/client.go`, `internal/provider/discovery_test.go`

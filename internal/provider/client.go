@@ -148,12 +148,13 @@ type Client struct {
 	modelMu sync.RWMutex
 	model   string
 
-	apiKey         string
-	httpClient     *http.Client
-	maxRetries     int
-	retryBaseDelay time.Duration
-	requestTimeout time.Duration    // per-attempt bound for Respond; 0 ⇒ caller's ctx governs
-	wireObserver   func(WireRecord) // nil ⇒ no wire capture at all (see WithWireObserver)
+	apiKey            string
+	httpClient        *http.Client
+	maxRetries        int
+	retryBaseDelay    time.Duration
+	requestTimeout    time.Duration    // per-attempt bound for Respond; 0 ⇒ caller's ctx governs
+	discoveryDeadline time.Duration    // bound for one Discover call; 0 ⇒ the discoveryTimeout default
+	wireObserver      func(WireRecord) // nil ⇒ no wire capture at all (see WithWireObserver)
 
 	// effortDialect is the thinking-effort dialect this server's entry FORCED, and the zero
 	// EffortDialectNone when it forced none — the `auto` that leaves Discover's passive detection
@@ -196,6 +197,12 @@ func WithRetryBaseDelay(d time.Duration) Option { return func(c *Client) { c.ret
 // governed by the caller's context). Streaming is never bounded this way — a long
 // generation is not a fault.
 func WithRequestTimeout(d time.Duration) Option { return func(c *Client) { c.requestTimeout = d } }
+
+// WithDiscoveryTimeout bounds one Discover call — both probes together — so a hung server cannot
+// stall construction (default 5s; zero or negative keeps the default). A test that stacks many
+// loopback servers under a race-instrumented shard passes a generous bound so the row it is
+// asserting cannot be failed by the deadline rather than by the reply.
+func WithDiscoveryTimeout(d time.Duration) Option { return func(c *Client) { c.discoveryDeadline = d } }
 
 // WithEffortDialect forces the thinking-effort dialect Discover reports for this server, for the
 // providers passive detection cannot see (ADR 0060 decision 3): a forced dialect overrides what the
