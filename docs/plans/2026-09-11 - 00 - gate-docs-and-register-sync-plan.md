@@ -107,7 +107,9 @@ NOTES (2026-09-11): the four-string containment loop over the rewritten file was
 
 **Commit:** `fix(provider): the discovery deadline is a Client option; the rate-limited discovery row no longer races a 5s constant`
 
-## 5. The register matches the tree
+## 5. The register matches the tree — ✅ DONE (2026-09-11)
+NOTES (2026-09-11): consequential edit — .beads/interactions.jsonl: made necessary by the fourteen `bd close` calls and the dependency swap, whose field-change records `bd export` writes into this tracked audit file alongside issues.jsonl (14 appended rows; prior register syncs committed it the same way).
+NOTES (2026-09-11): the item's "stage and commit" step is left to the verifier per this run's commit protocol; the export was compared against `bd list --status=closed` (14/14) and `bd show apogee-4kb` and did not lag. If `git status` shows `.beads/issues.jsonl` modified after the verifier's commit (the pre-commit hook re-exports after git snapshots the index), `git add .beads/issues.jsonl && git commit --amend --no-edit` as the item prescribes.
 
 **What:** Depends on items 2, 3, 4. With `PATH=/home/linuxbrew/.linuxbrew/bin:$PATH`:
 - `bd close apogee-yk9 apogee-370 apogee-3xx apogee-zqs apogee-d8q apogee-boe apogee-fso apogee-o60 apogee-ilh apogee-tbs --reason "delivered by docs/plans/archived/2026-09-09 - 00 - deferred-findings-plan.md (17c105c1 090b0f63 480095e0 4cb5922e f3f9b321 94978659 5fe4fcc4 300336ff edb2bbe4 9ba9619e)"`
