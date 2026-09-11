@@ -10,6 +10,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The reactions manual, the configuration manual, the README, the default `config.yaml` template and CONTEXT.md now describe the shipped `gate:` action — an argv list asked at `pre-tool-exec`, answering `allow`, `deny` or `ask` on its first stdout line, running as an approval stage ahead of the human (under `bypass:` too, default timeout 5s), with `deny` refusing the call as `tool call denied by reaction <id>`, `ask` forcing the approval prompt (denied unattended), and an unreadable answer counting as `ask` — instead of calling the list observe-only and `gate:` unshipped. `advise:` stays documented as reserved.
+
+- Fixed: `TestSettingsApplierReloadsRefuseAnUnparseableFile`'s `reloadServers` row reported a moved-token failure on the parent test instead of its own subtest; the table's rows now take the subtest's `*testing.T` (apogee-itk).
+
+- Fixed: `TestApplyConfigFoldsTheHooksBlock` now reads the backup path out of the fold notice (`<path>.bak-YYYYMMDD-HHMMSS`), checks the backup holds the original file, and asserts the rewritten file byte-equal to `migrateLegacyConfig`'s fold of the same input instead of by containment (apogee-330).
+
+- **Fixed:** `provider.WithDiscoveryTimeout(d)` bounds one `Discover` call (default 5s unchanged; zero keeps the default). `TestDiscoverTransportFailureIsLabelled` builds its clients with a generous bound so its rows are judged on the reply, never failed by the default expiring under a race-instrumented test shard (`apogee-3h4`); a new test pins that a deadline surfaces as a `*TransportError` wrapping `context.DeadlineExceeded`.
+
 - Fixed (tests): **the five entry refusals `internal/reactions` owns are pinned on their whole sentences.**
   `TestHookValidateRefusesEachRule` compared only message tails — `must not be blank`, `absolute http:// or
   https:// URL`, `names no host`, `maps to no environment variable name` — so the `run:`, `run: url:` and
