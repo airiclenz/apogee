@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -566,21 +567,23 @@ func TestApplyConfigFoldsTheHooksBlock(t *testing.T) {
 		t.Error("the folded entry carries no handler; the command: argv did not become a run:")
 	}
 
-	// (b) And the file the user owns is the live schema now, not the retired one.
+	// (b) And the file the user owns is the live schema now, not the retired one: byte for byte
+	// what migrateLegacyConfig makes of the same input, since both paths share reactionsFold and
+	// the golden is pinned at that function's own test. The fold runs on a SECOND on-disk copy —
+	// migrateLegacyConfig backs up and rewrites the path it is given, so folding this launch's
+	// file again would leave a second backup beside the one asserted below.
 	onDisk, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read the migrated config: %v", err)
 	}
-	for _, want := range []string{"reactions:", "- id: notify", "on: [approval-requested, turn-finished]",
-		"run: [notify-send, waiting]"} {
-		if !strings.Contains(string(onDisk), want) {
-			t.Errorf("the rewritten file does not carry %q:\n%s", want, onDisk)
-		}
+	twin := writeMigrationConfig(t, given)
+	want, _, err := migrateLegacyConfig(twin, []byte(given), migrationClock, true)
+	if err != nil {
+		t.Fatalf("migrateLegacyConfig refused the same fixture: %v", err)
 	}
-	for _, absent := range []string{"hooks:", "name: notify", "events:", "command:"} {
-		if strings.Contains(string(onDisk), absent) {
-			t.Errorf("the rewritten file still carries the retired %q:\n%s", absent, onDisk)
-		}
+	if string(onDisk) != string(want) {
+		t.Errorf("the rewritten file differs from migrateLegacyConfig's fold of the same input:\n"+
+			"--- ApplyConfig wrote ---\n%s--- migrateLegacyConfig produced ---\n%s", onDisk, want)
 	}
 
 	// (c) The one line that tells the user their file was rewritten, and what their own scripts
@@ -598,6 +601,23 @@ func TestApplyConfigFoldsTheHooksBlock(t *testing.T) {
 		if !strings.Contains(notes[0], want) {
 			t.Errorf("the fold announcement does not carry %q: %s", want, notes[0])
 		}
+	}
+	// The backup the notice names is the path the user needs if they disagree with the fold, so it
+	// is read back from the sentence itself: it sits beside the file, stamped to the second, and
+	// holds the file exactly as it was.
+	foldNotice := regexp.MustCompile(`^apogee: rewrote ` + regexp.QuoteMeta(path) + ` — .*; backup at (` +
+		regexp.QuoteMeta(path) + `\.bak-\d{8}-\d{6})\.`)
+	m := foldNotice.FindStringSubmatch(notes[0])
+	if m == nil {
+		t.Fatalf("the fold announcement does not name a backup beside %s: %s", path, notes[0])
+	}
+	backup, err := os.ReadFile(m[1])
+	if err != nil {
+		t.Fatalf("the backup the announcement names cannot be read: %v", err)
+	}
+	if string(backup) != given {
+		t.Errorf("the backup does not hold the original file:\n--- backup ---\n%s--- original ---\n%s",
+			backup, given)
 	}
 
 	// And the launch after it neither migrates nor announces anything again.

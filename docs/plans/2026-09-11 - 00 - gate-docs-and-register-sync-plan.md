@@ -76,7 +76,9 @@ Sites (rule: every sentence in these files claiming observe-only, "can change no
 
 **Commit:** `fix(cmd/apogee): the reloadServers refusal row reports on its own subtest`
 
-## 3. The fold notice's backup path is asserted (`apogee-330`)
+## 3. The fold notice's backup path is asserted (`apogee-330`) — ✅ DONE (2026-09-11)
+
+NOTES (2026-09-11): the four-string containment loop over the rewritten file was replaced by the byte-equal comparison it is subsumed by, rather than kept beside it; the second-launch assertion is untouched.
 
 **What:** Fixes `apogee-330`: `TestApplyConfigFoldsTheHooksBlock` (`internal/config/configmigrate_test.go:520`, notes asserted at :588-601) never checks the backup path the one fold notice announces, and asserts the rewritten file by containment. Add, without changing production code: (a) the notice matches `^apogee: rewrote <path> — .*; backup at <path>\.bak-\d{8}-\d{6}\.` (regexp; `path` quoted with `regexp.QuoteMeta`), the captured backup file exists and holds the original fixture bytes; (b) the rewritten file's bytes equal what `migrateLegacyConfig` produces for the same input under `migrationClock` — compute that in the test rather than duplicating the golden, since the two paths share `reactionsFold` and must agree byte-for-byte (the backup suffix does not appear in the rewritten content). Keep the existing silent-second-launch assertion. Producer of the notice: `internal/config/configmigrate.go:1526` (`reactionsFold.note`); backup suffix from `:426`.
 **Regression guard.** (2026-09-11) the byte-equal comparison folds a SECOND on-disk copy of the same fixture (written with writeMigrationConfig, configmigrate_test.go:21) through migrateLegacyConfig under migrationClock, never the ApplyConfig path's own file — migrateLegacyConfig stats, backs up and rewrites the path it is given (configmigrate.go:141-148), so folding the ApplyConfig file again would write a second backup; the rewritten bytes never embed the backup stamp (golden at configmigrate_test.go:917-937), so drop the "if it does, NOTES the fact" clause.
