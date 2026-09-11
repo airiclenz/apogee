@@ -8,6 +8,75 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **The sync classes reach the domain: argv advise and gate, a gate decision, the `Sync` lane (stage 3).** `Reaction.Validate` replaces the "an async handler takes class observe alone" rule with a per-class one: an `ArgvHandler` now serves three of the user's cells — observe on notices as before, advise at `post-tool-result` or `file-changed` (`reaction "notify": advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`) and gate at `pre-tool-exec` alone (`reaction "notify": gate: reacts at pre-tool-exec; "post-tool-result" is not it`) — while a `WebhookHandler` stays observe-only with its existing refusal, since its response is discarded. `Outcome` gains `Gate GateDecision{Verdict GateVerdict; Reason string}` with the verdicts `allow`, `deny` and `ask`: a non-empty verdict counts as an act, and the reason reaches the human being asked, never the model. `Generation` gains `Sync []Reaction` beside `Observe` — the lane the agent runs inside the loop — with a `Validate` of its own: every entry user-origin, every entry class advise or gate, no repeated ID within the lane, while the SAME id may sit in both lanes because one configured entry resolves to one reaction per class. New `domain.SplitLanes` divides one resolved list into the two lanes, order preserved. `GateDecision`, `GateVerdict` and the three verdict constants are re-exported from the root facade. Nothing arms or fires a sync reaction yet — no behaviour changes.
+
+- **The advise slot's substrate: a provenance ledger, a fence nothing can forge, and a strip that keeps
+  advice out of every session record.** New `internal/domain/advice.go` carries `AdviceSpan`
+  (`{Reaction, Origin, Moment, Turn, Offset}` — Offset is the byte index in the advised message's
+  Content where the span's fence begins), the 8 KiB `AdviceCap`, `RenderAdvice` and `CapAdvice`.
+  `RenderAdvice` builds the fence header — `[advice — reaction <id> (<origin> origin) at <moment>,
+  turn <n>]` — from the span alone, never from handler output, so a handler printing its own header
+  lands inside the fence rather than beside it; `CapAdvice` cuts at 8 KiB on a rune boundary and
+  appends `[advice truncated at 8 KiB]` only when it cut. `Message` gains the `Advice` ledger and
+  `WithAdvice`, which appends the rendered fence and records the span at the offset it starts.
+  Spans are ephemeral by construction: `Message.MarshalJSON` — the one encoder a `Conversation`
+  persists through — writes the content up to the first fence, so a session record carries no
+  advice and a resume has nothing to drop, and a message with no spans marshals byte-identically to
+  before. `Conversation.SetMessageContent` drops a ledger the rewritten content no longer reaches,
+  so the prune's stub cannot leave an offset pointing past the end (ADR 0076 D6, D7).
+
+- **The sync lane gets its executor: one door a user's `advise:` or `gate:` command is spawned through
+  (stage 3).** New `internal/agent/syncexec.go` carries `runSyncArgv`, the one deep module the later
+  seams call — it owns the permit, the class deadline, the payload document and the failure report, and
+  hands its caller nothing but `(stdout, err)`. Its permit row (new `syncPermitCtx`, beside the
+  post-response `hookExecutionCtx`) has **no mode term**: a user's sync reaction is the user's own
+  configuration rather than anything the model chose, so it fires in Plan exactly as it fires in Auto —
+  unfenced when `confine-to-workspace` is off, inside the workspace box when it is on and the host has
+  filesystem caps, and refused outright (`workspace confinement is unavailable on this host`, nothing
+  spawned) when the operator asked for the fence and the host cannot build one. The deadline is the
+  entry's own `timeout:` when it set one, else the class default — 10s advise, 5s gate
+  (`domain.DefaultAdviseTimeout` / `DefaultGateTimeout`) — against the observe lane's 30s, because these
+  handlers hold the loop. New `domain.SeamPayload` is the JSON document the command reads on stdin: the
+  observe payload's identity block under the very same JSON keys (pinned against it by a reflection
+  test), plus the pending call's `arguments` and the tool `result: {content, is_error}`, with
+  `APOGEE_REACTION_EVENT`, `_NAME`, `_WORKSPACE` and `_PATH` in the child's environment for a script that
+  would rather not parse it; the executor stamps the identity half itself, so a seam cannot ship a
+  document that misreports the run. `domain.Config` gains `Report func(msg string)` — where a failed
+  sync reaction's one line reaches the user, the in-loop twin of the observe Runner's report seam, and
+  dropped when nil — and a failure books `ReactionFiredEvent{Action: "failed"}` rather than an
+  `ErrorEvent`: a user's command failing is that reaction doing nothing, not a fault of the engine's.
+  `SeamPayload` and `SeamResult` are re-exported from the root facade. Nothing calls the executor yet —
+  no behaviour changes.
+
+- An advise Reaction's text now reaches the model as a provenance-fenced trailer on the closing tool result: the post-tool-result cascade collects one span per advise reaction in ladder order, caps the text at 8 KiB, books the firing as `advise` with the capped text, and the commit seam renders each fence after the structural clamp. The spans ride the message's ledger only — the tool-result event, the audit record and the session record carry the tool's own output, so a resumed session carries no advice.
+
+- A `reactions:` entry's advise command now runs in the loop's sync lane at `post-tool-result`: its
+  standard output is redacted of configured secret values, capped, and handed to the model as the
+  provenance-fenced trailer on the closing tool result. An entry that lists `file-changed` hears
+  only successful workspace writes and is told the resolved path it landed on. A command that
+  fails, times out or prints nothing costs the Turn nothing — the tool result stands and the
+  failure is reported once.
+
+- Reactions: a gate reaction is now a stage of the Approver. It is asked about a pending tool call at `pre-tool-exec`, after the mode ladder has decided and before anything runs, and answers `allow`, `deny` or `ask` on the first line of its output with any further lines a reason for the human. It can only tighten the ladder's verdict: a `deny` refuses the call with `tool call denied by reaction <id>`, an `ask` raises it to the human whatever the mode said — naming the reaction and its reason on the prompt, and never remembered as an allow-for-session — and an `allow` means nothing at all. A gate that fails, times out, is refused a permit or writes something unreadable ASKS rather than passing, so a broken gate cannot disarm the surface it was armed for, and gates stay armed under Bypass. On a delegation an `ask` leaves the delegation standing and is answered by the same gate on the child's own tool calls; a `deny` still refuses it.
+
+- Reactions: the `advise:` and `gate:` entries of a `reactions:` file are now armed LIVE. One `SetReactions` swap installs the Floor enable set, Bypass and the sync lane together, so a reaction added to the file reaches the very next tool call and one deleted from it stops answering, with no restart — and a swap about something else (a Floor guard toggled from the settings surface) leaves the lane exactly as it was. A cascade fires the host's own construction-time reactions first and the user's file after them, and a sub-agent spawned after a swap inherits the lane it was spawned under, so a gate the user armed mid-session still answers for the calls a delegation makes.
+
+- **A `reactions:` entry can now take `gate:`.** The key is an argv list — the command whose first
+  stdout line is the verdict the Approver reads — and it resolves to a Reaction of class gate under
+  the entry's own id, beside the observe Reaction `run:` arms. One entry now resolves to one
+  Reaction per action key it spells, all sharing its id, `on:` list and `workspace:` filter; an
+  absent `timeout:` takes the CLASS default (30s observe, 5s gate, because a person waits on a
+  verdict) and a spelled one binds every Reaction the entry arms. A `gate:` written as anything but
+  a sequence of strings is refused with `reaction "warden": gate: is an argv list`, and a `gate:`
+  listed at a Moment it cannot take earns the core's own sentence
+  (`gate: reacts at pre-tool-exec; "post-tool-result" is not it`). `advise:` stays refused with
+  `advise: is not yet shipped (ADR 0076 stage 3)` until its admission arm passes. The whole-list
+  refusal `parseConfigFile` runs now splits the resolved list by lane before checking it:
+  `reactions.ValidateAll` answers for the observe half and `domain.Generation.Validate` for the sync
+  half, so the same id may appear in both lanes when one entry armed two classes.
+
 ### Fixed
 
 - The reactions manual, the configuration manual, the README, the default `config.yaml` template and CONTEXT.md now describe the shipped `gate:` action — an argv list asked at `pre-tool-exec`, answering `allow`, `deny` or `ask` on its first stdout line, running as an approval stage ahead of the human (under `bypass:` too, default timeout 5s), with `deny` refusing the call as `tool call denied by reaction <id>`, `ask` forcing the approval prompt (denied unattended), and an unreadable answer counting as `ask` — instead of calling the list observe-only and `gate:` unshipped. `advise:` stays documented as reserved.
@@ -96,6 +165,23 @@ point is a **minor** bump, not a breaking change.
   `internal/agent/contextfiles_test.go`.
 
 ### Changed
+
+- **A `reactions:` file's `gate:` entries now reach every run apogee makes.** The resolved list is
+  divided into its two lanes at every wiring site: the observe entries go to the Reaction Runner
+  that has always fired them, and the advise and gate entries are armed on the agent itself — in the
+  TUI at the session's first bind and again at every live `reactions:` reload, and in `apogee
+  headless`, a `/schedule` Firing and a daemon tick before the run's first tool call. A gate added to
+  the file mid-session therefore answers the very next tool call and one deleted from it stops
+  answering, with no restart; a Firing raised inside a session runs the gates that session is
+  answering to.
+- **A sync-lane reaction that fails now says so.** A `gate:` or `advise:` command that could not be
+  spawned, failed or timed out is reported where each Driver already reports the observe lane's
+  trouble — the session's notice line, `apogee headless`'s stderr, the daemon log — so one
+  `reactions:` file's trouble reads the same way whichever lane it came from.
+- **The `/settings` `reactions` row counts the entries the file spells**, not the Reactions they
+  resolve to, so a single entry arming two classes still reads `1 reaction`. Its description now
+  names what both lanes do: `Commands run when a Moment closes or a seam fires; advise text reaches
+  the model fenced, a gate answers before the Approver does.`
 
 - **Reaction core types (stage 1).** `internal/domain` gains the one vocabulary the Floor-guard, Mechanism and Hook layers collapse into (ADR 0076 D1/D2): `Moment` with its five seam and five notice constants (the retired `HookPoint` and `hooks.Event` spellings, unchanged), the `Origin` × `Class` axes of the Reaction surface matrix, `Reaction` with a `Validate` that applies that matrix, the single `Outcome` shape every seam folds to, a sealed per-seam `Handler`, the two revision-bearing seam payloads, and the `ReactionFiredEvent` that will succeed `MechanismFiredEvent` and `FloorGuardEvent`. All of it is re-exported from the root facade. Nothing fires them yet — no behaviour changes.
 
