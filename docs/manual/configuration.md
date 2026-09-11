@@ -369,16 +369,20 @@ connections serving and says why on the row.
 
 ## Reactions — `reactions:`
 
-`reactions:` is the list of **observe-only** reactions apogee runs when a moment closes in a
-session: each entry gives itself an `id:`, lists the moments it fires on under `on:`, and takes one
-action under `run:` — an argv list run directly (no shell; write `["sh", "-c", "…"]` when you want
-one) or a mapping naming a `url:` the JSON payload is POSTed to. It is **empty by default**. A
-reaction is told what already happened and can change nothing: it cannot veto a tool call or an
-approval, and nothing it prints reaches the model, the conversation or the saved session. The six
-moments are `exchange-finished`, `turn-finished`, `file-changed`, `approval-requested` (raised,
-before you answer), `approval-decided` (its verdict) and `error`. The five in-loop seams are not
-open to this list: they take the `advise:` and `gate:` actions, which are not shipped yet, and an
-entry naming one is refused at startup.
+`reactions:` is the list of reactions apogee runs on what a session does: each entry gives itself
+an `id:`, lists the moments it fires on under `on:`, and takes its action under `run:` — an argv
+list run directly (no shell; write `["sh", "-c", "…"]` when you want one) or a mapping naming a
+`url:` the JSON payload is POSTed to — or under `gate:`. It is **empty by default**. A `run:`
+reaction is told what already happened, and nothing it prints reaches the model, the conversation
+or the saved session. The six moments are `exchange-finished`, `turn-finished`, `file-changed`,
+`approval-requested` (raised, before you answer), `approval-decided` (its verdict) and `error`. A
+`gate:` reaction — an argv list, `on: [pre-tool-exec]` — is asked before a tool call runs, as an
+approval stage ahead of you (under `bypass:` too, default `timeout:` 5s): the first line it prints
+is `allow`, `deny` or `ask`, the rest is its reason. A `deny` refuses the call and the model reads
+only `tool call denied by reaction <id>`; an `ask` forces the approval prompt, `reaction <id> asks:
+<reason>`, which an unattended run denies; an answer that is missing, malformed, late or crashed
+counts as `ask`. The other four in-loop seams take `advise:`, not shipped yet and refused at
+startup, as is an entry naming one of them.
 
 ```yaml
 # ~/.apogee/config.yaml

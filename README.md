@@ -221,8 +221,8 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 - **Scriptable** — [`apogee headless`](docs/manual/headless.md) runs one prompt
   unattended with clean stdout and meaningful exit codes.
 - **Reactions** — run a command or POST a webhook when an exchange ends, a file changes or an
-  approval is waiting. Observe-only: a reaction is told what happened and can change nothing,
-  and nothing it prints reaches the model. See [Reactions](docs/manual/reactions.md).
+  approval is waiting; a `gate:` entry can deny a tool call, or hand it to you, before it runs.
+  Nothing a reaction prints reaches the model. See [Reactions](docs/manual/reactions.md).
 - **[`apogee probe`](docs/manual/probe.md)** reports what this host, model and terminal
   can actually do, without running an agent or calling a model.
 - **Deliverables you actually see** — a finished report is opened on your desktop, or

@@ -1186,15 +1186,17 @@ Anything else is a firing, and it reaches every Driver as one `ReactionFiredEven
 under the action `retry`, else `defer`, else `intercept` when a shape reaction moved the working
 value's revision. The seven Floor-guard booleans stay the canonical switches for the builtins.
 A **user**-origin Reaction is one entry of the global `reactions:` list —
-`{id, on: [notices], run: <argv | {url, headers, headers-env}>, workspace?, timeout?, enabled?}` —
-resolved at **observe** class into a `domain.Reaction` the async lane (`internal/reactions`' own
-runner) fires. `advise:` and `gate:` are reserved keys that refuse the file with a sentence naming
-them, as does an `on:` naming a seam, and `enabled: false` **parks** an entry: it stays in the file
+`{id, on: [moments], run: <argv | {url, headers, headers-env}>, gate: <argv>, workspace?, timeout?, enabled?}` —
+resolved into one `domain.Reaction` per action key it spells, sharing its id: `run:` at **observe**
+class, fired by the async lane (`internal/reactions`' own runner) on notices, and `gate:` at
+**gate** class, fired by the agent's sync lane at `pre-tool-exec` only. `advise:` is the reserved key
+that refuses the file with a sentence naming it, as does an `on:` a key's class cannot take (a seam
+under `run:`, a notice under `gate:`), and `enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
-**`Generation`** — `{Floor, Bypass, Observe}` — which a **Driver** applies in one act to the agent
-(which takes Floor and Bypass) and to the runner (which takes Observe), so nothing downstream reads
-a half-swapped state; it is the single idiom that replaced `SetBypass`, `SetFloor` and the runner's
-own `Replace`
+**`Generation`** — `{Floor, Bypass, Observe, Sync}` — which a **Driver** applies in one act to the
+agent (which takes Floor, Bypass and Sync) and to the runner (which takes Observe), so nothing
+downstream reads a half-swapped state; it is the single idiom that replaced `SetBypass`, `SetFloor`
+and the runner's own `Replace`
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D4, A8). The
 key's earlier name was `hooks:`, and a file still carrying it is **folded** into `reactions:` once,
 at start-up: backed up first, re-rendered from its parsed entries, and reported in a note naming

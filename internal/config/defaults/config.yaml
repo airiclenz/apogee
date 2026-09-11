@@ -434,13 +434,14 @@ context-files:
 #     endpoint: https://mcp.example.com/ # the server URL (http://127.0.0.1:… is fine too)
 
 # =============================================================================
-# Reactions: commands and webhooks Apogee runs when a moment closes in a session. Default-EMPTY:
-# with no entries listed, nothing runs and nothing is reported. A reaction of this kind is
-# OBSERVE-ONLY — it is told what already happened, it can change or veto nothing, and nothing it
-# prints ever reaches the model, the conversation or the saved session. Use one to ring a bell for
-# an approval nobody is watching, or to poke a build when a file changed. Config-file only, and
-# live in the interactive TUI: save the file and the running session swaps its reactions over (a
-# headless run and the daemon read the list once, at start).
+# Reactions: commands and webhooks Apogee runs when a moment closes in a session, and gates it asks
+# before a tool call runs. Default-EMPTY: with no entries listed, nothing runs and nothing is
+# reported. A `run:` reaction is told what already happened, it can change or veto nothing, and
+# nothing it prints ever reaches the model, the conversation or the saved session. Use one to ring
+# a bell for an approval nobody is watching, or to poke a build when a file changed. A `gate:`
+# reaction (below) can deny a call or hand it to you. Config-file only, and live in the interactive
+# TUI: save the file and the running session swaps its reactions over (a headless run and the
+# daemon read the list once, at start).
 #
 # The six moments are:
 #   exchange-finished  a top-level exchange closed — the model answered, or the loop gave up
@@ -464,15 +465,26 @@ context-files:
 # environment variable at send time (`headers-env:`, the api-key-env spelling), so a token you send
 # with a reaction never has to sit in this file. Two more spellings are its own: `enabled: false`
 # parks an entry without deleting it, and an id that is one of the seven Floor-guard keys is refused
-# — those are switched with their own top-level key, not with a reactions: entry. `advise:` and
-# `gate:` are reserved for a later release and refused today.
+# — those are switched with their own top-level key, not with a reactions: entry.
+#
+# `gate:` is the other action an entry can take: an argv LIST asked BEFORE a tool call runs, with
+# `on: [pre-tool-exec]` and nothing else under `on:`. The call reaches it as JSON on stdin (event,
+# reaction, tool, arguments) and it answers on stdout — the first line is allow, deny or ask, any
+# later lines are the reason (its first ~240 characters are kept). It runs as an approval stage
+# ahead of you, under bypass: too, with a default `timeout:` of 5s. The first deny ends the call and
+# the model reads only "tool call denied by reaction <id>", never the reason; the first ask forces
+# the approval prompt ("reaction <id> asks: <reason>"), which a headless run or the daemon denies
+# as "tool call denied by approver". An answer that is missing, malformed, late or crashed counts
+# as ask, never as allow, and allow changes nothing the mode already decided. An ask on a sub_agent
+# call is deferred to the child's own calls. `advise:` is reserved for a later release and refused
+# today.
 #
 # `hooks:` was this key's earlier name. A config file that still carries one is folded into
 # reactions: at startup, once, and the change is announced with the backup it kept.
 #
 # reactions:
 #   - id: notify                         # unique; it is what a failure notice names
-#     on: [approval-requested]           # one or more of the six moments above
+#     on: [approval-requested]           # one or more of the six moments above (run:)
 #     run: ["notify-send", "apogee is waiting for an answer"]
 #     timeout: 10s                       # optional; default 30s
 #   - id: ci-bell
@@ -484,6 +496,10 @@ context-files:
 #       headers-env:
 #         Authorization: MY_WEBHOOK_TOKEN # the NAME of the variable holding the value
 #     workspace: ~/code/apogee           # optional; fires in this workspace only
+#   - id: no-force-push
+#     on: [pre-tool-exec]                # a gate: reacts here and nowhere else
+#     gate: ["check-tool-call"]          # prints allow, deny or ask on its first line
+#     timeout: 2s                        # optional; a gate's default is 5s
 
 # =============================================================================
 # The tool roster: which of Apogee's BUILT-IN tools this configuration offers the model. Almost all

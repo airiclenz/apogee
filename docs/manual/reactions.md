@@ -1,18 +1,22 @@
 # Reactions — commands and webhooks on what a session did
 
-`reactions:` in `~/.apogee/config.yaml` is a list of **observe-only** Reactions apogee runs when
-something happens in a session — what other tools call a hook. Each entry names the moments it
-fires on and the one action it takes: an argv list run directly, or a URL the moment is POSTed to
-as JSON. The list is empty by default, so a fresh install runs nothing and reports nothing.
+`reactions:` in `~/.apogee/config.yaml` is a list of Reactions apogee runs when something happens
+in a session — what other tools call a hook. Each entry names the moments it fires on and the
+action it takes: `run:` — an argv list run directly, or a URL the moment is POSTed to as JSON —
+after the moment, or `gate:` — an argv list asked whether a tool call may run — before it. The
+list is empty by default, so a fresh install runs nothing and reports nothing.
 
-An entry is told what **already happened**. It cannot veto a tool call, delay a turn, answer an
-approval, or change anything about the run it is watching, and nothing it prints, returns or
-answers reaches the model, the conversation or the saved session — its failure is yours to see and
-nobody else's. It is a [Reaction](../../CONTEXT.md) of **user** origin and **observe** class: it
-watches. A Floor guard is the engine's own `shape (view)` Reaction — it fires on a Moment inside
-the loop and changes what the model sees — while yours fires after the fact, on your own machine,
-as your configuration rather than a model action. There are deliberately no `pre-*` moments here:
-every notice below reports a thing that is over.
+A `run:` entry is told what **already happened**. It cannot delay a turn, answer an approval, or
+change anything about the run it is watching, and nothing it prints, returns or answers reaches
+the model, the conversation or the saved session — its failure is yours to see and nobody else's.
+It is a [Reaction](../../CONTEXT.md) of **user** origin and **observe** class: it watches. A
+`gate:` entry is the same origin at **gate** class: it is asked, before a tool call runs, whether
+the call may — and it can say `deny`, or `ask` to put the call to you, but never approve a call on
+your behalf. A Floor guard is the engine's own `shape (view)` Reaction — it fires on a Moment
+inside the loop and changes what the model sees — while yours fires on your own machine, as your
+configuration rather than a model action, and never speaks to the model. Of the five in-loop
+seams, a `gate:` entry reacts at `pre-tool-exec` and answers allow/deny/ask; the other four take
+`advise:`, not yet shipped. Every notice below reports a thing that is over.
 ([ADR 0073](../adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md) is the
 decision and its reasoning;
 [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) is the origin and
@@ -40,19 +44,25 @@ reactions:
       headers-env:
         Authorization: MY_WEBHOOK_TOKEN # the NAME of the variable holding the value
     workspace: ~/code/apogee            # optional; fires in this workspace only
+  - id: no-force-push
+    on: [pre-tool-exec]                 # a gate: reacts here and nowhere else
+    gate: ["check-tool-call"]           # answers allow, deny or ask on its first stdout line
+    timeout: 2s                         # optional; a gate's default is 5s
 ```
 
 | Key | Meaning |
 |---|---|
 | `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id — a guard is switched off with its own top-level key, not with an entry here. |
-| `on:` | Required, at least one, from the eleven notices below. A spelling outside that vocabulary is refused at startup, and so is one of the five **seams**: a `run:` entry reacts to notices, and the classes that act on a seam (`advise:`, `gate:`) are not yet shipped. |
+| `on:` | Required, at least one. A `run:` entry reacts to the eleven notices below; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a seam under a `run:` entry or a notice under a `gate:` — the other four seams take `advise:`, not yet shipped. |
 | `run:` | The entry's one action, in either of two shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. |
 | `workspace:` | Optional. Scopes the entry to one workspace; unset means every workspace. |
 | `timeout:` | Optional Go duration (`10s`, `2m`). Default `30s`. Bounds the command run and the POST alike. |
 | `enabled:` | Optional. `enabled: false` **parks** an entry — it stays in the file and is dropped when the file is read, so nothing arms it and the `/settings` summary does not count it. |
-| `advise:` / `gate:` | Reserved for the classes a later release ships. An entry that spells either is refused today, by a sentence that says so, rather than being silently ignored. |
+| `gate:` | The entry's other action: an argv list, run directly like a `run:` list, that is asked before a tool call runs — its `on:` is `[pre-tool-exec]`. The call reaches it as JSON on **stdin** (`event`, `reaction`, `tool`, `arguments` and the shared fields below) and it answers on **stdout**: the first line is `allow`, `deny` or `ask`, and any later lines are the reason, kept to its first ~240 characters. It runs as an approval stage ahead of you — under `bypass:` too — with a default `timeout:` of `5s`. The first `deny` ends the call: the model reads `tool call denied by reaction <id>` and never the reason. The first `ask` forces the approval prompt, which reads `reaction <id> asks: <reason>`; in [`apogee headless`](headless.md) and the [daemon](daemon.md) nobody is there to answer, so the call is denied as `tool call denied by approver`. A gate that printed nothing, printed something else, exited non-zero, timed out or crashed counts as `ask`, never as `allow`, and an `allow` changes nothing about what the mode already decided. On a `sub_agent` call an `ask` is deferred: the child inherits the gate and is asked on the calls that actually do something. |
+| `advise:` | Reserved for the class a later release ships. An entry that spells it is refused today, by a sentence that says so, rather than being silently ignored. |
 
-An entry takes **exactly one** action, and `run:` is the only one this release ships. Inside the
+An entry takes `run:` or `gate:`. The two share the entry's `on:` list and a gate reacts only where
+a `run:` cannot, so an entry spelling both is refused today rather than half-armed. Inside the
 webhook mapping the three keys above are the whole vocabulary — a misspelt `header-env:` is a
 startup refusal and not a token that never gets sent. The whole block is checked when the file is
 read, and a malformed entry is a startup refusal naming the entry rather than a Reaction that

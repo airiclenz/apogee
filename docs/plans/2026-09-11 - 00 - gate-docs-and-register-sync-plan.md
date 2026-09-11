@@ -37,7 +37,10 @@
 - `apogee-ed5`, `apogee-7ui`, `apogee-5cf`, `apogee-304` (parked by the archived plan, still parked).
 - Any `VERSION` / release change.
 
-## 1. The user docs stop denying the shipped `gate:` cell
+## 1. The user docs stop denying the shipped `gate:` cell — ✅ DONE (2026-09-11)
+
+NOTES (2026-09-11): deviation — docs/manual/reactions.md's action paragraph says an entry takes `run:` OR `gate:`, not "or both": internal/config/reactions.go hands the entry's whole `on:` list to each key's Reaction and Validate refuses a seam under `run:` and a notice under `gate:`, so an entry spelling both is always refused today; documenting "both" would have been a false fact.
+NOTES (2026-09-11): the manual and the template each gained a commented `gate:` example entry (id `no-force-push`, `on: [pre-tool-exec]`) beside the two existing `run:` examples — the item names the example for the template only; the manual's mirrors it so the two stay in step.
 
 **What:** Regression from `c2f0c9d3`/`de2263c0`: four user-facing docs still say reactions are observe-only and `gate:` is unshipped. Rewrite only the gate half; `advise:` sentences keep their reserved wording (split any sentence that bundles the two). The facts to state, from the shipped code: an entry may carry `run:` and/or `gate:` (an argv list), one Reaction per action key sharing `id:`/`on:`/`workspace:`; a gate reacts at `pre-tool-exec` only (`internal/domain/reaction.go:488`); default timeout 5s (`DefaultGateTimeout`), `timeout:` overrides; it runs as an Approver stage before the human Approver, also under Bypass; stdout's first line is `allow`, `deny` or `ask`, later lines the reason (capped at 240 runes); a missing, malformed, timed-out or crashing answer counts as `ask`; the first `deny` ends the call with the engine-authored result `tool call denied by reaction <id>` (the reason never reaches the model); the first `ask` forces the human gate with `reaction <id> asks: <reason>`; in headless/daemon runs `ask` resolves as the unattended Approver denies (`tool call denied by approver`); a delegation's `ask` defers to the child's calls.
 Sites (rule: every sentence in these files claiming observe-only, "can change nothing", "cannot veto", or that `gate:` is reserved/unshipped — grep below finds them):
