@@ -752,6 +752,9 @@ const (
 	// instructions into the model through a refusal it manufactured.
 	gateDenial   = "tool call denied by reaction " + gateWardenName
 	gateQuestion = "reaction " + gateWardenName + " asks: " + gateAskReason
+	// The question's opening alone, for the journey whose reason is the engine's sentence about a
+	// gate that failed rather than a line the script wrote.
+	gateQuestionPrefix = "reaction " + gateWardenName + " asks: "
 
 	// The unattended denier's own refusal (internal/run/run.go:291). An `ask` that reached a
 	// headless run ends here rather than at finishGate's no-Approver sentence: an unattended root
@@ -851,6 +854,51 @@ func TestE2EGateAsksInTheTUI(t *testing.T) {
 	if _, _, ok := drv.Frame().Find("Always allow this session"); !ok {
 		t.Fatalf("the gate's words are on screen but the approval menu is not, so the frame "+
 			"carrying them is not the approval pane:\n%s", drv.Frame().String())
+	}
+
+	// Answered, so the session ends the way every other driven case does rather than being quit
+	// out from under a pending question.
+	drv.WaitQuiet(settled)
+	drv.Type("a")
+	drv.WaitText(gateAnswer)
+	drv.WaitQuiet(settled)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// TestE2EGateFailureIsReportedInTheTUI is the sync lane's report seam driven from the one Driver
+// that has a screen: a gate whose command exits 1 could not answer, so the engine says so through
+// Config.Report — which the session's boot phase wires to the Bridge's NotifyHook, the same seam an
+// observe reaction's failure takes (TestE2EHooksReportAFailureAsAnEphemeralNote) — and the line
+// lands on the transcript as ONE ephemeral note. The gate then escalates to `ask`, so the pane the
+// human sees names the failure too; the note is told apart from it by the Moment it quotes, which
+// the ask's reason never carries.
+//
+// It is the driven twin of TestBootConfigWiresTheSyncLanesReporter: that one proves the boot phase
+// hands the engine the Bridge's reporter, this one proves what the reporter puts in front of the
+// human when a real gate fails inside a real Turn.
+func TestE2EGateFailureIsReportedInTheTUI(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, gateConfig("exit 1"),
+		"--mode", string(domain.ModeAskBefore))
+
+	submit(drv, gatePrompt)
+
+	const failureLine = "reaction " + gateWardenName + " (" + string(domain.MomentPreToolExec) + ")"
+	drv.WaitText(failureLine)
+	drv.WaitText(gateQuestionPrefix)
+	if _, _, ok := drv.Frame().Find("Always allow this session"); !ok {
+		t.Fatalf("the failed gate's report is on screen but the approval menu is not, so the "+
+			"gate did not escalate to ask:\n%s", drv.Frame().String())
+	}
+	if n := rowsContaining(drv.Frame(), failureLine); n != 1 {
+		t.Errorf("a failing gate left %d notice lines; want exactly one:\n%s", n, drv.Frame())
+	}
+	if row := rowContaining(t, drv.Frame(), failureLine); !strings.Contains(row, "exited 1") {
+		t.Errorf("the gate notice %q does not say the command exited 1", row)
 	}
 
 	// Answered, so the session ends the way every other driven case does rather than being quit

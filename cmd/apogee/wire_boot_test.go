@@ -4,12 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -777,6 +780,55 @@ func TestBootConfigCarriesTheFloorGuardKeys(t *testing.T) {
 	if w.cfg.Floor != want {
 		t.Errorf("Config.Floor = %+v; want %+v — one key off, the other six guards standing",
 			w.cfg.Floor, want)
+	}
+}
+
+// Where a SYNC-lane reaction's trouble is said out loud in a session: the boot phase installs the
+// Bridge's own NotifyHook as Config.Report — the SAME seam its Reaction Runner reports the observe
+// lane through — so a gate or advise command that failed reaches the transcript's ephemeral note
+// exactly as an observe reaction's failure does. The claim is made on the message the bound program
+// receives rather than on the field alone: a Report that is non-nil but narrates somewhere else
+// would leave the human as uninformed as a nil one. The Firing Driver's half of the same claim is
+// TestFiringConfigWiresTheSyncLanesReporter.
+func TestBootConfigWiresTheSyncLanesReporter(t *testing.T) {
+	t.Parallel()
+	opts := config.Options{
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
+		ConfigDir: t.TempDir(),
+	}
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+	t.Cleanup(w.close)
+	if err := w.resolveConfig(); err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if w.cfg.Report == nil {
+		t.Fatal("Config.Report is nil; a gate that could not be spawned would fail silently in a " +
+			"session that has a screen to say so on")
+	}
+
+	// The program the Bridge late-binds, buffered so the two sends below need no Update loop.
+	sender := loopSender{msgs: make(chan tea.Msg, 2)}
+	w.bridge.Bind(sender)
+	const line = `reaction "warden" (pre-tool-exec): gate: timed out`
+	w.cfg.Report(line)
+	w.bridge.NotifyHook(line)
+
+	var got [2]tea.Msg
+	for i := range got {
+		select {
+		case got[i] = <-sender.msgs:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("message %d never reached the program", i+1)
+		}
+	}
+	if !reflect.DeepEqual(got[0], got[1]) {
+		t.Errorf("Config.Report put %#v on the program; want what Bridge.NotifyHook puts there, %#v",
+			got[0], got[1])
 	}
 }
 
