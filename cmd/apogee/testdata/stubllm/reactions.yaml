@@ -1,6 +1,7 @@
-# The upstream the two SEAM-CLOSING headless journeys talk to (ADR 0076 A6): one `apogee headless`
-# run whose Exchange actually calls a tool, which is the only way a `post-tool-result-finished`
-# notice has a result to carry.
+# The upstream the SEAM-CLOSING headless journeys talk to (ADR 0076 A6), and the gate and advise
+# journeys after them: one `apogee headless` run whose Exchange actually calls a tool, which is the
+# only way a `post-tool-result-finished` notice has a result to carry — or a gate has a call to
+# refuse, or an advise trailer has a tool result to land on.
 #
 # hooks.yaml cannot serve them: its one Turn answers with text and never calls anything, so the
 # post-tool-result seam it closes has no working value worth reading. This script is that script
@@ -15,7 +16,21 @@ turns:
     - when:
         tool_result: list_dir
       text: Both roots fired their reactions.
-    # Anything apogee asks on its own account. Never consumed, so the two turns above stay the
-    # whole conversation.
+    # The file-changed advise journey (ADR 0076 D6): a WRITE, then a read, on one prompt. The
+    # write is what a `file-changed` entry fires on and the read is what it must stay silent on,
+    # and the read's own result lands on the list_dir Turn above — so the conversation ends the
+    # way every other run of this script does.
+    - when:
+        last_message: ^Leave a note in this workspace
+      tool_calls:
+        - name: write_file
+          arguments: '{"path":"note.txt","content":"remember\n"}'
+    - when:
+        tool_result: write_file
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"."}'
+    # Anything apogee asks on its own account. Never consumed, so the turns above stay the whole
+    # conversation.
     - repeat: true
       text: OK.

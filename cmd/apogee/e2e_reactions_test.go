@@ -937,6 +937,215 @@ func gateFirstIndex(t *testing.T, lines []map[string]any, kind, member, want str
 	return -1
 }
 
+// ----------------------------------------------------------------------------
+// The advise journeys (ADR 0076 D6)
+// ----------------------------------------------------------------------------
+
+// The advise journeys' vocabulary. The entry is named once and read everywhere, the fence header
+// included: every word of that header is derived from the entry's identity and the Moment it fired
+// at (domain.RenderAdvice), so renaming the entry re-aims the trailer assertion rather than
+// un-arming it.
+const (
+	adviseCoachName = "coach"
+	// What the coach says, and — with echo's newline — what the model reads inside the fence
+	// and what the firing's detail carries: the trailer is the command's stdout verbatim, cap and
+	// redaction aside, so the newline is part of the claim rather than noise to trim.
+	adviseCoachSays = "remember to run the tests"
+	adviseCoachText = adviseCoachSays + "\n"
+
+	// The prompt that makes the script WRITE before it reads (testdata/stubllm/reactions.yaml),
+	// and the file the write lands on.
+	adviseNotePrompt = "Leave a note in this workspace."
+	adviseNoteFile   = "note.txt"
+
+	// The spelling every advice fence opens with, whatever entry produced it — the substring a
+	// record or a request must NOT carry for the absence claims below to hold.
+	adviceFenceMark = "[advice"
+)
+
+// TestE2EAdviseLandsAsTheTrailer is the advise cell's first journey: an `advise:` entry in the
+// user's own config.yaml runs after a tool call, and what it printed reaches the model as the
+// fenced trailer on that call's result — the exact string domain.RenderAdvice composes for the
+// entry, its origin, the Moment and the Turn — while the firing line books the same text as its
+// detail.
+//
+// The claim is made on what the STUB received rather than on the ledger inside the Agent: a fence
+// that was booked but never rendered onto the wire would look identical from inside, and the tool
+// message on the next request is the only place the model's own view of the result is visible from
+// out here. The Turn is 0 because the call is the first Turn of the run, numbered as the event
+// stream numbers it (testdata/eventlines/run.jsonl).
+func TestE2EAdviseLandsAsTheTrailer(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	stdout, _, _ := headlessHooksArgs(t, stub, gatePrompt,
+		adviseConfig(domain.MomentPostToolResult, "echo "+adviseCoachSays),
+		"--format", formatJSON)
+
+	want := domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: adviseCoachName,
+		Origin:   domain.OriginUser,
+		Moment:   domain.MomentPostToolResult,
+		Turn:     0,
+	}, adviseCoachText)
+	if got := toolResultHandedOn(t, stub, 1); !strings.HasSuffix(got, want) {
+		t.Errorf("the model was handed the tool result\n%q\nwant it to end with the trailer\n%q",
+			got, want)
+	}
+
+	fired := adviseFirings(t, jsonEventLines(t, stdout))
+	if want := []string{adviseCoachText}; !slices.Equal(fired, want) {
+		t.Errorf("the stream booked the advise firings %q; want %q — one firing, carrying the "+
+			"text the model read", fired, want)
+	}
+}
+
+// TestE2EAdviseNeverReachesTheSessionRecord is the ephemerality half of D6: the trailer the model
+// read is written on the message it advised and NOT on the record the run saved, so a resumed
+// conversation carries no advice and a replay never re-reads a stale one. The tool result itself
+// is the positive control — the record holds the message, minus the fence.
+func TestE2EAdviseNeverReachesTheSessionRecord(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	home := t.TempDir()
+	headlessHooksIn(t, stub, home, gatePrompt,
+		adviseConfig(domain.MomentPostToolResult, "echo "+adviseCoachSays),
+		"--format", formatJSON)
+
+	if got := toolResultHandedOn(t, stub, 1); !strings.Contains(got, adviceFenceMark) {
+		t.Fatalf("the model was handed the tool result %q with no advice fence on it, so the "+
+			"record's silence would prove nothing", got)
+	}
+
+	record := sessionRecordText(t, home)
+	if !strings.Contains(record, "a.txt") {
+		t.Fatalf("the session record does not carry the tool result the seeded workspace "+
+			"produces, so it is not the record of this run:\n%s", record)
+	}
+	for _, leaked := range []string{adviceFenceMark, adviseCoachSays} {
+		if strings.Contains(record, leaked) {
+			t.Errorf("the session record carries %q — advice is ephemeral and never saved:\n%s",
+				leaked, record)
+		}
+	}
+}
+
+// TestE2EAdviseIsOffUnderBypass is the Bypass row of the policy matrix (ADR 0076 D9): under
+// `--bypass` every model-shaping class is off, the advise entry among them, so the same run
+// produces no trailer and books no firing. The tool result still reaches the model whole — Bypass
+// switches the shaping off, not the tools.
+func TestE2EAdviseIsOffUnderBypass(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	stdout, _, _ := headlessHooksArgs(t, stub, gatePrompt,
+		adviseConfig(domain.MomentPostToolResult, "echo "+adviseCoachSays),
+		"--format", formatJSON, "--bypass")
+
+	got := toolResultHandedOn(t, stub, 1)
+	if !strings.Contains(got, "a.txt") {
+		t.Fatalf("the model was handed the tool result %q, which is not the listing the seeded "+
+			"workspace produces", got)
+	}
+	if strings.Contains(got, adviceFenceMark) {
+		t.Errorf("the model was handed the tool result %q with an advice fence on it; under "+
+			"Bypass the advise class is off", got)
+	}
+
+	if fired := adviseFirings(t, jsonEventLines(t, stdout)); len(fired) != 0 {
+		t.Errorf("the stream booked the advise firings %q; want none under Bypass", fired)
+	}
+}
+
+// TestE2EAdviseFileChangedFiresOnTheWriteAlone is the narrowed Moment: an entry on
+// `file-changed` alone runs after a successful write and after nothing else. The script writes and
+// then reads on one prompt, so the two calls sit in one run, and what the command PRINTS is the
+// Moment and path it was told — the environment facts a `file-changed` script keys on — which is
+// how the trailer proves it fired for the write and not merely at the seam.
+//
+// The mode is Auto because headless defaults to Plan, where a write is refused before it runs and
+// no file ever changes; `confine-to-workspace: false` in the config is what lets an unattended
+// Auto run start on a host that cannot fence (adviseConfig).
+func TestE2EAdviseFileChangedFiresOnTheWriteAlone(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	stdout, _, workspace := headlessHooksArgs(t, stub, adviseNotePrompt,
+		adviseConfig(domain.MomentFileChanged,
+			`echo "$`+domain.EnvReactionEvent+` $`+domain.EnvReactionPath+`"`),
+		"--format", formatJSON, "--mode", string(domain.ModeAuto))
+
+	wantText := string(domain.MomentFileChanged) + " " + filepath.Join(workspace, adviseNoteFile) + "\n"
+	wantTrailer := domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: adviseCoachName,
+		Origin:   domain.OriginUser,
+		Moment:   domain.MomentPostToolResult,
+		Turn:     0,
+	}, wantText)
+	if got := toolResultHandedOn(t, stub, 1); !strings.HasSuffix(got, wantTrailer) {
+		t.Errorf("the write's result reached the model as\n%q\nwant it to end with the trailer\n%q",
+			got, wantTrailer)
+	}
+	if got := toolResultHandedOn(t, stub, 2); strings.Contains(got, adviceFenceMark) {
+		t.Errorf("the read's result reached the model as %q, carrying an advice fence; a "+
+			"file-changed entry does not fire on list_dir", got)
+	}
+
+	fired := adviseFirings(t, jsonEventLines(t, stdout))
+	if want := []string{wantText}; !slices.Equal(fired, want) {
+		t.Errorf("the stream booked the advise firings %q; want %q — one firing, for the write",
+			fired, want)
+	}
+}
+
+// adviseConfig is the config an advise journey runs with: the `coach` entry armed at moment with
+// script as its advise command, above the same `confine-to-workspace: false` the gate journeys
+// run under and for the same reason (gateConfig) — a user-origin sync reaction spawns under a
+// permit the fence would refuse on a host without confinement capabilities. script is written
+// into a YAML flow scalar, so its single quotes are doubled here.
+func adviseConfig(moment domain.Moment, script string) string {
+	return "confine-to-workspace: false\n" +
+		hookBlockOf("  - id: "+adviseCoachName+"\n"+
+			"    on: ["+string(moment)+"]\n"+
+			"    advise: [sh, -c, '"+strings.ReplaceAll(script, "'", "''")+"']\n")
+}
+
+// toolResultHandedOn is the tool message the stub was handed as the LAST message of its request
+// number n (zero-based): the model's own view of the call that request followed. A script that
+// calls twice sends its second result on request 2, which is what a journey with a write and a
+// read has to tell apart.
+func toolResultHandedOn(t *testing.T, stub *stubllm.Server, n int) string {
+	t.Helper()
+
+	reqs := stub.Requests()
+	if len(reqs) <= n {
+		t.Fatalf("the stub answered %d requests; want at least %d", len(reqs), n+1)
+	}
+	messages := reqs[n].Messages
+	last := messages[len(messages)-1]
+	if last.ToolCallID == "" {
+		t.Fatalf("request %d's last message is a %q message rather than a tool result: %+v",
+			n+1, last.Role, last)
+	}
+	return last.Content
+}
+
+// adviseFirings is the detail of every reaction_fired line booked under the advise action, in
+// stream order — the text the model was handed — and fails on a firing for any other entry, since
+// the journeys arm one. A line for the coach under any OTHER action would be a firing the advise
+// slot never booked, so it fails too.
+func adviseFirings(t *testing.T, lines []map[string]any) []string {
+	t.Helper()
+
+	var details []string
+	for i, line := range lines {
+		if line["event"] != "reaction_fired" {
+			continue
+		}
+		if id := stringMember(t, i, line, "reaction"); id != adviseCoachName {
+			t.Fatalf("line %d books a firing for %q; the run armed only %q", i+1, id, adviseCoachName)
+		}
+		if action := stringMember(t, i, line, "action"); action != "advise" {
+			t.Fatalf("line %d books %q under the action %q; want advise", i+1, adviseCoachName, action)
+		}
+		details = append(details, stringMember(t, i, line, "detail"))
+	}
+	return details
+}
+
 // sinkEntry is one `reactions:` entry, named, that appends every payload it is handed to the shared
 // sink. The NAME is what the reload journey reads back: two entries writing to one file are told
 // apart by the payload's own `reaction` field, which is the field a firing is attributed by.
@@ -1071,6 +1280,15 @@ func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfi
 func headlessHooksArgs(t *testing.T, stub *stubllm.Server, prompt, extraConfig string,
 	extra ...string) (stdout, stderr, workspace string) {
 	t.Helper()
+	return headlessHooksIn(t, stub, t.TempDir(), prompt, extraConfig, extra...)
+}
+
+// headlessHooksIn is [headlessHooksArgs] rooted in a home the caller chose, which is the whole of
+// what the advise record journey needs beyond it: the run's session record lands in that home's
+// store, and a claim about what the record does NOT carry has to know where to read it.
+func headlessHooksIn(t *testing.T, stub *stubllm.Server, home, prompt, extraConfig string,
+	extra ...string) (stdout, stderr, workspace string) {
+	t.Helper()
 
 	prev := runOnce
 	runOnce = run.Once
@@ -1080,7 +1298,6 @@ func headlessHooksArgs(t *testing.T, stub *stubllm.Server, prompt, extraConfig s
 	assertNoAmbientApogeeConfig(t)
 	t.Setenv(config.EnvMode, "")
 
-	home := t.TempDir()
 	writeConfigHome(t, home, extraConfig+
 		"servers:\n"+
 		"  - name: stub\n"+

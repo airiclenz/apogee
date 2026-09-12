@@ -341,7 +341,11 @@ go test ./internal/config/ -run 'TestLoadFileConfig|TestReaction'
 
 **Commit:** `feat(config): reactions: entries take advise: — the user advise cell ships`
 
-## 14. Journey: an `advise:` entry's text reaches the model as the trailer and never the session record
+## 14. Journey: an `advise:` entry's text reaches the model as the trailer and never the session record — ✅ DONE (2026-09-12)
+
+NOTES (2026-09-12): the file-changed journey's advise command echoes `$APOGEE_REACTION_EVENT $APOGEE_REACTION_PATH` rather than a fixed sentence, so its trailer and detail prove the narrowed Moment and the written path, not only that a firing happened; the fence header still names `post-tool-result` because the advise slot fences at the seam it runs at (`adviceOf`), which is the shipped behaviour.
+NOTES (2026-09-12): `headlessHooksArgs` now delegates to a new `headlessHooksIn` that takes the home, so the record journey can read the session store the run saved into; existing callers are unchanged.
+NOTES (2026-09-12): consequential edit — cmd/apogee/testdata/stubllm/reactions.yaml: header and trailing comments no longer count "two" turns/journeys, made necessary by the added `write_file` turn.
 
 **What:** Depends on items 10, 13. In `cmd/apogee/e2e_reactions_test.go`, headless over the same stub script: config `- id: coach / on: [post-tool-result] / advise: ["sh", "-c", "echo remember to run the tests"]`: the request the stub receives after the tool call ends its tool message with the exact `RenderAdvice` string for `{coach, user origin, post-tool-result, turn N}`; the `reaction_fired` line carries `"action":"advise"` and `"detail":"remember to run the tests\n"`; the saved session file's tool message has no `[advice` substring; `--bypass` produces no trailer and no `advise` line; an entry on `file-changed` fires for a scripted `write_file` and not for `list_dir`.
 
