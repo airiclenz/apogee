@@ -3,24 +3,27 @@
 `reactions:` in `~/.apogee/config.yaml` is a list of Reactions apogee runs when something happens
 in a session — what other tools call a hook. Each entry names the moments it fires on and the
 action it takes: `run:` — an argv list run directly, or a URL the moment is POSTed to as JSON —
-after the moment, or `gate:` — an argv list asked whether a tool call may run — before it. The
-list is empty by default, so a fresh install runs nothing and reports nothing.
+after the moment; `advise:` — an argv list whose standard output the model reads, as a fenced
+trailer on a tool result; or `gate:` — an argv list asked whether a tool call may run — before it.
+The list is empty by default, so a fresh install runs nothing and reports nothing.
 
 A `run:` entry is told what **already happened**. It cannot delay a turn, answer an approval, or
 change anything about the run it is watching, and nothing it prints, returns or answers reaches
 the model, the conversation or the saved session — its failure is yours to see and nobody else's.
-It is a [Reaction](../../CONTEXT.md) of **user** origin and **observe** class: it watches. A
-`gate:` entry is the same origin at **gate** class: it is asked, before a tool call runs, whether
-the call may — and it can say `deny`, or `ask` to put the call to you, but never approve a call on
+It is a [Reaction](../../CONTEXT.md) of **user** origin and **observe** class: it watches. The
+other two keys are the same origin at the two classes the loop **waits** on. An `advise:` entry
+(class **advise**) runs after a tool call finished, and what it prints is appended to that call's
+result inside a fence apogee writes, so the model reads it as advice from you and not as the
+tool's own output. A `gate:` entry (class **gate**) is asked, before a tool call runs, whether the
+call may — and it can say `deny`, or `ask` to put the call to you, but never approve a call on
 your behalf. A Floor guard is the engine's own `shape (view)` Reaction — it fires on a Moment
-inside the loop and changes what the model sees — while yours fires on your own machine, as your
-configuration rather than a model action, and never speaks to the model. Of the five in-loop
-seams, a `gate:` entry reacts at `pre-tool-exec` and answers allow/deny/ask; the other four take
-`advise:`, not yet shipped. Every notice below reports a thing that is over.
-([ADR 0073](../adr/0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md) is the
-decision and its reasoning;
-[ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) is the origin and
-class vocabulary.)
+inside the loop and rewrites what the model sees — while yours fires on your own machine, as your
+configuration rather than a model action. Of the five in-loop seams, a `gate:` entry reacts at
+`pre-tool-exec` and an `advise:` entry at `post-tool-result` (or its `file-changed` narrowing);
+the other three take no user entry. Every notice below reports a thing that is over.
+([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) is the
+decision — the origin and class vocabulary, and which cells a user entry may take; ADR 0073,
+which it supersedes in part, is the reasoning behind the `run:` posture.)
 
 The same list is fired by every front-end — the interactive TUI, a `/schedule` firing inside it,
 [`apogee headless`](headless.md) and an [`apogee daemon`](daemon.md) firing — from one library, so
@@ -48,21 +51,28 @@ reactions:
     on: [pre-tool-exec]                 # a gate: reacts here and nowhere else
     gate: ["check-tool-call"]           # answers allow, deny or ask on its first stdout line
     timeout: 2s                         # optional; a gate's default is 5s
+  - id: unformatted
+    on: [file-changed]                  # an advise: reacts here or at post-tool-result
+    advise: ["sh", "-c", "gofmt -l \"$APOGEE_REACTION_PATH\""]  # its stdout reaches the model
+    timeout: 5s                         # optional; an advise's default is 10s
 ```
 
 | Key | Meaning |
 |---|---|
 | `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id — a guard is switched off with its own top-level key, not with an entry here. |
-| `on:` | Required, at least one. A `run:` entry reacts to the eleven notices below; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a seam under a `run:` entry or a notice under a `gate:` — the other four seams take `advise:`, not yet shipped. |
-| `run:` | The entry's one action, in either of two shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. |
+| `on:` | Required, at least one. A `run:` entry reacts to the eleven notices below; an `advise:` entry reacts at `post-tool-result` or `file-changed`; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a Moment a key cannot take — a seam under `run:`, a notice other than `file-changed` under `advise:`, anything but `pre-tool-exec` under `gate:` — by a sentence naming the key and what it does take: `advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`. The list is shared by every action key the entry spells, so each of them must be able to take all of it. |
+| `run:` | The entry's observe action, in either of two shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. |
 | `workspace:` | Optional. Scopes the entry to one workspace; unset means every workspace. |
-| `timeout:` | Optional Go duration (`10s`, `2m`). Default `30s`. Bounds the command run and the POST alike. |
+| `timeout:` | Optional Go duration (`10s`, `2m`). Default `30s` for `run:`, `10s` for `advise:`, `5s` for `gate:`. Bounds the command run and the POST alike, and one `timeout:` binds every Reaction its entry arms. |
 | `enabled:` | Optional. `enabled: false` **parks** an entry — it stays in the file and is dropped when the file is read, so nothing arms it and the `/settings` summary does not count it. |
-| `gate:` | The entry's other action: an argv list, run directly like a `run:` list, that is asked before a tool call runs — its `on:` is `[pre-tool-exec]`. The call reaches it as JSON on **stdin** (`event`, `reaction`, `tool`, `arguments` and the shared fields below) and it answers on **stdout**: the first line is `allow`, `deny` or `ask`, and any later lines are the reason, kept to its first ~240 characters. It runs as an approval stage ahead of you — under `bypass:` too — with a default `timeout:` of `5s`. The first `deny` ends the call: the model reads `tool call denied by reaction <id>` and never the reason. The first `ask` forces the approval prompt, which reads `reaction <id> asks: <reason>`; in [`apogee headless`](headless.md) and the [daemon](daemon.md) nobody is there to answer, so the call is denied as `tool call denied by approver`. A gate that printed nothing, printed something else, exited non-zero, timed out or crashed counts as `ask`, never as `allow`, and an `allow` changes nothing about what the mode already decided. On a `sub_agent` call an `ask` is deferred: the child inherits the gate and is asked on the calls that actually do something. |
-| `advise:` | Reserved for the class a later release ships. An entry that spells it is refused today, by a sentence that says so, rather than being silently ignored. |
+| `gate:` | The entry's gate action: an argv list, run directly like a `run:` list, that is asked before a tool call runs — its `on:` is `[pre-tool-exec]`. The call reaches it as JSON on **stdin** (`event`, `reaction`, `tool`, `arguments` and the shared fields below) and it answers on **stdout**: the first line is `allow`, `deny` or `ask`, and any later lines are the reason, kept to its first ~240 characters. It runs as an approval stage ahead of you — under `bypass:` too — with a default `timeout:` of `5s`. The first `deny` ends the call: the model reads `tool call denied by reaction <id>` and never the reason. The first `ask` forces the approval prompt, which reads `reaction <id> asks: <reason>`; in [`apogee headless`](headless.md) and the [daemon](daemon.md) nobody is there to answer, so the call is denied as `tool call denied by approver`. A gate that printed nothing, printed something else, exited non-zero, timed out or crashed counts as `ask`, never as `allow`, and an `allow` changes nothing about what the mode already decided. On a `sub_agent` call an `ask` is deferred: the child inherits the gate and is asked on the calls that actually do something. |
+| `advise:` | The entry's third action: an argv list, run directly like the others, **after** a tool call finished — its `on:` is `[post-tool-result]`, `[file-changed]` or both. The call reaches it as JSON on **stdin** (`event`, `reaction`, `tool`, `arguments`, `result` and the shared fields below) and its **stdout** — redacted, capped at 8 KiB — is appended to that call's result inside a fence the model reads and the saved session never carries. A mapping or a bare string is refused: `reaction <id>: advise: is an argv list`. Default `timeout:` `10s`; switched off under `bypass:`. See [Advising the model](#advising-the-model). |
 
-An entry takes `run:` or `gate:`. The two share the entry's `on:` list and a gate reacts only where
-a `run:` cannot, so an entry spelling both is refused today rather than half-armed. Inside the
+An entry may spell more than one action key. Each arms a Reaction of its own under the entry's one
+`id:`, and the whole `on:` list has to suit each of them: `run:` beside `advise:` on
+`[file-changed]` is the useful pair — a notifier and an adviser on one edit — while `run:` beside
+`gate:` is refused, because `pre-tool-exec` is a seam no `run:` takes and no notice is one. An
+entry that spells no action key at all earns the `run:` sentence. Inside the
 webhook mapping the three keys above are the whole vocabulary — a misspelt `header-env:` is a
 startup refusal and not a token that never gets sent. The whole block is checked when the file is
 read, and a malformed entry is a startup refusal naming the entry rather than a Reaction that
@@ -164,6 +174,34 @@ The payload is **not** scrubbed. It goes to your own command or your own URL, wh
 trust as your screen — so a `reason`, an `error` or a `value` may quote whatever the run was
 working on.
 
+### The seam document
+
+An `advise:` or `gate:` command reads a **different** document, because it is handed the call
+itself rather than a notice about it. It opens with the shared block above — `event`, `reaction`,
+`time`, `workspace`, `depth`, `turn` and `call_id`, spelled the same — and then carries:
+
+| Field | On | Meaning |
+|---|---|---|
+| `tool` | every firing | The tool whose call is pending (`pre-tool-exec`) or whose result came back (`post-tool-result`, `file-changed`). |
+| `arguments` | every firing | The JSON object the model produced for the call, as it stands. |
+| `result` | `post-tool-result`, `file-changed` | `{"content": …, "is_error": …}` — what the tool returned, as the model would read it; `is_error` is always written, so a script can branch on it. Absent at `pre-tool-exec`, where nothing has run yet. |
+| `path` | `file-changed` | The absolute, symlink-resolved path the write landed on. |
+
+```json
+{"event":"file-changed","reaction":"unformatted","time":"2026-09-12T09:41:00Z",
+ "workspace":"/work/repo","depth":0,"turn":3,
+ "tool":"write_file","arguments":{"path":"main.go","content":"…"},
+ "result":{"content":"…","is_error":false},"path":"/work/repo/main.go"}
+```
+
+`event` is the Moment the **entry** subscribed to, not the seam it ran at: a `file-changed` entry
+reads `file-changed` and a `path`, an entry on `post-tool-result` reads that Moment and no path.
+There is no `value`, no `seam` and no `schedule` — the call is the document. The same headline
+facts are in the command's environment as `APOGEE_REACTION_EVENT`, `APOGEE_REACTION_NAME`,
+`APOGEE_REACTION_WORKSPACE` and, on `file-changed`, `APOGEE_REACTION_PATH`; the two schedule
+variables belong to the notices alone. Nothing is interpolated into the argv: the document is on
+stdin and in the environment, and nowhere else.
+
 ## Running a command
 
 An argv `run:` is run **directly**: no shell, no interpolation, no word splitting, no glob, so a
@@ -220,6 +258,110 @@ webhook answers reaches the model either. A transport failure is reported **with
 because a webhook URL is exactly the kind of thing that carries a token in its path or query.
 `timeout:` bounds the whole POST.
 
+## Advising the model
+
+An `advise:` entry is the one kind of Reaction whose output the model reads. It runs **while the
+loop waits** — after a tool call has finished and before the model sees the result — and what it
+prints on stdout is appended to that result. It reacts at two Moments, and `on:` takes either or
+both:
+
+- `post-tool-result` — every tool call, once its result is in hand; `result.is_error` says whether
+  the call failed.
+- `file-changed` — `post-tool-result` narrowed to a successful workspace write: the entry fires on
+  the `write_file` that landed and not on the `list_dir` after it, and `path` names the file. An
+  entry listing `file-changed` alone is silent on every other call.
+
+The command is run like a `run:` list — directly, no shell — with the
+[seam document](#the-seam-document) on **stdin** and the `APOGEE_REACTION_*` facts in its
+environment. What it prints goes through three steps before the model sees it:
+
+1. **Redaction.** Every value of a configured secret — the variables your `api-key-env:` entries
+   name — is replaced by `[redacted]`, so a script that echoes its own config file cannot hand the
+   model a token the credential scrub kept out of the child's environment.
+2. **The cap.** Output past **8 KiB** is cut on a character boundary and ends in
+   `[advice truncated at 8 KiB]`; nothing spills to a file.
+3. **The fence.** The text is appended to the tool result, after a blank line, as
+
+   ```
+   [advice — reaction unformatted (user origin) at post-tool-result, turn 3]
+   main.go
+   [end advice — unformatted]
+   ```
+
+   Every word of the header is written by apogee from the firing — the entry's id, its origin,
+   the seam, the turn — and never from what the command printed, so a script that prints a
+   header of its own lands inside the fence, not beside it. The header names the **seam** the
+   advice was fenced at, which is `post-tool-result` for a `file-changed` entry too; the stdin
+   document's `event` is what names the entry's own Moment (`file-changed`).
+
+The trailer is what the model reads, and only the model: the **session record is written from the
+result as it stood before the fence**, so a resumed session carries no advice, a replay never
+re-reads a stale timestamp, and the transcript you save is the tool's own words. The firing is
+booked all the same — in [`apogee headless`](headless.md) a `reaction_fired` line carries the text
+as its `detail` — so what the model was told is always attributable to the entry that told it.
+
+Advise is **fail-open in every direction**, and each of them costs the turn nothing: a command
+that prints nothing injects no fence, so an entry that only sometimes has something to say is
+silent the rest of the time; one that failed, timed out (default `timeout:` `10s`) or could not
+be spawned contributes nothing and is reported to you, each time it fails; a `file-changed`
+entry on a call that changed no file neither runs nor reports. Under `bypass:` the
+entry is switched off entirely, like every other Reaction that shapes what the model sees, so a
+Bypass run reads exactly what the bare loop would.
+
+Write a script that **returns facts, not imperatives**: the files `gofmt` would rewrite, the
+failing test's name, the line a linter flagged. The fence tells the model who spoke; it does not
+make the model obey, and a smaller model handed an order inside a tool result will often follow
+it at the cost of the task it was on. Advice is also text the model must read, and pay tokens
+for, on every call the entry fires on — print nothing when there is nothing to say.
+
+## Gating a tool call
+
+A `gate:` entry is an approval stage of your own, run **before** a tool call and ahead of any
+question apogee would put to you. It reacts at `pre-tool-exec` and nowhere else, and is run like a
+`run:` list — directly, no shell — with the [seam document](#the-seam-document) on **stdin**
+(`tool` and `arguments` name the pending call; there is no `result` yet) and the
+`APOGEE_REACTION_*` facts in its environment. It answers on **stdout**:
+
+- the **first line** is the verdict — `allow`, `deny` or `ask`;
+- every line after it is the **reason**, kept to its first ~240 characters and shown to the
+  human, never to the model.
+
+`deny` ends the call: the model reads `tool call denied by reaction <id>` and nothing else — the
+reason is yours, so a script cannot write into the conversation through a refusal it manufactured.
+`ask` forces the approval prompt whatever the mode had decided, skipping the approval cache, and
+the prompt reads `reaction <id> asks: <reason>`; in [`apogee headless`](headless.md) and the
+[daemon](daemon.md) nobody is there to answer, so the call is denied as
+`tool call denied by approver`. `allow` means **nothing**: the mode ladder's own verdict stands,
+because a script that could pre-approve a call would be a second autonomy ladder nobody audited —
+a gate can say No, never Yes.
+
+Every answer apogee cannot read **escalates to `ask`**, never to `allow`: an empty stdout, a first
+line that is none of the three words, a non-zero exit, a timeout (default `timeout:` `5s`), a
+command that could not be spawned. A gate you armed and apogee cannot run is a question, never a
+silent pass — which is why this is the one user Reaction `bypass:` leaves armed: Bypass switches
+off what shapes the model's view, and a gate shapes nothing the model sees.
+
+Gates run in the order the list gives them, on every call the mode has not already refused — a
+call that will never run is not put to them. The first `deny` ends the call; otherwise the first
+`ask` is what the prompt shows. On a `sub_agent` call an `ask` is deferred rather than raised: the
+delegation proceeds, the child inherits the gate, and the question is asked on the child's own
+calls, the ones that actually do something; a `deny` still refuses the delegation.
+
+## Where an `advise:` or `gate:` command runs
+
+The two waited-on keys share one posture, and it is not quite the `run:` one. The command is
+yours, not the model's, so the mode ladder has no verdict about it: it runs in Plan exactly as it
+runs in Auto. What the ladder leaves behind is the fence. With `confine-to-workspace` **off** the
+command runs unfenced, as a `run:` does. With it **on**, the command runs inside the same
+workspace box a subprocess tool would be confined to — and on a host that cannot build that box
+it does not run at all: `workspace confinement is unavailable on this host` is reported to you, an
+advise contributes nothing and a gate asks. As with `run:`, the program is resolved before it
+starts and refused when it lives somewhere the model could have written it. Unlike `run:`, the
+command is spawned through the same door every execution tool uses, so it gets that door's
+credential scrub — apogee's own key and every `api-key-env:` value are **absent** from its
+environment — along with the output cap and the process-tree teardown; a `run:` command alone
+inherits the environment whole.
+
 ## `workspace:` — scoping an entry
 
 `workspace:` matches **exactly**, not by prefix: an entry scoped to `~/code/apogee` fires for runs
@@ -260,6 +402,12 @@ A notice names the entry and the notice it was firing on:
 `reaction notify (approval-requested): exit 3: …`. The same failure line for one entry is reported
 **once** — an entry failing every turn would otherwise bury everything else — and again only after
 that entry has succeeded in between.
+
+An `advise:` or `gate:` command that fails — a non-zero exit, a timeout, a refused permit — reaches
+you at the same place and in the same words, `reaction <id> (<moment>): <error>`, each time it
+fails; the once-only fold above is the `run:` lane's. It is booked as a `reaction_fired` line with
+`"action": "failed"` and the error as its `detail`, never as an `error` notice, and the turn goes
+on: the advise contributes nothing, the gate escalates to `ask`.
 
 ## Live reload
 

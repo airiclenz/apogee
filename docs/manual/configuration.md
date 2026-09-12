@@ -372,17 +372,26 @@ connections serving and says why on the row.
 `reactions:` is the list of reactions apogee runs on what a session does: each entry gives itself
 an `id:`, lists the moments it fires on under `on:`, and takes its action under `run:` — an argv
 list run directly (no shell; write `["sh", "-c", "…"]` when you want one) or a mapping naming a
-`url:` the JSON payload is POSTed to — or under `gate:`. It is **empty by default**. A `run:`
-reaction is told what already happened, and nothing it prints reaches the model, the conversation
-or the saved session. The six moments are `exchange-finished`, `turn-finished`, `file-changed`,
-`approval-requested` (raised, before you answer), `approval-decided` (its verdict) and `error`. A
-`gate:` reaction — an argv list, `on: [pre-tool-exec]` — is asked before a tool call runs, as an
-approval stage ahead of you (under `bypass:` too, default `timeout:` 5s): the first line it prints
-is `allow`, `deny` or `ask`, the rest is its reason. A `deny` refuses the call and the model reads
-only `tool call denied by reaction <id>`; an `ask` forces the approval prompt, `reaction <id> asks:
+`url:` the JSON payload is POSTed to — or under `advise:` or `gate:`. It is **empty by default**.
+A `run:` reaction is told what already happened, and nothing it prints reaches the model, the
+conversation or the saved session. Its eleven moments are the six notices `exchange-finished`,
+`turn-finished`, `file-changed`, `approval-requested` (raised, before you answer),
+`approval-decided` (its verdict) and `error`, and the five seam-closing notices `pre-request-finished`,
+`post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished` and
+`history-rewrite-finished`. The other two keys are the ones the loop waits on. An `advise:`
+reaction — an argv list, `on: [post-tool-result]`, `[file-changed]` or both, default `timeout:`
+10s — runs after a tool call finished, and what it prints (secrets redacted, capped at 8 KiB) is
+appended to that call's result inside a fence the model reads and the saved session never carries;
+it is off under `bypass:`, and a command that fails or prints nothing changes nothing:
+`advise: ["sh", "-c", "gofmt -l \"$APOGEE_REACTION_PATH\""]` on `[file-changed]` tells the model
+which file it left unformatted. A `gate:` reaction — an argv list, `on: [pre-tool-exec]` — is asked
+before a tool call runs, as an approval stage ahead of you (under `bypass:` too, default
+`timeout:` 5s): the first line it prints is `allow`, `deny` or `ask`, the rest is its reason.
+`gate: ["check-tool-call"]` refuses the call with a `deny`, and the model reads only
+`tool call denied by reaction <id>`; an `ask` forces the approval prompt, `reaction <id> asks:
 <reason>`, which an unattended run denies; an answer that is missing, malformed, late or crashed
-counts as `ask`. The other four in-loop seams take `advise:`, not shipped yet and refused at
-startup, as is an entry naming one of them.
+counts as `ask`, and an `allow` changes nothing the mode already decided. A Moment a key cannot
+take is refused at startup by a sentence naming the key and what it does take.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -401,11 +410,18 @@ reactions:
         Authorization: APOGEE_REACTION_TOKEN
     workspace: ~/code/apogee
     enabled: true
+  - id: unformatted
+    on: [file-changed]
+    advise: ["sh", "-c", "gofmt -l \"$APOGEE_REACTION_PATH\""]
+  - id: no-force-push
+    on: [pre-tool-exec]
+    gate: ["check-tool-call"]
 ```
 
-`timeout:` bounds the command and the POST alike and defaults to 30s; `workspace:` scopes an entry
-to one workspace, leaving it inactive at every other; `enabled: false` parks an entry without
-deleting it. Header values are literal (`headers:`) or read at send time from the environment
+`timeout:` bounds the command and the POST alike and defaults to 30s under `run:`, 10s under
+`advise:` and 5s under `gate:`, one `timeout:` binding every reaction its entry arms; `workspace:`
+scopes an entry to one workspace, leaving it inactive at every other; `enabled: false` parks an
+entry without deleting it. Header values are literal (`headers:`) or read at send time from the environment
 variable a `headers-env:` entry NAMES, so a token never has to sit in this file. Ids must be unique,
 and an id that is one of the seven Floor-guard keys is refused — a guard is switched off with its
 own top-level key, never with an entry here. `hooks:` is this key's earlier name, with
@@ -418,8 +434,9 @@ The block is file-only (no flag, no environment variable) and it is **live in th
 save the file — or use `⏎` on the `reactions:` row in [`/settings`](commands.md#the-settings-screen--settings),
 which opens your editor because no row can write a list this shape — and the running session swaps
 its reactions over. A headless run and the daemon read the list once, at start. The full reference —
-every payload field, the exec posture, the webhook contract, `workspace:` matching, and what happens
-when a reaction fails or falls behind — is on the [Reactions](reactions.md) page.
+every payload field, the exec posture, the webhook contract, the advice fence, the gate protocol,
+`workspace:` matching, and what happens when a reaction fails or falls behind — is on the
+[Reactions](reactions.md) page.
 
 ## Skills a repository ships — `use-project-skills:`
 
