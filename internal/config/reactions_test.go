@@ -23,11 +23,14 @@ func writeReactionsConfig(t *testing.T, body string) string {
 // A `reactions:` block resolves onto the user-origin Reactions a root arms: origin and class
 // stamped, the `on:` list read as Moments, each action key turned into the handler that runs it —
 // `run:` as a sequence into an argv command and as a mapping into a webhook, `gate:` as the argv of
-// the command whose verdict the Approver reads — an absent `timeout:` defaulted per CLASS (30s
-// observe, 5s gate, since a person waits on a gate) and a spelled one parsed, `workspace:` reduced
-// to the comparable spelling with its leading `~` expanded, and a parked entry dropped rather than
-// armed. The home directory is moved for the case rather than read, so the `~` rule is asserted
-// against a path this test owns.
+// the command whose verdict the Approver reads, `advise:` as the argv of the command whose stdout
+// the model reads — an absent `timeout:` defaulted per CLASS (30s observe, 10s advise, 5s gate,
+// since the loop waits on the sync classes and a person on a gate) and a spelled one parsed,
+// `workspace:` reduced to the comparable spelling with its leading `~` expanded, and a parked entry
+// dropped rather than armed. An entry spelling `run:` beside `advise:` resolves to an observe and an
+// advise Reaction of one id — the lint case — and the whole list splits into the two lanes the
+// Drivers fire. The home directory is moved for the case rather than read, so the `~` rule is
+// asserted against a path this test owns.
 func TestLoadFileConfigResolvesTheReactionsBlock(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -58,6 +61,10 @@ reactions:
     on: [pre-tool-exec]
     gate: ["./scripts/guard.sh"]
     timeout: 2s
+  - id: lint
+    on: [file-changed]
+    run: ["./scripts/log-change.sh"]
+    advise: ["./scripts/lint.sh", "--quiet"]
 `)
 
 	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
@@ -65,9 +72,9 @@ reactions:
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
 
-	if len(opts.Reactions) != 4 {
-		t.Fatalf("resolved %d reactions; want the 4 armed entries (the parked one is dropped): %+v",
-			len(opts.Reactions), opts.Reactions)
+	if len(opts.Reactions) != 6 {
+		t.Fatalf("resolved %d reactions; want the 6 the 5 armed entries arm (the parked one is dropped, "+
+			"the lint entry arms two): %+v", len(opts.Reactions), opts.Reactions)
 	}
 
 	notify := opts.Reactions[0]
@@ -143,6 +150,49 @@ reactions:
 	if quick := opts.Reactions[3]; quick.Timeout != 2*time.Second {
 		t.Errorf("fourth timeout = %v, want the 2s the entry spells over the class default", quick.Timeout)
 	}
+
+	lintObserve, lintAdvise := opts.Reactions[4], opts.Reactions[5]
+	if lintObserve.ID != "lint" || lintObserve.Class != domain.ClassObserve {
+		t.Errorf("fifth entry is %q/%s, want the observe reaction %q's `run:` arms",
+			lintObserve.ID, lintObserve.Class, "lint")
+	}
+	if lintAdvise.ID != "lint" || lintAdvise.Class != domain.ClassAdvise {
+		t.Errorf("sixth entry is %q/%s, want the advise reaction %q's `advise:` arms",
+			lintAdvise.ID, lintAdvise.Class, "lint")
+	}
+	adviseArgv, ok := lintAdvise.Handler.(domain.ArgvHandler)
+	if !ok {
+		t.Fatalf("sixth handler = %T; want a domain.ArgvHandler for an `advise:` sequence", lintAdvise.Handler)
+	}
+	if len(adviseArgv.Argv) != 2 || adviseArgv.Argv[0] != "./scripts/lint.sh" || adviseArgv.Argv[1] != "--quiet" {
+		t.Errorf("sixth argv = %v, want the two elements the sequence spells", adviseArgv.Argv)
+	}
+	if len(lintAdvise.On) != 1 || lintAdvise.On[0] != domain.MomentFileChanged {
+		t.Errorf("sixth entry fires on %v, want the one file-changed Moment the entry spells", lintAdvise.On)
+	}
+	if lintObserve.Timeout != defaultReactionTimeout || lintAdvise.Timeout != domain.DefaultAdviseTimeout {
+		t.Errorf("lint timeouts = %v/%v, want the %v observe and %v advise defaults — one entry, two "+
+			"class defaults", lintObserve.Timeout, lintAdvise.Timeout,
+			defaultReactionTimeout, domain.DefaultAdviseTimeout)
+	}
+
+	observe, sync := domain.SplitLanes(opts.Reactions)
+	if got := laneIDs(observe); got != "notify bell lint" {
+		t.Errorf("observe lane = %q, want %q — every `run:` in file order", got, "notify bell lint")
+	}
+	if got := laneIDs(sync); got != "warden quick-warden lint" {
+		t.Errorf("sync lane = %q, want %q — every `advise:` and `gate:` in file order",
+			got, "warden quick-warden lint")
+	}
+}
+
+// laneIDs spells one lane's ids in order, space-separated, so a lane can be compared in one line.
+func laneIDs(lane []domain.Reaction) string {
+	ids := make([]string, 0, len(lane))
+	for _, reaction := range lane {
+		ids = append(ids, reaction.ID)
+	}
+	return strings.Join(ids, " ")
 }
 
 // An empty or absent block resolves to no Reactions and no error: the lane is dormant by default,
@@ -198,9 +248,19 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 			want: `reaction "notify": run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
 		},
 		{
-			name: "advise: is spelled",
-			body: "reactions:\n  - id: coach\n    on: [post-response]\n    advise: [\"say-something\"]\n",
-			want: `reaction "coach": advise: is not yet shipped (ADR 0076 stage 3)`,
+			name: "advise: is a bare string",
+			body: "reactions:\n  - id: coach\n    on: [post-tool-result]\n    advise: say-something\n",
+			want: `reaction "coach": advise: is an argv list`,
+		},
+		{
+			name: "advise: is a webhook mapping",
+			body: "reactions:\n  - id: coach\n    on: [post-tool-result]\n    advise:\n      url: https://example.com/\n",
+			want: `reaction "coach": advise: is an argv list`,
+		},
+		{
+			name: "advise: reacts at a Moment it cannot take",
+			body: "reactions:\n  - id: coach\n    on: [turn-finished]\n    advise: [\"say-something\"]\n",
+			want: `invalid reaction "coach": advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`,
 		},
 		{
 			name: "gate: is a bare string",

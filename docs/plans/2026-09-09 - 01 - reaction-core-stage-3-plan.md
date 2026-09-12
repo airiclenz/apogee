@@ -325,7 +325,7 @@ grep -n '^> .*Verdict: pass' "../apogee-sim/docs/plans/2026-09-08 - 01 - advise-
 
 **Commit:** none (a NOTES line on this item only).
 
-## 13. Config: the `advise:` key ships — bounded to the arm's verdict
+## 13. Config: the `advise:` key ships — bounded to the arm's verdict — ✅ DONE (2026-09-12)
 
 **What:** Depends on items 9, 12. `internal/config/reactions.go`: delete `refuseReservedActions`; `advise:` resolves like `gate:` — a sequence of strings, class advise, default 10s, `on:` validated by the domain (`invalid reaction "coach": advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`); a mapping ⇒ `reaction "coach": advise: is an argv list`. The lint case resolves whole: `on: [file-changed]` with both `run:` and `advise:` yields an observe reaction and an advise reaction of one id.
 

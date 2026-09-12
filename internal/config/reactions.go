@@ -15,17 +15,18 @@ import (
 // command that never returns; thirty seconds is long enough for a notifier or a webhook round trip
 // and short enough that a wedged one is noticed rather than waited on (ADR 0073, ratified call B).
 // The sync classes are shorter — the loop, and behind it a person, waits on those — and carry their
-// own defaults beside the core that runs them ([domain.DefaultGateTimeout]).
+// own defaults beside the core that runs them ([domain.DefaultAdviseTimeout],
+// [domain.DefaultGateTimeout]).
 const defaultReactionTimeout = 30 * time.Second
 
 // reactionConfig is the on-disk schema for one entry of the global `reactions:` list — the
 // user-origin half of the Reaction core (ADR 0076). It mirrors a [domain.Reaction] with yaml tags
 // and the spellings only a FILE has: a Moment list written as plain strings under `on:`, a timeout
 // written as a duration like `30s`, an `enabled:` switch that parks an entry without deleting it,
-// and ONE action key per class — `run:` for observe and `gate:` for gate, with `advise:` still
-// reserved. An entry may spell more than one of them and resolves to one Reaction per key, all
-// sharing its id. The mapping across to the core's value type is entryReactions', so the on-disk
-// shape and the values the engine fires stay independently evolvable (mcpServerConfig's rule).
+// and ONE action key per class — `run:` for observe, `advise:` for advise and `gate:` for gate. An
+// entry may spell more than one of them and resolves to one Reaction per key, all sharing its id.
+// The mapping across to the core's value type is entryReactions', so the on-disk shape and the
+// values the engine fires stay independently evolvable (mcpServerConfig's rule).
 //
 // The three action keys are typed `any` and not yaml.Node ON PURPOSE. `run:` carries two shapes —
 // a sequence for a command, a mapping for a webhook — so the field has to hold either; a yaml.Node
@@ -63,9 +64,10 @@ var floorGuardKeys = []string{
 // entryReactions maps one on-disk entry onto the user-origin Reactions it arms — ONE per action key
 // it spells, all carrying the entry's id, `on:` list and `workspace:` filter, so `run:` and `gate:`
 // on one entry resolve to an observe Reaction and a gate Reaction that [domain.SplitLanes] later
-// sends down their own lanes. The id is checked against the names it may not take, the action key
-// stage 3 has not shipped is refused, every `on:` entry is read as a Moment, each action key is
-// turned into the handler that runs it, an absent `timeout:` takes the class default, and
+// sends down their own lanes, and `run:` beside `advise:` to an observe Reaction and an advise
+// Reaction the same way. The id is checked against the names it may not take, every `on:` entry
+// is read as a Moment, each action key is turned into the handler that runs it — the two sync keys
+// take an argv list and nothing else — an absent `timeout:` takes the class default, and
 // `workspace:` is reduced to the one spelling both sides of the filter are compared as (ADR 0073
 // ratified call C — `~` expanded, absolute, symlinks evaluated). It reports the first thing it
 // cannot map, naming the entry, so a user with several Reactions is told which line to fix.
@@ -84,9 +86,6 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 	if slices.Contains(floorGuardKeys, id) {
 		return nil, reactionEntryError(id,
 			"that is the Floor guard %s: — set the top-level key, not a reactions: entry", id)
-	}
-	if err := r.refuseReservedActions(id); err != nil {
-		return nil, err
 	}
 
 	moments, err := r.moments(id)
@@ -114,6 +113,25 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 			Class:     domain.ClassObserve,
 			On:        slices.Clone(moments),
 			Handler:   handler,
+			Workspace: workspace,
+			Timeout:   timeout,
+		})
+	}
+	if r.Advise != nil {
+		argv, ok := argvList(r.Advise)
+		if !ok {
+			return nil, reactionEntryError(id, "advise: is an argv list")
+		}
+		timeout, err := r.classTimeout(id, domain.DefaultAdviseTimeout)
+		if err != nil {
+			return nil, err
+		}
+		mapped = append(mapped, domain.Reaction{
+			ID:        id,
+			Origin:    domain.OriginUser,
+			Class:     domain.ClassAdvise,
+			On:        slices.Clone(moments),
+			Handler:   domain.ArgvHandler{Argv: argv},
 			Workspace: workspace,
 			Timeout:   timeout,
 		})
@@ -152,16 +170,6 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 		}
 	}
 	return mapped, nil
-}
-
-// refuseReservedActions refuses an entry that spells the one action key stage 3 has not shipped. It
-// is in the schema now so a file written against it fails with a sentence naming the stage rather
-// than being silently ignored as an unknown key.
-func (r reactionConfig) refuseReservedActions(id string) error {
-	if r.Advise != nil {
-		return reactionEntryError(id, "advise: is not yet shipped (ADR 0076 stage 3)")
-	}
-	return nil
 }
 
 // classTimeout resolves the deadline one of the entry's Reactions runs under: the entry's own
@@ -221,7 +229,8 @@ func (r reactionConfig) handler(id string) (domain.Handler, error) {
 
 // argvList reads a decoded YAML value as an argv: a sequence whose every element is text. It
 // reports whether the value is one, so each action key can name ITSELF in the sentence a wrong
-// shape earns — `run:` spells two shapes and `gate:` only this one.
+// shape earns — `run:` spells two shapes; `advise:` and `gate:` only this one (a webhook cannot
+// advise or gate, ADR 0076 D2).
 func argvList(value any) ([]string, bool) {
 	list, ok := value.([]any)
 	if !ok {
