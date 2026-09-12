@@ -307,7 +307,10 @@ go test ./cmd/apogee/ -run 'TestE2EGate'
 
 **Commit:** `test(e2e): a gate: entry denies and asks through headless and the TUI`
 
-## 12. GATE: the advise admission arm has passed
+## 12. GATE: the advise admission arm has passed — ✅ DONE (2026-09-12)
+
+NOTES (2026-09-12): gate open — `Verdict: pass — ~/.apogee-sim/campaigns/volumes-bit-plantage-ll-models-gemma-4-gemma-4-e4b-it-qat-q4-0-gguf-20260912-advise-admission-v2 (2026-09-12)`; rung e4b, model class `gemma-4-e4b-it-qat` (Gemma 4 E4B QAT Q4_0) — the advise cell ships bounded to the e4b class; gate non-inferior (W+ = 99.0, p = 0.0009, N = 14, δ = 0.1880), engagement verified, 0 rig faults, fingerprint diff empty.
+NOTES (2026-09-12): the verdict line lives in `../apogee-sim/docs/plans/2026-09-11 - 02 - advise-admission-arm-pre-registration-v2.md` (status block line 5 and Outcome line 463), not in the `2026-09-08 - 01` doc the item names — that v1 run was killed at the checkpoint (Band 9 < K 10, status dated 2026-09-10) and the v2 pre-registration superseded it, its disposition stating `pass` unblocks apogee stage-3 item 12; the item's literal acceptance grep passes against the v2 path.
 
 **What:** Depends on item 6 (P1, P2 landed) and item 11 (so the gate cell is whole before the wait). Verify-first, no code. Read `../apogee-sim/docs/plans/2026-09-08 - 01 - advise-admission-arm-pre-registration.md`: the item passes only when its status block carries a dated line of the form `Verdict: pass — <results bundle path>` (any other status, `inferior`, `no-evidence` or the absence of the line ⇒ this item is a FOLLOW-UP: stop the run and hand the runbook to the owner, who runs the arm on the host; an `inferior` verdict means stage 3 does not ship advise and the plan is re-opened, per the doc's disposition table). When the line exists, record it as a dated NOTES line here with the bundle path and the rung's model class. No file in this repo changes.
 
