@@ -89,6 +89,8 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Fixed:** `Request.SetMessageContent` now drops a message's advice span ledger when the rewritten content no longer reaches the first fence — the same guard `Conversation.SetMessageContent` carries, so the two edit seams cannot drift. No observable gap before this: Request values are never marshalled and nothing reads `Advice` off one.
+
 - **Fixed:** the advise lane's `file-changed` narrowing now lives on the post-tool-result seam's own dispatch path (`hearsCall`) instead of inside the user command route, so every class-advise reaction that listed `file-changed` — a Go handler as much as an `advise:` command — fires only when the closing tool result is a successful workspace write. Previously `subscribes` widened `file-changed` onto `post-tool-result` for the whole class while only the argv route narrowed it back; no shipped reaction was affected (bead `apogee-0n6`).
 
 - The reactions manual, the configuration manual, the README, the default `config.yaml` template and CONTEXT.md now describe the shipped `gate:` action — an argv list asked at `pre-tool-exec`, answering `allow`, `deny` or `ask` on its first stdout line, running as an approval stage ahead of the human (under `bypass:` too, default timeout 5s), with `deny` refusing the call as `tool call denied by reaction <id>`, `ask` forcing the approval prompt (denied unattended), and an unreadable answer counting as `ask` — instead of calling the list observe-only and `gate:` unshipped. `advise:` stays documented as reserved.

@@ -169,6 +169,28 @@ func TestRequestSetMessageContent(t *testing.T) {
 	}
 }
 
+// TestRequestSetMessageContentDropsStaleAdvice mirrors the Conversation guard: a capped or
+// collapsed message written through SetMessageContent is shorter than the fence's offset, so
+// the advice ledger that pointed at it is dropped rather than left pointing past the end.
+func TestRequestSetMessageContentDropsStaleAdvice(t *testing.T) {
+	r := NewRequest("m", []Message{
+		Message{Role: RoleTool, Content: "a long tool result", ToolCallID: "call-1"}.WithAdvice(
+			AdviceSpan{Reaction: "lint", Origin: OriginUser, Moment: MomentPostToolResult, Turn: 1},
+			"two findings",
+		),
+	}, nil, Budget{}, 0)
+
+	r.SetMessageContent(0, "[capped]")
+
+	msgs := r.State().Messages
+	if msgs[0].Content != "[capped]" {
+		t.Errorf("edit not applied: %q", msgs[0].Content)
+	}
+	if spans := msgs[0].Advice; len(spans) != 0 {
+		t.Errorf("ledger kept %d stale spans after the rewrite, want none", len(spans))
+	}
+}
+
 func TestRequestSetToolsAndExtraAndSampling(t *testing.T) {
 	r := sysUserReq(t)
 

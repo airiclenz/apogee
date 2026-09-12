@@ -579,11 +579,16 @@ func (r *Request) AppendSupersededAssistant(text string, calls []ToolCall) {
 
 // SetMessageContent edits one message's content in place by index — tool-result
 // capping and history-collapse of older messages. An out-of-range index is a no-op.
+//
+// Rewriting the content invalidates any advice spans the message carried, so a ledger the
+// new content no longer reaches is dropped — the same guard Conversation.SetMessageContent
+// carries, kept identical so the two edit seams cannot drift.
 func (r *Request) SetMessageContent(index int, content string) {
 	if index < 0 || index >= len(r.messages) {
 		return
 	}
 	r.messages[index].Content = content
+	r.messages[index].dropStaleAdvice()
 	r.revision++
 }
 
