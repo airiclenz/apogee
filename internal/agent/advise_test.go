@@ -169,6 +169,58 @@ func TestAdviseIsSilentUnderBypass(t *testing.T) {
 	}
 }
 
+// The file-changed narrowing is the advise CLASS's rule, not the user command's: subscribes widens
+// every advise reaction that listed file-changed onto the post-tool-result seam, so the narrowing
+// that pays for it has to hold on the seam's own invoke path, whatever the handler's kind. A Go
+// advise handler on file-changed hears a successful workspace write and nothing else — a read-only
+// call never calls it, never spans and never books. The reaction is armed through the live sync
+// lane (SetReactions), the one arming route that takes a list as given: domain.Reaction.Validate
+// pins a Go handler to its own seam and would refuse this shape on Config.Reactions, so the
+// dispatcher's guarantee is pinned here independently of that refusal.
+func TestAdviseGoHandlerAtFileChangedIsNarrowed(t *testing.T) {
+	sink := &recordingSink{}
+	var reported []string
+	ws := t.TempDir()
+	a := adviseArgvAgent(t, sink, ws, false, &reported)
+
+	calls := 0
+	watcher := domain.Reaction{
+		ID:     "watcher",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassAdvise,
+		On:     []domain.Moment{domain.MomentFileChanged},
+		Handler: domain.PostToolResultFunc(
+			func(context.Context, domain.LoopView, domain.ToolCall, *domain.ToolResultEdit) (domain.Outcome, error) {
+				calls++
+				return domain.Outcome{Inject: "a file changed"}, nil
+			}),
+	}
+	gen := a.Generation()
+	gen.Sync = []domain.Reaction{watcher}
+	a.SetReactions(gen)
+
+	call, result := readCall()
+	msg := adviseArgvCall(t, a, call, result)
+	if calls != 0 {
+		t.Fatalf("a read-only call invoked the file-changed advise handler %d times, want never", calls)
+	}
+	if len(msg.Advice) != 0 || msg.Content != result.Content {
+		t.Errorf("message = %q with %d spans, want the bare result", msg.Content, len(msg.Advice))
+	}
+	if fired := firedAdvice(sink); len(fired) != 0 {
+		t.Errorf("firings = %+v, want none — a file-changed handler hears no read", fired)
+	}
+
+	write := domain.ToolCall{ID: "c2", Tool: "write_file", Arguments: []byte(`{"path":"notes.md","content":"hi"}`)}
+	msg = adviseArgvCall(t, a, write, domain.ToolResult{CallID: "c2", Content: "wrote notes.md"})
+	if calls != 1 {
+		t.Fatalf("a successful write invoked the handler %d times, want once", calls)
+	}
+	if len(msg.Advice) != 1 || msg.Advice[0].Reaction != "watcher" {
+		t.Errorf("ledger = %+v, want one span from watcher on the write", msg.Advice)
+	}
+}
+
 // A delegation's result closes the same way a leaf call's does — commitDelegation runs the same
 // cascade and the same commit — so a child's result carries the trailer too. The fan-out is the one
 // path that could have grown a second commit point; it must not have.

@@ -324,9 +324,10 @@ func (a *Agent) fireLeg(
 // list, and the one exception is the ADVISE lane's file-changed narrowing: file-changed is no seam
 // of its own but post-tool-result with two further conditions on the call, so a reaction that
 // listed it runs at post-tool-result and is narrowed there, where the tool and its result are in
-// hand (adviseDocument). On the OBSERVE lane file-changed stays the notice Moment it always was —
-// the Runner matches it off the Event stream and never reaches this cascade — which is why the
-// widening is scoped to class advise rather than applied to the Moment.
+// hand (hearsCall, on the seam's invoke path — whatever the handler's kind, so the widening here
+// and the narrowing there cover the same set). On the OBSERVE lane file-changed stays the notice
+// Moment it always was — the Runner matches it off the Event stream and never reaches this
+// cascade — which is why the widening is scoped to class advise rather than applied to the Moment.
 func subscribes(r domain.Reaction, m domain.Moment) bool {
 	if slices.Contains(r.On, m) {
 		return true
@@ -478,12 +479,13 @@ func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) 
 // (ADR 0076 D2, D6). It is called from the post-tool-result seam alone — the only Moment with a
 // closing tool result to fence a trailer onto.
 //
-// It is FAIL-OPEN in all three directions (D7), and each of them costs the Turn nothing: a call
-// this entry does not concern — a file-changed entry on a call that changed no file — contributes
-// nothing and books nothing; a command that failed, timed out or was refused a permit contributes
-// nothing and is reported once, through the sync lane's own reporter and one "failed" firing; a
-// command that printed nothing contributes nothing, so an entry that only sometimes has something
-// to say is silent the rest of the time rather than injecting an empty fence.
+// It is FAIL-OPEN in both directions it decides (D7), and each of them costs the Turn nothing: a
+// command that failed, timed out or was refused a permit contributes nothing and is reported once,
+// through the sync lane's own reporter and one "failed" firing; a command that printed nothing
+// contributes nothing, so an entry that only sometimes has something to say is silent the rest of
+// the time rather than injecting an empty fence. The third silence — a file-changed entry on a
+// call that changed no file — is decided BEFORE this route is reached (hearsCall), because it is
+// the whole advise class's rule and not the command's.
 //
 // Standard output is REDACTED before it is anything else. It is the one place a configured
 // secret's value can re-enter apogee from a process the scrub kept it out of, and the redaction
@@ -494,13 +496,8 @@ func (a *Agent) adviseArgv(
 	ctx context.Context,
 	turn int,
 	r domain.Reaction,
-	p domain.ToolResultMoment,
+	doc domain.SeamPayload,
 ) (domain.Outcome, error) {
-	doc, fires := a.adviseDocument(r, p)
-	if !fires {
-		return domain.Outcome{}, nil
-	}
-
 	stdout, err := a.runSyncArgv(ctx, turn, r, doc)
 	if err != nil {
 		a.reportReaction(turn, r.ID, doc.Event, err)
@@ -514,17 +511,17 @@ func (a *Agent) adviseArgv(
 	return domain.Outcome{Inject: text}, nil
 }
 
-// adviseDocument builds the stdin document one advise command receives for a finished tool call,
-// and reports whether this entry fires on this call at all. The executor stamps the identity block
-// over what is returned here (runSyncArgv), so what this function settles is the MOMENT's half
-// alone: which Moment fired, on which tool, over which arguments and result, and — for
-// file-changed — which file.
+// hearsCall is the advise lane's file-changed NARROWING — the half that pays for subscribes'
+// widening. It reports whether advise reaction r, which subscribes told the cascade fires at
+// post-tool-result, hears THIS finished call, and the file the call changed when that is what
+// admitted it. A reaction that listed post-tool-result hears every call, because that seam closes
+// on every call; one that listed file-changed hears a call that was a successful workspace write,
+// with its path; one that listed file-changed ALONE hears nothing else, which is what the
+// narrowing buys a user who wants to react to edits and not to reads.
 //
-// The Moment reported is the one the ENTRY subscribed to, not the seam it ran at. An entry that
-// listed file-changed sees `file-changed` with `path` set whenever the call was a successful
-// workspace write; one that listed file-changed ALONE does not fire on any other call, which is
-// what the narrowing buys a user who wants to react to edits and not to reads. An entry that
-// listed post-tool-result sees that Moment and no path, because that seam closes on every call.
+// It sits on the seam's invoke path rather than in any one handler's route so that the set the
+// widening admits and the set the narrowing keeps are the same set for every handler kind — a Go
+// advise handler on file-changed is narrowed exactly as the user's command is.
 //
 // The path is tools.WorkspaceWriteTarget's — the same resolution the blast-radius ladder judged
 // the call by and the same one the observe lane's file-changed firing carries (internal/reactions'
@@ -532,23 +529,37 @@ func (a *Agent) adviseArgv(
 // deliberately neither a.resolvedPath, which is empty for an ordinary in-workspace write because
 // it is the DISCLOSURE twin and speaks only when the resolution differs from the argument, nor
 // classifyWriteTarget's escape target, which is empty inside the fence.
-func (a *Agent) adviseDocument(r domain.Reaction, p domain.ToolResultMoment) (domain.SeamPayload, bool) {
+func (a *Agent) hearsCall(r domain.Reaction, p domain.ToolResultMoment) (path string, hears bool) {
+	if !slices.Contains(r.On, domain.MomentFileChanged) {
+		return "", true
+	}
+	if path, ok := a.writtenPath(p.Call); ok && !p.Edit.IsError() {
+		return path, true
+	}
+	// The call changed no file. An entry that also listed post-tool-result still hears the seam
+	// close; one that listed file-changed alone hears nothing.
+	return "", slices.Contains(r.On, domain.MomentPostToolResult)
+}
+
+// adviseDocument builds the stdin document one advise command receives for a finished tool call
+// it hears. The executor stamps the identity block over what is returned here (runSyncArgv), so
+// what this function settles is the MOMENT's half alone: which Moment fired, on which tool, over
+// which arguments and result, and — for file-changed — which file.
+//
+// The Moment reported is the one the ENTRY subscribed to, not the seam it ran at: path is the file
+// hearsCall admitted the call on, and when it is set the document says `file-changed` and names
+// it. An entry that listed post-tool-result sees that Moment and no path.
+func adviseDocument(p domain.ToolResultMoment, path string) domain.SeamPayload {
 	doc := domain.SeamPayload{
 		Event:     domain.MomentPostToolResult,
 		Tool:      p.Call.Tool,
 		Arguments: append(json.RawMessage(nil), p.Call.Arguments...),
 		Result:    &domain.SeamResult{Content: p.Edit.Content(), IsError: p.Edit.IsError()},
 	}
-	if !slices.Contains(r.On, domain.MomentFileChanged) {
-		return doc, true
-	}
-	if path, ok := a.writtenPath(p.Call); ok && !p.Edit.IsError() {
+	if path != "" {
 		doc.Event, doc.Path = domain.MomentFileChanged, path
-		return doc, true
 	}
-	// The call changed no file. An entry that also listed post-tool-result still hears the seam
-	// close; one that listed file-changed alone hears nothing.
-	return doc, slices.Contains(r.On, domain.MomentPostToolResult)
+	return doc
 }
 
 // writtenPath is the absolute, symlink-resolved path a workspace-scoped write tool's call lands
@@ -666,11 +677,22 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 		return seamPayload{
 			work: p,
 			invoke: func(ctx context.Context, r domain.Reaction) (domain.Outcome, error) {
-				// The user's advise cell is the one route at this seam that leaves the
-				// process: its handler is a command, not a Go func, so it is dispatched
-				// before the Go handler assertion rather than failing it.
-				if _, argv := r.Handler.(domain.ArgvHandler); argv && r.Class == domain.ClassAdvise {
-					return a.adviseArgv(ctx, turn, r, p)
+				// The advise lane is NARROWED here, before the handler kind is looked at,
+				// because this closure is the one path every advise reaction at this seam
+				// crosses: subscribes widened a file-changed entry onto this Moment for the
+				// whole class, so the narrowing that pays for it (hearsCall) has to hold for
+				// the whole class too — a Go advise handler and the user's command alike.
+				// The user's advise cell is then the one route that leaves the process: its
+				// handler is a command, not a Go func, so it is dispatched before the Go
+				// handler assertion rather than failing it.
+				if r.Class == domain.ClassAdvise {
+					path, hears := a.hearsCall(r, p)
+					if !hears {
+						return domain.Outcome{}, nil
+					}
+					if _, argv := r.Handler.(domain.ArgvHandler); argv {
+						return a.adviseArgv(ctx, turn, r, adviseDocument(p, path))
+					}
 				}
 				fn, ok := r.Handler.(domain.PostToolResultFunc)
 				if !ok {
