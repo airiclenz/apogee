@@ -1159,7 +1159,9 @@ reaction takes exactly **one cell**:
 - **continue** is **not a class**; nothing may take the loop's next step for it.
 
 The line the user row draws: a user Reaction may change the model's **view** and may say **No**; it
-may never change the model's **work** or make its **choices**. **Bypass** switches off the advise
+may never change the model's **work** or make its **choices**. Of the user row, **observe**,
+**advise** and **gate** ship — a `reactions:` entry's `run:`, `advise:` and `gate:` keys — and
+**shape (view)** is the one reserved cell. **Bypass** switches off the advise
 and shape classes of user and bench-armed origin and nothing else. A **Tool** is not a cell: the
 model asks for it by name, and it is admitted on a **replicated** ask across models
 (`docs/design/tool-surface-findings.md`,
@@ -1171,27 +1173,37 @@ of this surface, "Mechanism" (retired — see [Retired terms](#retired-terms)).
 One `{id, origin, class, on: [Moments], handler}` — the single thing apogee does when the loop
 passes a **Moment**, shipped as `domain.Reaction`. Its **origin** is **engine** (a builtin such as
 a [Floor guard](#floor-guard), or a Go reaction the bench arms in-process through the facade) or
-**user**; its **class** is one column of the **Reaction surface** matrix. Its handler today is one
-of five **sealed** per-seam Go func types, one per seam **Moment**, so a reaction always names
-exactly one seam: `Validate` refuses an `On` list the handler cannot serve, an origin × class
-outside the matrix, a missing id, origin, class or handler, and an id another reaction already
-took. `TopLevelOnly` opts a reaction **out** of sub-agent inheritance — the zero value is inherited
-by every child agent; `Timeout` is carried for the non-Go handlers stage 2 adds and ignored by a Go
-one, which runs without a deadline exactly as a Floor guard does.
+**user**; its **class** is one column of the **Reaction surface** matrix. Its handler is one of
+seven kinds behind one sealed interface: five per-seam Go func types, one per seam **Moment**, so
+an engine reaction always names exactly one seam; and two out-of-process kinds a user entry arms —
+an `ArgvHandler` (a command, serving observe, advise and gate) and a `WebhookHandler` (a POST,
+serving observe alone) — whose `On` list spans Moments and is checked against the class. `Validate`
+refuses an `On` list the handler cannot serve, an origin × class outside the matrix, a missing id,
+origin, class or handler, and an id another reaction already took. `TopLevelOnly` opts a reaction
+**out** of sub-agent inheritance — the zero value is inherited by every child agent; `Timeout` is
+the deadline an out-of-process handler runs under on either lane (observe 30s, advise 10s, gate 5s
+by default; an entry's `timeout:` binds every reaction it arms) and is ignored by a Go one, which
+runs without a deadline exactly as a Floor guard does.
 The engine fires them with one `fire(ctx, moment, payload)` per seam — builtins first, then
 whatever is armed beside them, each under a recover boundary, an error ending the cascade at once
 and a panic reported and stepped over. Each returns one **`Outcome`**:
-`{Retry, Inject, Defer, Edited, Detail}`, whose zero value means "did nothing" and is not booked.
-Anything else is a firing, and it reaches every Driver as one `ReactionFiredEvent` keyed by id,
-under the action `retry`, else `defer`, else `intercept` when a shape reaction moved the working
-value's revision. The seven Floor-guard booleans stay the canonical switches for the builtins.
+`{Retry, Inject, Defer, Edited, Gate, Detail}`, whose zero value means "did nothing" and is not
+booked. Anything else is a firing, and it reaches every Driver as one `ReactionFiredEvent` keyed by
+id, under the action `retry`, else `defer`, else `intercept` when a shape reaction moved the working
+value's revision; the sync lane books `advise` for a landed trailer, a gate's own verdict (`deny`,
+`ask`, `allow`) and `failed` when a command could not run. The seven Floor-guard booleans stay the
+canonical switches for the builtins.
 A **user**-origin Reaction is one entry of the global `reactions:` list —
-`{id, on: [moments], run: <argv | {url, headers, headers-env}>, gate: <argv>, workspace?, timeout?, enabled?}` —
+`{id, on: [moments], run: <argv | {url, headers, headers-env}>, advise: <argv>, gate: <argv>, workspace?, timeout?, enabled?}` —
 resolved into one `domain.Reaction` per action key it spells, sharing its id: `run:` at **observe**
-class, fired by the async lane (`internal/reactions`' own runner) on notices, and `gate:` at
-**gate** class, fired by the agent's sync lane at `pre-tool-exec` only. `advise:` is the reserved key
-that refuses the file with a sentence naming it, as does an `on:` a key's class cannot take (a seam
-under `run:`, a notice under `gate:`), and `enabled: false` **parks** an entry: it stays in the file
+class, fired by the async lane (`internal/reactions`' own runner) on notices; `advise:` at
+**advise** class, fired by the agent's sync lane at `post-tool-result` or `file-changed` (the latter
+narrowing it to a successful write-tool call), its stdout secret-redacted (`tools.RedactSecrets`),
+capped and fenced as the trailer — one **Advice span**; and `gate:` at **gate** class, fired by the
+sync lane at `pre-tool-exec` only, as the **Gate stage**. `advise:` and `gate:` take an argv list
+alone — a mapping is refused with a sentence naming the key — as is an `on:` a key's class cannot
+take (a seam under `run:`, a notice under `gate:`, any Moment but the two under `advise:`), and
+`enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
 **`Generation`** — `{Floor, Bypass, Observe, Sync}` — which a **Driver** applies in one act to the
 agent (which takes Floor, Bypass and Sync) and to the runner (which takes Observe), so nothing
@@ -1203,6 +1215,42 @@ at start-up: backed up first, re-rendered from its parsed entries, and reported 
 every rename it made.
 _Avoid_: "Hook" (the colloquial alias — see [Hook](#identity-and-shape)), "Mechanism" (retired),
 "plugin" (no Reaction adds a capability).
+
+**Advice span**:
+One row of the **provenance ledger** — `domain.AdviceSpan`, `{reaction, origin, moment, turn,
+offset}` — recorded on the message an **advise** **[Reaction](#reactions-and-moments)** advised,
+one per injection in the order they landed
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D6). The
+fenced trailer the model reads (`[advice — reaction <id> (<origin> origin) at <moment>, turn <n>]`
+… `[end advice — <id>]`) is rendered from the span, never from the handler's output, so nothing
+out-of-process can forge an engine header; the text inside is secret-redacted and capped at 8 KiB
+with a marker. `offset` is where the fence begins in the message's content, so the content before
+the first span's offset is the message as it stood before any advice — and that is what the
+**[Session record](#identity-and-shape)** keeps: a span is **ephemeral**, written to no record and
+gone on resume, so a replay never re-reads a stale SHA or timestamp. The bench attributes an advise
+reaction's effect by the span's reaction id; `/settings` can show what the model saw this Turn.
+_Avoid_: "injection" (the system-prompt fold the trailer replaced), "advice message" (a trailer on
+the tool result, not a message of its own), "advice history" (nothing persists).
+
+**Gate stage**:
+The stage of the **Approver** at which the armed **gate** **[Reactions](#reactions-and-moments)**
+answer *may this call run* — `applyGates` in `internal/agent`, run immediately after `resolve` at
+both of its sites and before the approval cache, in every **[Agent mode](#safety-and-autonomy)** and
+under **[Bypass mode](#safety-and-autonomy)**
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D2, D9). It
+is a stage of the Approver, not a leg of the `pre-tool-exec` cascade: the cascade reshapes a pending
+call, a gate decides its fate, and it folds into the ladder's own verdict one way only — the first
+`deny` refuses the call with the engine-authored `tool call denied by reaction <id>`, the first
+`ask` raises it to the human whatever the mode said (`reaction <id> asks: <reason>`; the reason
+reaches the person, never the model), and `allow` means nothing, the ladder's verdict standing,
+because a script that could pre-approve a call would be a second, unaudited autonomy ladder
+([ADR 0049](docs/adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
+§4). Every unreadable answer — empty or unparseable stdout, a non-zero exit, a timeout, a refused
+permit — is an `ask`, the one place the sync lane is not fail-open. On a delegation an `ask` leaves
+the verdict untouched and is booked as `deferred to the child's calls`: nothing executes at the
+recursion point, and the inherited gate asks on the child's own tool calls.
+_Avoid_: "gate hook", "pre-approval" (a gate can only tighten), "gate leg" (it is no part of the
+seam cascade).
 
 **Context-fill notice**:
 The engine-origin **advise** **[Reaction](#reactions-and-moments)** (`context-fill-notice`,

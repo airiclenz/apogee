@@ -124,6 +124,20 @@ secret redaction before the fence and the cap. An entry carrying `run:` and `adv
 handlers, each under its own class's posture; adding a blocking key never silently confines the
 notifier beside it.
 
+> **Note (2026-09-12, stage 3 —
+> [plan `2026-09-09 - 01`](../plans/2026-09-09%20-%2001%20-%20reaction-core-stage-3-plan.md)).** This
+> decision's reading as shipped. *The redactor:* "the terminal tool's secret redaction" is
+> `tools.RedactSecrets(text, secretEnv)`, an output-side value redactor that replaces every non-empty
+> configured secret value (`Config.SecretEnvVars`, the `api-key-env` names of ADR 0047) with
+> `[redacted]`; advise stdout passes it before the cap and the fence. *The permit row:* "inside the
+> workspace exec fence" is the contract's §10.4 row for a user-origin sync reaction — it spawns in
+> **every mode** under a `SubprocessPermit`, with `Confinement` = the workspace box when
+> `confine-to-workspace` is on and the Confiner has caps, nil when it is off; on but no caps ⇒ no
+> permit, the handler fails (`workspace confinement is unavailable on this host`) and gate ⇒ ask,
+> advise ⇒ nothing. The mode is not a term because the reaction is the user's own configuration, not
+> anything the model chose; §10.3's post-response row keeps its mode term. The sync lane's handlers are
+> argv only — a sync-lane webhook is bead `apogee-1d8`.
+
 **9. Bypass switches off the model-shaping classes.** `--bypass` turns off every `advise` and
 `shape` reaction of user or bench-armed origin; `observe`, `gate` and the seven Floor guards stay.
 That keeps ADR 0006's meaning exactly — what can move the floor is off — without stripping a bench

@@ -1101,7 +1101,9 @@ default posture (may not spawn) with no further code.
 ### 10.3 The ladder row the engine installs
 
 `(*Agent).hookExecutionCtx` (`internal/agent/dispatch.go`) is the hook-time analogue of
-`resolveLadderAuto`'s `classSubprocess` row:
+`resolveLadderAuto`'s `classSubprocess` row. The table is the **post-response permit's** row and
+nothing wider — a user-origin sync reaction mints its own permit under §10.4's row, which has no
+mode term at all:
 
 | effective mode | `confine-to-workspace` | fs confinement caps | installed |
 |---|---|---|---|
@@ -1118,11 +1120,37 @@ subprocess tool's.
 
 ### 10.4 Scope
 
-The permit is installed at **post-response only**, once per cascade, ahead of every reaction that
-fires there — the engine's builtins, the armed Reactions and the registry bridge alike (`fire`,
-`internal/agent/reactions.go`). Pre-request, pre-tool-exec, post-tool-result and history-rewrite get
-no permit, which under §10.2 keeps their existing "may not spawn" posture — the intended one.
-Widening to another Moment is a deliberate act: install the permit there and record the row here.
+Two minting sites install a permit, and no other Moment carries one:
+
+| who spawns | Moment | minted by |
+|---|---|---|
+| an engine-origin reaction of the post-response cascade — the builtins, the armed Reactions and the registry bridge alike (`fire`, `internal/agent/reactions.go`) | `post-response`, once per cascade | `hookExecutionCtx`, §10.3's row |
+| a **user-origin sync reaction** — class advise or gate, a `reactions:` entry's `advise:` or `gate:` argv (ADR 0076 D2, D8; stage 3, 2026-09-12) | `pre-tool-exec` (the gate stage of the Approver) and `post-tool-result` (the advise slot; `file-changed` is that seam narrowed to a successful write) | `syncPermitCtx`, the row below |
+
+Pre-request and history-rewrite carry no permit, and pre-tool-exec and post-tool-result carry one
+for the sync lane alone, which under §10.2 keeps every other spawn at those Moments on the "may not
+spawn" posture — the intended one. Widening to another Moment is a deliberate act: install the
+permit there and record the row here.
+
+The sync lane's row is the ratified permit row (plan `2026-09-09 - 01`, header design call, from
+ADR 0076 D8 and this section): **a user-origin sync reaction spawns in every mode under a
+`SubprocessPermit`; `Confinement` = the workspace box when `confine-to-workspace` is on and the
+Confiner has caps, nil when it is off; on but no caps ⇒ no permit, the handler fails
+(`workspace confinement is unavailable on this host`) and gate ⇒ ask, advise ⇒ nothing.**
+
+| `confine-to-workspace` | fs confinement caps | installed |
+|---|---|---|
+| off | — | permit, **nil** `Confinement` — unfenced |
+| on | available | permit carrying `&Confinement{Confiner, Box}`, and the matching `domain.WithConfinement` handle for the funnel |
+| on | unavailable | **nothing** — `errConfinementUnavailable`; the command is never spawned, the reaction fails, and the class reads the failure (a gate escalates to `ask`, an advise reaction contributes nothing) |
+
+The **mode is not a term** of this row, where it is the first term of §10.3's: a user's sync
+reaction is the user's own configuration rather than anything the model chose, so the ladder —
+which exists to bound what the *model* may reach — has no verdict to give about it, and the reaction
+fires in Plan exactly as it fires in Auto. What survives of the ladder's row is the fence itself:
+with `confine-to-workspace` on the command runs inside the same box a subprocess tool would have
+been confined to, and a host that cannot build that box gets no unfenced fallback. The row
+supersedes §10.3 for sync reactions; §10.3 keeps governing the post-response permit.
 
 ### 10.5 The hook spawns through the tools funnel (amendment, 2026-08-20)
 
@@ -1133,7 +1161,11 @@ process-group / Job-Object teardown, no output cap and no timeout clamp. The per
 authorisation hole while every *other* execution guard stayed on the tool side of the fence.
 
 A hook now spawns through `tools.RunHookSubprocess` (`internal/tools/exec_common.go`), the single
-exported door onto the same `runSubprocess` funnel every execution tool goes through. The funnel
+exported door onto the same `runSubprocess` funnel every execution tool goes through; the sync
+lane's executor, `(*Agent).runSyncArgv` (`internal/agent/syncexec.go`), is its second caller,
+spawning every `advise:` and `gate:` command through the same door under §10.4's permit, with the
+seam document on stdin and the class default deadline (advise 10s, gate 5s) or the entry's own
+`timeout:`. The funnel
 itself stays unexported: the door takes only what a hook names (ctx, argv, dir, secretEnv, timeout,
 stdin) and returns the child's stdout alone, so a caller consuming the output as a payload — the
 formatter reads the reformatted file off stdout — never gets a diagnostic spliced into it.

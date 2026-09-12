@@ -3,7 +3,7 @@
 **Date:** 2026-09-07 · **Status:** ✅ **Decided** — grilled the same day; §3 and §8 resolved in
 [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (day-one user
 cells observe + advise + gate; user shape(view) and `mcp:` reserved; Bypass = advise + shape off).
-Implementation plan not yet written. · **Companion:**
+Implementation plans: the three staged plans §9.4 links. · **Companion:**
 [hook-talkback-findings.md](hook-talkback-findings.md) (research; the doctrine map) · **Open bead:**
 `apogee-575`.
 
@@ -108,7 +108,10 @@ roll already models exactly this mapping.
 > validation error naming the boolean instead, never a second spelling. Engine origin is code — the
 > bench arms a Go reaction in-process through the facade (ADR 0076 D1), not through this key. The
 > entry schema is `id:` / `on:` / `run:` (polymorphic — a sequence is argv, a mapping is a webhook)
-> / `workspace:` / `timeout:` / `enabled:`; `advise:` and `gate:` are rejected at load until stage 3.
+> / `workspace:` / `timeout:` / `enabled:`; stage 3 shipped `advise:`/`gate:` (argv only — a
+> mapping is refused by sentence; webhooks for the sync lane are bead `apogee-1d8`), `advise:` on
+> `post-tool-result` or `file-changed` and `gate:` on `pre-tool-exec`, both resolving beside `run:`
+> into one Reaction per key of one id.
 > This supersedes D10's "builtins appear by id with `enabled:`" and the original wording here.
 
 **Which keys a repo layer may set.** The rule to keep is not "global only" but *a clone cannot run a
@@ -338,6 +341,14 @@ config loader consults at resolve time, not a runtime check.
 ### 9.4 Plan boundaries
 
 - **Plan A (stage 1):** 9.1 rows one to eleven, the type sketches, 9.3. No config change beyond
-  the migration notice; no user cells beyond `observe`.
+  the migration notice; no user cells beyond `observe`. Written and executed as
+  [`docs/plans/archived/2026-09-07 - 01`](../plans/archived/2026-09-07%20-%2001%20-%20reaction-core-stage-1-plan.md).
 - **Plan B (stage 2, gated on A):** `reactions:` config, three layers, adoption pin, `/settings`
-  table, the user cells the grill ratified.
+  table, the user cells the grill ratified. Written and executed as
+  [`docs/plans/archived/2026-09-08 - 00`](../plans/archived/2026-09-08%20-%2000%20-%20reaction-core-stage-2-plan.md)
+  (global file only; the repo layer and adoption pin are bead `apogee-089`).
+- **Plan C (stage 3, gated on B):** the user `advise` and `gate` cells —
+  [`docs/plans/2026-09-09 - 01 - reaction-core-stage-3-plan.md`](../plans/2026-09-09%20-%2001%20-%20reaction-core-stage-3-plan.md):
+  the advise slot, its fence, cap, redaction and ledger (§2.5) with the resume strip; the gate stage
+  of the Approver at `pre-tool-exec`; the sync-lane executor under the contract's §10.4 permit row;
+  the `advise:` key shipped only on the admission arm's `Verdict: pass` (ADR 0076 D5).
