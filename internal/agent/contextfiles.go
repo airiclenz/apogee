@@ -176,21 +176,26 @@ func (a *Agent) hasContextBlocks() bool {
 
 // forgesStandingStructure reports whether one content line spells a line the standing system
 // message uses as its OWN furniture: a context-file header or footer, the orientation block's
-// header, the delegate report block's opening sentence, or the task list block's header opening.
+// header, the delegate report block's opening sentence, the task list block's header opening, or
+// either line of the advice fence an advise Reaction's text is delivered in (domain.RenderAdvice).
 // Leading whitespace is trimmed before
 // the test — an indented forgery reads as furniture to a model just as well as a flush one — but
 // the line itself is never trimmed, only prefixed.
 //
 // It is a CLOSED list and every engine-owned block belongs on it: a block this list does not know
 // can be forged by a repo file that reaches the model after the real one, where it reads as a
-// correction rather than as the workspace prose it is (F-19, orientation.go).
+// correction rather than as the workspace prose it is (F-19, orientation.go). The advice fence is
+// on it for the same reason from the other side: its header is derived from provenance so no
+// handler can print one, and this is what keeps a repo file from printing one either.
 func forgesStandingStructure(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	return strings.HasPrefix(trimmed, contextFileHeader) ||
 		strings.HasPrefix(trimmed, contextFileFooter) ||
 		strings.HasPrefix(trimmed, orientationHeader()) ||
 		strings.HasPrefix(trimmed, delegateReportFence) ||
-		strings.HasPrefix(trimmed, tasklist.Fence)
+		strings.HasPrefix(trimmed, tasklist.Fence) ||
+		strings.HasPrefix(trimmed, domain.AdviceFencePrefix) ||
+		strings.HasPrefix(trimmed, domain.AdviceFenceClosePrefix)
 }
 
 // fenceContent prefixes every line of a context file that spells the standing message's own

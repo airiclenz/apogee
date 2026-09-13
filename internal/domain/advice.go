@@ -43,6 +43,17 @@ const AdviceCap = 8 << 10
 // adviceTruncationMarker is appended by CapAdvice when, and only when, it cut.
 const adviceTruncationMarker = "\n[advice truncated at 8 KiB]"
 
+// AdviceFencePrefix and AdviceFenceClosePrefix are the fixed openings of the fence's header and
+// closing lines — the bytes every rendered fence starts its two structural lines with, before the
+// span's own fields fill in the rest. They are exported so the workspace context-file guard
+// (internal/agent, forgesStandingStructure) can refuse a repo file that spells either one: the
+// header is derived from provenance in-process, and these are what keep an out-of-process file
+// from printing a convincing copy of it.
+const (
+	AdviceFencePrefix      = "[advice — reaction "
+	AdviceFenceClosePrefix = "[end advice — "
+)
+
 // RenderAdvice renders one advice span as the fenced block appended to a message's Content.
 // Every field of the header comes from span — the caller's text is fenced, never trusted to
 // name itself — so a handler printing its own "[advice — reaction …]" line lands inside the
@@ -52,9 +63,9 @@ const adviceTruncationMarker = "\n[advice truncated at 8 KiB]"
 // emitted verbatim between the header and the closing line, so a caller that wants it capped
 // passes it through CapAdvice first.
 func RenderAdvice(span AdviceSpan, text string) string {
-	return "\n\n[advice — reaction " + span.Reaction + " (" + string(span.Origin) +
+	return "\n\n" + AdviceFencePrefix + span.Reaction + " (" + string(span.Origin) +
 		" origin) at " + string(span.Moment) + ", turn " + strconv.Itoa(span.Turn) + "]\n" +
-		text + "\n[end advice — " + span.Reaction + "]"
+		text + "\n" + AdviceFenceClosePrefix + span.Reaction + "]"
 }
 
 // CapAdvice truncates text to at most AdviceCap bytes and appends the truncation marker when

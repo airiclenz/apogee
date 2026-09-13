@@ -1224,8 +1224,9 @@ one per injection in the order they landed
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D6). The
 fenced trailer the model reads (`[advice — reaction <id> (<origin> origin) at <moment>, turn <n>]`
 … `[end advice — <id>]`) is rendered from the span, never from the handler's output, so nothing
-out-of-process can forge an engine header; the text inside is secret-redacted and capped at 8 KiB
-with a marker. `offset` is where the fence begins in the message's content, so the content before
+out-of-process can forge an engine header — and a workspace **Context files** line that spells
+either fence line is fenced `[workspace text] `, exactly as a forged orientation header is; the
+text inside is secret-redacted and capped at 8 KiB with a marker. `offset` is where the fence begins in the message's content, so the content before
 the first span's offset is the message as it stood before any advice — and that is what the
 **[Session record](#identity-and-shape)** keeps: a span is **ephemeral**, written to no record and
 gone on resume, so a replay never re-reads a stale SHA or timestamp. The bench attributes an advise

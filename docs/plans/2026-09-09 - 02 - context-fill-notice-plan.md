@@ -87,7 +87,9 @@ go test ./internal/agent/ -run 'FillNotice|ContextFill|Builtin|Advise|Prompt|Doc
 
 **Commit:** `feat(agent): the context-fill-notice reaction — three rungs of the compaction line on the closing tool result`
 
-## 4. Forgery closure: a context file cannot carry the advice fence
+## 4. Forgery closure: a context file cannot carry the advice fence — ✅ DONE (2026-09-13)
+
+NOTES (2026-09-13): consequential edit — CONTEXT.md: made necessary by the context-file guard now fencing the advice fence — the **Advice span** entry's "nothing out-of-process can forge an engine header" sentence gained the context-file half of that posture, matching how the Delegate report block and Task list entries record theirs.
 
 **What:** `internal/domain/advice.go` exports the fence's fixed prefixes as consts (`AdviceFencePrefix = "[advice — reaction "`, `AdviceFenceClosePrefix = "[end advice — "`) and `RenderAdvice` builds from them (byte-identical output — `TestAdviceRenderIsByteExact` stays untouched). `forgesStandingStructure` (`internal/agent/contextfiles.go:187-194`) refuses a context file whose trimmed line starts with either prefix, exactly as it refuses `delegateReportFence`.
 
