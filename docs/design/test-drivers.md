@@ -808,7 +808,7 @@ accepted proxies with no open work.
 | Session record on disk (T-03, T-06, T-19) | either driver — read the run's own `sessions/` records under its temp home; the record, not the frame, is the authority on what was persisted | `TestE2ESmokeInProcess` | — |
 | What a killed run left behind (T-03) | either driver — a stubllm turn that `hang`s holds the run mid-delegation for as long as the test needs, then `Kill()` and a relaunch on the SAME home; the reopened frame is where "closed as interrupted" is read | `TestE2EDelegationRecordSurvivesAKill`; `TestE2EDelegationRecordSurvivesSIGKILL` | — |
 | A scheduled Firing and its block (T-07) | in-process — the package var `tuiScheduleClock` (the daemon's `daemonClock`, one Driver over) puts the Scheduler on a clock the test ticks, so the thirty-second `MinCycle` floor costs a microsecond | `TestE2EFiringMarksAnAbandonedFinalTurn` | — |
-| Config file watch and live apply (T-16) | in-process — write the key into the run's temp-home `config.yaml` and wait for the transcript line; the package var `configWatchTiming` shortens the poll to 50 ms for every driven launch, so a watcher step costs a tenth of a second rather than the production second-and-a-quarter | `TestE2ELiveStateFollowsTheRunningSession` | — |
+| Config file watch and live apply (T-16) | in-process — write the key into the run's temp-home `config.yaml` and wait for the transcript line; the package var `configWatchTiming`, set once in `TestMain`, shortens the poll to 50 ms for every driven launch, so a watcher step costs a tenth of a second rather than the production second-and-a-quarter | `TestE2ELiveStateFollowsTheRunningSession` | — |
 | Daemon and headless output (T-07) | no driver needed — run the binary against stubllm and assert stdout, the record and the exit code | `TestHeadlessExitCodes`; `TestDaemonFaultedVerbColumn` | — |
 | Network egress: proxy honoured, url-safety live, a stream nothing deadlines (T-18) | PTY only — the proxy variables reach a program only in the environment it STARTS with (`launchPTYWithEnv`); an in-test forward proxy with a route table onto loopback servers (`internal/tuitest/netfix.go`) is the instrument, and its access log is the evidence. The 2 MiB body cap is the one claim of this row that stays unit-covered (`internal/tools/network_funnel_test.go`): a driven run would have to carry two megabytes through the conversation to say the same thing | `TestE2EEgress`; `TestE2EEgressLongStreamIsNotDeadlined` | Traffic to a real remote host — nothing in the suite leaves loopback, so a `NO_PROXY` host dialling DIRECT has no hermetic form; what is asserted instead is that no loopback traffic, the model conversation included, ever went through the proxy |
 | MCP server behaviour (T-18) | an in-test streamable-http MCP server with one `echo` tool (`tuitest.MCPEcho`, the shape `internal/mcp`'s own fixture uses) reached at a proxied endpoint; a url-safety edit that closes the endpoint is read off the tool DISAPPEARING (the live connection follows the new host lists, so the server is dropped and its calls come back as an unknown tool), the reconnect that is then refused off nothing coming back, and the denied ENDPOINT off the raw pty stream of a launch that never reached a frame | `TestE2EEgress`; `TestE2EEgressDeniedMCPEndpointStopsTheLaunch` | What a third-party MCP server actually does with a call |
@@ -858,8 +858,13 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
    after a pane that never closed types its next command into that pane and fails somewhere else.
 8. **Add a judge rubric only for a judgment half** — wording, tone, "reads as one row". Everything
    a cell can settle is settled by a cell.
-9. **Stay inside the budget below.** Every wait bounded, no `t.Parallel` (the e2e tests use
-   `t.Setenv` and package-var seams), and every swapped package var restored via `t.Cleanup`.
+9. **Stay inside the budget below, and stay parallel.** Every wait bounded, and `t.Parallel()`
+   the first statement of every e2e test — a driven launch writes nothing the process shares.
+   The exceptions are the tests that reach `t.Setenv` or swap a package-var seam
+   (`newConfiner`, `liveLauncherOps`, `tuiScheduleClock`, `openerLookPath`, `runOnce`, …),
+   directly or through a helper (`guardHome`, `presentRemote`, `installFenceableConfiner`,
+   `useFakeScheduleClock`, …): those stay serial, every swapped var restored via `t.Cleanup`,
+   and a new helper that swaps one makes every test reaching it serial too.
 
 ## Gates and budgets
 
@@ -900,20 +905,37 @@ say so: it skips on Windows (the driver is unix-only) and it skips when `TestMai
 the binary, with the build error in the skip message. It needs no terminal of its own — it makes
 one — and no model beyond the same loopback stub.
 
-The e2e tests are **serial**: they use `t.Setenv` and package-var seams, so none of them calls
-`t.Parallel`, and every swapped package var is restored through `t.Cleanup`. The budget is therefore
-serial wall clock, and the measurement above is the whole of it: **≈ 122 s** under `-race`, on top
-of the 5.5 s the package cost before this work. That is well past the ~15 s the kit's first slice
+The e2e tests are **parallel by default** (2026-09-13): `t.Parallel()` is the first statement of
+every test that launches through the kit, because a driven launch writes nothing the process
+shares — `tuitest.CheckLeaks` attributes goroutines to the test that started them (pprof labels,
+`internal/tuitest/leak.go`), `assertNoAmbientApogeeConfig` only reads what `TestMain` cleared, and
+the config watcher's fast cadence is set once in `TestMain` rather than swapped per launch. What
+stays serial is exactly the set that reaches `t.Setenv` (the testing package panics on the pair)
+or swaps a package-var seam — fourteen of the seventy-one, through `guardHome`, `presentDesktop`,
+`presentRemote`, `installFenceableConfiner`, `installFakeLauncher`, `useFakeScheduleClock` or a
+`t.Setenv` of their own — and the testing package runs those to completion before it releases the
+parallel ones, so a swapped seam is never read across tests; every swap is still restored through
+`t.Cleanup`. The rule is transitive: a helper that starts to `t.Setenv` or swap a seam makes every
+test reaching it serial, and `t.Parallel()` after such a helper is a panic, not a slow test. The
+sweep took `go test -race -count=1 ./cmd/apogee/` from **202 s** serial to **66 s** on the same
+9-core box (three consecutive `-count=3` runs green at ≈ 62 s each), and it is the reason the one
+wait that outran its default on a loaded box — the in-process 400-line reply — now carries the
+PTY twin's 15 s bound.
+
+The per-test figures that follow are test time under `-race` on an idle box, not wall clock, and
+they still add up to roughly the **≈ 122 s** the serial measurement above recorded, on top of the
+5.5 s the package cost before this work. That is well past the ~15 s the kit's first slice
 budgeted for itself, and the excess is not waste — it is nine later sets, each measured and narrated
 below, plus one test whose twenty-five seconds are its assertion. Nothing has been moved behind an
 env flag to buy the number down, and the rule two paragraphs up is why: a test that runs only when
 someone remembers a flag is a test nobody runs. Gating the single slowest one would delete the only
-observation that the provider client sets no response-wide timeout and still leave ~96 s. The knobs
-that genuinely trade time for fidelity are named per set below, and the first to reach for is the
-streamed fixture's `chunk_runes`. The per-set figures below were each taken when that set landed;
-the table above is the authority when they disagree. `TestE2ESmokeInProcess` — thirteen checklist steps,
-two launches and a restore — measures **≈ 7.5 s** of that under `-race`, and `TestE2ESmokePTY`
-**≈ 1 s** on top of the one-off `go build` (**≈ 1.5 s**) every run of the package now pays.
+observation that the provider client sets no response-wide timeout and still leave ~96 s of test
+time. The knobs that genuinely trade time for fidelity are named per set below, and the first to
+reach for is the streamed fixture's `chunk_runes`. The per-set figures below were each taken when
+that set landed; the table above is the authority when they disagree. `TestE2ESmokeInProcess` —
+thirteen checklist steps, two launches and a restore — measures **≈ 7.5 s** of that under `-race`,
+and `TestE2ESmokePTY` **≈ 1 s** on top of the one-off `go build` (**≈ 1.5 s**) every run of the
+package now pays.
 
 A **streamed** e2e test is the expensive kind, and the reason is arithmetic rather than waste: a
 fixture that streams the checklist's 400-line answer three runes at a time with a millisecond

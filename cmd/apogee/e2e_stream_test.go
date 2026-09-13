@@ -86,6 +86,8 @@ func streamRunes(n int) int {
 // is what the buffer committed, and the frame is what the renderer then painted. A chunk list
 // joined wrongly breaks the first; a viewport that reflowed badly breaks only the second.
 func TestE2EStreamCommitsCompleteAndInOrder(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "stream400"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -111,8 +113,12 @@ func TestE2EStreamCommitsCompleteAndInOrder(t *testing.T) {
 	waitStreamGrows(t, drv)
 
 	// Step 6 — the reply commits. The last line on the wire is the first thing to wait for; the
-	// record on disk follows once the Exchange settles.
-	drv.WaitText(streamLine(streamLines))
+	// record on disk follows once the Exchange settles. The wait is the PTY twin's rather than the
+	// default: 400 lines three runes at a time is some two seconds of scripted delay, and beside
+	// the other parallel e2e tests on a loaded race-enabled box the rest of the reply has been
+	// seen to outrun five seconds.
+	drv.WaitFor(func() bool { _, _, ok := drv.Frame().Find(streamLine(streamLines)); return ok },
+		tuitest.Within(15*time.Second), tuitest.Awaiting("the last line of the reply"))
 	committed := waitForCommittedReply(t, sess, streamLine(1))
 	if committed != strings.TrimRight(streamText(), "\n") {
 		t.Errorf("the committed reply is not the reply that was streamed:\n%s",
@@ -133,6 +139,8 @@ func TestE2EStreamCommitsCompleteAndInOrder(t *testing.T) {
 // than dropping it or doubling it, and the next prompt opens a NEW entry instead of continuing the
 // cancelled one.
 func TestE2EStreamCancelKeepsWhatArrived(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "stream400"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -250,6 +258,8 @@ func TestE2EStreamCancelKeepsWhatArrived(t *testing.T) {
 // other child's never, so ownership is a claim about which block a marker landed in rather than
 // about which order the two ran in.
 func TestE2EDelegationsStreamIntoTheirOwnBlocks(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "delegate2"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -325,6 +335,8 @@ const repaintCeilingInProcess = 24.0
 // it gets longer" is a claim about the second number and not the first, and a full-screen erase
 // mid-stream is counted outright.
 func TestE2EStreamRepaintCeiling(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "stream400"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -378,6 +390,8 @@ const repaintCeilingPTY = 27.0
 // pseudo-terminal, with a real SIGWINCH landing mid-stream — the resize a driver inside the
 // process can only simulate — and reads the flicker measure off the --tui-trace seam.
 func TestE2EStreamPTY(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "stream400"))
 	sess := launchPTY(t, stub)
 	drv := sess.drv
@@ -425,6 +439,8 @@ func TestE2EStreamPTY(t *testing.T) {
 // LOOKS right as it arrives — to the configured judge, with the checklist's own two oracles as the
 // rubric. It skips without the gate, exactly as the live tests do, and its verdict is binding.
 func TestJudgeStreamFrames(t *testing.T) {
+	t.Parallel()
+
 	if !judge.Enabled() {
 		judge.Skip(t)
 		return

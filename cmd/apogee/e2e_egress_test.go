@@ -66,6 +66,8 @@ const egressMCPServers = "mcp-servers:\n" +
 // the process, an `mcp-servers:` endpoint travels the same road, the host allow/deny lists are read
 // LIVE by both surfaces, and a redirect from the upstream is reported rather than followed.
 func TestE2EEgress(t *testing.T) {
+	t.Parallel()
+
 	page := tuitest.PageServer(t, pageBody)
 	redirectTarget := tuitest.PageServer(t, "the redirect was followed")
 	mcpServer := tuitest.MCPEcho(t)
@@ -218,6 +220,8 @@ func TestE2EEgress(t *testing.T) {
 // the TUI exists, so it is a line of output and not a picture, and a hundred-column emulator would
 // wrap it across rows that neither half is findable in.
 func TestE2EEgressDeniedMCPEndpointStopsTheLaunch(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "egress"))
 	sess := launchPTYConfigured(t, stub,
 		egressMCPServers+"url-safety:\n  deny-hosts: ["+mcpHost+"]\n")
@@ -248,6 +252,8 @@ func TestE2EEgressDeniedMCPEndpointStopsTheLaunch(t *testing.T) {
 // is on loopback. It is also the single most expensive test in the package, which is why it stands
 // on its own rather than inside [TestE2EEgress] — see the budget in docs/design/test-drivers.md.
 func TestE2EEgressLongStreamIsNotDeadlined(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "egress"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	launchTUI(t, drv, stub)

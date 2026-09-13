@@ -2,20 +2,18 @@
 # test-shards.sh — run the full race-enabled test suite as several concurrent `go test`
 # processes, so `make check` is bounded by the slowest SHARD rather than by the slowest PACKAGE.
 #
-# Why sharding rather than `t.Parallel()`. Nearly all of the suite's wall time is in two
-# packages, and in both of them it is in tests that CANNOT be parallel tests: every driven
-# launch ends in `tuitest.CheckLeaks` (internal/tuitest/leak.go), which diffs the PROCESS-WIDE
-# goroutine dump, so under parallel tests one test's cleanup would read another test's live
-# goroutines as leaks. (The e2e launch helpers used to add a second constraint — a `t.Setenv`
-# in `assertNoAmbientApogeeConfig`, which the testing package forbids alongside `t.Parallel` —
-# but cmd/apogee's TestMain now clears the ambient `APOGEE_*` configuration once for the
-# binary, and the helper only asserts it is absent. Only tests that deliberately `t.Setenv`
-# still carry that constraint.)
+# Why sharding as well as `t.Parallel()`. Nearly all of the suite's wall time is in two
+# packages. cmd/apogee's e2e tests are parallel tests by default — `tuitest.CheckLeaks`
+# (internal/tuitest/leak.go) attributes goroutines to the test that started them, and the
+# launch helpers neither `t.Setenv` nor swap a package-level seam; only a test that reaches one
+# of those itself stays serial. internal/tui's driver tests are still serial, so that package
+# is bounded by sharding alone, and the balance ACROSS packages — the race-enabled process each
+# heavy package gets, against the one process the rest share — is sharding's other job.
 #
-# The constraint is per-process, so giving each shard its own `go test` process keeps it
-# exactly as it is today: no test is skipped, weakened, reordered within its shard, or run
-# with different flags. Measured on a 9-core box: `go test -race ./...` 212s, sharded 82s cold
-# (no timing cache) and around 55s warm.
+# A shard is a `go test` process of its own, so every test runs exactly as it does today: none
+# is skipped, weakened, reordered within its shard, or run with different flags. Measured on a
+# 9-core box before the cmd/apogee sweep: `go test -race ./...` 212s, sharded 82s cold (no
+# timing cache) and around 55s warm.
 #
 # Balance comes from the timings of the LAST run, cached in .test-timings (gitignored, rebuilt
 # on every run). Without it the packer falls back to equal costs, which still shards correctly —

@@ -51,6 +51,8 @@ const (
 // checks the block on the request that follows the call, quits, resumes the same session with
 // `--continue`, and checks the block again on the request the resumed session's first prompt makes.
 func TestE2ETaskListReachesTheWireAndSurvivesAResume(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "tasklist"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIConfigured(t, drv, stub, taskListStandingPrompt)

@@ -273,6 +273,8 @@ func headlessRunUnderEnv(t *testing.T, stub *stubRunner, name, value string) (st
 // stdout, and an in-process launch supplies its own output writer, which tui.Build refuses a trace
 // beside. launchPTY already passes --tui-trace; --tui-diag is this test's own argument.
 func TestDocsEnvTraceFlagsWriteFilesAndStayOutOfHelp(t *testing.T) {
+	t.Parallel()
+
 	help := rootHelpText(t)
 	for _, flag := range []string{"--tui-trace", "--tui-diag"} {
 		if strings.Contains(help, flag) {
@@ -338,7 +340,6 @@ func rootHelpText(t *testing.T) string {
 // APOGEE_CONFIG set, which is exactly the resolution path this test is not about.
 func TestDocsEnvRootsMoveTheHomeAndTheFence(t *testing.T) {
 	tuitest.CheckLeaks(t)
-	driveConfigWatch(t)
 
 	stub := stubllm.New(t, loadScript(t, "docs-env"))
 	home := upstreamHome(t, stub.URL, stub.Model)

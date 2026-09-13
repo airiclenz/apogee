@@ -1359,8 +1359,6 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 // Firing builds its Agent inside run.Once), so this asserts the seam the Driver actually fills —
 // the observe lane must not leak into it, and the sync lane must not be dropped on the floor.
 func TestScheduleFiringCarriesTheSessionsSyncLane(t *testing.T) {
-	t.Parallel()
-
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)

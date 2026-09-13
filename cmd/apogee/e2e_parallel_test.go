@@ -71,6 +71,8 @@ const serialWatch = 500 * time.Millisecond
 // TestE2EParallelDelegationsFollowAServerSwitch is the pinned run: the session moves onto an entry
 // that pins two, and the reply that follows puts two delegations on screen at the same time.
 func TestE2EParallelDelegationsFollowAServerSwitch(t *testing.T) {
+	t.Parallel()
+
 	start, fanOut, drv := launchParallelSession(t, parallelPin)
 
 	switchToFanOutServer(t, drv, fanOut)
@@ -101,6 +103,8 @@ func TestE2EParallelDelegationsFollowAServerSwitch(t *testing.T) {
 // and the same two delegations, onto an entry that pins nothing. The cap resolves to the serial
 // floor, so the second delegation is not announced at all while the first is still working.
 func TestE2EParallelDelegationsStaySerialWithoutThePin(t *testing.T) {
+	t.Parallel()
+
 	start, fanOut, drv := launchParallelSession(t, parallelNoPin)
 
 	switchToFanOutServer(t, drv, fanOut)

@@ -69,6 +69,8 @@ var salvageCases = []salvageCase{
 // transcript shows the narration the model wrote around its mistake, and the request that followed
 // carries the salvaged call, the text it was cut out of, and the call's result on the wire.
 func TestE2ESalvagedTextCallReachesTheServerAsAToolCall(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range salvageCases {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := stubllm.New(t, loadScript(t, "salvage"))

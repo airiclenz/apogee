@@ -75,6 +75,8 @@ const seatUnreachable = "http://127.0.0.1:1"
 // names `run_on: "session"` runs on the box the conversation is on, while a perfectly usable
 // Sub-agent server stands beside it taking nothing.
 func TestE2ESeatChoiceSessionAskKeepsTheChildOnTheSessionServer(t *testing.T) {
+	t.Parallel()
+
 	run := launchSeatSession(t, seatChoiceModel)
 
 	// Routing is waited for even though the near seat never consults it: the claim is that a
@@ -99,6 +101,8 @@ func TestE2ESeatChoiceSessionAskKeepsTheChildOnTheSessionServer(t *testing.T) {
 // tool, and a delegation that names `run_on: "sub-agents-server"` has its conversation answered by
 // the OTHER server.
 func TestE2ESeatChoiceSubAgentsAskRunsTheChildOnTheTarget(t *testing.T) {
+	t.Parallel()
+
 	run := launchSeatSession(t, seatChoiceModel)
 
 	// The send waits for routing to be in force. A `run_on: "sub-agents-server"` sent before the
@@ -131,6 +135,8 @@ func TestE2ESeatChoiceSubAgentsAskRunsTheChildOnTheTarget(t *testing.T) {
 // would be a decision this feature is not allowed to take. Nothing steers here, so the body is the
 // whole content and its last line is where the note belongs.
 func TestE2ESeatFallbackNoteRidesTheResultWhenTheTargetIsDown(t *testing.T) {
+	t.Parallel()
+
 	run := launchSeatSessionOn(t, seatChoiceModel, seatUnreachable, "down-model")
 
 	awaitNotice(t, run.drv, "sub-agents: "+seatTargetServer+" unavailable")
@@ -161,6 +167,8 @@ func TestE2ESeatFallbackNoteRidesTheResultWhenTheTargetIsDown(t *testing.T) {
 // observable through the stub's log, so the roster half of the gate is pinned by item 13's unit
 // test and this case pins the prompt half.
 func TestE2ESeatChoiceFixedStatesNoDelegationsLine(t *testing.T) {
+	t.Parallel()
+
 	run := launchSeatSession(t, seatChoiceFixed)
 
 	submit(run.drv, seatPlainPrompt)
@@ -186,6 +194,8 @@ func TestE2ESeatChoiceFixedStatesNoDelegationsLine(t *testing.T) {
 // would therefore pass on a session that started with the near seat named but undescribed, which is
 // the one thing this asks about.
 func TestE2ESeatDelegationsLineDescribesBothSeatsOnTheFirstRequest(t *testing.T) {
+	t.Parallel()
+
 	run := launchSeatSession(t, seatChoiceModel)
 
 	submit(run.drv, seatPlainPrompt)
@@ -215,6 +225,8 @@ func TestE2ESeatDelegationsLineDescribesBothSeatsOnTheFirstRequest(t *testing.T)
 // promises. So this closes the far server for real, waits for apogee to notice, and asks whether
 // the line moved.
 func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
+	t.Parallel()
+
 	run := launchSeatSession(t, seatChoiceModel)
 
 	awaitNotice(t, run.drv, "sub-agents: routing to "+seatTargetServer)

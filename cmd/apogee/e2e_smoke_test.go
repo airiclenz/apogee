@@ -29,6 +29,8 @@ const settled = 150 * time.Millisecond
 // command, the config resolution, the Agent, the tool layer, the approval gate, the session store
 // and the renderer — everything but the terminal, which is the emulator.
 func TestE2ESmokeInProcess(t *testing.T) {
+	t.Parallel()
+
 	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
 	if err != nil {
 		t.Fatalf("load the smoke script: %v", err)
@@ -238,6 +240,8 @@ func TestE2ESmokeInProcess(t *testing.T) {
 // repeating them here would buy a second copy of the same evidence at the price of the package's
 // wall-clock budget.
 func TestE2ESmokePTY(t *testing.T) {
+	t.Parallel()
+
 	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
 	if err != nil {
 		t.Fatalf("load the smoke script: %v", err)

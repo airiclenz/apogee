@@ -46,6 +46,8 @@ const thinkingEmpty = "no thinking recorded yet"
 // TestE2EThinkingPaneShowsEitherWireSpelling drives a session, opens /thinking, and reads the
 // model's reasoning off the frame — once per wire spelling of the channel.
 func TestE2EThinkingPaneShowsEitherWireSpelling(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct{ name, fixture string }{
 		{name: "reasoning_content, as llama.cpp and vLLM send it", fixture: "thinking"},
 		{name: "reasoning, as Ollama and OpenRouter send it", fixture: "thinking-reasoning-field"},

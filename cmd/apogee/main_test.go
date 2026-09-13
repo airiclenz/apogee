@@ -7,7 +7,9 @@ package main
 // TestNoTestWritesTheRealApogeeHome guards the override against a future test file that
 // resets HOME to the real home. The same TestMain clears the developer's ambient `APOGEE_*`
 // configuration once for the binary — TestAmbientApogeeConfigIsClearedForTheSuite guards
-// that — so the launch helpers assert it is absent instead of each `t.Setenv`-ing it away.
+// that — so the launch helpers assert it is absent instead of each `t.Setenv`-ing it away. It
+// also puts the session's config watcher on its fast cadence once, for the same reason: the seam
+// is a package var, and a per-launch swap of it is a write that parallel tests would race on.
 
 import (
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/config"
 )
@@ -79,6 +82,14 @@ func TestMain(m *testing.M) {
 	for _, name := range ambientApogeeEnv {
 		_ = os.Unsetenv(name)
 	}
+	// The config watcher's cadence, likewise once for the binary rather than per launch. The
+	// production one — a poll a second plus a quarter-second settle (internal/filewatch) — is the
+	// right number for a human saving a document and a second and a half of the suite's budget for
+	// every save a driver makes; the one test that saves (T-16's watcher step) is why the seam
+	// exists, and a run that never touches config.yaml pays nothing for the fast one. Set here and
+	// never restored: production never reassigns the seam, and a per-test swap with a t.Cleanup
+	// restore was the write that kept every driven launch out of t.Parallel.
+	configWatchTiming = watchTiming{Interval: 50 * time.Millisecond, Settle: 50 * time.Millisecond}
 
 	// Built for every ordinary run of the suite — never for the key-command fixture's re-exec of
 	// this binary (keysource_test.go), which happens several times per run and only ever prints a

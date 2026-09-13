@@ -60,6 +60,8 @@ type symlinkedHome struct {
 // home the operator configured, symlinks and all, and a header that started announcing the resolved
 // path would fail this test rather than silently change what is covered.
 func TestE2EAnnouncedSkillPathsUnderASymlinkedHome(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "announced-skill"))
 	fx := announcedSkillFixture(t, stub)
 	drv := tuitest.NewDriver(t, e2eSize)
@@ -461,6 +463,8 @@ var announcedSeatCalls = []string{`"run_on":"session"`, `"run_on":"sub-agents-se
 // it is answering (seat-session.yaml's captures) and hands them straight back, so the day the line
 // changes this test fails rather than quietly testing a constant of its own.
 func TestE2EAnnouncedDelegationSeatsAreAcceptedVerbatim(t *testing.T) {
+	t.Parallel()
+
 	run := launchSeatSession(t, seatChoiceModel)
 
 	// Routing has to be in force before the far value can mean anything: an ask that finds no

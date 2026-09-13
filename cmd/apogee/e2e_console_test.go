@@ -48,6 +48,8 @@ const (
 // it. It skips on Windows, where console_open answers "console is not supported on Windows yet" and
 // the item is BLOCKED for a human too (the PTY driver skips there anyway).
 func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "console"))
 	sess := launchPTYConfigured(t, stub, consoleToolsOn)
 

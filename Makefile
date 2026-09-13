@@ -169,10 +169,10 @@ install: build
 
 ## test: run the full test suite with the race detector, sharded across processes
 #
-# The suite's wall time sits almost entirely in two packages whose tests cannot be `t.Parallel`
-# ones — the process-wide goroutine dump behind `tuitest.CheckLeaks` (the e2e launch helpers no
-# longer `t.Setenv`; cmd/apogee's TestMain clears the ambient `APOGEE_*` configuration once) —
-# so the split is by PROCESS, which keeps that constraint exactly as it is.
+# The suite's wall time sits almost entirely in two packages. cmd/apogee's e2e tests are
+# `t.Parallel` ones (serial only where a test itself `t.Setenv`s or swaps a package-level seam);
+# internal/tui's driver tests are still serial, and sharding is what bounds that package and
+# balances the heavy packages against the rest — a split by PROCESS, which changes no test.
 # scripts/test-shards.sh holds the reasoning and the shard plan; `go test -race -count=1 ./...`
 # remains the equivalent single-process run for a bisect or a one-off.
 .PHONY: test

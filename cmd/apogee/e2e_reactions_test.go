@@ -258,6 +258,8 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 // to a Reaction that exits 1, the watcher applies it, and the next exchange fires it — the failure
 // lands as ONE transcript note and is absent from the record the session saved.
 func TestE2EHooksReportAFailureAsAnEphemeralNote(t *testing.T) {
+	t.Parallel()
+
 	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
 	if err != nil {
 		t.Fatalf("load the smoke script: %v", err)
@@ -843,6 +845,8 @@ func TestE2EGateAsksInAHeadlessRun(t *testing.T) {
 // without asking in every mode on the ladder, so the pane in front of the human here exists because
 // a gate asked for it and for no other reason.
 func TestE2EGateAsksInTheTUI(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "reactions"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIConfigured(t, drv, stub, gateConfig(`printf 'ask\nlooks risky\n'`),
@@ -880,6 +884,8 @@ func TestE2EGateAsksInTheTUI(t *testing.T) {
 // hands the engine the Bridge's reporter, this one proves what the reporter puts in front of the
 // human when a real gate fails inside a real Turn.
 func TestE2EGateFailureIsReportedInTheTUI(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "reactions"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIConfigured(t, drv, stub, gateConfig("exit 1"),

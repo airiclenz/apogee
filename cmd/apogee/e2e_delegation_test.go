@@ -74,6 +74,8 @@ const (
 // The kill is the program's context cancelled — the in-process half of ratified call 14. The other
 // half, a real SIGKILL to a real pid, is TestE2EDelegationRecordSurvivesSIGKILL below.
 func TestE2EDelegationRecordSurvivesAKill(t *testing.T) {
+	t.Parallel()
+
 	t.Run("a delegation still running reopens closed and noted", func(t *testing.T) {
 		stub := stubllm.New(t, loadScript(t, "delegate-hang"))
 		drv := tuitest.NewDriver(t, e2eSize)
@@ -161,6 +163,8 @@ func TestE2EDelegationRecordSurvivesAKill(t *testing.T) {
 // That is the claim no in-process driver can make — a cancelled context still unwinds — and it is
 // what proves the record on disk was written by the progress save rather than by a tidy exit.
 func TestE2EDelegationRecordSurvivesSIGKILL(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "delegate-hang"))
 	sess := launchPTY(t, stub)
 	drv := sess.drv
@@ -202,6 +206,8 @@ func TestE2EDelegationRecordSurvivesSIGKILL(t *testing.T) {
 // the configured bound, the human is told once and told what raises it, and the parent is handed a
 // clearly-labelled partial result rather than a failure.
 func TestE2EDelegationStepCap(t *testing.T) {
+	t.Parallel()
+
 	t.Run("a capped child stops, says so, and hands back a labelled partial", func(t *testing.T) {
 		stub := stubllm.New(t, loadScript(t, "delegate-cap"))
 		drv := tuitest.NewDriver(t, e2eSize)
@@ -344,6 +350,8 @@ func TestE2EDelegationStepCap(t *testing.T) {
 // read. It is the judgement half the checklist called manual — "whether the partial marker reads
 // sensibly to a human, which no assertion makes" — and it is binding wherever the gate is set.
 func TestJudgeDelegationStepCap(t *testing.T) {
+	t.Parallel()
+
 	if !judge.Enabled() {
 		judge.Skip(t)
 		return
@@ -416,6 +424,8 @@ const (
 // internal/agent, where standingSystem can be called directly; this one asks the question the way a
 // user meets it — one conversation, one delegation, and the request log the upstream kept.
 func TestE2EDelegationChildCarriesTheReportBlock(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "delegate-report"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIConfigured(t, drv, stub, reportStandingPrompt)

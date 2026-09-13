@@ -159,6 +159,8 @@ func TestE2EApprovalForcedLookSurvivesAutoMode(t *testing.T) {
 // establish — and one exchange is told from the next by waiting for the prompt box to go idle,
 // never by waiting for reply text the exchange before it already painted.
 func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "guard"))
 	sess := launchPTY(t, stub)
 	drv := sess.drv

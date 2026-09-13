@@ -98,8 +98,11 @@ func launchTUIOn(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, 
 	return startSession(t, drv, stub, home, ws, args...)
 }
 
-// e2eGuards is what every driven launch registers before it creates anything: the leak check, the
-// ambient-environment refusal, and the fast config watcher.
+// e2eGuards is what every driven launch registers before it creates anything: the leak check and
+// the ambient-environment refusal. Neither writes anything the process shares — the leak check
+// attributes goroutines to the test that started them and the refusal only reads the environment
+// TestMain cleared — which is what lets a driven launch run under t.Parallel. The fast config
+// watcher is not here for the same reason: it is a package-var seam, set once in TestMain.
 //
 // The leak check goes first so it is the LAST cleanup to run and sees a tree that has already been
 // torn down — whatever is still running then is a leak.
@@ -108,7 +111,6 @@ func e2eGuards(t *testing.T) {
 
 	tuitest.CheckLeaks(t)
 	assertNoAmbientApogeeConfig(t)
-	driveConfigWatch(t)
 }
 
 // startSession builds the session around a home and a workspace and starts its first launch. An
@@ -123,21 +125,6 @@ func startSession(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home,
 	s := &e2eSession{t: t, home: home, ws: ws, stub: stub, args: args}
 	s.start(drv)
 	return s
-}
-
-// driveConfigWatch runs the session's config watcher in milliseconds for the length of one test.
-//
-// The production cadence is a poll a second plus a quarter-second settle (internal/filewatch) — the
-// right numbers for a human saving a document, and a second and a half of a test suite's budget for
-// every save a driver makes. Every driven launch takes the fast one: a run that never touches
-// config.yaml pays nothing for it, and the one test that does (T-16's watcher step) is the reason
-// the seam exists.
-func driveConfigWatch(t *testing.T) {
-	t.Helper()
-
-	was := configWatchTiming
-	configWatchTiming = watchTiming{Interval: 50 * time.Millisecond, Settle: 50 * time.Millisecond}
-	t.Cleanup(func() { configWatchTiming = was })
 }
 
 // appendHomeConfig adds lines to a home's config.yaml. It appends rather than rewrites so the

@@ -96,6 +96,8 @@ func click(drv *tuitest.Driver, x, y int) {
 // TestE2EPopupFramesLists records the three list pop-ups: the `/` dropdown, the picker and the
 // `/sessions` browser.
 func TestE2EPopupFramesLists(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "popups"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -152,6 +154,8 @@ func TestE2EPopupFramesLists(t *testing.T) {
 // the box on the clicked row fills, so the highlight-then-send rule is readable in the frame rather
 // than only in the answer.
 func TestE2EPopupClickAsk(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "popups"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -196,6 +200,8 @@ func TestE2EPopupClickAsk(t *testing.T) {
 // the row the pane itself highlighted, on a pane that has been up long enough for its latch to have
 // landed, still grants nothing.
 func TestE2EPopupClickApproval(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "popups"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -252,6 +258,8 @@ func TestE2EPopupClickApproval(t *testing.T) {
 // anything is created — which is exactly the case a handler that dropped its Cmd, or re-derived the
 // pane's geometry after the swap, would get wrong.
 func TestE2EPopupClickLists(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "popups"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -334,6 +342,8 @@ func TestE2EPopupClickLists(t *testing.T) {
 // single-select, multi-select with one box ticked, single-select with a custom answer typed, and
 // free-text.
 func TestE2EPopupFramesPrompts(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "popups"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -403,6 +413,8 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 // `/compact` and the menu's own first row `/clear` would both RUN on accept, which is exactly what
 // the two-click rule exists to keep a stray press away from.
 func TestE2EPopupClickDropdown(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "popups"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)

@@ -70,6 +70,8 @@ var liveStateSize = tuitest.Size{W: 140, H: 30}
 // `/confine` verbs that move it, the two settings rows that must read the engine rather than the
 // boot snapshot, and the one note a save on disk leaves behind.
 func TestE2ELiveStateFollowsTheRunningSession(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "livestate"))
 	drv := tuitest.NewDriver(t, liveStateSize)
 	sess := launchTUI(t, drv, stub)

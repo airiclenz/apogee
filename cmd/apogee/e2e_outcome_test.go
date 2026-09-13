@@ -68,6 +68,8 @@ var linesFixture = []string{
 // slot says what the tool did, in the tone the tool's own verdict earns, and the body it quotes has
 // no vote in either.
 func TestE2EOutcomeSlotsCarryTheToolsVerdict(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "outcome"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -140,6 +142,8 @@ func TestE2EOutcomeSlotsCarryTheToolsVerdict(t *testing.T) {
 // written by the replay that closes every call a record left open (closeInterruptedCalls), so it
 // exists from the reopen onwards and nowhere before it.
 func TestE2EOutcomeCancelledDelegationCarriesTheFailureTone(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "outcome"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -185,6 +189,8 @@ func TestE2EOutcomeCancelledDelegationCarriesTheFailureTone(t *testing.T) {
 // test above proves the renderer asks for the scheme's error role; this one proves what a terminal
 // is actually told, which is the half a human at a real keyboard was being asked to judge.
 func TestE2EOutcomeTonePTY(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "outcome"))
 	sess := launchPTY(t, stub)
 

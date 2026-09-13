@@ -62,6 +62,8 @@ const (
 // painted by the name the out-of-band call produced, in place of the task's first line it wore
 // while the call was in flight.
 func TestE2ENamingPaintsAGeneratedName(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "naming"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -135,6 +137,8 @@ func TestE2ENamingReachesAHeadlessSubAgentLine(t *testing.T) {
 // made at all — not one that is made and discarded. The delegation still runs and still paints, on
 // the task's first line it has always worn.
 func TestE2ENamingIsSilentWithAutoTitleOff(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, withoutTheChildGate(loadScript(t, "naming")))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIConfigured(t, drv, stub, "auto-title: false\n")

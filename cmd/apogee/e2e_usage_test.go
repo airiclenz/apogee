@@ -54,6 +54,8 @@ var usageHeaderOrder = regexp.MustCompile(`agent\s+calls\s+prompt\s+cached\s+com
 // server answers mostly from its cache, the /usage pane, a delegation, the /sessions row, and the
 // totals a --continue resume carries forward.
 func TestE2EUsageReportsCachedTokensAndDelegateSpend(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "cached-usage"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -151,6 +153,8 @@ func TestE2EUsageReportsCachedTokensAndDelegateSpend(t *testing.T) {
 // A column of zeros would read as a cache miss, which is a different fact and not one the server
 // stated.
 func TestE2EUsageHidesTheCachedColumnWithoutABreakdown(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "cached-usage"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)

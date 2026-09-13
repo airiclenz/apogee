@@ -37,6 +37,8 @@ const (
 // TestE2EWidthTicksMultiSelectChoices is T-20 steps 2 to 4: the checkbox column of a multi-select
 // question, the tick that goes in it, and the labels that have to stay in one column beside it.
 func TestE2EWidthTicksMultiSelectChoices(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "widths"))
 	drv := unicodeCoreTerminal(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
@@ -103,6 +105,8 @@ func TestE2EWidthTicksMultiSelectChoices(t *testing.T) {
 // the authority back to wcwidth would re-measure `⚠️` as one cell and every column right of it would
 // move.
 func TestE2EWidthSurvivesAColourSchemeSwitch(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "widths"))
 	drv := unicodeCoreTerminal(t, e2eSize)
 	diag := filepath.Join(t.TempDir(), "tui-diag.txt")

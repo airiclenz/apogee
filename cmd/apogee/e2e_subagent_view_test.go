@@ -87,6 +87,8 @@ const (
 // it is showing, it carries a message into that child's conversation, it hands the parent the
 // notice, and esc puts the reader back where they were.
 func TestE2ESubAgentView(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "run-view"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIOn(t, drv, stub, runViewHome(t, stub), "")

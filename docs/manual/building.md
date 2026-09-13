@@ -57,18 +57,20 @@ act; CI creates the tag and nothing more.
 ## Testing
 
 `make test` does not run `go test ./...` in one process. Almost all of the suite's wall time
-is in two packages — `cmd/apogee` and `internal/tui` — and in both it is in tests that
-*cannot* be `t.Parallel` tests: the e2e launch helpers call `t.Setenv` (which the testing
-package forbids alongside `t.Parallel`), and `tuitest.CheckLeaks` diffs the process-wide
-goroutine dump, so a concurrent test's goroutines would read as another test's leak. Adding
-`-parallel` therefore changes nothing: on a 9-core box `-parallel 1` and `-parallel 32` are
-within 3% of each other.
+is in two packages — `cmd/apogee` and `internal/tui`. In `cmd/apogee` the e2e tests are
+`t.Parallel` tests by default: `tuitest.CheckLeaks` attributes goroutines to the test that
+started them, and the launch helpers neither `t.Setenv` (the testing package forbids that
+alongside `t.Parallel`) nor swap a package-level seam. Only a test that reaches one of those
+itself — directly or through a helper — stays serial, and the testing package runs those
+before it releases the parallel ones. `internal/tui`'s driver tests are still serial, so a
+`-parallel` flag alone does not bound that package.
 
 `scripts/test-shards.sh` splits those two packages across several concurrent `go test`
-processes instead. Both constraints are per-process, so every test runs exactly as it does
+processes as well. A shard is a process of its own, so every test runs exactly as it does
 today — same flags, same isolation, nothing skipped or reordered within its shard — and the
 run is bounded by the slowest shard rather than the slowest package. Measured on a 9-core
-box: 212s in one process, 68s sharded, with `make check` going from 224s to 77s.
+box before the `cmd/apogee` sweep: 212s in one process, 68s sharded, with `make check` going
+from 224s to 77s.
 
 Shards are balanced from the previous run's per-test durations, cached in `.test-timings`
 (gitignored, rewritten every run). A missing or stale cache costs only a less even split,

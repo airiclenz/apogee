@@ -34,9 +34,10 @@ import (
 // configWatchTiming is the seam onto how fast the session's `config.yaml` watcher runs (ADR 0041
 // decision 3). Its zero value — the production one — leaves internal/filewatch's own constants in
 // place: a poll every second, a quarter of a second of quiet before a save is reported, which is
-// what a feature that ends with a human saving a document should cost. A driver test replaces it so
-// a watcher step costs a tenth of a second instead of a second and a half of a test suite's budget.
-// Production never reassigns it.
+// what a feature that ends with a human saving a document should cost. The test suite's TestMain
+// replaces it once, for the whole binary, so a watcher step costs a tenth of a second instead of a
+// second and a half of the suite's budget — once rather than per test, because a per-test swap is a
+// write the parallel driver tests would race on. Production never reassigns it.
 //
 // It is a pair of durations rather than a filewatch value because the watcher's own knobs are
 // exported fields settable before Start, and the seam's job is only to carry the two numbers to

@@ -31,6 +31,8 @@ const (
 )
 
 func TestE2EQuitMidAnswerStillSavesTheSession(t *testing.T) {
+	t.Parallel()
+
 	stub := stubllm.New(t, loadScript(t, "quitsave"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)

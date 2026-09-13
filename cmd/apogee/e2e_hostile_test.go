@@ -74,6 +74,8 @@ func TestE2EHostileProbeKeepsItsOwnRows(t *testing.T) {
 // from a hostile MODEL label, and the /skills note drawn from a hostile skill DIRECTORY name — the
 // two surfaces the item's own commits changed.
 func TestE2EHostileSurfacesKeepTheirOwnRows(t *testing.T) {
+	t.Parallel()
+
 	ws := hostileWorkspace(t)
 	stub := stubllm.New(t, loadScript(t, "hostile"))
 	drv := tuitest.NewDriver(t, e2eSize)
@@ -146,6 +148,8 @@ func TestE2EHostileSurfacesKeepTheirOwnRows(t *testing.T) {
 // a newline or a carriage return arrives spelled `\n` / `\r` — escapeRowBreaks, internal/tools —
 // so one entry is one row and no row can be overwritten by the one after it.
 func TestE2EHostileToolResultsKeepOneRowPerEntry(t *testing.T) {
+	t.Parallel()
+
 	ws := hostileWorkspace(t)
 	stub := stubllm.New(t, loadScript(t, "hostile"))
 	drv := tuitest.NewDriver(t, e2eSize)
@@ -196,6 +200,8 @@ func TestE2EHostileToolResultsKeepOneRowPerEntry(t *testing.T) {
 // sentence, and the approval pane that has to wrap a three-hundred-character argument without letting
 // a continuation row fall back to the pane's left edge.
 func TestE2EHostileWrapsUnderItsOwnIndent(t *testing.T) {
+	t.Parallel()
+
 	ws := hostileWorkspace(t)
 	stub := stubllm.New(t, loadScript(t, "hostile"))
 	drv := tuitest.NewDriver(t, narrowHostileSize)
@@ -258,6 +264,8 @@ func TestE2EHostileWrapsUnderItsOwnIndent(t *testing.T) {
 // what is left is whether a reader looking at these two frames would take the hostile text for
 // apogee's own.
 func TestJudgeHostileRowsReadAsOneRow(t *testing.T) {
+	t.Parallel()
+
 	if !judge.Enabled() {
 		judge.Skip(t)
 		return
