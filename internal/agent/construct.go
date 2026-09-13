@@ -125,10 +125,13 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
 	// onClose rides here for the same reason: the lifecycle owns the moment an Exchange ends, the
 	// Agent owns what an ending Exchange costs — the undo journal's closing capture (ADR 0074).
+	// onRollback likewise: the lifecycle owns the moment a cancelled Turn is rolled back, the Agent
+	// owns the ladder that climbed the tool results the rollback drops (ADR 0077 D4).
 	a.turns = &turnLifecycle{
 		conv:          &a.conv,
 		compactFailed: &a.compactFailed,
 		onClose:       a.closeUndoGroup,
+		onRollback:    a.rearmFillNotice,
 	}
 	return a, nil
 }

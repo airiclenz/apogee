@@ -330,6 +330,85 @@ func TestContextFillNoticeReArmsAfterAnAbortedExchange(t *testing.T) {
 	}
 }
 
+// A cancelled Turn's rollback (end()'s endCancelled row, turn.go) drops the Turn's committed tool
+// results — including the one a notice rode on — the way AbortExchange does, and the Step-driven
+// host re-attempts the Turn on resume: the ladder therefore ends its climb at the rollback
+// (turnLifecycle.onRollback → rearmFillNotice), so the re-attempt's first result back at 50–74%
+// fires the 50 rung again, once, rather than staying silent until 75 over a result the model never
+// saw.
+func TestContextFillNoticeReArmsAfterACancelledTurnRollsBack(t *testing.T) {
+	sink := &recordingSink{}
+	started := make(chan struct{})
+	up := &scriptedResponder{scripts: [][]provider.Delta{
+		// Turn 1: the probe result fires the 50 rung, then the blocking tool is cancelled and
+		// the Turn rolls back over both.
+		twoToolCallScript(toolReq{"c1", "probe", `{"n":1}`}, toolReq{"c2", "block", "{}"}),
+		toolCallScript("c3", "probe", `{"n":2}`), // the re-attempt: straight back onto the 50 rung
+		contentScript("done"),
+	}}
+	cfg := fillConfig(sink)
+	cfg.Tools = domain.NewToolRegistry()
+	if err := cfg.Tools.Register(sizedTool(8300, 8300)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := cfg.Tools.Register(blockingTool{name: "block", started: started}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "start"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-started
+		cancel()
+	}()
+	res, err := a.Step(ctx)
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("Step status = %q, want %q", res.Status, domain.StatusCancelled)
+	}
+	if fired := noticeFirings(sink); len(fired) != 1 || !strings.HasPrefix(fired[0].Detail, "rung 50 (") {
+		t.Fatalf("firings before the rollback = %+v, want exactly one at rung 50", fired)
+	}
+	if got := a.conv.Len(); got != 1 {
+		t.Fatalf("after the rollback the conversation has %d messages, want 1 (the user input alone)", got)
+	}
+	if a.fillRung != 0 {
+		t.Fatalf("fillRung = %d after the rollback, want 0 — the ladder re-arms with the dropped result", a.fillRung)
+	}
+	// The rollback a Step-driven host may reach again on resume: a second re-arm is a no-op.
+	a.rearmFillNotice()
+	if a.fillRung != 0 {
+		t.Fatalf("fillRung = %d after a second re-arm, want 0", a.fillRung)
+	}
+
+	// Resume: the open Exchange re-attempts the Turn against the next script.
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run (resume): %v", err)
+	}
+
+	fired := noticeFirings(sink)
+	if len(fired) != 2 || !strings.HasPrefix(fired[1].Detail, "rung 50 (") {
+		t.Fatalf("firings = %+v, want the 50 rung before the rollback and exactly once again after it", fired)
+	}
+	msgs := toolMessages(a)
+	if len(msgs) != 1 {
+		t.Fatalf("conversation holds %d tool messages after the resume, want the one re-attempt result", len(msgs))
+	}
+	span := noticeSpan(t, msgs[0])
+	if !strings.Contains(msgs[0].Content, "context: 5") || span.Reaction != contextFillNoticeID {
+		t.Errorf("post-rollback tool message = %q, want the 50 rung's fact line as its trailer", msgs[0].Content)
+	}
+}
+
 // The window in the line is the advertised one, and a working window with no advertised one is
 // the only room anyone named, so it stands in; no window at all is silence — no notice, no
 // firing, no ledger — rather than a percent of a guessed line.

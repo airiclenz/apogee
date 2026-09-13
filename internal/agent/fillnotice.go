@@ -41,9 +41,9 @@ var (
 // firing closes, which appendToolResult has not yet committed — and fires ONCE per rung per
 // climb: the highest rung the fill has reached, reporting the actual percent, and nothing again
 // until the fill crosses the next rung. A climb ends where the conversation is replaced or
-// scrapped: a fold (fold, below), a /clear, a resumed snapshot or an aborted Exchange re-arms the
-// whole ladder (rearmFillNotice), so the first result of the new climb fires whichever rung it
-// reaches — 50 at 52%, 75 at 80% —
+// scrapped: a fold (fold, below), a /clear, a resumed snapshot, an aborted Exchange or a cancelled
+// Turn's rollback re-arms the whole ladder (rearmFillNotice), so the first result of the new climb
+// fires whichever rung it reaches — 50 at 52%, 75 at 80% —
 // exactly as a fresh session would at that fill, and no rung is ever marked fired without its
 // notice having been given. A zero fill is an unknown window or an uncalibrated ratio, and the
 // notice is silent there rather than guessing — the standing posture.
@@ -66,7 +66,8 @@ func (a *Agent) contextFillNotice(_ context.Context, view domain.LoopView, _ dom
 	switch {
 	case reached < a.fillRung:
 		// Every path that shrinks the conversation behind the model's back — a fold, /clear, a
-		// restored snapshot, an aborted Exchange — re-arms the whole ladder, so a fill that
+		// restored snapshot, an aborted Exchange, a cancelled Turn's rollback — re-arms the whole
+		// ladder, so a fill that
 		// reads under a fired rung here is the estimate moving — a usage report recalibrated
 		// the chars→token ratio — not a shorter history. Re-arm the rungs the reading fell
 		// under, silently: the model was told the higher figure already, and a "50" at 74%
@@ -95,10 +96,13 @@ func (a *Agent) contextFillNotice(_ context.Context, view domain.LoopView, _ dom
 // rearmFillNotice ends the current climb: every rung is armed again, so the next result the
 // notice measures fires whichever rung its fill reaches, as the first result of a session does.
 // Called where the conversation the ladder climbed is replaced or scrapped — after a fold that ran
-// (fold), on /clear (ClearContext), on a snapshot swapped into a live Agent (RestoreSession) and on
-// an aborted Exchange (AbortExchange, which drops the tool result a notice rode on). Without it a
-// fold landing the next result at 52% would leave the 50 rung "fired" from the climb the fold
-// just erased, and the model would hear nothing until 75.
+// (fold), on /clear (ClearContext), on a snapshot swapped into a live Agent (RestoreSession), on
+// an aborted Exchange (AbortExchange, which drops the tool result a notice rode on) and on a
+// cancelled Turn's rollback (end()'s endCancelled row through turnLifecycle.onRollback, which drops
+// the same results and which a Step-driven host may reach again on resume — the reset is
+// idempotent, so twice is harmless). Without it a fold landing the next result at 52% would leave
+// the 50 rung "fired" from the climb the fold just erased, and the model would hear nothing until
+// 75.
 func (a *Agent) rearmFillNotice() { a.fillRung = 0 }
 
 // rungReached reports the highest rung at or under pct, and 0 when the fill is under the first.

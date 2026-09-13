@@ -41,6 +41,16 @@ type turnLifecycle struct {
 	// exactly closeExchange's own contract: endCancelled is not a caller, so a Turn that will be
 	// re-attempted never closes the group its re-attempt writes into.
 	onClose func()
+
+	// onRollback is fired by end()'s endCancelled row, once per Turn ROLLBACK, after the
+	// conversation is dropped back to the Turn's boundary — the seam the context-fill notice's
+	// re-arm hangs off (Agent.rearmFillNotice, fillnotice.go). The rollback drops the Turn's
+	// committed tool results, including the one a notice rode on, so the ladder must end its climb
+	// here exactly as it does on AbortExchange. Same shape as onClose for the same reason: this
+	// type owns the MOMENT a Turn is rolled back and nothing of what the Agent tracks against the
+	// conversation it dropped. nil is inert, never an error. A Step-driven host may re-attempt the
+	// Turn and cancel again, so what hangs here must be idempotent (the re-arm is).
+	onRollback func()
 }
 
 // turnRun is the working state of one Turn attempt — the values step() used to thread as five
@@ -134,6 +144,11 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		l.conv.DropRange(t.rollback, l.conv.Len())
 		l.conv.TruncateDeferred(t.deferredFloor)
 		l.restoreDeferred(t.deferred)
+		// The dropped tool results may include the one a context-fill notice rode on: let the
+		// Agent end the ladder's climb (onRollback → rearmFillNotice), as AbortExchange does.
+		if l.onRollback != nil {
+			l.onRollback()
+		}
 		// inExchange is deliberately left untouched (NOT cleared) and the counter is NOT advanced,
 		// so the snapshot taken here resumes and re-attempts the Turn from serializable state: a
 		// cancelled Turn does not END the Exchange — the user input / tool results committed so far
