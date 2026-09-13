@@ -285,15 +285,17 @@ func newLiveSettings(opts config.Options) *liveSettings {
 
 		// The Reaction surface as one generation, seeded from the very values the composition root
 		// hands the engine holder (wire_live.go): the seven Floor keys through their one negation
-		// seam, `bypass:`, and the two lanes the resolved `reactions:` list divides into — the
-		// observe rows the Runner was built from and the sync rows the Agent runs. Seeded rather
-		// than left zero because the zero Generation is a DIFFERENT session — every guard on,
-		// nothing armed — and a first partial edit would install it over what the file asked for.
+		// seam, `bypass:`, the `context-fill-notice:` switch as is, and the two lanes the resolved
+		// `reactions:` list divides into — the observe rows the Runner was built from and the sync
+		// rows the Agent runs. Seeded rather than left zero because the zero Generation is a
+		// DIFFERENT session — every guard on, nothing armed — and a first partial edit would
+		// install it over what the file asked for.
 		gen: apogee.Generation{
-			Floor:   floorFromOptions(opts),
-			Bypass:  opts.Bypass,
-			Observe: observe,
-			Sync:    sync,
+			Floor:             floorFromOptions(opts),
+			Bypass:            opts.Bypass,
+			ContextFillNotice: opts.ContextFillNotice,
+			Observe:           observe,
+			Sync:              sync,
 		},
 
 		delegateMaxSteps: opts.DelegateMaxSteps,

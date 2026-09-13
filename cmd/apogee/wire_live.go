@@ -202,10 +202,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// entry twice.
 	observe, sync := domain.SplitLanes(w.opts.Reactions)
 	w.engine.seedReactions(w.hooks, apogee.Generation{
-		Floor:   w.cfg.Floor,
-		Bypass:  w.cfg.Bypass,
-		Observe: observe,
-		Sync:    sync,
+		Floor:             w.cfg.Floor,
+		Bypass:            w.cfg.Bypass,
+		ContextFillNotice: w.cfg.ContextFillNotice,
+		Observe:           observe,
+		Sync:              sync,
 	})
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on

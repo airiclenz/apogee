@@ -522,11 +522,12 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"ToolUseEnforcer": true, "EmptyResponseRecovery": true, "ToolCallRepair": true,
 		"ToolCallSalvage": true,
 		"ToolLoopBreaker": true, "ToolResultCap": true, "ReadCache": true,
-		"UndoSnapshots":    true,
-		"DelegateMaxSteps": true,
-		"UseShippedSkills": true,
-		"UseDefaultPrompt": true,
-		"AutoTitle":        true, "RememberModel": true,
+		"ContextFillNotice": true,
+		"UndoSnapshots":     true,
+		"DelegateMaxSteps":  true,
+		"UseShippedSkills":  true,
+		"UseDefaultPrompt":  true,
+		"AutoTitle":         true, "RememberModel": true,
 		"ContextWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
 		"ToolsDisabled": true,
 		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true,
@@ -575,12 +576,13 @@ func everyKeyFileConfig() fileConfig {
 		ToolCallRepair: boolptr(false), ToolCallSalvage: boolptr(false),
 		ToolLoopBreaker: boolptr(false),
 		ToolResultCap:   boolptr(false), ReadCache: boolptr(false),
-		UndoSnapshots:    boolptr(false),
-		UseShippedSkills: boolptr(false),
-		UseDefaultPrompt: boolptr(false),
-		DelegateMaxSteps: intptr(12),
-		RememberModel:    boolptr(true),
-		ContextWindow:    64000, ResponseReserve: 0.3,
+		ContextFillNotice: boolptr(true),
+		UndoSnapshots:     boolptr(false),
+		UseShippedSkills:  boolptr(false),
+		UseDefaultPrompt:  boolptr(false),
+		DelegateMaxSteps:  intptr(12),
+		RememberModel:     boolptr(true),
+		ContextWindow:     64000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
 			Run: []any{"true"}}},
@@ -1722,6 +1724,42 @@ func TestApplyConfigRememberModel(t *testing.T) {
 			}
 			if opts.RememberModel != tt.want {
 				t.Errorf("opts.rememberModel = %v; want %v", opts.RememberModel, tt.want)
+			}
+		})
+	}
+}
+
+// `context-fill-notice` is remember-model's shape again — a file-only pointer whose built-in default
+// is OFF — for ADR 0077's reason: the notice steers the model rather than correcting it, so it is
+// not a Floor guard and ships off until bench evidence turns it on. The seeded template is in the
+// table because it carries the key as an ACTIVE `false` line: a first run must come back off with
+// the line read rather than read past, and a template that ever flipped the line would fail here
+// before it shipped the notice on by default.
+func TestApplyConfigContextFillNotice(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fileYAML string
+		want     bool
+	}{
+		{name: "absent key ⇒ off", want: false},
+		{name: "an explicit true opts in", fileYAML: "context-fill-notice: true\n", want: true},
+		{name: "an explicit false is the default, said out loud", fileYAML: "context-fill-notice: false\n", want: false},
+		{name: "the seeded template ships it off", fileYAML: string(defaultConfigYAML), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			if tt.fileYAML != "" {
+				writeConfigHome(t, home, tt.fileYAML)
+			}
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.ContextFillNotice != tt.want {
+				t.Errorf("opts.ContextFillNotice = %v; want %v", opts.ContextFillNotice, tt.want)
 			}
 		})
 	}

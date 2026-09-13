@@ -52,6 +52,7 @@ func fabricatedSettings() config.Options {
 		ToolLoopBreaker:       true,
 		ToolResultCap:         true,
 		ReadCache:             false,
+		ContextFillNotice:     true,
 		UndoSnapshots:         true,
 		DelegateMaxSteps:      40,
 		AutoTitle:             false,
@@ -400,6 +401,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"tool-loop-breaker":       "true",
 		"tool-result-cap":         "true",
 		"read-cache":              "false", // opted out in the fixture: a guard row reports the value, never the floor
+		"context-fill-notice":     "true",  // opted IN in the fixture: a default-off row reports the value, never the default
 		"undo-snapshots":          "true",
 		"delegate-max-steps":      "40",
 		"auto-title":              "false",

@@ -304,6 +304,37 @@ func TestSkillSuggestionsRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 	}
 }
 
+// The context-fill notice's row is a bool that defaults OFF (ADR 0077): the one top-level boolean
+// beside the seven Floor keys that a config naming nothing leaves off, because the notice steers
+// the model rather than correcting it and ships off until bench evidence turns it on. The row reads
+// back what THIS session resolved rather than the declared default, and its description says out
+// loud that the key is not a Floor guard — the condition ADR 0077 put on giving a builtin a
+// top-level key at all.
+func TestContextFillNoticeRowIsABoolDefaultingOff(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("context-fill-notice")
+	if !ok {
+		t.Fatal("no registry row for context-fill-notice; /settings could not show the key at all")
+	}
+	if row.Kind != KindBool {
+		t.Errorf("kind = %q, want %q", row.Kind, KindBool)
+	}
+	if row.Default != "false" {
+		t.Errorf("default = %q, want \"false\" — a model-facing behaviour above the Floor ships off", row.Default)
+	}
+	if !strings.Contains(row.Desc, "Not a Floor guard") {
+		t.Errorf("desc = %q, want it to say the key is not a Floor guard (ADR 0077 D2)", row.Desc)
+	}
+
+	if got := row.Read(Options{ContextFillNotice: true}); got != "true" {
+		t.Errorf("read of a session with the notice on = %q, want \"true\"", got)
+	}
+	if got := row.Read(Options{}); got != "false" {
+		t.Errorf("read of an unconfigured session = %q, want \"false\"", got)
+	}
+}
+
 // The `reactions` row summarises the human's FILE, and since ADR 0076 one entry in that file
 // resolves to one Reaction per action key it carries — all sharing the entry's own id. So the row
 // counts distinct ids: an entry that armed two classes is still one block the human wrote, and a

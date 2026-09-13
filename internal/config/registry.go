@@ -449,6 +449,13 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return boolValue(o.ReadCache) },
 	},
 	{
+		Path: "context-fill-notice", Kind: KindBool, Default: "false",
+		Editable: false,
+		Desc: "Tell the model how close it is to automatic compaction (50/75/90) on its tool " +
+			"results. Not a Floor guard: off until bench evidence turns it on.",
+		Read: func(o Options) string { return boolValue(o.ContextFillNotice) },
+	},
+	{
 		Path: "delegate-max-steps", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxSteps),
 		Editable: true,
 		Validate: validateDelegateMaxSteps,

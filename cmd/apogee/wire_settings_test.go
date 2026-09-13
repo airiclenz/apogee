@@ -3318,6 +3318,21 @@ func TestLiveSettingsGenerationClonesBothLanes(t *testing.T) {
 	}
 }
 
+// The settings host's generation is seeded with the `context-fill-notice` switch the session
+// resolved (ADR 0077), beside Bypass and the Floor set: the bind replays this generation over the
+// engine's construction seed, so a host seeded WITHOUT the member would switch the notice off again
+// for a session whose file asked for it, while the manual announces the key as working.
+func TestLiveSettingsGenerationCarriesTheContextFillNotice(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []bool{false, true} {
+		live := newLiveSettings(config.Options{ContextFillNotice: want})
+		if got := live.generation().ContextFillNotice; got != want {
+			t.Errorf("generation().ContextFillNotice = %v; want the seeded %v", got, want)
+		}
+	}
+}
+
 // Replace runs on the UPDATE goroutine — the pane's ⏎ and the config watcher's own fold both land
 // there — while Report goes to the Bridge, whose send BLOCKS until Update takes the message. A
 // Replace that reported the retired generation's drop totals on the caller's goroutine would

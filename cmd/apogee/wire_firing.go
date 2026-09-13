@@ -379,6 +379,9 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		// (floorFromOptions). A Firing is composed out of the session's LIVE options, so a guard
 		// switched off in `/settings` is off for the run this session raises as well.
 		Floor: floorFromOptions(in.opts),
+		// And the `context-fill-notice` switch beside it (ADR 0077), carried as is: a Firing's
+		// model is told how full its context is exactly when the session's would be.
+		ContextFillNotice: in.opts.ContextFillNotice,
 	}
 
 	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink

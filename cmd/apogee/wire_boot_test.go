@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -780,6 +781,38 @@ func TestBootConfigCarriesTheFloorGuardKeys(t *testing.T) {
 	if w.cfg.Floor != want {
 		t.Errorf("Config.Floor = %+v; want %+v — one key off, the other six guards standing",
 			w.cfg.Floor, want)
+	}
+}
+
+// The `context-fill-notice` key rides the same trip WITHOUT the negation (ADR 0077): it is not a
+// Floor guard, so the engine reads it positively, and a session that switched it on must arrive
+// with Config.ContextFillNotice true — while one that said nothing arrives with it off, which is
+// the default the notice ships with.
+func TestBootConfigCarriesTheContextFillNotice(t *testing.T) {
+	t.Parallel()
+	for _, want := range []bool{false, true} {
+		t.Run(fmt.Sprintf("context-fill-notice=%v", want), func(t *testing.T) {
+			t.Parallel()
+			opts := config.Options{
+				Mode:              "ask-before",
+				Workspace:         t.TempDir(),
+				ConfigDir:         t.TempDir(),
+				ContextFillNotice: want,
+			}
+			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+			t.Cleanup(w.close)
+			if err := w.resolveConfig(); err != nil {
+				t.Fatalf("resolveConfig: %v", err)
+			}
+			if w.cfg.ContextFillNotice != want {
+				t.Errorf("Config.ContextFillNotice = %v; want the threaded %v",
+					w.cfg.ContextFillNotice, want)
+			}
+		})
 	}
 }
 

@@ -359,6 +359,11 @@ func (w *rootWiring) resolveConfig() error {
 		// what a scheduled Firing copies, so a guard the human took away is taken away for the runs
 		// nobody watches too.
 		Floor: floorFromOptions(w.opts),
+		// And whether the engine's context-fill notice is on (ADR 0077): the `context-fill-notice`
+		// key, default off. Not a Floor guard, so it is carried as is — no negation — beside Bypass,
+		// which switches it off with the rest of the advise class. It rides here for the reply
+		// cap's reason too: this Config is what a scheduled Firing copies.
+		ContextFillNotice: w.opts.ContextFillNotice,
 	}
 	return nil
 }

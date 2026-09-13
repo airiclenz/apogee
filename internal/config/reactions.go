@@ -61,6 +61,13 @@ var floorGuardKeys = []string{
 	"read-cache",
 }
 
+// contextFillNoticeKey is the config key of the engine's context-fill notice (ADR 0077), which is
+// also the id its builtin advise Reaction fires under (internal/agent's fillnotice.go). It is
+// refused as an entry's `id:` for the Floor guards' reason, and kept as a second literal beside
+// floorGuardKeys rather than an eighth name in it because the notice is NOT a Floor guard — that
+// list stays the seven — and its refusal says so.
+const contextFillNoticeKey = "context-fill-notice"
+
 // entryReactions maps one on-disk entry onto the user-origin Reactions it arms — ONE per action key
 // it spells, all carrying the entry's id, `on:` list and `workspace:` filter, so `run:` and `gate:`
 // on one entry resolve to an observe Reaction and a gate Reaction that [domain.SplitLanes] later
@@ -86,6 +93,10 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 	if slices.Contains(floorGuardKeys, id) {
 		return nil, reactionEntryError(id,
 			"that is the Floor guard %s: — set the top-level key, not a reactions: entry", id)
+	}
+	if id == contextFillNoticeKey {
+		return nil, reactionEntryError(id,
+			"that is the built-in engine reaction %s: — set the top-level key, not a reactions: entry", id)
 	}
 
 	moments, err := r.moments(id)

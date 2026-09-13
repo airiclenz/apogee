@@ -296,6 +296,14 @@ type Options struct {
 	// ReadCache keeps the cap on a re-read of a file unchanged since apogee last read it.
 	ReadCache bool
 
+	// ContextFillNotice switches on the engine's context-fill notice (ADR 0077): the advise line on
+	// a tool result that tells the model how far its conversation has climbed toward automatic
+	// Compaction, at the 50 / 75 / 90 rungs. NOT a Floor guard — it steers rather than corrects —
+	// so it is default FALSE and loaded from the config file only; ApplyConfig sets it from the
+	// resolved settings and the composition root hands it to apogee.Config.ContextFillNotice as is,
+	// with no negation.
+	ContextFillNotice bool
+
 	// UndoSnapshots keeps the snapshot-backed undo store: the workspace imaged around each
 	// exchange in a git object database of the session's own, so `/undo` survives a relaunch and
 	// covers writes that never passed through apogee's write funnel (ADR 0074). Off leaves ADR

@@ -724,6 +724,14 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// Default OFF, unlike the seven Floor keys above it: a model-facing behaviour above the Floor
+		// ships off until bench evidence turns it on (ADR 0077).
+		row: mustKey("context-fill-notice"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ContextFillNotice = fc.ContextFillNotice != nil && *fc.ContextFillNotice
+		},
+	},
+	{
 		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
 		// absence of one, so presence cannot stand in for the positive value the way it does there.
 		row: mustKey("delegate-max-steps"),
@@ -1337,6 +1345,14 @@ type fileConfig struct {
 	ToolResultCap *bool `yaml:"tool-result-cap"`
 	// ReadCache gates capping a re-read of a file already read successfully and not written since.
 	ReadCache *bool `yaml:"read-cache"`
+	// ContextFillNotice gates the engine's CONTEXT-FILL NOTICE (ADR 0077): the advise line on a tool
+	// result that tells the model how far it has climbed toward automatic Compaction. It sits after
+	// the seven Floor guards but is NOT one of them — a guard corrects what the model sees after
+	// its own failure, this notice steers — so it is the other way round: absent ⇒ OFF, and only an
+	// explicit `context-fill-notice: true` switches it on. File-only (no flag/env), a pointer for
+	// auto-compact's reason, and — unlike the Floor — taken away by Bypass with the rest of the
+	// advise class.
+	ContextFillNotice *bool `yaml:"context-fill-notice"`
 	// DelegateMaxSteps bounds a CHILD agent's one Exchange, in Turns: the engine ends the
 	// delegation when it reaches this many Turns and hands the parent what the child has.
 	// File-only (no flag/env), like auto-compact above it, and a POINTER for auto-compact's

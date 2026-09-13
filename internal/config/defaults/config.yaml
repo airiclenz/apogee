@@ -468,8 +468,9 @@ context-files:
 # it inactive at every other. Webhook headers are literal (`headers:`) or read from a named
 # environment variable at send time (`headers-env:`, the api-key-env spelling), so a token you send
 # with a reaction never has to sit in this file. Two more spellings are its own: `enabled: false`
-# parks an entry without deleting it, and an id that is one of the seven Floor-guard keys is refused
-# — those are switched with their own top-level key, not with a reactions: entry.
+# parks an entry without deleting it, and an id that is one of the seven Floor-guard keys — or
+# `context-fill-notice`, the engine's own built-in reaction — is refused: those are switched with
+# their own top-level key, not with a reactions: entry.
 #
 # `gate:` is the other action an entry can take: an argv LIST asked BEFORE a tool call runs, with
 # `on: [pre-tool-exec]` and nothing else under `on:`. The call reaches it as JSON on stdin (event,
@@ -674,6 +675,15 @@ read-cache: true
 # for a model whose profile says its calls arrive on the wire. Set this to false to let the JSON
 # stand as text.
 tool-call-salvage: true
+
+# Tell the model how full its context is. With this on, apogee adds one line to a tool result each
+# time the conversation crosses 50, 75 and 90 percent of the way to automatic compaction — the
+# percent, the tokens used and the window — and a sub-agent's 90 gets one more sentence telling it
+# to wrap up and report. It is NOT a Floor guard: a guard corrects what the model saw after its own
+# mistake, this one steers, and nothing that steers ships on until a bench run shows the model does
+# better with it than without. So it starts off, and Bypass turns it off with the rest of its class.
+# Set this to true to try it on your own work.
+context-fill-notice: false
 
 # =============================================================================
 # How far a delegated sub-agent may run. A sub-agent works its task in one exchange of its own, and

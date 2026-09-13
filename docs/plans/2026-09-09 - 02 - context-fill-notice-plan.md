@@ -105,7 +105,7 @@ go test ./internal/domain/ -run Advice && go test ./internal/agent/ -run 'Forge|
 
 **Commit:** `fix(agent): a context file cannot forge the advice fence`
 
-## 5. The `context-fill-notice:` config key
+## 5. The `context-fill-notice:` config key — ✅ DONE (2026-09-13)
 
 **What:** Depends on item 2. `internal/config/config.go`: `fileConfig` gains `ContextFillNotice *bool \`yaml:"context-fill-notice"\`` in its **own** comment block directly after the Floor block (`:1317-1339` stays "the seven"); `keyAccessors` gains a row in the default-**false** shape of `remember-model` (`:749-756`); `internal/config/options.go` gains `ContextFillNotice bool` after `ReadCache` (`:297`), outside the Floor comment. `internal/config/registry.go`: row `{Path: "context-fill-notice", Kind: KindBool, Default: "false", Editable: false, Desc: "Tell the model how close it is to automatic compaction (50/75/90) on its tool results. Not a Floor guard: off until bench evidence turns it on.", Read: …}` inserted **directly after `read-cache`** (`:445-450`, before `delegate-max-steps`) so it lands in the Session run (`settingsrows.go:81-92`); item 6 flips `Editable: true` with the applier. `internal/config/reactions.go`: a `reactions:` entry with `id: context-fill-notice` is refused in `entryReactions` (`:86-89`) with `that is the built-in engine reaction context-fill-notice: — set the top-level key, not a reactions: entry` (a second literal beside `floorGuardKeys`, which stays seven). `internal/config/defaults/config.yaml`: after `tool-call-salvage: true` (`:675`) a short second-person paragraph (what it tells the model, that it is not a Floor guard, why it ships off, how to turn it on) then the active line `context-fill-notice: false`; the `reactions:` header's refusal sentence (`:471`) names the notice's id too. Wire the value into the `apogee.Config` literals beside `Floor: floorFromOptions(...)` at `cmd/apogee/wire_boot.go:361` and `wire_firing.go:381` (headless composes through `firingConfig`); item 6 owns the live path. Docs gate: `docs/manual/configuration.md` gains the `### context-fill-notice` subsection after the Floor prose (`:67-75`) — the yaml one-liner, what the model receives (the line and the rungs, the child wrap-up at 90), that it is **not** a Floor guard, why it defaults off (ADR 0077), that Bypass turns it off, that it is silent until a window is known; `cmd/apogee/settingsrows_test.go` gains the `want` map entry and the `fabricatedSettings()` field.
 
@@ -124,6 +124,9 @@ go test ./internal/config/ && go test ./cmd/apogee/ -run 'Boot|Firing|SettingsRo
 **Commit:** `feat(config): the context-fill-notice key — file-only, default off, refused as a reactions: id`
 
 NOTES (2026-09-09): for the one commit between items 5 and 6 the row is `Editable: false` and so `externallyEdited` (`cmd/apogee/settingsrows.go`): `/settings` paints it with the `⏎ opens $EDITOR` pointer until item 6 flips it.
+NOTES (2026-09-13): the manual subsection sits directly after the "What runs above the floor" paragraph (the Floor prose's closing bridge), and that paragraph's "and nothing else in this release" was amended to name the notice — the sentence became false once an engine builtin ran above the floor.
+NOTES (2026-09-13): the refused id is a second literal `contextFillNoticeKey` (a const beside `floorGuardKeys`, which stays seven); `TestFloorGuardKeysAreRegistryKeys` also pins it as a registry key kept out of the seven.
+NOTES (2026-09-13): the new boot/firing/settings-host tests are separate `…CarriesTheContextFillNotice` cases (both values of the switch) rather than edits to the Floor tests, whose one-key-off literals stay exact.
 
 ## 6. Live toggle in `/settings` and the settings rows
 

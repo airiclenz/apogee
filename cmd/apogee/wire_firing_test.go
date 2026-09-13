@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -288,6 +289,45 @@ func TestFiringConfigCarriesTheFloorGuardKeys(t *testing.T) {
 	if cfg.Floor != want {
 		t.Errorf("Config.Floor = %+v; want %+v — the one guard the session gave up, and no other",
 			cfg.Floor, want)
+	}
+}
+
+// A Firing runs the `context-fill-notice` switch the session it was raised from runs (ADR 0077),
+// carried as is — the key is not a Floor guard, so nothing negates it on the trip. A Firing is
+// composed out of the session's LIVE options, so a session that switched the notice on raises runs
+// whose model is told how full its context is, and one that said nothing raises runs without it.
+func TestFiringConfigCarriesTheContextFillNotice(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []bool{false, true} {
+		t.Run(fmt.Sprintf("context-fill-notice=%v", want), func(t *testing.T) {
+			t.Parallel()
+			roots := firingRoots(t)
+			opts := config.Options{
+				Servers: []config.ServerEntry{
+					{Name: "box", Endpoint: "http://box.example/v1"},
+				},
+				ContextFillNotice: want,
+			}
+			provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+
+			cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+				opts:     opts,
+				entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+				roots:    roots,
+				confiner: fenceableHost,
+				mode:     domain.ModeAuto,
+				skills:   provider,
+				beat:     firingBeat,
+				recordID: "2026-09-03T09-00-00-firing",
+			})
+			if err != nil {
+				t.Fatalf("firingConfig: %v", err)
+			}
+			if cfg.ContextFillNotice != want {
+				t.Errorf("Config.ContextFillNotice = %v; want the session's %v", cfg.ContextFillNotice, want)
+			}
+		})
 	}
 }
 

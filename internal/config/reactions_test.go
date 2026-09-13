@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -283,6 +284,11 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 			want: `reaction "tool-use-enforcer": that is the Floor guard tool-use-enforcer: — set the top-level key, not a reactions: entry`,
 		},
 		{
+			name: "the id is the context-fill notice's key",
+			body: "reactions:\n  - id: context-fill-notice\n    on: [post-tool-result]\n    advise: [\"true\"]\n",
+			want: `reaction "context-fill-notice": that is the built-in engine reaction context-fill-notice: — set the top-level key, not a reactions: entry`,
+		},
+		{
 			name: "on: names a seam",
 			body: "reactions:\n  - id: shaper\n    on: [pre-request]\n    run: [\"true\"]\n",
 			want: `invalid reaction "shaper": run: reacts to notices; "pre-request" is a seam`,
@@ -334,6 +340,14 @@ func TestFloorGuardKeysAreRegistryKeys(t *testing.T) {
 		if _, ok := LookupKey(key); !ok {
 			t.Errorf("floorGuardKeys names %q, which is no registry key", key)
 		}
+	}
+	// The notice's key is refused the same way but is NOT a Floor guard, so it is a literal of its
+	// own — a registry key still, and kept out of the seven.
+	if _, ok := LookupKey(contextFillNoticeKey); !ok {
+		t.Errorf("contextFillNoticeKey %q is no registry key", contextFillNoticeKey)
+	}
+	if slices.Contains(floorGuardKeys, contextFillNoticeKey) {
+		t.Errorf("floorGuardKeys names %q; the notice is not a Floor guard", contextFillNoticeKey)
 	}
 }
 
