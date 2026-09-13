@@ -33,6 +33,7 @@ import (
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // stubRunner stands in for internal/run.Once: it records the Spec the command composed and
@@ -607,10 +608,10 @@ func TestHeadlessComposesTheRunnerSpec(t *testing.T) {
 	}
 	// The Events sink is the ONE delegate the command does wire, and wiring it is not the same as
 	// claiming run.Once's: Spec says the Config's sink is WRAPPED by the runner's tap, not replaced
-	// (internal/run/run.go), so the command's own prune-notice sink sits inside the tap rather than
+	// (internal/run/run.go), so the command's own narration sink sits inside the tap rather than
 	// displacing it. What must hold is that it is the headless one and nothing else.
-	if _, ok := cfg.Events.(pruneNoticeSink); !ok {
-		t.Errorf("Config.Events = %T; want the headless prune-notice sink", cfg.Events)
+	if _, ok := cfg.Events.(*narrationSink); !ok {
+		t.Errorf("Config.Events = %T; want the headless narration sink", cfg.Events)
 	}
 	if cfg.Tools != nil {
 		t.Error("the command wired a tool registry; with `sub-agents-choice:` unset a headless run " +
@@ -1863,6 +1864,59 @@ func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
 	}
 }
 
+// The live narration, over the same real process streams and the real engine: a scripted upstream
+// makes one read_file call and then answers (testdata/stubllm/eventlines.yaml), and stderr carries
+// the call's arrow line and its result's arrow line — in that order, and BEFORE the post-hoc block
+// the run composes from Result — while stdout is still the answer alone. This is the guard on the
+// stdout contract TestHeadlessAnswerLandsOnTheProcessStdout pins, now that the sink prints mid-run:
+// a narration line that took OutOrStdout would break every pipeline reading the answer.
+func TestHeadlessNarratesToolCallsLiveOnStderr(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "eventlines"))
+	prev := runOnce
+	runOnce = run.Once
+	t.Cleanup(func() { runOnce = prev })
+	assertNoAmbientApogeeConfig(t)
+	t.Setenv(config.EnvMode, "")
+
+	workspace := e2eWorkspace(t)
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	var runErr error
+	stdout, stderr := captureProcessStreams(t, func() {
+		cmd := newHeadlessCommand()
+		// Deliberately no SetOut: the fallback under test is the one every real run takes.
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetArgs([]string{"--config", home, "--workspace", workspace, eventLinesPrompt})
+		runErr = cmd.ExecuteContext(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("headless: %v (stderr: %q)", runErr, stderr)
+	}
+	stub.AssertConsumed(t)
+
+	if strings.TrimRight(stdout, "\n") != "The file says hello." {
+		t.Errorf("process stdout = %q; want the answer and nothing else", stdout)
+	}
+	lines := strings.Split(stderr, "\n")
+	call := slices.Index(lines, "→ read_file a.txt")
+	result := slices.Index(lines, "← read_file ok")
+	summary := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "turns:") })
+	if call < 0 || result < 0 || summary < 0 {
+		t.Fatalf("stderr lacks the call line (%d), the result line (%d) or the summary (%d):\n%s",
+			call, result, summary, stderr)
+	}
+	if !(call < result && result < summary) {
+		t.Errorf("stderr order is call %d, result %d, summary %d; want the narration in event order "+
+			"and ahead of the post-hoc block:\n%s", call, result, summary, stderr)
+	}
+	for _, l := range lines {
+		if strings.HasPrefix(l, "→ ") || strings.HasPrefix(l, "← ") {
+			if l != "→ read_file a.txt" && l != "← read_file ok" {
+				t.Errorf("stderr carries an arrow line the one call does not account for: %q", l)
+			}
+		}
+	}
+}
+
 // The exit-code convention this command introduces, end to end through the error type: 0 for a
 // completed run, 1 for a run that started and failed, 2 for one that never started, 3 for one that
 // reached its boundary with its final Turn abandoned.
@@ -2457,7 +2511,48 @@ func TestHeadlessFormatJSONSuppressesThePruneNotice(t *testing.T) {
 	}
 }
 
-// The encoder is the OUTERMOST sink the command composes and the prune-notice sink is what it
+// What the prune notice's silence under json says of the whole narration: a tool call, its result
+// and a sub-agent phase are each their own line on stdout there, so none of the stderr arrow or
+// sub-agent lines prints — the same fact told once (ADR 0075 decision 6). The stream is the
+// positive control: the three Events must have reached the encoder for their absence on stderr to
+// mean suppression rather than a sink that never saw them.
+func TestHeadlessFormatJSONSuppressesTheNarration(t *testing.T) {
+	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1},
+		emit: func(sink domain.EventSink) {
+			sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{
+				ID: "call_1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"a.txt"}`),
+			}})
+			sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call_1", Content: "hello"}})
+			sink.Emit(domain.SubAgentPhaseEvent{
+				EventBase: domain.EventBase{Depth: 1, CallID: "call_2"},
+				Phase:     domain.SubAgentStarted,
+			})
+		}}
+
+	out, errOut, err := headlessRun(t, stub, "--format", "json", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+
+	var kinds []string
+	for _, line := range jsonEventLines(t, out) {
+		kind, _ := line["event"].(string)
+		kinds = append(kinds, kind)
+	}
+	for _, want := range []string{"tool_call", "tool_result", "sub_agent_phase"} {
+		if !slices.Contains(kinds, want) {
+			t.Fatalf("the stream carries no %s line, so stderr's silence proves nothing:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(errOut, "\n") {
+		if strings.HasPrefix(line, "→ ") || strings.HasPrefix(line, "← ") ||
+			strings.HasPrefix(line, "sub-agent ") {
+			t.Errorf("the narration was printed as well as streamed: %q\n%s", line, errOut)
+		}
+	}
+}
+
+// The encoder is the OUTERMOST sink the command composes and the narration sink is what it
 // wraps. Both halves matter: outermost is the only place a lossless, blocking write may sit —
 // inside the Reaction Runner it would block a callback documented not to block (ADR 0075 decision
 // 9) — and the wrap is what keeps every observer beneath it, the Reactions included, receiving
@@ -2477,10 +2572,10 @@ func TestHeadlessFormatJSONEncoderIsOutermost(t *testing.T) {
 	// accessor that exists for one test.
 	inner := reflect.ValueOf(writer).Elem().FieldByName("inner")
 	if !inner.IsValid() || inner.IsNil() {
-		t.Fatal("the encoder wraps nothing; the prune-notice sink was displaced rather than wrapped")
+		t.Fatal("the encoder wraps nothing; the narration sink was displaced rather than wrapped")
 	}
-	if got := inner.Elem().Type(); got != reflect.TypeOf(pruneNoticeSink{}) {
-		t.Errorf("the encoder wraps %s; want the headless prune-notice sink beneath it", got)
+	if got := inner.Elem().Type(); got != reflect.TypeOf(&narrationSink{}) {
+		t.Errorf("the encoder wraps %s; want the headless narration sink beneath it", got)
 	}
 }
 
@@ -3045,7 +3140,7 @@ func TestHeadlessPrintsThePruneNotice(t *testing.T) {
 	}
 }
 
-// TestPruneNoticeSinkForwardsEveryEvent pins the wrap half of the sink: it prints for a prune and
+// TestNarrationSinkForwardsEveryEvent pins the wrap half of the sink: it prints for a prune and
 // hands EVERY Event on to the sink it wraps, its own included. run.Once puts its tap around this
 // one (run.Spec), so a sink that swallowed what it rendered would cost the Firing's record the very
 // entry the notice is about.
@@ -3053,12 +3148,12 @@ func TestHeadlessPrintsThePruneNotice(t *testing.T) {
 // The ReactionFiredEvent is here to pin the silence: a Reaction firing is forwarded like anything
 // else and prints NO stderr line, since a Floor guard repairing the model's own failure is engine
 // behaviour rather than news for an unattended run (ADR 0071).
-func TestPruneNoticeSinkForwardsEveryEvent(t *testing.T) {
+func TestNarrationSinkForwardsEveryEvent(t *testing.T) {
 	t.Parallel()
 
 	inner := &recordingSink{}
 	var errOut bytes.Buffer
-	sink := pruneNoticeSink{inner: inner, out: &errOut}
+	sink := &narrationSink{inner: inner, out: &errOut}
 
 	sink.Emit(domain.PruneEvent{Results: 2, Tokens: 800})
 	sink.Emit(domain.ReactionFiredEvent{
@@ -3074,6 +3169,124 @@ func TestPruneNoticeSinkForwardsEveryEvent(t *testing.T) {
 	}
 	if got, want := errOut.String(), "pruned 2 tool results (~800 tokens)\n"; got != want {
 		t.Errorf("printed %q, want %q — the prune alone, nothing for the guard or the message", got, want)
+	}
+}
+
+// TestNarrationSinkSummarisesTheFirstStringArgument pins the call line's summary: the first
+// string-valued top-level member of the arguments in the order they were WRITTEN — the path for a
+// workspace tool, the command for a shell — escape-stripped and clipped to the same width as a
+// sub-agent line, and absent, with no trailing space, when the call carries no string at all. A
+// nested object earlier in the arguments is skipped whole, never descended into.
+func TestNarrationSinkSummarisesTheFirstStringArgument(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("x", headlessTaskMax+5)
+	cases := []struct {
+		name      string
+		arguments string
+		want      string
+	}{
+		{"path first", `{"path":"a.txt","start_line":1}`, "→ read_file a.txt"},
+		{"string after a number", `{"start_line":1,"path":"b.txt"}`, "→ read_file b.txt"},
+		{"nested object first", `{"opts":{"a":"inner"},"path":"c.txt"}`, "→ read_file c.txt"},
+		{"no strings", `{"start_line":1,"all":true}`, "→ read_file"},
+		{"no arguments", ``, "→ read_file"},
+		{"empty object", `{}`, "→ read_file"},
+		{"over the width", `{"path":"` + long + `"}`, "→ read_file " + strings.Repeat("x", headlessTaskMax-1) + "…"},
+		{"escape sequence", `{"path":"a\u001b[31m.txt\nb"}`, "→ read_file a[31m.txt b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var errOut bytes.Buffer
+			sink := &narrationSink{out: &errOut}
+
+			sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{
+				ID: "call_1", Tool: "read_file", Arguments: json.RawMessage(tc.arguments),
+			}})
+
+			if got := errOut.String(); got != tc.want+"\n" {
+				t.Errorf("printed %q, want %q", got, tc.want+"\n")
+			}
+		})
+	}
+}
+
+// TestNarrationSinkWordsTheResult pins the result line's three shapes — ok, error with the failure's
+// first line, and the id alone when the sink never saw the call — and the depth gate on both tool
+// line families: a child's call and result print nothing, because the sub-agent lines stand in for
+// them.
+func TestNarrationSinkWordsTheResult(t *testing.T) {
+	t.Parallel()
+
+	var errOut bytes.Buffer
+	sink := &narrationSink{out: &errOut}
+	call := func(id string) domain.ToolCallEvent {
+		return domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: id, Tool: "shell", Arguments: json.RawMessage(`{"command":"ls"}`),
+		}}
+	}
+
+	sink.Emit(call("call_1"))
+	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call_1", Content: "a.txt"}})
+	sink.Emit(call("call_2"))
+	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID: "call_2", IsError: true, Content: "ls: no such\x1b[0m file\nsecond line",
+	}})
+	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call_9", Content: "?"}})
+	sink.Emit(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1, CallID: "call_2"},
+		Call: domain.ToolCall{ID: "child_1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"z"}`)}})
+	sink.Emit(domain.ToolResultEvent{EventBase: domain.EventBase{Depth: 1, CallID: "call_2"},
+		Result: domain.ToolResult{CallID: "child_1", Content: "z"}})
+
+	want := "→ shell ls\n" +
+		"← shell ok\n" +
+		"→ shell ls\n" +
+		"← shell error: ls: no such[0m file\n" +
+		"← call_9\n"
+	if got := errOut.String(); got != want {
+		t.Errorf("printed\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestNarrationSinkNamesTheSubAgent pins the sub-agent line and what it calls the delegation: the
+// `name` the sub_agent call gave, replaced by the name the out-of-band naming call hands it
+// (SubAgentNamedEvent), and the call id when neither has landed; `cancelled` over the phase word
+// when the human cancelled the child. The phase and named Events are stamped the way the engine
+// stamps them — Depth 1, under the Depth-0 call's id (internal/agent's emitSubAgentPhase) — and a
+// grandchild's phase, one level deeper, prints nothing.
+func TestNarrationSinkNamesTheSubAgent(t *testing.T) {
+	t.Parallel()
+
+	var errOut bytes.Buffer
+	sink := &narrationSink{out: &errOut}
+	child := domain.EventBase{Depth: 1, CallID: "call_1"}
+	unnamed := domain.EventBase{Depth: 1, CallID: "call_2"}
+
+	sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "call_1", Tool: "sub_agent",
+		Arguments: json.RawMessage(`{"task":"scout the config keys","name":"scout config"}`),
+	}})
+	sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "call_2", Tool: "sub_agent", Arguments: json.RawMessage(`{"task":"count the tests"}`),
+	}})
+	sink.Emit(domain.SubAgentPhaseEvent{EventBase: child, Phase: domain.SubAgentStarted})
+	sink.Emit(domain.SubAgentPhaseEvent{EventBase: unnamed, Phase: domain.SubAgentStarted})
+	sink.Emit(domain.SubAgentNamedEvent{EventBase: child, Name: "read\x1bthe keys"})
+	sink.Emit(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 2, CallID: "grandchild"}, Phase: domain.SubAgentStarted,
+	})
+	sink.Emit(domain.SubAgentPhaseEvent{EventBase: child, Phase: domain.SubAgentFinished})
+	sink.Emit(domain.SubAgentPhaseEvent{EventBase: unnamed, Phase: domain.SubAgentFinished, Cancelled: true})
+
+	want := "→ sub_agent scout the config keys\n" +
+		"→ sub_agent count the tests\n" +
+		"sub-agent scout config: started\n" +
+		"sub-agent call_2: started\n" +
+		"sub-agent readthe keys: finished\n" +
+		"sub-agent call_2: cancelled\n"
+	if got := errOut.String(); got != want {
+		t.Errorf("printed\n%s\nwant\n%s", got, want)
 	}
 }
 

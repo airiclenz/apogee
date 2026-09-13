@@ -120,8 +120,11 @@ func TestE2ENamingReachesAHeadlessSubAgentLine(t *testing.T) {
 	if !strings.HasSuffix(lines[0], " · "+namingGenerated) {
 		t.Errorf("the sub-agent line is %q; it must close with the generated name %q", lines[0], namingGenerated)
 	}
-	if strings.Contains(errOut, namingTask) {
-		t.Errorf("the delegation printed its task beside the generated name: %q", errOut)
+	// The absence is asserted on the sub-agent line itself and not on the whole of stderr: the live
+	// narration legitimately prints the task once, as the `→ sub_agent <task>` call line, before the
+	// name exists at all (narrationSink) — what must not happen is the task standing beside the name.
+	if strings.Contains(lines[0], namingTask) {
+		t.Errorf("the delegation printed its task beside the generated name: %q", lines[0])
 	}
 	if calls := namingRequests(stub); len(calls) != 1 {
 		t.Errorf("the headless run made %d naming requests, want exactly 1", len(calls))

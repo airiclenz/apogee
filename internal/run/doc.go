@@ -17,8 +17,8 @@
 // injected body a chat message does, and a Config with no resolver leaves every "/" token
 // prose. A missing or escaping ref — and an unknown skill ID — is skipped WITHOUT notice: the
 // loop reports one as an ErrorEvent, and a Firing has no event sink that would carry it (the
-// daemon leaves Config.Events nil, and headless wires only its own prune-notice sink, which
-// renders domain.PruneEvent and nothing else).
+// daemon leaves Config.Events nil, and headless wires only its own narration sink, which
+// renders prunes, tool calls and sub-agent phases and never an ErrorEvent).
 //
 // # Nothing waits for a human
 //

@@ -3592,7 +3592,7 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 // dim host note wording the engine's two counts verbatim, placed at the run that emitted it.
 //
 // The wording is asserted literally because three Drivers word it identically (internal/run's
-// transcriptFold.fold, cmd/apogee's pruneNoticeSink) and a reader comparing a terminal against a
+// transcriptFold.fold, cmd/apogee's narrationSink) and a reader comparing a terminal against a
 // session record must not find two spellings of one event. The placement matters for the same
 // reason addError's does: a delegate prunes its OWN conversation, so the note belongs inside that
 // delegate's run rather than interrupting the parent's with a child's housekeeping.

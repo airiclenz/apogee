@@ -39,7 +39,15 @@
 
 **Out of scope:** streaming assistant text or tokens to stdout; a `--quiet` for the narration; the `internal/tui` `t.Parallel` sweep (follow-up bead, item 7); any change to ADR 0076 A5's default; apogee-6fp, apogee-rw6, apogee-zci and every bench/owner-run/grill bead.
 
-## 1. Headless live narration on stderr (apogee-czf)
+## 1. Headless live narration on stderr (apogee-czf) — ✅ DONE (2026-09-13)
+
+NOTES (2026-09-13): `TestE2ENamingReachesAHeadlessSubAgentLine` (cmd/apogee/e2e_naming_test.go) went red — its whole-stderr `strings.Contains(errOut, namingTask)` absence check now trips on the narration's legitimate `→ sub_agent <task>` call line; narrowed to the `sub-agent:` line itself, which is the claim the test states (no task beside the generated name). Not in the plan's Files; not a regression of the claim.
+NOTES (2026-09-13): consequential edit — docs/adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md: made necessary by the `pruneNoticeSink` → `narrationSink` rename and the narration joining D6's `--format json` exception (one parenthetical after D6's "one exception" sentence; the historical context at :12 left as written).
+NOTES (2026-09-13): consequential edit — internal/run/doc.go: made necessary by the rename ("headless wires only its own prune-notice sink, which renders domain.PruneEvent and nothing else" was no longer true).
+NOTES (2026-09-13): consequential edit — internal/tui/transcript_test.go: made necessary by the rename (a comment naming `cmd/apogee's pruneNoticeSink`).
+NOTES (2026-09-13): the bead's "prints nothing until done" premise was updated with `bd update apogee-czf --append-notes` (the plan's What asks for it); `.beads/issues.jsonl` is that write's auto-export and rides in FILES so the committed fallback matches the register.
+NOTES (2026-09-13): the summary and the error's first line are clipped through the existing `clipSubAgentTask` (`headlessTaskMax` = 80 runes, ellipsis inside the cap) rather than a second 80-rune clip — one width for every label this Driver prints; an error result whose first line is empty prints `← <tool> error` rather than a colon with nothing after it; `TestNarrationSinkWordsTheResult` added beyond the plan's list to pin the three result shapes and the Depth-1 gate on tool lines.
+NOTES (2026-09-13): `TestHeadlessNarratesToolCallsLiveOnStderr` drives the real `run.Once` against the scripted `eventlines.yaml` upstream over the real process streams (`captureProcessStreams`), so the order claim (call → result → summary) is measured against the engine, not a stub.
 
 **What:** Generalise `pruneNoticeSink` (`cmd/apogee/headless.go:167–208`) into `narrationSink` — same shape (`inner`, `out`, `quiet`), same forwarding, same prune line — that also prints, as each Event arrives and only at `Depth == 0`:
 - `domain.ToolCallEvent`: `→ <Call.Tool> <summary>`, where summary is the value of the first string-valued member of `Call.Arguments` in JSON order (decode with `json.Decoder` tokens to keep order), truncated to 80 runes with `…`; empty when there is none (then no trailing space). Escape-stripped through `sanitize.StripEscapes`.

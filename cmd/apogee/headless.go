@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +31,7 @@ import (
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/title"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // ----------------------------------------------------------------------------
@@ -164,47 +167,207 @@ func watchSecondInterrupt(sigs <-chan os.Signal, done <-chan struct{}, errOut io
 // work. Production never reassigns it.
 var prewarmLabelWalk = platform.PrewarmLabelWalk
 
-// pruneNoticeSink is the headless Driver's own EventSink: it prints one stderr line per
-// [domain.PruneEvent] and forwards every Event, its own included, to whatever sink it wraps
-// (nil ⇒ nothing to forward to). A zero-value inner is the normal case — a bare headless run
-// composes no sink of its own — and the wrap still matters, because run.Once installs its tap
-// AROUND this one rather than instead of it (run.Spec).
+// narrationSink is the headless Driver's own EventSink: the live view of an unattended run under
+// `--format text`. It prints one stderr line per [domain.PruneEvent], one per tool call and tool
+// result at Depth 0, and one per sub-agent lifecycle boundary — and forwards every Event, its own
+// included, to whatever sink it wraps (nil ⇒ nothing to forward to). A zero-value inner is the
+// normal case — a bare headless run composes no sink of its own — and the wrap still matters,
+// because run.Once installs its tap AROUND this one rather than instead of it (run.Spec).
 //
 // It lives here, in the command, rather than in internal/run's eventTap, because internal/run is
 // also the DAEMON's Firing path (daemonfire.go): a print there would put a line on a daemon's
-// stderr on every Firing, for a human who is not watching. The record keeps the same fact either
-// way — transcriptFold folds a Note entry for it — so this sink is the live view alone.
+// stderr on every Firing, for a human who is not watching. The record keeps the same facts either
+// way — transcriptFold folds them — so this sink is the live view alone. stdout is untouched: the
+// answer is still the one thing written there, at the end (TestHeadlessAnswerLandsOnTheProcessStdout).
 //
-// It prints for a prune and for NOTHING else — a [domain.ReactionFiredEvent] included, and
-// deliberately: a Floor guard repairing the model's own failure is engine behaviour rather than
-// news for the human who is not watching, so it stays in the TUI's hidden debug view and off this
-// stderr (ADR 0071). It is still forwarded, like every other Event.
+// The lines are narration, not the run's outcome, so they read as arrows rather than as the
+// post-hoc block's sentences:
+//
+//	→ <tool> <summary>           a tool call, the summary being the call's first string argument
+//	← <tool> ok                  its result
+//	← <tool> error: <first line> its result, when the tool failed
+//	sub-agent <name>: started    a delegation's child began running
+//	sub-agent <name>: finished   ... reached its boundary (cancelled, when the human cancelled it)
+//
+// Depth gating is per line family. Tool lines print at Depth 0 only: a child's calls are its own
+// business, and the sub-agent lines stand in for them. The sub-agent lines print at Depth 1 —
+// the engine stamps a phase and a rename with the CHILD's identity (dispatch.go's
+// emitSubAgentPhase), one level below the Depth-0 sub_agent call whose id they carry — so a
+// grandchild's phases are as silent as its calls. The prune line has no depth gate, unchanged: a
+// child's pruning pass shrinks a window the human never sees otherwise.
+//
+// It prints for a prune and NOTHING for a [domain.ReactionFiredEvent], deliberately: a Floor guard
+// repairing the model's own failure is engine behaviour rather than news for the human who is not
+// watching, so it stays in the TUI's hidden debug view and off this stderr (ADR 0071). It is
+// still forwarded, like every other Event.
 //
 // quiet switches the printing half off and leaves the forwarding half exactly as it was. It is what
-// `--format json` asks for: there the same pruning pass is already on stdout as a `prune` Event
-// line, and the stderr sentence would be the one fact told twice in two vocabularies (ADR 0075
-// decision 6). The sink is still WRAPPED under json rather than dropped, because dropping it would
-// drop the forward every observer behind it depends on — the Reaction Runner included.
+// `--format json` asks for: there the same Events are already on stdout as their own lines, and
+// each stderr sentence would be the one fact told twice in two vocabularies (ADR 0075 decision 6).
+// The sink is still WRAPPED under json rather than dropped, because dropping it would drop the
+// forward every observer behind it depends on — the Reaction Runner included.
 //
-// Emit is never called concurrently: the engine serializes emission on its side ([domain.EventSink]).
-type pruneNoticeSink struct {
+// It is installed as a POINTER: the result and sub-agent lines name a tool and a delegation that
+// only the earlier call Event carried, so the sink remembers each Depth-0 call under its id
+// (calls) and a value receiver would forget it on the next Emit. Emit is never called
+// concurrently: the engine serializes emission on its side ([domain.EventSink]).
+type narrationSink struct {
 	inner domain.EventSink
 	out   io.Writer
 	quiet bool
+	// calls remembers every Depth-0 call seen, by id: the tool name a result line needs, and — for
+	// a sub_agent call — the delegation's display name a phase line needs. Nil until the first
+	// call, so a zero value is usable.
+	calls map[string]narratedCall
 }
 
-// Emit prints the prune notice — unless quiet, which forwards and says nothing — then forwards to
-// the sink it wraps whatever it printed. The two numbers are rendered verbatim, worded as
+// narratedCall is what the sink keeps of one Depth-0 tool call once its Event has gone by.
+type narratedCall struct {
+	tool string
+	// name is the delegation's display name, for a sub_agent call: the `name` argument the model
+	// gave, or the one a later [domain.SubAgentNamedEvent] handed it. Empty means neither has
+	// landed, and the phase line falls back to the call id.
+	name string
+}
+
+// Emit narrates the Event — unless quiet, which forwards and says nothing — then forwards to the
+// sink it wraps whatever it printed. The prune's two numbers are rendered verbatim, worded as
 // every other Driver words them (internal/tui's transcript.addPrune, internal/run's
 // transcriptFold.fold), so one pruning pass reads the same on a terminal, in a session record and
 // in a scrollback.
-func (s pruneNoticeSink) Emit(e domain.Event) {
-	if pe, ok := e.(domain.PruneEvent); ok && !s.quiet {
-		_, _ = fmt.Fprintf(s.out, "pruned %d tool results (~%d tokens)\n", pe.Results, pe.Tokens)
+func (s *narrationSink) Emit(e domain.Event) {
+	if !s.quiet {
+		s.narrate(e)
 	}
 	if s.inner != nil {
 		s.inner.Emit(e)
 	}
+}
+
+// narrate prints the one line an Event earns, or nothing: the depth gates and the line shapes are
+// the ones on the type.
+func (s *narrationSink) narrate(e domain.Event) {
+	switch ev := e.(type) {
+	case domain.PruneEvent:
+		_, _ = fmt.Fprintf(s.out, "pruned %d tool results (~%d tokens)\n", ev.Results, ev.Tokens)
+	case domain.ToolCallEvent:
+		if ev.Depth != 0 {
+			return
+		}
+		s.remember(ev.Call)
+		line := "→ " + ev.Call.Tool
+		if summary := narrationLine(firstStringArgument(ev.Call.Arguments)); summary != "" {
+			line += " " + summary
+		}
+		_, _ = fmt.Fprintln(s.out, line)
+	case domain.ToolResultEvent:
+		if ev.Depth != 0 {
+			return
+		}
+		_, _ = fmt.Fprintln(s.out, s.resultLine(ev.Result))
+	case domain.SubAgentPhaseEvent:
+		if ev.Depth != 1 {
+			return
+		}
+		word := string(ev.Phase)
+		if ev.Cancelled {
+			word = "cancelled"
+		}
+		_, _ = fmt.Fprintf(s.out, "sub-agent %s: %s\n", s.subAgentName(ev.CallID), word)
+	case domain.SubAgentNamedEvent:
+		if ev.Depth != 1 {
+			return
+		}
+		if call, ok := s.calls[ev.CallID]; ok {
+			call.name = sanitize.StripEscapesToLine(ev.Name)
+			s.calls[ev.CallID] = call
+		}
+	}
+}
+
+// remember files a Depth-0 call under its id, reading the delegation name off a sub_agent call's
+// arguments while the bytes are at hand. A name that fails to decode is simply absent, and the
+// phase line falls back to the id.
+func (s *narrationSink) remember(call domain.ToolCall) {
+	if s.calls == nil {
+		s.calls = make(map[string]narratedCall)
+	}
+	remembered := narratedCall{tool: call.Tool}
+	if call.Tool == tools.SubAgentToolName {
+		var args tools.SubAgentArgs
+		if err := json.Unmarshal(call.Arguments, &args); err == nil {
+			remembered.name = sanitize.StripEscapesToLine(args.Name)
+		}
+	}
+	s.calls[call.ID] = remembered
+}
+
+// resultLine words one Depth-0 result: `← <tool> ok`, or `← <tool> error: <first line>` for a
+// failed call — `← <tool> error` when the failure carried no text at all, rather than a colon with
+// nothing after it. A result whose call this sink never saw — a stub driving the sink out of order,
+// or a call at a depth the sink does not narrate — is named by its id alone, so the line still says
+// which result it is.
+func (s *narrationSink) resultLine(result domain.ToolResult) string {
+	call, ok := s.calls[result.CallID]
+	if !ok {
+		return "← " + result.CallID
+	}
+	if !result.IsError {
+		return "← " + call.tool + " ok"
+	}
+	first, _, _ := strings.Cut(result.Content, "\n")
+	if first = narrationLine(first); first == "" {
+		return "← " + call.tool + " error"
+	}
+	return "← " + call.tool + " error: " + first
+}
+
+// subAgentName is what a phase line calls the delegation the sub_agent call callID spawned: the
+// name the call gave, else the one the naming call handed it since, else the id itself.
+func (s *narrationSink) subAgentName(callID string) string {
+	if call, ok := s.calls[callID]; ok && call.name != "" {
+		return call.name
+	}
+	return callID
+}
+
+// narrationLine makes an untrusted string safe and short enough to stand beside an arrow: escape
+// sequences and line breaks out (sanitize.StripEscapesToLine — a model-supplied argument or a
+// tool's error text is exactly the text that must not forge a second line), whitespace trimmed,
+// and the rest clipped to the sub-agent line's own rune budget, ellipsis included.
+func narrationLine(text string) string {
+	return clipSubAgentTask(strings.TrimSpace(sanitize.StripEscapesToLine(text)))
+}
+
+// firstStringArgument returns the value of the first string-valued top-level member of a tool
+// call's argument object, in the order the object was WRITTEN — which is the order the model
+// chose, and for every workspace tool the path or command comes first. The empty string means
+// there is none: no object, no members, or none whose value is a string. The tokens are walked
+// rather than the object unmarshalled because a map would lose that order, and a nested object or
+// array in an earlier member is skipped as a whole value rather than descended into.
+func firstStringArgument(arguments json.RawMessage) string {
+	dec := json.NewDecoder(bytes.NewReader(arguments))
+	if open, err := dec.Token(); err != nil || open != json.Delim('{') {
+		return ""
+	}
+	for dec.More() {
+		if _, err := dec.Token(); err != nil {
+			return ""
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return ""
+		}
+		if len(value) == 0 || value[0] != '"' {
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(value, &text); err != nil {
+			return ""
+		}
+		return text
+	}
+	return ""
 }
 
 // discoverBeat is the seam onto the ONE observation an unattended run takes of the server it is
@@ -800,16 +963,17 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		go watchSecondInterrupt(sigs, done, cmd.ErrOrStderr())
 	}
 
-	// The one Event this Driver renders live. Everything else a headless run reports comes back on
-	// Result, but a prune happens MID-run and leaves no trace on the answer, so a human watching an
-	// unattended run would otherwise see a window quietly shrink with nothing said. The sink WRAPS
-	// whatever the Config already carries — the Reaction Runner since ADR 0073 — rather than replacing
-	// it, exactly as run.Once's own tap wraps this one in turn (run.Spec). The order that leaves is
-	// prune notice → Reactions → nothing: the renderer sees every Event first, and installing
-	// Reactions cannot change what this command prints.
+	// The live view of the run. Everything a headless run REPORTS comes back on Result, but a
+	// tool call, a delegation's start and a prune all happen MID-run and leave no trace on the
+	// answer, so a human watching an unattended run would otherwise see nothing at all for ten
+	// minutes and read it as hung (narrationSink). The sink WRAPS whatever the Config already
+	// carries — the Reaction Runner since ADR 0073 — rather than replacing it, exactly as run.Once's
+	// own tap wraps this one in turn (run.Spec). The order that leaves is narration → Reactions →
+	// nothing: the renderer sees every Event first, and installing Reactions cannot change what
+	// this command prints. It is a pointer because it remembers each call for its result line.
 	//
 	// Under `--format json` the encoder goes on TOP of that and never inside it, so the whole chain
-	// reads engine → serialEventSink → eventTap → encoder → prune notice → Reactions. Outermost is the
+	// reads engine → serialEventSink → eventTap → encoder → narration → Reactions. Outermost is the
 	// only place it can correctly sit: writing an Event line is lossless and therefore BLOCKING (ADR
 	// 0075 decision 9), while a reactions.Runner's Report callback is documented must-not-block
 	// (internal/reactions), so an encoder installed inside the Runner would put a blocking stdout
@@ -817,10 +981,10 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// the Reactions. Outermost also makes the stream complete: it sees every Event before any wrapper
 	// below it can decide to render, swallow or fail on one.
 	//
-	// The prune notice goes quiet in the same breath, for the reason on the type: the prune is
-	// already a `prune` line on stdout under json, and the stderr sentence would be the same fact
-	// told twice.
-	cfg.Events = pruneNoticeSink{inner: cfg.Events, out: cmd.ErrOrStderr(), quiet: lines != nil}
+	// The narration goes quiet in the same breath, for the reason on the type: the prune, the
+	// calls and the phases are already their own lines on stdout under json, and each stderr
+	// sentence would be the same fact told twice.
+	cfg.Events = &narrationSink{inner: cfg.Events, out: cmd.ErrOrStderr(), quiet: lines != nil}
 	if lines != nil {
 		cfg.Events = lines.Wrap(cfg.Events)
 	}
@@ -1209,7 +1373,9 @@ const headlessTaskMax = 80
 // clipSubAgentTask cuts a task label to headlessTaskMax runes, ellipsis included in the cap, so a
 // clipped label is never wider than an unclipped one. It never splits a rune: the cut is made on
 // the decoded slice, not on the bytes. A delegation's name is spent from the same budget
-// (headlessSubAgentTarget): it stands in the same slot, and a name is not licence to be wider.
+// (headlessSubAgentTarget): it stands in the same slot, and a name is not licence to be wider. So
+// is the live narration's summary and error text (narrationLine): one width for every label this
+// Driver prints beside a tool or a delegation.
 func clipSubAgentTask(task string) string {
 	runes := []rune(task)
 	if len(runes) <= headlessTaskMax {

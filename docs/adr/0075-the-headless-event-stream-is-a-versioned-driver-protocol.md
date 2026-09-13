@@ -104,7 +104,10 @@ today; `--format json` replaces stdout entirely. stderr keeps its prose diagnost
 **not** part of the contract — hook failures in particular never re-enter the stream (ADR 0073 §8).
 The one exception: `pruneNoticeSink`'s stderr line is suppressed under `--format json`, because the
 `prune` line carries the same fact. Re-rendering the text output *from* the Event lines was rejected
-here and filed as its own bead.
+here and filed as its own bead. (That bead, apogee-czf, landed 2026-09-13 as `narrationSink` — the
+same sink, now also narrating tool calls, results and sub-agent phases live on stderr under `text`;
+those lines join the prune notice in this exception, since each is its own Event line under `json`.
+stdout under `text` is still the answer alone.)
 
 **7. Identity is Driver-stamped.** The encoder adds `time`, `seq` and `session`; `EventBase`
 (`events.go:37-58`) is not extended. A timestamp is neither model-visible nor safety-relevant, so

@@ -47,12 +47,27 @@ approval, and an unattended run has nobody to approve (see
 action is refused rather than parked — the refusals are the `denied:` count — `ask_user`
 and `present_document` are not registered, and no MCP server is contacted.
 
-Under the default `--format text`, only the model's answer goes to **stdout**; resolution
-notices and the one-line summary go to **stderr**, so a pipeline reads the text and
-nothing else. `--format json` replaces that stdout wholesale with the machine-readable
+Under the default `--format text`, only the model's answer goes to **stdout**, once, when
+the run is done; everything else — resolution notices, the live narration below, and the
+one-line summary — goes to **stderr**, so a pipeline reads the text and nothing else.
+`--format json` replaces that stdout wholesale with the machine-readable
 Event lines; the section at the foot of this page is their contract, and everything said
-about stderr here holds under both formats bar the one line that section names as
-suppressed. Where the workspace carries context files, that
+about stderr here holds under both formats bar the lines that section names as
+suppressed.
+
+While the run works, stderr **narrates it live**, one line per event as it happens, so a
+ten-minute run never looks hung: `→ <tool> <summary>` when the model calls a tool — the
+summary is the call's first string argument, the path or the command, clipped to one
+line — then `← <tool> ok` or `← <tool> error: <first line of the failure>` when its result
+comes back, and `sub-agent <name>: started` / `finished` / `cancelled` as each delegation
+crosses those boundaries, named as the delegating call named it (or as apogee named it
+while it ran, the moment that name lands). A delegation's own calls are not narrated — its
+`sub-agent` lines stand in for them. A pruning pass mid-run prints
+`pruned N tool results (~T tokens)` in the same stream, at every depth. None of this is
+the run's outcome: the block described next is still composed after the run, from what it
+reported, in the wording and order it has always had.
+
+Where the workspace carries context files, that
 stderr stream opens with what they contributed: one `context:` line naming every file that
 loaded and its size, one `context: <name> unreadable — <reason>` line per file that is present
 but could not be read, and — when the standing system content has outgrown its share of the
@@ -118,8 +133,9 @@ thing happened:
 and is exactly the output described above, byte for byte. `--format json` replaces that stdout with
 the **Event lines** — the engine's own event stream rendered one JSON object per line, JSONL, no
 answer and no prose among them. stderr keeps every notice, warning and summary it prints under
-`text`, with one exception: the prune notice goes quiet, because the `prune` line on stdout already
-carries the same fact. The contract is
+`text`, with one exception: the prune notice and the live narration go quiet, because the `prune`,
+`tool_call`, `tool_result` and `sub_agent_phase` lines on stdout already carry the same facts. The
+contract is
 [ADR 0075](../adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md).
 
 ```json
