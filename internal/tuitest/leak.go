@@ -1,12 +1,13 @@
 package tuitest
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"runtime"
-	"slices"
+	"bytes"
+	"context"
+	"fmt"
+	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -19,11 +20,21 @@ import (
 //
 // It is the test's OWN goroutines it makes that failure of: a driver test running in parallel with
 // others sees their stacks too, and blaming a neighbour's straggler on whichever cleanup happens to
-// look next is how a leak check becomes noise nobody reads. So [CheckLeaks] snapshots the goroutines
-// already running when it is called and reports only the ids that were not in it. The caveat that
-// rests on is id reuse: the runtime hands out goroutine ids from a counter that only ever goes up,
-// so a retired id is never seen again and a snapshotted id can only ever mean the same goroutine. If
-// that ever changed, a newborn goroutine could inherit a retired id and be forgiven as inherited.
+// look next is how a leak check becomes noise nobody reads. So [CheckLeaks] labels the goroutine it
+// is called from with a pprof label carrying a per-call id. The runtime copies a goroutine's labels
+// to every goroutine it starts, so everything the test starts from then on — the program, its
+// renderer, the worker the program starts — inherits the id, and the cleanup reports only the
+// goroutines still wearing it. What this rests on: a goroutine that was already running when the
+// check was called never carries a fresh id, so an inherited goroutine cannot be blamed; and the
+// reach ends where inheritance does — a goroutine a [time.AfterFunc] timer starts is born on the
+// runtime's timer goroutine, carries no label, and is outside the check.
+
+// leakLabel is the pprof label key the check attributes with; its value is the per-call id.
+const leakLabel = "tuitest.leakcheck"
+
+// leakCheckSeq mints the per-call ids. A counter rather than a test name: one test can call the
+// check more than once — a subtest inside a checked test does — and each call must be its own.
+var leakCheckSeq atomic.Uint64
 
 // leakMarkers are the packages whose goroutines belong to a driver test and must not outlive it.
 // Everything else — the testing framework, the runtime, the standard library's own workers — is
@@ -45,16 +56,18 @@ var leakMarkers = []string{
 // than snapping once.
 const leakGrace = 2 * time.Second
 
-// checkerFrame is this package's own inspection frame. The goroutine running the check is walking
-// its own stack, which of course names internal/tuitest; without this it would report itself.
-const checkerFrame = "tuitest.leakedGoroutines("
+// checkerFrame is this package's own inspection frame. The goroutine reading the profile is in it,
+// which of course names internal/tuitest; the cleanup clears its own labels before it reads, so
+// this is a second line — it keeps the check from reporting itself should it ever be run from a
+// goroutine that still wears the id.
+const checkerFrame = "tuitest.goroutineProfile"
 
 // harnessFrames belong to `go test` itself: the goroutine running a test, and the one running the
 // suite. A test function that lives in one of the marked packages — every test in THIS package,
-// and every driver test in cmd/apogee — names its package in its own stack, so without this the
-// check would report the very goroutine it was called from. A leak is never a tRunner: a leaked
-// goroutine was started BY a test, and its stack says "created by", not "testing.tRunner".
-var harnessFrames = []string{"testing.tRunner(", "testing.(*M).Run(", "testing.runTests("}
+// and every driver test in cmd/apogee — names its package in its own stack, and a subtest started
+// from a checked test inherits its id; without this the check could report the very goroutine a
+// test runs on. A leak is never a tRunner: a leaked goroutine was started BY a test.
+var harnessFrames = []string{"testing.tRunner", "testing.(*M).Run", "testing.runTests"}
 
 // timerFrames are goroutines that are ALREADY over and are only waiting for a clock to say so.
 // bubbletea's Tick starts a goroutine that parks on a timer for the whole interval and cannot be
@@ -62,34 +75,46 @@ var harnessFrames = []string{"testing.tRunner(", "testing.(*M).Run(", "testing.r
 // test by up to its own period. Reporting those would make this check unusable against any program
 // that ticks — which is every TUI — and they hold nothing: no channel a dead program reads, no file,
 // no lock. What this check is for is a goroutine that is still WORKING.
-var timerFrames = []string{"bubbletea/v2.Tick.func1("}
+//
+// The frames here, and in [checkerFrame] and [harnessFrames], are spelled the way the debug=1
+// goroutine profile prints them — `pkg.func+0x…`, never `pkg.func(…)`.
+var timerFrames = []string{"bubbletea/v2.Tick.func1"}
 
-// goroutineID is the runtime's identifier for one goroutine, as it appears in the
-// "goroutine <id> [<state>]:" header that opens every block of a [runtime.Stack] dump.
-type goroutineID string
-
-// unparsedID prefixes the id [idOf] invents for a block whose header does not parse. The runtime
-// writes goroutine ids as decimal digits and nothing else, so no real id can ever wear it.
-const unparsedID = "unparsed-"
+// leak is one entry of the goroutine profile still wearing a check's id. The debug=1 profile folds
+// goroutines with an identical stack and identical labels into one entry with a count, so an entry
+// can stand for several goroutines.
+type leak struct {
+	count int
+	stack string
+}
 
 // CheckLeaks registers a cleanup that fails the test when a goroutine the test itself started, from
 // the driver's own stack, is still running after it. Call it FIRST in a driver test — before
-// anything is launched — so that the snapshot it takes holds only what the test inherited, and so
-// that the cleanup runs last, after every other cleanup has had its chance to stop things.
+// anything is launched — so that everything the test starts inherits its id, and so that the
+// cleanup runs last, after every other cleanup has had its chance to stop things.
 func CheckLeaks(t testing.TB) {
 	t.Helper()
 
-	inherited := leakedGoroutines()
+	id := strconv.FormatUint(leakCheckSeq.Add(1), 10)
+	pprof.SetGoroutineLabels(pprof.WithLabels(context.Background(), pprof.Labels(leakLabel, id)))
 	t.Cleanup(func() {
+		// The cleanup runs on the test's own goroutine, which wears the id like everything it
+		// started; without this it would count itself.
+		pprof.SetGoroutineLabels(context.Background())
 		deadline := time.Now().Add(leakGrace)
 		for {
-			left := startedSince(inherited, leakedGoroutines())
+			profile, err := goroutineProfile()
+			if err != nil {
+				t.Errorf("reading the goroutine profile: %v", err)
+				return
+			}
+			left := leaksLabelled(profile, id)
 			if len(left) == 0 {
 				return
 			}
 			if !time.Now().Before(deadline) {
 				t.Errorf("%d goroutine(s) outlived the test by %s:\n\n%s",
-					len(left), leakGrace, strings.Join(left, "\n\n"))
+					goroutinesIn(left), leakGrace, stacksOf(left))
 				return
 			}
 			time.Sleep(50 * time.Millisecond)
@@ -97,43 +122,36 @@ func CheckLeaks(t testing.TB) {
 	})
 }
 
-// startedSince returns the stacks in current that the snapshot does not already hold, in a stable
-// order — the maps behind them have none, and a report that reads the same way twice is worth the
-// sort. Both sides are arguments: reading the live dump in here would leave the caller no way to
-// say what was running, and this package's own tests no way to drive the comparison at all.
-func startedSince(snapshot, current map[goroutineID]string) []string {
-	var left []string
-	for id, stack := range current {
-		if _, born := snapshot[id]; !born {
-			left = append(left, stack)
-		}
+// goroutineProfile is the live goroutine profile in its debug=1 form — the one that prints frames
+// as `pkg.func+0x…` lines and, for a labelled goroutine, a `# labels:` line.
+func goroutineProfile() ([]byte, error) {
+	var buf bytes.Buffer
+	if err := pprof.Lookup("goroutine").WriteTo(&buf, 1); err != nil {
+		return nil, err
 	}
-	slices.Sort(left)
-	return left
+	return buf.Bytes(), nil
 }
 
-// leakedGoroutines returns the stack of every goroutine naming one of [leakMarkers], keyed by its
-// id and excluding the one doing the looking.
-func leakedGoroutines() map[goroutineID]string {
-	buf := make([]byte, 1<<16)
-	for {
-		n := runtime.Stack(buf, true)
-		if n < len(buf) {
-			buf = buf[:n]
-			break
+// leaksLabelled returns the entries of a debug=1 goroutine profile that wear the check id and name
+// one of [leakMarkers], excluding the checker, the test harness and the timer-parked. The profile
+// is an argument rather than read in here so this package's own tests can drive the parsing with
+// canned profiles.
+func leaksLabelled(profile []byte, id string) []leak {
+	label := fmt.Sprintf("%q:%q", leakLabel, id)
+	var left []leak
+	for _, block := range strings.Split(string(profile), "\n\n") {
+		entry := strings.TrimSpace(block)
+		// The first block starts with the profile's own "goroutine profile: total N" line.
+		if _, rest, found := strings.Cut(entry, "\n"); found && strings.HasPrefix(entry, "goroutine profile:") {
+			entry = rest
 		}
-		buf = make([]byte, 2*len(buf))
-	}
-	left := make(map[goroutineID]string)
-	for _, block := range strings.Split(string(buf), "\n\n") {
-		if strings.TrimSpace(block) == "" || strings.Contains(block, checkerFrame) ||
-			harness(block) || parkedOnATimer(block) {
+		if entry == "" || !strings.Contains(entry, label) || strings.Contains(entry, checkerFrame) ||
+			harness(entry) || parkedOnATimer(entry) {
 			continue
 		}
 		for _, marker := range leakMarkers {
-			if strings.Contains(block, marker) {
-				stack := strings.TrimSpace(block)
-				left[idOf(stack)] = stack
+			if strings.Contains(entry, marker) {
+				left = append(left, leak{count: countOf(entry), stack: entry})
 				break
 			}
 		}
@@ -141,23 +159,33 @@ func leakedGoroutines() map[goroutineID]string {
 	return left
 }
 
-// idOf reads the goroutine id out of a stack block's header line — "goroutine 42 [chan receive]:".
-// A block whose header does not parse is keyed on a short hash of its own trimmed text instead,
-// under the [unparsedID] prefix no runtime id can wear: two unattributable goroutines stay two
-// entries, and one present when the snapshot was taken forgives itself and nothing else. The one
-// case that still collapses is two goroutines whose unparseable blocks are byte-identical — they
-// share a key, which is the same forgiveness a matching pair of real ids would earn.
-func idOf(stack string) goroutineID {
-	stack = strings.TrimSpace(stack)
-	header, _, _ := strings.Cut(stack, "\n")
-	if rest, ok := strings.CutPrefix(strings.TrimSpace(header), "goroutine "); ok {
-		id, _, _ := strings.Cut(rest, " ")
-		if _, err := strconv.ParseUint(id, 10, 64); err == nil {
-			return goroutineID(id)
-		}
+// countOf reads the goroutine count off an entry's head line — "3 @ 0x… 0x…". An entry whose head
+// does not parse still stands for at least the one goroutine it prints.
+func countOf(entry string) int {
+	head, _, _ := strings.Cut(entry, "\n")
+	digits, _, _ := strings.Cut(head, " ")
+	if n, err := strconv.Atoi(digits); err == nil && n > 0 {
+		return n
 	}
-	sum := sha256.Sum256([]byte(stack))
-	return unparsedID + goroutineID(hex.EncodeToString(sum[:6]))
+	return 1
+}
+
+// goroutinesIn is how many goroutines the entries stand for between them.
+func goroutinesIn(leaks []leak) int {
+	n := 0
+	for _, l := range leaks {
+		n += l.count
+	}
+	return n
+}
+
+// stacksOf joins the entries for a report, in the order the profile printed them.
+func stacksOf(leaks []leak) string {
+	stacks := make([]string, 0, len(leaks))
+	for _, l := range leaks {
+		stacks = append(stacks, l.stack)
+	}
+	return strings.Join(stacks, "\n\n")
 }
 
 // parkedOnATimer reports whether a stack is one of [timerFrames] — over, but not yet told.

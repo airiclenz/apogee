@@ -360,12 +360,16 @@ shorthands almost every test uses. Options: `On(screen)` (which screen to print 
 writes `<dir>/<test name>.{txt,ansi}`, for a CI run nobody is watching live.
 
 `CheckLeaks(t)` is the other guard: called FIRST in a driver test, it fails the test if a goroutine
-from `internal/tui`, bubbletea, `internal/tuitest`, `internal/filewatch` or `internal/heartbeat` is
-still running 2 s after it ends. Only goroutines the test itself started: the call snapshots the
-ones already running and reports the ids absent from that snapshot, so a parallel neighbour's
-straggler is never charged to whichever cleanup looks next. A driver test starts real workers; the
-interesting failure is not one that crashes but one that never stops and makes some *later* test
-flaky.
+from `internal/tui`, bubbletea, `internal/tuitest`, `internal/filewatch`, `internal/heartbeat` or
+`internal/reactions` is still running 2 s after it ends. Only goroutines the test itself started:
+the call labels the test goroutine with a per-call pprof label (`tuitest.leakcheck`), every
+goroutine started from it — the program's included — inherits the label, and the cleanup reads the
+goroutine profile and reports the stacks still carrying it, so a parallel neighbour's straggler is
+never charged to whichever cleanup looks next. The reach is goroutines started from the test
+goroutine: one a `time.AfterFunc` timer starts (the sink's `closeWindow`) carries no label and is
+outside the check, and a bubbletea `Tick` parked on its timer is skipped on purpose. A driver test
+starts real workers; the interesting failure is not one that crashes but one that never stops and
+makes some *later* test flaky.
 
 ### Goldens
 

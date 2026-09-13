@@ -2,26 +2,16 @@ package tuitest
 
 import (
 	"fmt"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 // parkedForTest blocks in a frame this package owns, which is exactly what a leaked driver
-// goroutine looks like from the outside. It reports its own id first, so a test can say WHICH
-// goroutine it expects the check to name.
-func parkedForTest(started chan<- goroutineID, stop <-chan struct{}) {
-	started <- ownGoroutineID()
+// goroutine looks like from the outside. It reports that it is parked first, so a test knows the
+// goroutine is there to be found before it looks.
+func parkedForTest(started chan<- struct{}, stop <-chan struct{}) {
+	started <- struct{}{}
 	<-stop
-}
-
-// ownGoroutineID is the calling goroutine's id, read the only way Go offers it: out of the header
-// of its own stack. It goes through [idOf], so the parser the check attributes with is the parser
-// these tests name their goroutines with.
-func ownGoroutineID() goroutineID {
-	buf := make([]byte, 1<<10)
-	return idOf(string(buf[:runtime.Stack(buf, false)]))
 }
 
 // recordingTB stands in for the *testing.T of a test that leaks, so a test can call [CheckLeaks],
@@ -47,36 +37,91 @@ func (r *recordingTB) runCleanups() {
 	}
 }
 
-// TestLeakedGoroutinesSeesAParkedOne — and stops seeing it once it finishes. The two halves are
-// one test on purpose: a check that only ever reports a leak is as useless as one that never does.
-// It does not run in parallel: it counts goroutines, and a neighbour's screen would be counted too.
-func TestLeakedGoroutinesSeesAParkedOne(t *testing.T) {
-	before := len(leakedGoroutines())
+// The canned entries below are real debug=1 goroutine profile excerpts (Go 1.27, linux/arm64),
+// which is the point: the parser matches frames in the form the profile prints them, and a canned
+// profile in any other form would pass a parser that fails live.
+const (
+	profileHeader = "goroutine profile: total 5\n"
 
-	started, stop := make(chan goroutineID), make(chan struct{})
-	go parkedForTest(started, stop)
-	<-started
-	if got := len(leakedGoroutines()); got <= before {
-		t.Errorf("leakedGoroutines() = %d with a goroutine parked in a tuitest frame, want more than %d", got, before)
+	// parkedEntry is a goroutine parked in this package's own frame, wearing check id 7.
+	parkedEntry = "1 @ 0x97f38 0x26ff0 0x26b44 0x3e2b54 0x9f504\n" +
+		"# labels: {\"tuitest.leakcheck\":\"7\"}\n" +
+		"#\t0x3e2b53\tgithub.com/airiclenz/apogee/internal/tuitest.parkedForTest+0x43\t/workspace/repos/apogee/internal/tuitest/leak_test.go:16\n"
+
+	// foldedEntry is the same stack the profile folded: three goroutines, one entry.
+	foldedEntry = "3 @ 0x97f38 0x26ff0 0x26b44 0x3e2b54 0x9f504\n" +
+		"# labels: {\"tuitest.leakcheck\":\"7\"}\n" +
+		"#\t0x3e2b53\tgithub.com/airiclenz/apogee/internal/tuitest.parkedForTest+0x43\t/workspace/repos/apogee/internal/tuitest/leak_test.go:16\n"
+
+	// unlabelledEntry is the same frame on a goroutine no check labelled.
+	unlabelledEntry = "1 @ 0x97f38 0x26ff0 0x26b44 0x3e2b54 0x9f504\n" +
+		"#\t0x3e2b53\tgithub.com/airiclenz/apogee/internal/tuitest.parkedForTest+0x43\t/workspace/repos/apogee/internal/tuitest/leak_test.go:16\n"
+
+	// neighbourEntry wears another check's id — one whose id happens to contain this one's.
+	neighbourEntry = "1 @ 0x97f38 0x26ff0 0x26b44 0x3e2b54 0x9f504\n" +
+		"# labels: {\"tuitest.leakcheck\":\"17\"}\n" +
+		"#\t0x3e2b53\tgithub.com/airiclenz/apogee/internal/tuitest.parkedForTest+0x43\t/workspace/repos/apogee/internal/tuitest/leak_test.go:16\n"
+
+	// tickEntry is bubbletea's Tick parked on its timer, in the `+0x` form the profile prints.
+	tickEntry = "1 @ 0x97f38 0x26ff0 0x26b44 0x22af48 0x9f504\n" +
+		"# labels: {\"tuitest.leakcheck\":\"7\"}\n" +
+		"#\t0x22af47\tcharm.land/bubbletea/v2.Tick.func1+0x37\t/root/go/pkg/mod/charm.land/bubbletea/v2@v2.0.8/commands.go:157\n"
+
+	// runnerEntry is the goroutine a test in this package runs on — labelled, in-package, and
+	// nobody's leak.
+	runnerEntry = "1 @ 0x5553c 0x96cc4 0x1b2954 0x1b2600 0x1afe64 0x3e0420 0x12b3c4 0x9f504\n" +
+		"# labels: {\"tuitest.leakcheck\":\"7\"}\n" +
+		"#\t0x3e041f\tgithub.com/airiclenz/apogee/internal/tuitest.TestSomething+0x21f\t/workspace/repos/apogee/internal/tuitest/some_test.go:26\n" +
+		"#\t0x12b3c3\ttesting.tRunner+0xc3\t/usr/local/go/src/testing/testing.go:2193\n"
+
+	// checkerEntry is the goroutine reading the profile, should it still wear the id.
+	checkerEntry = "1 @ 0x5553c 0x96cc4 0x1b2954 0x1b2600 0x1afe64 0x3e0420 0x12b3c4 0x9f504\n" +
+		"# labels: {\"tuitest.leakcheck\":\"7\"}\n" +
+		"#\t0x1afe63\truntime/pprof.(*Profile).WriteTo+0x143\t/usr/local/go/src/runtime/pprof/pprof.go:405\n" +
+		"#\t0x3e041f\tgithub.com/airiclenz/apogee/internal/tuitest.goroutineProfile+0x21f\t/workspace/repos/apogee/internal/tuitest/leak.go:120\n"
+
+	// outsideEntry wears the id but names no marked package: the standard library's own worker.
+	outsideEntry = "1 @ 0x97f38 0x26ff0 0x26b44 0x2b1234 0x9f504\n" +
+		"# labels: {\"tuitest.leakcheck\":\"7\"}\n" +
+		"#\t0x2b1233\tnet/http.(*persistConn).readLoop+0x1234\t/usr/local/go/src/net/http/transport.go:2200\n"
+)
+
+// TestLeaksLabelledReadsTheProfile drives the parser with canned profiles: what wears the id and
+// names a marked package is a leak, everything else is not.
+func TestLeaksLabelledReadsTheProfile(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		profile    string
+		goroutines int
+	}{
+		{"labelled stack found", profileHeader + parkedEntry, 1},
+		{"a folded entry counts every goroutine in it", profileHeader + foldedEntry, 3},
+		{"unlabelled ignored", profileHeader + unlabelledEntry, 0},
+		{"another check's id ignored", profileHeader + neighbourEntry, 0},
+		{"Tick timer frame ignored", profileHeader + tickEntry, 0},
+		{"the test runner ignored", profileHeader + runnerEntry, 0},
+		{"the checker ignored", profileHeader + checkerEntry, 0},
+		{"an unmarked package ignored", profileHeader + outsideEntry, 0},
+		{"the header line does not hide the first entry", profileHeader + parkedEntry + "\n" + unlabelledEntry, 1},
+		{"every entry of a full profile is read", profileHeader + runnerEntry + "\n" + tickEntry + "\n" +
+			parkedEntry + "\n" + neighbourEntry + "\n" + foldedEntry, 4},
+		{"an empty profile", "goroutine profile: total 0\n", 0},
 	}
-	close(stop)
-
-	deadline := time.Now().Add(2 * time.Second)
-	for len(leakedGoroutines()) > before {
-		if !time.Now().Before(deadline) {
-			t.Fatalf("the finished goroutine is still reported as leaked")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// TestLeakedGoroutinesIgnoresItsOwnChecker: the goroutine walking the stacks is standing in a
-// tuitest frame itself, and a check that reported itself would fail every test that used it.
-func TestLeakedGoroutinesIgnoresItsOwnChecker(t *testing.T) {
-	for _, stack := range leakedGoroutines() {
-		if strings.Contains(stack, checkerFrame) {
-			t.Errorf("leakedGoroutines() reported the goroutine doing the looking:\n%s", stack)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			left := leaksLabelled([]byte(tc.profile), "7")
+			if got := goroutinesIn(left); got != tc.goroutines {
+				t.Errorf("leaksLabelled(...) stands for %d goroutine(s), want %d:\n%s", got, tc.goroutines, stacksOf(left))
+			}
+			for _, l := range left {
+				if strings.HasPrefix(l.stack, "goroutine profile:") {
+					t.Errorf("a reported entry still carries the profile header:\n%s", l.stack)
+				}
+			}
+		})
 	}
 }
 
@@ -94,78 +139,69 @@ func TestCheckLeaksPassesWhenTheScreenIsClosed(t *testing.T) {
 	})
 }
 
-// TestCheckLeaksReportsOnlyWhatTheTestStarted: a goroutine already parked when CheckLeaks is called
-// belongs to whoever started it — a parallel neighbour, or the process — and attributing it to this
-// test would make the check noise. One started after the call is this test's to answer for. Not
-// parallel: it reads a leak report the whole process contributes to.
-func TestCheckLeaksReportsOnlyWhatTheTestStarted(t *testing.T) {
-	started, stop := make(chan goroutineID), make(chan struct{})
-	defer close(stop)
+// TestCheckLeaksIgnoresWhatWasRunningBefore: a goroutine already parked when CheckLeaks is called
+// belongs to whoever started it — a parallel neighbour, or the process — and carries no id the
+// check could blame it by.
+func TestCheckLeaksIgnoresWhatWasRunningBefore(t *testing.T) {
+	t.Parallel()
 
+	started, stop := make(chan struct{}), make(chan struct{})
+	defer close(stop)
 	go parkedForTest(started, stop)
-	inherited := <-started
+	<-started
 
 	rec := &recordingTB{TB: t}
 	CheckLeaks(rec)
-
-	go parkedForTest(started, stop)
-	ours := <-started
-
 	rec.runCleanups()
 
-	if len(rec.reports) != 1 {
-		t.Fatalf("CheckLeaks reported %d time(s), want 1: %v", len(rec.reports), rec.reports)
-	}
-	report := rec.reports[0]
-	if !strings.Contains(report, "goroutine "+string(ours)+" ") {
-		t.Errorf("the goroutine started after CheckLeaks (%s) is missing from its report:\n%s", ours, report)
-	}
-	if strings.Contains(report, "goroutine "+string(inherited)+" ") {
-		t.Errorf("the goroutine parked before CheckLeaks (%s) was attributed to this test:\n%s", inherited, report)
+	if len(rec.reports) != 0 {
+		t.Errorf("CheckLeaks blamed a goroutine parked before it was called:\n%s", strings.Join(rec.reports, "\n"))
 	}
 }
 
-// TestIdOfKeysAnUnparseableBlockOnItsContent: a well-formed header still yields the bare number,
-// and a block whose header does not parse yields an id of its own instead of the empty one every
-// such block used to share — two of them stay two entries in the snapshot map, and the same block
-// keys the same way twice so a snapshot still forgives the goroutine it actually holds.
-func TestIdOfKeysAnUnparseableBlockOnItsContent(t *testing.T) {
-	t.Parallel()
+// TestCheckLeaksBlamesOnlyTheLeakingSubtest is the attribution the labels buy: two checked
+// subtests run in parallel, one leaks, and the report lands on that one alone — the clean
+// neighbour's cleanup looks at the same profile and sees nothing of its own.
+func TestCheckLeaksBlamesOnlyTheLeakingSubtest(t *testing.T) {
+	stop, leaking := make(chan struct{}), make(chan struct{})
+	// A Cleanup, not a defer: the parallel subtests run after this function returns, and the
+	// leaked goroutines must stay parked until both have looked.
+	t.Cleanup(func() { close(stop) })
 
-	if got := idOf("goroutine 42 [chan receive]:\ninternal/tui.wait()"); got != "42" {
-		t.Errorf("idOf(a well-formed header) = %q, want %q", got, "42")
-	}
+	t.Run("leaks two goroutines", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingTB{TB: t}
+		CheckLeaks(rec)
 
-	const truncated = "goroutine\ninternal/tui.wait()"
-	const headerless = "internal/tui.paint()\n\tlayout.go:12 +0x1"
-	first, second := idOf(truncated), idOf(headerless)
-	for _, id := range []goroutineID{first, second} {
-		if !strings.HasPrefix(string(id), unparsedID) {
-			t.Errorf("idOf(an unparseable block) = %q, want the %q prefix a runtime id cannot wear", id, unparsedID)
+		started := make(chan struct{})
+		go parkedForTest(started, stop)
+		<-started
+		go parkedForTest(started, stop)
+		<-started
+		close(leaking)
+
+		rec.runCleanups()
+		if len(rec.reports) != 1 {
+			t.Fatalf("CheckLeaks reported %d time(s), want 1:\n%s", len(rec.reports), strings.Join(rec.reports, "\n"))
 		}
-	}
-	if first == second {
-		t.Errorf("two different unparseable blocks share the id %q", first)
-	}
-	if again := idOf(truncated); again != first {
-		t.Errorf("idOf(the same unparseable block) = %q then %q, want one stable id", first, again)
-	}
-}
+		report := rec.reports[0]
+		if !strings.HasPrefix(report, "2 goroutine(s) outlived the test by "+leakGrace.String()) {
+			t.Errorf("the report does not open with the count of what leaked:\n%s", report)
+		}
+		if !strings.Contains(report, "tuitest.parkedForTest+0x") {
+			t.Errorf("the report does not name the parked frame:\n%s", report)
+		}
+	})
 
-// TestStartedSinceDoesNotForgiveASecondUnparseableBlock is the leak the empty id caused: one
-// unparseable block running when CheckLeaks snapshotted forgave every later one, because they all
-// keyed the same. Both maps are built through the real keying, so it is [idOf]'s rule under test
-// here and not the test's own bookkeeping.
-func TestStartedSinceDoesNotForgiveASecondUnparseableBlock(t *testing.T) {
-	t.Parallel()
-
-	const inherited = "goroutine\ninternal/tui.inherited()"
-	const leaked = "goroutine\ninternal/tui.leaked()"
-	snapshot := map[goroutineID]string{idOf(inherited): inherited}
-	current := map[goroutineID]string{idOf(inherited): inherited, idOf(leaked): leaked}
-
-	left := startedSince(snapshot, current)
-	if len(left) != 1 || left[0] != leaked {
-		t.Fatalf("startedSince(...) = %q, want only the block that was not in the snapshot", left)
-	}
+	t.Run("leaks nothing", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingTB{TB: t}
+		CheckLeaks(rec)
+		// Look only once the neighbour's goroutines are parked, or there is nothing to misattribute.
+		<-leaking
+		rec.runCleanups()
+		if len(rec.reports) != 0 {
+			t.Errorf("the clean subtest was blamed for its neighbour's leak:\n%s", strings.Join(rec.reports, "\n"))
+		}
+	})
 }
