@@ -2482,6 +2482,127 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 	}
 }
 
+// seamsRunStub is the stub every `--seams` assertion drives: one tool call, bracketed by the two
+// tool seams closing around it, the way the loop emits them. The seam closures are named by their
+// SEAM here because that is what the engine emits; the line names them by the seam's closing
+// notice, which is the spelling the assertions below use.
+func seamsRunStub() *stubRunner {
+	return &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1},
+		emit: func(sink domain.EventSink) {
+			for _, e := range []domain.Event{
+				domain.ToolCallEvent{Call: domain.ToolCall{ID: "call-1", Tool: "read_file"}},
+				domain.SeamClosedEvent{Seam: domain.MomentPreToolExec},
+				domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call-1", Content: "ok"}},
+				domain.SeamClosedEvent{Seam: domain.MomentPostToolResult, Fired: []string{"tool-result-repair"}},
+			} {
+				sink.Emit(e)
+			}
+		}}
+}
+
+// seamClosedLines returns the seam names of every seam_closed line on the stream, in order.
+func seamClosedLines(t *testing.T, out string) []string {
+	t.Helper()
+	var seams []string
+	for _, line := range jsonEventLines(t, out) {
+		if line["event"] != "seam_closed" {
+			continue
+		}
+		data, ok := line["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("a seam_closed line carried no data object: %v", line)
+		}
+		seams = append(seams, fmt.Sprint(data["seam"]))
+	}
+	return seams
+}
+
+// `--seams` opts the stream into the seam_closed kind: the two tool seams that closed around the
+// call arrive as lines of their own, named by the closing notice, and the frames still bracket
+// the run — the opt-in adds lines and changes nothing about the contract around them.
+func TestHeadlessSeamsEmitsSeamClosedLines(t *testing.T) {
+	stub := seamsRunStub()
+
+	out, _, err := headlessRun(t, stub, "--format", "json", "--seams", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+
+	want := []string{
+		string(domain.MomentPreToolExecFinished),
+		string(domain.MomentPostToolResultFinished),
+	}
+	if got := seamClosedLines(t, out); !slices.Equal(got, want) {
+		t.Errorf("seam_closed lines name %v; want %v\nstdout:\n%s", got, want, out)
+	}
+
+	lines := jsonEventLines(t, out)
+	if lines[0]["event"] != "run_started" || lines[len(lines)-1]["event"] != "run_finished" {
+		t.Errorf("the frames no longer bracket the run:\n%s", out)
+	}
+	_, data := finishedFrame(t, lines)
+	wantExitCode(t, data, 0)
+}
+
+// Without the flag the same run writes no seam_closed line at all: the default stream is exactly
+// what ADR 0076 A5 promised, and the tool call and its result still reach it.
+func TestHeadlessFormatJSONOmitsSeamClosedByDefault(t *testing.T) {
+	stub := seamsRunStub()
+
+	out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+
+	if got := seamClosedLines(t, out); len(got) != 0 {
+		t.Errorf("the default stream carried seam_closed lines %v; the kind is opt-in\nstdout:\n%s", got, out)
+	}
+	var kinds []string
+	for _, line := range jsonEventLines(t, out) {
+		kinds = append(kinds, fmt.Sprint(line["event"]))
+	}
+	want := []string{"run_started", "tool_call", "tool_result", "run_finished"}
+	if !slices.Equal(kinds, want) {
+		t.Errorf("stream kinds = %v; want %v", kinds, want)
+	}
+}
+
+// `--seams` reaches only the Event lines, so asking for it under the text format is a usage
+// mistake of the same class as an unknown `--format` value: refused in prose with the exact
+// sentence a caller can act on, exit 2, and no run started.
+func TestHeadlessSeamsWithoutJSONIsAUsageError(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "the default format", args: []string{"--seams", "a prompt"}},
+		{name: "text named explicitly", args: []string{"--format", "text", "--seams", "a prompt"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubRunner{}
+			out, _, err := headlessRun(t, stub, tc.args...)
+
+			if err == nil {
+				t.Fatal("--seams without --format json was accepted")
+			}
+			const want = "apogee headless: --seams needs --format json"
+			if err.Error() != want {
+				t.Errorf("refusal = %q; want %q", err.Error(), want)
+			}
+			if code := exitCodeFor(err); code != exitNotStarted {
+				t.Errorf("exit code = %d; want %d (err: %v)", code, exitNotStarted, err)
+			}
+			if stub.called {
+				t.Error("the runner ran for an invocation the flag check refused")
+			}
+			if out != "" {
+				t.Errorf("a run that never started wrote to stdout: %q", out)
+			}
+		})
+	}
+}
+
 // The prune is reported ONCE under json, on the stream, in the stream's vocabulary. The stderr
 // sentence the text path prints is the same fact in a second vocabulary, and a consumer reading a
 // machine stream has no use for it (ADR 0075 decision 6) — but the sink is still WRAPPED, not
@@ -2900,7 +3021,9 @@ func TestHeadlessFormatRejectsUnknownValue(t *testing.T) {
 
 // Cobra validates flags and the argument count BEFORE it calls RunE, so the exit convention has to
 // reach those refusals from outside the command body or they leave as bare errors and exit 1 —
-// telling a script the model ran and failed when nothing was ever sent.
+// telling a script the model ran and failed when nothing was ever sent. The last case is the one
+// flag combination the body itself judges (`--seams` under the text format) and holds it to the
+// same convention.
 func TestHeadlessUsageErrorsNeverStartARun(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2909,6 +3032,7 @@ func TestHeadlessUsageErrorsNeverStartARun(t *testing.T) {
 		{name: "an unknown flag", args: []string{"--bogus", "a prompt"}},
 		{name: "a flag value that will not parse", args: []string{"--no-save=maybe", "a prompt"}},
 		{name: "an unquoted prompt arrives as several arguments", args: []string{"summarise", "the", "repo"}},
+		{name: "--seams without --format json", args: []string{"--seams", "a prompt"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

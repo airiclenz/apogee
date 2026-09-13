@@ -74,7 +74,9 @@ NOTES (2026-09-13): `TestEncodeSkipsAnUnknownEvent` left as is — it already us
 **Acceptance:** `go test -race -count=1 ./internal/eventjson/ && go test -race -count=1 -run 'TestManualListsEveryEventLineKind|TestHeadlessFormatJSON' ./cmd/apogee/`
 **Commit:** `feat(eventjson): seam_closed line kind behind Options.Seams`
 
-## 3. `headless --format json --seams` (apogee-5cf, part 2)
+## 3. `headless --format json --seams` (apogee-5cf, part 2) — ✅ DONE (2026-09-13)
+
+NOTES (2026-09-13): `--seams` is judged inside runHeadless's text branch, so `--format <unknown> --seams` still gets the `--format` refusal — the format is the larger mistake and the plan's "same class as the --format rejection" wording left the precedence open.
 
 Depends on item 2.
 **What:** Add the `--seams` bool flag next to `--format` (`cmd/apogee/headless.go:340`), help text `also emit seam_closed lines (--format json only)`; set `eventjson.Options{Seams: seams}` at the `eventjson.New` call (line 390). `--seams` without `--format json` is a usage error in the same class as the `--format` rejection at line 400 (exit 2, no run started), worded `apogee headless: --seams needs --format json`. Document the flag in `docs/manual/headless.md` under "Machine-readable output" (a short paragraph: what it adds, why it is off by default — volume, ADR 0076 A5 — and the five seam names) and in the `seam_closed` table row from item 2.

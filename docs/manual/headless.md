@@ -187,12 +187,26 @@ moment, and the case difference is the signal.
 | `prune` | the context was pruned: how many results, how many tokens |
 | `usage` | one model call's token accounting and the run's cumulative totals |
 | `audit` | a tool call's allow/deny decision and its reason |
-| `seam_closed` | one in-loop seam finished passing: `data.seam` is its closing notice's name (`post-response-finished`, …) and `data.fired` the reactions that acted there, in order — **opt-in**, absent from the stream unless asked for |
+| `seam_closed` | one in-loop seam finished passing: `data.seam` is its closing notice's name (`post-response-finished`, …) and `data.fired` the reactions that acted there, in order — **opt-in**, absent from the stream unless `--seams` asks for it |
 | `run_started` | the opening frame — not an event |
 | `run_finished` | the closing frame — not an event |
 
 The Inspector's raw provider protocol is the one thing never written here: putting a wire format on
 a documented stdout contract would make it a public surface.
+
+### `--seams` — the seam closures, on request
+
+`--format json --seams` adds the `seam_closed` lines: one per in-loop seam that finished passing,
+named by the seam's closing notice — `pre-request-finished`, `post-response-finished`,
+`pre-tool-exec-finished`, `post-tool-result-finished` and `history-rewrite-finished` — with the
+reactions that acted there under `data.fired`. They are off by default for two reasons. Volume:
+the request and response seams close once per streamed Turn and the two tool seams once per tool
+call, at every depth, so a run that used tools has more seam lines than tool lines. And the
+default stream is what [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+A5 promised: the seam closures are sink-only there, so a consumer that never asked sees exactly
+the stream it saw before the kind existed. `--seams` reaches only the Event lines; given without
+`--format json` it is a usage error — `apogee headless: --seams needs --format json`, exit `2`,
+no run started.
 
 ### The two frames
 

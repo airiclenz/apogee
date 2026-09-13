@@ -437,6 +437,7 @@ func newHeadlessCommand() *cobra.Command {
 	var opts config.Options
 	var noSave bool
 	var outputFormat string
+	var seams bool
 
 	cmd := &cobra.Command{
 		Use:   "headless [prompt]",
@@ -468,7 +469,7 @@ func newHeadlessCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHeadless(cmd, args, &opts, noSave, outputFormat)
+			return runHeadless(cmd, args, &opts, noSave, outputFormat, seams)
 		},
 	}
 
@@ -502,6 +503,8 @@ func newHeadlessCommand() *cobra.Command {
 		"run the prompt and print the answer, but record no session")
 	flags.StringVar(&outputFormat, "format", formatText,
 		"what stdout carries: text (the answer) | json (the JSONL Event lines, ADR 0075)")
+	flags.BoolVar(&seams, "seams", false,
+		"also emit seam_closed lines (--format json only)")
 
 	return cmd
 }
@@ -532,9 +535,17 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 // JSONL stream whose single line said "that is not a format" would be a worse answer than the
 // prose every other usage mistake gets. Cobra has already parsed the flag by the time this runs,
 // so this is the only point that can judge its VALUE (an unknown flag NAME is the FlagErrorFunc's).
-func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave bool, outputFormat string) error {
+//
+// `--seams` is the same class of mistake when it arrives without `--format json`: the flag opts the
+// Event lines into the seam_closed kind (eventjson.Options.Seams), and the text path has no Event
+// lines for it to reach. It is refused here rather than silently ignored, because a caller who
+// asked for seam lines and got prose would read the silence as "the run closed no seams".
+func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave bool, outputFormat string, seams bool) error {
 	switch outputFormat {
 	case formatText:
+		if seams {
+			return notStarted(errors.New("apogee headless: --seams needs --format json"))
+		}
 		_, err := runHeadlessBody(cmd, args, opts, noSave, nil)
 		return err
 	case formatJSON:
@@ -554,6 +565,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 			Report: func(err error) {
 				cmd.PrintErrln("apogee headless: event lines stopped — " + err.Error())
 			},
+			Seams: seams,
 		})
 		res, err := runHeadlessBody(cmd, args, opts, noSave, lines)
 		lines.RunFinished(runFinishedFrame(res, err))
