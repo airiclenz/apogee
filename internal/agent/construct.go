@@ -83,10 +83,10 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		tools:              resolveTools(cfg),
 		ownsToolSet:        composesDefaultRoster(cfg), // …and whether the engine may RE-compose it when the model's roster axis changes (ADR 0057)
 		guards:             security.NewDefaultGuards(),
-		mode:               cfg.Mode,                                                // seed the live, swappable mode from the construction config
-		confineToWorkspace: cfg.ConfineToWorkspace,                                  // likewise the live, swappable blast-radius flag (/confine)
-		scratchDir:         cfg.ScratchDir,                                          // and the live, session-following scratch root (SetScratchDir)
-		gen:                domain.Generation{Bypass: cfg.Bypass, Floor: cfg.Floor}, // and the live Generation the settings surface swaps whole: Bypass beside the Floor enable set (SetReactions, ADR 0076 A8) …
+		mode:               cfg.Mode,                                                                                          // seed the live, swappable mode from the construction config
+		confineToWorkspace: cfg.ConfineToWorkspace,                                                                            // likewise the live, swappable blast-radius flag (/confine)
+		scratchDir:         cfg.ScratchDir,                                                                                    // and the live, session-following scratch root (SetScratchDir)
+		gen:                domain.Generation{Bypass: cfg.Bypass, Floor: cfg.Floor, ContextFillNotice: cfg.ContextFillNotice}, // and the live Generation the settings surface swaps whole: Bypass and the context-fill notice switch beside the Floor enable set (SetReactions, ADR 0076 A8, ADR 0077) …
 		compaction:         cfg.Context.CompactionEnabled,
 		prune:              cfg.Context.PruneToolResults,
 		contextFileNames:   cfg.ContextFiles,
@@ -103,14 +103,15 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
 		now:                time.Now,                             // the request-render clock for the system prompt's {{datetime}}
 	}
-	// The engine's own Reactions — the Floor guards cfg.Floor leaves ON — are built HERE, after
-	// the literal, because each handler closes over this Agent. The ladder is the ENABLE SET
-	// (ADR 0076 A8): a guard whose opt-out is set is absent from it, and SetReactions rebuilds it
-	// whenever the live Floor moves. The host's own Reactions are validated against ALL SEVEN
+	// The engine's own Reactions — the Floor guards cfg.Floor leaves ON, and the context-fill
+	// notice when cfg.ContextFillNotice switches it on — are built HERE, after the literal,
+	// because each handler closes over this Agent. The ladder is the ENABLE SET (ADR 0076 A8): a
+	// guard whose opt-out is set is absent from it, and SetReactions rebuilds it whenever the live
+	// Floor or the notice switch moves. The host's own Reactions are validated against ALL SEVEN
 	// guard keys whatever the enable set holds (armReactions): an ill-formed entry, or one
 	// reusing a guard's or a sibling's ID, fails construction rather than firing under a name
 	// something else already answers to.
-	a.builtins = a.buildBuiltins(cfg.Floor)
+	a.builtins = a.buildBuiltins(cfg.Floor, cfg.ContextFillNotice)
 	armed, err := armReactions(cfg.Reactions)
 	if err != nil {
 		return nil, err

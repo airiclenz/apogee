@@ -58,8 +58,10 @@ type Agent struct {
 	cfg      domain.Config
 	upstream provider.Responder // provider seam (Decision C): fake in tests, real HTTP via New
 
-	// builtins are the engine's OWN Reactions — the seven Floor guards (builtins.go) — which
-	// fire first at every seam Moment and are never switched off by Bypass (ADR 0076 D1/D9).
+	// builtins are the engine's OWN Reactions — the seven Floor guards and, when its switch is
+	// on, the context-fill notice (builtins.go) — which fire first at every seam Moment. A Floor
+	// guard is never switched off by Bypass (ADR 0076 D1/D9); the notice, the one builtin of
+	// class advise, is (ADR 0077 D1).
 	// armed are the Reactions Config.Reactions arms beside them, validated at construction and
 	// fired after every builtin, in registration order. The two are held apart rather than
 	// concatenated because the split IS the ladder: which leg a reaction is in decides whether
@@ -1037,11 +1039,12 @@ func (a *Agent) closeUndoGroup() {
 // this would guard against cannot be configured, and refusing a swap at fire time has nowhere to
 // report the refusal to.
 //
-// The builtin ladder is REBUILT from gen.Floor, because a Floor guard whose boolean is off is
-// absent from the ladder rather than self-skipping at fire time (the enable set, ADR 0076 A8):
-// the firing sequence is identical either way, a disabled guard having booked nothing before.
-// It is rebuilt only when the Floor actually MOVED — a Bypass-only swap leaves the slice exactly
-// as it was, so a ladder installed in place of the seven guards survives one.
+// The builtin ladder is REBUILT from gen.Floor and gen.ContextFillNotice, because a Floor guard
+// whose boolean is off — or the context-fill notice while its switch is off — is absent from the
+// ladder rather than self-skipping at fire time (the enable set, ADR 0076 A8): the firing
+// sequence is identical either way, a disabled guard having booked nothing before. It is rebuilt
+// only when one of the two actually MOVED — a Bypass-only swap leaves the slice exactly as it
+// was, so a ladder installed in place of the seven guards survives one.
 //
 // Bypass takes effect at the next fire, as it always has: the gate is consulted per armed
 // Reaction per Moment (bypassSkips), so a Turn already mid-flight starts honouring the new value
@@ -1054,16 +1057,18 @@ func (a *Agent) closeUndoGroup() {
 func (a *Agent) SetReactions(gen domain.Generation) {
 	a.genMu.Lock()
 	defer a.genMu.Unlock()
-	if gen.Floor != a.gen.Floor {
-		a.builtins = a.buildBuiltins(gen.Floor)
+	if gen.Floor != a.gen.Floor || gen.ContextFillNotice != a.gen.ContextFillNotice {
+		a.builtins = a.buildBuiltins(gen.Floor, gen.ContextFillNotice)
 	}
 	a.gen.Floor, a.gen.Bypass, a.gen.Sync = gen.Floor, gen.Bypass, gen.Sync
+	a.gen.ContextFillNotice = gen.ContextFillNotice
 }
 
-// Generation reports the live Generation this Agent is running — the Floor enable set, Bypass and
-// the sync lane as SetReactions last installed them, seeded at construction from cfg.Floor and
-// cfg.Bypass with an empty Sync (Config.Reactions is the OTHER route and is not folded in here).
-// Observe is always empty: the agent never holds the observe lane.
+// Generation reports the live Generation this Agent is running — the Floor enable set, Bypass,
+// the context-fill notice switch and the sync lane as SetReactions last installed them, seeded at
+// construction from cfg.Floor, cfg.Bypass and cfg.ContextFillNotice with an empty Sync
+// (Config.Reactions is the OTHER route and is not folded in here). Observe is always empty: the
+// agent never holds the observe lane.
 //
 // It is the read half of the read-edit-hand-back idiom SetReactions documents, so a caller moving
 // one field carries the sync lane through untouched.

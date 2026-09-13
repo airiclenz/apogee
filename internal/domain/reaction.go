@@ -520,9 +520,9 @@ func (r Reaction) Validate() error {
 }
 
 // Generation is the whole live shape of the engine at one moment: the Floor enable set, Bypass,
-// and the user-origin observe and sync lists. It is the ONE value a live swap carries (ADR 0076
-// A8), replacing the three separate swap idioms — each with its own setter and its own lock — that
-// preceded it, so nothing downstream can read a half-swapped state.
+// the user-origin observe and sync lists, and the context-fill notice switch. It is the ONE value
+// a live swap carries (ADR 0076 A8), replacing the three separate swap idioms — each with its own
+// setter and its own lock — that preceded it, so nothing downstream can read a half-swapped state.
 type Generation struct {
 	// Floor is the Floor guard enable set: which of the seven structural guards are switched off.
 	Floor FloorConfig
@@ -536,15 +536,21 @@ type Generation struct {
 	// handler holds the Turn while it runs and its output reaches the model or the Approver. The
 	// RUNNER ignores it, exactly as the agent ignores Observe.
 	Sync []Reaction
+	// ContextFillNotice switches the engine's context-fill notice on (ADR 0077 D1/D2): the one
+	// builtin of class advise, off by default and not a Floor guard, which is why it is a member of
+	// its own beside Floor rather than a FloorConfig field. Like Floor it is an enable-set input:
+	// the agent rebuilds its builtin ladder when it moves, so the notice is absent from the ladder
+	// rather than self-skipping while it is off.
+	ContextFillNotice bool
 }
 
 // Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what
-// is wrong. Floor and Bypass are booleans and cannot be malformed, so every check is about the
-// two lanes: each entry validates on its own, each takes a class its lane accepts — observe for
-// the Runner's lane, advise or gate for the sync lane, which is the user's alone — and no two
-// entries WITHIN one lane share an ID, which is what a firing is reported under. The same ID may
-// appear in both lanes: one configured entry resolves to up to one reaction per class and they
-// all carry the entry's id.
+// is wrong. Floor, Bypass and ContextFillNotice are booleans and cannot be malformed, so every
+// check is about the two lanes: each entry validates on its own, each takes a class its lane
+// accepts — observe for the Runner's lane, advise or gate for the sync lane, which is the user's
+// alone — and no two entries WITHIN one lane share an ID, which is what a firing is reported
+// under. The same ID may appear in both lanes: one configured entry resolves to up to one
+// reaction per class and they all carry the entry's id.
 func (g Generation) Validate() error {
 	seen := make(map[string]bool, len(g.Observe))
 	for _, r := range g.Observe {

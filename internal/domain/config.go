@@ -67,6 +67,17 @@ type Config struct {
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006/0076 D9: armed advise and shape Reactions off, structure on (the hard-constraint floor)
 
+	// ContextFillNotice switches the engine's context-fill notice on (ADR 0077 D1/D2): an
+	// engine-origin ADVISE Reaction on post-tool-result that tells the model how far its
+	// conversation has climbed toward the automatic Compaction line. It is NOT a Floor guard — a
+	// guard corrects what the model sees after its own failure, this notice steers — so it is off
+	// by default (the hard invariant: a model-facing behaviour above the Floor ships off until
+	// bench evidence turns it on), it is switched off by Bypass like every advise reaction, and it
+	// lives beside Bypass rather than inside Floor. It is the CONSTRUCTION SEED of the live
+	// Generation's member of the same name (Generation.ContextFillNotice), which the settings
+	// surface swaps whole; a child inherits the parent's LIVE value at spawn.
+	ContextFillNotice bool
+
 	// ConfineToWorkspace tunes Auto's blast radius (ADR 0012); meaningful only in Auto.
 	// true (the default) fences subprocess writes to the workspace under OS confinement
 	// (network open, MCP gated); false ("I am the sandbox") runs Auto unconfined, safe

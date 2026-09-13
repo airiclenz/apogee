@@ -523,7 +523,9 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	gen := a.Generation()        // the parent's LIVE Generation at spawn:
 	childCfg.Bypass = gen.Bypass // its Bypass and its Floor enable set, read as ONE value so a
 	childCfg.Floor = gen.Floor   // child never runs half of each (ADR 0076 A8) — and so it runs
-	//                              the same floor the parent is running (ADR 0071)
+	//                              the same floor the parent is running (ADR 0071) —
+	childCfg.ContextFillNotice = gen.ContextFillNotice // and its context-fill notice switch, so a
+	//                                                    child inherits the notice (ADR 0077 D1)
 	childCfg.Context.CompactionEnabled = a.compactionEnabled() // and the auto-Compaction and Pruning gates,
 	childCfg.Context.PruneToolResults = a.pruneEnabled()       // which the settings surface may have swapped
 	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the

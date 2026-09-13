@@ -109,11 +109,12 @@ func TestAgentSetBypassObservedByTheNextHookFire(t *testing.T) {
 }
 
 // TestSetReactionsSwapsFloorAndBypassAtomically drives the ONE swap seam against a concurrent
-// cascade under the race detector. The generation is a compound value now — Floor and Bypass
-// under one lock, with the builtin ladder rebuilt from the Floor (ADR 0076 A8) — so the setter
-// races both the per-Moment Bypass read and the ladder read fire takes, which is what the old
-// per-field locks could not cover. It asserts nothing beyond "no data race and both halves
-// land": that is the whole point of a swap that must never be observed half applied.
+// cascade under the race detector. The generation is a compound value now — Floor, Bypass and
+// the context-fill notice switch under one lock, with the builtin ladder rebuilt from the Floor
+// and the switch (ADR 0076 A8, ADR 0077) — so the setter races both the per-Moment Bypass read
+// and the ladder read fire takes, which is what the old per-field locks could not cover. It
+// asserts nothing beyond "no data race and every switch lands": that is the whole point of a
+// swap that must never be observed half applied.
 func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
 	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
 	if err != nil {
@@ -126,6 +127,7 @@ func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
 		{Bypass: true, Floor: domain.FloorConfig{DisableToolLoopBreaker: true}},
 		{Floor: domain.FloorConfig{DisableReadCache: true, DisableToolResultCap: true}},
 		{Bypass: true},
+		{ContextFillNotice: true},
 	}
 
 	var wg sync.WaitGroup
@@ -148,11 +150,11 @@ func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
 	}()
 	wg.Wait()
 
-	// The last generation installed is what the Agent runs, both halves of it.
-	want := domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableToolCallSalvage: true}}
+	// The last generation installed is what the Agent runs, all three switches of it.
+	want := domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableToolCallSalvage: true}, ContextFillNotice: true}
 	a.SetReactions(want)
 	got := a.Generation()
-	if got.Floor != want.Floor || got.Bypass != want.Bypass {
+	if got.Floor != want.Floor || got.Bypass != want.Bypass || got.ContextFillNotice != want.ContextFillNotice {
 		t.Errorf("Generation() = %+v, want %+v", got, want)
 	}
 	if ids := builtinIDs(a); slices.Contains(ids, guardToolCallSalvage) {

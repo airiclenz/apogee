@@ -10,22 +10,26 @@ import (
 	"github.com/airiclenz/apogee/internal/processing"
 )
 
-// The engine's builtin Reactions: the seven Floor guards (ADR 0071, ADR 0076 D1). Each is a
-// domain.Reaction of engine origin and shape-view class, holding a thin handler that calls the
-// unchanged internal/floor policy
-// function. The policy stays in internal/floor byte-for-byte; what lives here is only the
+// The engine's builtin Reactions: the seven Floor guards (ADR 0071, ADR 0076 D1) and, behind its
+// own switch, the context-fill notice (ADR 0077). Each guard is a domain.Reaction of engine
+// origin and shape-view class, holding a thin handler that calls the unchanged internal/floor
+// policy function. The policy stays in internal/floor byte-for-byte; what lives here is only the
 // engine's half — when the guard is consulted, what its firing is called, and what it books.
 //
 // They are built into Agent.builtins at construction and are never entries of Config.Reactions:
-// a builtin fires FIRST at its Moment and is never switched off by Bypass, which is the whole
-// difference between the floor a model always gets and everything armed above it.
+// a builtin fires FIRST at its Moment. A Floor guard is never switched off by Bypass, which is
+// the whole difference between the floor a model always gets and everything armed above it; the
+// context-fill notice is the ONE builtin Bypass does switch off, because it is class advise — it
+// steers the model rather than correcting what it sees — and Bypass is the promise that nothing
+// of that class speaks (ADR 0077 D1, bypassSkips).
 //
-// The ladder is an ENABLE SET (ADR 0076 A8): a guard whose gate is off is ABSENT from the slice
-// buildBuiltins returns rather than present-and-self-skipping, so no handler consults a Floor
-// gate at fire time. The firing sequence is identical either way — a disabled guard booked
-// nothing before — and the ladder is rebuilt from the live Generation whenever its Floor moves
-// (SetReactions), so a guard switched off stops at the next Moment, one switched back on arms
-// again, and nothing already corrected is undone.
+// The ladder is an ENABLE SET (ADR 0076 A8): a guard whose gate is off — or the notice while its
+// switch is off — is ABSENT from the slice buildBuiltins returns rather than
+// present-and-self-skipping, so no handler consults a Floor gate at fire time. The firing
+// sequence is identical either way — a disabled guard booked nothing before — and the ladder is
+// rebuilt from the live Generation whenever its Floor or its notice switch moves (SetReactions),
+// so a guard switched off stops at the next Moment, one switched back on arms again, and nothing
+// already corrected is undone.
 
 // buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON — in the
 // order they fire. Within
@@ -42,8 +46,12 @@ import (
 //
 // gates is the enable set's input, read ONCE here: a guard whose opt-out is set is skipped over,
 // which is the whole of how a Floor gate is honoured now. The relative order of the guards that
-// survive is untouched, so switching one off never reshuffles the rest.
-func (a *Agent) buildBuiltins(gates domain.FloorConfig) []armedReaction {
+// survive is untouched, so switching one off never reshuffles the rest. notice is the
+// context-fill notice's switch (Generation.ContextFillNotice, ADR 0077), read the same way: the
+// notice belongs after the guards when it is on and is absent otherwise. Its reaction is not yet
+// in the tree — the parameter is threaded ahead of it so the ladder already rebuilds when the
+// switch moves.
+func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice bool) []armedReaction {
 	ladder := make([]armedReaction, 0, len(guardIDs))
 	enabled := func(off bool, r armedReaction) {
 		if !off {

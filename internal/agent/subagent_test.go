@@ -640,6 +640,43 @@ func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
 	assertCancelledBracket(t, sink.events, "c1")
 }
 
+// TestSubAgent_ChildInheritsTheLiveNoticeSwitch proves the context-fill notice switch
+// (Generation.ContextFillNotice, ADR 0077 D1) reaches a child the way Bypass and the Floor do:
+// read from the parent's LIVE Generation at spawn, so a switch flipped through SetReactions after
+// construction — the construction Config has it off — is what a child spawned after it carries,
+// and one flipped back off is not.
+func TestSubAgent_ChildInheritsTheLiveNoticeSwitch(t *testing.T) {
+	sink := &recordingSink{}
+	parent, err := newAgent(subAgentConfig(sink, domain.ModeAllowEdits), &scriptedResponder{scripts: [][]provider.Delta{contentScript("done")}})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if parent.Generation().ContextFillNotice {
+		t.Fatal("a bare Config seeds the notice switch on, want it off (ADR 0077: off by default)")
+	}
+
+	gen := parent.Generation()
+	gen.ContextFillNotice = true
+	parent.SetReactions(gen)
+	child, err := parent.newChildAgent("spawn-1", "survey the tree", "surveyor")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	if !child.Generation().ContextFillNotice {
+		t.Error("a child spawned after the switch went ON does not carry it")
+	}
+
+	gen.ContextFillNotice = false
+	parent.SetReactions(gen)
+	child, err = parent.newChildAgent("spawn-2", "survey the tree again", "surveyor")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	if child.Generation().ContextFillNotice {
+		t.Error("a child spawned after the switch went OFF still carries it")
+	}
+}
+
 // TestSubAgent_DepthLimitConstant guards the recursion bound's value so a careless change is
 // caught (the orchestrator and its tests assume this ceiling).
 func TestSubAgent_DepthLimitConstant(t *testing.T) {

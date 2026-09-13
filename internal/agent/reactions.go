@@ -24,9 +24,11 @@ import (
 // The rules the cascade applies, each ratified in the stage-1 plan header:
 //
 //   - BYPASS (D9) switches off ARMED reactions of class advise, shape-view and shape-work. The
-//     builtins never consult it — a Floor guard cannot regress Bypass, so it is never withdrawn
-//     — and observe and gate reactions stay on because neither can make a model do worse.
-//     A skipped reaction is silent: no event, no ledger entry, nothing to read back.
+//     Floor guards never consult it — a Floor guard cannot regress Bypass, so it is never
+//     withdrawn — and observe and gate reactions stay on because neither can make a model do
+//     worse. The one builtin Bypass does reach is a builtin of class ADVISE — the context-fill
+//     notice (ADR 0077) — which is skipped like any armed advise reaction. A skipped reaction is
+//     silent: no event, no ledger entry, nothing to read back.
 //   - A PANIC is recovered at the extension boundary (ADR 0007), reported as an ErrorEvent
 //     attributed to the reaction, and the cascade CONTINUES: a broken extension degrades to a
 //     reaction that did nothing rather than to a degraded Turn.
@@ -292,7 +294,10 @@ func (a *Agent) fireLeg(
 		if !subscribes(r.spec, m) {
 			continue
 		}
-		if !builtin && a.bypassSkips(r.spec) {
+		// Bypass reaches every armed reaction of a skippable class, and of the builtins only one
+		// of class advise (the context-fill notice, ADR 0077): the shape-view Floor guards keep
+		// firing under it exactly as they always have.
+		if a.bypassSkips(r.spec) && (!builtin || r.spec.Class == domain.ClassAdvise) {
 			continue
 		}
 
@@ -446,8 +451,9 @@ func acted(out domain.Outcome) bool {
 // isAdvice reports whether this ACTED Outcome is an advise injection — the one firing that both
 // books under actionAdvise and contributes a span to the advise slot. All three terms are
 // necessary: the class says the reaction is allowed to speak to the model, the Moment says there
-// is a tool result to speak on, and a non-empty Inject is the text itself. A builtin never
-// satisfies it (every one is class shape-view), so the engine's own leg contributes no advice.
+// is a tool result to speak on, and a non-empty Inject is the text itself. Of the builtins only
+// the context-fill notice satisfies it — the one engine reaction of class advise (ADR 0077); the
+// seven Floor guards are shape-view and contribute no advice.
 func isAdvice(m domain.Moment, r domain.Reaction, out domain.Outcome) bool {
 	return m == domain.MomentPostToolResult && r.Class == domain.ClassAdvise && out.Inject != ""
 }
@@ -594,9 +600,11 @@ func reactionAction(m domain.Moment, r domain.Reaction, out domain.Outcome) stri
 	}
 }
 
-// bypassSkips reports whether Bypass switches this armed reaction off (ADR 0076 D9): advise and
-// the two shape classes go quiet, observe and gate stay on. It reads the LIVE flag, so a
-// mid-session SetReactions lands at the very next Moment.
+// bypassSkips reports whether Bypass switches this reaction off by CLASS (ADR 0076 D9): advise
+// and the two shape classes go quiet, observe and gate stay on. It reads the LIVE flag, so a
+// mid-session SetReactions lands at the very next Moment. The answer is applied to every ARMED
+// reaction; of the builtins it reaches only one of class advise — the context-fill notice
+// (ADR 0077) — because a shape-view Floor guard is the floor Bypass exists to keep (fireLeg).
 func (a *Agent) bypassSkips(r domain.Reaction) bool {
 	if !a.bypassEnabled() {
 		return false

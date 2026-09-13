@@ -355,8 +355,10 @@ func TestFireBuiltinRetryHandsOverOnlyWhenTheBudgetIsSpent(t *testing.T) {
 }
 
 // Bypass (ADR 0076 D9) switches off ARMED advise and shape reactions and nothing else: observe
-// and gate stay on because neither can make a model do worse, and a builtin is never withdrawn
-// at all. A skipped reaction is SILENT — it is never invoked and books nothing.
+// and gate stay on because neither can make a model do worse, and a shape-view builtin — a Floor
+// guard — is never withdrawn at all. The one builtin Bypass reaches is a builtin of class ADVISE
+// (the context-fill notice, ADR 0077 D1), skipped like any armed advise reaction. A skipped
+// reaction is SILENT — it is never invoked and books nothing.
 //
 // A gate stays on under Bypass but never reaches THIS cascade: its cell is the Approver stage
 // applyGates runs after resolve() (gate.go), so the cascade skips class gate at every seam and
@@ -373,7 +375,8 @@ func TestFireBypassMatrix(t *testing.T) {
 		{name: "armed advise is skipped", class: domain.ClassAdvise},
 		{name: "armed shape-view is skipped", class: domain.ClassShapeView},
 		{name: "armed shape-work is skipped", class: domain.ClassShapeWork},
-		{name: "a builtin is never skipped", class: domain.ClassShapeView, builtin: true, wantRun: true},
+		{name: "a builtin shape-view is never skipped", class: domain.ClassShapeView, builtin: true, wantRun: true},
+		{name: "a builtin advise is skipped", class: domain.ClassAdvise, builtin: true},
 	}
 
 	for _, tc := range cases {
@@ -581,7 +584,7 @@ func builtinIDs(a *Agent) []string {
 // than in the loop.
 func TestBuiltinReactionsAreTheSevenFloorGuardsWhenEveryGuardIsOn(t *testing.T) {
 	a, _ := ladderAgent(t, nil, nil)
-	builtins := a.buildBuiltins(domain.FloorConfig{})
+	builtins := a.buildBuiltins(domain.FloorConfig{}, false)
 
 	type want struct {
 		moment domain.Moment
@@ -639,11 +642,11 @@ func TestBuiltinReactionsAreTheSevenFloorGuardsWhenEveryGuardIsOn(t *testing.T) 
 func TestBuiltinEnableSetDropsAGuardWhoseBooleanIsOff(t *testing.T) {
 	a, _ := ladderAgent(t, nil, nil)
 
-	full := a.buildBuiltins(domain.FloorConfig{})
+	full := a.buildBuiltins(domain.FloorConfig{}, false)
 	trimmed := a.buildBuiltins(domain.FloorConfig{
 		DisableToolLoopBreaker: true,
 		DisableToolResultCap:   true,
-	})
+	}, false)
 
 	var got, want []string
 	for _, b := range trimmed {
@@ -677,8 +680,9 @@ func TestBuiltinEnableSetDropsAGuardWhoseBooleanIsOff(t *testing.T) {
 
 // A Bypass-only swap must NOT rebuild the ladder: whatever slice the Agent is running stays,
 // so anything holding it — a lab ladder installed in place of the seven guards, a cascade
-// mid-flight — survives the swap untouched. Only a moved Floor rebuilds, and then the ladder is
-// the enable set that Floor implies.
+// mid-flight — survives the swap untouched. Only a moved enable-set input rebuilds — the Floor
+// here, the context-fill notice switch in the test below — and then the ladder is the enable set
+// that input implies.
 func TestSetReactionsRebuildsTheLadderOnlyWhenTheFloorMoves(t *testing.T) {
 	log := &ladderLog{}
 	a, _ := ladderAgent(t, []domain.Reaction{probe(log, "installed", domain.ClassShapeView, nil)}, nil)
@@ -701,6 +705,42 @@ func TestSetReactionsRebuildsTheLadderOnlyWhenTheFloorMoves(t *testing.T) {
 	}
 	if len(ids) != len(guardIDs)-1 {
 		t.Errorf("ladder = %v, want the six guards the Floor leaves on", ids)
+	}
+}
+
+// The context-fill notice switch (Generation.ContextFillNotice, ADR 0077) is the second enable-set
+// input: a swap that moves ONLY it rebuilds the ladder exactly as a moved Floor does, and a swap
+// that moves neither leaves the installed slice untouched — the notice is absent from the ladder
+// while off rather than self-skipping, so its switch has to reach buildBuiltins.
+func TestSetReactionsRebuildsTheLadderWhenOnlyTheNoticeSwitchMoves(t *testing.T) {
+	log := &ladderLog{}
+	a, _ := ladderAgent(t, []domain.Reaction{probe(log, "installed", domain.ClassShapeView, nil)}, nil)
+
+	a.SetReactions(domain.Generation{})
+	assertOrder(t, "the ladder after a swap that moved nothing", builtinIDs(a), []string{"installed"})
+
+	a.SetReactions(domain.Generation{ContextFillNotice: true})
+
+	if !a.Generation().ContextFillNotice {
+		t.Error("the notice switch did not land")
+	}
+	ids := builtinIDs(a)
+	if slices.Contains(ids, "installed") {
+		t.Errorf("ladder = %v after a notice-only swap, want it rebuilt from the guards", ids)
+	}
+	if len(ids) != len(guardIDs) {
+		t.Errorf("ladder = %v, want the seven guards the zero Floor leaves on", ids)
+	}
+
+	// Moving it back is a move too, and a second identical generation is not.
+	a.SetReactions(domain.Generation{})
+	if a.Generation().ContextFillNotice {
+		t.Error("the notice switch did not clear")
+	}
+	a.builtins = append(a.builtins, armedReaction{spec: probe(log, "installed-again", domain.ClassShapeView, nil)})
+	a.SetReactions(domain.Generation{})
+	if ids := builtinIDs(a); !slices.Contains(ids, "installed-again") {
+		t.Errorf("ladder = %v after a swap that moved nothing, want the installed slice kept", ids)
 	}
 }
 

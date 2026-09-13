@@ -1205,9 +1205,10 @@ alone — a mapping is refused with a sentence naming the key — as is an `on:`
 take (a seam under `run:`, a notice under `gate:`, any Moment but the two under `advise:`), and
 `enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
-**`Generation`** — `{Floor, Bypass, Observe, Sync}` — which a **Driver** applies in one act to the
-agent (which takes Floor, Bypass and Sync) and to the runner (which takes Observe), so nothing
-downstream reads a half-swapped state; it is the single idiom that replaced `SetBypass`, `SetFloor`
+**`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice}` — which a **Driver** applies
+in one act to the agent (which takes Floor, Bypass, Sync and the
+**[Context-fill notice](#reactions-and-moments)** switch) and to the runner (which takes Observe), so
+nothing downstream reads a half-swapped state; it is the single idiom that replaced `SetBypass`, `SetFloor`
 and the runner's own `Replace`
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D4, A8). The
 key's earlier name was `hooks:`, and a file still carrying it is **folded** into `reactions:` once,
