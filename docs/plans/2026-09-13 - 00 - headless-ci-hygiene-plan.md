@@ -86,7 +86,9 @@ Depends on item 2.
 **Acceptance:** `go test -race -count=1 -run 'TestHeadlessSeams|TestHeadlessFormatJSON|TestHeadlessUsageErrors' ./cmd/apogee/`
 **Commit:** `feat(headless): --seams opts the seam_closed lines into --format json`
 
-## 4. CI runs the sharded suite (apogee-7ui)
+## 4. CI runs the sharded suite (apogee-7ui) — ✅ DONE (2026-09-13)
+
+NOTES (2026-09-13): consequential edit — .beads/issues.jsonl: made necessary by the `bd update apogee-7ui --notes` the item prescribes (the passive export picked the note up; its diff is the one bead row).
 
 **What:** `.github/workflows/ci.yml:51–54`: the "go test (race)" step becomes `run: make test` with `env: APOGEE_TEST_SHARDS: 2` and a comment stating the runner size (4 vCPU / 16 GB) and why the cap (race-enabled binaries' memory). Leave the second race step (`platform`/`probe`, line ~151) as is. `docs/manual/building.md:79–80`: replace "CI still runs that form" with "CI runs `make test` under `APOGEE_TEST_SHARDS=2`". Record on the bead (`bd update apogee-7ui --notes`) that the measured wall-time/OOM check is an owner-run pass after the next push; the bead closes at closeout with that note.
 **Regression guard.** The bead note states the owner-run OOM/wall-time measurement is taken AFTER item 7 lands (the two changes land together on the runner: 5 `go test` processes plus per-shard parallel TUI programs).

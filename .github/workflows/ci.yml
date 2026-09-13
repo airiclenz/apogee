@@ -48,10 +48,16 @@ jobs:
           fi
       - name: go build
         run: go build ./...
-      - name: go test (race)
-        # Passes trivially until P0.6 adds the harness test; -race is on from day one
-        # so the loop goroutine + EventSink observer are checked the moment they exist.
-        run: go test -race ./...
+      - name: go test (race, sharded)
+        # `make test` is scripts/test-shards.sh: the race-enabled suite split across several
+        # concurrent `go test` processes, the same command `make check` runs locally, so the
+        # suite has one definition (as with `make actionlint` above). The shard count is
+        # normally sized off nproc; a ubuntu-latest runner is 4 vCPU / 16 GB, and every shard
+        # is a race-enabled test binary with its own memory cost, so the cap keeps the run at
+        # two shards per heavy package rather than letting the runner OOM under more.
+        run: make test
+        env:
+          APOGEE_TEST_SHARDS: 2
       - name: probe discloses no residual on a modern kernel
         # The negative half of checklist T-11: ubuntu-latest runs landlock ABI >= 3, which fences
         # truncate(2) like every other write. A residual disclosed here is as wrong as one missing

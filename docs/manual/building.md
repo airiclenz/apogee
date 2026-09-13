@@ -77,7 +77,9 @@ plan that does not cover every listed test. `APOGEE_TEST_SHARDS=n` overrides the
 shard count; the script prints each shard's wall time so the balance can be read off a run.
 
 `go test -race -count=1 ./...` remains the equivalent single-process run, and is the one to
-reach for when bisecting or debugging a single test. CI still runs that form.
+reach for when bisecting or debugging a single test. CI runs `make test` under
+`APOGEE_TEST_SHARDS=2` — the same sharded form, capped because a hosted runner is a 4 vCPU
+box where each race-enabled shard carries its own memory cost.
 
 ## Releasing
 
