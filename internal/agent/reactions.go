@@ -312,9 +312,14 @@ func (a *Agent) fireLeg(
 		// An advise injection is collected before it is booked, so the firing's Detail is the
 		// CAPPED text the model will read rather than whatever the handler returned — what
 		// apogee-sim hashes to attribute an effect is then the same string the fence carries.
+		// A handler that set its own Detail keeps it: the context-fill notice books the rung
+		// and percent it fired at (ADR 0077), the fact a bench keys on, and every user advise
+		// entry leaves the field empty.
 		if adv, ok := adviceOf(turn, m, r.spec, out); ok {
 			*advised = append(*advised, adv)
-			out.Detail = adv.text
+			if out.Detail == "" {
+				out.Detail = adv.text
+			}
 		}
 
 		a.bookFiring(turn, m, r, out, result, fired)
@@ -741,23 +746,25 @@ func wrongHandler(m domain.Moment, h domain.Handler) error {
 
 // armReactions validates the Reactions a host armed on Config.Reactions and returns them in the
 // dispatcher's own shape. Every entry must be well formed (Reaction.Validate) and answer to an
-// ID no Floor guard and no earlier entry already holds: the ReactionFiredEvent, the identity
+// ID no builtin and no earlier entry already holds: the ReactionFiredEvent, the identity
 // projector and the provenance ledger all key on the ID, so two reactions sharing one name make
 // every attribution ambiguous. Either failure fails construction — an invalid or shadowed
 // reaction never silently does nothing.
 //
 // The reserved set is guardIDs — ALL seven guard keys, not the enable set the ladder currently
-// holds (floorguards.go). A guard the user switched off still owns its name: arming an entry
-// under it would be answered by the guard again the moment the Floor swaps back.
+// holds (floorguards.go) — plus the context-fill notice's id (fillnotice.go), on the same terms.
+// A builtin the user switched off still owns its name: arming an entry under it would be
+// answered by the builtin again the moment its switch moves back.
 func armReactions(reactions []domain.Reaction) ([]armedReaction, error) {
 	if len(reactions) == 0 {
 		return nil, nil
 	}
 
-	taken := make(map[string]bool, len(guardIDs)+len(reactions))
+	taken := make(map[string]bool, len(guardIDs)+1+len(reactions))
 	for _, id := range guardIDs {
 		taken[id] = true
 	}
+	taken[contextFillNoticeID] = true
 
 	armed := make([]armedReaction, 0, len(reactions))
 	for _, r := range reactions {

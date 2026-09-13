@@ -31,8 +31,8 @@ import (
 // so a guard switched off stops at the next Moment, one switched back on arms again, and nothing
 // already corrected is undone.
 
-// buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON — in the
-// order they fire. Within
+// buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON and, when its
+// switch is, the context-fill notice — in the order they fire. Within
 // post-response the order is ratified (ADR 0071): tool-call salvage, then the tool-loop breaker,
 // tool-call repair, empty-response recovery and the tool-use enforcer — the coarser "you are
 // going in circles" judgment before the finer "this call is malformed" one, then the two
@@ -48,11 +48,11 @@ import (
 // which is the whole of how a Floor gate is honoured now. The relative order of the guards that
 // survive is untouched, so switching one off never reshuffles the rest. notice is the
 // context-fill notice's switch (Generation.ContextFillNotice, ADR 0077), read the same way: the
-// notice belongs after the guards when it is on and is absent otherwise. Its reaction is not yet
-// in the tree — the parameter is threaded ahead of it so the ladder already rebuilds when the
-// switch moves.
+// notice belongs after the guards when it is on and is absent otherwise. It is the LAST builtin
+// because it is the one that speaks rather than corrects: what it says is measured over the tool
+// result as the guards ahead of it left it.
 func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice bool) []armedReaction {
-	ladder := make([]armedReaction, 0, len(guardIDs))
+	ladder := make([]armedReaction, 0, len(guardIDs)+1)
 	enabled := func(off bool, r armedReaction) {
 		if !off {
 			ladder = append(ladder, r)
@@ -79,23 +79,32 @@ func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice bool) []armedReac
 	enabled(gates.DisableToolResultCap,
 		engineBuiltin(guardToolResultCap, guardActionCap, domain.MomentPreRequest,
 			domain.PreRequestFunc(a.capToolResults)))
+	enabled(!notice,
+		classedBuiltin(contextFillNoticeID, actionNotice, domain.ClassAdvise, domain.MomentPostToolResult,
+			domain.PostToolResultFunc(a.contextFillNotice)))
 	return ladder
 }
 
-// engineBuiltin builds one builtin: an engine-origin, shape-view Reaction on the single Moment
+// engineBuiltin builds one Floor guard: an engine-origin, shape-view Reaction on the single Moment
 // named, booking its firings under action. Every Floor guard is shape-view because that is what
 // a guard does — it edits what the model SEES, the response it is about to be judged on or the
 // request it is about to be sent.
+func engineBuiltin(id, action string, on domain.Moment, handler domain.Handler) armedReaction {
+	return classedBuiltin(id, action, domain.ClassShapeView, on, handler)
+}
+
+// classedBuiltin builds one builtin of the class named: engineBuiltin's general form, which the
+// context-fill notice — engine origin, class advise (ADR 0077) — is the one caller of beside it.
 //
 // The Moment is passed rather than read off the handler because the handler's own seam is
 // domain's seal, unexported outside it; Reaction.Validate re-checks the two agree, so a builtin
 // wired to the wrong Moment fails the structural test rather than firing in the wrong place.
-func engineBuiltin(id, action string, on domain.Moment, handler domain.Handler) armedReaction {
+func classedBuiltin(id, action string, class domain.Class, on domain.Moment, handler domain.Handler) armedReaction {
 	return armedReaction{
 		spec: domain.Reaction{
 			ID:      id,
 			Origin:  domain.OriginEngine,
-			Class:   domain.ClassShapeView,
+			Class:   class,
 			On:      []domain.Moment{on},
 			Handler: handler,
 		},

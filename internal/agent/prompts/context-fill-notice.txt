@@ -1,0 +1,1 @@
+context: %d%% of the way to automatic compaction — %s tokens used of a %s window

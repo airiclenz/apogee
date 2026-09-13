@@ -505,6 +505,12 @@ func TestNewRejectsReactionsItCannotArm(t *testing.T) {
 			reactions: []domain.Reaction{observer(guardToolLoopBreaker)},
 		},
 		{
+			// The notice's switch is off in baseConfig, and its id is reserved all the same —
+			// the same terms as an off guard's (ADR 0077).
+			name:      "the context-fill notice's id while its switch is off",
+			reactions: []domain.Reaction{observer(contextFillNoticeID)},
+		},
+		{
 			name:      "an id another entry already holds",
 			reactions: []domain.Reaction{observer("twice"), observer("twice")},
 		},
@@ -631,6 +637,38 @@ func TestBuiltinReactionsAreTheSevenFloorGuardsWhenEveryGuardIsOn(t *testing.T) 
 	}
 }
 
+// With the context-fill notice switched on the ladder is eight: the seven guards as above and,
+// LAST, the notice — engine origin, class advise (the one builtin of that class, ADR 0077), on
+// post-tool-result alone, booking under its own action label — so what it measures is the tool
+// result as every guard ahead of it left it. The guards are untouched by the switch.
+func TestBuiltinReactionsAddTheContextFillNoticeLastWhenItsSwitchIsOn(t *testing.T) {
+	a, _ := ladderAgent(t, nil, nil)
+	builtins := a.buildBuiltins(domain.FloorConfig{}, true)
+
+	if len(builtins) != len(guardIDs)+1 {
+		t.Fatalf("builtins = %d, want the seven guards and the notice", len(builtins))
+	}
+	for i, id := range guardIDs {
+		if builtins[i].spec.ID != id || builtins[i].spec.Class != domain.ClassShapeView {
+			t.Errorf("builtin %d = %q/%q, want guard %q shape-view", i, builtins[i].spec.ID, builtins[i].spec.Class, id)
+		}
+	}
+
+	notice := builtins[len(builtins)-1]
+	if err := notice.spec.Validate(); err != nil {
+		t.Errorf("%q: Validate = %v", notice.spec.ID, err)
+	}
+	if notice.spec.ID != contextFillNoticeID || notice.action != actionNotice {
+		t.Errorf("last builtin = %q booking %q, want %q booking %q", notice.spec.ID, notice.action, contextFillNoticeID, actionNotice)
+	}
+	if notice.spec.Origin != domain.OriginEngine || notice.spec.Class != domain.ClassAdvise {
+		t.Errorf("%q: origin/class = %q/%q, want engine/advise", notice.spec.ID, notice.spec.Origin, notice.spec.Class)
+	}
+	if len(notice.spec.On) != 1 || notice.spec.On[0] != domain.MomentPostToolResult {
+		t.Errorf("%q: On = %v, want [post-tool-result]", notice.spec.ID, notice.spec.On)
+	}
+}
+
 // A guard whose Floor boolean is off is ABSENT from the ladder rather than present and
 // self-skipping (the enable set, ADR 0076 A8): the guards around it keep their relative order,
 // and the firing sequence is unchanged because a disabled guard booked nothing before either.
@@ -728,8 +766,8 @@ func TestSetReactionsRebuildsTheLadderWhenOnlyTheNoticeSwitchMoves(t *testing.T)
 	if slices.Contains(ids, "installed") {
 		t.Errorf("ladder = %v after a notice-only swap, want it rebuilt from the guards", ids)
 	}
-	if len(ids) != len(guardIDs) {
-		t.Errorf("ladder = %v, want the seven guards the zero Floor leaves on", ids)
+	if len(ids) != len(guardIDs)+1 || ids[len(ids)-1] != contextFillNoticeID {
+		t.Errorf("ladder = %v, want the seven guards the zero Floor leaves on and the notice last", ids)
 	}
 
 	// Moving it back is a move too, and a second identical generation is not.
