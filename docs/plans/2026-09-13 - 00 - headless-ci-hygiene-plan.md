@@ -97,7 +97,12 @@ NOTES (2026-09-13): consequential edit — .beads/issues.jsonl: made necessary b
 **Acceptance:** `make actionlint && APOGEE_TEST_SHARDS=2 ./scripts/test-shards.sh` (this item's change IS the suite runner, so one local run under the cap is its targeted check; expect all packages green).
 **Commit:** `ci: run the sharded suite (make test) with a two-shard cap`
 
-## 5. Neutralise `APOGEE_*` once in `TestMain` (apogee-ed5, part 1)
+## 5. Neutralise `APOGEE_*` once in `TestMain` (apogee-ed5, part 1) — ✅ DONE (2026-09-13)
+
+NOTES (2026-09-13): the seven names live in one package-level `ambientApogeeEnv` list in main_test.go, read by TestMain, the suite guard test and the helper, rather than being spelled twice (the plan names them in both places).
+NOTES (2026-09-13): `TestAmbientApogeeConfigIsClearedForTheSuite` sits in main_test.go beside the HOME guard; `TestAssertNoAmbientApogeeConfigFailsWhenSet` and its `ambientFatalRecorder` double (nil-embedded `testing.TB`, `Fatalf` → `runtime.Goexit`, the `internal/tuitest/screen_test.go` pattern) sit in e2e_support_test.go beside the helper.
+NOTES (2026-09-13): `docs/manual/building.md:61–63` and `docs/design/test-drivers.md:857–858`, `:899` still say the launch helpers `t.Setenv` — left untouched on purpose: item 7 (not yet done) owns those passages and rewrites them against this item's text.
+NOTES (2026-09-13): `internal/tuitest/leak.go` and `leak_test.go` were dirty in the tree from item 6's concurrent implementation; not touched, not in FILES.
 
 **What:** `cmd/apogee/main_test.go` `TestMain` (line 42): after the HOME override, `os.Unsetenv` the seven vars `config.EnvConfig, EnvServer, EnvEndpoint, EnvModel, EnvMode, EnvBypass, EnvWorkspace`. `assertNoAmbientApogeeConfig` (`e2e_support_test.go:532–544`) becomes a pure assertion: `t.Fatalf` if any of the seven is set, no `t.Setenv`. Tests that deliberately `t.Setenv` an `APOGEE_*` var (`headless_test.go`, `root_test.go`, `undo_test.go`, `docs_env_test.go`, `e2e_naming_test.go`, `keymigrate_test.go`, `e2e_fillnotice_test.go`, `e2e_reactions_test.go`) are untouched and stay serial. Update the header comment of `scripts/test-shards.sh` (lines 5–16) and the `Makefile` `test` comment (170–176): the `t.Setenv` constraint is gone; the leak-check constraint remains until item 6.
 **Regression guard.** `assertNoAmbientApogeeConfig` (`cmd/apogee/e2e_support_test.go:532`) widens its signature to `testing.TB` — every caller passes a `*testing.T` — so `TestAssertNoAmbientApogeeConfigFailsWhenSet` can drive it with the recording double; "set" is spelled `os.Getenv(name) != ""`, as `applyEnv` (`internal/config/config.go:2809–2812`) and today's `EnvConfig` check already read empty as unset.

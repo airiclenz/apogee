@@ -3,17 +3,17 @@
 # processes, so `make check` is bounded by the slowest SHARD rather than by the slowest PACKAGE.
 #
 # Why sharding rather than `t.Parallel()`. Nearly all of the suite's wall time is in two
-# packages, and in both of them it is in tests that CANNOT be parallel tests:
+# packages, and in both of them it is in tests that CANNOT be parallel tests: every driven
+# launch ends in `tuitest.CheckLeaks` (internal/tuitest/leak.go), which diffs the PROCESS-WIDE
+# goroutine dump, so under parallel tests one test's cleanup would read another test's live
+# goroutines as leaks. (The e2e launch helpers used to add a second constraint — a `t.Setenv`
+# in `assertNoAmbientApogeeConfig`, which the testing package forbids alongside `t.Parallel` —
+# but cmd/apogee's TestMain now clears the ambient `APOGEE_*` configuration once for the
+# binary, and the helper only asserts it is absent. Only tests that deliberately `t.Setenv`
+# still carry that constraint.)
 #
-#   * every e2e launch helper goes through `assertNoAmbientApogeeConfig`
-#     (cmd/apogee/e2e_support_test.go), which calls `t.Setenv` — and the testing package
-#     panics if a test calls both `t.Setenv` and `t.Parallel`;
-#   * `tuitest.CheckLeaks` (internal/tuitest/leak.go) diffs the PROCESS-WIDE goroutine dump,
-#     so under parallel tests one test's cleanup would read another test's live goroutines as
-#     leaks.
-#
-# Both constraints are per-process, so giving each shard its own `go test` process keeps them
-# exactly as they are today: no test is skipped, weakened, reordered within its shard, or run
+# The constraint is per-process, so giving each shard its own `go test` process keeps it
+# exactly as it is today: no test is skipped, weakened, reordered within its shard, or run
 # with different flags. Measured on a 9-core box: `go test -race ./...` 212s, sharded 82s cold
 # (no timing cache) and around 55s warm.
 #

@@ -12,9 +12,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -526,20 +528,63 @@ func e2eWorkspace(t *testing.T) string {
 	return ws
 }
 
-// assertNoAmbientApogeeConfig neutralises the developer's own environment and pins the rule the
-// whole kit rests on: a driven run reads the home this test made and no other. APOGEE_CONFIG in
-// particular would silently move the home out from under --config's own resolution order.
-func assertNoAmbientApogeeConfig(t *testing.T) {
+// assertNoAmbientApogeeConfig pins the rule the whole kit rests on: a driven run reads the home
+// this test made and no other. TestMain (main_test.go) already unset the developer's `APOGEE_*`
+// configuration for the binary, so this is a pure assertion — it sets nothing, which is what
+// lets a launch be a `t.Parallel` test — and it trips only on a test file that exported one and
+// left it there. Empty counts as unset, exactly as the config loader reads it. The parameter is
+// testing.TB so the assertion's own failure branch can be driven by a recording double
+// (TestAssertNoAmbientApogeeConfigFailsWhenSet).
+func assertNoAmbientApogeeConfig(t testing.TB) {
 	t.Helper()
 
-	if home := os.Getenv(config.EnvConfig); home != "" {
-		t.Fatalf("%s is set to %q; an e2e run must own its home", config.EnvConfig, home)
+	for _, name := range ambientApogeeEnv {
+		if value := os.Getenv(name); value != "" {
+			t.Fatalf("%s is set to %q; an e2e run must own its configuration, and TestMain cleared this one", name, value)
+		}
 	}
-	for _, name := range []string{
-		config.EnvServer, config.EnvEndpoint, config.EnvModel, config.EnvMode, config.EnvBypass,
-		config.EnvWorkspace,
-	} {
-		t.Setenv(name, "")
+}
+
+// ambientFatalRecorder stands in for the *testing.T a launch helper hands
+// assertNoAmbientApogeeConfig: it keeps the message that was formatted and ends the goroutine the
+// way testing.T.Fatalf does, through runtime.Goexit, so nothing after the Fatalf runs.
+type ambientFatalRecorder struct {
+	// The embedded TB is nil on purpose. Every method the assertion calls is overridden below;
+	// a call to any other one should panic here rather than quietly do nothing.
+	testing.TB
+
+	msg string
+}
+
+// Helper is a no-op: there is no real test frame to attribute failures to.
+func (r *ambientFatalRecorder) Helper() {}
+
+// Fatalf records the message and ends the goroutine, as testing.T.Fatalf does.
+func (r *ambientFatalRecorder) Fatalf(format string, args ...any) {
+	r.msg = fmt.Sprintf(format, args...)
+	runtime.Goexit()
+}
+
+// TestAssertNoAmbientApogeeConfigFailsWhenSet drives the assertion's failure branch: with one of
+// the suite-cleared variables exported again, it must report a fatal naming that variable. The
+// assertion runs on its own goroutine because runtime.Goexit ends the goroutine it runs on —
+// inline, it would end this test — and the join orders the recorder's field for the read.
+func TestAssertNoAmbientApogeeConfigFailsWhenSet(t *testing.T) {
+	t.Setenv(config.EnvMode, "auto")
+
+	rec := &ambientFatalRecorder{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		assertNoAmbientApogeeConfig(rec)
+	}()
+	<-done
+
+	if rec.msg == "" {
+		t.Fatalf("assertNoAmbientApogeeConfig passed with %s=auto in the environment; want a fatal", config.EnvMode)
+	}
+	if !strings.Contains(rec.msg, config.EnvMode) || !strings.Contains(rec.msg, `"auto"`) {
+		t.Errorf("fatal message %q; want it to name %s and the value \"auto\"", rec.msg, config.EnvMode)
 	}
 }
 

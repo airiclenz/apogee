@@ -5,7 +5,9 @@ package main
 // run littered it with empty `~/.apogee/scratch/<id>/` dirs, one per wiring. TestMain points
 // the home at a temp dir for the whole binary so no test can reach the real one, and
 // TestNoTestWritesTheRealApogeeHome guards the override against a future test file that
-// resets HOME to the real home.
+// resets HOME to the real home. The same TestMain clears the developer's ambient `APOGEE_*`
+// configuration once for the binary — TestAmbientApogeeConfigIsClearedForTheSuite guards
+// that — so the launch helpers assert it is absent instead of each `t.Setenv`-ing it away.
 
 import (
 	"fmt"
@@ -15,7 +17,19 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/config"
 )
+
+// ambientApogeeEnv is the `APOGEE_*` configuration the developer's shell may carry into the
+// suite: every one of them would silently reshape a driven run — APOGEE_CONFIG would move the
+// home out from under --config's own resolution order — so TestMain unsets them once for the
+// binary. APOGEE_API_KEY is deliberately absent: no launch helper reads it, and the key tests
+// set it themselves.
+var ambientApogeeEnv = []string{
+	config.EnvConfig, config.EnvServer, config.EnvEndpoint, config.EnvModel, config.EnvMode,
+	config.EnvBypass, config.EnvWorkspace,
+}
 
 // realUserHome is the process's home as it was BEFORE TestMain overrode it — the value the
 // guard test asserts nothing resolves to any more. Empty when the OS could not name one.
@@ -59,6 +73,12 @@ func TestMain(m *testing.M) {
 	// HOME is what os.UserHomeDir reads on POSIX, USERPROFILE what it reads on Windows.
 	_ = os.Setenv("HOME", home)
 	_ = os.Setenv("USERPROFILE", home)
+	// Once, here, rather than per launch: a `t.Setenv` in a launch helper is what kept every
+	// e2e test out of `t.Parallel` (the testing package panics on the pair). A test that wants
+	// one of these set still `t.Setenv`s it and stays serial.
+	for _, name := range ambientApogeeEnv {
+		_ = os.Unsetenv(name)
+	}
 
 	// Built for every ordinary run of the suite — never for the key-command fixture's re-exec of
 	// this binary (keysource_test.go), which happens several times per run and only ever prints a
@@ -115,5 +135,16 @@ func TestNoTestWritesTheRealApogeeHome(t *testing.T) {
 
 	if realUserHome != "" && home == realUserHome {
 		t.Fatalf("suite home is the real user home %q — a test reset HOME; every ConfigDir:\"\" wiring now writes to ~/.apogee", home)
+	}
+}
+
+// TestAmbientApogeeConfigIsClearedForTheSuite asserts the suite starts every test with no
+// `APOGEE_*` configuration in its environment: it fails the moment TestMain stops unsetting
+// one, or a test file exports one and leaves it there.
+func TestAmbientApogeeConfigIsClearedForTheSuite(t *testing.T) {
+	for _, name := range ambientApogeeEnv {
+		if value := os.Getenv(name); value != "" {
+			t.Errorf("%s=%q is in the suite's environment; TestMain unsets it so every launch helper can assume it is absent", name, value)
+		}
 	}
 }
