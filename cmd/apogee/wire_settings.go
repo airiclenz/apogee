@@ -803,6 +803,19 @@ func (s *liveSettings) setFloorGuard(key string, on bool) apogee.Generation {
 	return s.generationLocked()
 }
 
+// setContextFillNotice moves the `context-fill-notice:` switch on the held generation and hands
+// back the WHOLE value the engine seam must be re-seeded with — setBypass' shape, for setBypass'
+// reason: the switch is one field of the generation the single seam takes (ADR 0077), so a row that
+// composed a fresh Generation from its own key alone would take away every guard and every armed
+// Reaction the session has. It is NOT a Floor key and never goes through setFloorGuard's negation
+// seam: the file spells it positively and the engine reads it positively.
+func (s *liveSettings) setContextFillNotice(on bool) apogee.Generation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gen.ContextFillNotice = on
+	return s.generationLocked()
+}
+
 // floorFromOptions is the ONE negation seam between the seven positive config keys and the engine's
 // Disable… gates (ADR 0071: the zero FloorConfig is the full floor). Both composition roots and
 // every `/settings` apply go through it, so "off in the file" and "off in the pane" cannot come to
@@ -910,8 +923,9 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.UndoSnapshots = s.undoSnapshots
 	next.DelegateMaxSteps = s.delegateMaxSteps
 
-	// And the Reaction surface, which is pushed as ONE value and comes back as three keys: the
-	// reaction list, the `bypass:` switch, and the seven Floor gates in the FILE's positive spelling —
+	// And the Reaction surface, which is pushed as ONE value and comes back as four keys: the
+	// reaction list, the `bypass:` switch, the `context-fill-notice:` switch, and the seven Floor
+	// gates in the FILE's positive spelling —
 	// optionsFromFloor being the inverse of the negation the seam takes, so an unattended run raised
 	// from this session runs the floor and the Reactions the human last chose rather than the ones
 	// the process started with.
@@ -922,6 +936,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	// that saw only the observe half would run without the `gate:` the session is answering to.
 	next.Reactions = append(slices.Clone(s.gen.Observe), s.gen.Sync...)
 	next.Bypass = s.gen.Bypass
+	next.ContextFillNotice = s.gen.ContextFillNotice
 	floor := optionsFromFloor(s.gen.Floor)
 	next.ToolUseEnforcer = floor.ToolUseEnforcer
 	next.EmptyResponseRecovery = floor.EmptyResponseRecovery
@@ -1439,6 +1454,14 @@ var settingsTable = []settingsEntry{
 		reaches: reachesTheEngineAndTheHolder,
 		apply:   applyFloorGuard,
 	},
+	// The context-fill notice's switch (ADR 0077): the seven Floor rows' shape — one field of the
+	// generation the single seam takes, so the row needs the holder for the fields it does not
+	// name — but not a Floor guard, so it takes no part in their negation seam and ships off.
+	{
+		key:     "context-fill-notice",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyContextFillNotice,
+	},
 	{
 		key: "delegate-max-steps",
 		// No member of the applier is needed: the bound reaches no engine seam and rides no
@@ -1915,6 +1938,20 @@ func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
 	return "", a.engine.SetReactions(a.live.setFloorGuard(key, on))
 }
 
+// applyContextFillNotice is the `context-fill-notice:` row's apply, on applyFloorGuard's terms: the
+// switch is written onto the holder and the GENERATION that write hands back is pushed at the single
+// engine seam, so the seven Floor gates, the `bypass:` switch and the two lanes beside it keep the
+// values they had. The engine half rebuilds its builtin ladder from the moved switch
+// (Agent.SetReactions), so the notice is armed or disarmed the moment this returns; the refusal it
+// returns is the Runner's and cannot arrive here, for applyFloorGuard's reason.
+func applyContextFillNotice(a settingsApplier, key, value string) (string, error) {
+	on, err := settingBool(key, value)
+	if err != nil {
+		return "", err
+	}
+	return "", a.engine.SetReactions(a.live.setContextFillNotice(on))
+}
+
 // reachesTheEngine reports whether the anytime-safe mutator class is composed: the keys that are
 // PUSHED at the engine and are in force the moment their apply returns.
 func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
@@ -1922,9 +1959,9 @@ func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
 // reachesTheEngineAndTheHolder reports whether the engine and the startup snapshot's mutable half
 // are BOTH composed — the pair the two `context-files.` rows need, since either row installs the
 // switch and the names together and only the holder remembers the half the row did not carry, and
-// the pair the seven Floor-guard rows and the `bypass` row need for the same shape of reason:
-// SetReactions takes one whole Generation and only the holder remembers the fields those rows did
-// not carry.
+// the pair the seven Floor-guard rows, the `bypass` row and the `context-fill-notice` row need for
+// the same shape of reason: SetReactions takes one whole Generation and only the holder remembers
+// the fields those rows did not carry.
 func reachesTheEngineAndTheHolder(a settingsApplier) bool { return a.engine != nil && a.live != nil }
 
 // reachesTheHolder reports whether the live holder is composed. It is the whole of what two keys

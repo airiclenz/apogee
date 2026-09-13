@@ -110,7 +110,8 @@ model does better with it than without
 ([ADR 0077](../adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md)). So the
 key is the one top-level boolean beside the seven Floor keys that an untouched config leaves off,
 and — unlike the Floor — `--bypass` turns it off together with every other advise reaction. It is
-file-only (no flag, no environment variable), and it is silent until a context window is known: with
+file-only (no flag, no environment variable) but live: the `/settings` row switches it for the
+running session. It is silent until a context window is known: with
 no window the percentage would be a guess, and apogee never fires on a guess. The line is dropped
 from a session record on resume, so a reopened session is not told it was at 90 percent an hour ago.
 

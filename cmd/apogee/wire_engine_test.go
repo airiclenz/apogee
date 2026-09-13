@@ -150,6 +150,45 @@ func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 	}
 }
 
+// The context-fill notice's switch rides the same contract as a field of the same generation (ADR
+// 0077), with the difference the Floor gates do not have: the Agent is constructed with a seed of
+// its own (Config.ContextFillNotice), and the bind's replay lands OVER it. So the replay must carry
+// the member — a generation held without it would switch the notice off again on a session whose
+// file asked for it — and a bound edit must move it the way a Floor edit moves a gate.
+func TestLateEngineReplaysTheContextFillNoticeAtTheBind(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	if err := engine.SetReactions(apogee.Generation{ContextFillNotice: true}); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
+
+	// Constructed with the switch ON, as the binder constructs a session whose file says so: what
+	// the replay must not do is take it away.
+	construct := func() (*apogee.Agent, error) {
+		cfg := validCfg(t)
+		cfg.ContextFillNotice = true
+		return apogee.New(cfg)
+	}
+	if err := engine.Bind(construct); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if got := engine.bound().Generation(); !got.ContextFillNotice {
+		t.Errorf("the bound Agent's generation = %+v; want the notice switch held for the bind", got)
+	}
+
+	// Past the bind the door stays open: a settings row hands the WHOLE generation back with the
+	// switch moved (liveSettings.setContextFillNotice), and the bound Agent reads it.
+	if err := engine.SetReactions(apogee.Generation{ContextFillNotice: false}); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
+	if got := engine.bound().Generation(); got.ContextFillNotice {
+		t.Errorf("the bound Agent's generation after a bound edit = %+v; want the switch off", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The one generation swap (ADR 0076 A8)
 // ---------------------------------------------------------------------------

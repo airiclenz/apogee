@@ -444,6 +444,78 @@ func TestBypassRowAppliesOneGeneration(t *testing.T) {
 	}
 }
 
+// The `context-fill-notice` row is the third writer of the same generation (ADR 0077): one field of
+// the value the single seam takes, so its apply has to carry the seven gates, the `bypass:` switch
+// and both lanes it never names — and, being no Floor guard, it must move WITHOUT the negation the
+// seven Floor keys take. A row that pushed a bare switch would put every guard back, throw the
+// floor switch and disarm every Reaction the session had.
+func TestContextFillNoticeRowAppliesOneGeneration(t *testing.T) {
+	t.Parallel()
+	spy := &applySettingSpy{}
+	boot := []domain.Reaction{hookEntry("boot", reactions.TurnFinished)}
+	// A session that has already opted one guard out, thrown the floor switch and armed one
+	// Reaction, so a generation composed from the notice alone would show as all three coming back.
+	live := newLiveSettings(config.Options{
+		ToolUseEnforcer:       true,
+		EmptyResponseRecovery: true,
+		ToolCallRepair:        true,
+		ToolCallSalvage:       true,
+		ToolLoopBreaker:       true,
+		ToolResultCap:         true,
+		ReadCache:             false,
+		Bypass:                true,
+		Reactions:             boot,
+	})
+	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+
+	if _, err := apply("context-fill-notice", "true"); err != nil {
+		t.Fatalf("apply context-fill-notice=true: %v", err)
+	}
+	if len(spy.generations) != 1 {
+		t.Fatalf("SetReactions = %+v, want exactly one generation", spy.generations)
+	}
+	gen := spy.generations[0]
+	if !gen.ContextFillNotice {
+		t.Error("the generation carries ContextFillNotice off; want the switch the row just moved")
+	}
+	if want := (apogee.FloorConfig{DisableReadCache: true}); gen.Floor != want {
+		t.Errorf("Floor = %+v, want %+v — the guard the session had already opted out of", gen.Floor, want)
+	}
+	if !gen.Bypass {
+		t.Error("Bypass = false; the notice row moves no floor switch")
+	}
+	if len(gen.Observe) != 1 || gen.Observe[0].ID != "boot" {
+		t.Errorf("Observe = %+v, want the list the session is firing", gen.Observe)
+	}
+
+	// And back off: the second swap carries the switch off with the same three fields untouched.
+	if _, err := apply("context-fill-notice", "false"); err != nil {
+		t.Fatalf("apply context-fill-notice=false: %v", err)
+	}
+	if len(spy.generations) != 2 || spy.generations[1].ContextFillNotice {
+		t.Errorf("SetReactions after the second apply = %+v, want a second generation with the switch off",
+			spy.generations)
+	}
+
+	// The projection a Firing composes from says the same, in the file's own spelling: the switch
+	// where the row left it, the guard and the floor where the session had them.
+	if got := live.options(); got.ContextFillNotice || !got.Bypass || got.ReadCache {
+		t.Errorf("options() = context-fill-notice:%v bypass:%v read-cache:%v, want false/true/false",
+			got.ContextFillNotice, got.Bypass, got.ReadCache)
+	}
+
+	// Which is why the row requires the holder as well as the engine, exactly as the seven Floor rows
+	// and the `bypass` row do: a Driver composed with an engine alone refuses the key by name rather
+	// than pushing a generation composed out of the one switch it was handed.
+	entry, ok := settingsEntryFor("context-fill-notice")
+	if !ok {
+		t.Fatal("the settings table has no `context-fill-notice` arm")
+	}
+	if entry.reaches(settingsApplier{engine: spy}) {
+		t.Error("the context-fill-notice arm claims to reach a Driver with no live holder")
+	}
+}
+
 // The negation between the file's seven positive keys and the engine's seven Disable… gates is
 // walked in BOTH directions now — the live holder keeps the Floor in the engine's spelling, and
 // everything composed out of the session reads config.Options — so the pair has to round-trip. A
@@ -917,6 +989,7 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		URLDenyHosts:      []string{"metadata.internal"},
 		AutoCompact:       true,
 		PruneToolResults:  true,
+		ContextFillNotice: true,
 		ContextFiles:      []string{"AGENTS.md"},
 		Servers:           []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
 		// The `reactions:` list is the one key here that NO case below edits, and it is in the snapshot
@@ -1021,6 +1094,15 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				t.Helper()
 				if opts.PruneToolResults {
 					t.Error("PruneToolResults = true, want the toggle the session switched off")
+				}
+			},
+		},
+		{
+			name: "context-fill-notice", key: "context-fill-notice", value: "false",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if opts.ContextFillNotice {
+					t.Error("ContextFillNotice = true, want the switch the session turned off")
 				}
 			},
 		},

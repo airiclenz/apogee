@@ -816,6 +816,38 @@ func TestBootConfigCarriesTheContextFillNotice(t *testing.T) {
 	}
 }
 
+// And the whole trip, as the TUI Driver walks it: a home whose file says `context-fill-notice: true`
+// resolves a Config with the switch on, the composition root seeds the engine holder's generation
+// from that Config and binds the startup server (wireSession), and that bind replays the generation
+// over the Agent it constructs — so what the session actually runs has the notice ON. The claim is
+// made on the bound Agent rather than on the Config because the replay is the step that could lose
+// it: a seed threaded without the member would overwrite the construct-time switch with false and
+// the manual's key would do nothing.
+func TestWireSessionBindsTheContextFillNoticeOntoTheAgent(t *testing.T) {
+	t.Parallel()
+	for _, want := range []bool{false, true} {
+		t.Run(fmt.Sprintf("context-fill-notice=%v", want), func(t *testing.T) {
+			t.Parallel()
+			w := urlGuardWiring(t, config.Options{ContextFillNotice: want})
+			if err := w.wireSession(context.Background()); err != nil {
+				t.Fatalf("wireSession: %v", err)
+			}
+			agent := w.engine.bound()
+			if agent == nil {
+				t.Fatal("wireSession left the engine unbound; the startup server was not bound")
+			}
+			if got := agent.Generation().ContextFillNotice; got != want {
+				t.Errorf("the bound Agent's Generation().ContextFillNotice = %v; want the file's %v", got, want)
+			}
+			// And the settings host projects the same switch, so a Firing raised from this session
+			// and the `/settings` row both report what the session is running.
+			if got := w.live.options().ContextFillNotice; got != want {
+				t.Errorf("live options().ContextFillNotice = %v; want the file's %v", got, want)
+			}
+		})
+	}
+}
+
 // Where a SYNC-lane reaction's trouble is said out loud in a session: the boot phase installs the
 // Bridge's own NotifyHook as Config.Report — the SAME seam its Reaction Runner reports the observe
 // lane through — so a gate or advise command that failed reaches the transcript's ephemeral note
