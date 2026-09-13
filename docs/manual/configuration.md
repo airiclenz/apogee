@@ -457,8 +457,9 @@ reactions:
 scopes an entry to one workspace, leaving it inactive at every other; `enabled: false` parks an
 entry without deleting it. Header values are literal (`headers:`) or read at send time from the environment
 variable a `headers-env:` entry NAMES, so a token never has to sit in this file. Ids must be unique,
-and an id that is one of the seven Floor-guard keys is refused — a guard is switched off with its
-own top-level key, never with an entry here. `hooks:` is this key's earlier name, with
+and an id that is one of the seven Floor-guard keys is refused, as is `context-fill-notice`, the
+engine's own built-in advise reaction — each is switched with its own top-level key, never with an
+entry here. `hooks:` is this key's earlier name, with
 `name:`/`events:`/`command:`/`webhook:` where this block writes `id:`/`on:`/`run:`; a file that
 still carries it is folded into `reactions:` at startup, once, and told so — the previous file is
 kept beside it as a `.bak-<timestamp>` sibling, and comments written inside the old block are only

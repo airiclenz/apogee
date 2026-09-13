@@ -61,7 +61,7 @@ reactions:
 
 | Key | Meaning |
 |---|---|
-| `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id — a guard is switched off with its own top-level key, not with an entry here. |
+| `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id, and so is `context-fill-notice`, the engine's own built-in advise reaction — each is switched with its own top-level key, not with an entry here. |
 | `on:` | Required, at least one. A `run:` entry reacts to the eleven notices below; an `advise:` entry reacts at `post-tool-result` or `file-changed`; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a Moment a key cannot take — a seam under `run:`, a notice other than `file-changed` under `advise:`, anything but `pre-tool-exec` under `gate:` — by a sentence naming the key and what it does take: `advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`. The list is shared by every action key the entry spells, so each of them must be able to take all of it. |
 | `run:` | The entry's observe action, in either of two shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. |
 | `workspace:` | Optional. Scopes the entry to one workspace; unset means every workspace. |
