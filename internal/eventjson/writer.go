@@ -25,11 +25,16 @@ const lineVersion = 2
 // time.Now — a test pins it to make whole lines comparable. Report receives the FIRST write error
 // and nothing after it, so a Driver spends exactly one stderr line on a closed pipe; it may be nil,
 // which discards that report. Report is called while the Writer's own lock is held and must not
-// call back into the Writer.
+// call back into the Writer. Seams opts the stream INTO the seam_closed lines: off, the Writer
+// forwards a domain.SeamClosedEvent to its inner sink and writes nothing for it, so the default
+// stream is exactly what ADR 0076 A5 promised; on, each seam closure is one more line, at every
+// depth — `pre-request` and `post-response` close once per streamed Turn and the two tool seams
+// once per tool call, which is why a consumer asks for them rather than filtering them out.
 type Options struct {
 	Session string
 	Now     func() time.Time
 	Report  func(error)
+	Seams   bool
 }
 
 // Writer renders the engine's Event stream as the Event lines — one JSON line per Event on the
@@ -53,6 +58,7 @@ type Writer struct {
 	out    *bufio.Writer
 	now    func() time.Time
 	report func(error)
+	seams  bool
 
 	mu      sync.Mutex
 	session string
@@ -69,7 +75,7 @@ func New(w io.Writer, o Options) *Writer {
 	if now == nil {
 		now = time.Now
 	}
-	return &Writer{out: bufio.NewWriter(w), now: now, report: o.Report, session: o.Session}
+	return &Writer{out: bufio.NewWriter(w), now: now, report: o.Report, seams: o.Seams, session: o.Session}
 }
 
 // Wrap installs inner as the sink every Emit is forwarded to and returns the Writer itself, so a
@@ -93,11 +99,16 @@ func (w *Writer) SetSession(id string) {
 //
 // A domain.WireEvent is forwarded only: it is raw provider protocol and is excluded from the
 // contract (decision 2), and per the same decision it consumes no sequence number — a gap in seq
-// means a lost line, never an Inspector event. The forward happens for every Event, including one
-// whose line was dropped because the stream had already stopped.
+// means a lost line, never an Inspector event. A domain.SeamClosedEvent is forwarded only as well
+// unless Options.Seams opted the stream in — and then it, too, consumes no sequence number. The
+// forward happens for every Event, including one whose line was dropped because the stream had
+// already stopped: the reactions.Runner beneath this Writer builds the five seam-closing notices
+// from the very SeamClosedEvent the default stream holds back, so the forward is never gated.
 func (w *Writer) Emit(ev domain.Event) {
-	if kind, base, data, ok := Encode(ev); ok {
-		w.writeLine(kind, &base, data)
+	if _, held := ev.(domain.SeamClosedEvent); !held || w.seams {
+		if kind, base, data, ok := Encode(ev); ok {
+			w.writeLine(kind, &base, data)
+		}
 	}
 
 	if w.inner != nil {

@@ -2397,9 +2397,10 @@ func TestHeadlessFormatJSONKeepsStderrProse(t *testing.T) {
 // The delegation's phase event is emitted at Depth 1 because a child's events are the only ones
 // that arrive from a nesting level this Driver never opened; they must reach the stream at their
 // own depth rather than being flattened or dropped. The WireEvent and the SeamClosedEvent are here
-// for the opposite reason: both are sink-only — excluded from the contract (decision 2) and
-// consuming no seq — so their presence in the emission proves the exclusion instead of merely not
-// testing it.
+// for the opposite reason: neither reaches the DEFAULT stream — the wire record is sink-only,
+// excluded from the contract (decision 2), and the seam closure is held back until `--seams` opts
+// the stream in — and neither consumes a seq, so their presence in the emission proves the
+// exclusion instead of merely not testing it.
 func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 	stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "the answer", Turns: 1},
 		emit: func(sink domain.EventSink) {
@@ -2440,9 +2441,15 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 		t.Fatalf("a completed run returned an error: %v", err)
 	}
 
-	// The two frames bracket the sixteen variants, in the contract's own order.
+	// The two frames bracket the sixteen default-stream variants, in the contract's own order —
+	// seam_closed is the one kind the default stream holds back.
 	kinds := eventjson.Kinds()
-	want := append([]string{"run_started"}, kinds[:len(kinds)-2]...)
+	want := []string{"run_started"}
+	for _, kind := range kinds[:len(kinds)-2] {
+		if kind != "seam_closed" {
+			want = append(want, kind)
+		}
+	}
 	want = append(want, "run_finished")
 
 	lines := jsonEventLines(t, out)
@@ -2458,7 +2465,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 	for i, line := range lines {
 		if line["seq"] != float64(i+1) {
 			t.Errorf("line %d (%v) has seq %v; the sequence starts at 1 and never skips — a gap "+
-				"means a lost line, and the excluded sink-only variants must not consume one",
+				"means a lost line, and the excluded wire record and held-back seam closure must not consume one",
 				i, line["event"], line["seq"])
 		}
 	}

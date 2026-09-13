@@ -334,25 +334,78 @@ func TestEncodeSkipsTheWireEvent(t *testing.T) {
 	}
 }
 
-// TestEncodeSkipsTheSeamClosedEvent pins the second sink-only variant: a seam closure carries the
-// seam's LIVE working value, read-only and valid only for the duration of Emit, so there is
-// nothing a line could serialize that a consumer could rely on. Like the wire record it answers
-// ok=false and consumes no sequence number.
-func TestEncodeSkipsTheSeamClosedEvent(t *testing.T) {
+// TestEncodeSeamClosed pins the seam_closed line's `data` over every seam: `seam` is the seam's
+// CLOSING-NOTICE name — the spelling a Reaction `on:` list and the manual use for the same fact —
+// never the seam's own, `fired` lists the firings in order and is `[]` rather than null when the
+// pass acted on nothing, and the variant's live Value never reaches the object. Encode is the pure
+// mapping; whether a line is written at all is the Writer's decision, pinned in writer_test.go.
+func TestEncodeSeamClosed(t *testing.T) {
 	t.Parallel()
 
-	kind, base, data, ok := Encode(domain.SeamClosedEvent{
-		EventBase: domain.EventBase{Turn: 1},
-		Seam:      domain.MomentPostResponse,
-		Fired:     []string{"tool-call-repair"},
-		Value:     domain.PostResponseMoment{},
-	})
-
-	if ok {
-		t.Fatalf("Encode(SeamClosedEvent) ok = true, want false")
+	cases := []struct {
+		seam     domain.Moment
+		fired    []string
+		wantData string
+	}{
+		{
+			seam:     domain.MomentPreRequest,
+			fired:    []string{"context-fill-notice"},
+			wantData: `{"seam":"pre-request-finished","fired":["context-fill-notice"]}`,
+		},
+		{
+			seam:     domain.MomentPostResponse,
+			fired:    []string{"tool-call-repair", "empty-reply-retry"},
+			wantData: `{"seam":"post-response-finished","fired":["tool-call-repair","empty-reply-retry"]}`,
+		},
+		{
+			seam:     domain.MomentPreToolExec,
+			fired:    nil,
+			wantData: `{"seam":"pre-tool-exec-finished","fired":[]}`,
+		},
+		{
+			seam:     domain.MomentPostToolResult,
+			fired:    []string{},
+			wantData: `{"seam":"post-tool-result-finished","fired":[]}`,
+		},
+		{
+			seam:     domain.MomentHistoryRewrite,
+			fired:    []string{"compaction"},
+			wantData: `{"seam":"history-rewrite-finished","fired":["compaction"]}`,
+		},
 	}
-	if kind != "" || data != nil || base != (domain.EventBase{}) {
-		t.Errorf("Encode(SeamClosedEvent) = (%q, %+v, %v, false), want zero values", kind, base, data)
+
+	for _, c := range cases {
+		t.Run(string(c.seam), func(t *testing.T) {
+			t.Parallel()
+
+			wantBase := domain.EventBase{Depth: 1, Turn: 2, CallID: "call-7"}
+			kind, base, data, ok := Encode(domain.SeamClosedEvent{
+				EventBase: wantBase,
+				Seam:      c.seam,
+				Fired:     c.fired,
+				Value:     domain.PostResponseMoment{},
+			})
+
+			if !ok {
+				t.Fatalf("Encode(SeamClosedEvent{%s}) ok = false, want true", c.seam)
+			}
+			if kind != "seam_closed" {
+				t.Errorf("kind = %q, want %q", kind, "seam_closed")
+			}
+			if base != wantBase {
+				t.Errorf("base = %+v, want %+v", base, wantBase)
+			}
+			encoded, err := json.Marshal(data)
+			if err != nil {
+				t.Fatalf("json.Marshal(data): %v", err)
+			}
+			if string(encoded) != c.wantData {
+				t.Errorf("data JSON =\n  %s\nwant\n  %s", encoded, c.wantData)
+			}
+			if strings.Contains(string(encoded), "value") {
+				t.Errorf("the seam's live Value reached the line: %s", encoded)
+			}
+		})
 	}
 }
 
@@ -366,16 +419,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreEighteen pins the vocabulary itself — the sixteen serialized variants plus the two
-// frames — so a kind added to the encoder without a manual entry, or an entry without a kind, is a
-// failing test rather than a documentation drift.
-func TestKindsAreEighteen(t *testing.T) {
+// TestKindsAreNineteen pins the vocabulary itself — the seventeen serialized variants, the opt-in
+// seam_closed among them, plus the two frames — so a kind added to the encoder without a manual
+// entry, or an entry without a kind, is a failing test rather than a documentation drift.
+func TestKindsAreNineteen(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 18 {
-		t.Fatalf("len(Kinds()) = %d, want 18: %v", len(kinds), kinds)
+	if len(kinds) != 19 {
+		t.Fatalf("len(Kinds()) = %d, want 19: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

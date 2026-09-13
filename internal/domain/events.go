@@ -325,9 +325,10 @@ type ReactionFiredEvent struct {
 // it. A sink that wants any of it beyond the call takes its own copy of the fields it needs; the
 // engine keeps mutating the working value the moment Emit returns.
 //
-// It is SINK-ONLY: like WireEvent it never reaches the headless line contract (eventjson.Encode
-// answers ok=false for it and consumes no sequence number), because a serialized payload of
-// arbitrary shape is not something a documented stdout contract can promise.
+// On the headless line contract it is OPT-IN: eventjson's Writer forwards it and writes nothing
+// unless its Options.Seams is set, and the line it then writes carries Seam (as the closing
+// notice's name) and Fired only — never Value, because a serialized payload of arbitrary shape is
+// not something a documented stdout contract can promise.
 type SeamClosedEvent struct {
 	EventBase
 	Seam  Moment   // the seam that closed

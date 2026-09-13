@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -148,7 +149,9 @@ func TestWriterSeqCountsFramesAndSkipsWire(t *testing.T) {
 
 // TestWriterForwardsEveryEventToInner pins the decorator half of the contract: the Writer is a
 // pass-through for the sink it displaced, so installing it never costs a Driver an observer — the
-// excluded WireEvent included, since the TUI's Inspector is exactly such an observer.
+// excluded WireEvent included, since the TUI's Inspector is exactly such an observer, and the
+// held-back SeamClosedEvent included, since the reactions.Runner beneath builds the seam-closing
+// notices from it.
 func TestWriterForwardsEveryEventToInner(t *testing.T) {
 	t.Parallel()
 
@@ -160,6 +163,7 @@ func TestWriterForwardsEveryEventToInner(t *testing.T) {
 	emitted := []domain.Event{
 		domain.TokenEvent{Text: "a"},
 		domain.WireEvent{Direction: "response", Payload: "{}"},
+		domain.SeamClosedEvent{Seam: domain.MomentPostResponse, Fired: []string{"tool-call-repair"}},
 		domain.TurnEvent{Status: "ok"},
 	}
 	for _, ev := range emitted {
@@ -170,9 +174,89 @@ func TestWriterForwardsEveryEventToInner(t *testing.T) {
 		t.Fatalf("inner sink saw %d events, want %d", len(inner.events), len(emitted))
 	}
 	for i := range emitted {
-		if inner.events[i] != emitted[i] {
+		if !reflect.DeepEqual(inner.events[i], emitted[i]) {
 			t.Errorf("event %d: inner sink saw %#v, want %#v", i, inner.events[i], emitted[i])
 		}
+	}
+}
+
+// TestWriterDropsSeamClosedByDefault pins the default stream ADR 0076 A5 promised: with no opt-in
+// a seam closure writes no line and consumes no seq, like the wire record — and it still reaches
+// the inner sink, because the seam-closing notices are built from it there.
+func TestWriterDropsSeamClosedByDefault(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	inner := &recordingSink{}
+	w := New(&out, Options{Now: fixedClock})
+	sink := w.Wrap(inner)
+
+	sink.Emit(domain.TokenEvent{Text: "a"})
+	sink.Emit(domain.SeamClosedEvent{Seam: domain.MomentPostResponse, Fired: []string{"tool-call-repair"}})
+	sink.Emit(domain.MessageEvent{Text: "a"})
+
+	got := lines(t, &out)
+	wantKinds := []string{"token", "message"}
+	if len(got) != len(wantKinds) {
+		t.Fatalf("wrote %d lines, want %d:\n%s", len(got), len(wantKinds), out.String())
+	}
+	for i, kind := range wantKinds {
+		wantPrefix := `{"event":"` + kind + `","v":2,"seq":` + strconv.Itoa(i+1) + `,`
+		if !strings.HasPrefix(got[i], wantPrefix) {
+			t.Errorf("line %d: got %s\nwant prefix %s", i+1, got[i], wantPrefix)
+		}
+	}
+	if strings.Contains(out.String(), "seam") {
+		t.Errorf("a seam closure reached the default stream:\n%s", out.String())
+	}
+	if len(inner.events) != 3 {
+		t.Fatalf("inner sink saw %d events, want 3 — the held-back SeamClosedEvent must still be forwarded", len(inner.events))
+	}
+	if _, ok := inner.events[1].(domain.SeamClosedEvent); !ok {
+		t.Errorf("inner sink's second event is %T, want domain.SeamClosedEvent", inner.events[1])
+	}
+}
+
+// TestWriterEmitsSeamClosedWhenSeamsIsSet pins the opt-in: with Seams set a seam closure is one
+// more line, stamped with the same envelope every other kind carries — its own seq, the run's
+// session and the emitting agent's turn, depth and call_id — with `data.seam` spelled as the
+// closing notice and `data.fired` never null.
+func TestWriterEmitsSeamClosedWhenSeamsIsSet(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	inner := &recordingSink{}
+	w := New(&out, Options{Session: "sess-1", Now: fixedClock, Seams: true})
+	sink := w.Wrap(inner)
+
+	sink.Emit(domain.TokenEvent{EventBase: domain.EventBase{Turn: 3}, Text: "a"})
+	sink.Emit(domain.SeamClosedEvent{
+		EventBase: domain.EventBase{Turn: 3, Depth: 1, CallID: "call-9"},
+		Seam:      domain.MomentPostResponse,
+		Fired:     []string{"tool-call-repair"},
+		Value:     domain.PostResponseMoment{},
+	})
+	sink.Emit(domain.SeamClosedEvent{EventBase: domain.EventBase{Turn: 3}, Seam: domain.MomentPreToolExec})
+
+	want := []string{
+		`{"event":"token","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"data":{"text":"a"}}`,
+		`{"event":"seam_closed","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":1,"call_id":"call-9",` +
+			`"data":{"seam":"post-response-finished","fired":["tool-call-repair"]}}`,
+		`{"event":"seam_closed","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,` +
+			`"data":{"seam":"pre-tool-exec-finished","fired":[]}}`,
+	}
+
+	got := lines(t, &out)
+	if len(got) != len(want) {
+		t.Fatalf("wrote %d lines, want %d:\n%s", len(got), len(want), out.String())
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d:\n got %s\nwant %s", i+1, got[i], want[i])
+		}
+	}
+	if len(inner.events) != 3 {
+		t.Errorf("inner sink saw %d events, want 3 — opting in never changes the forward", len(inner.events))
 	}
 }
 

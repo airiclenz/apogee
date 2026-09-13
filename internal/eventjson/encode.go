@@ -6,9 +6,11 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The eighteen line kinds of ADR 0075 §4 — sixteen Event variants plus the two frames that
+// The nineteen line kinds of ADR 0075 §4 — seventeen Event variants plus the two frames that
 // bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
+// seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
+// here is total, the gating is the Writer's.
 const (
 	kindToken             = "token"
 	kindReasoning         = "reasoning"
@@ -26,6 +28,7 @@ const (
 	kindPrune             = "prune"
 	kindUsage             = "usage"
 	kindAudit             = "audit"
+	kindSeamClosed        = "seam_closed"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -52,6 +55,7 @@ func Kinds() []string {
 		kindPrune,
 		kindUsage,
 		kindAudit,
+		kindSeamClosed,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -61,13 +65,15 @@ func Kinds() []string {
 // the envelope's turn/depth/call_id are stamped from, and the value that marshals to the line's
 // `data` object.
 //
-// ok is false for the two SINK-ONLY variants — domain.WireEvent and domain.SeamClosedEvent — and
-// for a nil or unrecognised event. The Inspector's raw provider protocol is excluded by ADR 0075
-// decision 2: putting a wire format on a documented stdout contract would make it part of a public
-// surface. A seam closure is excluded on the same terms: its Value is the seam's live working
-// value, read-only and valid only for the duration of Emit, so there is nothing a line could carry
-// that a consumer could rely on. A caller that sees false writes no line at all and, per the same
-// decision, consumes no sequence number for it.
+// ok is false for the one SINK-ONLY variant — domain.WireEvent — and for a nil or unrecognised
+// event. The Inspector's raw provider protocol is excluded by ADR 0075 decision 2: putting a wire
+// format on a documented stdout contract would make it part of a public surface. A caller that
+// sees false writes no line at all and, per the same decision, consumes no sequence number for it.
+//
+// A domain.SeamClosedEvent maps to the seam_closed kind, but only PART of it: its Value is the
+// seam's live working value, read-only and valid only for the duration of Emit, so no line carries
+// it — a consumer reads which seam closed and which reactions fired, nothing more. Whether that
+// line is written at all is the Writer's call (Options.Seams), not this mapping's.
 //
 // base is read as ev.EventBase explicitly at every case, which matters for domain.AuditEvent
 // alone: that variant declares a CallID of its own — the AUDITED call — which shadows the
@@ -149,6 +155,11 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			Decision: e.Decision,
 			Reason:   e.Reason,
 			IsError:  e.IsError,
+		}, true
+	case domain.SeamClosedEvent:
+		return kindSeamClosed, e.EventBase, seamClosedData{
+			Seam:  string(e.Seam.Closing()),
+			Fired: firedOrEmpty(e.Fired),
 		}, true
 	default:
 		return "", domain.EventBase{}, nil, false
@@ -286,6 +297,16 @@ type auditData struct {
 	IsError  bool   `json:"is_error"`
 }
 
+// seamClosedData is the seam_closed line: one seam finished passing. Seam is the seam's CLOSING
+// notice name (`post-response-finished`, not `post-response`) so the line and the Reaction notice
+// it stands beside spell the same fact the same way. Fired is never null: a pass in which nothing
+// acted is a fact in its own right, and it reads as `[]`. The variant's Value is deliberately
+// absent — see Encode.
+type seamClosedData struct {
+	Seam  string   `json:"seam"`
+	Fired []string `json:"fired"`
+}
+
 // The nested mirrors. A domain struct that rides inside a variant gets its own tagged shape here
 // rather than being marshalled directly, so the wire names are this package's decision and a
 // domain field acquiring a json tag for some other reason can never move the contract.
@@ -360,6 +381,15 @@ func approvalRequestOf(req domain.ApprovalRequest) approvalRequest {
 // userInputOf converts a domain.UserInput to its wire mirror.
 func userInputOf(in domain.UserInput) userInput {
 	return userInput{Text: in.Text, FileRefs: in.FileRefs, SkillIDs: in.SkillIDs}
+}
+
+// firedOrEmpty returns fired, or an empty non-nil slice when it holds nothing, so the member
+// encodes as `[]` and never as null.
+func firedOrEmpty(fired []string) []string {
+	if fired == nil {
+		return []string{}
+	}
+	return fired
 }
 
 // rawOrNull returns raw, or nil when it holds no bytes so the member encodes as null. It is not a

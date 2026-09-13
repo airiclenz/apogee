@@ -275,7 +275,10 @@ plus the reaction ids that fired at that seam. They are **sink-only**: `eventjso
 `ok=false` for them, so the headless Event lines are unchanged. `pre-request` and `post-response`
 fire per streamed Turn and the two tool seams per tool call; five new line kinds would roughly double
 a typical stream's volume for consumers who never asked, and ADR 0075 D10 makes adding the lines
-later purely additive.
+later purely additive. *(2026-09-13: added on those terms as the one opt-in `seam_closed` line kind —
+`eventjson.Encode` now maps the event, carrying `seam` as the closing notice's name and `fired`, never
+the payload, and the Writer writes the line only when `eventjson.Options.Seams` asks for it; the
+default stream is unchanged, so the sink-only reading above stays true by default.)*
 
 **A6. A hard rename, delivered by an automatic file migration.** `approval-waiting` becomes
 `approval-requested`, `approval-decided` is added and carries the verdict (the engine already emits
