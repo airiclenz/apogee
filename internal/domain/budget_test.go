@@ -132,3 +132,107 @@ func TestPromptChars_CountsContentToolArgsAndMenu(t *testing.T) {
 		t.Errorf("PromptChars = %d, want %d", got, 5+13+11)
 	}
 }
+
+// TestBudgetHistoryFill pins the fill measure the context-fill notice reports (ADR 0077):
+// estimated tokens over the History allocation, through the same ceil rounding as
+// EstimateTokens, and 0 — inert, no substitute ceiling — on an unknown window or an
+// uncalibrated ratio, the same clauses that keep the sibling compares false.
+func TestBudgetHistoryFill(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		history       int
+		charsPerToken float64
+		chars         int
+		want          float64
+	}{
+		{"zero History is inert", 0, 4, 400, 0},
+		{"negative History is inert", -5, 4, 400, 0},
+		{"zero ratio is inert", 100, 0, 400, 0},
+		{"negative ratio is inert", 100, -3, 400, 0},
+		{"empty history fills nothing", 100, 4, 0, 0},
+		{"half way", 200, 4, 400, 0.5},
+		{"exactly at the allocation", 100, 4, 400, 1},
+		{"one char over rounds up past the allocation", 100, 4, 401, 1.01},
+		{"past the allocation keeps climbing", 100, 4, 800, 2},
+		{"fractional ratio ceils like EstimateTokens", 10, 2.5, 6, 0.3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b := Budget{History: tc.history, CharsPerToken: tc.charsPerToken}
+			if got := b.HistoryFill(tc.chars); got != tc.want {
+				t.Errorf("%+v.HistoryFill(%d) = %v, want %v", b, tc.chars, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBudgetHistoryFill_AgreesWithHistoryExceedsAllocation pins the invariant the notice and
+// the automatic Compaction trigger share one scale on: for a view over msgs,
+// HistoryExceedsAllocation(msgs) == (HistoryFill(ConversationChars(conv)) > 1.0), held one
+// char under, exactly at, and one char over the History boundary — where EstimateTokens'
+// ceil makes the equality tightest — and across the inert cases.
+func TestBudgetHistoryFill_AgreesWithHistoryExceedsAllocation(t *testing.T) {
+	t.Parallel()
+	// History 100 at 4 chars/token puts the boundary at exactly 400 chars.
+	tests := []struct {
+		name   string
+		budget Budget
+		chars  int
+	}{
+		{"one char under the boundary", Budget{CharsPerToken: 4, History: 100}, 399},
+		{"exactly at the boundary", Budget{CharsPerToken: 4, History: 100}, 400},
+		{"one char over the boundary", Budget{CharsPerToken: 4, History: 100}, 401},
+		{"well under", Budget{CharsPerToken: 4, History: 100}, 10},
+		{"well over", Budget{CharsPerToken: 4, History: 100}, 4000},
+		{"fractional ratio at the boundary", Budget{CharsPerToken: 2.5, History: 10}, 25},
+		{"fractional ratio one char over", Budget{CharsPerToken: 2.5, History: 10}, 26},
+		{"unknown window", Budget{CharsPerToken: 4}, 4000},
+		{"uncalibrated ratio", Budget{History: 100}, 4000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			msgs := []Message{{Role: RoleUser, Content: strings.Repeat("x", tc.chars)}}
+			conv := NewRequest("", msgs, nil, Budget{}, 0).View().Conversation()
+
+			exceeds := tc.budget.HistoryExceedsAllocation(msgs)
+			fill := tc.budget.HistoryFill(ConversationChars(conv))
+
+			if exceeds != (fill > 1.0) {
+				t.Errorf("HistoryExceedsAllocation = %v but HistoryFill = %v (chars %d, %+v)",
+					exceeds, fill, tc.chars, tc.budget)
+			}
+		})
+	}
+}
+
+// TestConversationChars_MatchesPromptChars proves the view-side measure is PromptChars with
+// no tool menu — contents plus each tool call's name and arguments, tool results included —
+// over the same messages, through the loop's own view (NewRequest(...).View().Conversation(),
+// the shape domaintest.FakeLoopView serves).
+func TestConversationChars_MatchesPromptChars(t *testing.T) {
+	t.Parallel()
+	msgs := []Message{
+		{Role: RoleSystem, Content: "be brief"},
+		{Role: RoleUser, Content: "read the file"},
+		{Role: RoleAssistant, Content: "on it", ToolCalls: []ToolCall{
+			{ID: "c1", Tool: "read", Arguments: json.RawMessage(`{"path":"a.go"}`)},
+			{ID: "c2", Tool: "ls", Arguments: json.RawMessage(`{}`)},
+		}},
+		{Role: RoleTool, ToolCallID: "c1", Content: "package main"},
+		{Role: RoleTool, ToolCallID: "c2", Content: "a.go\nb.go"},
+		{Role: RoleAssistant, Content: "done"},
+	}
+	conv := NewRequest("", msgs, nil, Budget{}, 0).View().Conversation()
+
+	got, want := ConversationChars(conv), PromptChars(msgs, nil)
+
+	if got != want {
+		t.Errorf("ConversationChars(conv) = %d, PromptChars(msgs, nil) = %d", got, want)
+	}
+	if want == 0 {
+		t.Fatal("fixture measures 0 chars — the comparison proves nothing")
+	}
+}

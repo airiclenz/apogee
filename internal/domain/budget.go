@@ -54,6 +54,42 @@ func (b Budget) HistoryExceedsFraction(msgs []Message, fraction float64) bool {
 	return float64(b.EstimateTokens(PromptChars(msgs, nil))) > float64(b.History)*fraction
 }
 
+// HistoryFill reports how far a conversation of the given character size has climbed
+// toward the Budget's History allocation, as a fraction of it: EstimateTokens(chars)
+// over History, so 1.0 is the automatic Compaction line itself and the value climbs
+// past it once the history has outgrown the allocation. It is the scale the
+// context-fill notice reports to the model (ADR 0077) and reads exactly what the
+// trigger compares — for a conversation of chars = ConversationChars(conv),
+// HistoryExceedsAllocation(msgs) == (HistoryFill(chars) > 1.0), so the notice and the
+// fold can never disagree on where the line is. A non-positive History (the window is
+// unknown, so nothing was allocated) or a non-positive CharsPerToken (the ratio is
+// uncalibrated) yields 0: inert on an un-measured guess, with no substitute ceiling,
+// for the same reason the sibling compares stay false there.
+func (b Budget) HistoryFill(chars int) float64 {
+	if b.History <= 0 || b.CharsPerToken <= 0 {
+		return 0
+	}
+	return float64(b.EstimateTokens(chars)) / float64(b.History)
+}
+
+// ConversationChars is PromptChars over a ConversationView: the message contents and
+// tool-call names and arguments, summed through Range, with no tool menu (the menu is
+// not history). It is the same number PromptChars(msgs, nil) yields over the messages
+// the view serves, so a reaction reading the view feeds HistoryFill the measure the
+// automatic Compaction trigger is estimating from. It is a free function rather than a
+// view method because the ConversationView interface gains no methods (ADR 0017 §4).
+func ConversationChars(conv ConversationView) int {
+	n := 0
+	conv.Range(func(_ int, m Message) bool {
+		n += len(m.Content)
+		for _, tc := range m.ToolCalls {
+			n += len(tc.Tool) + len(tc.Arguments)
+		}
+		return true
+	})
+	return n
+}
+
 // PromptChars is a stable character measure of a request's prompt — the message contents and
 // tool-call arguments plus the tool menu's names, descriptions, and schemas — used both as the
 // estimator's calibration sample (internal/context.TokenEstimator.Calibrate) and as the basis

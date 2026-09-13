@@ -25,7 +25,7 @@
 
 **Regression check (2026-09-13, a1ce9252):** 1: yields to ADR 0017 §4 — `ConversationView` gains no method; a free `ConversationChars(conv)` in budget.go carries the measure; 1: What recast to match · 2: guard folded (writer's decision on the bind-time replay) · 3: guard folded (`agent.go` in Files; `32.8k`/`8.2k` pinned; the trigger boundary observed through one result crossing 90 and 100 together) · 5: guard folded (both Driver-built `Generation` literals threaded here) · 7: guard folded (fixtures written into the workspace at test time; no `testdata/` files) · 8: guard folded (link targets the `### context-fill-notice` heading). Items 4 and 6 SAFE.
 
-## 1. The fill measure: `Budget.HistoryFill` and `ConversationChars`
+## 1. The fill measure: `Budget.HistoryFill` and `ConversationChars` — ✅ DONE (2026-09-13)
 
 **What:** In `internal/domain/budget.go`, `func (b Budget) HistoryFill(chars int) float64` returns `EstimateTokens(chars) / History` and **0** when `History <= 0` or `CharsPerToken <= 0` (inert on an unknown window — the same clauses `HistoryExceedsFraction` has). In the same file, `func ConversationChars(conv ConversationView) int` sums `Content` and each `ToolCall`'s `Tool` + `Arguments` through `Range` — the same number as `PromptChars(msgs, nil)`; `ConversationView` (`internal/domain/hooks.go:353-366`) gains no method and `hookview.go` / `domaintest.FakeLoopView` are untouched. The invariant to pin: for any conv over msgs, `HistoryExceedsAllocation(msgs) == (HistoryFill(ConversationChars(conv)) > 1.0)` — the notice and the fold read one scale.
 
