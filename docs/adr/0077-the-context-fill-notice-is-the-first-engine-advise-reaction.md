@@ -52,8 +52,12 @@ ships **off** until bench evidence turns it on — which decides the default, an
    knowing where the line sits. When no window is known the Budget carries a zero allocation and the
    notice is **silent** — the standing posture, never fire on a guess.
 
-4. **Rungs.** Fixed at **50, 75 and 90** percent of the line, each fired **once per climb** and
-   re-armed when a fold drops the fill back under it. The 50 and 75 rungs carry the fact line only.
+4. **Rungs.** Fixed at **50, 75 and 90** percent of the line, each fired **once per climb**. A fold
+   ends the climb and re-arms the whole ladder — the first post-fold result fires whichever rung its
+   fill reaches, as a fresh session's first result would, so no rung is ever marked fired without
+   its notice (amended 2026-09-13: the first cut re-armed only the rungs the fill fell under, and a
+   post-fold result landing at 50–74 kept the 50 rung "fired", silent until 75). The 50 and 75
+   rungs carry the fact line only.
    The 90 rung adds, for a **child agent** alone, one engine-authored sentence: stop, and report what
    remains to the parent. The main agent's 90 rung stays a fact: its fold waits for the Exchange
    boundary and its wrap-up is the human's call.

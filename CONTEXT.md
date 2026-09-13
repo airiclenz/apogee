@@ -1261,7 +1261,8 @@ tells the model, as a fenced trailer on the closing tool result, how far its con
 climbed toward the **[Compaction](#context-and-history)** line — the **[Budget](#context-and-history)**'s
 History allocation, the very compare the automatic fold reads, so notice and fold can never
 disagree — as a percentage of that line beside the tokens used and the window. It fires at three
-fixed rungs (50, 75, 90), each once per climb and re-armed when a fold drops the fill; at 90 a
+fixed rungs (50, 75, 90), each once per climb; a fold ends the climb and re-arms the whole
+ladder, so the first post-fold result fires whichever rung its fill reaches; at 90 a
 **[Sub-agent](#identity-and-shape)** is also told to stop and report what remains. Off by default
 and switched by one top-level, file-only boolean, off under **Bypass**, silent while no window is
 known, inherited by every child agent. It is **not** a **[Floor guard](#floor-guard)**: it exists to

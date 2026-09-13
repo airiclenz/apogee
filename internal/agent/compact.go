@@ -85,8 +85,23 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 	if a.turns.inExchange {
 		return false, domain.ErrInputPending
 	}
-	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
+	res, err := a.fold(ctx)
 	return res.Skipped, err
+}
+
+// fold is the one call every Compaction path makes — the on-demand Compact, the estimate-driven
+// autoCompact and the overflow-driven emergencyFold — so what a fold that RAN must leave behind
+// is done in one place: the conversation Replaced by internal/context.Compact, and the
+// context-fill notice's ladder re-armed (rearmFillNotice), because the climb it tracked was just
+// folded away and the next result measures a new one. A fault leaves the conversation untouched
+// (Compact's guarantee) and a skip folded nothing, so neither re-arms — the ladder still describes
+// the history the model sees.
+func (a *Agent) fold(ctx context.Context) (apogeectx.Result, error) {
+	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
+	if err == nil && !res.Skipped {
+		a.rearmFillNotice()
+	}
+	return res, err
 }
 
 // foldStandDownSuffix is appended to a failed automatic fold's ErrorEvent when that fold ran
@@ -128,7 +143,7 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 	}
 	a.compacting = true
 	defer func() { a.compacting = false }()
-	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
+	res, err := a.fold(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return // a cancel masquerades as a stream error; the Turn's main stream handles it
@@ -378,7 +393,7 @@ func (a *Agent) emergencyFold(ctx context.Context, turn int) bool {
 	a.compacting = true
 	defer func() { a.compacting = false }()
 
-	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
+	res, err := a.fold(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return false // a cancel masquerades as a stream error; the caller routes the Turn to the cancel exit (end → endCancelled)

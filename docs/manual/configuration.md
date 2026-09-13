@@ -97,8 +97,9 @@ context: 78% of the way to automatic compaction — 25.6k tokens used of a 32.8k
 ```
 
 — fenced as advice from the engine, so the model can see the line is apogee's and not the tool's.
-Each rung fires once per climb and is re-armed when a fold drops the fill back under it, and a
-single tool result carries at most one notice, the highest rung it reached. The 50 and 75 rungs are
+Each rung fires once per climb; a compaction ends the climb and re-arms all three, so the first
+tool result after a fold fires whichever rung its own fill reaches (50 at 52%, 75 at 80%) exactly as
+a fresh session would. A single tool result carries at most one notice, the highest rung it reached. The 50 and 75 rungs are
 the fact alone; at 90 a **sub-agent** also gets one sentence telling it to stop and make its next
 reply the report its parent needs, while the main agent's 90 stays a fact, because its compaction
 waits for the exchange to end and its wrap-up is your call.

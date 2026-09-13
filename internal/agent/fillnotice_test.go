@@ -166,8 +166,8 @@ func TestContextFillNoticeReportsTheHighestRungOneResultCrosses(t *testing.T) {
 
 // A single result that crosses 90 and 100 together fires exactly one notice — reporting a
 // percent past 100 — and the automatic Compaction trigger agrees the line is crossed at the next
-// Turn boundary; after that fold drops the fill, a result under 50 re-arms the ladder and the next
-// climb past 50 fires the 50 rung again.
+// Turn boundary; that fold re-arms the ladder, so a result under 50 is silent and the next climb
+// past 50 fires the 50 rung again.
 func TestContextFillNoticeReArmsAfterAFold(t *testing.T) {
 	sink := &recordingSink{}
 	up := &scriptedCompactResponder{
@@ -213,6 +213,64 @@ func TestContextFillNoticeReArmsAfterAFold(t *testing.T) {
 	fired = noticeFirings(sink)
 	if len(fired) != 2 || !strings.HasPrefix(fired[1].Detail, "rung 50 (") {
 		t.Fatalf("firings after the fold = %+v, want the 90 rung and then the 50 rung fired again", fired)
+	}
+}
+
+// The fold re-arms the WHOLE ladder, not only the rungs the fill fell under: the first post-fold
+// result fires whichever rung its own fill reaches — 50 when it lands at 50–74, 75 (and never 50)
+// when it lands at 75–89 — exactly as a fresh session's first result would. The old re-arm kept
+// the 50 rung "fired" from the climb the fold erased and said nothing until 75.
+func TestContextFillNoticeFirstPostFoldResultFiresItsOwnRung(t *testing.T) {
+	cases := []struct {
+		name     string
+		size     int    // the first post-fold result's body; the fold leaves ~180 chars beside it
+		wantRung string // the one firing's Detail prefix
+	}{
+		{"lands at 50–74 and fires 50", 8300, "rung 50 ("},
+		{"lands at 75–89 and fires 75, never 50", 12500, "rung 75 ("},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			up := &scriptedCompactResponder{
+				summaryReply: "FOLDED",
+				scripts: [][]provider.Delta{
+					toolCallScript("c1", "probe", `{"n":1}`), // Exchange 1: one result past the line
+					contentScript("first done"),
+					toolCallScript("c2", "probe", `{"n":2}`), // Exchange 2 (after the fold): straight onto a rung
+					contentScript("second done"),
+				},
+			}
+			cfg := fillConfig(sink)
+			cfg.Context.CompactionEnabled = true
+			cfg.Tools = domain.NewToolRegistry()
+			if err := cfg.Tools.Register(sizedTool(16000, tc.size)); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+			a, err := newAgent(cfg, up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+
+			runExchange(t, a, "start")
+			runExchange(t, a, "again")
+
+			if up.summaryCalls != 1 {
+				t.Fatalf("summary calls = %d, want the one fold at the second Exchange's opening", up.summaryCalls)
+			}
+			fired := noticeFirings(sink)
+			if len(fired) != 2 || !strings.HasPrefix(fired[0].Detail, "rung 90 (") || !strings.HasPrefix(fired[1].Detail, tc.wantRung) {
+				t.Fatalf("firings = %+v, want the 90 rung before the fold and then exactly one at %q…", fired, tc.wantRung)
+			}
+			msgs := toolMessages(a)
+			if len(msgs) != 1 {
+				t.Fatalf("conversation holds %d tool messages after the fold, want the one post-fold result", len(msgs))
+			}
+			span := noticeSpan(t, msgs[0])
+			if !strings.Contains(msgs[0].Content, "context: ") || span.Reaction != contextFillNoticeID {
+				t.Errorf("post-fold tool message = %q, want the notice's fact line as its trailer", msgs[0].Content)
+			}
+		})
 	}
 }
 

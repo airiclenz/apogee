@@ -349,7 +349,7 @@ type Agent struct {
 	compacting    bool                // guards the automatic Compaction trigger against re-entry (item 9)
 	compactSat    bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
 	compactFailed bool                // stand-down latch: an automatic fold FAULTED, so the estimate-driven trigger stands down for the rest of THIS Exchange rather than re-running the identical failing summary call at every Turn boundary (turnLifecycle.openExchange clears it; the emergency fold and the on-demand /compact ignore it)
-	fillRung      int                 // context-fill notice (fillnotice.go): the highest rung fired on the current climb toward the compaction line, 0 = none; re-armed when the fill drops back under it, so a fold lets the ladder fire again (ADR 0077 D4)
+	fillRung      int                 // context-fill notice (fillnotice.go): the highest rung fired on the current climb toward the compaction line, 0 = none; a fold, /clear or restored snapshot re-arms the whole ladder (rearmFillNotice), so the next climb fires from its first reached rung (ADR 0077 D4)
 	depth         int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
 	callID        string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
 	consoleOwner  string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
@@ -1322,6 +1322,7 @@ func (a *Agent) ClearContext() error {
 	_ = a.tasks.Replace(nil) // clearing cannot break a cap, so the validated error is not one
 	a.reloadContextFiles()
 	a.conv = *domain.NewConversation(nil)
+	a.rearmFillNotice() // the climb the ladder tracked is gone with the conversation
 	return nil
 }
 
@@ -1362,6 +1363,7 @@ func (a *Agent) RestoreSession(snap domain.Session) error {
 	a.consoles.CloseAll()
 	a.usage = usageTally{}
 	a.reloadContextFiles()
+	a.rearmFillNotice() // the ladder climbed the conversation just swapped out, not this one
 	return nil
 }
 
