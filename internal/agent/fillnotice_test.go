@@ -274,6 +274,62 @@ func TestContextFillNoticeFirstPostFoldResultFiresItsOwnRung(t *testing.T) {
 	}
 }
 
+// An aborted Exchange (Esc in the TUI) drops the tool result a notice rode on, so it ends the
+// climb the way a fold does: a fired 50, then AbortExchange, then a result back at 50–74% fires
+// the 50 rung again, once — never left silent until 75 by a rung marked fired from a conversation
+// the model no longer sees.
+func TestContextFillNoticeReArmsAfterAnAbortedExchange(t *testing.T) {
+	sink := &recordingSink{}
+	up := &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "probe", `{"n":1}`), // Exchange 1: one Turn onto the 50 rung, then Esc
+		toolCallScript("c2", "probe", `{"n":2}`), // Exchange 2: straight back onto the 50 rung
+		contentScript("second done"),
+	}}
+	cfg := fillConfig(sink)
+	cfg.Tools = domain.NewToolRegistry()
+	if err := cfg.Tools.Register(sizedTool(8300, 8300)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "start"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if res.Status != domain.StatusTurnComplete {
+		t.Fatalf("Step status = %q, want %q (a tool Turn keeps the Exchange open for the abort)", res.Status, domain.StatusTurnComplete)
+	}
+	if fired := noticeFirings(sink); len(fired) != 1 || !strings.HasPrefix(fired[0].Detail, "rung 50 (") {
+		t.Fatalf("firings before the abort = %+v, want exactly one at rung 50", fired)
+	}
+
+	a.AbortExchange()
+	if got := a.conv.Len(); got != 0 {
+		t.Fatalf("after AbortExchange the conversation has %d messages, want 0", got)
+	}
+
+	runExchange(t, a, "again")
+
+	fired := noticeFirings(sink)
+	if len(fired) != 2 || !strings.HasPrefix(fired[1].Detail, "rung 50 (") {
+		t.Fatalf("firings = %+v, want the 50 rung before the abort and exactly once again after it", fired)
+	}
+	msgs := toolMessages(a)
+	if len(msgs) != 1 {
+		t.Fatalf("conversation holds %d tool messages after the abort, want the one post-abort result", len(msgs))
+	}
+	span := noticeSpan(t, msgs[0])
+	if !strings.Contains(msgs[0].Content, "context: 5") || span.Reaction != contextFillNoticeID {
+		t.Errorf("post-abort tool message = %q, want the 50 rung's fact line as its trailer", msgs[0].Content)
+	}
+}
+
 // The window in the line is the advertised one, and a working window with no advertised one is
 // the only room anyone named, so it stands in; no window at all is silence — no notice, no
 // firing, no ledger — rather than a percent of a guessed line.
