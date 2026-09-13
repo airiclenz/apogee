@@ -17,7 +17,9 @@ result inside a fence apogee writes, so the model reads it as advice from you an
 tool's own output. A `gate:` entry (class **gate**) is asked, before a tool call runs, whether the
 call may — and it can say `deny`, or `ask` to put the call to you, but never approve a call on
 your behalf. A Floor guard is the engine's own `shape (view)` Reaction — it fires on a Moment
-inside the loop and rewrites what the model sees — while yours fires on your own machine, as your
+inside the loop and rewrites what the model sees — and the engine's own `advise` Reaction is the
+[context-fill notice](configuration.md#context-fill-notice), which appends its line to a tool
+result the way an `advise:` entry does; yours fires on your own machine, as your
 configuration rather than a model action. Of the five in-loop seams, a `gate:` entry reacts at
 `pre-tool-exec` and an `advise:` entry at `post-tool-result` (or its `file-changed` narrowing);
 the other three take no user entry. Every notice below reports a thing that is over.
@@ -305,8 +307,9 @@ that prints nothing injects no fence, so an entry that only sometimes has someth
 silent the rest of the time; one that failed, timed out (default `timeout:` `10s`) or could not
 be spawned contributes nothing and is reported to you, each time it fails; a `file-changed`
 entry on a call that changed no file neither runs nor reports. Under `bypass:` the
-entry is switched off entirely, like every other Reaction that shapes what the model sees, so a
-Bypass run reads exactly what the bare loop would.
+entry is switched off entirely, like every other Reaction that shapes what the model sees — the
+engine's own [context-fill notice](configuration.md#context-fill-notice) included, even with its
+key on — so a Bypass run reads exactly what the bare loop would.
 
 Write a script that **returns facts, not imperatives**: the files `gofmt` would rewrite, the
 failing test's name, the line a linter flagged. The fence tells the model who spoke; it does not

@@ -171,7 +171,7 @@ go test ./cmd/apogee/ -run 'FillNotice'
 
 **Commit:** `test(e2e): the context-fill notice reaches the model as the announced line, once per rung`
 
-## 8. Manual
+## 8. Manual — ✅ DONE (2026-09-13)
 
 **What:** Depends on item 5. `docs/manual/configuration.md:77-79`: rewrite "the `reactions:` list, and nothing else in this release" to name the notice as the one engine advise builtin above the floor, linking the item-5 subsection. `docs/manual/commands.md:420-424`: the Session-section row list gains `context-fill-notice` with the phrase that it is not one of the seven. `docs/manual/reactions.md`: beside `:19` ("A Floor guard is the engine's own `shape (view)` Reaction") add that the engine's own `advise` Reaction is `context-fill-notice` (configuration.md), and in the `bypass:` paragraph (`:300-309`) say the engine notice is off under Bypass too. `docs/manual/headless.md:169`: the `reaction_fired` cell becomes "an engine builtin (a Floor guard or the context-fill notice) or armed Reaction". Rule for the sweep: every manual sentence that says the engine ships only Floor guards as builtins, or that nothing but `reactions:` runs above the floor, names the notice — `grep -rn "nothing else in this release\|only.*Floor guards\|the seven" docs/manual/` finds the candidates; amend each that makes the claim.
 
@@ -188,3 +188,6 @@ grep -n "nothing else in this release" docs/manual/configuration.md | wc -l   # 
 ```
 
 **Commit:** `docs(manual): context-fill-notice — the key, the line the model sees, and why it ships off`
+
+NOTES (2026-09-13): `docs/manual/configuration.md` and `docs/manual/commands.md` needed no edit — items 5 and 6 already landed the "nothing else in this release" rewrite (naming the notice and linking `#context-fill-notice`) and the Session-row sentence ("not a Floor guard and starts `off`"); this item's sweep confirmed both and touched only the two remaining files.
+NOTES (2026-09-13): the acceptance grep's one surviving hit, `docs/manual/daemon.md:108` ("the only live surface. The seven Floor guards are on for every firing"), is a false positive — it states the Floor is on, not that nothing else runs — and the daemon threads `context-fill-notice:` through `cmd/apogee/wire_firing.go:384`, so the sentence stays true; left as is.

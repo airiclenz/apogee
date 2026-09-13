@@ -166,7 +166,7 @@ moment, and the case difference is the signal.
 | `child_interjection` | input steered into a running delegation, and whether it landed |
 | `approval` | an approval request: its phase, the request, the decision |
 | `turn` | a Turn boundary, at every depth: its status, whether it faulted, whether it hit the step cap |
-| `reaction_fired` | a Reaction acted: builtin Floor guard or armed Reaction, at which Moment, and what it did |
+| `reaction_fired` | a Reaction acted: an engine builtin (a Floor guard or the context-fill notice) or armed Reaction, at which Moment, and what it did |
 | `error` | something failed, named by its source |
 | `prune` | the context was pruned: how many results, how many tokens |
 | `usage` | one model call's token accounting and the run's cumulative totals |
