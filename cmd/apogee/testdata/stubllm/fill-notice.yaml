@@ -1,0 +1,41 @@
+# The upstream the context-fill notice journeys talk to (ADR 0077): one `apogee headless` run whose
+# Exchange reads three DISTINCT files and then answers, so the conversation climbs past 50% of the
+# compaction line on the third result and on no earlier one. Three files rather than one read three
+# times, because the `read-cache` Floor guard caps a re-read of an unchanged file to one line and a
+# conversation of one-line results never climbs anywhere.
+#
+# The files themselves are written into the run's workspace by the test, sized from the 8192
+# window's History allocation at the uncalibrated 4 chars per token — which is why no turn here
+# reports `usage:`: a reported prompt count would recalibrate the ratio and move the line the
+# fixtures were sized against.
+#
+# The read turns are told apart by the header the last result opens with (`[File: fill-N.txt, …`),
+# not by order: the stub takes the first `when:` that matches, and three `tool_result: read_file`
+# matchers alone would all take the first.
+model: fill-notice-model
+turns:
+    - when:
+        last_message: ^Read the three notes in this workspace
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"fill-1.txt"}'
+    - when:
+        tool_result: read_file
+        last_message: '^\[File: fill-1\.txt,'
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"fill-2.txt"}'
+    - when:
+        tool_result: read_file
+        last_message: '^\[File: fill-2\.txt,'
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"fill-3.txt"}'
+    - when:
+        tool_result: read_file
+        last_message: '^\[File: fill-3\.txt,'
+      text: All three notes read.
+    # Anything apogee asks on its own account. Never consumed, so the turns above stay the whole
+    # conversation.
+    - repeat: true
+      text: OK.
