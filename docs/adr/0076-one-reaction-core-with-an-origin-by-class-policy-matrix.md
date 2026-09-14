@@ -305,9 +305,10 @@ they arrive in stage 3.
 
 **A8. One generation swap covers bypass too.** A generation is *the reactions that will fire*: the
 builtin enable set resolved from the seven Floor booleans, the user entries from `reactions:`, and
-the bypass filter applied. One `SetReactions(gen)` retires `SetBypass`, `SetFloor` and
-`Runner.Replace` together, so a reload is one atomic swap and the row-driven read-modify-write on the
-floor holder disappears. Greenfield §9.1 row 9, delivered whole. Consolidating the five independent
+the bypass filter applied. One `SetReactions(gen)` retires `SetBypass` and `SetFloor` and
+becomes the only caller of `Runner.Replace` (kept as the observe lane's swap primitive), so a
+reload is one atomic swap and the row-driven read-modify-write on the floor holder disappears.
+Greenfield §9.1 row 9, delivered whole. Consolidating the five independent
 `LoadFileConfig(a.configPath, …)` re-reads in `wire_settings.go` is **out of scope** — four are MCP,
 model profiles and validated sets, unrelated to reactions; a bead carries it.
 
