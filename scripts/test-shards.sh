@@ -11,7 +11,9 @@
 # heavy package gets, against the one process the rest share — is sharding's other job.
 #
 # A shard is a `go test` process of its own, so every test runs exactly as it does today: none
-# is skipped, weakened, reordered within its shard, or run with different flags. Measured on a
+# is skipped, weakened, reordered within its shard, or run with different flags — with ONE
+# flag this script sets itself, `-parallel` (see "the parallel bound" below), which changes how
+# many of a shard's parallel tests run at once and nothing about any test. Measured on a
 # 9-core box before the cmd/apogee sweep: `go test -race ./...` 212s, sharded 82s cold (no
 # timing cache) and around 55s warm.
 #
@@ -47,6 +49,26 @@ ncpu=$( (command -v nproc >/dev/null 2>&1 && nproc) || sysctl -n hw.ncpu 2>/dev/
 budget=$((ncpu - 1))
 [ "$budget" -ge 2 ] || budget=2
 [ "$budget" -le 7 ] || budget=7
+
+# The parallel bound. `go test` runs a package's `t.Parallel` tests `-parallel` at a time, and
+# the flag defaults to GOMAXPROCS — the whole box — because it assumes it is the only process
+# on it. Here it is not: the budget above is already spent on shards, and a shard that also
+# fanned its tests out GOMAXPROCS-wide would put shards × GOMAXPROCS driven e2e tests on the
+# box at once (four cmd/apogee shards × 9 = 36 on the 9-core box this is tuned for, beside the
+# tui shards and the rest), which is what turned the sharded suite red after the cmd/apogee
+# sweep — 5 s waits timing out, leak checks finding goroutines still unwinding, PTY frames
+# arriving late: load, not logic. So the budget is divided among the processes it launches,
+# and each shard runs that many tests at once — 1 whenever the plan already fills the budget
+# with processes, more only when APOGEE_TEST_SHARDS leaves slots over.
+# The same bound holds under CI's APOGEE_TEST_SHARDS=2 on a 4-vCPU runner. It is set only on
+# the heavy shards: the remaining packages run as one process whose per-package tests are
+# small, and `go test` already limits how many of those packages run at once by GOMAXPROCS.
+# The isolated `go test -race ./cmd/apogee/` keeps `go test`'s default and the whole box.
+parallel_bound() { # jobs -> the -parallel value for each heavy shard
+	local p=$((budget / $1))
+	[ "$p" -ge 1 ] || p=1
+	echo "$p"
+}
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -87,10 +109,14 @@ render_failures() {
 			next
 		}
 
-		# `=== PAUSE` is pure scheduling noise. `=== RUN` / `=== CONT` name the test whose output
-		# follows — the interleaving a parallel run produces means the LAST such marker wins.
+		# `=== PAUSE` is pure scheduling noise. `=== RUN` / `=== CONT` / `=== NAME` name the test
+		# whose output follows — the interleaving a parallel run produces means the LAST such
+		# marker wins. `=== NAME` is the one `go test` prints when the output of a test resumes
+		# after lines from another test cut in, which is how the failure message of a parallel
+		# test and its `--- FAIL` line usually arrive: without the rule the message is charged to
+		# whichever test the previous marker named and the report shows a bare `--- FAIL` line.
 		/^=== PAUSE[ \t]/ { next }
-		/^=== (RUN|CONT)[ \t]/ { cur = $3; if (root(cur) in failed) print; next }
+		/^=== (RUN|CONT|NAME)[ \t]/ { cur = $3; if (root(cur) in failed) print; next }
 
 		# A result line, at any indent. `go test` buffers a tree and prints the parent verdict
 		# FIRST, then its children indented beneath it, so this must set the group rather than
@@ -225,10 +251,13 @@ launch() { # log label -- go test args...
 	pids+=($!) ; labels+=("$label") ; logs+=("$log")
 }
 
+parallel=$(parallel_bound $(( ${#shard_run[@]} + 1 )))
+echo "    each shard runs $parallel test(s) at a time (-parallel $parallel: budget $budget over $(( ${#shard_run[@]} + 1 )) processes)"
+
 launch "$work/rest.log" "the remaining ${#rest[@]} packages" -- "$@" "${rest[@]}"
 
 for s in "${!shard_run[@]}"; do
-	launch "$work/shard.$s.log" "${shard_pkg[$s]} shard $s" -- "$@" -run "${shard_run[$s]}" "${shard_pkg[$s]}"
+	launch "$work/shard.$s.log" "${shard_pkg[$s]} shard $s" -- "$@" -parallel "$parallel" -run "${shard_run[$s]}" "${shard_pkg[$s]}"
 done
 
 rc=0

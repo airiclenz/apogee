@@ -173,6 +173,8 @@ install: build
 # `t.Parallel` ones (serial only where a test itself `t.Setenv`s or swaps a package-level seam);
 # internal/tui's driver tests are still serial, and sharding is what bounds that package and
 # balances the heavy packages against the rest — a split by PROCESS, which changes no test.
+# Each heavy shard gets a `-parallel` bound (its share of the process budget, 1 at the default
+# sizing), so the shards spend the box and a shard's own fan-out does not multiply the load.
 # scripts/test-shards.sh holds the reasoning and the shard plan; `go test -race -count=1 ./...`
 # remains the equivalent single-process run for a bisect or a one-off.
 .PHONY: test

@@ -920,7 +920,13 @@ test reaching it serial, and `t.Parallel()` after such a helper is a panic, not 
 sweep took `go test -race -count=1 ./cmd/apogee/` from **202 s** serial to **66 s** on the same
 9-core box (three consecutive `-count=3` runs green at ≈ 62 s each), and it is the reason the one
 wait that outran its default on a loaded box — the in-process 400-line reply — now carries the
-PTY twin's 15 s bound.
+PTY twin's 15 s bound. That figure is the isolated package run. Under `make test` the shards
+already spend the box, so `scripts/test-shards.sh` passes each heavy shard a `-parallel` bound —
+its share of the process budget, 1 at the default sizing — and a shard runs its parallel tests
+that many at a time: the alternative, `go test`'s GOMAXPROCS-wide default in every shard at once,
+put up to thirty-six driven tests on the 9-core box and turned the sharded suite red on load
+alone (5 s waits, leak checks, PTY frames). The kit's waits stay sized for a shard that has its
+share of the box, not for one competing with seven others' fan-out.
 
 The per-test figures that follow are test time under `-race` on an idle box, not wall clock, and
 they still add up to roughly the **≈ 122 s** the serial measurement above recorded, on top of the

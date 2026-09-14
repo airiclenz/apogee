@@ -67,10 +67,21 @@ before it releases the parallel ones. `internal/tui`'s driver tests are still se
 
 `scripts/test-shards.sh` splits those two packages across several concurrent `go test`
 processes as well. A shard is a process of its own, so every test runs exactly as it does
-today — same flags, same isolation, nothing skipped or reordered within its shard — and the
-run is bounded by the slowest shard rather than the slowest package. Measured on a 9-core
-box before the `cmd/apogee` sweep: 212s in one process, 68s sharded, with `make check` going
-from 224s to 77s.
+today — same flags but one, same isolation, nothing skipped or reordered within its shard —
+and the run is bounded by the slowest shard rather than the slowest package. Measured on a
+9-core box before the `cmd/apogee` sweep: 212s in one process, 68s sharded, with `make check`
+going from 224s to 77s; after it, 72s sharded, since the shards were already spending the box.
+
+The one flag is `-parallel`. `go test` runs a package's `t.Parallel` tests GOMAXPROCS at a
+time by default, as if it had the box to itself; a shard does not, and a shard that also fanned
+its tests out that wide would put shards × GOMAXPROCS driven e2e tests on the box at once —
+which is load, not logic, and is what makes 5 s waits time out and leak checks catch goroutines
+still unwinding. So the script divides its process budget among the processes it launches and
+passes each heavy shard that share as `-parallel`: 1 whenever the plan already fills the budget
+with processes (the default sizing, and CI's cap below), more only when `APOGEE_TEST_SHARDS`
+leaves slots over. The bound is the script's, not the tests': the isolated
+`go test -race -count=1 ./cmd/apogee/` keeps `go test`'s default and the whole box, which is
+where the `cmd/apogee` sweep's 202s → 66s shows.
 
 Shards are balanced from the previous run's per-test durations, cached in `.test-timings`
 (gitignored, rewritten every run). A missing or stale cache costs only a less even split,
