@@ -222,6 +222,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- `CONTEXT.md` now tells the truth about the shipped Reaction core: `Reaction.Validate` no longer claims to refuse duplicate ids (that is `Generation.Validate` per lane and the agent's arming step), the `ReactionFiredEvent` action list names `fired`, `cap`, `salvage` and `notice` beside `retry`/`defer`/`intercept`, and the `Generation` sentence records that `Runner.Replace` survives as the observe half's swap primitive called only from the Driver's `SetReactions`.
+
+- `CONTEXT.md`'s three Bypass sentences (the hard-constraint opener, the **Bypass mode** glossary entry and the policy-matrix paragraph) now say Bypass also switches off the engine's one advise builtin, the context-fill notice (ADR 0077), and that the seven Floor guards, observe and gate stay on — they previously read "builtins intact", predating ADR 0077.
+
+- ADR 0076 A8 and the greenfield §9.1 row 9 no longer record `Runner.Replace` as retired: `SetReactions(gen)` retires `SetBypass` and `SetFloor` and is `Runner.Replace`'s only caller (kept as the observe lane's swap primitive).
+
+- **Docs:** the Reactions rows of the README's manual index and the manual's own index now name all three `reactions:` entry kinds (`run:`, `advise:`, `gate:`), the sixteen Moments and the `hooks:` migration, instead of the `run:`-only "eleven notices" wording.
+
+- The archived `2026-09-09 - 01` (Reaction stage 3) and `2026-09-09 - 02` (context-fill notice) plans now read `Status: executed` instead of the stale `unexecuted`.
+
+- The `tools.enabled` field comment in `internal/config` no longer claims no tool ships default-off: it names the Console four (`console_open`, `console_send`, `console_read`, `console_close`) as the default-off tools an `enabled:` entry lifts, and both `internal/config` comments now spell the interface `domain.DefaultOffTool` (the symbol that exists) instead of `tools.DefaultOffTool`.
+
+- The `isFileMutatingTool` comment in `internal/floor/toolnames.go` no longer says the content-repair rows "stay lab Mechanisms": the narrower full-file-body question belonged to the retired content-repair rows and no Floor guard asks it.
+
 - **A `reactions:` file's `gate:` entries now reach every run apogee makes.** The resolved list is
   divided into its two lanes at every wiring site: the observe entries go to the Reaction Runner
   that has always fired them, and the advise and gate entries are armed on the agent itself — in the
