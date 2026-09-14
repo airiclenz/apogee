@@ -765,6 +765,13 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		if next, opened := m.openRunAt(target.entry); opened {
 			return next, nil
 		}
+		// A task-list card's fold is the one every such card shares, and flipping it is also a
+		// write of `ui.task-list-open` (toggleTaskListFold): asked after the run redirect and before
+		// the ordinary flip for the same reason the redirect is — one rule for the mouse and for ⏎.
+		if m.transcript.foldsWithTaskLists(target.entry) {
+			m = m.toggleTaskListFold()
+			break
+		}
 		if !m.transcript.toggleExpanded(target.entry) {
 			return m, nil
 		}

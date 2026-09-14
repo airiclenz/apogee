@@ -51,6 +51,18 @@ type transcript struct {
 	// fact about the RUN rather than about the conversation, so reset preserves it as it does debug.
 	// The zero value shortens nothing, which is what a hand-built test transcript gets.
 	ws workspaceRoot
+	// taskListOpen is the state a NEW task-list card is seeded with — the one fold preference every
+	// header-folding card shares (toolView.collapsesToHeader), whose record is the Model's
+	// Options.TaskListFolded and whose FACT is each entry's own expanded flag. It lives here for ws's
+	// reason: addToolCall is reached through apply, which folds an Event with no Model in sight, and
+	// replay decodes a record whose cards carry no fold at all. The Model seeds it at construction
+	// and moves it through [transcript.setTaskListOpen], the one sweep a toggle and a settings apply
+	// both take, so the seed and the cards already on screen can never disagree. reset preserves it
+	// as it does ws: /clear opens a new session under the same preference. The zero value is
+	// FOLDED — the ordinary block default, which is what a hand-built test transcript gets and what
+	// its assertions on the collapsed paint are written against; a Model built from Options is
+	// where the open default the config key carries comes in.
+	taskListOpen bool
 	// root is the run the transcript is currently PAINTED at: the delegation whose own entries fill
 	// the view, with everything above and beside it left out (render.go, [transcript.setRoot]). The
 	// zero value is the whole transcript — the human's own conversation with every run folded into
@@ -262,8 +274,11 @@ type entry struct {
 	done        bool
 	// the head of a sub-agent run only: the delegation's lifecycle phase as its child reported it
 	// (domain.SubAgentPhaseEvent); view-only liveness beside done's pairing, never persisted
-	phase    domain.SubAgentPhase
-	expanded bool // view-only block state: false = collapsed (the default); never persisted
+	phase domain.SubAgentPhase
+	// view-only block state: false = collapsed (the default); never persisted. A header-folding
+	// card is the one entry not born collapsed: it is seeded from the shared task-list fold
+	// (taskListOpen) and moves with every other such card (setTaskListOpen).
+	expanded bool
 	// view-only state of the TYPE ROW this entry heads inside a super-group; never persisted
 	typeExpanded bool
 	// view-only fold of the TASK this entry's run was handed, as the run's own view paints it
@@ -790,8 +805,9 @@ func (t *transcript) refreshStartup(v startupView) {
 }
 
 // reset returns the transcript to its empty state — no committed entries and no in-progress
-// assistant buffer — while preserving the debug flag (a hidden view toggle, not conversation) and
-// the workspace root (a fact about the run, which /clear does not move).
+// assistant buffer — while preserving the debug flag (a hidden view toggle, not conversation), the
+// workspace root (a fact about the run, which /clear does not move) and the task-list fold
+// preference (a fact about the human, which a new session inherits).
 // It is the /clear + /new "start a new session" primitive: the caller re-seeds the one-time
 // start-up box with addStartup so the fresh view matches a launch. It does NOT touch the engine's
 // memory (ClearContext) — that is the caller's separate, fallible step (model.startNewSession).
@@ -806,7 +822,7 @@ func (t *transcript) reset() {
 	// scrollback) before anything renders again, so pruning against the entry count at the next
 	// render would find index 3 occupied and hand back the previous session's paint (paintcache.go).
 	t.paints.clear()
-	// t.debug and t.ws are deliberately preserved across a session reset.
+	// t.debug, t.ws and t.taskListOpen are deliberately preserved across a session reset.
 }
 
 // replay appends already-decoded committed entries after whatever the transcript already holds —
@@ -814,8 +830,18 @@ func (t *transcript) reset() {
 // start-up box. It is append-only and never touches the in-progress pending buffer: the entries
 // are committed history, while streaming state belongs to this fresh process. The entries were
 // escape-stripped on decode, so nothing untrusted from disk reaches the terminal unfiltered.
+//
+// Block state is never persisted, so every decoded card arrives collapsed — and the header-folding
+// ones are seeded here from the shared fold preference (taskListOpen), exactly as a live card is
+// (addToolCall): a resumed session paints every task-list card per the file, not per the record.
 func (t *transcript) replay(entries []entry) {
+	at := len(t.entries)
 	t.entries = append(t.entries, entries...)
+	for i := at; i < len(t.entries); i++ {
+		if t.entries[i].tool.collapsesToHeader {
+			t.setExpanded(i, t.taskListOpen)
+		}
+	}
 }
 
 // hasPrompt reports whether the transcript holds at least one committed user message. It is THE
@@ -1228,13 +1254,19 @@ func (t *transcript) commitCancelled() {
 // resolved is the engine's disclosure for this call — where its path argument really points, when
 // that is not where the argument says (domain.ToolCallEvent.ResolvedPath) — and empty on every
 // ordinary call. It reaches the block through the presenter, which spells it beside the target.
+//
+// A header-folding card (toolView.collapsesToHeader) is the one block not born collapsed: it is
+// seeded from the shared fold preference (taskListOpen), so a card the model writes while the
+// reader has the lists open opens too, and one written after a fold stays folded with the rest.
 func (t *transcript) addToolCall(call domain.ToolCall, resolved string, run runRef) {
+	tv := presentToolCall(call, resolved, t.ws)
 	t.place(entry{
 		kind:        entryToolCall,
 		depth:       run.depth,
 		callID:      call.ID,
 		spawnCallID: run.spawn,
-		tool:        presentToolCall(call, resolved, t.ws),
+		tool:        tv,
+		expanded:    tv.collapsesToHeader && t.taskListOpen,
 	})
 }
 
@@ -1453,11 +1485,46 @@ func (t *transcript) setExpanded(index int, expanded bool) bool {
 // found a block to flip — the meaning of a click on a block's header line. The kind and range
 // guards are setExpanded's, so an index that names no block answers false from one place; the
 // bound here only makes the READ of the current state safe.
+//
+// A header-folding card is not toggled here: its fold is the one every such card shares
+// (setTaskListOpen), and the click path asks foldsWithTaskLists first so the shared toggle — and
+// the write-back it carries — is what the gesture reaches ([Model.toggleBlockAt]).
 func (t *transcript) toggleExpanded(index int) bool {
 	if index < 0 || index >= len(t.entries) {
 		return false
 	}
 	return t.setExpanded(index, !t.entries[index].expanded)
+}
+
+// foldsWithTaskLists reports whether entries[index] is a header-folding card — one whose fold is the
+// shared task-list preference rather than a state of its own (toolView.collapsesToHeader). An index
+// outside the slice answers false, for the reason toggleExpanded bounds its read: this sits on the
+// click path, where a panic is the whole session.
+func (t *transcript) foldsWithTaskLists(index int) bool {
+	return index >= 0 && index < len(t.entries) && t.entries[index].tool.collapsesToHeader
+}
+
+// setTaskListOpen moves the shared task-list fold: it records the preference every card added from
+// now on is seeded with (taskListOpen) and performs the ONE sweep that puts every header-folding
+// card already in the transcript into that state — a toggle on any card flips them all, and a
+// `/settings` edit or a hand-edited file lands on every card the same way. It goes through
+// setExpanded so the guards a single click meets are the guards the sweep meets, and because
+// expanded is what the paint cache keys on (spanFlags): each card's paint key moves with it, and
+// the next frame draws every card afresh. It reports whether any card changed, so a caller that
+// repaints only on a change can tell a sweep that found nothing to move.
+//
+// Every card of the mark is swept, a row-less or errored one included: the preference is one
+// state for the KIND, and a failed call left open beside folded lists would be a card the reader
+// had to fold by itself.
+func (t *transcript) setTaskListOpen(open bool) bool {
+	t.taskListOpen = open
+	changed := false
+	for i := range t.entries {
+		if t.entries[i].tool.collapsesToHeader && t.entries[i].expanded != open {
+			changed = t.setExpanded(i, open) || changed
+		}
+	}
+	return changed
 }
 
 // setTypeExpanded opens or closes the TYPE ROW of the run headed by entries[index] — the second,

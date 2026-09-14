@@ -78,5 +78,9 @@ Nor is what you had **open** on screen. Which blocks you had unfolded is the
 view's own state, and so is a **run view** — the full-transcript reading of one
 sub-agent you get by opening its row. A resumed session opens at the top level
 with everything folded shut, however deep into a delegation you were when it was
-written; the run itself is in the record, and one click opens it again.
+written; the run itself is in the record, and one click opens it again. The one
+exception is the task-list card: its fold is a preference rather than view
+state, remembered in [`ui.task-list-open`](configuration.md#the-terminal-ui--ui) — so a
+resumed session paints every task-list card the way you last left them, not the
+way the record found them.
 

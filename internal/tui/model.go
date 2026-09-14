@@ -646,6 +646,12 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// /clear opens a new session in the same workspace.
 	m.transcript.ws = newWorkspaceRoot(opts.Workspace)
 
+	// Seed the shared task-list fold from the same Options, for the same reason and with the same
+	// preservation: the card is added by a fold that reaches no Model, and /clear keeps the human's
+	// preference. The polarity turns back here — the transcript's zero value is the ordinary
+	// collapsed block, the Option's zero value the open card the config key defaults to.
+	m.transcript.taskListOpen = !opts.TaskListFolded
+
 	// Give the transcript its block-paint cache (paintcache.go). It is built ONCE, here, and lives
 	// behind a pointer for the same reason ws is set before the first fold: every by-value copy of
 	// the Model has to reach the same one (ADR 0011), and a cache rebuilt per copy would never hit.

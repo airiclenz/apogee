@@ -836,6 +836,19 @@ type Options struct {
 	// changes it and never on its own.
 	HideScrollbar bool
 
+	// TaskListFolded starts every task-list card in the transcript FOLDED to its counted header
+	// rather than open on its rows — what the `ui.task-list-open` config key selected, INVERTED at
+	// the composition root exactly as HideScrollbar is (cmd/apogee's wire_options.go is the one
+	// place the polarity flips): the config key is positive and defaults to true, while this field
+	// must have the zero value mean today's behaviour — the cards open — so a hand-built Options
+	// paints the card a human sees by default. It is one preference for EVERY task-list card, not a
+	// per-card memory: the fold FACT stays on each entry's own expanded state, which the paint keys
+	// on, and this is the value a new card is seeded from and a toggle on any card moves them all
+	// to ([Model.toggleTaskListFold]). That toggle writes the key back through [SettingsHost]
+	// silently (ADR 0035 addendum), so the choice outlives the session; a `/settings` edit or a
+	// hand-edited file moves it mid-session the same way (settingsApplyLocal).
+	TaskListFolded bool
+
 	// StallAfter is how long the ENGINE may go silent, mid-turn, before the status line reports the
 	// quiet — what the `ui.stall-after` config key selected, already parsed by the binary
 	// (internal/config's UISettings), so the renderer takes a duration and never a spelling of one.

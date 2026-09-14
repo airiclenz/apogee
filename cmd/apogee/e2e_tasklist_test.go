@@ -13,6 +13,8 @@ package main
 // session that wrote the list and once inside the session that restored it.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,6 +47,12 @@ const (
 	// the block rides along on standing content that already exists, so a run whose prompt is the
 	// embedded default would be asserting against wording the default is free to change.
 	taskListStandingPrompt = "system-prompt-text: |\n  You are apogee, a terminal coding agent.\n"
+	// The card's two headers, as the frame spells them: the count is the fixture's one done task of
+	// three, and the glyph is the fold — ▼ open on its rows, ▶ folded to the header alone.
+	taskListCardOpen   = "✦ Task List (1/3) ▼"
+	taskListCardFolded = "✦ Task List (1/3) ▶"
+	// taskListFoldedConfig is the config line that starts every task-list card folded.
+	taskListFoldedConfig = "ui:\n  task-list-open: false\n"
 )
 
 // TestE2ETaskListReachesTheWireAndSurvivesAResume drives one session that writes a three-task list,
@@ -143,4 +151,103 @@ func taskListRequestCarrying(t *testing.T, reqs []stubllm.Request, prompt string
 	}
 	t.Fatalf("no request of the resumed session ended on %q; it made %d requests", prompt, len(reqs))
 	return stubllm.Request{}
+}
+
+// TestE2ETaskListFoldFollowsTheConfigKey drives the card's fold from the FILE (item 4 of plan
+// "2026-09-14 - 00"): with `ui.task-list-open: false` in the home's config.yaml the card's first
+// paint is its counted header alone, `✦ Task List (1/3) ▶`, with no task row beneath it; with the
+// default it opens on its rows under a ▼. The row is asserted through the driven frame rather than
+// the renderer's own test because the key crosses three seams to get there — the config resolve,
+// the composition root's inversion onto tui.Options, and the transcript's seed — and only the
+// binary proves the rope.
+func TestE2ETaskListFoldFollowsTheConfigKey(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		config string
+		header string
+		rows   bool // whether the done row is painted under the header
+	}{
+		{name: "the default opens the card on its rows", config: "", header: taskListCardOpen, rows: true},
+		{name: "task-list-open: false folds it to its header", config: taskListFoldedConfig, header: taskListCardFolded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			stub := stubllm.New(t, loadScript(t, "tasklist"))
+			drv := tuitest.NewDriver(t, e2eSize)
+			sess := launchTUIConfigured(t, drv, stub, taskListStandingPrompt+tc.config)
+
+			submit(drv, taskListPrompt)
+			drv.WaitText(taskListWrapUp)
+			drv.WaitQuiet(settled)
+
+			frame := drv.Frame().String()
+			if !strings.Contains(frame, tc.header) {
+				t.Errorf("the frame carries no %q header:\n%s", tc.header, frame)
+			}
+			if got := strings.Contains(frame, taskListDoneRow); got != tc.rows {
+				t.Errorf("the frame paints the %q row: %v, want %v:\n%s", taskListDoneRow, got, tc.rows, frame)
+			}
+			if err := sess.Quit(); err != nil {
+				t.Fatalf("the run returned %v; want a clean quit", err)
+			}
+		})
+	}
+}
+
+// TestE2ETaskListFoldIsRememberedAcrossAResume is the write-back half of the same item: a click on
+// the open card folds it, and the fold is recorded in the home's config.yaml as
+// `task-list-open: false` with no note in the transcript — so the session resumed with `--continue`
+// paints the replayed card folded, per the file rather than per the record (block state is never
+// persisted). It is the one `ui:` key the program writes as well as reads (ADR 0035 addendum).
+func TestE2ETaskListFoldIsRememberedAcrossAResume(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "tasklist"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, taskListStandingPrompt)
+
+	submit(drv, taskListPrompt)
+	drv.WaitText(taskListWrapUp)
+	drv.WaitQuiet(settled)
+	x, y, ok := drv.Frame().Find(taskListCardOpen)
+	if !ok {
+		t.Fatalf("the frame carries no open %q header to click:\n%s", taskListCardOpen, drv.Frame())
+	}
+
+	click(drv, x, y)
+
+	drv.WaitText(taskListCardFolded)
+	drv.WaitGone(taskListDoneRow)
+	drv.WaitQuiet(settled)
+	// The only sentence the fold can ever say names its key (`task-list-open: not saved: …`), and
+	// a landed write says nothing at all.
+	if frame := drv.Frame().String(); strings.Contains(frame, "task-list-open") {
+		t.Errorf("the fold left a note on the transcript; a landed write is silent:\n%s", frame)
+	}
+	cfg, err := os.ReadFile(filepath.Join(sess.Home(), "config.yaml"))
+	if err != nil {
+		t.Fatalf("read the home's config.yaml: %v", err)
+	}
+	if !strings.Contains(string(cfg), "task-list-open: false") {
+		t.Errorf("config.yaml does not carry `task-list-open: false` after the fold:\n%s", cfg)
+	}
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the first run returned %v; want a clean quit", err)
+	}
+
+	next := sess.RelaunchWith("--continue")
+	next.WaitText("Send a message")
+	next.WaitText(taskListCardFolded)
+	next.WaitQuiet(settled)
+
+	if frame := next.Frame().String(); strings.Contains(frame, taskListDoneRow) {
+		t.Errorf("the resumed card paints its rows; the file says folded:\n%s", frame)
+	}
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the resumed run returned %v; want a clean quit", err)
+	}
 }

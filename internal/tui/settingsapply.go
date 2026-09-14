@@ -22,7 +22,7 @@ import (
 // that order and in one place, so a key committed on its row, a key returned to its default, and a
 // key found changed by a re-read (settingswatcher.go) all land identically.
 //
-// Three clusters share the file because they are three faces of one act:
+// Four clusters share the file because they are four faces of one act:
 //
 //   - the ARMED RESET, which is the only commit whose value is "remove the line" — backspace arms it
 //     and ⏎ answers, because deleting from a file a human maintains by hand is not a stray keypress;
@@ -32,7 +32,10 @@ import (
 //     the only thing that owns the schema (ADR 0037 decision 2);
 //   - the EDIT JOURNAL, this session's record of what it did to each key — what the row's ` *`
 //     marker, the value an edit starts from, and the value a re-opened sub-list opens on are all
-//     read off.
+//     read off;
+//   - the TASK-LIST FOLD, the one key a gesture on the transcript commits rather than the pane
+//     (toggleTaskListFold): the same write, the same journal entry and the same live apply as a
+//     row's ⏎, reached from a click on a card — and silent, because the card itself is the report.
 
 // settingsArmReset arms the selected row's reset-to-default — backspace on a row that HAS something to
 // reset. Arming is deliberately a state and not the act: removing a line from a file the human
@@ -281,6 +284,14 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// draft where the frame is built, so the very next render already answers the new value —
 		// and an edit made from the /settings pane happens with no draft on screen anyway.
 		m.opts.SkillSuggestions = value == settingTrue
+	case settingKeyTaskListOpen:
+		// The config key is positive and the option is inverted (the polarity flips in cmd/apogee),
+		// and the value lands on every task-list card at once: this is the same sweep a click on a
+		// card takes (toggleTaskListFold), which is what makes a `/settings` edit and a hand-edited
+		// file apply live — and a resumed session, whose cards were seeded from the file, paint
+		// per the file. The frame is laid out again because the cards' height just moved.
+		m.setTaskListFolded(value != settingTrue)
+		m.layout()
 	case settingKeyStallAfter:
 		after, err := parseStallAfter(value)
 		if err != nil {
@@ -405,8 +416,63 @@ const (
 	settingKeyColorScheme      = "ui.color-scheme"
 	settingKeyStallAfter       = "ui.stall-after"
 	settingKeySkillSuggestions = "ui.skill-suggestions"
+	settingKeyTaskListOpen     = "ui.task-list-open"
 	settingKeyCursorShape      = "cursor-shape"
 )
+
+// taskListOpenSource is the label the fold gesture's one failure notice carries — the key's own
+// name, colorSchemeSource's posture, so a transcript line reads `task-list-open: not saved: …`.
+const taskListOpenSource = "task-list-open"
+
+// taskListNotSavedNote opens that notice: the fold happened on screen and the file did not take
+// it, which is the one thing a silent write has to say out loud (the ratified call of plan
+// "2026-09-14 - 00", item 4 — a landed write says nothing, because the card itself is the report).
+const taskListNotSavedNote = "not saved: "
+
+// setTaskListFolded moves the shared task-list fold on BOTH halves the Model keeps: the Option that
+// records the preference (Options.TaskListFolded) and the transcript's seed-and-sweep
+// ([transcript.setTaskListOpen]), which puts every task-list card on screen into the new state and
+// seeds every card added after it. It is the one writer of either, so the two cannot drift: a
+// toggle on a card and an apply of `ui.task-list-open` both come through here, and neither touches
+// a card by hand. It is a pointer method because both its callers hold the Model they are already
+// returning.
+func (m *Model) setTaskListFolded(folded bool) {
+	m.opts.TaskListFolded = folded
+	m.transcript.setTaskListOpen(!folded)
+}
+
+// toggleTaskListFold is what a click on a task-list card, or ⏎ at the block cursor on one, means
+// (toggleBlockAt): the shared fold flips on every card, and the flip is PERSISTED through
+// [SettingsHost.Write] as `ui.task-list-open` — the pane's own write, the pane's own journal entry
+// (recordSettingEdit, so the `/settings` row shows the toggled value with its ` *` marker), and
+// no note on success: the cards folding or opening under the pointer is the whole report, and a
+// `saved` line under every fold would be noise the reader learns to skip (ADR 0035 addendum).
+// Only a write that FAILED speaks, as one transcript error naming the key, and the flipped state
+// stands: the screen shows what the human asked for, and the file simply did not keep it.
+//
+// A nil seam flips and writes nothing — the Driver degrade (ADR 0031): a composition without a
+// settings host still has a fold, it just has nowhere to remember it. The binary's own seam
+// refreshes the config watcher's baseline on every landed write (ADR 0041 decision 8), which is
+// what keeps this write from coming back a second later as somebody else's edit.
+//
+// The write is synchronous, on the keypress, the [SettingsHost.Write] contract — and it returns
+// the Model alone, because nothing here schedules anything: the caller repaints, anchored, as it
+// does for every other flip.
+func (m Model) toggleTaskListFold() Model {
+	m.setTaskListFolded(!m.opts.TaskListFolded)
+	if m.opts.Settings == nil {
+		return m
+	}
+	value := settingTrue
+	if m.opts.TaskListFolded {
+		value = settingFalse
+	}
+	if err := m.opts.Settings.Write(settingKeyTaskListOpen, value); err != nil {
+		m.transcript.addError(taskListOpenSource, taskListNotSavedNote+err.Error(), runRef{})
+		return m
+	}
+	return m.recordSettingEdit(settingEdit{path: settingKeyTaskListOpen, value: value})
+}
 
 // settingsApplyFailedNote opens the row's failure when the WRITE landed and the apply did not: the
 // file has the new value and the session does not, which is a different sentence from a refused

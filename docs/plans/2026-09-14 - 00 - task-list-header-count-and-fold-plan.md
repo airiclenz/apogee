@@ -122,7 +122,13 @@ NOTES (2026-09-14): `cmd/apogee` `TestSettingsRowsFormatEffectiveValues` now fai
 
 **Commit:** `feat(config): ui.task-list-open records whether task-list cards start open`
 
-## 4. One shared fold state, written back on toggle
+## 4. One shared fold state, written back on toggle — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): the seed lives on the transcript as `taskListOpen` (zero = folded, the ordinary block default a hand-built test transcript gets), mirrored from `Options.TaskListFolded` at `newModel` and moved only through `Model.setTaskListFolded` → `transcript.setTaskListOpen` (the one sweep) — `addToolCall` and `replay` are reached through `apply`/`decodeTranscript` with no Model in sight, the same reason `transcript.ws` is a mirror; the option itself is `TaskListFolded` with the zero value open, as the item pins.
+NOTES (2026-09-14): `internal/tui/blockcursor.go`, `toolblock.go`, `subagentblock.go`, `render.go` and `paintcache.go` are on the item's Files list but needed no edit — ⏎ reaches the shared toggle through `toggleBlockAt`, and the paint cache already keys on each entry's `expanded` via `spanFlags`, so the sweep moves every card's key by itself.
+NOTES (2026-09-14): `modelWithTaskListBlock` (blocktarget_test.go) now takes the `Options` the model is built from, and its existing click/⏎ subtest asserts the card starts OPEN — the default preference this item seeds — where it asserted the collapsed default item 2 left; `addTaskListCard`, `taskListEntries`, `headerLineOf` and `taskListHeaders` are the helpers the new shared-fold tests read the model and its painted frame with.
+NOTES (2026-09-14): the errored / row-less task-list card carries the `collapsesToHeader` mark too, so where it is a toggle target (more lines than the targetless cap) its click flips the SHARED fold and writes the key, per the item's "a toggle on such an entry" — its own paint stays the ordinary targetless shape item 2 ratified.
+NOTES (2026-09-14): consequential edit — docs/manual/sessions.md: made necessary by the resume seeding ("A resumed session opens … with everything folded shut" now has the task-list card as its one exception).
 
 **What:** Recast at the regression check (2026-09-14). Depends on items 2 and 3. The task-list cards' fold is one shared preference, `m.opts.TaskListFolded`, whose FACT stays on each entry's `expanded` (the paint cache keys on it via `spanFlags`; painters read `paintInput.expanded`, never `m.opts`):
 - `tui.Options` gains `TaskListFolded bool` (zero value = open = today's behaviour); `cmd/apogee/wire_options.go` sets it from `!opts.UI.TaskListOpen`, inverted exactly as `HideScrollbar` is.

@@ -7,6 +7,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -829,18 +830,18 @@ func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 	}
 
 	t.Run("a click on the header and ⏎ at the block cursor both flip it", func(t *testing.T) {
-		m := modelWithTaskListBlock(t)
+		m := modelWithTaskListBlock(t, testOpts)
 		header := markedLine(t, m, targetHeader)
+		if !blockExpanded(t, m, header) {
+			t.Fatal("setup: the block is folded before any gesture; a card built from the default Options starts open (item 4)")
+		}
+		m = clickCell(t, m, 2, screenRow(t, m, header))
 		if blockExpanded(t, m, header) {
-			t.Fatal("setup: the block is expanded before any gesture; collapsed is the default")
+			t.Fatal("a click on the header did not fold the task list")
 		}
 		m = clickCell(t, m, 2, screenRow(t, m, header))
 		if !blockExpanded(t, m, header) {
-			t.Fatal("a click on the header did not open the task list")
-		}
-		m = clickCell(t, m, 2, screenRow(t, m, header))
-		if blockExpanded(t, m, header) {
-			t.Fatal("a second click on the header did not fold the task list")
+			t.Fatal("a second click on the header did not open the task list")
 		}
 
 		m = step(t, m, keyAltUp())
@@ -848,27 +849,254 @@ func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 			t.Fatalf("the block cursor entered on %q, not the task list's header", strip(m.lines[m.blockCursorRow()]))
 		}
 		m = step(t, m, keyEnter())
-		if !blockExpanded(t, m, header) {
-			t.Fatal("⏎ at the block cursor did not open the task list")
+		if blockExpanded(t, m, header) {
+			t.Fatal("⏎ at the block cursor did not fold the task list")
 		}
 		m = step(t, m, keyEnter())
-		if blockExpanded(t, m, header) {
-			t.Fatal("a second ⏎ did not fold the task list")
+		if !blockExpanded(t, m, header) {
+			t.Fatal("a second ⏎ did not open the task list")
 		}
 	})
 }
 
-// modelWithTaskListBlock is a ready idle model whose transcript holds the three-task fixture's
-// card, laid out so the click and cursor gestures above land on painted rows.
-func modelWithTaskListBlock(t *testing.T) Model {
+// modelWithTaskListBlock is a ready idle model built from opts whose transcript holds the three-task
+// fixture's card, laid out so the click and cursor gestures above land on painted rows.
+func modelWithTaskListBlock(t *testing.T, opts Options) Model {
 	t.Helper()
-	m := newTestModel(t) // 80x24
+	m := newTestModelEng(t, &fakeEngine{}, opts) // 80x24
 	m.transcript.reset()
 	m.transcript.addUser("plan the work", nil)
-	m.transcript.apply(domain.ToolCallEvent{Call: taskListCall})
-	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: taskListRendered}})
+	addTaskListCard(&m, "1")
 	m.refreshViewport()
 	return m
+}
+
+// addTaskListCard folds one answered task_list call — the three-task fixture under the given call
+// id — into m's transcript through the same event path the engine drives (foldEvent), so the card
+// is seeded exactly as a live one is.
+func addTaskListCard(m *Model, id string) {
+	call := taskListCall
+	call.ID = id
+	*m = m.foldEvent(domain.ToolCallEvent{Call: call})
+	*m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: taskListRendered}})
+}
+
+// taskListEntries is the index of every task-list card in m's transcript, in order.
+func taskListEntries(m Model) []int {
+	var at []int
+	for i := range m.transcript.entries {
+		if m.transcript.entries[i].tool.collapsesToHeader {
+			at = append(at, i)
+		}
+	}
+	return at
+}
+
+// headerLineOf is the painted line the card at entry hangs its header on — the first line the
+// painter marked as that entry's toggle target.
+func headerLineOf(t *testing.T, m Model, entry int) int {
+	t.Helper()
+	for i, target := range m.lineTargets {
+		if target.kind == targetHeader && target.entry == entry {
+			return i
+		}
+	}
+	t.Fatalf("no rendered line is marked as entry %d's header", entry)
+	return -1
+}
+
+// taskListHeaders is every `✦ Task List` header on the frame m last painted, glyph included, so a
+// test can say which state EVERY card is painted in from the frame alone — the cached paint path
+// (paintcache.go), which is what a click has to move.
+func taskListHeaders(m Model) []string {
+	var headers []string
+	for _, ln := range m.lines {
+		if plain := strings.TrimSpace(strip(ln)); strings.HasPrefix(plain, "✦ Task List") {
+			headers = append(headers, plain)
+		}
+	}
+	return headers
+}
+
+// TestTaskListCardsShareOneFold pins the shared fold (item 4 of plan "2026-09-14 - 00"): every
+// task-list card in the transcript is one preference, seeded from Options.TaskListFolded and
+// flipped on EVERY card by a gesture on any one of them — a click on the second folds both, ⏎ at
+// the block cursor on the first opens both — and the flip lands on the very next frame through the
+// cached paint path, because the fact lives on each entry's expanded flag and the paint keys on it.
+// The flip is written back through the settings seam as `ui.task-list-open`, once per toggle and
+// with NO note in the transcript on success; a card added after the flip is seeded from the flipped
+// preference; and a nil seam flips with no write at all.
+func TestTaskListCardsShareOneFold(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a gesture on any card flips them all and writes the key back", func(t *testing.T) {
+		log := &settingsWriteLog{}
+		opts := testOpts
+		opts.Settings = fakeSettingsHost{write: log.write}
+		m := modelWithTaskListBlock(t, opts)
+		addTaskListCard(&m, "2")
+		m.refreshViewport()
+		cards := taskListEntries(m)
+		if len(cards) != 2 {
+			t.Fatalf("setup: %d task-list cards, want 2", len(cards))
+		}
+		for _, at := range cards {
+			if !m.transcript.entries[at].expanded {
+				t.Fatalf("setup: the card at entry %d starts folded; the default preference seeds it open", at)
+			}
+		}
+		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphExpanded, "✦ Task List (1/3) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("setup: headers = %q, want both open %q", got, want)
+		}
+		entries := len(m.transcript.entries)
+
+		second := headerLineOf(t, m, cards[1])
+		m = clickCell(t, m, 2, screenRow(t, m, second))
+
+		for _, at := range cards {
+			if m.transcript.entries[at].expanded {
+				t.Errorf("after the click on the second card, the card at entry %d is still open; the fold is shared", at)
+			}
+		}
+		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphCollapsed, "✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+			t.Errorf("the next frame paints headers %q, want both folded %q — the cached paint did not move", got, want)
+		}
+		if !m.opts.TaskListFolded {
+			t.Error("opts.TaskListFolded is still false after the fold")
+		}
+		if want := []settingEdit{{path: "ui.task-list-open", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
+			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
+		}
+		if got := len(m.transcript.entries); got != entries {
+			t.Errorf("the transcript grew from %d to %d entries on a landed write; a fold says nothing on success", entries, got)
+		}
+
+		m = step(t, m, keyAltUp())
+		for !strings.Contains(strip(m.lines[m.blockCursorRow()]), "✦ Task List") ||
+			m.lineTargets[m.cursor.line].entry != cards[0] {
+			if m.cursor.line == 0 {
+				t.Fatal("the block cursor never reached the first task-list card")
+			}
+			m = step(t, m, keyAltUp())
+		}
+		m = step(t, m, keyEnter())
+
+		for _, at := range cards {
+			if !m.transcript.entries[at].expanded {
+				t.Errorf("after ⏎ on the first card, the card at entry %d is still folded; the fold is shared", at)
+			}
+		}
+		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphExpanded, "✦ Task List (1/3) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
+			t.Errorf("the next frame paints headers %q, want both open %q", got, want)
+		}
+		if want := []settingEdit{{path: "ui.task-list-open", value: "false"}, {path: "ui.task-list-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
+			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
+		}
+		if got := len(m.transcript.entries); got != entries {
+			t.Errorf("the transcript grew from %d to %d entries across two landed writes; want no note", entries, got)
+		}
+		// The `/settings` row mirrors the gesture through the journal the pane reads: Rows() answers
+		// the launch snapshot, so without the entry the row would go on saying `true`.
+		row := SettingRow{Path: "ui.task-list-open", Section: "Interface", Kind: SettingBool, Value: "true", Default: "true", Editable: true}
+		if got, want := m.settingsValueCell(row), "true"+settingsEditMarker; got != want {
+			t.Errorf("the /settings value cell = %q, want %q — the toggle is journaled like a pane edit", got, want)
+		}
+	})
+
+	t.Run("a card added after the flip is seeded from the preference", func(t *testing.T) {
+		m := modelWithTaskListBlock(t, testOpts)
+		header := markedLine(t, m, targetHeader)
+		m = clickCell(t, m, 2, screenRow(t, m, header)) // folds
+
+		addTaskListCard(&m, "2")
+		m.refreshViewport()
+
+		cards := taskListEntries(m)
+		if len(cards) != 2 || m.transcript.entries[cards[1]].expanded {
+			t.Fatalf("a card added under the folded preference starts open (cards %v); it is seeded from TaskListFolded", cards)
+		}
+		m = clickCell(t, m, 2, screenRow(t, m, headerLineOf(t, m, cards[1]))) // opens both
+		addTaskListCard(&m, "3")
+		m.refreshViewport()
+		cards = taskListEntries(m)
+		if len(cards) != 3 || !m.transcript.entries[cards[2]].expanded {
+			t.Fatalf("a card added under the open preference starts folded (cards %v)", cards)
+		}
+	})
+
+	t.Run("a folded launch seeds every card folded, and a resumed record too", func(t *testing.T) {
+		opts := testOpts
+		opts.TaskListFolded = true
+		m := modelWithTaskListBlock(t, opts)
+		cards := taskListEntries(m)
+		if len(cards) != 1 || m.transcript.entries[cards[0]].expanded {
+			t.Fatalf("under ui.task-list-open: false the live card starts open (cards %v)", cards)
+		}
+		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+			t.Errorf("first paint headers = %q, want %q", got, want)
+		}
+
+		// The resume path: a record's cards carry no fold, and are seeded from the file's preference
+		// as they are replayed.
+		blob, err := encodeTranscript(&m.transcript)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		folded := newTestModelEng(t, &fakeEngine{}, opts)
+		folded.replayScrollback(blob, "resumed", false)
+		open := newTestModelEng(t, &fakeEngine{}, testOpts)
+		open.replayScrollback(blob, "resumed", false)
+		if at := taskListEntries(folded); len(at) != 1 || folded.transcript.entries[at[0]].expanded {
+			t.Errorf("a record replayed under the folded preference paints its card open (cards %v)", at)
+		}
+		if at := taskListEntries(open); len(at) != 1 || !open.transcript.entries[at[0]].expanded {
+			t.Errorf("a record replayed under the open preference paints its card folded (cards %v)", at)
+		}
+	})
+
+	t.Run("a nil settings host flips and writes nothing", func(t *testing.T) {
+		m := modelWithTaskListBlock(t, testOpts) // testOpts wires no SettingsHost
+		entries := len(m.transcript.entries)
+		header := markedLine(t, m, targetHeader)
+
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+
+		if blockExpanded(t, m, header) || !m.opts.TaskListFolded {
+			t.Error("the fold did not flip under a nil seam; the Driver degrade is flip-and-forget")
+		}
+		if got := len(m.transcript.entries); got != entries {
+			t.Errorf("the transcript grew from %d to %d entries under a nil seam; want no note", entries, got)
+		}
+		if len(m.settingEdits) != 0 {
+			t.Errorf("edits = %+v, want none journaled: nothing was written", m.settingEdits)
+		}
+	})
+
+	t.Run("a failed write warns once and the flip stands", func(t *testing.T) {
+		log := &settingsWriteLog{err: errors.New("config.yaml: permission denied")}
+		opts := testOpts
+		opts.Settings = fakeSettingsHost{write: log.write}
+		m := modelWithTaskListBlock(t, opts)
+		header := markedLine(t, m, targetHeader)
+
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+
+		if blockExpanded(t, m, header) || !m.opts.TaskListFolded {
+			t.Error("the refused write unwound the fold; the session keeps the flipped state")
+		}
+		var warnings []string
+		for _, e := range m.transcript.entries {
+			if e.kind == entryError {
+				warnings = append(warnings, e.text)
+			}
+		}
+		if want := []string{"task-list-open: not saved: config.yaml: permission denied"}; !reflect.DeepEqual(warnings, want) {
+			t.Errorf("transcript warnings = %q, want exactly %q", warnings, want)
+		}
+		if len(m.settingEdits) != 0 {
+			t.Errorf("edits = %+v, want none journaled: the file is unchanged", m.settingEdits)
+		}
+	})
 }
 
 // TestRowlessTaskListCardKeepsTheOrdinaryShape is the header fold's regression guard (the ratified

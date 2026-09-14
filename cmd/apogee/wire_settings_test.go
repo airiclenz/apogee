@@ -692,7 +692,37 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.stall-after",
 	"ui.color-scheme",
 	"ui.skill-suggestions",
+	"ui.task-list-open",
 	"cursor-shape",
+}
+
+// The `ui.task-list-open` key reaches the renderer INVERTED, exactly as `ui.show-scrollbar` does:
+// the config key is positive and defaults to true, while tui.Options.TaskListFolded must have the
+// zero value mean the open card — so runRoot is the one place the polarity flips, and both values
+// are walked so a wiring that dropped the inversion (or the key) fails on one of them.
+func TestRunRootThreadsTheTaskListFoldInverted(t *testing.T) {
+	t.Parallel()
+	for _, open := range []bool{true, false} {
+		t.Run(fmt.Sprintf("task-list-open=%v", open), func(t *testing.T) {
+			t.Parallel()
+			rec := &recordingLauncher{}
+			opts := config.Options{
+				Endpoint:  "http://127.0.0.1:1111",
+				Model:     "fake",
+				Mode:      "ask-before",
+				Workspace: t.TempDir(),
+				UI: config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
+					ColorScheme: "dark", TaskListOpen: open},
+			}
+			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+				t.Fatalf("runRoot: %v", err)
+			}
+			if rec.opts.TaskListFolded != !open {
+				t.Errorf("tui.Options.TaskListFolded = %v; want %v, the resolved ui.task-list-open=%v inverted",
+					rec.opts.TaskListFolded, !open, open)
+			}
+		})
+	}
 }
 
 // The settings table is kept in config.KeyRegistry order — the order the pane renders the rows in —

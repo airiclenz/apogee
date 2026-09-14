@@ -62,7 +62,8 @@ func fabricatedSettings() config.Options {
 		ResponseReserve:       0.35,
 		Present:               config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
 		UI: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
-			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false},
+			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
+			TaskListOpen: false},
 		Bypass: true,
 		ModelProfiles: []profiles.Entry{
 			{Pattern: "minimax-m3", Profile: apogee.ModelProfile{
@@ -420,6 +421,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.stall-after":          "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
 		"ui.inspector":            "true",  // armed for THIS run, which is the only thing a startup-only key can report
 		"ui.skill-suggestions":    "false", // turned off in the fixture: a bool row reports the value, never the default
+		"ui.task-list-open":       "false", // folded in the fixture, for the same reason: the row reports the value
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
 		"sessions.max-age":   "0s",

@@ -1652,6 +1652,17 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "ui.task-list-open",
+			row:  settingsTaskListOpenRow(),
+			check: func(t *testing.T, m Model) {
+				t.Helper()
+				// The config key is positive and the option inverted, as the scroll bar's is.
+				if !m.opts.TaskListFolded {
+					t.Error("opts.TaskListFolded is still false; the cards would go on opening")
+				}
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1673,6 +1684,77 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 			}
 			tt.check(t, m)
 		})
+	}
+}
+
+// settingsTaskListOpenRow is the `ui.task-list-open` row as the registry describes it: a bool at its
+// `true` default, which the renderer applies to every task-list card itself.
+func settingsTaskListOpenRow() SettingRow {
+	return SettingRow{
+		Path: "ui.task-list-open", Section: "Interface", Kind: SettingBool, Value: "true",
+		Default: "true", Editable: true, Desc: "Start with the task-list cards in the transcript open.",
+	}
+}
+
+// TestSettingsTaskListOpenAppliesToEveryCard is the pane's half of the shared fold (item 4 of plan
+// "2026-09-14 - 00"): an edit of `ui.task-list-open` lands on EVERY task-list card in the transcript
+// on the same keypress — `false` folds them all, `true` opens them all — because the apply runs the
+// same sweep a click on a card takes, and the very next frame paints them so through the cached
+// paint path. The row shows the toggled value with the pane's own ` *` marker, as any edit does.
+func TestSettingsTaskListOpenAppliesToEveryCard(t *testing.T) {
+	rows := []SettingRow{settingsTaskListOpenRow()}
+	log := &settingsWriteLog{}
+	opts := testOpts
+	opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return rows }, write: log.write, apply: log.apply}
+	m := modelWithTaskListBlock(t, opts)
+	addTaskListCard(&m, "2")
+	m.refreshViewport()
+	cards := taskListEntries(m)
+	if len(cards) != 2 || !m.transcript.entries[cards[0]].expanded || !m.transcript.entries[cards[1]].expanded {
+		t.Fatalf("setup: want two open cards, got %v", cards)
+	}
+	m = openSettingsPane(t, m)
+
+	m = step(t, m, keyEnter()) // toggles `ui.task-list-open` to false, persists and applies it
+
+	if want := []settingEdit{{path: "ui.task-list-open", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if len(log.applies) != 0 {
+		t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
+	}
+	if !m.opts.TaskListFolded {
+		t.Error("opts.TaskListFolded is still false after the edit")
+	}
+	for _, at := range cards {
+		if m.transcript.entries[at].expanded {
+			t.Errorf("the card at entry %d is still open after `false`; the apply sweeps every card", at)
+		}
+	}
+	if got, want := m.settingsValueCell(rows[0]), "false"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q", got, want)
+	}
+	closed := step(t, m, keyEsc())
+	if got, want := taskListHeaders(closed), []string{"✦ Task List (1/3) " + glyphCollapsed, "✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the next frame paints headers %q, want both folded %q", got, want)
+	}
+
+	m = step(t, m, keyEnter()) // and back to true
+
+	if m.opts.TaskListFolded {
+		t.Error("opts.TaskListFolded is still true after the edit back")
+	}
+	for _, at := range cards {
+		if !m.transcript.entries[at].expanded {
+			t.Errorf("the card at entry %d is still folded after `true`; the apply sweeps every card", at)
+		}
+	}
+	if got, want := m.settingsValueCell(rows[0]), "true"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q", got, want)
+	}
+	closed = step(t, m, keyEsc())
+	if got, want := taskListHeaders(closed), []string{"✦ Task List (1/3) " + glyphExpanded, "✦ Task List (1/3) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the next frame paints headers %q, want both open %q", got, want)
 	}
 }
 

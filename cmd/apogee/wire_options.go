@@ -119,12 +119,14 @@ func (w *rootWiring) options() tui.Options {
 		// engine may go silent before the status line reports the quiet. Independent values, resolved
 		// and validated by ApplyConfig, so the renderer selects rather than parses — the threshold
 		// arrives as the duration it means, not as the text it was written as.
-		// The scroll bar is the one key whose polarity flips here — the config says show, the
-		// renderer's option says hide, so its zero value is the shown default (see tui.Options).
-		Spinner:       w.opts.UI.Spinner,
-		SpinnerColor:  w.opts.UI.SpinnerColor,
-		HideScrollbar: !w.opts.UI.ShowScrollbar,
-		StallAfter:    w.opts.UI.StallAfter,
+		// The scroll bar and the task-list fold are the two keys whose polarity flips here — the
+		// config says show / open, the renderer's option says hide / folded, so each zero value is
+		// the default the key carries (see tui.Options).
+		Spinner:        w.opts.UI.Spinner,
+		SpinnerColor:   w.opts.UI.SpinnerColor,
+		HideScrollbar:  !w.opts.UI.ShowScrollbar,
+		TaskListFolded: !w.opts.UI.TaskListOpen,
+		StallAfter:     w.opts.UI.StallAfter,
 		// And `ui.inspector`, which the ENGINE acts on (domain.Config.Inspector arms the capture) and
 		// the renderer only words its empty pane with: /inspect names the key when nothing was
 		// captured and it is off.
