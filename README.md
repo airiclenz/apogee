@@ -249,7 +249,7 @@ The [manual](docs/manual/README.md) carries the full reference:
 | [Commands](docs/manual/commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, `/settings` |
 | [Sessions](docs/manual/sessions.md) | Saving, resuming, browsing, renaming conversations |
 | [Configuration](docs/manual/configuration.md) | `config.yaml` end to end: servers, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
-| [Reactions](docs/manual/reactions.md) | Commands and webhooks fired on what a session did: the notices, the payload, exec posture, webhooks |
+| [Reactions](docs/manual/reactions.md) | Commands and webhooks fired on what a session did (`run:`), plus commands that advise the model on a tool result (`advise:`) or gate a tool call (`gate:`): the Moments, the payloads, exec posture, webhooks, migrating from `hooks:` |
 | [`apogee probe`](docs/manual/probe.md) | Diagnosing what a host, model, and terminal can do |
 | [`apogee headless`](docs/manual/headless.md) | One unattended prompt, for scripts |
 | [`apogee daemon`](docs/manual/daemon.md) | Standing schedules that outlive the session |

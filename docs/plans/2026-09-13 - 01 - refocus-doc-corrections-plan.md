@@ -68,7 +68,7 @@ NOTES (2026-09-14): retry — the prior attempt's ADR and greenfield rewrites we
 **Acceptance:** `grep -q "becomes the only caller of \`Runner.Replace\`" "docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md" && ! grep -q "\`Runner.Replace\` together" "docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md"`
 **Commit:** `docs(adr): 0076 A8 — SetReactions is Runner.Replace's only caller, not its retirement`
 
-## 4. Manual index rows describe all three `reactions:` entry kinds
+## 4. Manual index rows describe all three `reactions:` entry kinds — ✅ DONE (2026-09-14)
 
 **What:** Replace the two Reactions index rows with the PROPOSED strings from `corrections.md` items 6 and 7 verbatim: `README.md:252` (repo front door) and `docs/manual/README.md:12` (manual index) both name `run:`, `advise:` and `gate:`, the Moments (the manual row says "sixteen Moments", not "eleven notices" — `internal/domain/reaction.go:68-88`), and migrating from `hooks:`. Keep each row a single table line.
 **Regression guard.** Drop the `go test -count=1 -run 'TestE2ENewcomer' ./cmd/apogee/` clause from Acceptance — no Go test reads either index row; the grep clauses are the whole check.
