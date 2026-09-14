@@ -326,6 +326,87 @@ func announcedScratchDir(t *testing.T, stub *stubllm.Server) string {
 	return ""
 }
 
+// announcedScratchWritePrompt is what the scratch-write fixture's model is asked, and the phrase
+// announced-scratch-write.yaml keys its one capturing turn on.
+const announcedScratchWritePrompt = "Create the probe file in the scratch dir."
+
+// announcedScratchWriteMarker is the line the native write leaves in the probe file: what a read
+// of the announced dir has to come back with, so a receipt that reported success against a path
+// the write never reached would leave nothing behind to find.
+const announcedScratchWriteMarker = "APOGEE-ANNOUNCED-SCRATCH-7e15"
+
+// announcedScratchWritePath lifts the scratch dir back out of the write_file call the model sent:
+// the `path` argument minus the probe file the fixture appended.
+var announcedScratchWritePath = regexp.MustCompile(`"path":"([^"]+)/probe\.txt"`)
+
+// TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters is the invariant over the orientation
+// block for apogee's OWN write tools: the dir apogee names on its `Scratch dir:` line is writable
+// by write_file, in Allow-Edits, with nobody asked.
+//
+// It is the native-writer twin of TestE2EAnnouncedScratchDirRunsUnpromptedInAuto. That test proves
+// the terminal route past the dangerous-action guard; this one proves the blast-radius ladder,
+// which classified a write_file into the session's scratch dir as an out-of-workspace escape and
+// gated it — in Allow-Edits a pane on every scratch file the model created, in an unattended Auto
+// run a denial — while the orientation on the same request called the dir writable. Allow-Edits is
+// the mode under test because it is the one whose contract runs an in-fence native write
+// unprompted and gates everything else (ADR 0012 D5), so a pane here can only be the fence
+// misclassifying the announced path.
+func TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "announced-scratch-write"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIIn(t, drv, stub, "", announcedStandingPrompt, "--mode", "allow-edits")
+	panes := watchApprovalPanes(t, drv)
+
+	submit(drv, announcedScratchWritePrompt)
+	drv.WaitText("The scratch probe is written.")
+	drv.WaitQuiet(settled)
+
+	// The path is read back off the call the model SENT — the script captured it out of that
+	// request's own system prompt — so what is checked below is what apogee ANNOUNCED.
+	var scratch string
+	for _, call := range toolCalls(stub) {
+		if match := announcedScratchWritePath.FindStringSubmatch(call.Arguments); match != nil {
+			scratch = match[1]
+		}
+	}
+	if scratch == "" {
+		t.Fatal("no write_file call named the announced scratch dir; the capture went unmatched")
+	}
+
+	results := toolResults(stub)
+	if len(results) != 1 {
+		t.Fatalf("the run produced %d tool results; want the fixture's one:\n%s",
+			len(results), strings.Join(results, "\n---\n"))
+	}
+	if strings.Contains(results[0], "denied by approver") || strings.Contains(results[0], "outside the workspace root") {
+		t.Errorf("the write into the announced scratch dir was refused:\n%s", results[0])
+	}
+	if !strings.Contains(results[0], "wrote ") {
+		t.Errorf("the write did not come back as a success receipt:\n%s", results[0])
+	}
+
+	// And the bytes reached the announced dir itself.
+	probe := filepath.Join(scratch, "probe.txt")
+	body, err := os.ReadFile(probe)
+	if err != nil {
+		t.Errorf("the scratch write did not reach %s: %v", probe, err)
+	} else if !strings.Contains(string(body), announcedScratchWriteMarker) {
+		t.Errorf("%s holds %q; want the written content", probe, string(body))
+	}
+
+	if n := panes(); n != 0 {
+		t.Errorf("the run raised %d approval pane(s); a path apogee itself named must cost nobody a look", n)
+	}
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+	stub.AssertConsumed(t)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
 // announcedWorkspacePrompt is what the workspace fixture's model is asked, and the phrase
 // announced-workspace.yaml keys its first tool turn on.
 const announcedWorkspacePrompt = "Use every workspace tool on the project tree."

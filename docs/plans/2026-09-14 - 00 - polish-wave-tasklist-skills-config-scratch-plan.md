@@ -106,7 +106,11 @@ NOTES (2026-09-14): a negative case (`TestTemplateMentionsEveryRegistryKeyReject
 
 **Commit.** `test(config): the embedded template is gated against the settings registry; retired wording swept`
 
-## 6. Scratch fence: native writers into the session scratch dir are in-fence
+## 6. Scratch fence: native writers into the session scratch dir are in-fence — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): `internal/agent/resolution_test.go` (listed under Files) needed no change — the pure resolver's inputs and its `writeTargetInWorkspace` rows are untouched; the fix lives entirely in dispatch's fact-gathering, so the new proofs are dispatch-level and e2e.
+NOTES (2026-09-14): `internal/domain/config.go:89-95` left as is — its `ConfineWritablePaths` comment describes the subprocess box and never claimed the classifier reads the slice directly.
+NOTES (2026-09-14): `driveScratchToolCall` now delegates to a tool-agnostic `driveScratchCall` (same body, same two callers' behaviour) so the write_file drives share the construct → SetScratchDir → Step ordering rather than duplicating it.
 
 **What.** Defect (not a regression from one commit — the seam predates ADR 0056's scratch fold): `classifyWriteTarget` (`internal/agent/dispatch.go:1304`) checks `a.cfg.ConfineWritablePaths`, which no host populates, and never the live scratch dir — so `write_file`/`edit_file`/`copy_file` targets under the announced `Scratch dir: …` gate in Allow-Edits/Auto and are refused by a Firing's denier, while the orientation calls the dir "writable". Fix: classify against `a.confinementBox().WritablePaths` (the same live-scratch fold every per-call consumer already builds from, `dispatch.go:693-702`) instead of the raw config slice; the return shape is unchanged (`inFence=true, escapeTarget=abs` for a writable path outside the root, so the ADR 0049 permit is still stamped at `dispatch.go:802` and `path_safety` lands the write). Producers/consumers of the classification: `resolve()` ladder cells in `internal/agent/resolution.go:392-455` (read `inFence`), the permit stamp at `dispatch.go:802`, `resolvedPath` disclosure (`dispatch.go` twin), the Approver pane text — none change shape. Ask-Before keeps gating (its default arm gates every write regardless of fence); Plan keeps refusing (`planAdmits`). Terminal untouched. Update the scout-found comment on `ConfineWritablePaths` in `internal/domain/config.go:89-95` only if it claims the classifier reads it directly.
 

@@ -1309,7 +1309,12 @@ func (a *Agent) classifyWriteTarget(tool domain.Tool, call domain.ToolCall) (inF
 	if pathWithin(abs, a.cfg.WorkspaceDir) {
 		return true, ""
 	}
-	for _, writable := range a.cfg.ConfineWritablePaths {
+	// The union is read off the LIVE box — the same fold every per-call consumer builds from —
+	// rather than the raw ConfineWritablePaths slice, so the session's scratch dir (folded in by
+	// ConfinementBox and moved by SetScratchDir) is in-fence for the native writers exactly as the
+	// orientation's `Scratch dir: … — writable` line announces it. Reading the config slice alone
+	// left that dir gating in Allow-Edits/Auto and refused by a Firing's denier.
+	for _, writable := range a.confinementBox().WritablePaths {
 		if pathWithin(abs, writable) {
 			return true, abs
 		}

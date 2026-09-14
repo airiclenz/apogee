@@ -1,0 +1,40 @@
+# The upstream TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters talks to: a model that takes
+# apogee at its word about where it may write, and reaches for that place with apogee's OWN write
+# tool rather than a terminal command.
+#
+# The one tool turn carries a capture whose pattern lifts the path out of the orientation block's
+# own `- Scratch dir: %s — writable and outside the workspace; …` line
+# (internal/agent/prompts/orientation.txt), so the write_file below names the dir apogee ANNOUNCED
+# on that very request rather than one this fixture guessed. It is the native-writer twin of
+# announced-scratch.yaml: that fixture proves the terminal route through the dangerous-action
+# guard, this one proves the blast-radius ladder — a write_file into the session's scratch dir
+# classified as an out-of-workspace escape and gated in Allow-Edits/Auto, so a model doing exactly
+# what the orientation told it was stopped to ask permission (or refused outright by an unattended
+# run's denier) on every scratch file it created. A capture that went unmatched, or a path the
+# ladder gated, fails here rather than in a user's session.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced scratch write
+    # The prompt, and the one turn that reads the orientation.
+    - when:
+        last_message: probe file in the scratch dir
+      captures:
+        - {name: scratch, from: system, pattern: 'Scratch dir: (\S+) — writable'}
+      tool_calls:
+        - id: scratch-write
+          name: write_file
+          arguments: '{"path":"{{scratch}}/probe.txt","content":"APOGEE-ANNOUNCED-SCRATCH-7e15\n"}'
+    # The wrap-up, once the write has come back.
+    - when:
+        tool_result: write_file
+      text: The scratch probe is written.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

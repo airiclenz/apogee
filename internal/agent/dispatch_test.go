@@ -924,8 +924,15 @@ func TestDispatch_ScratchDirCommandIsConfinedNotForcedInAuto(t *testing.T) {
 // and steps in one breath.
 func driveScratchToolCall(t *testing.T, cfg domain.Config, scratch, command string) *Agent {
 	t.Helper()
+	return driveScratchCall(t, cfg, scratch, "terminal", `{"command":`+strconv.Quote(command)+`}`)
+}
+
+// driveScratchCall is the tool-agnostic body of driveScratchToolCall: one Turn issuing one call to
+// tool with args, with the scratch move landed between construction and the Step.
+func driveScratchCall(t *testing.T, cfg domain.Config, scratch, tool, args string) *Agent {
+	t.Helper()
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "terminal", `{"command":`+strconv.Quote(command)+`}`),
+		toolCallScript("c1", tool, args),
 		contentScript("done"),
 	}}
 	a, err := newAgent(cfg, responder)
@@ -940,6 +947,145 @@ func driveScratchToolCall(t *testing.T, cfg domain.Config, scratch, command stri
 		t.Fatalf("Step: %v", err)
 	}
 	return a
+}
+
+// ----------------------------------------------------------------------------
+// The session's own scratch dir is in-fence for the native writers
+// ----------------------------------------------------------------------------
+
+// scratchWriteProbe is the real write_file with its execution context inspected on the way
+// through: it records the write-escape permit dispatch handed the call and then lets the tool
+// land the write, so one drive answers both what the fence classified (the permit's Real) and
+// whether the bytes reached the announced dir.
+type scratchWriteProbe struct {
+	*tools.WriteFile
+	granted bool
+	target  string
+}
+
+func (p *scratchWriteProbe) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	permit, granted := domain.WriteEscapePermitFrom(ctx)
+	p.granted, p.target = granted, permit.Real
+	return p.WriteFile.Execute(ctx, call)
+}
+
+// scratchWriteConfig is autoConfigWS in the given mode with a denying Approver, so a write that
+// gated could never land: the ONLY way the file appears is a Run verdict.
+func scratchWriteConfig(sink *recordingSink, mode domain.Mode, ws string, probe domain.Tool) domain.Config {
+	cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws, probe)
+	cfg.Mode = mode
+	cfg.Approver = &fakeApprover{decision: domain.ApprovalDeny}
+	// Plan withdraws write_file from the menu; the repair guard is off so the call still reaches
+	// dispatch and the refusal proven below is the resolver's, not the guard's.
+	cfg.Floor.DisableToolCallRepair = true
+	return cfg
+}
+
+// TestDispatch_ScratchDirWriteIsInFence proves the orientation's `Scratch dir: … — writable` line
+// against the native writers: a write_file into the LIVE session scratch dir classifies in-fence,
+// so Allow-Edits and confined Auto run it unprompted with the ADR 0049 permit stamped at the
+// resolved target and the file landing; Ask-Before still gates every write and Plan still refuses
+// (ADR 0012); and a sibling session's scratch dir is nobody's fence.
+//
+// The scratch dir is handed to SetScratchDir in its UNRESOLVED spelling and the permit compared
+// against realPath(t, scratch), because the classification carries the EvalRealPath-resolved
+// target — the same shape as the "declared writable path" test in writeescape_test.go — so a temp
+// dir reached through a symlinked parent (macOS /var → /private/var) proves pathWithin's root
+// resolution rather than merely a literal prefix match.
+func TestDispatch_ScratchDirWriteIsInFence(t *testing.T) {
+	t.Parallel()
+
+	runs := []struct {
+		name string
+		mode domain.Mode
+	}{
+		{name: "allow-edits runs it unprompted", mode: domain.ModeAllowEdits},
+		{name: "confined auto runs it unprompted", mode: domain.ModeAuto},
+	}
+	for _, tc := range runs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ws, scratch := t.TempDir(), t.TempDir()
+			want := filepath.Join(realPath(t, scratch), "probe.txt")
+
+			probe, sink := &scratchWriteProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
+			cfg := scratchWriteConfig(sink, tc.mode, ws, probe)
+
+			driveScratchCall(t, cfg, scratch, "write_file", writeCall(filepath.Join(scratch, "probe.txt")))
+
+			if hasEvent[domain.ApprovalEvent](sink.events) {
+				t.Error("a write into the session's own scratch dir gated; the orientation calls that dir writable")
+			}
+			if !probe.granted || probe.target != want {
+				t.Errorf("permit (granted=%v, Real=%q), want a permit naming %q", probe.granted, probe.target, want)
+			}
+			if _, err := os.Stat(want); err != nil {
+				t.Errorf("the scratch write did not land at %s: %v", want, err)
+			}
+		})
+	}
+
+	t.Run("ask-before still gates it", func(t *testing.T) {
+		t.Parallel()
+		ws, scratch := t.TempDir(), t.TempDir()
+		target := filepath.Join(scratch, "probe.txt")
+
+		probe, sink := &scratchWriteProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
+		cfg := scratchWriteConfig(sink, domain.ModeAskBefore, ws, probe)
+
+		driveScratchCall(t, cfg, scratch, "write_file", writeCall(target))
+
+		if !hasEvent[domain.ApprovalEvent](sink.events) {
+			t.Error("Ask-Before ran a scratch write without asking; its default arm gates every write")
+		}
+		if _, err := os.Stat(target); err == nil {
+			t.Errorf("the denied scratch write landed at %s", target)
+		}
+	})
+
+	t.Run("plan still refuses it", func(t *testing.T) {
+		t.Parallel()
+		ws, scratch := t.TempDir(), t.TempDir()
+		target := filepath.Join(scratch, "probe.txt")
+
+		probe, sink := &scratchWriteProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
+		cfg := scratchWriteConfig(sink, domain.ModePlan, ws, probe)
+
+		driveScratchCall(t, cfg, scratch, "write_file", writeCall(target))
+
+		res, ok := lastToolResult(sink.events)
+		if !ok || !res.IsError || !strings.Contains(res.Content, planRefusalReason) {
+			t.Errorf("Plan result = %+v (ok=%v), want the plan refusal %q", res, ok, planRefusalReason)
+		}
+		if _, err := os.Stat(target); err == nil {
+			t.Errorf("the refused scratch write landed at %s", target)
+		}
+	})
+
+	t.Run("a sibling session's scratch dir stays out of the fence", func(t *testing.T) {
+		t.Parallel()
+		ws, home := t.TempDir(), t.TempDir()
+		scratch := filepath.Join(home, ".apogee", "scratch", "this-session")
+		sibling := filepath.Join(home, ".apogee", "scratch", "other-session")
+		for _, dir := range []string{scratch, sibling} {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		target := filepath.Join(sibling, "x")
+
+		probe, sink := &scratchWriteProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
+		cfg := scratchWriteConfig(sink, domain.ModeAllowEdits, ws, probe)
+
+		driveScratchCall(t, cfg, scratch, "write_file", writeCall(target))
+
+		if !hasEvent[domain.ApprovalEvent](sink.events) {
+			t.Error("a write into ANOTHER session's scratch dir ran unprompted; only this session's dir is in-fence")
+		}
+		if _, err := os.Stat(target); err == nil {
+			t.Errorf("the denied sibling-dir write landed at %s", target)
+		}
+	})
 }
 
 // unconfinableClaimTool returns ErrConfinementUnavailable from Execute although nothing asked
