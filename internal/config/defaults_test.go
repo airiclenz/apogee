@@ -291,3 +291,141 @@ func TestSeedDefaultConfigHonoursConfigEnv(t *testing.T) {
 		t.Errorf("created=%v path=%q; want a new file under the APOGEE_CONFIG home %q", created, path, home)
 	}
 }
+
+// templateOmitsSetting is the allowlist for the template↔registry gate, and it is deliberately
+// narrow: it is ONLY for a registry key the seeded template has a reason not to spell — even as a
+// commented example. Each entry carries a one-line reason, so the list stays auditable rather than
+// becoming a silencer; a key that is simply missing gets an example line in the template instead
+// of a row here.
+//
+// Empty today: every key in KeyRegistry is spelled in defaults/config.yaml.
+var templateOmitsSetting = map[string]string{}
+
+// TestTemplateMentionsEveryRegistryKey is the drift gate between the settings registry and the
+// seeded template — the counterpart of cmd/apogee's TestManualDocumentsEverySettingsKey, over the
+// file the user edits rather than the page they read. Every Path in KeyRegistry is spelled in
+// defaults/config.yaml as an active or commented key: a top-level key on its own column-0 line, a
+// nested key as its leaf indented under its parent's block (`skill-suggestions` under `ui:`). A
+// key added to the registry (which the bijection guard already ties to fileConfig) fails here
+// until the template gains it too.
+func TestTemplateMentionsEveryRegistryKey(t *testing.T) {
+	t.Parallel()
+
+	lines := SplitConfigLines(defaultConfigYAML)
+
+	if len(KeyRegistry) == 0 {
+		t.Fatal("KeyRegistry is empty; the scan has stopped working")
+	}
+
+	var missing []string
+	for _, key := range KeyRegistry {
+		mentioned := templateMentionsSetting(lines, key.Path)
+		if reason, allowed := templateOmitsSetting[key.Path]; allowed {
+			if reason == "" {
+				t.Errorf("the allowlist exempts %s with no reason; every entry must say why the template omits it", key.Path)
+			}
+			if mentioned {
+				t.Errorf("the allowlist exempts %s as %q, but the template spells it after all; drop the entry",
+					key.Path, reason)
+			}
+			continue
+		}
+		if !mentioned {
+			missing = append(missing, key.Path)
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("defaults/config.yaml spells no %s; the seeded template has fallen behind KeyRegistry. "+
+			"Add each key as an active or commented example under its own block, or — only with a reason — "+
+			"add it to templateOmitsSetting", strings.Join(missing, ", "))
+	}
+}
+
+// TestTemplateMentionsEveryRegistryKeyRejectsAnAbsentKey is the gate's negative case: the predicate
+// says no to a key the template has never spelled, and no to a leaf borrowed from another block
+// (`max-age` is spelled under `sessions:`, never under `ui:`). It feeds FABRICATED paths to the
+// real predicate over the real template rather than mutating the registry, so the gate itself is
+// proved without the gate's subject moving.
+func TestTemplateMentionsEveryRegistryKeyRejectsAnAbsentKey(t *testing.T) {
+	t.Parallel()
+
+	lines := SplitConfigLines(defaultConfigYAML)
+
+	for _, path := range []string{
+		"no-such-setting",
+		"no-such-block.no-such-key",
+		"ui.no-such-key",
+		"ui.max-age",
+	} {
+		if templateMentionsSetting(lines, path) {
+			t.Errorf("the predicate calls %q spelled; no such key is in defaults/config.yaml, so the gate cannot fail", path)
+		}
+		if _, allowed := templateOmitsSetting[path]; allowed {
+			t.Errorf("the allowlist carries the fabricated path %q", path)
+		}
+	}
+}
+
+// templateMentionsSetting is the gate's predicate. It walks the template once, tracking the
+// top-level block each line sits under — the most recent column-0 key line, active or commented —
+// and accepts a top-level path as that line itself, a nested path as its leaf spelled indented
+// under its own parent. Both spellings the template uses for a commented key count: `#   leaf:`
+// (the comment first, then the indentation the key would have) and `  # leaf:` (an example
+// commented out inside an active block, as `ui:` carries `skill-suggestions`).
+func templateMentionsSetting(lines []string, path string) bool {
+	parent, leaf, nested := strings.Cut(path, ".")
+	block := ""
+	for _, line := range lines {
+		indent, name, ok := templateKeyLine(line)
+		if !ok {
+			continue
+		}
+		if indent == 0 {
+			block = name
+			if !nested && name == path {
+				return true
+			}
+			continue
+		}
+		if nested && block == parent && name == leaf {
+			return true
+		}
+	}
+	return false
+}
+
+// templateKeyLine reads the key a template line spells, active or commented, with the indentation
+// the key has (or would have, uncommented). A key is a kebab-case word — lowercase letters, digits
+// and hyphens — so a prose comment whose first word happens to end in a colon (`# NOTE: …`) is not
+// mistaken for a block, and a list item (`- name: …`) is not mistaken for a key.
+func templateKeyLine(line string) (int, string, bool) {
+	leading := len(line) - len(strings.TrimLeft(line, " "))
+	text := line[leading:]
+	if strings.HasPrefix(text, "#") {
+		indent, name, ok := commentedKey(text)
+		if !ok || !kebabKey(name) {
+			return 0, "", false
+		}
+		return leading + indent, name, true
+	}
+	name, _, ok := strings.Cut(text, ":")
+	if !ok || !kebabKey(name) {
+		return 0, "", false
+	}
+	return leading, name, true
+}
+
+// kebabKey reports whether a name is spelled the way the template spells a key: non-empty, lowercase
+// letters, digits and hyphens only.
+func kebabKey(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
+}

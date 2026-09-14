@@ -153,7 +153,7 @@
 #   parallel-agents
 #              how many sub-agents this server may run at once. When one model reply asks for
 #              several delegations, apogee runs up to this many of them side by side instead of
-#              one after another, and a Mechanism that synthesises delegations batches by the same size.
+#              one after another, and a Reaction that synthesises delegations batches by the same size.
 #              Optional, and it is a PIN — set it and nothing overrides it:
 #
 #                (absent)  ask the server: apogee uses the slot count it advertises. A server
@@ -167,6 +167,19 @@
 #              splits its context window into N slots, so more parallel agents means a SMALLER
 #              window each. apogee's context numbers are per-slot either way, so the footer
 #              keeps telling you what you actually have.
+#   effort-dialect
+#              which wire carries the thinking-effort dial to this server, for a provider apogee
+#              cannot detect: auto (the default) detects, kwargs / reasoning / openai each force
+#              one of the three wires, and off never sends an effort at all.
+#
+#                effort-dialect: openai
+#
+#   plaintext-key-ok
+#              written beside a plaintext api-key: by "never for this entry" — the answer to the
+#              startup offer to move that key into the machine's secret store — so you are not
+#              asked again.
+#
+#                plaintext-key-ok: true
 #
 # servers:
 #   - name: workstation
@@ -1093,6 +1106,9 @@ ui:
 #     tool-call-format: markdown-fenced
 #     thinking:
 #       style: none                 # also how you switch an unwanted built-in match back off
+#   my-xml-model:
+#     tool-call-format: custom-regex
+#     tool-call-pattern: '<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>'
 #   my-big-model:                   # a roster of its own, for the model that can carry it
 #     tools:
 #       enabled: [web_search]       # on for this model, wherever the global block leaves it off

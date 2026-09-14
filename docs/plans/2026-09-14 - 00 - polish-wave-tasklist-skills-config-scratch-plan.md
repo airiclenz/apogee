@@ -89,7 +89,10 @@ NOTES (2026-09-14): `derefType` moved from registry_test.go to unknownkeys.go be
 
 **Commit.** `feat(config): unknown keys are announced once at startup instead of ignored silently`
 
-## 5. Config: template↔registry gate and template sweep
+## 5. Config: template↔registry gate and template sweep — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): the registry holds 57 rows today, not the 55 the plan counts; the gate is green over all 57 without an allowlist entry.
+NOTES (2026-09-14): a negative case (`TestTemplateMentionsEveryRegistryKeyRejectsAnAbsentKey`, fabricated paths incl. a leaf borrowed from another block) was added beside the gate, mirroring the manual gate's negative cases.
 
 **What.** In `internal/config/defaults_test.go` add `TestTemplateMentionsEveryRegistryKey`: every registry `Path` (the 55 rows) appears in `internal/config/defaults/config.yaml` as an active or commented key (match the leaf spelling under its parent, e.g. `skill-suggestions` under `ui:`), mirroring `cmd/apogee/docs_settings_test.go`'s manual gate; an empty allowlist constant sits beside it for a future exception. The gate is expected green on landing (all 55 leaves are already present in the template) — it is a guard against future drift, not a fix. Sweep the template: add commented example lines for the three read-but-absent sub-keys — `servers[].plaintext-key-ok`, `servers[].effort-dialect`, `model-profiles.<name>.tool-call-pattern` — with one-sentence comments taken from their manual entries (`docs/manual/configuration.md`, grep each key) — `tool-call-pattern` is already described in template prose (`defaults/config.yaml:1041-1042`), so its example line is additive; rewrite line 156's "a Mechanism that synthesises delegations batches…" so it names no retired Mechanism (ADR 0071/0076) — state the fact in Reaction/Floor vocabulary per `CONTEXT.md`. Prose guard rule: every template comment naming `Mechanism`, `mechanism`, `catalogue` (in the retired sense) or `validated-set` — `grep -n -i "mechanism\|validated-set" internal/config/defaults/config.yaml` — is reworded; the skills "catalogue" at :943 is the skills catalog and stays.
 
