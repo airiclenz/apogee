@@ -122,11 +122,20 @@ func TestE2ENamingReachesAHeadlessSubAgentLine(t *testing.T) {
 	if !strings.HasSuffix(lines[0], " · "+namingGenerated) {
 		t.Errorf("the sub-agent line is %q; it must close with the generated name %q", lines[0], namingGenerated)
 	}
-	// The absence is asserted on the sub-agent line itself and not on the whole of stderr: the live
-	// narration legitimately prints the task once, as the `→ sub_agent <task>` call line, before the
-	// name exists at all (narrationSink) — what must not happen is the task standing beside the name.
-	if strings.Contains(lines[0], namingTask) {
-		t.Errorf("the delegation printed its task beside the generated name: %q", lines[0])
+	// The task is allowed on stderr exactly once: as the live narration's own `→ sub_agent <task>`
+	// call line, printed before the name exists at all (narrationSink). Every other line of the
+	// stream — this sub-agent line, the `sub-agent <name>: started|finished` phase lines, a prune
+	// notice, the closing block — must not carry it, so the one legitimate line is taken out by its
+	// EXACT shape and the absence is asserted on all that remains. A regression that leaks the task
+	// anywhere else, the name's own line included, is caught; one that widens the call line's shape
+	// is caught by the count.
+	arrow := "→ sub_agent " + namingTask
+	remainder, arrows := withoutLine(errOut, arrow)
+	if arrows != 1 {
+		t.Errorf("the narration printed the delegation's call line %q %d times, want exactly once:\n%s", arrow, arrows, errOut)
+	}
+	if strings.Contains(remainder, namingTask) {
+		t.Errorf("the delegation's task reached stderr beyond the narration's call line:\n%s", remainder)
 	}
 	if calls := namingRequests(stub); len(calls) != 1 {
 		t.Errorf("the headless run made %d naming requests, want exactly 1", len(calls))
@@ -238,6 +247,21 @@ func releasingOnName(inner domain.EventSink, stub *stubllm.Server) domain.EventS
 			stub.Release(namingChildGate)
 		}
 	})
+}
+
+// withoutLine returns text with every line equal to line removed, and how many were. Equality is
+// of the WHOLE line, so what is removed is exactly the shape the caller vouched for and nothing
+// that merely starts the same way.
+func withoutLine(text, line string) (rest string, removed int) {
+	var kept []string
+	for _, l := range strings.Split(text, "\n") {
+		if l == line {
+			removed++
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return strings.Join(kept, "\n"), removed
 }
 
 // sinkFunc is a domain.EventSink written as one function.
