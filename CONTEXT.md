@@ -1013,7 +1013,11 @@ re-read never reports (ADR 0036 decision 2). It **reconciles** the
 standing "apogee never writes your config" claims (seeding never overwrites, Probe prints
 paste-ready YAML, `/model` does not rewrite the file): never *unprompted* — a settings-screen edit
 is a deliberate user act and names the file and entry it changed, the same fence ADR 0012 applies
-to `/confine off --save`. See
+to `/confine off --save`. Three keys are written off a gesture outside the pane, each admitted by
+name: `server:` (ADR 0036 decision 2), `launch-profile:` under `remember-model:` (ADR 0048), and
+`ui.task-list-open`, which the transcript's task-list fold records silently — the click or `enter`
+that folds every task-list card also writes the flip, only a failed write is mentioned (ADR 0035,
+2026-09-14 addendum). See
 [ADR 0035](docs/adr/0035-the-settings-surface-persists-one-key-per-deliberate-edit.md) (the
 persistence contract) and
 [ADR 0037](docs/adr/0037-every-settings-edit-applies-to-the-running-session.md) (the live apply),

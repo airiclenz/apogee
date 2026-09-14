@@ -10,8 +10,6 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
-- The `task_list` block in the transcript is always open: every task row is painted (clipped to width per line), the block wears no ▶/▼ and a click on it selects rather than folds; the model-facing header sentence (`Task list — yours to maintain…`) is stripped display-side only — the result text the model reads is unchanged (ADR 0031). A replayed session paints the block the same way.
-
 - The skill-suggestion band no longer pads a clear winner with coincidences: a row is shown only when it scores at least 60 % of the top row (the top row always survives), and the dev-generic words `file`, `files` and `add` are ignored when matching a draft — two of them alone no longer admit a skill. `load_skill` keeps its own evidence gate and sees every admitted skill unchanged.
 
 - The skill-suggestion band's precision is pinned on the real library fixture: six generic dev-chat drafts that used to earn a row ("add a field to the config struct", "move these files into a new package", …) are held at no row, and a TUI-level table drives the band over the real matcher so the cutoff reaches the row a person sees. ADR 0061 carries a dated amendment for the relative cutoff and the three dev-generic stopwords; the manual, README, layout spec and config template now say the band names "the skills that clearly fit, up to three" rather than "the closest".

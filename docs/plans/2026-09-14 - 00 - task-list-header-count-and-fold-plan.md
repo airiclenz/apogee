@@ -152,7 +152,11 @@ NOTES (2026-09-14): consequential edit — docs/manual/sessions.md: made necessa
 
 **Commit:** `feat(tui): task-list cards share one fold state, remembered in ui.task-list-open`
 
-## 5. Layout specs and the changelog trail
+## 5. Layout specs and the changelog trail — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): the ADR 0035 addendum and the CONTEXT.md sentence call `ui.task-list-open` the third program-written key and the one that records SILENTLY — `server:` and `launch-profile:` both announce their write (ADR 0036 D2, ADR 0048 "Recording is visible"), so the plan's "third silent program-written key" is spelled to keep that distinction true.
+NOTES (2026-09-14): the manual's task-list section (`docs/manual/configuration.md`, "The task list") gained a sentence on the counted header, the shared fold and `ui.task-list-open`; the guard grep had no hit there, but the item lists the file and the section said nothing about the fold. Its `[ ]` for an open one was reworded to `a row still open` so the acceptance grep's `[0-9n] open` no longer matches it.
+NOTES (2026-09-14): acceptance grep keeps one pre-existing false positive — `docs/layout/tool-layout.md:248`, a sub-agent sentence ("a view of a finished or scheduled run opens read-only") matching `n open` and `task`; it names neither the always-open card nor the `N open` stat and is out of this item's scope, so it is left untouched.
 
 **What:** Depends on item 4. Reword every spec sentence that records the always-open card:
 - `docs/layout/tool-layout.md`: "Fold states" (the single-state exception becomes: the task-list block collapses to its counted header, `▶`/`▼` on the header, click and `enter` toggle every task-list block together, state remembered in `ui.task-list-open`); the tool table row (`task_list | Task list (done/total) | — | — | the list, one row per task; collapsed = header only`); the task_list notes.

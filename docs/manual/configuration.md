@@ -1754,7 +1754,11 @@ that never calls the tool runs exactly the agent it ran before. One call carries
 and replaces what was there — the model sends the complete set of tasks with each one marked done
 or not — so ticking a task off is resending the list with that task done, and clearing it is
 sending an empty one. There are no task ids to get wrong. The current list is what you see in the
-transcript's `Task List` card, rendered `[✔]` for a finished row and `[ ]` for an open one.
+transcript's `Task List` card, rendered `[✔]` for a finished row and `[ ]` for a row still open. The
+card's header counts them, `✦ Task List (done/total)`, and the card folds to that header alone:
+click it, or press `enter` with the block cursor on it, and every task-list card in the session
+folds — or opens — together, a choice apogee remembers in
+[`ui.task-list-open`](#the-terminal-ui--ui).
 
 **The list survives the things that lose a plan.** It is written into the session record, so
 `--resume` brings it back with everything else, and it lives outside the conversation, so a
