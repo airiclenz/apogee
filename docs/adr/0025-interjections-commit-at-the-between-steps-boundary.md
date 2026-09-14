@@ -63,15 +63,39 @@ remaining Turns still available to act on it. If the model is already writing it
 is no next boundary, so the message arrives at Exchange end and opens a new one. That is the whole
 of "scheduled": queue, and deliver at the first boundary that exists.
 
+> **Amended 2026-09-14 — a staged message PRE-EMPTS the delegations not yet started.** The boundary
+> is unmoved: the message still commits only where this decision puts it. What changes is how soon
+> that boundary comes when a delegation group is running. Before, a message queued while the model
+> had fanned out three sub-agents waited for all three — the ones still queued behind the
+> `parallel-agents` cap included — because the group was one tool round. Now the staging is also a
+> **predicate** the engine reads: `Config.InterjectionPending` (answered by the host's mailbox at
+> depth 0; a child's own mailbox answers for its grandchildren at depth > 0) is consulted the instant a
+> pool worker — or the serial dispatch — dequeues a delegation, and a slot that finds it true is
+> **skipped rather than run**: committed in call order like a refused slot, with the error-shaped
+> tool result `sub-agent not started: the user sent a message while this group was running; delegate
+> again if the task is still needed` and a finished lifecycle phase (no started phase, no audit entry),
+> so the model is told and may delegate again. The children **already running finish, untouched** —
+> a message never cancels anything (ADR 0013 D5's rollback stays the only cancel) — and the message
+> lands at the boundary their results close, as an ordinary Interjection. The seam is a predicate and
+> nothing more: the engine never reads the message through it, never drains the host's queue, and
+> commits nothing before the boundary. `/schedule` Firings keep waiting for a quiescent host
+> ([ADR 0033](0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md) D7 stands).
+> Ratified 2026-09-14, implemented by `docs/plans/2026-09-14 - 01`; ADR 0039 is amended the same day.
+
 **3. Three parties, split by what each one owns.** The staging is the TUI's, the delivery is the
 worker's, the commit is the engine's — and the split follows ownership, not convenience:
 
 - **The TUI stages.** Display rows, the hold-on-stop rule, the Backspace pop back into the editor,
-  the `N queued` readout: all of it is UI. The engine never learns a message exists until it is
-  delivered.
+  the `N queued` readout: all of it is UI. The engine never reads a message before it is
+  delivered — since the 2026-09-14 amendment above it may ask whether one is *pending*
+  (`Config.InterjectionPending`, a yes/no the Bridge answers over the live mailbox), and that
+  answer is all it learns; the message itself stays the TUI's until the worker delivers it.
 - **The worker drains.** A per-Exchange mailbox (`interjectBox`) is written by the Update goroutine
-  and read by the worker between Steps. It is the ONE place the two goroutines touch shared state,
-  so it carries the one real mutex in the whole feature, and it is held **by pointer** on the
+  and read by the worker between Steps. It is the ONE place the two goroutines touch shared state
+  — and, since 2026-09-14, the one place the engine's dispatching goroutine and its pool workers
+  touch it too, though only through the `pending` predicate, never a row — so it carries the one
+  real mutex in the delivery path (the Bridge's registration of the live box, added with the
+  predicate, guards a pointer, not a row), and it is held **by pointer** on the
   value-copied `Model` (ADR 0011's no-copy invariant — a `sync.Mutex` copied by value would hand
   each copy its own lock and unsynchronise the two goroutines *silently*).
 - **The engine commits.** `Agent.Interject(domain.UserInput) error` appends one marked user message,
@@ -207,7 +231,10 @@ the feature.
   the observability.
 - **A drain hook on `Agent.Run` for embedders.** Rejected: `Run` is the convenience loop, and an
   embedder who wants mid-run interjection drives `Step` themselves, which is exactly what the TUI
-  does. `Run`'s doc says so.
+  does. `Run`'s doc says so. *Stands after the 2026-09-14 amendment:* the pre-emption seam
+  (`Config.InterjectionPending`) is a predicate, not a drain — the engine asks whether a message
+  waits and skips the delegations it has not started; the commit is still the boundary's, and
+  the drain is still the driving goroutine's.
 - **Clock-timed scheduling ("send at 15:00").** Rejected — a misreading of the issue's word
   "scheduled", and a timer is a feature nobody asked for.
 - **Freeze transcript repaints while a drag is held**, to keep a selection alive across the stream.

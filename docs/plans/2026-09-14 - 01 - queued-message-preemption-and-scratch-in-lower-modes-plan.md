@@ -97,7 +97,10 @@ NOTES (2026-09-14): the e2e was checked against the rope — with the `Interject
 
 **Commit:** `feat(tui): the queued-message mailbox answers the engine's pre-emption seam; skipped sub-agents say so`
 
-## 3. Docs: ADR 0025 / ADR 0039 amendments, CONTEXT.md, manual — the pre-emption rule
+## 3. Docs: ADR 0025 / ADR 0039 amendments, CONTEXT.md, manual — the pre-emption rule — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): guard grep residue left as-is because each remaining hit is either already qualified or makes no wait-claim — ADR 0025:61 ("next tool-round boundary") is the Decision 2 sentence the new amendment block directly qualifies; README.md:22 (demo alt text, "delivered at the next tool boundary") and ADR 0063:33 (D5 atomicity) name no sub-agent wait; CONTEXT.md "atomically" hits are file writes.
+NOTES (2026-09-14): `IDEAS.md` is gitignored (`.gitignore:12`) — the `[P] Scheduled messages …` line is removed on disk as the item instructs and the acceptance grep passes, but the file cannot be staged or committed; it is listed under FILES as a modified file, not as one to stage.
 
 **What:** Depends on item 2. Record the ratified rule where the old wait was implied:
 - `docs/adr/0025-…`: dated amendment under Decision 2 — the boundary is unmoved, but a staged message PRE-EMPTS delegations not yet started (skipped with the bound tool result); the "drain hook" rejection stands (the seam is a predicate; the commit is still the boundary's).

@@ -134,6 +134,14 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 // with it because a cancel that has already landed makes this Exchange a doomed one — see
 // deliverInterjections.
 //
+// The same mailbox is also read from INSIDE a Step, by the engine and not by this loop: while a
+// delegation group runs, the dispatching goroutine and its pool workers ask the Bridge whether the
+// box holds a row (Config.InterjectionPending over interjectBox.pending) and skip the sub-agents
+// they have not started when it does, so the boundary this loop drains at comes as soon as the
+// running children finish rather than after the whole group. That predicate is the top level's
+// only signal that a message waits; it reads no row and commits nothing — delivery is still this
+// loop's, at the next boundary, exactly as above (ADR 0025, amended 2026-09-14).
+//
 // exchangeOpen says whether there is an Exchange to deliver into YET, and it exists because the two
 // drive paths differ exactly there: driveResume enters with the Exchange already open (false would
 // silently defer a staged row by one Step), while driveExchange enters having only Submitted —

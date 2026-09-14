@@ -53,10 +53,13 @@ type queuedInterjection struct {
 
 // interjectBox is the per-Exchange mailbox: the Update goroutine pushes staged rows into it and
 // the worker goroutine drains them between Steps, which is the ONE place the two goroutines
-// touch the same state. Everywhere else the split is clean — the Model owns the display rows,
+// touch the same state — and the one place a third party touches it: the engine's dispatching
+// goroutine and, under a fan-out, its pool workers read the box through the Bridge as a yes/no
+// (pending, the Config.InterjectionPending seam) to skip the sub-agents they have not started,
+// never as rows. Everywhere else the split is clean — the Model owns the display rows,
 // the worker owns the engine — so this mutex is the whole of the concurrency in the interjection
-// path (the engine needs none: Agent.Interject is called at the between-Steps boundary, where the
-// worker owns the conversation outright).
+// path (the engine needs none for the commit: Agent.Interject is called at the between-Steps
+// boundary, where the worker owns the conversation outright; ADR 0025, amended 2026-09-14).
 //
 // It is held BY POINTER on the Model. The Model is value-copied on every Update (ADR 0011), and a
 // sync.Mutex copied by value would hand each copy its own lock — silently unsynchronising the two

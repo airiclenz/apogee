@@ -190,6 +190,15 @@ own delegations run serially inline; a reply split across **Delegation seats** t
 smaller of the two caps); every event a sub-agent emits carries the **call-ID**
 of the `sub_agent` call that spawned it, so interleaved streams stay attributable
 ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
+A delegation the group has **not started** when an **Interjection** is staged for its parent is
+**skipped**, not run: it commits, in call order, the tool result `sub-agent not started: the user
+sent a message while this group was running; delegate again if the task is still needed` with a
+finished phase and no started one, so the model is told and may delegate again; the TUI paints that
+row with the `error` verdict (never `scheduled`) and opens it onto the skip's own words, like a
+refusal at the depth bound. The children already running finish untouched — a message never
+cancels anything — and a child holding a message in its own mailbox skips its unstarted
+grandchildren the same way (ADR 0039, amended 2026-09-14). Headless runs and Firings have no
+queue, so nothing is ever skipped there.
 What a delegation is CALLED is its **Delegation name**, and the rule is three-deep: the name its
 call gave — an optional `name` argument on the `sub_agent` call, normalised to a trimmed first
 line — else a **generated** one that lands once the run is under way, else the delegated task's
@@ -629,6 +638,12 @@ results already in the tail (legal OpenAI chat; strict Gemma-class templates are
 concern, ADR 0025). A message typed while the model works is **staged** (queued for the next
 boundary), and a queue left standing by Esc or a loop error is **held** (nothing auto-sends after
 a stop; the next ⏎ sends it, Backspace on an empty box pops the newest back into the editor).
+A staged message also **pre-empts** the **Sub-agents** of a running delegation group that have
+not started yet: the engine reads the staging as a predicate (`Config.InterjectionPending`, the
+host's mailbox answering yes/no) the instant it is about to start one, skips it with an explicit
+tool result instead, lets the children already running finish, and lands the message at the
+boundary their results close — the boundary is unmoved, it just comes sooner (ADR 0025, amended
+2026-09-14; a `/schedule` Firing keeps waiting for a quiescent host, ADR 0033 D7).
 Staged and held rows are session-ephemeral — sessions record what was committed (ADR 0022).
 Mid-run delivery is 1:1 (one row, one marked message); a flush at idle joins the rows into ONE
 **unmarked** message, because exactly one unmarked user message opens an Exchange. A **Skill** or

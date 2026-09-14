@@ -174,7 +174,10 @@ func (a *Agent) InterjectChild(spawnCallID string, in domain.UserInput) error {
 // step past — the one place Interject's caller rule is satisfied without a host driving Step —
 // and only for a CHILD: a top-level Run drains nothing and emits no ChildInterjectionEvent,
 // because a top-level interjection stays the host's own call between the Steps it drives
-// (ADR 0025; ADR 0063 D1 supersedes that rejection for depth > 0 only).
+// (ADR 0025; ADR 0063 D1 supersedes that rejection for depth > 0 only). The top level's only
+// signal that a message waits is the Config.InterjectionPending seam its dispatch reads to skip
+// the delegations it has not started (Agent.interjectionPending) — a predicate, never a drain
+// (ADR 0025, amended 2026-09-14).
 //
 // turn is the Turn the messages are about to reach, which is what the events report.
 func (a *Agent) drainMailbox(turn int) {

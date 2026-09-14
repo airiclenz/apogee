@@ -67,7 +67,9 @@ same path. Several references in one message share that room between them, so a 
 full of files still fits.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
-the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
+the model works, and a queued message does not wait for sub-agents that have not started yet:
+those are skipped, the model is told so, and your message lands once the running ones finish —
+`⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
 prompts you have already sent in this workspace, `esc` twice stops a run, `⌃c` quits.
 Stopping is a double-tap, like quitting: the first `esc` arms the gesture for one second —
 the status line says `press esc again to stop` for as long as it is armed — and a second

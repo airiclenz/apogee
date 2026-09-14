@@ -90,6 +90,22 @@ unchanged** (ADR 0013 §5): Esc signals every in-flight child, waits for them to
 rolls the whole parent Turn back — no worse than today's serial N-in-one-Turn, where a
 cancel during child 2 already discards child 1.
 
+> **Amended 2026-09-14 — the pool yields its queued slots to a pending message.** A slot
+> waiting behind the cap is not owed a run. When a user message is staged for the top-level
+> agent (`Config.InterjectionPending`, the host's mailbox read as a predicate — [ADR 0025](0025-interjections-commit-at-the-between-steps-boundary.md),
+> amended the same day), a pool worker that dequeues a delegation **skips it instead of
+> starting it**: the slot commits in call order like a refused one, with the error-shaped tool
+> result `sub-agent not started: the user sent a message while this group was running;
+> delegate again if the task is still needed` and a finished phase carrying it (no started
+> phase, no audit entry), so the parent's next primary call sees the skip beside its
+> siblings' real results and may delegate again. The decision is read once, at dequeue, and
+> never re-read. A child does the same one level down: a message in its own mailbox
+> ([ADR 0063](0063-sub-agent-runs-are-user-addressable-views.md)) makes its serial inline
+> dispatch skip the grandchildren it has not started. **Running children are never cancelled
+> by a message** — this decision's cancel rule stands untouched: Esc is still the only cancel,
+> and it still rolls the whole parent Turn back. Firings keep waiting for a quiescent host
+> (ADR 0033 D7). Implemented by `docs/plans/2026-09-14 - 01`.
+
 **5 — Child streams are identified by the spawning call-ID.** `EventBase` gains the ID of
 the `sub_agent` tool call that spawned the emitting agent, stamped at child construction
 exactly as `Depth` is today; top-level events carry none. Every consumer keys off it: the
