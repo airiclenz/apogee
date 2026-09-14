@@ -941,8 +941,8 @@ remember-model: true
 #
 # `skill-suggestions` shows you which of your skills fit the message you are typing: while you type,
 # apogee ranks its skill catalogue against the draft — over each skill's id, name, summary and the
-# `triggers:` its author declared, never its body — and names the closest few in a one-row band just
-# above the input box. Tab opens the `/` menu on exactly those, ⏎ picks one, Esc closes; with nothing
+# `triggers:` its author declared, never its body — and names the skills that clearly fit, up to
+# three, in a one-row band just above the input box. Tab opens the `/` menu on exactly those, ⏎ picks one, Esc closes; with nothing
 # suggested Tab does what it always did. A skill shown when you send a message is not suggested again
 # for the rest of the session (/clear starts over). This is a hint for YOU and nothing else: no part
 # of your skill library is ever sent to the model — a skill reaches it only when you invoke one with

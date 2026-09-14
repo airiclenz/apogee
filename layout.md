@@ -1682,8 +1682,8 @@ readout is separate too, and reads the same count from the same queue.
 ## The skill-suggestion band
 
 **What it shows, and when.** While a message is being typed, the draft is ranked against the skill
-catalog and the closest skills are named in **one row** directly above the input box — the same slot
-the staged strip sits in, one step nearer the box. It is advice about the draft and nothing else: no
+catalog and the skills that clearly fit, up to three, are named in **one row** directly above the
+input box — the same slot the staged strip sits in, one step nearer the box. It is advice about the draft and nothing else: no
 part of the catalog reaches the model either way, and a skill becomes prompt text only when the human
 invokes it with a `/token` (ADR 0061). The row appears as soon as the draft holds enough for the
 matcher to answer honestly and disappears again the moment it does not — a draft of one or two words

@@ -230,7 +230,8 @@ hide the fact that the answer was *not allowed* rather than *not found*.
 ## Suggested skills
 
 A library you cannot recall is a library you do not use, so apogee ranks your skills against the
-message you are typing and names the closest few in **one row directly above the input box**:
+message you are typing and names the skills that clearly fit, up to three, in **one row directly
+above the input box**:
 
 ```
   ✦ skills: /grill-me · /code-audit · /handoff   tab to pick

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -502,5 +503,71 @@ func TestSuggestionsSurviveARefusedLine(t *testing.T) {
 	}
 	if got := len(m.skillHints); got != 3 {
 		t.Errorf("the refusal cleared the band: %d hints left, want 3", got)
+	}
+}
+
+// TestSuggestBandPrecision runs the band over the REAL matcher and the real library fixture
+// (internal/skills/testdata/library) instead of the fake catalog the other tests use: what it pins
+// is that the matcher's precision — the relative cutoff and the dev-generic stopwords (ADR 0061,
+// amended 2026-09-14) — reaches the row a human sees through the seam unchanged. A band that showed
+// three rows for a generic edit would fail here even though every row of the fake-catalog tests
+// still passed, because the fake hands back three rows for anything past the gate. The rows the
+// matcher returns are the engine's question (suggest_library_test.go); this table holds one row of
+// each shape the band can end up with: a clear winner, two genuine runners-up, and nothing at all.
+func TestSuggestBandPrecision(t *testing.T) {
+	catalog, err := skills.Load(skills.Sources{Home: "../skills/testdata/library"})
+	if err != nil {
+		t.Fatalf("Load(../skills/testdata/library): %v", err)
+	}
+	if catalog.Len() < 20 {
+		t.Fatalf("fixture catalog holds %d skills, want at least 20 — is internal/skills/testdata/library intact?", catalog.Len())
+	}
+	opts := testOpts
+	opts.SkillSuggestions = true
+	opts.Skills = catalog
+
+	cases := []struct {
+		name  string
+		draft string
+		first string   // the id the row must name first; empty when the band must stay dark
+		wants []string // ids the row must name somewhere
+	}{
+		{name: "a clear winner names one skill first", draft: "cut a release for homebrew", first: "brew-release"},
+		{name: "two audit skills are both named", draft: "audit the parser for security holes", wants: []string{"code-audit", "security-audit"}},
+		{name: "a generic struct edit keeps the band dark", draft: "add a field to the config struct"},
+		{name: "a generic file move keeps the band dark", draft: "move these files into a new package"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := modelWithOverlayRoom(t, 24, opts)
+
+			m = typeDraft(t, m, tc.draft)
+
+			var ids []string
+			for _, s := range m.skillHints {
+				ids = append(ids, s.ID)
+			}
+			t.Logf("band for %q = %v", tc.draft, ids)
+			if len(ids) > maxSkillHints {
+				t.Errorf("band holds %d hints, want at most %d", len(ids), maxSkillHints)
+			}
+			if tc.first == "" && len(tc.wants) == 0 {
+				if len(ids) != 0 || m.renderSkillHints() != "" {
+					t.Fatalf("band names %v for a generic draft, want it dark", ids)
+				}
+				return
+			}
+			if m.renderSkillHints() == "" {
+				t.Error("the band paints nothing while it holds hints")
+			}
+			if tc.first != "" && (len(ids) == 0 || ids[0] != tc.first) {
+				t.Errorf("band names %v first, want %q", ids, tc.first)
+			}
+			for _, want := range tc.wants {
+				if !slices.Contains(ids, want) {
+					t.Errorf("band names %v, want it to include %q", ids, want)
+				}
+			}
+		})
 	}
 }

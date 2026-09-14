@@ -167,7 +167,8 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 - **Skills** — short markdown playbooks you invoke with `/name`. apogee ships a few
   (debugging, planning, code review, commit hygiene), reads your own from
   `~/.apogee/skills`, and picks up skills a repository ships to everyone working in it.
-  As you type, it names the closest few above the input box; `Tab` picks one.
+  As you type, it names the skills that clearly fit, up to three, above the input box;
+  `Tab` picks one.
 - **MCP servers** over stdio, SSE, or streamable-http, for tools apogee doesn't ship.
 - **A Console family, off by default** — the REPLs, shells and dev servers a model
   keeps alive across turns, for models that ask for them.

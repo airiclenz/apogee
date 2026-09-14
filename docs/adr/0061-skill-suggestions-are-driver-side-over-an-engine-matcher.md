@@ -86,6 +86,19 @@ hit adds one IDF's worth of bonus; and the document indexes the skill's full des
 the 200-rune menu summary. An amendment, not a supersession: the decision's substance — Driver-side
 painting over an engine-level matcher that never reaches the model — is unchanged.
 
+*Amended 2026-09-14* (plan `2026-09-14 - 00`, skill-band precision): Decision 1's "the top 3
+returned" now reads "up to 3 returned" — `Suggest` keeps a row only when its score reaches 60 % of
+the top row's (`minRelativeScore`; the top row always survives, the cutoff is relative, never
+absolute), so a sentence that shares two common words with three skills no longer earns three rows,
+and the band names the skills that clearly fit rather than the closest three. Three dev-generic
+words — `file`, `files`, `add` — join the stopword set, so a draft that merely edits a file admits
+nothing on those words alone; the set stays closed to any word a shipped trigger phrase uses
+(`change`, `update`, `fix`, `code` stay content terms). The cutoff is `Suggest`'s alone: `load_skill`
+(ADR 0065 §6) keeps the evidence gate and its own `confidentMargin`, and must still see every
+admitted skill to name candidates — only the stopword change reaches it. The prefix rule is
+untouched: a draft term still matches a document term by ≥ 4-rune prefix either way. An amendment,
+not a supersession, on the same terms as the one above.
+
 ## Consequences
 
 - **The engine gains a ranking API and stays wire-silent.** `skills.Catalog.Suggest` reads the

@@ -47,6 +47,17 @@ func TestSuggestOnTheRealLibrary(t *testing.T) {
 		{name: "get me up to speed on this project", draft: "get me up to speed on this project", first: "refocus"},
 		{name: "two words are below the gate", draft: "fix the parser", wantNil: true},
 		{name: "pure stopwords hold no content term", draft: "the and of to", wantNil: true},
+		// Generic dev chat names no skill. Each of these drafts earned at least one row from the
+		// matcher before the relative cutoff and the dev-generic stopwords (file, files, add)
+		// landed — "add" and "file" alone admitted a skill that merely mentions them — so a row
+		// that starts returning something again means the precision regressed, not that the draft
+		// grew a skill.
+		{name: "generic edit: add a struct field", draft: "add a field to the config struct", wantNil: true},
+		{name: "generic edit: add an import", draft: "add the missing import to this file", wantNil: true},
+		{name: "generic edit: move files", draft: "move these files into a new package", wantNil: true},
+		{name: "generic edit: add a cli flag", draft: "add a flag to the command line parser", wantNil: true},
+		{name: "generic edit: split a file", draft: "split this file into two smaller files", wantNil: true},
+		{name: "generic edit: changelog entry", draft: "please add a changelog entry for the fix", wantNil: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

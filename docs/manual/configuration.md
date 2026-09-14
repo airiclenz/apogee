@@ -557,11 +557,11 @@ same body your session resolves.
 ## The terminal UI — `ui:`
 
 A library grows past what anyone can recall, which is exactly where a menu you have to open stops
-helping. While you type, apogee ranks the skill catalog against your draft and names the closest
-three in a one-row band above the input box; `⇥` opens the `/` menu on exactly those. It is on by
-default, and the flip is live: commit the `ui.skill-suggestions` row in `/settings`, or save the
-file, and the band goes — or comes back — in the session you are already in. The keys, the
-spent-once rule and what the row looks like are on the [commands
+helping. While you type, apogee ranks the skill catalog against your draft and names the skills
+that clearly fit, up to three, in a one-row band above the input box; `⇥` opens the `/` menu on
+exactly those. It is on by default, and the flip is live: commit the `ui.skill-suggestions` row in
+`/settings`, or save the file, and the band goes — or comes back — in the session you are already
+in. The keys, the spent-once rule and what the row looks like are on the [commands
 page](commands.md#suggested-skills).
 
 ```yaml
