@@ -13,11 +13,12 @@ import (
 // of each other and a real winner — the one whose id or display name IS the query — carries the
 // name bonus or a trigger boost on top and clears this easily.
 //
-// It is a threshold on a score that "is not a probability and carries no threshold a caller should
-// test against" (Suggestion.Score) for exactly one caller and exactly one purpose: deciding whether
-// to spend tokens now or ask the model to spell an id. Getting it wrong costs one extra round trip,
-// never a wrong answer — the candidates rung names the same skills the confident rung would have
-// picked from.
+// It is one of the two relative thresholds read against a score that "carries no absolute
+// threshold a caller should test against" (Suggestion.Score) — the other is Suggest's
+// minRelativeScore cutoff, which trims the band and never runs here — and it exists for exactly
+// one purpose: deciding whether to spend tokens now or ask the model to spell an id. Getting it
+// wrong costs one extra round trip, never a wrong answer — the candidates rung names the same
+// skills the confident rung would have picked from.
 const confidentMargin = 1.5
 
 // maxLookupCandidates caps the id+summary list a non-confident lookup returns. Five is enough for

@@ -34,8 +34,20 @@ const minDraftWords = 3
 
 // minMatchedTerms is the evidence gate: absent a trigger hit, a skill is admitted only when at
 // least this many distinct draft terms appear in its document. One shared word is the noise floor
-// — "code", "file", "test" appear in half a library — so a single match never earns a row.
+// — "code", "test", "workspace" appear in half a library — so a single match never earns a row.
 const minMatchedTerms = 2
+
+// minRelativeScore is the band's relative cutoff: a row is kept only when its Score reaches this
+// fraction of the top row's. The evidence gate admits every skill that shares two words with the
+// draft, and over a real library that is three rows for almost any sentence — the two skills that
+// happen to mention "workspace" and "review" ride in under the one the user meant. Sixty percent
+// is where a genuine runner-up (two audit skills sharing the draft's vocabulary) still shows and
+// a coincidence (a summary that reuses two common words) does not: the scores are BM25 sums over
+// a handful of terms, so a row that matched one fewer term than the leader sits well below it.
+// The top row always survives — the cutoff is relative, never absolute — and it is applied by
+// Suggest ONLY: the model-facing lookup (lookup.go) keeps its own confidentMargin and must still
+// see every admitted skill to name candidates.
+const minRelativeScore = 0.6
 
 // minTokenRunes drops one-rune fragments ("a", "I", the "s" left by a possessive) before they can
 // become terms: they carry no topic and inflate every document's length.
@@ -67,13 +79,23 @@ const nameBonusIDFs = 1.0
 const triggerBoostIDFs = 2.0
 
 // stopwords are the English function words dropped before scoring, plus the request verbs a chat
-// draft opens with ("please", "want", "need", "make", "use"). They appear in nearly every draft and
-// in many summaries, so leaving them in would let politeness alone admit a skill.
+// draft opens with ("please", "want", "need", "make", "use"), plus the dev-generic words "file",
+// "files" and "add": in a coding chat they name nothing — every draft touches a file and adds
+// something — yet half the skill summaries mention them, so two of them together would clear the
+// evidence gate for a skill the draft has nothing to do with. They appear in nearly every draft
+// and in many summaries, so leaving them in would let politeness alone admit a skill.
+//
+// tokenize tests this set on the RAW word before stemming, so a plural and its singular are
+// separate entries ("file" and "files"). A word may join only if no tokenized shipped-trigger
+// term equals it or its stem (TestShippedTriggersKeepTheirTokenCounts pins that) and every
+// positive row of suggest_library_test.go stays green — which is why "code", "change", "update"
+// and "fix" are NOT here: each is a word an author put in a trigger phrase, and dropping it would
+// blind that trigger.
 var stopwords = map[string]bool{
-	"about": true, "after": true, "all": true, "also": true, "am": true, "an": true,
+	"about": true, "add": true, "after": true, "all": true, "also": true, "am": true, "an": true,
 	"and": true, "any": true, "are": true, "as": true, "at": true, "be": true,
 	"because": true, "been": true, "but": true, "by": true, "can": true, "could": true,
-	"did": true, "do": true, "does": true, "for": true, "from": true, "get": true,
+	"did": true, "do": true, "does": true, "file": true, "files": true, "for": true, "from": true, "get": true,
 	"had": true, "has": true, "have": true, "how": true, "if": true, "in": true,
 	"into": true, "is": true, "it": true, "its": true, "just": true, "like": true,
 	"make": true, "may": true, "me": true, "my": true, "need": true, "not": true,
@@ -123,8 +145,11 @@ type Suggestion struct {
 	Summary     string
 	// Score is the BM25 score over the draft's distinct terms, plus the name bonus for every term
 	// that hit the skill's id or display name, plus the trigger boost when TriggerHit. It is
-	// comparable only within one Suggest call — it is not a probability and carries no threshold
-	// a caller should test against.
+	// comparable only within one Suggest call — it is not a probability and carries no absolute
+	// threshold a caller should test against. The two thresholds that DO read it are both
+	// relative and both live beside it: Suggest keeps a row only within minRelativeScore of the
+	// top row's Score, and Lookup's confidentMargin asks how far the top row leads the runner-up.
+	// rank applies neither — it returns every admitted skill so both callers can.
 	Score float64
 	// TriggerHit reports that one of the skill's authored trigger phrases appeared verbatim in
 	// the draft. A hit admits the skill on its own; lexical matches need minMatchedTerms.
@@ -139,6 +164,10 @@ type Suggestion struct {
 // holds a term it shares a prefix with either way, the shorter side at least minPrefixRunes long.
 // Admitted skills are ordered by score descending, then by ID ascending so ties are stable across
 // calls.
+//
+// Admitted skills are then cut to the rows within minRelativeScore of the top row's score before
+// the limit applies, so a band never pads a clear winner with the two coincidences that happened
+// to clear the gate behind it.
 //
 // It returns nil — never a partial guess — when the draft holds fewer than minDraftWords words
 // (stopwords included) or no content term at all, when nothing clears the gate, or when the
@@ -157,22 +186,42 @@ func (c *Catalog) Suggest(draft string, exclude func(id string) bool, limit int)
 		return nil
 	}
 	out := rank(c, draft, exclude)
+	out = cutRelative(out)
 	if len(out) > limit {
 		out = out[:limit]
 	}
 	return out
 }
 
+// cutRelative keeps the leading run of ranked rows whose Score reaches minRelativeScore of the
+// first row's. ranked must be sorted strongest first, as rank returns it, so the cut is a prefix:
+// the first row that falls short ends the result and the top row is always kept. An empty input
+// stays nil.
+func cutRelative(ranked []Suggestion) []Suggestion {
+	if len(ranked) == 0 {
+		return nil
+	}
+	floor := minRelativeScore * ranked[0].Score
+	keep := 1
+	for keep < len(ranked) && ranked[keep].Score >= floor {
+		keep++
+	}
+	return ranked[:keep]
+}
+
 // rank is the scoring half of Suggest, split out so the model-facing lookup (lookup.go) reuses the
 // SAME index, evidence gate and ordering rather than growing a second matcher beside it. It returns
 // every skill that cleared the gate, strongest first, with no limit applied.
 //
-// What it deliberately does NOT carry is Suggest's minDraftWords floor. That floor is a property of
-// the SUGGESTION BAND — a half-typed chat draft must not flicker a guess at the user on every
-// keystroke — and not of matching: a lookup's query is a deliberate one-shot argument ("debugging",
-// "cut a release"), where a single word is the normal case and refusing to score it would make the
-// door answer "no match" to the queries most likely to be right. The gate that decides whether a
-// skill matched at all (minMatchedTerms, or a trigger hit) is shared and unchanged.
+// What it deliberately does NOT carry is either of Suggest's band-side cuts: the minDraftWords
+// floor and the minRelativeScore cutoff. Both are properties of the SUGGESTION BAND — a half-typed
+// chat draft must not flicker a guess at the user on every keystroke, and a band of three rows
+// must not pad a clear winner with coincidences — and not of matching: a lookup's query is a
+// deliberate one-shot argument ("debugging", "cut a release"), where a single word is the normal
+// case and refusing to score it would make the door answer "no match" to the queries most likely
+// to be right, and where every admitted skill must stay visible so the candidates rung can name
+// them. The gate that decides whether a skill matched at all (minMatchedTerms, or a trigger hit)
+// is shared and unchanged.
 func rank(c *Catalog, query string, exclude func(id string) bool) []Suggestion {
 	draftTokens := tokenize(query)
 	queryTerms := distinctTerms(draftTokens)

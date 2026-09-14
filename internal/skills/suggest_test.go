@@ -126,7 +126,9 @@ func TestSuggestRanksTheStrongerLexicalMatchFirst(t *testing.T) {
 
 	got := c.Suggest("please audit the parser for security holes", nil, 0)
 
-	want := []string{"security-audit", "code-audit", "note-taker"}
+	// note-taker clears the evidence gate too ("parser" and "audit") but on two summary words
+	// alone it scores under half of security-audit, so the relative cutoff keeps it off the band.
+	want := []string{"security-audit", "code-audit"}
 	if ids := suggestedIDs(t, got); !reflect.DeepEqual(ids, want) {
 		t.Fatalf("Suggest = %v, want %v", ids, want)
 	}
@@ -141,21 +143,34 @@ func TestSuggestPutsATriggerHitFirst(t *testing.T) {
 	t.Parallel()
 	c := newFixtureCatalog(t, suggestFixture())
 
-	got := c.Suggest("cut a release for homebrew", nil, 0)
+	const draft = "cut a release for homebrew"
 
-	if len(got) < 2 {
-		t.Fatalf("Suggest = %v, want the triggered skill and at least one lexical match", suggestedIDs(t, got))
+	// The score comparison runs through rank — unlimited and uncut — because the boost is the
+	// very thing that pushes the lexical runner-up under the band's relative cutoff.
+	ranked := rank(c, draft, nil)
+	if len(ranked) < 2 {
+		t.Fatalf("rank = %v, want the triggered skill and at least one lexical match", suggestedIDs(t, ranked))
 	}
-	if got[0].ID != "brew-release" || !got[0].TriggerHit {
-		t.Fatalf("top suggestion = %+v, want brew-release with TriggerHit", got[0])
+	if ranked[0].ID != "brew-release" || !ranked[0].TriggerHit {
+		t.Fatalf("top match = %+v, want brew-release with TriggerHit", ranked[0])
 	}
 	// The boost must lift the trigger above a skill that shares two draft terms lexically, which
 	// is what test-checklist ("the last cut release") is in the fixture for.
-	if got[1].ID != "test-checklist" || got[1].TriggerHit {
-		t.Fatalf("second suggestion = %+v, want test-checklist without a trigger hit", got[1])
+	if ranked[1].ID != "test-checklist" || ranked[1].TriggerHit {
+		t.Fatalf("second match = %+v, want test-checklist without a trigger hit", ranked[1])
 	}
-	if got[0].Score <= got[1].Score {
-		t.Errorf("trigger score %v did not beat the lexical score %v", got[0].Score, got[1].Score)
+	if ranked[0].Score <= ranked[1].Score {
+		t.Errorf("trigger score %v did not beat the lexical score %v", ranked[0].Score, ranked[1].Score)
+	}
+
+	// On the band the triggered skill stands alone: a verbatim trigger outscores a two-word
+	// lexical match by more than the cutoff allows a runner-up to trail.
+	got := c.Suggest(draft, nil, 0)
+	if ids := suggestedIDs(t, got); !reflect.DeepEqual(ids, []string{"brew-release"}) {
+		t.Fatalf("Suggest = %v, want brew-release alone", ids)
+	}
+	if !got[0].TriggerHit {
+		t.Errorf("Suggest row = %+v, want TriggerHit", got[0])
 	}
 }
 
@@ -306,9 +321,19 @@ func TestSuggestExcludeDropsASkillAndTheNextFillsIn(t *testing.T) {
 
 func TestSuggestLimitCapsTheResult(t *testing.T) {
 	t.Parallel()
-	c := newFixtureCatalog(t, suggestFixture())
-	const draft = "please audit the parser for security holes"
+	// Four skills with identical summaries and equal-length ids score identically, so all four
+	// survive the relative cutoff and only the limit decides how many the band gets.
+	c := newFixtureCatalog(t, []Skill{
+		{ID: "quad-alpha", DisplayName: "Quad Alpha", Summary: "A duplicated fixture entry for limit capping."},
+		{ID: "quad-bravo", DisplayName: "Quad Bravo", Summary: "A duplicated fixture entry for limit capping."},
+		{ID: "quad-delta", DisplayName: "Quad Delta", Summary: "A duplicated fixture entry for limit capping."},
+		{ID: "quad-gamma", DisplayName: "Quad Gamma", Summary: "A duplicated fixture entry for limit capping."},
+	})
+	const draft = "duplicated fixture entry capping"
 
+	if got := rank(c, draft, nil); len(got) != 4 {
+		t.Fatalf("rank admitted %d skills, want all 4 of the fixture", len(got))
+	}
 	if got := c.Suggest(draft, nil, 1); len(got) != 1 {
 		t.Errorf("Suggest(limit 1) returned %d results, want 1", len(got))
 	}
@@ -318,8 +343,168 @@ func TestSuggestLimitCapsTheResult(t *testing.T) {
 	if got := c.Suggest(draft, nil, -5); len(got) != defaultSuggestLimit {
 		t.Errorf("Suggest(limit -5) returned %d results, want the default %d", len(got), defaultSuggestLimit)
 	}
-	if got := c.Suggest(draft, nil, 50); len(got) != 3 {
-		t.Errorf("Suggest(limit 50) returned %d results, want the 3 admitted", len(got))
+	if got := c.Suggest(draft, nil, 50); len(got) != 4 {
+		t.Errorf("Suggest(limit 50) returned %d results, want the 4 admitted", len(got))
+	}
+}
+
+func TestSuggestKeepsOnlyRowsWithinTheRelativeCutoff(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+	const draft = "please audit the parser for security holes"
+
+	// Three skills clear the evidence gate; the band shows the two within minRelativeScore of the
+	// leader and drops the third, which rank still returns for the lookup's sake.
+	ranked := rank(c, draft, nil)
+	if ids := suggestedIDs(t, ranked); !reflect.DeepEqual(ids, []string{"security-audit", "code-audit", "note-taker"}) {
+		t.Fatalf("rank = %v, want the three admitted skills", ids)
+	}
+	floor := minRelativeScore * ranked[0].Score
+	if ranked[1].Score < floor || ranked[2].Score >= floor {
+		t.Fatalf("fixture scores %v no longer straddle the cutoff %v", []float64{ranked[0].Score, ranked[1].Score, ranked[2].Score}, floor)
+	}
+	if ids := suggestedIDs(t, c.Suggest(draft, nil, 0)); !reflect.DeepEqual(ids, []string{"security-audit", "code-audit"}) {
+		t.Fatalf("Suggest = %v, want the two rows within the cutoff", ids)
+	}
+}
+
+func TestCutRelativeKeepsTheTopRowAndTheRowsWithinTheFloor(t *testing.T) {
+	t.Parallel()
+	row := func(id string, score float64) Suggestion { return Suggestion{ID: id, Score: score} }
+	cases := []struct {
+		name   string
+		ranked []Suggestion
+		want   []string
+	}{
+		{"a runner-up at half the top score is dropped", []Suggestion{row("top", 10), row("half", 5)}, []string{"top"}},
+		{"a runner-up at seven tenths is kept", []Suggestion{row("top", 10), row("seven", 7)}, []string{"top", "seven"}},
+		{"a runner-up exactly at the floor is kept", []Suggestion{row("top", 10), row("edge", 6)}, []string{"top", "edge"}},
+		{"the cut is a prefix of the ranked order", []Suggestion{row("top", 10), row("seven", 7), row("half", 5), row("tail", 1)}, []string{"top", "seven"}},
+		{"the top row survives at any absolute score", []Suggestion{row("tiny", 0.001), row("tinier", 0.0001)}, []string{"tiny"}},
+		{"a lone row is kept", []Suggestion{row("only", 3)}, []string{"only"}},
+		{"nothing in, nothing out", nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := suggestedIDs(t, cutRelative(tc.ranked))
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("cutRelative = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSuggestIgnoresTheDevGenericWords(t *testing.T) {
+	t.Parallel()
+	// "add" and "file" both sit in this summary, so before they were stopwords the draft cleared
+	// the evidence gate on them alone; now neither is a term and nothing else matches.
+	c := newFixtureCatalog(t, []Skill{
+		{ID: "importer", DisplayName: "Importer", Summary: "Add a file to the workspace index and report what it holds."},
+	})
+
+	if got := c.Suggest("add the file please", nil, 0); got != nil {
+		t.Fatalf("Suggest = %v, want nil when only dev-generic words match", suggestedIDs(t, got))
+	}
+	for _, word := range []string{"file", "files", "add"} {
+		if !stopwords[word] {
+			t.Errorf("stopwords lacks the dev-generic word %q", word)
+		}
+	}
+}
+
+func TestSuggestStillHitsTheStagedChangesTrigger(t *testing.T) {
+	t.Parallel()
+	// "change" is deliberately NOT a stopword: tokenize tests the raw word before stemming, so
+	// adding it would drop the singular in this draft while the plural trigger kept its term, and
+	// commit-hygiene's "stage these changes" would stop hitting.
+	c, err := Load(Sources{UseShippedSkills: true})
+	if err != nil {
+		t.Fatalf("Load(shipped): %v", err)
+	}
+
+	got := c.Suggest("stage this change now", nil, 0)
+	if len(got) == 0 || got[0].ID != "commit-hygiene" || !got[0].TriggerHit {
+		t.Fatalf("Suggest = %v, want commit-hygiene first with TriggerHit", suggestedIDs(t, got))
+	}
+}
+
+// TestShippedTriggersKeepTheirTokenCounts pins the number of terms tokenize leaves of every shipped
+// trigger phrase and asserts that no trigger term is a stopword or the stem of one. It is the
+// stopword rule's bite check: a word may join stopwords only if no tokenized shipped-trigger term
+// equals it or its stem, and this table is what turns red when one does — a trigger whose count
+// drops has been partly swallowed, and a trigger whose count reaches zero can never hit again.
+func TestShippedTriggersKeepTheirTokenCounts(t *testing.T) {
+	t.Parallel()
+	c, err := Load(Sources{UseShippedSkills: true})
+	if err != nil {
+		t.Fatalf("Load(shipped): %v", err)
+	}
+
+	want := map[string]map[string]int{
+		"code-review": {
+			"review this": 1, "code review": 2, "review my changes": 2, "review the diff": 2,
+			"review this pr": 2, "look over this code": 2, "check this code": 2, "any bugs in this": 1,
+			"is this correct": 1, "what did i miss": 1, "critique this": 1,
+		},
+		"commit-hygiene": {
+			"commit this": 1, "commit message": 2, "write a commit": 2, "git commit": 2,
+			"stage these changes": 2, "split this commit": 2, "amend the commit": 2,
+			"update the changelog": 2, "prepare a pr": 2, "conventional commits": 2,
+			"squash these commits": 2,
+		},
+		"debugging": {
+			"debug this": 1, "fix this bug": 2, "why is this failing": 2, "why does this crash": 2,
+			"this test fails": 2, "test is failing": 2, "stack trace": 2, "panic": 1,
+			"it worked before": 2, "track down the cause": 3, "reproduce the issue": 2, "root cause": 2,
+		},
+		"planning": {
+			"make a plan": 1, "plan this": 1, "plan out": 1, "how should i approach": 1,
+			"break this down": 2, "what are the steps": 1, "implement this feature": 2,
+			"where do i start": 2, "refactor this": 1, "multi-step task": 3, "step by step": 2,
+		},
+	}
+
+	stems := make(map[string]string, len(stopwords))
+	for word := range stopwords {
+		stems[stem(word)] = word
+	}
+	seen := 0
+	for _, s := range c.List() {
+		if want[s.ID] == nil {
+			t.Errorf("shipped skill %q has no row in the pin table", s.ID)
+			continue
+		}
+		for _, trigger := range s.Triggers {
+			terms := tokenize(trigger)
+			pinned, ok := want[s.ID][trigger]
+			if !ok {
+				t.Errorf("%s trigger %q is not pinned; add it with %d terms", s.ID, trigger, len(terms))
+				continue
+			}
+			seen++
+			if len(terms) != pinned {
+				t.Errorf("%s trigger %q tokenizes to %v (%d terms), pinned at %d", s.ID, trigger, terms, len(terms), pinned)
+			}
+			for _, term := range terms {
+				if stopwords[term] {
+					t.Errorf("%s trigger %q term %q is a stopword", s.ID, trigger, term)
+				}
+				if word, clash := stems[term]; clash {
+					t.Errorf("%s trigger %q term %q is the stem of stopword %q", s.ID, trigger, term, word)
+				}
+			}
+		}
+	}
+	total := 0
+	for _, rows := range want {
+		total += len(rows)
+	}
+	if seen != total {
+		t.Errorf("pinned %d triggers but the shipped skills declare %d; drop the stale rows", total, seen)
 	}
 }
 
