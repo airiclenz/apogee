@@ -352,9 +352,39 @@ var announcedScratchWritePath = regexp.MustCompile(`"path":"([^"]+)/probe\.txt"`
 // unprompted and gates everything else (ADR 0012 D5), so a pane here can only be the fence
 // misclassifying the announced path.
 func TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters(t *testing.T) {
+	assertAnnouncedScratchDirIsWritableIn(t, "allow-edits")
+}
+
+// TestE2EAnnouncedScratchDirIsWritableInPlan is the same invariant one rung down the ladder, where
+// it is a stronger claim: Plan runs the read-only floor and nothing else, so for a write_file to
+// land at all the ladder must have recognised the announced dir as the ONE target Plan's writers
+// run on (ADR 0012 second loosen, 2026-09-14). Before that loosen the orientation in Plan named no
+// scratch dir and the writers were off the menu; a Plan that announces the dir again has to honour
+// the announcement on the same request.
+func TestE2EAnnouncedScratchDirIsWritableInPlan(t *testing.T) {
+	assertAnnouncedScratchDirIsWritableIn(t, "plan")
+}
+
+// TestE2EAnnouncedScratchDirIsWritableInAskBefore is the invariant in the mode whose whole contract
+// is to ask: Ask-Before gates every write and every command, and the scratch dir is the one
+// exception the second loosen carves out — a native write into the announced dir runs unprompted,
+// everything else still raises its pane. The zero-pane assertion is the claim; a pane here means
+// the exception was lost and the model is again stopped on every scratch file it creates.
+func TestE2EAnnouncedScratchDirIsWritableInAskBefore(t *testing.T) {
+	assertAnnouncedScratchDirIsWritableIn(t, "ask-before")
+}
+
+// assertAnnouncedScratchDirIsWritableIn drives announced-scratch-write.yaml in the given mode and
+// asserts the whole journey: the model's write_file names the dir the orientation announced on that
+// very request, the tool result is a success receipt, the bytes reached the announced dir, and no
+// approval pane was raised on the way. The script is the same for every mode — what differs is the
+// launch flag, which is why one fixture serves three tests.
+func assertAnnouncedScratchDirIsWritableIn(t *testing.T, mode string) {
+	t.Helper()
+
 	stub := stubllm.New(t, loadScript(t, "announced-scratch-write"))
 	drv := tuitest.NewDriver(t, e2eSize)
-	sess := launchTUIIn(t, drv, stub, "", announcedStandingPrompt, "--mode", "allow-edits")
+	sess := launchTUIIn(t, drv, stub, "", announcedStandingPrompt, "--mode", mode)
 	panes := watchApprovalPanes(t, drv)
 
 	submit(drv, announcedScratchWritePrompt)
@@ -378,8 +408,9 @@ func TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters(t *testing.T) {
 		t.Fatalf("the run produced %d tool results; want the fixture's one:\n%s",
 			len(results), strings.Join(results, "\n---\n"))
 	}
-	if strings.Contains(results[0], "denied by approver") || strings.Contains(results[0], "outside the workspace root") {
-		t.Errorf("the write into the announced scratch dir was refused:\n%s", results[0])
+	if strings.Contains(results[0], "denied by approver") || strings.Contains(results[0], "outside the workspace root") ||
+		strings.Contains(results[0], "plan mode:") {
+		t.Errorf("the write into the announced scratch dir was refused in %s:\n%s", mode, results[0])
 	}
 	if !strings.Contains(results[0], "wrote ") {
 		t.Errorf("the write did not come back as a success receipt:\n%s", results[0])
@@ -395,7 +426,89 @@ func TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters(t *testing.T) {
 	}
 
 	if n := panes(); n != 0 {
-		t.Errorf("the run raised %d approval pane(s); a path apogee itself named must cost nobody a look", n)
+		t.Errorf("the run raised %d approval pane(s) in %s; a path apogee itself named must cost nobody a look", n, mode)
+	}
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+	stub.AssertConsumed(t)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// announcedScratchRefusalPrompt is what the refusal fixture's model is asked, and the phrase
+// announced-scratch-refusal-plan.yaml keys its one tool turn on.
+const announcedScratchRefusalPrompt = "Create the probe file in the workspace."
+
+// announcedScratchLine is the orientation's own `Scratch dir:` bullet as it stands on the wire —
+// the same pattern the fixtures capture with, applied here to the system text the stub was sent,
+// so a test can hold the announced spelling next to a tool result that has to name it.
+var announcedScratchLine = regexp.MustCompile(`Scratch dir: (\S+) — writable`)
+
+// announcedScratchDirOnTheWire is the scratch dir the orientation announced on the run's requests,
+// read off the system message itself. It is what a refusal that claims to name "the session
+// scratch dir" is compared against: the announcement, not a path this test built.
+func announcedScratchDirOnTheWire(t *testing.T, stub *stubllm.Server) string {
+	t.Helper()
+
+	for _, req := range stub.Requests() {
+		for _, msg := range req.Messages {
+			if msg.Role != "system" {
+				continue
+			}
+			if match := announcedScratchLine.FindStringSubmatch(msg.Content); match != nil {
+				return match[1]
+			}
+		}
+	}
+	t.Fatal("no request's system prompt announced a scratch dir; the orientation bullet is missing")
+	return ""
+}
+
+// TestE2EPlanRefusalNamesTheAnnouncedScratchDir is the other half of Plan's contract: a write_file
+// aimed anywhere BUT the scratch dir is still refused, and the refusal the model reads names the
+// dir the orientation announced — in the same spelling — so the way out is in the tool result
+// rather than left for the model to guess. The reason is compared against the announcement read
+// off the same conversation's system prompt: a refusal naming a resolved or otherwise re-spelled
+// path would fail here, because the model can only act on the spelling it was given.
+func TestE2EPlanRefusalNamesTheAnnouncedScratchDir(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "announced-scratch-refusal-plan"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	ws := e2eWorkspace(t)
+	sess := launchTUIIn(t, drv, stub, ws, announcedStandingPrompt, "--mode", "plan")
+	panes := watchApprovalPanes(t, drv)
+
+	submit(drv, announcedScratchRefusalPrompt)
+	drv.WaitText("The workspace write was refused.")
+	drv.WaitQuiet(settled)
+
+	scratch := announcedScratchDirOnTheWire(t, stub)
+
+	results := toolResults(stub)
+	if len(results) != 1 {
+		t.Fatalf("the run produced %d tool results; want the fixture's one:\n%s",
+			len(results), strings.Join(results, "\n---\n"))
+	}
+	// The bare reason is the result's content; an advise trailer may follow it, so the claim is
+	// containment of the exact sentence, path and all.
+	want := "plan mode: writes are permitted only inside the session scratch dir " + scratch
+	if !strings.Contains(results[0], want) {
+		t.Errorf("the Plan refusal reads:\n%s\nwant it to carry %q", results[0], want)
+	}
+	if strings.Contains(results[0], "wrote ") {
+		t.Errorf("a workspace write ran in Plan:\n%s", results[0])
+	}
+
+	// And nothing landed in the workspace: a refusal that had already written would be a receipt
+	// with the wrong words, not a refusal.
+	if _, err := os.Stat(filepath.Join(ws, "probe.txt")); !os.IsNotExist(err) {
+		t.Errorf("the refused write reached the workspace (stat err = %v)", err)
+	}
+
+	if n := panes(); n != 0 {
+		t.Errorf("the run raised %d approval pane(s); Plan refuses, it never asks", n)
 	}
 	if un := stub.Unmatched(); len(un) > 0 {
 		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)

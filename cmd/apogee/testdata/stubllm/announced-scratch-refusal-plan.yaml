@@ -1,0 +1,34 @@
+# The upstream TestE2EPlanRefusalNamesTheAnnouncedScratchDir talks to: a model in Plan mode that
+# reaches for the workspace with apogee's OWN write tool — the one thing Plan still refuses now
+# that the session scratch dir is writable there (ADR 0012 second loosen, 2026-09-14).
+#
+# The write below names a WORKSPACE path on purpose. Plan offers the writers for exactly one
+# target, the scratch dir, so this call has to come back refused — and the refusal has to say
+# which target that is, in the spelling the orientation announced on this very request. The test
+# reads that spelling back off the same request's system prompt and holds it against the tool
+# result; a refusal that named nothing, or named a re-spelled path, fails here rather than leaving
+# a model to guess where Plan will let it write.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced scratch refusal
+    # The prompt, and the one workspace write Plan refuses.
+    - when:
+        last_message: probe file in the workspace
+      tool_calls:
+        - id: workspace-write
+          name: write_file
+          arguments: '{"path":"probe.txt","content":"APOGEE-ANNOUNCED-REFUSED-3a90\n"}'
+    # The wrap-up, once the refusal has come back.
+    - when:
+        tool_result: write_file
+      text: The workspace write was refused.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

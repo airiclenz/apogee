@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -950,6 +951,78 @@ func TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes(t *testing.T) {
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("a stale scratch dir survived a headless start (stat err = %v); a host driven only "+
 			"headlessly never passes the TUI's boot sweep", err)
+	}
+}
+
+// headlessSummarySession lifts the record id out of the summary line a headless run prints on
+// stderr (`session: <id> · turns: N · denied: M`): the name the run's scratch dir carries.
+var headlessSummarySession = regexp.MustCompile(`session: (\S+) · turns:`)
+
+// TestHeadlessPlanRunWritesItsOwnScratchDir is the Firing half of the announced-scratch journey:
+// a headless `--mode plan` run whose scripted model writes into the dir the orientation announced
+// lands the file under the run's own scratch dir — named after its record, so the two share one
+// sweep — and reports `denied: 0`. The count is the claim about WHO answered: the fail-safe denier
+// counts only the gated actions it refused, and a scratch write in Plan is neither gated nor
+// refused (ADR 0012 second loosen, 2026-09-14), so a Plan Firing that put its working files in
+// its scratch dir does not read as a run that was told no.
+//
+// The real engine runs here — run.Once against a scripted upstream, not the stubRunner — because
+// the claim is about the ladder's verdict on the announced path, which no stub of the run can
+// vouch for.
+func TestHeadlessPlanRunWritesItsOwnScratchDir(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "announced-scratch-write"))
+	prev := runOnce
+	runOnce = run.Once
+	t.Cleanup(func() { runOnce = prev })
+	assertNoAmbientApogeeConfig(t)
+	t.Setenv(config.EnvMode, "")
+
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	cmd := newHeadlessCommand()
+	var outBuf, errBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&errBuf)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", home, "--workspace", e2eWorkspace(t), "--mode", "plan", announcedScratchWritePrompt})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("headless: %v (stderr: %q)", err, errBuf.String())
+	}
+	stub.AssertConsumed(t)
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+
+	stderr := errBuf.String()
+	match := headlessSummarySession.FindStringSubmatch(stderr)
+	if match == nil {
+		t.Fatalf("stderr carries no summary line naming the record:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "denied: 0") {
+		t.Errorf("the summary counts a denial; a scratch write in Plan is never the denier's to refuse:\n%s", stderr)
+	}
+
+	// The write the model sent named the announced dir, and that dir is the run's own: the one
+	// under <home>/scratch that carries the record's id.
+	var scratch string
+	for _, call := range toolCalls(stub) {
+		if m := announcedScratchWritePath.FindStringSubmatch(call.Arguments); m != nil {
+			scratch = m[1]
+		}
+	}
+	if scratch == "" {
+		t.Fatal("no write_file call named the announced scratch dir; the capture went unmatched")
+	}
+	if want := filepath.Join(home, "scratch", match[1]); scratch != want {
+		t.Errorf("the orientation announced %s; want the run's own scratch dir %s", scratch, want)
+	}
+	body, err := os.ReadFile(filepath.Join(scratch, "probe.txt"))
+	if err != nil {
+		t.Errorf("the scratch write did not reach %s: %v", scratch, err)
+	} else if !strings.Contains(string(body), announcedScratchWriteMarker) {
+		t.Errorf("%s/probe.txt holds %q; want the written content", scratch, string(body))
+	}
+	if strings.TrimRight(outBuf.String(), "\n") != "The scratch probe is written." {
+		t.Errorf("stdout = %q; want the answer alone", outBuf.String())
 	}
 }
 

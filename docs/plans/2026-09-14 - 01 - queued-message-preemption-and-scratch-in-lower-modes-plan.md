@@ -179,7 +179,11 @@ NOTES (2026-09-14): `internal/tui/schedule.go` `autoBlockedNote` ("runs in plan 
 
 **Commit:** `feat(agent): Plan announces its scratch dir again; mode prose says where the lower modes may write`
 
-## 6. Announced-surface e2e: Plan and Ask-Before write the announced scratch dir; a Plan Firing does too
+## 6. Announced-surface e2e: Plan and Ask-Before write the announced scratch dir; a Plan Firing does too — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): took the plan's "one script parameterised by `--mode`" alternative — `announced-scratch-write.yaml` serves Allow-Edits, Plan, Ask-Before and the headless Plan run (its header comment widened); no `announced-scratch-write-plan.yaml` / `-ask.yaml` twins were created since the script is mode-independent.
+NOTES (2026-09-14): the Allow-Edits test's body moved verbatim into `assertAnnouncedScratchDirIsWritableIn(t, mode)` so the three mode tests share it; its name, doc comment and every assertion are unchanged (one extra refusal marker, `plan mode:`, joined the refused-write check).
+NOTES (2026-09-14): the refusal test reads the announced dir off the request's own system message (`announcedScratchDirOnTheWire`, same pattern the fixtures capture with) and asserts the tool result Contains the exact reason — Contains rather than equality, per the Read-first note on an advise trailer.
 
 **What:** Depends on item 5. Drive the journey with the exact strings the program emits:
 - `cmd/apogee/testdata/stubllm/announced-scratch-write.yaml` gains Plan and Ask-Before twins (or one script parameterised by `--mode`): the model reads the orientation's `Scratch dir: <path> — writable` line (the existing capture pattern) and calls `write_file` on `<path>/probe.txt`.

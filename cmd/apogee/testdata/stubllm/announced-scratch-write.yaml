@@ -1,6 +1,8 @@
-# The upstream TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters talks to: a model that takes
-# apogee at its word about where it may write, and reaches for that place with apogee's OWN write
-# tool rather than a terminal command.
+# The upstream TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters and its Plan and Ask-Before
+# twins talk to: a model that takes apogee at its word about where it may write, and reaches for
+# that place with apogee's OWN write tool rather than a terminal command. One script serves all
+# three tests because nothing in the conversation depends on the mode — only the launch flag
+# differs, and the ladder's answer to the same call is what each test measures.
 #
 # The one tool turn carries a capture whose pattern lifts the path out of the orientation block's
 # own `- Scratch dir: %s — writable and outside the workspace; …` line
@@ -10,7 +12,9 @@
 # guard, this one proves the blast-radius ladder — a write_file into the session's scratch dir
 # classified as an out-of-workspace escape and gated in Allow-Edits/Auto, so a model doing exactly
 # what the orientation told it was stopped to ask permission (or refused outright by an unattended
-# run's denier) on every scratch file it created. A capture that went unmatched, or a path the
+# run's denier) on every scratch file it created; and, since the second loosen of ADR 0012
+# (2026-09-14), refused in Plan and gated in Ask-Before, where the scratch dir is the one target
+# the ladder lets a native write through unprompted. A capture that went unmatched, or a path the
 # ladder gated, fails here rather than in a user's session.
 model: announced-model
 turns:
