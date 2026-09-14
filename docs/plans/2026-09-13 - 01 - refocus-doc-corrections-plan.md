@@ -35,7 +35,8 @@ Re-check round (2026-09-13, 62a51ac5), same reviewers over the amended plan:
 
 **Out of scope:** `docs/manual/headless.md` (its kinds table and `reaction_fired` row belong to `docs/plans/2026-09-13 - 00 - headless-ci-hygiene-plan.md`); unexporting `Runner.Replace`; narrowing the `reaction_fired` vocabulary; the doc-vs-doc disagreements the briefing lists as unsettled (ADR 0077 D5 vs stage-3 plan, CHANGELOG layering, historical `internal/hooks/...` paths in ADR 0075, the confinement contract's "hook" vocabulary); the undocumented gate-hint carry-over (`gate.go:298-299`); the Reaction residue beads.
 
-## 1. CONTEXT.md — Reaction entry, `ReactionFiredEvent` actions, `Generation` swap sentence
+## 1. CONTEXT.md — Reaction entry, `ReactionFiredEvent` actions, `Generation` swap sentence — ✅ DONE (2026-09-14)
+NOTES (2026-09-14): retry — the tree held a prior batch attempt's edits for items 1–4; per the DECISION, CONTEXT.md was reduced to item 1's three hunks by reverting item 2's three Bypass-sentence hunks (item 2 re-applies them in its own dispatch); the other items' files were left untouched.
 
 **What:** Three edits in `CONTEXT.md`, each replacing the CURRENT string with the PROPOSED string from `corrections.md` items 1, 5 and 2 verbatim:
 - lines 1181-1182 (`Reaction` entry): `Validate` no longer claims to refuse "an id another reaction already took"; duplicates are refused one level up by `Generation.Validate` per lane (same id allowed across the observe and sync lanes) and by the agent's arming step (`internal/agent/reactions.go:758-789`).

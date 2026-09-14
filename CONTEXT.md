@@ -1178,8 +1178,10 @@ seven kinds behind one sealed interface: five per-seam Go func types, one per se
 an engine reaction always names exactly one seam; and two out-of-process kinds a user entry arms —
 an `ArgvHandler` (a command, serving observe, advise and gate) and a `WebhookHandler` (a POST,
 serving observe alone) — whose `On` list spans Moments and is checked against the class. `Validate`
-refuses an `On` list the handler cannot serve, an origin × class outside the matrix, a missing id,
-origin, class or handler, and an id another reaction already took. `TopLevelOnly` opts a reaction
+refuses an `On` list the handler cannot serve, an origin × class outside the matrix, and a missing
+id, origin, class or handler; a duplicate id is refused one level up — `Generation.Validate` per
+lane (the same id may appear in both the observe and the sync lane) and the agent's arming step,
+which also refuses an id a builtin or the context-fill notice already holds. `TopLevelOnly` opts a reaction
 **out** of sub-agent inheritance — the zero value is inherited by every child agent; `Timeout` is
 the deadline an out-of-process handler runs under on either lane (observe 30s, advise 10s, gate 5s
 by default; an entry's `timeout:` binds every reaction it arms) and is ignored by a Go one, which
@@ -1190,8 +1192,10 @@ and a panic reported and stepped over. Each returns one **`Outcome`**:
 `{Retry, Inject, Defer, Edited, Gate, Detail}`, whose zero value means "did nothing" and is not
 booked. Anything else is a firing, and it reaches every Driver as one `ReactionFiredEvent` keyed by
 id, under the action `retry`, else `defer`, else `intercept` when a shape reaction moved the working
-value's revision; the sync lane books `advise` for a landed trailer, a gate's own verdict (`deny`,
-`ask`, `allow`) and `failed` when a command could not run. The seven Floor-guard booleans stay the
+value's revision, or `fired` when an armed reaction acted at pre-request, pre-tool-exec or
+history-rewrite; two Floor guards book their own labels (`cap`, `salvage`) and the context-fill
+notice books `notice`; the sync lane books `advise` for a landed trailer, a gate's own verdict
+(`deny`, `ask`, `allow`) and `failed` when a command could not run. The seven Floor-guard booleans stay the
 canonical switches for the builtins.
 A **user**-origin Reaction is one entry of the global `reactions:` list —
 `{id, on: [moments], run: <argv | {url, headers, headers-env}>, advise: <argv>, gate: <argv>, workspace?, timeout?, enabled?}` —
@@ -1208,8 +1212,9 @@ and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
 **`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice}` — which a **Driver** applies
 in one act to the agent (which takes Floor, Bypass, Sync and the
 **[Context-fill notice](#reactions-and-moments)** switch) and to the runner (which takes Observe), so
-nothing downstream reads a half-swapped state; it is the single idiom that replaced `SetBypass`, `SetFloor`
-and the runner's own `Replace`
+nothing downstream reads a half-swapped state; it is the single idiom that replaced `SetBypass` and `SetFloor`;
+the runner keeps `Replace` as the observe half's swap primitive, now
+called only from the Driver's `SetReactions`
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D4, A8). The
 key's earlier name was `hooks:`, and a file still carrying it is **folded** into `reactions:` once,
 at start-up: backed up first, re-rendered from its parsed entries, and reported in a note naming
