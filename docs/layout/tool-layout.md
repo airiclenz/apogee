@@ -131,6 +131,11 @@ closer is drawn today.
   exception to it: a framed sub-agent has one state, collapsed, and opening it
   opens a different *surface* rather than a third fold stage of the row
   ([ADR 0063](../adr/0063-sub-agent-runs-are-user-addressable-views.md)).
+  The one block with a single state is `task_list`: it is **always open** —
+  every task row painted, each clipped to width, no `▶`/`▼` and no click
+  surface — because the checklist is the thing the reader keeps glancing at,
+  and a two-row preview would fold away exactly the rows they came to see
+  (2026-09-14; the table row below says so).
 - The umbrella's floor is its type rows — it never folds to one line.
   Clicking the umbrella header **closes all open children**.
 - Failure marking: the red right-slot summary only; no glyph or header color
@@ -330,7 +335,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | present_document | Present | document title (path fallback) | — | path + title |
 | ask_user | Ask user | the question | `answered` / `pending` | question + choices + the answer |
 | sub_agent | Sub-agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed` | task text + result summary |
-| task_list | Task list | — | `N open` | the list, one row per task |
+| task_list | Task list | — | `N open` | the list, one row per task — always open, no toggle |
 | load_skill | Skill | the loaded skill (the query until one is) | — | the skill body |
 
 Notes:
@@ -359,6 +364,12 @@ Notes:
   its slot counts the OPEN rows of the list the tool echoed back: a result
   with no rows at all — a cleared list, or a refusal — declines the slot and
   keeps the tool's own sentence there rather than reading `0 open`.
+  **2026-09-14** — the block is always open (the `Fold states` exception
+  above), and the header sentence the tool writes for the model (`Task list
+  — yours to maintain; call task_list with the COMPLETE list…`) is stripped
+  display-side: the card paints the task rows alone under its label. The
+  result text is the model's and reaches it unchanged (ADR 0031) — the strip
+  is a render-time act on a retained result, like every extractor's.
 - git_commit never promotes its one-line output into the slot at any width: the
   line repeats the subject the row already leads with, so the slot holds the
   short hash above and the line lays out in the body.

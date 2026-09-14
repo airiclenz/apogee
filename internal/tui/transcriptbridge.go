@@ -402,6 +402,12 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 		(tv.name == askUserToolName && done && len(w.Details) > 0 && !tv.Summary.failed) {
 		tv.solo = true
 	}
+	// The one-state mark is not on the wire at all and is re-derived rather than trusted for the
+	// same reason a delegation head's solo is: it is the REGISTRY's word about the tool
+	// (toolPresenter.alwaysOpen), knowable from the retained name alone, and a record that kept its
+	// own copy would replay a fold the live paint no longer has the day the entry changes. Reading the
+	// same entry field the live producer reads (presentToolCall) is what keeps the two paints one.
+	tv.alwaysOpen = toolRegistry[tv.name].alwaysOpen
 	if len(w.Details) > 0 {
 		lines := make([]detailLine, 0, len(w.Details))
 		for _, d := range w.Details {

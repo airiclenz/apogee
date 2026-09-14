@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/title"
 )
 
@@ -107,6 +108,16 @@ type toolPresenter struct {
 	// slot as the tool's own words keeps it, and the stat becomes the phrase the promote-guard
 	// swaps in when the row is too narrow for both (toolView.stat, design call 5).
 	stat func(res domain.ToolResult) (statValue, bool)
+
+	// alwaysOpen says this tool's block has ONE state, open: its collapsed paint is its whole branch
+	// list, so it hides nothing, wears no ▶/▼, and a click on any of its rows selects rather than
+	// folds (collapsedCall, the one predicate that decides the shape; blockHidesWhenCollapsed reads
+	// it). It is the presenter's word for a block that IS a list the reader keeps glancing at —
+	// task_list, the model's own checklist (ADR 0072) — where a two-row preview of a five-task list
+	// would fold away exactly the rows the reader came to see. It is a fact about the tool and never
+	// about the result, so it is copied onto the view at build time on both producers
+	// (presentToolCall, fromWireToolView) and never rides the wire.
+	alwaysOpen bool
 
 	// argStat words the same slot from the call's OWN ARGUMENTS, at the moment the call is
 	// presented — the request half of the table's stat column, and argBody's counterpart: a
@@ -440,10 +451,11 @@ var toolRegistry = map[string]toolPresenter{
 	// it. No contentArgs row either: the tasks array is the call's whole point, and repeating it
 	// above the result it produced would say the same thing twice; the session record keeps it.
 	"task_list": {
-		label:  "Task List",
-		verb:   "updating the task list",
-		detail: outputDetail, // the block the model reads: the header line, then one row per task
-		stat:   openTasksStat,
+		label:      "Task List",
+		verb:       "updating the task list",
+		detail:     taskListDetail, // the rows the model reads, its header sentence stripped
+		stat:       openTasksStat,
+		alwaysOpen: true, // the checklist is what the reader glances at; a fold would hide it
 	},
 	askUserToolName: {
 		label:   "Ask User",
@@ -1033,6 +1045,27 @@ func openTasksStat(res domain.ToolResult) (statValue, bool) {
 		return statValue{}, false
 	}
 	return countedStat(open, "open"), true
+}
+
+// taskListDetail lays out a task_list result as its task rows alone: the block's first line is
+// the header sentence internal/tasklist writes for the MODEL ("Task list — yours to maintain; call
+// task_list with the COMPLETE list…"), an instruction the reader has no use for on a card whose
+// label already says what it is, so it is dropped here — display-side only. The result text is the
+// model's and reaches it unchanged (ADR 0031): this is a render-time act on a retained result, the
+// same kind every extractor here performs. The line is recognised by the fence the package exports
+// for exactly that purpose (tasklist.Fence) rather than by a respelled prefix, so a reworded header
+// cannot leave a stale sentence on the card.
+//
+// Every remaining line is handed on as BODY, never promoted: a one-task list is still a list, and
+// its single row belongs beneath the header with the open count in the slot beside it
+// (openTasksStat), not in the slot itself. A result that does not open with the fence — a cleared
+// list echoing nothing, a refusal's sentence — is free-form output and keeps outputDetail's shape.
+func taskListDetail(content string) toolOutcome {
+	first, rest, _ := strings.Cut(content, "\n")
+	if !strings.HasPrefix(first, tasklist.Fence) {
+		return outputDetail(content)
+	}
+	return toolOutcome{Details: outputBody(rest)}
 }
 
 // taskListOpenMarker and taskListDoneMarker are the row prefixes internal/tasklist renders a task

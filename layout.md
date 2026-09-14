@@ -829,7 +829,10 @@ facts**: the entry keeps every line, and the cap applies at paint, not at build.
 **One budget, and every tool-shaped block spends it: the header, and at most two content rows.**
 So a collapsed block stands no taller than three screen rows, whatever tool filled it and however
 long its target is — which is the point, because a scrollback of tool calls should read as a list
-and not as a wall. Where the two rows go is the only thing the shape decides:
+and not as a wall. The one exception is the **always-open** block — `task_list`, the model's own
+checklist (2026-09-14): it has a single state, paints every task row clipped to width, wears no
+`▶`/`▼` and is no click target, because a two-row preview of a checklist would fold away exactly
+the rows the reader keeps glancing at. Where the two rows go is the only thing the shape decides:
 
 - **A call with a target** spends **one** of them on its row, and only that one — the leader shape
   fills the width exactly and cuts the target to make it, and the `+N more lines` count of what it

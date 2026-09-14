@@ -45,7 +45,10 @@ import (
 // stands two rows tall whatever tool filled it and however long its target is, which is the point:
 // a scrollback of tool calls reads as a list rather than as a wall. A
 // collapsed targetless call caps its branch list instead, since there the lines ARE the branches —
-// collapsedBodyCap of them, one clipped row each — and lands on the same budget.
+// collapsedBodyCap of them, one clipped row each — and lands on the same budget. The ONE block
+// outside the budget is the always-open one (toolView.alwaysOpen — task_list, the model's own
+// checklist): its "collapsed" paint is its whole branch list, one clipped row each and no cap, so it
+// has no second state and no toggle; collapsedCall is where that is decided, not here.
 //
 // toggle is the block's own click surface, settled once by renderToolBlock and spent on every row
 // a branch emits: the branch line, the body under it, the targetless shape's branch list. A click
@@ -121,7 +124,8 @@ func collapsedRemainder(tv toolView, expanded bool) string {
 // collapsedBodyCap is the TARGETLESS shape's cap — how many of its branch lines survive the
 // collapse (collapsedCall), the block having no body to cap instead. It is the taller of the two
 // shapes and the one the three-row budget is measured against, since there the branch lines ARE the
-// content and there is no target line above them to read them against.
+// content and there is no target line above them to read them against. An always-open call
+// (toolView.alwaysOpen) never meets it: that shape keeps every branch line in its one state.
 //
 // collapsedBranchRows is what one of those surviving lines may spend — one row, and the clip takes
 // the rest (clipDetails). It is what holds the targetless shape to the budget at all: two branch
@@ -231,7 +235,17 @@ const collapsedBodyRows = 0
 // a clipped target reveals nothing to expand (blockHidesWhenCollapsed). The width still reaches the
 // TARGETLESS shape, whose surviving branch lines the row budget cuts — a fact about the width rather
 // than about the entry, which lives with the clip that takes it (clipDetails).
+//
+// An ALWAYS-OPEN call (toolView.alwaysOpen) is the one shape with no cap: its whole branch list is
+// its collapsed paint, uncut and uncounted, so this answers "nothing hidden" for it and the toggle
+// rule, the ▶/▼ and the click surface all follow from that one answer (blockHidesWhenCollapsed) —
+// no painter special-cases the tool by name. It is asked before the target, because the mark says
+// the block has one state whatever shape the presenter gave it; today's one such call is targetless
+// (task_list), so its branch list is what lays out.
 func collapsedCall(tv toolView) (shown []detailLine, remainder detailLine, truncated bool) {
+	if tv.alwaysOpen {
+		return branchDetails(tv), detailLine{}, false
+	}
 	if tv.Target == "" {
 		return collapseAtCap(branchDetails(tv), collapsedBodyCap)
 	}

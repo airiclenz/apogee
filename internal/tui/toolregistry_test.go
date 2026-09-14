@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
 // TestGrepTarget pins what a grep row LEADS with. The pattern alone answers "what was searched
@@ -185,6 +188,23 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 	})
 }
 
+// taskListRendered is the block internal/tasklist renders for the three-task fixture every task_list
+// test here shares — 2 open, 1 done — spelled from the package's own header format rather than
+// respelled, so a reworded header cannot leave these tests pinning a sentence the tool no longer
+// writes.
+var taskListRendered = fmt.Sprintf(tasklist.HeaderFormat, 2, 1) + "\n" +
+	"[✔] read the plan\n" +
+	"[ ] write the code\n" +
+	"[ ] run the tests"
+
+// taskListCall is the call that fixture answers.
+var taskListCall = domain.ToolCall{
+	ID:   "1",
+	Tool: "task_list",
+	Arguments: []byte(`{"tasks":[{"text":"read the plan","done":true},` +
+		`{"text":"write the code"},{"text":"run the tests"}]}`),
+}
+
 // TestToolRegistryPresentsTheTaskListCall pins the whole card a task_list call draws (ADR 0072):
 // the registry's own label and verb rather than the raw-name fallback a dynamic tool falls to, no
 // target — its one argument IS the list, the same reason git_status carries none — and the list the
@@ -194,20 +214,16 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 // rule (TestFileContentBodiesAreNumbered, whose walk reaches every registry entry): a task list is
 // the model's own text and sits on no file's lines, so a gutter here would claim a position that
 // does not exist.
+//
+// The PAINT is pinned whole as well, at 80 columns: the block is always open (the ratified call of
+// plan "2026-09-14 - 00", item 1), so its header wears no indicator, every task row is painted in
+// order beneath it, the `N open` stat closes the list as its ┕ row — a targetless block has no
+// leader row for a stat to ride — and neither the model-facing header sentence nor a `+N more lines`
+// marker is anywhere on it.
 func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 	t.Parallel()
 
-	const rendered = "Task list — yours to maintain; call task_list with the COMPLETE list to update it (2 open, 1 done):\n" +
-		"[✔] read the plan\n" +
-		"[ ] write the code\n" +
-		"[ ] run the tests"
-
-	call := domain.ToolCall{
-		ID:   "1",
-		Tool: "task_list",
-		Arguments: []byte(`{"tasks":[{"text":"read the plan","done":true},` +
-			`{"text":"write the code"},{"text":"run the tests"}]}`),
-	}
+	rendered, call := taskListRendered, taskListCall
 
 	tv := presentToolCall(call, "", workspaceRoot{})
 	if tv.Label != "Task List" {
@@ -238,6 +254,64 @@ func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 	}
 	if !carriesDoneRow {
 		t.Errorf("body = %v, want it to carry the ticked row the tool rendered", body)
+	}
+
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: call})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: rendered}})
+
+	assertTaskListPaint(t, renderPlain(tr, 80))
+}
+
+// assertTaskListPaint is the always-open shape the three-task fixture paints, shared by the live
+// card and its replayed record so the two are held to ONE picture.
+func assertTaskListPaint(t *testing.T, painted string) {
+	t.Helper()
+	want := []string{
+		"✦ Task List",
+		"  ┝ [✔] read the plan",
+		"  ┝ [ ] write the code",
+		"  ┝ [ ] run the tests",
+		"  ┕ 2 open",
+	}
+	if got := strings.Split(painted, "\n"); !reflect.DeepEqual(got, want) {
+		t.Errorf("task_list paints:\n%s\nwant the always-open shape:\n%s", painted, strings.Join(want, "\n"))
+	}
+	if strings.Contains(painted, tasklist.Fence) {
+		t.Errorf("paint = %q, want the model-facing header sentence stripped (display-side; the result text is the model's)", painted)
+	}
+	if strings.Contains(painted, "more line") {
+		t.Errorf("paint = %q, want no +N more lines marker — an always-open block hides nothing", painted)
+	}
+}
+
+// TestToolRegistryTaskListReplaysAlwaysOpen holds the replayed record to the live card's paint: the
+// always-open mark is not on the wire and is re-derived off the retained name at decode
+// (fromWireToolView, the same registry field presentToolCall reads), so a session resumed with a
+// task list on screen paints it open exactly as the run that wrote it did, and never with a fold.
+func TestToolRegistryTaskListReplaysAlwaysOpen(t *testing.T) {
+	t.Parallel()
+
+	live := &transcript{}
+	live.apply(domain.ToolCallEvent{Call: taskListCall})
+	live.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: taskListRendered}})
+
+	blob, err := encodeTranscript(live)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	entries, err := decodeTranscript(blob)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	replayed := &transcript{entries: entries}
+
+	if !replayed.entries[0].tool.alwaysOpen {
+		t.Errorf("the decoded record lost the always-open mark; want it re-derived from the registry off %q", replayed.entries[0].tool.name)
+	}
+	assertTaskListPaint(t, renderPlain(replayed, 80))
+	if live, back := renderPlain(live, 80), renderPlain(replayed, 80); live != back {
+		t.Errorf("the replayed record paints:\n%s\nwant the live paint:\n%s", back, live)
 	}
 }
 

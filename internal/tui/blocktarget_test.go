@@ -7,6 +7,7 @@
 package tui
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -745,6 +747,60 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 			}
 			if got := headerStar(t, tr, true); got != tc.flipped {
 				t.Errorf("header at the flipped phase = %q, want %q", got, tc.flipped)
+			}
+		})
+	}
+}
+
+// TestAlwaysOpenBlockIsNoToggleTarget pins the always-open block's half of the target rule (the
+// ratified call of plan "2026-09-14 - 00", item 1): a task_list block paints every task row in its
+// one state, so it hides nothing, wears no indicator and marks no row — a click anywhere on it keeps
+// its selection meaning. It holds at EVERY width, which is the part the width arm of
+// blockHidesWhenCollapsed would otherwise get wrong: at 40 columns every row of the long-task list
+// is clipped to width, and a clipped row on a block with no second state is a row the block is
+// showing, not one it hides — so the narrow block is as inert as the wide one.
+func TestAlwaysOpenBlockIsNoToggleTarget(t *testing.T) {
+	t.Parallel()
+
+	longTasks := fmt.Sprintf(tasklist.HeaderFormat, 2, 1) + "\n" +
+		"[✔] read the whole plan document and every ADR it names before touching a file\n" +
+		"[ ] write the code the item asks for, the tests beside it, and the docs it names\n" +
+		"[ ] run the item's acceptance command and the full suite before writing the sidecar"
+
+	cases := []struct {
+		name     string
+		width    int
+		rendered string
+		rows     int // task rows the paint must carry, whatever the width
+	}{
+		{name: "at 80 columns every row fits", width: 80, rendered: taskListRendered, rows: 3},
+		{name: "at 40 columns every row is clipped", width: 40, rendered: longTasks, rows: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tr.apply(domain.ToolCallEvent{Call: taskListCall})
+			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: tc.rendered}})
+
+			if got := blockMarks(t, tr, tc.width); got != nil {
+				t.Errorf("marks on an always-open block = %+v, want none — no row toggles", got)
+			}
+			lines := strings.Split(renderPlain(tr, tc.width), "\n")
+			if want := 2 + tc.rows; len(lines) != want {
+				t.Fatalf("the block stands %d rows tall, want %d — header, every task row, the stat:\n%s",
+					len(lines), want, strings.Join(lines, "\n"))
+			}
+			for i, ln := range lines {
+				if strings.HasSuffix(ln, glyphCollapsed) || strings.HasSuffix(ln, glyphExpanded) {
+					t.Errorf("row %d = %q wears an indicator; an always-open block has no second state", i, ln)
+				}
+			}
+			if tc.width == 40 {
+				for i, ln := range lines[1 : 1+tc.rows] {
+					if !strings.Contains(ln, clipTail) {
+						t.Errorf("task row %d = %q, want it clipped to width with %q — the fixture must clip every row", i, ln, clipTail)
+					}
+				}
 			}
 		})
 	}

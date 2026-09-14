@@ -552,3 +552,43 @@ func TestSplitDiffPaintsUnderAnOpenMembersGutter(t *testing.T) {
 			"%d columns:\n%s", splitPaneMinCols, strings.Join(narrow, "\n"))
 	}
 }
+
+// TestTargetlessBlockStillCapsAndToggles is the regression half of the always-open call (plan
+// "2026-09-14 - 00", item 1): the mark is ONE tool's, so a targetless block without it — git_status,
+// whose report is the same shape of free-form output — still spends the collapsed budget: its
+// branch list is cut at collapsedBodyCap, its header wears the ▶ that says there is more, every row
+// of it is a click target, and a click opens it onto the whole report.
+func TestTargetlessBlockStillCapsAndToggles(t *testing.T) {
+	t.Parallel()
+
+	const report = "On branch main\n\nStaged (2):\n  a.go\n  b.go\n\nUntracked (1):\n  c.go"
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "git_status", Arguments: []byte(`{}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: report}})
+
+	if tr.entries[0].tool.alwaysOpen {
+		t.Fatal("git_status carries the always-open mark; it is task_list's alone")
+	}
+	collapsed := strings.Split(renderPlain(tr, 80), "\n")
+	if want := 1 + collapsedBodyCap; len(collapsed) != want {
+		t.Errorf("the collapsed block stands %d rows tall, want the budget's %d:\n%s",
+			len(collapsed), want, strings.Join(collapsed, "\n"))
+	}
+	if want := "✦ Git Status " + glyphCollapsed; collapsed[0] != want {
+		t.Errorf("header = %q, want %q — a capped targetless block says there is more on its header", collapsed[0], want)
+	}
+	marks := blockMarks(t, tr, 80)
+	if len(marks) != len(collapsed) {
+		t.Errorf("marks = %+v, want every one of the %d rows a toggle target", marks, len(collapsed))
+	}
+
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the git_status block to open")
+	}
+	expanded := renderPlain(tr, 80)
+	for _, ln := range []string{"Staged (2):", "Untracked (1):", "c.go"} {
+		if !strings.Contains(expanded, ln) {
+			t.Errorf("the open block:\n%s\nwant it to paint %q — the whole report", expanded, ln)
+		}
+	}
+}

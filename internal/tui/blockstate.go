@@ -133,6 +133,13 @@ func memberFlags(ins []paintInput) []bool {
 // cuts. One call in a block with something to reveal makes the whole block a target — the header
 // belongs to the block, not to a branch.
 //
+// An ALWAYS-OPEN call (toolView.alwaysOpen — task_list) is the one exception to both counts, and
+// answers false at every width: collapsedCall hands its whole branch list back uncut, and the width
+// arm is skipped for it because a row clipped to width is a row the block is SHOWING — every row is
+// painted, the clip tail on it says its own continuation (clipTail), and there is no second state
+// for the rest of the line to appear in — so an indicator there would be the affordance the canon
+// spec forbids, one that opens onto what the block was already showing.
+//
 // A DELEGATION is the one shape whose hidden half is not among the lines at all: what its block
 // opens onto is the prompt it carried, which the collapsed row never paints (subAgentHidesPrompt).
 // That question is asked FIRST and on its own, because the body-counting rules below answer for a
@@ -153,7 +160,7 @@ func blockHidesWhenCollapsed(th theme, views []toolView, width int) bool {
 		if truncated {
 			return true
 		}
-		if tv.Target == "" {
+		if tv.Target == "" && !tv.alwaysOpen {
 			if _, clipped := clipDetails(th, shown, width); clipped {
 				return true
 			}
