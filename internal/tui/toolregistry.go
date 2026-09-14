@@ -120,15 +120,18 @@ type toolPresenter struct {
 	// is kept on the view (toolView.count) and never on the wire.
 	count func(lines []string) (string, bool)
 
-	// alwaysOpen says this tool's block has ONE state, open: its collapsed paint is its whole branch
-	// list, so it hides nothing, wears no ▶/▼, and a click on any of its rows selects rather than
-	// folds (collapsedCall, the one predicate that decides the shape; blockHidesWhenCollapsed reads
-	// it). It is the presenter's word for a block that IS a list the reader keeps glancing at —
-	// task_list, the model's own checklist (ADR 0072) — where a two-row preview of a five-task list
-	// would fold away exactly the rows the reader came to see. It is a fact about the tool and never
-	// about the result, so it is copied onto the view at build time on both producers
+	// collapsesToHeader says this tool's block folds to its HEADER alone: collapsed, it paints no
+	// row and no `+N more lines` — the header's own count is what says what the fold holds — and
+	// open, every row uncapped with no see-less footer, the header's ▼ being the fold
+	// (collapsedCall, the one predicate that decides the shape; blockHidesWhenCollapsed reads it).
+	// It is the presenter's word for a block that IS a list the reader glances at whole or not at
+	// all — task_list, the model's own checklist (ADR 0072) — where a two-row preview of a
+	// five-task list would show exactly the wrong half. The shape needs rows to fold over: a call
+	// whose lines hold none (hasTaskRows) — an error, a cleared list — takes the ordinary
+	// targetless shape instead, so a failure verdict is never folded away. It is a fact about the
+	// tool and never about the result, so it is copied onto the view at build time on both producers
 	// (presentToolCall, fromWireToolView) and never rides the wire.
-	alwaysOpen bool
+	collapsesToHeader bool
 
 	// argStat words the same slot from the call's OWN ARGUMENTS, at the moment the call is
 	// presented — the request half of the table's stat column, and argBody's counterpart: a
@@ -462,12 +465,12 @@ var toolRegistry = map[string]toolPresenter{
 	// it. No contentArgs row either: the tasks array is the call's whole point, and repeating it
 	// above the result it produced would say the same thing twice; the session record keeps it.
 	"task_list": {
-		label:      "Task List",
-		verb:       "updating the task list",
-		detail:     taskListDetail, // the rows the model reads, its header sentence stripped
-		stat:       blankStat,      // the header's (done/total) already says how the list stands
-		count:      taskListCount,  // "1/3": done rows over every row the tool echoed back
-		alwaysOpen: true,           // the checklist is what the reader glances at; a fold would hide it
+		label:             "Task List",
+		verb:              "updating the task list",
+		detail:            taskListDetail, // the rows the model reads, its header sentence stripped
+		stat:              blankStat,      // the header's (done/total) already says how the list stands
+		count:             taskListCount,  // "1/3": done rows over every row the tool echoed back
+		collapsesToHeader: true,           // the checklist folds to its counted header, or opens whole
 	},
 	askUserToolName: {
 		label:   "Ask User",
@@ -1087,6 +1090,21 @@ const (
 	taskListOpenMarker = askUncheckedMarker + " "
 	taskListDoneMarker = askCheckedMarker + " "
 )
+
+// hasTaskRows says whether a branch list holds at least one task row — a line opening with one of
+// the two markers above, the same test taskListCount counts by. It is the header-only fold's
+// precondition (collapsedCall): a collapsesToHeader card folds to its header only when there are
+// rows for the header's count to stand for, and a card whose lines hold none — an errored call's
+// red verdict and its message, a fence-only result — keeps the ordinary targetless shape, so what
+// it has to say is never folded away (the ratified call of plan "2026-09-14 - 00", item 2).
+func hasTaskRows(lines []detailLine) bool {
+	for _, ln := range lines {
+		if strings.HasPrefix(ln.Text, taskListDoneMarker) || strings.HasPrefix(ln.Text, taskListOpenMarker) {
+			return true
+		}
+	}
+	return false
+}
 
 // ----------------------------------------------------------------------------
 // Extractor helpers

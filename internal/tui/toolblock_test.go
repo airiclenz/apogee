@@ -553,8 +553,8 @@ func TestSplitDiffPaintsUnderAnOpenMembersGutter(t *testing.T) {
 	}
 }
 
-// TestTargetlessBlockStillCapsAndToggles is the regression half of the always-open call (plan
-// "2026-09-14 - 00", item 1): the mark is ONE tool's, so a targetless block without it — git_status,
+// TestTargetlessBlockStillCapsAndToggles is the regression half of the header-fold call (plan
+// "2026-09-14 - 00", item 2): the mark is ONE tool's, so a targetless block without it — git_status,
 // whose report is the same shape of free-form output — still spends the collapsed budget: its
 // branch list is cut at collapsedBodyCap, its header wears the ▶ that says there is more, every row
 // of it is a click target, and a click opens it onto the whole report.
@@ -566,8 +566,8 @@ func TestTargetlessBlockStillCapsAndToggles(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "git_status", Arguments: []byte(`{}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: report}})
 
-	if tr.entries[0].tool.alwaysOpen {
-		t.Fatal("git_status carries the always-open mark; it is task_list's alone")
+	if tr.entries[0].tool.collapsesToHeader {
+		t.Fatal("git_status carries the header-fold mark; it is task_list's alone")
 	}
 	collapsed := strings.Split(renderPlain(tr, 80), "\n")
 	if want := 1 + collapsedBodyCap; len(collapsed) != want {

@@ -69,7 +69,11 @@ NOTES (2026-09-14): the replay discard is narrowed to the record's own WORDING o
 
 **Commit:** `feat(tui): task_list header counts done over total; the open-count stat goes`
 
-## 2. The task-list card folds again, collapsed to its header
+## 2. The task-list card folds again, collapsed to its header — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): `internal/tui/toolblock.go` is on the item's Files list but needed no edit — the targetless header already hangs `▶`/`▼` and marks the block under `blockHidesWhenCollapsed`, which now answers true through `collapsedCall`.
+NOTES (2026-09-14): the 40-column half of `TestTaskListBlockCollapsesToHeader` asserts the open paint carries all three task rows (each wrapping whole under its marker, as `renderBranchList` has always painted the expanded targetless shape) rather than the old clip-per-row check, which was the collapsed paint's; the exact header+rows line count is pinned at 80 columns.
+NOTES (2026-09-14): `TestToolRegistryTaskListReplaysAlwaysOpen` renamed to `TestToolRegistryTaskListReplaysCollapsesToHeader` with the identifier it names; `hasTaskRows` (beside the row markers in toolregistry.go) is the row-less precondition `collapsedCall` asks.
 
 **What:** Reverse the always-open shape of `2bc0062b` deliberately (ratified): rename `alwaysOpen` to `collapsesToHeader` on `toolPresenter` and `toolView` (both producers: `presentToolCall`, `fromWireToolView`), keep `task_list` as its one user, and give it the shape the calls fix:
 - `collapsedCall` returns NO lines for a `collapsesToHeader` view that has any branch line, with `truncated = true` and an EMPTY remainder (no `+N more lines`); a view with no lines at all returns `truncated = false` (nothing to reveal, no indicator).

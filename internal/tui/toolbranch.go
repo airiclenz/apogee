@@ -46,9 +46,11 @@ import (
 // a scrollback of tool calls reads as a list rather than as a wall. A
 // collapsed targetless call caps its branch list instead, since there the lines ARE the branches —
 // collapsedBodyCap of them, one clipped row each — and lands on the same budget. The ONE block
-// outside the budget is the always-open one (toolView.alwaysOpen — task_list, the model's own
-// checklist): its "collapsed" paint is its whole branch list, one clipped row each and no cap, so it
-// has no second state and no toggle; collapsedCall is where that is decided, not here.
+// under the budget is the header-folding one (toolView.collapsesToHeader — task_list, the model's
+// own checklist): its collapsed paint is its header alone, no row and no count of the rest, since
+// the header's own (done/total) already says what the fold holds; open, it is every row uncapped
+// and no see-less footer, the header's ▼ being the fold. collapsedCall is where the collapsed half
+// is decided, not here; the footer's absence is this painter's, below.
 //
 // toggle is the block's own click surface, settled once by renderToolBlock and spent on every row
 // a branch emits: the branch line, the body under it, the targetless shape's branch list. A click
@@ -63,7 +65,13 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 			var out blockPaint
 			rows := renderBranchList(th, tv, width)
 			out.add(rows, toggle)
-			out.add(seeLessFooter(th, rows, width, toggle), toggle)
+			// A header-folding card carries no see-less footer: its header's ▼ and a click on any
+			// of its rows are its fold, and a footer under a list the reader opened to read whole
+			// would be a row that says nothing the header's glyph does not (the ratified call of
+			// plan "2026-09-14 - 00", item 2).
+			if !tv.collapsesToHeader {
+				out.add(seeLessFooter(th, rows, width, toggle), toggle)
+			}
 			return out
 		}
 		shown, _, _ := collapsedCall(tv)
@@ -124,8 +132,9 @@ func collapsedRemainder(tv toolView, expanded bool) string {
 // collapsedBodyCap is the TARGETLESS shape's cap — how many of its branch lines survive the
 // collapse (collapsedCall), the block having no body to cap instead. It is the taller of the two
 // shapes and the one the three-row budget is measured against, since there the branch lines ARE the
-// content and there is no target line above them to read them against. An always-open call
-// (toolView.alwaysOpen) never meets it: that shape keeps every branch line in its one state.
+// content and there is no target line above them to read them against. A header-folding call
+// (toolView.collapsesToHeader) meets it only when it has no task rows to fold over: with rows, its
+// collapsed paint is its header and nothing beneath, so there is no line for the cap to cut.
 //
 // collapsedBranchRows is what one of those surviving lines may spend — one row, and the clip takes
 // the rest (clipDetails). It is what holds the targetless shape to the budget at all: two branch
@@ -236,15 +245,19 @@ const collapsedBodyRows = 0
 // TARGETLESS shape, whose surviving branch lines the row budget cuts — a fact about the width rather
 // than about the entry, which lives with the clip that takes it (clipDetails).
 //
-// An ALWAYS-OPEN call (toolView.alwaysOpen) is the one shape with no cap: its whole branch list is
-// its collapsed paint, uncut and uncounted, so this answers "nothing hidden" for it and the toggle
-// rule, the ▶/▼ and the click surface all follow from that one answer (blockHidesWhenCollapsed) —
-// no painter special-cases the tool by name. It is asked before the target, because the mark says
-// the block has one state whatever shape the presenter gave it; today's one such call is targetless
-// (task_list), so its branch list is what lays out.
+// A HEADER-FOLDING call (toolView.collapsesToHeader) is the one shape that hides its branch list
+// WHOLE: collapsed, it shows no line, and it counts none either — the remainder stays empty, no
+// `+N more lines`, because the header's own count (toolView.count, "1/3") already says what the
+// fold holds. truncated is true for it, so the toggle rule, the ▶/▼ and the click surface all
+// follow from that one answer (blockHidesWhenCollapsed) — no painter special-cases the tool by
+// name. It is asked before the target, because the mark says the shape whatever the presenter gave
+// it; today's one such call is targetless (task_list). The fold needs rows to stand for: a card
+// whose lines hold no task row (hasTaskRows) — an errored call's red verdict and message, a
+// fence-only result — takes the ORDINARY targetless shape at the cap beneath, so a failure is
+// never folded away, and a card with no lines at all answers "nothing hidden" through it.
 func collapsedCall(tv toolView) (shown []detailLine, remainder detailLine, truncated bool) {
-	if tv.alwaysOpen {
-		return branchDetails(tv), detailLine{}, false
+	if tv.collapsesToHeader && hasTaskRows(branchDetails(tv)) {
+		return nil, detailLine{}, true
 	}
 	if tv.Target == "" {
 		return collapseAtCap(branchDetails(tv), collapsedBodyCap)

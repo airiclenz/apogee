@@ -133,12 +133,14 @@ func memberFlags(ins []paintInput) []bool {
 // cuts. One call in a block with something to reveal makes the whole block a target — the header
 // belongs to the block, not to a branch.
 //
-// An ALWAYS-OPEN call (toolView.alwaysOpen — task_list) is the one exception to both counts, and
-// answers false at every width: collapsedCall hands its whole branch list back uncut, and the width
-// arm is skipped for it because a row clipped to width is a row the block is SHOWING — every row is
-// painted, the clip tail on it says its own continuation (clipTail), and there is no second state
-// for the rest of the line to appear in — so an indicator there would be the affordance the canon
-// spec forbids, one that opens onto what the block was already showing.
+// A HEADER-FOLDING call (toolView.collapsesToHeader — task_list) answers through the first count
+// alone: collapsedCall hides its whole row list behind the header, so a card with rows is a target
+// at every width, and the width arm is skipped for it because open it paints every row — a row
+// clipped to width there is a row the block is SHOWING, the clip tail on it saying its own
+// continuation (clipTail), with no further state for the rest of the line to appear in — so an
+// indicator read off the clip would be the affordance the canon spec forbids, one that opens onto
+// what the block was already showing. A row-less card of that mark takes the ordinary targetless
+// cap in collapsedCall, and its width arm stays skipped for the same reason.
 //
 // A DELEGATION is the one shape whose hidden half is not among the lines at all: what its block
 // opens onto is the prompt it carried, which the collapsed row never paints (subAgentHidesPrompt).
@@ -160,7 +162,7 @@ func blockHidesWhenCollapsed(th theme, views []toolView, width int) bool {
 		if truncated {
 			return true
 		}
-		if tv.Target == "" && !tv.alwaysOpen {
+		if tv.Target == "" && !tv.collapsesToHeader {
 			if _, clipped := clipDetails(th, shown, width); clipped {
 				return true
 			}

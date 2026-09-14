@@ -217,10 +217,11 @@ var taskListCall = domain.ToolCall{
 // the model's own text and sits on no file's lines, so a gutter here would claim a position that
 // does not exist.
 //
-// The PAINT is pinned whole as well, at 80 columns: the block is always open (item 1 of that plan),
-// so its header wears no indicator, every task row is painted in order beneath it, no `N open` row
-// closes the list — the header's `(1/3)` is the one count the card wears — and neither the
-// model-facing header sentence nor a `+N more lines` marker is anywhere on it.
+// The PAINT is pinned whole as well, at 80 columns, in both fold states (item 2 of that plan): the
+// collapsed card is its counted header alone under a ▶, the open card that header under a ▼ with
+// every task row painted in order beneath it and no footer, no `N open` row closes the list — the
+// header's `(1/3)` is the one count the card wears — and neither the model-facing header sentence
+// nor a `+N more lines` marker is anywhere on it.
 func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 	t.Parallel()
 
@@ -267,39 +268,51 @@ func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: call})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: rendered}})
 
-	assertTaskListPaint(t, renderPlain(tr, 80))
+	assertTaskListPaint(t, tr)
 }
 
-// assertTaskListPaint is the always-open shape the three-task fixture paints, shared by the live
-// card and its replayed record so the two are held to ONE picture: the header counting done rows
-// over all rows, the rows beneath it, and no `N open` row closing the list.
-func assertTaskListPaint(t *testing.T, painted string) {
+// assertTaskListPaint is the header-folding shape the three-task fixture paints, shared by the
+// live card and its replayed record so the two are held to ONE picture: collapsed, the header
+// counting done rows over all rows and nothing beneath it; open, that header over every row and no
+// footer; and no `N open` row closing the list in either state. It toggles tr to reach the second
+// picture and leaves it open.
+func assertTaskListPaint(t *testing.T, tr *transcript) {
 	t.Helper()
+	collapsed := renderPlain(tr, 80)
+	if want := "✦ Task List (1/3) " + glyphCollapsed; collapsed != want {
+		t.Errorf("task_list paints collapsed:\n%s\nwant its counted header alone:\n%s", collapsed, want)
+	}
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the task_list card to open")
+	}
+	painted := renderPlain(tr, 80)
 	want := []string{
-		"✦ Task List (1/3)",
+		"✦ Task List (1/3) " + glyphExpanded,
 		"  ┝ [✔] read the plan",
 		"  ┝ [ ] write the code",
 		"  ┕ [ ] run the tests",
 	}
 	if got := strings.Split(painted, "\n"); !reflect.DeepEqual(got, want) {
-		t.Errorf("task_list paints:\n%s\nwant the always-open shape:\n%s", painted, strings.Join(want, "\n"))
+		t.Errorf("task_list paints open:\n%s\nwant the header and every row, no footer:\n%s", painted, strings.Join(want, "\n"))
 	}
-	if strings.Contains(painted, "2 open") {
-		t.Errorf("paint = %q, want no `N open` row — the header's count is the one count the card wears", painted)
-	}
-	if strings.Contains(painted, tasklist.Fence) {
-		t.Errorf("paint = %q, want the model-facing header sentence stripped (display-side; the result text is the model's)", painted)
-	}
-	if strings.Contains(painted, "more line") {
-		t.Errorf("paint = %q, want no +N more lines marker — an always-open block hides nothing", painted)
+	for _, state := range []string{collapsed, painted} {
+		if strings.Contains(state, "2 open") {
+			t.Errorf("paint = %q, want no `N open` row — the header's count is the one count the card wears", state)
+		}
+		if strings.Contains(state, tasklist.Fence) {
+			t.Errorf("paint = %q, want the model-facing header sentence stripped (display-side; the result text is the model's)", state)
+		}
+		if strings.Contains(state, "more line") {
+			t.Errorf("paint = %q, want no +N more lines marker — the header's count says what the fold holds", state)
+		}
 	}
 }
 
-// TestToolRegistryTaskListReplaysAlwaysOpen holds the replayed record to the live card's paint: the
-// always-open mark is not on the wire and is re-derived off the retained name at decode
+// TestToolRegistryTaskListReplaysCollapsesToHeader holds the replayed record to the live card's
+// paint: the header-fold mark is not on the wire and is re-derived off the retained name at decode
 // (fromWireToolView, the same registry field presentToolCall reads), so a session resumed with a
-// task list on screen paints it open exactly as the run that wrote it did, and never with a fold.
-func TestToolRegistryTaskListReplaysAlwaysOpen(t *testing.T) {
+// task list on screen folds and opens it exactly as the run that wrote it did.
+func TestToolRegistryTaskListReplaysCollapsesToHeader(t *testing.T) {
 	t.Parallel()
 
 	live := &transcript{}
@@ -316,12 +329,18 @@ func TestToolRegistryTaskListReplaysAlwaysOpen(t *testing.T) {
 	}
 	replayed := &transcript{entries: entries}
 
-	if !replayed.entries[0].tool.alwaysOpen {
-		t.Errorf("the decoded record lost the always-open mark; want it re-derived from the registry off %q", replayed.entries[0].tool.name)
+	if !replayed.entries[0].tool.collapsesToHeader {
+		t.Errorf("the decoded record lost the header-fold mark; want it re-derived from the registry off %q", replayed.entries[0].tool.name)
 	}
-	assertTaskListPaint(t, renderPlain(replayed, 80))
 	if live, back := renderPlain(live, 80), renderPlain(replayed, 80); live != back {
-		t.Errorf("the replayed record paints:\n%s\nwant the live paint:\n%s", back, live)
+		t.Errorf("the replayed record paints collapsed:\n%s\nwant the live paint:\n%s", back, live)
+	}
+	assertTaskListPaint(t, replayed)
+	if !live.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false on the live card")
+	}
+	if live, back := renderPlain(live, 80), renderPlain(replayed, 80); live != back {
+		t.Errorf("the replayed record paints open:\n%s\nwant the live paint:\n%s", back, live)
 	}
 }
 
@@ -364,7 +383,7 @@ func TestToolRegistryTaskListReplaysAnOldOpenCountRecord(t *testing.T) {
 	if got := replayed.entries[0].tool.Summary.Text; got != "" {
 		t.Errorf("replayed outcome slot = %q, want the old record's `2 open` discarded — the header count supersedes it", got)
 	}
-	assertTaskListPaint(t, renderPlain(replayed, 80))
+	assertTaskListPaint(t, replayed)
 }
 
 // TestToolRegistryTaskListReplayKeepsAVerdictAndAPromotedLine pins the two slot readings the

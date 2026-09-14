@@ -752,14 +752,17 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 	}
 }
 
-// TestAlwaysOpenBlockIsNoToggleTarget pins the always-open block's half of the target rule (the
-// ratified call of plan "2026-09-14 - 00", item 1): a task_list block paints every task row in its
-// one state, so it hides nothing, wears no indicator and marks no row — a click anywhere on it keeps
-// its selection meaning. It holds at EVERY width, which is the part the width arm of
-// blockHidesWhenCollapsed would otherwise get wrong: at 40 columns every row of the long-task list
-// is clipped to width, and a clipped row on a block with no second state is a row the block is
-// showing, not one it hides — so the narrow block is as inert as the wide one.
-func TestAlwaysOpenBlockIsNoToggleTarget(t *testing.T) {
+// TestTaskListBlockCollapsesToHeader pins the header-folding block's half of the target rule (the
+// ratified call of plan "2026-09-14 - 00", item 2): a task_list block with rows folds to its header
+// alone — one row, `✦ Task List (1/3) ▶`, no task row and no `+N more lines`, the header's own
+// count saying what the fold holds — and opens onto every row uncapped under a `▼` header with NO
+// see-less footer, the header's glyph and a click anywhere on the block being its fold. It holds at
+// EVERY width, which is the part the width arm of blockHidesWhenCollapsed would otherwise muddle:
+// at 40 columns every row of the long-task list overflows the width, and the block is a toggle for
+// the rows it hides rather than for the width — open, each row wraps whole under its marker, as the
+// expanded targetless shape always has (renderBranchList). The block is a toggle target, and both
+// gestures flip it: a click on the header and ⏎ at the block cursor.
+func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 	t.Parallel()
 
 	longTasks := fmt.Sprintf(tasklist.HeaderFormat, 2, 1) + "\n" +
@@ -771,7 +774,7 @@ func TestAlwaysOpenBlockIsNoToggleTarget(t *testing.T) {
 		name     string
 		width    int
 		rendered string
-		rows     int // task rows the paint must carry, whatever the width
+		rows     int // task rows the open paint must carry, whatever the width
 	}{
 		{name: "at 80 columns every row fits", width: 80, rendered: taskListRendered, rows: 3},
 		{name: "at 40 columns every row is clipped", width: 40, rendered: longTasks, rows: 3},
@@ -782,26 +785,137 @@ func TestAlwaysOpenBlockIsNoToggleTarget(t *testing.T) {
 			tr.apply(domain.ToolCallEvent{Call: taskListCall})
 			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: tc.rendered}})
 
-			if got := blockMarks(t, tr, tc.width); got != nil {
-				t.Errorf("marks on an always-open block = %+v, want none — no row toggles", got)
+			collapsed := strings.Split(renderPlain(tr, tc.width), "\n")
+			if want := []string{"✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(collapsed, want) {
+				t.Errorf("the collapsed block paints:\n%s\nwant exactly its header:\n%s",
+					strings.Join(collapsed, "\n"), strings.Join(want, "\n"))
 			}
-			lines := strings.Split(renderPlain(tr, tc.width), "\n")
-			if want := 1 + tc.rows; len(lines) != want {
-				t.Fatalf("the block stands %d rows tall, want %d — the header and every task row:\n%s",
-					len(lines), want, strings.Join(lines, "\n"))
+			if marks := blockMarks(t, tr, tc.width); len(marks) != 1 || marks[0].kind != targetHeader {
+				t.Errorf("marks on the collapsed block = %+v, want its one header row a toggle target", marks)
 			}
-			for i, ln := range lines {
-				if strings.HasSuffix(ln, glyphCollapsed) || strings.HasSuffix(ln, glyphExpanded) {
-					t.Errorf("row %d = %q wears an indicator; an always-open block has no second state", i, ln)
+
+			if !tr.toggleExpanded(0) {
+				t.Fatal("toggleExpanded(0) = false; want the task_list block to open")
+			}
+			open := strings.Split(renderPlain(tr, tc.width), "\n")
+			if want := "✦ Task List (1/3) " + glyphExpanded; open[0] != want {
+				t.Errorf("open header = %q, want %q", open[0], want)
+			}
+			rows := 0
+			for i, ln := range open[1:] {
+				switch {
+				case strings.Contains(ln, taskListOpenMarker), strings.Contains(ln, taskListDoneMarker):
+					rows++
+				case strings.HasPrefix(ln, "    "):
+					// a task row's own wrapped continuation, under its marker
+				default:
+					t.Errorf("open row %d = %q, want a task row or its continuation — the open card is header plus rows only", i+1, ln)
 				}
 			}
-			if tc.width == 40 {
-				for i, ln := range lines[1 : 1+tc.rows] {
-					if !strings.Contains(ln, clipTail) {
-						t.Errorf("task row %d = %q, want it clipped to width with %q — the fixture must clip every row", i, ln, clipTail)
-					}
-				}
+			if rows != tc.rows {
+				t.Errorf("the open block carries %d task rows, want every one of the %d:\n%s", rows, tc.rows, strings.Join(open, "\n"))
+			}
+			if tc.width == 80 && len(open) != 1+tc.rows {
+				t.Errorf("the open block stands %d rows tall at 80 columns, want %d — the header and every task row, no footer:\n%s",
+					len(open), 1+tc.rows, strings.Join(open, "\n"))
+			}
+			if strings.Contains(strings.Join(open, "\n"), promptSeeLess) {
+				t.Errorf("the open block:\n%s\nwears a %q footer; the header's ▼ is its fold", strings.Join(open, "\n"), promptSeeLess)
+			}
+			if marks := blockMarks(t, tr, tc.width); len(marks) != len(open) {
+				t.Errorf("marks on the open block = %+v, want every one of its %d rows a toggle target", marks, len(open))
 			}
 		})
 	}
+
+	t.Run("a click on the header and ⏎ at the block cursor both flip it", func(t *testing.T) {
+		m := modelWithTaskListBlock(t)
+		header := markedLine(t, m, targetHeader)
+		if blockExpanded(t, m, header) {
+			t.Fatal("setup: the block is expanded before any gesture; collapsed is the default")
+		}
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+		if !blockExpanded(t, m, header) {
+			t.Fatal("a click on the header did not open the task list")
+		}
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+		if blockExpanded(t, m, header) {
+			t.Fatal("a second click on the header did not fold the task list")
+		}
+
+		m = step(t, m, keyAltUp())
+		if !strings.Contains(strip(m.lines[m.blockCursorRow()]), "✦ Task List") {
+			t.Fatalf("the block cursor entered on %q, not the task list's header", strip(m.lines[m.blockCursorRow()]))
+		}
+		m = step(t, m, keyEnter())
+		if !blockExpanded(t, m, header) {
+			t.Fatal("⏎ at the block cursor did not open the task list")
+		}
+		m = step(t, m, keyEnter())
+		if blockExpanded(t, m, header) {
+			t.Fatal("a second ⏎ did not fold the task list")
+		}
+	})
+}
+
+// modelWithTaskListBlock is a ready idle model whose transcript holds the three-task fixture's
+// card, laid out so the click and cursor gestures above land on painted rows.
+func modelWithTaskListBlock(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("plan the work", nil)
+	m.transcript.apply(domain.ToolCallEvent{Call: taskListCall})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: taskListRendered}})
+	m.refreshViewport()
+	return m
+}
+
+// TestRowlessTaskListCardKeepsTheOrdinaryShape is the header fold's regression guard (the ratified
+// call of plan "2026-09-14 - 00", item 2): the fold needs task rows to stand for, so a task_list
+// card whose lines hold none takes the ORDINARY targetless collapsed shape. An errored call keeps
+// its red `error` verdict and the message in view collapsed — the failure is never folded away —
+// and a fence-only result, with no line at all, hides nothing, wears no indicator and is not a toggle
+// target.
+func TestRowlessTaskListCardKeepsTheOrdinaryShape(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an errored call shows its verdict collapsed", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: taskListCall})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "1", IsError: true, Content: "the task list holds at most 40 tasks"}})
+
+		if !tr.entries[0].tool.collapsesToHeader {
+			t.Fatal("the errored card lost the header-fold mark; it is the registry's word about the tool, not the result")
+		}
+		collapsed := strings.Split(renderPlain(tr, 80), "\n")
+		if len(collapsed) > 1+collapsedBodyCap {
+			t.Errorf("the collapsed errored card stands %d rows tall, want at most the budget's %d:\n%s",
+				len(collapsed), 1+collapsedBodyCap, strings.Join(collapsed, "\n"))
+		}
+		if collapsed[0] != "✦ Task List" {
+			t.Errorf("header = %q, want the bare label — no count over an error, and nothing folded behind it", collapsed[0])
+		}
+		painted := strings.Join(collapsed, "\n")
+		for _, want := range []string{"error", "the task list holds at most 40 tasks"} {
+			if !strings.Contains(painted, want) {
+				t.Errorf("the collapsed errored card:\n%s\nwant %q in view — a failure verdict is never folded away", painted, want)
+			}
+		}
+	})
+
+	t.Run("a fence-only result hides nothing", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: taskListCall})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "1", Content: fmt.Sprintf(tasklist.HeaderFormat, 0, 0)}})
+
+		if got := renderPlain(tr, 80); got != "✦ Task List" {
+			t.Errorf("the fence-only card paints %q, want the bare header and nothing beneath", got)
+		}
+		if got := blockMarks(t, tr, 80); got != nil {
+			t.Errorf("marks on the fence-only card = %+v, want none — there is nothing to reveal", got)
+		}
+	})
 }

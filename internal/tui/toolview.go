@@ -537,9 +537,9 @@ type toolView struct {
 	// "1/3", done rows over every row — worded by the presenter's count hook (toolPresenter.count)
 	// off the body's lines. It is display text and travels the sanitize seam with the fields above
 	// it, but deliberately NOT the wire (session.ToolView): it is re-derived from the retained rows
-	// on replay (fromWireToolView), exactly as alwaysOpen is re-derived from the retained name, so
-	// a resumed card wears the count the live one did and never one the registry may since have
-	// reworded. A call still in flight carries none: nothing has been counted yet.
+	// on replay (fromWireToolView), exactly as collapsesToHeader is re-derived from the retained
+	// name, so a resumed card wears the count the live one did and never one the registry may since
+	// have reworded. A call still in flight carries none: nothing has been counted yet.
 	count string
 
 	name string
@@ -610,17 +610,19 @@ type toolView struct {
 	// is exactly what a later change to that rule takes away.
 	solo bool
 
-	// alwaysOpen marks a block with ONE state: its collapsed paint is its whole branch list, every
-	// row painted and clipped to width per line, so the block hides nothing — no ▶/▼, no click
-	// surface, a click on any of its rows keeps its selection meaning (collapsedCall, the one
-	// predicate that decides the shape; blockHidesWhenCollapsed reads it). It is the presenter's
-	// word (toolPresenter.alwaysOpen), copied here at build time by BOTH producers — presentToolCall
-	// for a live call and fromWireToolView for a replayed record — and deliberately not on the wire
-	// (session.ToolView): it is a fact about the TOOL, knowable from the retained name alone, and a
-	// record that carried it would keep a verdict the registry may since have changed. One call says
-	// it today: task_list, the model's own checklist (ADR 0072), whose rows are the thing the reader
-	// keeps glancing at and which a two-row preview would fold away.
-	alwaysOpen bool
+	// collapsesToHeader marks a block that folds to its HEADER: its collapsed paint is the header
+	// alone — ▶ beside the count, no row, no `+N more lines` — and its open paint every row, uncapped
+	// and with no see-less footer, the header's ▼ and a click anywhere on the block being its fold
+	// (collapsedCall, the one predicate that decides the shape; blockHidesWhenCollapsed reads it).
+	// It is the presenter's word (toolPresenter.collapsesToHeader), copied here at build time by
+	// BOTH producers — presentToolCall for a live call and fromWireToolView for a replayed record —
+	// and deliberately not on the wire (session.ToolView): it is a fact about the TOOL, knowable
+	// from the retained name alone, and a record that carried it would keep a verdict the registry
+	// may since have changed. One call says it today: task_list, the model's own checklist
+	// (ADR 0072), whose rows the reader wants whole or out of the way and never a two-row preview
+	// of. The mark folds only over task rows: a row-less card keeps the ordinary targetless shape
+	// (hasTaskRows).
+	collapsesToHeader bool
 
 	// args is the call's parsed arguments, kept for the one presenter shape that needs the REQUEST
 	// back when the result lands (toolPresenter.outcome). It is retained only for such a presenter
@@ -800,11 +802,12 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	// the same reason: it groups with its OWN kind (loadSkillToolName), and a mixed umbrella would
 	// bury the instructions the run just took on among the reads around them.
 	tv.solo = call.Tool == subAgentToolName || call.Tool == loadSkillToolName
-	// A block with one state is the presenter's word too, and a fact about the tool rather than
-	// about anything the result will say, so it is settled here where the call is recognised
-	// (toolView.alwaysOpen). The decoder copies the same entry field off the same name
-	// (fromWireToolView), so a replayed record cannot come back with a fold the live one never had.
-	tv.alwaysOpen = p.alwaysOpen
+	// A block that folds to its header is the presenter's word too, and a fact about the tool
+	// rather than about anything the result will say, so it is settled here where the call is
+	// recognised (toolView.collapsesToHeader). The decoder copies the same entry field off the same
+	// name (fromWireToolView), so a replayed record cannot come back with a shape the live one
+	// never had.
+	tv.collapsesToHeader = p.collapsesToHeader
 	args := parseArgs(call.Arguments)
 	// A delegation's name is recorded beside the Target rather than read back out of it: the header
 	// text is the same string on a named call, but only this says a name was GIVEN, which is the
