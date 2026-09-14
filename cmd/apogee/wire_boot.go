@@ -233,6 +233,11 @@ func (w *rootWiring) resolveConfig() error {
 		Report:   w.bridge.NotifyHook,
 		Approver: w.bridge.Approver(),
 		Asker:    w.bridge.Asker(),
+		// The pre-emption seam (ADR 0025): the Bridge answers whether the TUI's queue holds a
+		// message, off the live Exchange's mailbox, so a queued message skips the sub-agents of the
+		// running group that have not started. The headless and Firing configs leave it nil — no
+		// human queue, nothing to pre-empt for.
+		InterjectionPending: w.bridge.InterjectionPending,
 		// The namer built above: an unnamed delegation is named out of band on the CHILD's own
 		// Upstream (ADR 0068), so the engine never learns which endpoint answered.
 		Namer:        w.namer,

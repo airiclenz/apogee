@@ -83,7 +83,7 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	// Submit that rides the worker Cmd — so a delegation inside the very first Turn still has an
 	// engine half to pair its live transcript with (cacheBoundaryAtIdle).
 	m.cacheBoundaryAtIdle()
-	m.box = newInterjectBox()
+	m.installBox(newInterjectBox())
 	cmd, cancel := startExchange(m.parent, m.eng, in, m.box, m.notify, m.flushEvents)
 	m.cancel = cancel
 	m.state = stateRunning
@@ -291,8 +291,8 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			// the TUI aborts on every live cancel): /continue resumes the OPEN Exchange rather than
 			// opening a new one. Drive Step-only from the boundary (startResume) — no Submit, no new
 			// user block; the interrupted note already stands, so the transcript is left untouched.
-			m.cacheBoundaryAtIdle()   // the boundary the resumed Turn re-attempts from (launchExchange)
-			m.box = newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
+			m.cacheBoundaryAtIdle()         // the boundary the resumed Turn re-attempts from (launchExchange)
+			m.installBox(newInterjectBox()) // a resumed Exchange is a running one; it takes interjections too
 			cmd, cancel := startResume(m.parent, m.eng, m.box, m.notify, m.flushEvents)
 			m.cancel = cancel
 			m.state = stateRunning
@@ -309,7 +309,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.transcript.addUser("/continue", nil)
 		m.layout()
 		m.cacheBoundaryAtIdle() // the canned turn is a launch like any other (launchExchange)
-		m.box = newInterjectBox()
+		m.installBox(newInterjectBox())
 		cmd, cancel := startExchange(m.parent, m.eng,
 			domain.UserInput{Text: "Please continue"}, m.box, m.notify, m.flushEvents)
 		m.cancel = cancel
@@ -435,8 +435,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// stopWorker; the terminal compactDoneMsg records the outcome.
 		m.layout() // reflow the input box after the caller emptied it (or cut the accepted verb out)
 		// No mailbox: /compact drives no Exchange, so there is nothing to interject INTO. A row
-		// staged while it runs stays on the display queue and goes out at the terminal fold.
-		m.box = nil
+		// staged while it runs stays on the display queue and goes out at the terminal fold. The
+		// Bridge is told the same (installBox): there is no Exchange for the seam to pre-empt in.
+		m.installBox(nil)
 		m.cacheBoundaryAtIdle() // a worker launch caches the boundary it launches from (launchExchange)
 		cmd, cancel := startCompact(m.parent, m.eng)
 		m.cancel = cancel

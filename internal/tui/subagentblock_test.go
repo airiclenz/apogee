@@ -1862,3 +1862,136 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// A delegation a queued message pre-empted reads its own result (ADR 0025)
+// ----------------------------------------------------------------------------
+
+// skippedDelegationContent is the engine's whole account of a delegation a queued user message
+// pre-empted (internal/agent/dispatch.go's constant of the same name), restated because the tui
+// package cannot read it: it is what the model is told and what the human's row opens onto, so a
+// rewording over there has to fail here.
+const skippedDelegationContent = "sub-agent not started: the user sent a message while this group " +
+	"was running; delegate again if the task is still needed"
+
+// skippedDelegation folds a delegation the engine SKIPPED for a pending interjection, exactly as
+// skipDelegation emits it: the call, then a finished phase with no started one before it, carrying
+// the error-shaped skip result — and, when burst is set, the trailing ToolResultEvent that pairs the
+// result with the call in the dispatch's own order.
+func skippedDelegation(tr *transcript, id, task string, burst bool) {
+	subAgentCall(tr, id, task, 0)
+	result := domain.ToolResult{CallID: id, Content: skippedDelegationContent, IsError: true}
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: id},
+		Phase:     domain.SubAgentFinished,
+		Result:    result,
+	})
+	if burst {
+		tr.apply(domain.ToolResultEvent{Result: result})
+	}
+}
+
+// TestSubAgentSkippedRowReadsItsResult pins what a pre-empted delegation's row says. Its head is
+// built from an IsError result through the finished phase alone — no started phase ever came,
+// because the child never ran — so it is `subAgentReported` without being started, which is the
+// shape of the engine's REAL depth-bound refusal on the wire (errorToolResult) and paints through
+// the same `absorbFailure` path: collapsed, the outcome slot reads the `error` verdict and never
+// `scheduled`, whether or not the trailing result burst has landed; expanded, the skip's own words
+// are the body under the task the delegation carried, exactly as a refusal's are
+// (TestUnframedSubAgentShowsThePromptWhenExpanded).
+func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
+	const width = 80
+	// The word the row must NOT say: a delegation whose finished phase arrived is over, and a rule
+	// that read only the missing started phase would leave it queued for the rest of the session.
+	const scheduledWord = "scheduled"
+
+	// build is the serial shape the e2e drives: the first delegation ran and reported, the second
+	// was skipped once the message was queued. The skipped head is entry 2 — the first run's read
+	// stands between the two calls.
+	build := func(t *testing.T, burst bool) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey", 0)
+		subAgentStarted(tr, "s1", 1)
+		readCall(tr, "rs1", "a.go", 1, 5, 1)
+		tr.apply(domain.SubAgentPhaseEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Phase:     domain.SubAgentFinished,
+			Result:    domain.ToolResult{CallID: "s1", Content: "all clear"},
+		})
+		skippedDelegation(tr, "s2", "check", burst)
+		if burst {
+			subAgentReport(tr, "s1", "all clear", 0)
+		}
+		return tr
+	}
+	collapsed := strings.Join([]string{
+		"✦ Sub-Agent (2)",
+		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
+		groupMemberLine("  ┕ check ⋯ error"),
+	}, "\n")
+
+	for _, tc := range []struct {
+		name  string
+		burst bool
+	}{
+		{name: "before the trailing result burst", burst: false},
+		{name: "after the trailing result burst", burst: true},
+	} {
+		t.Run("collapsed "+tc.name, func(t *testing.T) {
+			got := renderPlain(build(t, tc.burst), width)
+			if got != collapsed {
+				t.Errorf("collapsed mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+			}
+			if strings.Contains(got, scheduledWord) {
+				t.Errorf("a skipped delegation still reads %q:\n%s", scheduledWord, got)
+			}
+			if strings.Contains(got, "sub-agent not started") {
+				t.Errorf("the skip's words are on the collapsed row rather than behind the ▶:\n%s", got)
+			}
+		})
+	}
+
+	t.Run("expanded, the skip content is the body", func(t *testing.T) {
+		tr := build(t, true)
+		if !tr.setExpanded(2, true) {
+			t.Fatalf("setExpanded(2, true) = false; want the skipped member open")
+		}
+		want := strings.Join([]string{
+			"✦ Sub-Agent (2)",
+			groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
+			leaderEdgeRow("  ┕ check ⋯ error", glyphExpanded),
+			"  │ " + unframedSubAgentPromptLead + "check",
+			"  │",
+			"  │ sub-agent not started: the user sent a message while this group was",
+			"  │ running; delegate again if the task is still needed",
+			memberEdgeRow(t, "  │", promptSeeLess, width),
+		}, "\n")
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("expanded skipped member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	// A lone skipped delegation — a message queued before the group's only delegation could start
+	// — is the same head in the lone frame: the refusal's shape row for row.
+	t.Run("a lone skipped delegation opens onto the same words", func(t *testing.T) {
+		tr := &transcript{}
+		skippedDelegation(tr, "s1", "check", true)
+		if got := renderPlain(tr, width); strings.Contains(got, scheduledWord) || !strings.Contains(got, "error") {
+			t.Errorf("collapsed lone skip does not read the error verdict:\n%s", got)
+		}
+		if !tr.setExpanded(0, true) {
+			t.Fatalf("setExpanded(0, true) = false; want the lone delegation open")
+		}
+		got := renderPlain(tr, width)
+		for _, line := range []string{
+			unframedSubAgentPromptLead + "check",
+			"sub-agent not started: the user sent a message while this group was running;",
+			"delegate again if the task is still needed",
+		} {
+			if !strings.Contains(got, line) {
+				t.Errorf("the opened lone skip lacks %q:\n%s", line, got)
+			}
+		}
+	})
+}

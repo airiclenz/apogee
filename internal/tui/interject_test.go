@@ -393,6 +393,48 @@ func TestEnterWhileRunningStagesRow(t *testing.T) {
 	}
 }
 
+// TestEnterWhileRunningRaisesThePendingSeam is the Model's half of the pre-emption seam: a row
+// staged in stateRunning is a row the Bridge can see, because launchExchange installs the
+// Exchange's box through installBox, which registers it (Bridge.setMailbox) — and the worker's end
+// (finishWorker) registers nil, so the seam reads no dead box. The engine reads the Bridge's
+// predicate and never the Model, which is value-copied on every Update (ADR 0011).
+func TestEnterWhileRunningRaisesThePendingSeam(t *testing.T) {
+	br := NewBridge()
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	m.registerBox = br.setMailbox
+
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+	if br.InterjectionPending() {
+		t.Fatal("InterjectionPending() = true before anything was staged; want false")
+	}
+
+	m = stageRow(t, m, "also check the tests")
+	if !br.InterjectionPending() {
+		t.Fatal("InterjectionPending() = false after ⏎ staged a row while running; want true")
+	}
+
+	// The Backspace pop takes the row back out of the mailbox, and the seam follows.
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if br.InterjectionPending() {
+		t.Error("InterjectionPending() = true after the Backspace pop withdrew the row; want false")
+	}
+
+	// A row the worker never drained dies with the Exchange: the Model lets go of the box and
+	// the Bridge with it, so the row held for the next ⏎ is not read as pending for it.
+	m = stageRow(t, m, "held for the next send")
+	m.finishWorker(stateIdle)
+	if m.box != nil {
+		t.Fatal("finishWorker left the mailbox on the Model")
+	}
+	if br.InterjectionPending() {
+		t.Error("InterjectionPending() = true after finishWorker; want false — the box is dead")
+	}
+}
+
 // An @file reference in an interjection reaches the engine as a ref, exactly as it does in a
 // submitted message — the refs resolve at delivery, so a mid-run "@main.go" is as useful as one
 // typed at idle.

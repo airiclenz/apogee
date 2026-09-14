@@ -520,7 +520,10 @@ const scheduledSummary = "scheduled"
 // signal this state exists to wait for. Its being OVER is the second: a delegation refused at the
 // depth bound or failed by a reaction never runs and so is never started, yet its result still
 // arrives (dispatch.go), and a row left "scheduled" over a delegation that already answered would
-// say so forever. The third is its being FRAMED (subAgentFramed) — a run standing behind it, or a
+// say so forever. A delegation a queued user message PRE-EMPTED is the same shape one producer
+// over — its finished phase arrives without a started one, carrying the error-shaped skip result
+// (skipDelegation, ADR 0025) — so the row reads that result's verdict, `error`, and opens onto the
+// skip's own words exactly as a refusal does. The third is its being FRAMED (subAgentFramed) — a run standing behind it, or a
 // reader having opened it. That one is the answer for a producer that emits no phases at all: a
 // hand-built test transcript, a record replayed from a session written before the phase existed. A
 // delegation with entries behind it has manifestly started whatever it announced, and one that is

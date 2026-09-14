@@ -68,7 +68,11 @@ NOTES (2026-09-14): the serial-path test places the leaf tool in the parent's NE
 
 **Commit:** `feat(agent): a pending queued message pre-empts the delegations not yet started`
 
-## 2. TUI and host: the mailbox answers the seam; the skipped row reads its result
+## 2. TUI and host: the mailbox answers the seam; the skipped row reads its result — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): `internal/tui/model.go` edited beyond the plan's file list — the Model struct (the new `registerBox` registrar field) and `finishWorker`'s `m.box = nil` site live there, not in `tui.go`; the plan's "every `m.box = nil` site registers nil" names finishWorker, so this is the item's own work, not a consequential edit.
+NOTES (2026-09-14): `subagentblock.go` carries no code change — a `SubAgentFinished` phase with no started one already ends `subAgentScheduled` and paints through `absorbFailure` exactly like the depth-bound refusal (verified by the new test); only `subAgentScheduled`'s doc comment gained the pre-empted case.
+NOTES (2026-09-14): the e2e was checked against the rope — with the `InterjectionPending` line removed from `wire_boot.go` it fails on all three claims (skip content, second child asked, row verdict) and passes with it restored.
 
 **What:** Recast at the regression check (2026-09-14). Depends on item 1. Wire the seam to the live mailbox and make the skipped delegation legible:
 - `internal/tui/bridge.go`: `Bridge` holds a mutex-guarded pointer to the live `*interjectBox` (`setMailbox(*interjectBox)`) and exposes `InterjectionPending() bool` — true when the registered box holds ≥ 1 item (`interjectBox.pending()`, new, lock-guarded; nil box ⇒ false). The pointer, not the Model, is what the engine reads: the Model is value-copied.

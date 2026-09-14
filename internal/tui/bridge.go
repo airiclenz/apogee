@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sync"
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
@@ -42,6 +43,15 @@ type Bridge struct {
 	// presenter is nil until SetPresentation installs the host's ladder rungs — which is the
 	// "present_document is not registered" contract itself (ADR 0019), not an oversight.
 	presenter *uiPresenter
+
+	// mailbox is the live Exchange's interjection mailbox, or nil between Exchanges and under a
+	// worker that drives no Exchange (/compact). It is the POINTER the engine's pre-emption seam
+	// reads (InterjectionPending), never the Model: the Model is value-copied on every Update
+	// (ADR 0011), so nothing on it can be read from another goroutine. The Model registers each
+	// box as it installs one (Model.installBox), and nil when the Exchange ends, so the seam never
+	// reads a box no worker drains. The mutex guards the pointer alone — the box has its own.
+	mailboxMu sync.Mutex
+	mailbox   *interjectBox
 }
 
 // NewBridge builds an unbound Bridge whose Sink, Approver, and Asker are usable immediately
@@ -95,6 +105,30 @@ func (b *Bridge) Presenter() domain.Presenter {
 		return nil
 	}
 	return b.presenter
+}
+
+// setMailbox registers the mailbox InterjectionPending reads: the live Exchange's box, or nil when
+// there is none. Called on the Update goroutine wherever the Model installs a box (installBox).
+func (b *Bridge) setMailbox(box *interjectBox) {
+	b.mailboxMu.Lock()
+	defer b.mailboxMu.Unlock()
+	b.mailbox = box
+}
+
+// InterjectionPending is the composition root's Config.InterjectionPending: true while the
+// registered mailbox holds at least one staged message, so the engine skips the delegations of
+// the running group that have not started and the message lands when the running ones finish
+// (ADR 0025, internal/agent/dispatch.go). It is a predicate over the LIVE box — a Backspace pop
+// (withdraw) or the worker's drain empties it, and it answers false again — and reads nothing else:
+// no message, no queue, no commit. With no box registered (idle, /compact) it answers false.
+//
+// It is goroutine-safe by construction — the pointer under its own lock, the box under the box's —
+// because the engine asks from the dispatching goroutine and, under a fan-out, from the pool workers.
+func (b *Bridge) InterjectionPending() bool {
+	b.mailboxMu.Lock()
+	box := b.mailbox
+	b.mailboxMu.Unlock()
+	return box.pending()
 }
 
 // Bind connects the live program. Run calls it once, before the program processes any

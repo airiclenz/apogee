@@ -78,6 +78,18 @@ func newInterjectBox() *interjectBox {
 	return &interjectBox{}
 }
 
+// installBox puts box on the Model and registers it with the Bridge in the same step, so the two
+// readers of the mailbox — the worker that drains it and the engine's pre-emption seam that asks
+// whether it holds anything (Bridge.InterjectionPending) — always see the SAME box: the live
+// Exchange's, or nil when there is none (finishWorker, the /compact worker). It is the one place a
+// box reaches m.box, which is what keeps the seam from ever reading a box no worker drains.
+func (m *Model) installBox(box *interjectBox) {
+	m.box = box
+	if m.registerBox != nil {
+		m.registerBox(box)
+	}
+}
+
 // push stages it for delivery at the next between-Steps boundary. Called from the Update
 // goroutine. A nil box drops the row silently — see the type doc: the display copy on the Model
 // is what makes that safe, not luck.
@@ -88,6 +100,20 @@ func (b *interjectBox) push(it queuedInterjection) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.items = append(b.items, it)
+}
+
+// pending answers whether the mailbox holds at least one staged row — the engine's pre-emption
+// question (domain.Config.InterjectionPending), asked through the Bridge from the dispatching
+// goroutine and, under a fan-out, from its pool workers at once, which is why it takes the lock. It
+// is a predicate and nothing more: it reads no row, drains nothing, and commits nothing — the
+// message itself still lands only at the boundary drainAll serves. A nil box holds nothing.
+func (b *interjectBox) pending() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.items) > 0
 }
 
 // withdraw takes one staged row back out of the mailbox before the worker can deliver it, and

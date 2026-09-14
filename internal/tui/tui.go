@@ -1714,6 +1714,11 @@ func Build(
 	// the Step that emitted it (worker.go, sink.go). It is wired HERE rather than through newModel
 	// because the sink is the Bridge's, and Build is where the two meet.
 	m.flushEvents = br.sink.flush
+	// The mailbox registrar: every box the Model installs is handed to the Bridge, whose
+	// InterjectionPending the composition root installs as Config.InterjectionPending — so the
+	// engine's pre-emption question is answered off the live box's pointer, never off a Model copy.
+	// Wired here for flushEvents' reason: the Bridge is the root's, and Build is where the two meet.
+	m.registerBox = br.setMailbox
 	// The environment the painter will read: bubbletea's own default (the process's) everywhere
 	// but Windows, and on Windows the terminal-naming rule's slice (environ_windows.go). It is
 	// resolved HERE, above the diag log rather than at the programOptions call below, because the

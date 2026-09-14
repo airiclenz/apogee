@@ -1,0 +1,45 @@
+# The upstream TestE2EQueuedMessagePreemptsTheScheduledSubAgents talks to: one reply that issues
+# two delegations, the first child held on a gate while the human queues a message, and the parent's
+# wrap-up once the message has landed (ADR 0025 — a queued message pre-empts the sub-agents that
+# have not started).
+#
+# The run is pinned to `parallel-agents: 1`, so the two delegations are dispatched SERIALLY: the
+# first child runs while the second waits its turn, and a message staged in that window is what
+# skips the second. There is deliberately no turn for the second child — it must never be asked —
+# so a request carrying its task falls to the fallback below, and the request log says so.
+model: preempt-model
+turns:
+    # The session title, matched before the prompt's own turn (see smoke.yaml): `auto-title:` is on
+    # by default and an unanswered request is an HTTP 500.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Two delegations, one queued message
+    # The main turn: two sub_agent calls in ONE reply, which is what makes them one group.
+    - when:
+        last_message: ^Delegate two summaries
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Summarise the alpha half of the workspace","name":"alpha"}'
+        - name: sub_agent
+          arguments: '{"task":"Summarise the beta half of the workspace","name":"beta"}'
+    # The parent's wrap-up, matched on the human's QUEUED message being the last thing said: the
+    # first child's report and the skip stand above it as the two tool results. It is listed before
+    # the child's turn so a parent request can never be answered as the child's.
+    - when:
+        last_message: ^Also check the tests
+      repeat: true
+      text: Message received; the beta half was not started.
+    # The first child. Its answer is held on the `staged` gate until the test has SEEN the queued
+    # row: the pre-emption is decided when the engine is about to start the SECOND delegation, which
+    # is after this child reports, so the message has to be in the mailbox before that. Holding the
+    # request rather than the reply would not do — apogee reads the mailbox, not the wire.
+    - when:
+        last_message: alpha half of the workspace
+      repeat: true
+      await: staged
+      text: The alpha half is two files and a README.
+    # Anything neither the parent nor the first child claims — the second child, if it were ever
+    # asked, lands here, and the request log then names it.
+    - repeat: true
+      text: Nothing else to add.

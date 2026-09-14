@@ -240,3 +240,65 @@ func TestBridgeNotifyHookLandsAsAnEphemeralNote(t *testing.T) {
 		}
 	}
 }
+
+// TestBridgeInterjectionPendingFollowsTheLiveBox pins the engine's pre-emption seam
+// (domain.Config.InterjectionPending, ADR 0025) to the mailbox the Model registers: it is a
+// predicate over the LIVE box and nothing else. No box, or a nil registration — finishWorker and
+// the /compact worker — answers false; a staged row answers true; the two ways a row leaves the
+// box, the Backspace pop (withdraw) and the worker's drain (drainAll), answer false again; and a
+// re-registered box supersedes the old one, so a row left in a dead Exchange's box is never read
+// as pending for the next.
+func TestBridgeInterjectionPendingFollowsTheLiveBox(t *testing.T) {
+	t.Parallel()
+	b := NewBridge()
+
+	if b.InterjectionPending() {
+		t.Fatal("InterjectionPending() = true with no box registered; want false")
+	}
+
+	box := newInterjectBox()
+	b.setMailbox(box)
+	if b.InterjectionPending() {
+		t.Fatal("InterjectionPending() = true over an empty box; want false")
+	}
+
+	box.push(queuedInterjection{id: 1, raw: "also check the tests"})
+	if !b.InterjectionPending() {
+		t.Fatal("InterjectionPending() = false after push; want true")
+	}
+	if !box.withdraw(1) {
+		t.Fatal("withdraw(1) = false; want the staged row back")
+	}
+	if b.InterjectionPending() {
+		t.Error("InterjectionPending() = true after withdraw emptied the box; want false")
+	}
+
+	box.push(queuedInterjection{id: 2, raw: "and the docs"})
+	if !b.InterjectionPending() {
+		t.Fatal("InterjectionPending() = false after a second push; want true")
+	}
+	if got := box.drainAll(); len(got) != 1 {
+		t.Fatalf("drainAll() = %+v; want the one staged row", got)
+	}
+	if b.InterjectionPending() {
+		t.Error("InterjectionPending() = true after drainAll emptied the box; want false")
+	}
+
+	// A row left behind in a box the Model has moved on from is not the next Exchange's.
+	box.push(queuedInterjection{id: 3, raw: "stale"})
+	fresh := newInterjectBox()
+	b.setMailbox(fresh)
+	if b.InterjectionPending() {
+		t.Error("InterjectionPending() = true over a fresh box while the OLD one holds a row; want false")
+	}
+	fresh.push(queuedInterjection{id: 4, raw: "live"})
+	if !b.InterjectionPending() {
+		t.Error("InterjectionPending() = false with a row in the re-registered box; want true")
+	}
+
+	// The finishWorker / compact registration: nil answers false however full the last box was.
+	b.setMailbox(nil)
+	if b.InterjectionPending() {
+		t.Error("InterjectionPending() = true after registering nil; want false")
+	}
+}

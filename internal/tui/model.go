@@ -86,6 +86,13 @@ type Model struct {
 	// stays nil in the model tests, which inject eventMsg past the sink entirely.
 	flushEvents func()
 
+	// registerBox tells the Bridge which mailbox the engine's pre-emption seam reads
+	// (Bridge.setMailbox), called with every box the Model installs and with nil when the Exchange
+	// ends — see installBox, the ONE place a box is put on the Model. Only Build can wire it, for
+	// flushEvents' reason: the Bridge is the composition root's. It stays nil in the model tests
+	// that never ask the seam, and installBox skips a nil registrar.
+	registerBox func(*interjectBox)
+
 	// diag is the --tui-diag log (diagnostics.go), or nil — which is the normal state, the flag
 	// being hidden and off by default. It is held by POINTER because it owns a mutex and an open
 	// file, which no value-copied Model may carry by value (the no-copy invariant in doc.go), and
@@ -1883,8 +1890,9 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// (pendingInterjections) is the queue of record and still holds every undelivered row. What
 	// happens to those rows next is the CALLER's ruling, not this one's: a natural completion
 	// flushes them into a new Exchange (flushAfterCompletion), a stop or a fault holds them for
-	// the next ⏎ (noteHeldQueue) — ADR 0025.
-	m.box = nil
+	// the next ⏎ (noteHeldQueue) — ADR 0025. The Bridge lets go of it in the same breath
+	// (installBox), so the engine's pre-emption seam can never read a box no worker drains.
+	m.installBox(nil)
 	m.genStart = time.Time{}
 	// The worker has unwound, so every run's activity is over — the whole board goes, including a
 	// sticky "stopping", which only this path clears, and any delegate slot whose child never got
