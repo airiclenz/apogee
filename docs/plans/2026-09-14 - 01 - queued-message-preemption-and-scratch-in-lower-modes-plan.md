@@ -122,7 +122,11 @@ NOTES (2026-09-14): `IDEAS.md` is gitignored (`.gitignore:12`) — the `[P] Sche
 
 **Commit:** `docs(adr): queued messages pre-empt the sub-agents not yet started (ADR 0025 / ADR 0039 amendments)`
 
-## 4. Engine ladder: Plan and Ask-Before run Apogee's own writers into the session scratch dir
+## 4. Engine ladder: Plan and Ask-Before run Apogee's own writers into the session scratch dir — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): `TestResolve_LadderTable`'s scratch rows ride a `ladderRow{ladderCase; inScratch; scratchDir}` wrapper appended to the same loop, because the existing literal table is positional and adding fields to `ladderCase` would have meant rewriting every row.
+NOTES (2026-09-14): the `delete_file` pin initialises a git repo in the workspace (skipping without git on PATH) so the absent staging note is load-bearing — in a non-repo workspace the note is absent for every target.
+NOTES (2026-09-14): `internal/agent/floorguards_test.go` needed no edit — `TestFloorGuard_RepairLeavesAWithdrawnToolToTheMode` sets no scratch dir, so the unchanged `planRefusalReason` const is still the wording it reads.
 
 **What:** Second loosen of the ladder (ADR 0012 core invariant kept: bounded by path-safety to the box's writable set, the dir is the session's own). In `internal/agent`:
 - `classifyWriteTarget` returns a `writeTargetClass{inFence, inScratch bool; escape string}` (changed shape; sole consumer `resolutionInput`, the `resolvedPath` twin untouched); `inScratch` = `pathWithin(abs, a.ScratchDir())` when a scratch dir is set. `resolutionInput` gains `writeTargetInScratch`.

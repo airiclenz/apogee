@@ -51,23 +51,28 @@ func (p *escapeProbe) Execute(ctx context.Context, call domain.ToolCall) (domain
 // answered for) and nothing else. writeTargetInWorkspace is the fence-at-classification bool
 // dispatch precomputes (workspace root ∪ the box's writable paths) and writeEscapeTarget the
 // resolved path that fence would not otherwise let land, so the union row is the pair (true,
-// out-of-workspace path) — in-fence for the ladder, still an escape at Execute.
+// out-of-workspace path) — in-fence for the ladder, still an escape at Execute. The session
+// scratch dir is one such union member, and the one Plan writes: a scratch write in Plan is a
+// Run that mints its permit like any other in-fence escape (ADR 0012 second loosen).
 func TestWriteEscapeVerdicts(t *testing.T) {
 	t.Parallel()
 
 	ws := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "notes.md")
+	scratch := t.TempDir()
+	scratchFile := filepath.Join(scratch, "notes.md")
 	wsw := tools.NewWriteFile(ws)
 
 	cases := []struct {
-		name     string
-		mode     domain.Mode
-		guard    security.PreCheck
-		confine  bool
-		inFence  bool
-		escape   string
-		wantKind resolutionKind
-		wantMint string
+		name      string
+		mode      domain.Mode
+		guard     security.PreCheck
+		confine   bool
+		inFence   bool
+		inScratch bool
+		escape    string
+		wantKind  resolutionKind
+		wantMint  string
 	}{
 		{
 			name: "ask-before gates an out-of-workspace write and its allow carries the target",
@@ -118,11 +123,20 @@ func TestWriteEscapeVerdicts(t *testing.T) {
 			wantKind: resolveRun, wantMint: "",
 		},
 		{
-			// Nothing refused reaches a permit — Plan's write refusal is the whole-ladder proof.
-			name: "plan refuses the write and authorises nothing",
+			// Nothing refused reaches a permit — Plan's refusal of an in-workspace write (the
+			// scratch dir being set but not the target) is the whole-ladder proof.
+			name: "plan refuses a workspace write",
 			mode: domain.ModePlan, guard: proceed, confine: true,
-			inFence: false, escape: outside,
+			inFence: true, inScratch: false, escape: "",
 			wantKind: resolveRefuse, wantMint: "",
+		},
+		{
+			// The scratch dir lies outside the workspace root, so the one write Plan makes is an
+			// in-fence escape: a Run whose permit names the resolved scratch target.
+			name: "plan mints for a scratch write",
+			mode: domain.ModePlan, guard: proceed, confine: true,
+			inFence: true, inScratch: true, escape: scratchFile,
+			wantKind: resolveRun, wantMint: scratchFile,
 		},
 		{
 			// A guard hard-refuse pre-empts the ladder entirely.
@@ -147,7 +161,9 @@ func TestWriteEscapeVerdicts(t *testing.T) {
 				confineToWorkspace:     tc.confine,
 				fsConfineAvailable:     true,
 				writeTargetInWorkspace: tc.inFence,
+				writeTargetInScratch:   tc.inScratch,
 				writeEscapeTarget:      tc.escape,
+				scratchDir:             scratch,
 				approverPresent:        true,
 				box:                    domain.ConfinementBox{WorkspaceRoot: ws},
 			})

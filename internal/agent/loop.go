@@ -1384,20 +1384,23 @@ func (a *Agent) maxOutputTokens() int {
 
 // toolMenu builds the model's tool menu from the resolved registry (nil ⇒ no tools). In
 // Plan mode it offers only the tools Plan can actually run — the model is never shown a call
-// it cannot make (ADR: Plan is read-only).
+// it cannot make on any target (ADR 0012: Plan is read-only except for the session scratch dir).
 //
-// The filter keys on planAdmits (resolution.go) — the SAME blast-radius classification the
+// The filter keys on planOffers (resolution.go) — the SAME blast-radius classification the
 // ladder's Plan row keys on — not on the bare ReadOnly() self-declaration it read until
 // 2026-08-02. A declaration-based filter offered diagnostics (read-only declaration +
 // OS-subprocess marker) in Plan and the ladder refused it on the call; keying both on one fact
-// means the menu can never offer what the ladder refuses (contract §4 fn 2).
+// means the menu can never offer what the ladder refuses on every target (contract §4 fn 2).
 //
-// Two classes pass the filter: classReadOnly, and classReadOnlySubprocess — RO-subproc, i.e.
-// read-only by construction, subprocess by mechanism (the git read trio: git_status, git_log,
-// git_diff_range), which Plan offers and runs (contract §4 amendment 2026-09-06).
+// Two classes pass the filter unconditionally: classReadOnly, and classReadOnlySubprocess —
+// RO-subproc, i.e. read-only by construction, subprocess by mechanism (the git read trio:
+// git_status, git_log, git_diff_range), which Plan offers and runs (contract §4 amendment
+// 2026-09-06). A third passes iff a session scratch dir is set: classWorkspaceWrite — Apogee's
+// own writers, which Plan runs on that one target and refuses elsewhere with a reason naming
+// it (ADR 0012 second loosen, 2026-09-14).
 //
-// The mode is read ONCE, before the loop: a mid-build tighten must not compose a menu from two
-// different modes (Mode() is live — agent.go).
+// The mode and the scratch dir are each read ONCE, before the loop: a mid-build tighten or
+// session move must not compose a menu from two different states (both are live — agent.go).
 func (a *Agent) toolMenu() []domain.ToolDef {
 	if a.tools == nil {
 		return nil
@@ -1411,14 +1414,15 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 		return nil
 	}
 	planMode := a.Mode() == domain.ModePlan
+	scratchSet := a.ScratchDir() != ""
 	all := a.tools.All()
 	menu := make([]domain.ToolDef, 0, len(all))
 	for _, t := range all {
 		// EXCEPT the sub_agent recursion point, which is bounded one level down (a Plan
-		// sub-agent inherits Plan, so its children are read-only too). It is not a leaf tool at
-		// all — resolve() Delegates it before the ladder — so hiding it would wrongly deny a
-		// Plan-mode parent the ability to delegate read/research work (ADR 0013).
-		if planMode && !planAdmits(t) && t.Name() != tools.SubAgentToolName {
+		// sub-agent inherits Plan, so its children are bounded the same way). It is not a leaf
+		// tool at all — resolve() Delegates it before the ladder — so hiding it would wrongly deny
+		// a Plan-mode parent the ability to delegate read/research work (ADR 0013).
+		if planMode && !planOffers(t, scratchSet) && t.Name() != tools.SubAgentToolName {
 			continue
 		}
 		menu = append(menu, domain.ToolDef{

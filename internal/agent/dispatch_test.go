@@ -975,8 +975,9 @@ func scratchWriteConfig(sink *recordingSink, mode domain.Mode, ws string, probe 
 	cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws, probe)
 	cfg.Mode = mode
 	cfg.Approver = &fakeApprover{decision: domain.ApprovalDeny}
-	// Plan withdraws write_file from the menu; the repair guard is off so the call still reaches
-	// dispatch and the refusal proven below is the resolver's, not the guard's.
+	// The repair guard is off so every call reaches dispatch as scripted and the verdict proven
+	// below is the resolver's, not the guard's (the menu is built from the same live scratch dir
+	// the ladder reads, but the scripted responder never consults it).
 	cfg.Floor.DisableToolCallRepair = true
 	return cfg
 }
@@ -984,8 +985,9 @@ func scratchWriteConfig(sink *recordingSink, mode domain.Mode, ws string, probe 
 // TestDispatch_ScratchDirWriteIsInFence proves the orientation's `Scratch dir: … — writable` line
 // against the native writers: a write_file into the LIVE session scratch dir classifies in-fence,
 // so Allow-Edits and confined Auto run it unprompted with the ADR 0049 permit stamped at the
-// resolved target and the file landing; Ask-Before still gates every write and Plan still refuses
-// (ADR 0012); and a sibling session's scratch dir is nobody's fence.
+// resolved target and the file landing; Ask-Before runs that one write unprompted too and Plan
+// runs it as the one write Plan makes, refusing every other target with a reason naming the dir
+// (ADR 0012 second loosen, 2026-09-14); and a sibling session's scratch dir is nobody's fence.
 //
 // The scratch dir is handed to SetScratchDir in its UNRESOLVED spelling and the permit compared
 // against realPath(t, scratch), because the classification carries the EvalRealPath-resolved
@@ -1025,40 +1027,102 @@ func TestDispatch_ScratchDirWriteIsInFence(t *testing.T) {
 		})
 	}
 
-	t.Run("ask-before still gates it", func(t *testing.T) {
+	// The two lower rungs run the scratch write the same way: the Approver (a denier) is never
+	// consulted, and the ONLY way the file can land is a Run verdict.
+	lower := []struct {
+		name string
+		mode domain.Mode
+		why  string
+	}{
+		{name: "ask-before runs it", mode: domain.ModeAskBefore, why: "Ask-Before gated a scratch write; it is the one write Ask-Before does not gate"},
+		{name: "plan runs it", mode: domain.ModePlan, why: "Plan gated a scratch write; the scratch dir is the one place Plan writes"},
+	}
+	for _, tc := range lower {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ws, scratch := t.TempDir(), t.TempDir()
+			want := filepath.Join(realPath(t, scratch), "probe.txt")
+
+			probe, sink := &scratchWriteProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
+			cfg := scratchWriteConfig(sink, tc.mode, ws, probe)
+
+			driveScratchCall(t, cfg, scratch, "write_file", writeCall(filepath.Join(scratch, "probe.txt")))
+
+			if hasEvent[domain.ApprovalEvent](sink.events) {
+				t.Error(tc.why)
+			}
+			if res, ok := lastToolResult(sink.events); !ok || res.IsError {
+				t.Errorf("result = %+v (ok=%v), want the write's own success result", res, ok)
+			}
+			if !probe.granted || probe.target != want {
+				t.Errorf("permit (granted=%v, Real=%q), want a permit naming %q", probe.granted, probe.target, want)
+			}
+			if _, err := os.Stat(want); err != nil {
+				t.Errorf("the scratch write did not land at %s: %v", want, err)
+			}
+		})
+	}
+
+	t.Run("plan refuses a workspace target with the scratch-naming reason", func(t *testing.T) {
 		t.Parallel()
 		ws, scratch := t.TempDir(), t.TempDir()
-		target := filepath.Join(scratch, "probe.txt")
-
-		probe, sink := &scratchWriteProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
-		cfg := scratchWriteConfig(sink, domain.ModeAskBefore, ws, probe)
-
-		driveScratchCall(t, cfg, scratch, "write_file", writeCall(target))
-
-		if !hasEvent[domain.ApprovalEvent](sink.events) {
-			t.Error("Ask-Before ran a scratch write without asking; its default arm gates every write")
-		}
-		if _, err := os.Stat(target); err == nil {
-			t.Errorf("the denied scratch write landed at %s", target)
-		}
-	})
-
-	t.Run("plan still refuses it", func(t *testing.T) {
-		t.Parallel()
-		ws, scratch := t.TempDir(), t.TempDir()
-		target := filepath.Join(scratch, "probe.txt")
+		target := filepath.Join(ws, "probe.txt")
 
 		probe, sink := &scratchWriteProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
 		cfg := scratchWriteConfig(sink, domain.ModePlan, ws, probe)
 
 		driveScratchCall(t, cfg, scratch, "write_file", writeCall(target))
 
+		// The reason spells the dir exactly as ScratchDir() returns it — the unresolved spelling
+		// SetScratchDir was handed — because that is the spelling the orientation announces.
+		want := "plan mode: writes are permitted only inside the session scratch dir " + scratch
 		res, ok := lastToolResult(sink.events)
-		if !ok || !res.IsError || !strings.Contains(res.Content, planRefusalReason) {
-			t.Errorf("Plan result = %+v (ok=%v), want the plan refusal %q", res, ok, planRefusalReason)
+		if !ok || !res.IsError || !strings.Contains(res.Content, want) {
+			t.Errorf("Plan result = %+v (ok=%v), want the refusal %q", res, ok, want)
+		}
+		if probe.granted {
+			t.Error("a refused write was handed a permit")
 		}
 		if _, err := os.Stat(target); err == nil {
-			t.Errorf("the refused scratch write landed at %s", target)
+			t.Errorf("the refused workspace write landed at %s", target)
+		}
+	})
+
+	t.Run("plan deletes a scratch file with no git-staging note", func(t *testing.T) {
+		t.Parallel()
+		if _, err := exec.LookPath("git"); err != nil {
+			t.Skip("no git on PATH; the staging probe cannot spawn")
+		}
+		// The workspace IS a repository, so an in-workspace deletion would carry a staging note;
+		// the scratch target is outside it, which is what the absent note proves.
+		ws, scratch := t.TempDir(), t.TempDir()
+		mustGit(t, ws, "init", "-q")
+		target := filepath.Join(scratch, "probe.txt")
+		if err := os.WriteFile(target, []byte("scratch"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", target, err)
+		}
+
+		sink := &recordingSink{}
+		cfg := scratchWriteConfig(sink, domain.ModePlan, ws, tools.NewDeleteFile(ws))
+
+		driveScratchCall(t, cfg, scratch, "delete_file", `{"path":`+strconv.Quote(target)+`}`)
+
+		res, ok := lastToolResult(sink.events)
+		if !ok || res.IsError {
+			t.Fatalf("Plan result = %+v (ok=%v), want the deletion's own success result", res, ok)
+		}
+		// The scratch dir is no repository, so the operation carries neither the staged note nor
+		// the skipped note: staging is a courtesy inside the workspace's index and nothing else.
+		for _, note := range []string{"staged in git", "git staging skipped"} {
+			if strings.Contains(res.Content, note) {
+				t.Errorf("result %q carries a git-staging note %q; a scratch target is outside any index", res.Content, note)
+			}
+		}
+		if hasEvent[domain.ApprovalEvent](sink.events) {
+			t.Error("Plan gated a scratch deletion; the scratch dir is the one place Plan writes")
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("the scratch deletion did not land: stat %s = %v", target, err)
 		}
 	})
 

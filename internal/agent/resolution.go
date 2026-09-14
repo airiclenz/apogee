@@ -34,15 +34,17 @@ import (
 // out the verdict — it holds no ladder, guard-tier, or demote decision of its own. The
 // tool-classification the ladder keys on (classifyTool / toolClass) lives here too, beside the
 // table that consumes it, and it is the ONLY classification in the engine: the Plan-mode tool
-// menu (loop.go) keys on it through planAdmits rather than re-deriving one of its own, so the
-// menu can never offer a tool the ladder then refuses (2026-08-02).
+// menu (loop.go) keys on it through planOffers (planAdmits plus the scratch-dir writers) rather
+// than re-deriving one of its own, so the menu can never offer a tool the ladder would refuse
+// on every target (2026-08-02; scratch writers 2026-09-14).
 
 // Model-facing refusal text and human-facing Approval reasons carried on a resolution. They
 // reproduce today's exact strings (dispatch.go / disposition.go) so the rewire in item 2 is
 // behaviour-preserving.
 const (
-	// planRefusalReason is returned to the model when Plan mode refuses a write tool the
-	// menu should already have hidden (a defensive refusal).
+	// planRefusalReason is returned to the model when Plan mode refuses a tool and NO session
+	// scratch dir is set — the menu has hidden every writer, so this is a defensive refusal.
+	// With a scratch dir set the refusal names the dir instead (planScratchRefusalReason).
 	planRefusalReason = "plan mode: write tools are not permitted"
 	// forceApprovalReason is the Approval prompt reason for a gate a Tier-2 dangerous action
 	// forced (a per-call speed-bump, not a pre-allowable convenience).
@@ -226,6 +228,17 @@ type resolutionInput struct {
 	// disclosure the pane rendered and the permit the executor mints can never name three
 	// different paths.
 	writeEscapeTarget string
+	// writeTargetInScratch is precomputed by dispatch from the SAME resolution as the two facts
+	// above: whether a workspace-scoped writer's target resolves inside the LIVE session scratch
+	// dir. It is the one target Plan writes and the one write Ask-Before does not gate (ADR 0012
+	// second loosen, 2026-09-14); it is always false with no scratch dir set, and it says nothing
+	// about any other tool class — the terminal route into the scratch dir is still refused in
+	// Plan and gated in Ask-Before.
+	writeTargetInScratch bool
+	// scratchDir is the live session scratch dir as ScratchDir() spells it, or "" when none is
+	// set. The Plan refusal names it, so the model is told WHERE a write would have run; the
+	// box (ConfinementBox) folds the same dir into WritablePaths but does not carry it apart.
+	scratchDir string
 	// atDepthBound is true when spawning a sub-agent here would reach maxSubAgentDepth.
 	atDepthBound bool
 	// approverPresent reports whether an Approver is configured (a gate with none refuses).
@@ -365,9 +378,11 @@ func classifyTool(tool domain.Tool) toolClass {
 	return classThirdPartyWrite
 }
 
-// planAdmits reports whether Plan mode admits tool — the ONE fact the Plan row of the ladder
-// (resolveLadder) and the Plan tool-menu filter (loop.go's toolMenu) both key on, so the menu
-// can never offer a tool the ladder then refuses.
+// planAdmits reports whether Plan mode admits tool on EVERY target — the read-only floor the
+// Plan row of the ladder (resolveLadder) runs unconditionally and the Plan tool-menu filter
+// (loop.go's toolMenu) offers through planOffers, so the menu can never offer a tool the ladder
+// then refuses. The scratch-dir writers are NOT admitted here: they are offered by planOffers and
+// run by the ladder on the one target the call resolves into the scratch dir.
 //
 // It is the blast-radius CLASS, never the bare ReadOnly() self-declaration: a tool that declares
 // itself read-only while carrying an unfakeable marker — diagnostics declares it and launches an
@@ -387,6 +402,25 @@ func planAdmits(tool domain.Tool) bool {
 	return class == classReadOnly || class == classReadOnlySubprocess
 }
 
+// planOffers reports whether Plan mode offers tool on the menu — the ONE predicate the Plan
+// tool-menu filter (loop.go's toolMenu) keys on, and the tool-level half of the Plan ladder row.
+// Plan offers what it can run for SOME target: everything planAdmits, plus Apogee's own
+// workspace-scoped writers when a session scratch dir is set (ADR 0012 second loosen,
+// 2026-09-14), because the scratch dir is the one target Plan runs them on. The ladder then
+// decides per CALL by the resolved target (writeTargetInScratch): a scratch write runs, every
+// other target is refused with a reason naming the dir. Without a scratch dir the writers stay
+// off the menu and Plan is the read-only floor it always was.
+func planOffers(tool domain.Tool, scratchSet bool) bool {
+	return planAdmits(tool) || (scratchSet && classifyTool(tool) == classWorkspaceWrite)
+}
+
+// planScratchRefusalReason is returned to the model when Plan mode refuses a tool while a
+// session scratch dir is set: it names the dir, in the spelling ScratchDir() returns, because the
+// menu offered the writers for that one target and the refusal has to say which target that is.
+func planScratchRefusalReason(dir string) string {
+	return "plan mode: writes are permitted only inside the session scratch dir " + dir
+}
+
 // resolveLadder ports dispose()/disposeAuto() verbatim: the autonomy-ladder × tool-class ×
 // confine-to-workspace × backend-caps table, producing the BARE leaf verdict (kind only,
 // plus the box for a Confine). The leaf overlays — guard Tier-2, nil-Approver, gate
@@ -396,11 +430,17 @@ func resolveLadder(in resolutionInput) resolution {
 
 	switch in.mode {
 	case domain.ModePlan:
-		// Plan runs the read-only floor and nothing else. The menu filter (loop.go) keys on the
-		// SAME predicate, so a refusal here is now defensive only: it catches a host-registered
-		// tool the model called without it being on the menu, never a tool Plan itself offered.
-		if planAdmits(in.tool) {
+		// Plan runs the read-only floor, plus Apogee's own writers on ONE target: the session
+		// scratch dir (ADR 0012 second loosen). The menu filter (loop.go) keys on planOffers, which
+		// offers the writers whenever a scratch dir is set, so a refusal here is the model-facing
+		// answer for an offered writer aimed anywhere else — it names the dir the write would have
+		// run in. Without a scratch dir the writers are off the menu and the refusal is defensive
+		// only, as before: a host-registered tool called without being offered.
+		if planAdmits(in.tool) || (class == classWorkspaceWrite && in.writeTargetInScratch) {
 			return resolution{kind: resolveRun}
+		}
+		if in.scratchDir != "" {
+			return resolution{kind: resolveRefuse, reason: planScratchRefusalReason(in.scratchDir)}
 		}
 		return resolution{kind: resolveRefuse, reason: planRefusalReason}
 
@@ -420,8 +460,13 @@ func resolveLadder(in resolutionInput) resolution {
 
 	default:
 		// An empty / unknown mode is Ask-Before — gate every write/exec/external, run only
-		// harmless reads (the hardened git read trio among them).
+		// harmless reads (the hardened git read trio among them) and Apogee's own writes into
+		// the session scratch dir, the one write Ask-Before does not gate (ADR 0012 second
+		// loosen). The terminal route into that dir is classSubprocess and still gates.
 		if class == classReadOnly || class == classReadOnlySubprocess {
+			return resolution{kind: resolveRun}
+		}
+		if class == classWorkspaceWrite && in.writeTargetInScratch {
 			return resolution{kind: resolveRun}
 		}
 		return resolution{kind: resolveGate}

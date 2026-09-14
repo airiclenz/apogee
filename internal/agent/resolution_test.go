@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -187,7 +188,40 @@ func TestResolve_LadderTable(t *testing.T) {
 		}
 	}
 
+	// The scratch-dir column (ADR 0012 second loosen, 2026-09-14): a workspace-scoped write whose
+	// target resolves into the session scratch dir RUNS in Plan and Ask-Before — the one write
+	// those rungs make unprompted — while every other Plan refusal names the dir once one is set.
+	// ladderRow widens ladderCase by the two scratch facts, so the positional table above stays
+	// as written and these rows feed the same loop.
+	type ladderRow struct {
+		ladderCase
+		inScratch  bool
+		scratchDir string
+	}
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	rows := make([]ladderRow, 0, len(cases)+10)
 	for _, tc := range cases {
+		rows = append(rows, ladderRow{ladderCase: tc})
+	}
+	rows = append(rows,
+		ladderRow{ladderCase{"WS-scratch/plan", wsw, domain.ModePlan, true, true, true, resolveRun, "", security.AuditAllowed}, true, scratch},
+		ladderRow{ladderCase{"WS-scratch/ask-before", wsw, domain.ModeAskBefore, true, true, true, resolveRun, "", security.AuditAllowed}, true, scratch},
+		ladderRow{ladderCase{"WS-scratch/unknown-mode", wsw, badMode, true, true, true, resolveRun, "", security.AuditAllowed}, true, scratch},
+		// A scratch dir set but the target elsewhere: Plan refuses, naming the dir; Ask-Before
+		// gates with the wording it always had.
+		ladderRow{ladderCase{"WS-in/plan-with-scratch", wsw, domain.ModePlan, true, true, true, resolveRefuse, planScratchRefusalReason(scratch), ""}, false, scratch},
+		ladderRow{ladderCase{"WS-out/plan-with-scratch", wsw, domain.ModePlan, true, true, false, resolveRefuse, planScratchRefusalReason(scratch), ""}, false, scratch},
+		ladderRow{ladderCase{"WS-in/ask-before-with-scratch", wsw, domain.ModeAskBefore, true, true, true, resolveGate, "out-of-workspace write", security.AuditAllowed}, false, scratch},
+		// The terminal route into the scratch dir is classSubprocess: still refused in Plan
+		// (with the scratch-naming reason) and gated in Ask-Before, whatever the command text.
+		ladderRow{ladderCase{"subproc/plan-with-scratch", sub, domain.ModePlan, true, true, true, resolveRefuse, planScratchRefusalReason(scratch), ""}, false, scratch},
+		ladderRow{ladderCase{"subproc/ask-before-with-scratch", sub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed}, false, scratch},
+		// Allow-Edits and Auto are unchanged: the scratch dir was already in-fence there.
+		ladderRow{ladderCase{"WS-scratch/allow-edits", wsw, domain.ModeAllowEdits, true, true, true, resolveRun, "", security.AuditAllowed}, true, scratch},
+		ladderRow{ladderCase{"WS-scratch/auto-confine", wsw, domain.ModeAuto, true, true, true, resolveRun, "", security.AuditAllowed}, true, scratch},
+	)
+
+	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			in := resolutionInput{
@@ -198,6 +232,8 @@ func TestResolve_LadderTable(t *testing.T) {
 				confineToWorkspace:     tc.confine,
 				fsConfineAvailable:     tc.fsConfine,
 				writeTargetInWorkspace: tc.writeIn,
+				writeTargetInScratch:   tc.inScratch,
+				scratchDir:             tc.scratchDir,
 				approverPresent:        true,
 				box:                    domain.ConfinementBox{WorkspaceRoot: ws},
 			}

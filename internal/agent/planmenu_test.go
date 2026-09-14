@@ -85,16 +85,23 @@ func offeredNames(menu []domain.ToolDef) map[string]bool {
 
 // TestPlanToolMenuAgreesWithTheLadder is the invariant this item exists for: for EVERY
 // registered tool, Plan offers it in the menu exactly when the Plan ladder would actually run
-// it. Offered-but-refused is the drift that shipped (diagnostics); refused-but-
+// it for SOME target. Offered-but-refused is the drift that shipped (diagnostics); refused-but-
 // hidden would be the opposite hole — a tool Plan can run that the model is never shown.
+//
+// With a session scratch dir set, the target the verdict side resolves for is a SCRATCH target
+// (writeTargetInScratch): that is the one target Plan runs Apogee's own writers on, so the
+// writers are offered exactly because the ladder runs them there (ADR 0012 second loosen). The
+// no-scratch-dir half of the invariant is TestPlanToolMenuWithoutAScratchDirIsReadOnly.
 //
 // The verdict side calls the real resolve() rather than re-deriving anything, so the two sides
 // of the assertion cannot drift together.
 func TestPlanToolMenuAgreesWithTheLadder(t *testing.T) {
 	t.Parallel()
-	ws := t.TempDir()
+	ws, scratch := t.TempDir(), t.TempDir()
 	toolset := planMenuTools(ws)
-	offered := offeredNames(planMenuAgent(t, domain.ModePlan, toolset).toolMenu())
+	a := planMenuAgent(t, domain.ModePlan, toolset)
+	a.SetScratchDir(scratch)
+	offered := offeredNames(a.toolMenu())
 
 	for _, tool := range toolset {
 		t.Run(tool.Name(), func(t *testing.T) {
@@ -107,17 +114,53 @@ func TestPlanToolMenuAgreesWithTheLadder(t *testing.T) {
 				confineToWorkspace:     true,
 				fsConfineAvailable:     true,
 				writeTargetInWorkspace: true,
+				writeTargetInScratch:   true,
+				scratchDir:             scratch,
 				approverPresent:        true,
 				box:                    domain.ConfinementBox{WorkspaceRoot: ws},
 			})
 			// Anything but a refusal is a call Plan carries out — sub_agent Delegates (D3/ADR
-			// 0013), a read-only-classed leaf Runs.
+			// 0013), a read-only-classed leaf Runs, a native writer Runs on the scratch target.
 			runnable := got.kind != resolveRefuse
 			if offered[tool.Name()] != runnable {
 				t.Errorf("Plan menu offers %s = %t, but the ladder resolves it to %s (want the menu to follow the ladder)",
 					tool.Name(), offered[tool.Name()], got.kind)
 			}
 		})
+	}
+}
+
+// TestPlanToolMenuWithoutAScratchDirIsReadOnly is the same agreement with NO session scratch
+// dir: there is then no target Plan writes, so the ladder refuses every writer and the menu
+// offers none of them — Plan is the read-only floor it was before the second loosen. The
+// writers are also named, so the boundary reads as itself rather than as rows of a table.
+func TestPlanToolMenuWithoutAScratchDirIsReadOnly(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	toolset := planMenuTools(ws)
+	offered := offeredNames(planMenuAgent(t, domain.ModePlan, toolset).toolMenu())
+
+	for _, tool := range toolset {
+		got := resolve(resolutionInput{
+			mode:                   domain.ModePlan,
+			call:                   domain.ToolCall{ID: "c1", Tool: tool.Name()},
+			tool:                   tool,
+			guard:                  proceed,
+			confineToWorkspace:     true,
+			fsConfineAvailable:     true,
+			writeTargetInWorkspace: true,
+			approverPresent:        true,
+			box:                    domain.ConfinementBox{WorkspaceRoot: ws},
+		})
+		if runnable := got.kind != resolveRefuse; offered[tool.Name()] != runnable {
+			t.Errorf("Plan menu (no scratch dir) offers %s = %t, but the ladder resolves it to %s",
+				tool.Name(), offered[tool.Name()], got.kind)
+		}
+	}
+	for _, name := range []string{"write_file", "edit_existing_file", "delete_file", "move_file"} {
+		if offered[name] {
+			t.Errorf("Plan menu offers %s with no scratch dir set; there is no target Plan writes", name)
+		}
 	}
 }
 
@@ -145,7 +188,7 @@ func TestPlanToolMenuDropsDiagnosticsAndTheUnmarkedFakes(t *testing.T) {
 			t.Errorf("Plan menu is missing %s; Plan runs it, so the model must be shown it", name)
 		}
 	}
-	// And the write half is still hidden, as it always was.
+	// And the write half is hidden: no scratch dir is set here, so Plan has no target to write.
 	for _, name := range []string{"write_file", "edit_existing_file", "terminal", "web_fetch"} {
 		if offered[name] {
 			t.Errorf("Plan menu offers %s, which Plan refuses", name)

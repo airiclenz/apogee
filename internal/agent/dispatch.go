@@ -740,7 +740,7 @@ func repeatedArgumentKeysResult(call domain.ToolCall) (domain.ToolResult, bool) 
 // a Confine verdict would run inside. It is dispatch's fact-gathering; the verdict logic lives
 // entirely in resolve().
 func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard security.PreCheck) resolutionInput {
-	inFence, escape := a.classifyWriteTarget(tool, call)
+	target := a.classifyWriteTarget(tool, call)
 	return resolutionInput{
 		mode:                   a.effectiveMode(),
 		call:                   call,
@@ -748,8 +748,10 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		guard:                  guard,
 		confineToWorkspace:     a.ConfineToWorkspace(),
 		fsConfineAvailable:     a.fsConfinementAvailable(),
-		writeTargetInWorkspace: inFence,
-		writeEscapeTarget:      escape,
+		writeTargetInWorkspace: target.inFence,
+		writeTargetInScratch:   target.inScratch,
+		writeEscapeTarget:      target.escape,
+		scratchDir:             a.ScratchDir(),
 		atDepthBound:           a.depth >= maxSubAgentDepth,
 		approverPresent:        a.cfg.Approver != nil,
 		box:                    a.confinementBox(),
@@ -1352,28 +1354,42 @@ func (a *Agent) effectiveMode() domain.Mode {
 	return domain.TighterMode(own, a.liveMode())
 }
 
-// classifyWriteTarget answers BOTH facts a workspace-scoped writer's target decides, from the ONE
-// resolution that discovers them (EvalRealPath touches disk — this is the single I/O-tainted fact
-// dispatch precomputes for the hermetically pure resolve(), and resolving twice to answer twice
-// would invite the two answers to describe different paths):
+// writeTargetClass is what classifyWriteTarget answers about a workspace-scoped writer's target:
+// the three facts the ladder and the executor read, all taken from ONE path resolution. Each
+// field is defined by the matching bullet on classifyWriteTarget.
+type writeTargetClass struct {
+	inFence   bool   // inside the ladder's fence (workspace root ∪ declared writable paths)
+	inScratch bool   // inside the LIVE session scratch dir (false when none is set)
+	escape    string // the resolved path a permit must name, "" for an in-root write
+}
+
+// classifyWriteTarget answers ALL the facts a workspace-scoped writer's target decides, from the
+// ONE resolution that discovers them (EvalRealPath touches disk — this is the single I/O-tainted
+// fact dispatch precomputes for the hermetically pure resolve(), and resolving twice to answer
+// twice would invite the two answers to describe different paths):
 //
 //   - inFence — whether the target lands inside the FENCE the ladder classifies against, which is
 //     the workspace root UNION the box's declared writable paths (ADR 0049 Q3). A call with no
 //     inspectable target (ok==false) is in-bounds, exactly as before: the Resolution runs it and
 //     path-safety bounds it at Execute. A tool that is not a workspace-scoped writer is never
 //     in-workspace by this seam.
-//   - escapeTarget — the resolved path a permit must name for the write to LAND, set whenever the
+//   - inScratch — whether the target lands inside the session's own scratch dir, read live so a
+//     SetScratchDir move lands on the next call. It is decided BEFORE the workspace check so a
+//     scratch dir that happens to sit under the workspace root still classifies as scratch; a
+//     call with no inspectable target is never in-scratch (Plan runs nothing on its account).
+//   - escape — the resolved path a permit must name for the write to LAND, set whenever the
 //     target is outside the workspace ROOT. That is deliberately wider than !inFence: a writable
 //     path outside the workspace is in-fence for the ladder (it gates nothing) and still needs the
 //     permit at Execute, because the fence itself keeps one rule — the workspace root, plus
 //     whatever single target the context's permit names.
-func (a *Agent) classifyWriteTarget(tool domain.Tool, call domain.ToolCall) (inFence bool, escapeTarget string) {
+func (a *Agent) classifyWriteTarget(tool domain.Tool, call domain.ToolCall) writeTargetClass {
 	abs, ok := tools.WorkspaceWriteTarget(tool, call)
 	if !ok {
-		return true, "" // nothing inspectable to classify ⇒ in-bounds (Execute path-bounds it)
+		return writeTargetClass{inFence: true} // nothing inspectable to classify ⇒ in-bounds (Execute path-bounds it)
 	}
+	inScratch := pathWithin(abs, a.ScratchDir()) // pathWithin answers false for an unset ("") dir
 	if pathWithin(abs, a.cfg.WorkspaceDir) {
-		return true, ""
+		return writeTargetClass{inFence: true, inScratch: inScratch}
 	}
 	// The union is read off the LIVE box — the same fold every per-call consumer builds from —
 	// rather than the raw ConfineWritablePaths slice, so the session's scratch dir (folded in by
@@ -1382,10 +1398,10 @@ func (a *Agent) classifyWriteTarget(tool domain.Tool, call domain.ToolCall) (inF
 	// left that dir gating in Allow-Edits/Auto and refused by a Firing's denier.
 	for _, writable := range a.confinementBox().WritablePaths {
 		if pathWithin(abs, writable) {
-			return true, abs
+			return writeTargetClass{inFence: true, inScratch: inScratch, escape: abs}
 		}
 	}
-	return false, abs
+	return writeTargetClass{inScratch: inScratch, escape: abs}
 }
 
 // resolvedPath is the DISCLOSURE twin of classifyWriteTarget: the same resolved target,
