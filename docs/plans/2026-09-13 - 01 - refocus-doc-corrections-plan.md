@@ -77,7 +77,7 @@ NOTES (2026-09-14): retry — the prior attempt's ADR and greenfield rewrites we
 **Acceptance:** `grep -q "advise:" README.md && grep -n "Reactions" README.md | grep -q "gate:" && grep -n "Reactions" docs/manual/README.md | grep -q "sixteen Moments" && ! grep -q "eleven notices" docs/manual/README.md`
 **Commit:** `docs(readme): the Reactions index rows cover run:, advise: and gate:`
 
-## 5. Archived stage-3 and context-fill plans read `Status: executed`
+## 5. Archived stage-3 and context-fill plans read `Status: executed` — ✅ DONE (2026-09-14)
 
 **What:** Flip the header status on the two archived plans (`corrections.md` items 8-9): `docs/plans/archived/2026-09-09 - 01 - reaction-core-stage-3-plan.md` line 5 `**Status:** unexecuted` → `**Status:** executed (16/16, archived 2026-09-12)`; `docs/plans/archived/2026-09-09 - 02 - context-fill-notice-plan.md` line 5 `**Status:** unexecuted` → `**Status:** executed (8/8, archived 2026-09-13)`. Nothing else in either file changes.
 **Files:** `docs/plans/archived/2026-09-09 - 01 - reaction-core-stage-3-plan.md`, `docs/plans/archived/2026-09-09 - 02 - context-fill-notice-plan.md`

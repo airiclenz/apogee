@@ -2,7 +2,7 @@
 
 **Goal:** Ship the two remaining day-one user cells of the Reaction surface matrix over the stage-1 core and the stage-2 `reactions:` file: `gate:` as a stage of the Approver at `pre-tool-exec`, and `advise:` as a fenced, capped, fail-open trailer on the closing tool result with a provenance ledger whose spans never survive a resume. The advise slot is built here and handed unchanged to the context-fill notice (ADR 0077) and to the bench; the advise cell ships only after the admission arm passes.
 
-**Date:** 2026-09-09 · **Status:** unexecuted · **Sized for:** ~200k-context host · **Base:** `7b23f9da` · **Bead:** `apogee-rxj`
+**Date:** 2026-09-09 · **Status:** executed (16/16, archived 2026-09-12) · **Sized for:** ~200k-context host · **Base:** `7b23f9da` · **Bead:** `apogee-rxj`
 
 **Sources:** `docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md` (D2–D9, A7, A8) · `docs/adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md` D5 (consumer of the slot) · `docs/design/reaction-core-greenfield.md` §2.3, §2.5, §7 step 3 · `docs/design/confinement-execution-contract.md` §10 · `docs/adr/0073-*.md` D6, D8 · `docs/adr/0049-*.md` §4 · `docs/adr/0009-the-ab-decision-rule.md` · `../apogee-sim/docs/plans/2026-09-08 - 01 - advise-admission-arm-pre-registration.md` (P1, P2, the verdict) · bead `apogee-rxj`.
 
