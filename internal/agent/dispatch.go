@@ -264,7 +264,18 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 			continue
 		}
 
-		result, outcome := a.resolveAndExecute(ctx, turn, call)
+		var (
+			result  domain.ToolResult
+			outcome dispatchOutcome
+		)
+		if isSubAgentCall(call) && a.interjectionPending() {
+			// A queued user message pre-empts a delegation that has not started: the same skip,
+			// result and phase the pool gives a dequeued slot (runDelegationPool), and never a
+			// leaf tool — a leaf runs to its result whatever is waiting at the boundary.
+			result = a.skipDelegation(turn, call)
+		} else {
+			result, outcome = a.resolveAndExecute(ctx, turn, call)
+		}
 		if outcome == dispatchCancelled {
 			return dispatchCancelled
 		}
@@ -302,7 +313,9 @@ type fanOutSlot struct {
 	verdict resolution
 	result  domain.ToolResult
 	// run marks a Delegate verdict: this slot's child still has to run through the pool. A
-	// refused (or unknown-tool, or hook-failed) slot already holds its final result.
+	// refused (or unknown-tool, or hook-failed) slot already holds its final result. The worker
+	// that SKIPS a slot for a pending interjection clears it too, so the commit phase treats the
+	// skipped slot exactly as a refused one: no audit record for a child that never ran.
 	run bool
 	// hookFailed marks a pre-tool-exec reaction failure, whose result is appended WITHOUT the
 	// productivity signal and the post-tool-result reactions — the serial path's `continue`.
@@ -413,6 +426,13 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 // CANCELLED is bracketed too: its finished phase carries no result and says so (ADR 0075 decision
 // 12). They are the group's only per-child timing: the results themselves still burst after the
 // join, in call order.
+//
+// The dequeue is also where a queued user message PRE-EMPTS the group (interjectionPending): a
+// slot dequeued while a message waits for the boundary is not run at all — it takes the skip
+// result and only a finished phase, at once, so a Driver's row leaves "scheduled" immediately —
+// while every child already started runs to its boundary untouched. The predicate is read once
+// per slot, at its dequeue, and never again: a child that has started is never affected, and a
+// slot skipped stays skipped even if the message is withdrawn.
 func (a *Agent) runDelegationPool(ctx context.Context, turn, width int, slots []fanOutSlot) {
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -421,6 +441,13 @@ func (a *Agent) runDelegationPool(ctx context.Context, turn, width int, slots []
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
+				if a.interjectionPending() {
+					// Cleared so commitDelegation books no audit record for a child that never
+					// ran — the refused-slot path, with the skip result in the refusal's place.
+					slots[i].run = false
+					slots[i].result = a.skipDelegation(turn, slots[i].call)
+					continue
+				}
 				a.emitSubAgentPhase(turn, slots[i].call, domain.SubAgentStarted, domain.ToolResult{}, false)
 				slots[i].result, slots[i].outcome = a.runDelegation(ctx, turn, slots[i].call)
 				cancelled := slots[i].outcome == dispatchCancelled
@@ -442,6 +469,43 @@ func (a *Agent) runDelegationPool(ctx context.Context, turn, width int, slots []
 	}
 	close(jobs)
 	wg.Wait()
+}
+
+// skippedDelegationContent is the whole tool result a delegation pre-empted by a queued user
+// message carries. It is a constant because it is the model's only account of a child that never
+// ran: the same words every time, so the model can tell a skip from a child's own failure and
+// decide whether to delegate again once it has read the message.
+const skippedDelegationContent = "sub-agent not started: the user sent a message while this group was running; delegate again if the task is still needed"
+
+// skippedDelegationResult is the error-shaped tool result of a pre-empted delegation — built as
+// executeRefuse builds a refusal, so on the wire and in a Driver it reads like one.
+func skippedDelegationResult(callID string) domain.ToolResult {
+	return errorToolResult(callID, skippedDelegationContent)
+}
+
+// interjectionPending answers whether a user message is waiting for this Agent's next boundary —
+// the one predicate that decides a delegation about to start is skipped instead. It is one rule
+// for every depth: at depth 0 it is the host's Config.InterjectionPending seam (nil ⇒ never), and
+// at depth > 0 it is this child's own mailbox (children.go), because a message queued for a child
+// waits on that child's grandchildren exactly as the human's waits on its children.
+func (a *Agent) interjectionPending() bool {
+	if a.depth > 0 {
+		return a.mailbox.hasPending()
+	}
+	if a.cfg.InterjectionPending == nil {
+		return false
+	}
+	return a.cfg.InterjectionPending()
+}
+
+// skipDelegation pre-empts one delegation that has not started: it emits the finished phase that
+// closes the child's bracket without a started one — carrying the skip result, not Cancelled,
+// since nothing is rolled back — and returns that result for the caller to commit in call order.
+// Both delegation paths call it, so a lone (serial) delegation is skipped exactly as a pooled one.
+func (a *Agent) skipDelegation(turn int, call domain.ToolCall) domain.ToolResult {
+	result := skippedDelegationResult(call.ID)
+	a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, result, false)
+	return result
 }
 
 // runDelegation is one worker's whole job: drive this call's nested Agent to its boundary. The
@@ -473,7 +537,8 @@ func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCal
 // emits and names the tool-call block an observer attaches it to.
 //
 // Both delegation paths call it, so a lone (serial) delegation reports the same started/finished
-// pair a pooled one does: nothing that runs is ever left looking queued.
+// pair a pooled one does: nothing that runs is ever left looking queued. A delegation skipped for
+// a pending interjection reports a finished phase alone (skipDelegation): it never started.
 //
 // cancelled marks a finished phase that closes a ROLLED-BACK delegation rather than a reported one
 // (ADR 0075 decision 12). It rides the event so an observer can tell the two apart; a started phase
@@ -525,7 +590,8 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 	}
 	if slot.run {
 		// executeDelegate's tail: a delegation that actually ran is audit-recorded under its
-		// verdict. A refused slot was already recorded by executeRefuse in the prepare phase.
+		// verdict. A refused slot was already recorded by executeRefuse in the prepare phase; a
+		// slot the pool skipped for a pending interjection never ran and records nothing.
 		a.recordExecuted(turn, slot.call, slot.verdict.auditDecision, slot.verdict.auditReason, slot.result)
 	}
 	advised := a.firePostToolResult(ctx, slot.call, &slot.result)

@@ -39,7 +39,10 @@
 - Terminal / subprocess writes into the scratch dir below Auto (still refused in Plan, gated in Ask-Before); per-project `confine-writable-paths` in Plan or Ask-Before (scratch dir only).
 - Any change to the orientation template text, `{{scratch}}`, the dangerous-action guard exemption (ADR 0049), scratch GC, or VERSION.
 
-## 1. Engine: a pending queued message pre-empts the delegations not yet started
+## 1. Engine: a pending queued message pre-empts the delegations not yet started — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): the child-side predicate is named `childMailbox.hasPending` (affirmative `has` prefix per the coding standard) rather than reusing `drainMailbox` state; `Agent.interjectionPending` and the shared `skipDelegation` (result + finished phase) live in dispatch.go, called by both the pool worker and dispatchSerially.
+NOTES (2026-09-14): the serial-path test places the leaf tool in the parent's NEXT Turn with the seam still true — partitionDispatch runs a same-reply leaf before every delegation, so that is the only order in which "a leaf after a skipped delegation" is observable.
 
 **What:** Add the host seam and the pre-emption, engine-side, depth-aware:
 - `internal/domain/config.go`: `Config.InterjectionPending func() bool` beside `Report` — a host-supplied delegate answering "is a message staged for this top-level agent?"; nil (bench, embedder, every bare test) ⇒ never pre-empts, byte-identical behaviour. May be called from the dispatching goroutine and pool workers; the host makes it goroutine-safe.

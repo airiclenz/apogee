@@ -129,6 +129,21 @@ type Config struct {
 	// hands the line over rather than blocking on it.
 	Report func(msg string)
 
+	// InterjectionPending answers "is a user message staged for this top-level agent, waiting for
+	// the boundary Interject commits it at?" — a host-supplied predicate the engine consults when
+	// it is about to START a delegation. A queued message pre-empts the sub-agents of the running
+	// delegation group that have not started yet: each is skipped with an explicit error-shaped
+	// tool result instead of run, the children already running finish untouched, and the message
+	// lands at that boundary as an ordinary Interjection (ADR 0025). It is a predicate and nothing
+	// more — the engine never reads the message through it, never drains the host's queue, and
+	// commits nothing before the boundary.
+	//
+	// nil (the default) never pre-empts: a Driver that stages no messages — the bench, an
+	// embedder, every test that composes a bare Config — is byte-identical to one built before
+	// this field existed. It may be called from the dispatching goroutine and, under a fan-out,
+	// from the pool workers at once, so the host makes it goroutine-safe.
+	InterjectionPending func() bool
+
 	// Inspector arms the raw-protocol capture (`ui.inspector` in config.yaml): with it set, the
 	// engine observes the Upstream client's own bytes and reports each model call's request body
 	// and response payload to Events as a WireEvent, stamped with the emitting Agent's identity

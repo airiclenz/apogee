@@ -78,7 +78,10 @@ func (r *childRegistry) all() []*Agent {
 // in the order they were queued. It is the handover between the goroutine a message is typed on
 // and the goroutine driving the child's Steps: adding is non-blocking and safe from anywhere,
 // draining happens only on the driving goroutine, at a between-Steps boundary where Interject is
-// legal (ADR 0025's caller rule).
+// legal (ADR 0025's caller rule). Between the two, a queued message is also a PREDICATE the
+// child's dispatch reads (hasPending): a grandchild not yet started is skipped rather than run
+// while a message waits for the boundary, exactly as a top-level agent's queued message skips
+// its unstarted children through Config.InterjectionPending.
 //
 // It closes exactly once, when the child's run ends, and refuses everything after: a message that
 // cannot be delivered must be refused at the door rather than accepted into a mailbox nothing will
@@ -100,6 +103,15 @@ func (m *childMailbox) add(in domain.UserInput) bool {
 	}
 	m.queued = append(m.queued, in)
 	return true
+}
+
+// hasPending reports whether a message is queued and not yet drained — the child-side answer to
+// Config.InterjectionPending, read by the dispatch that is about to start a grandchild
+// (Agent.interjectionPending). A closed mailbox holds nothing deliverable and reports false.
+func (m *childMailbox) hasPending() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !m.closed && len(m.queued) > 0
 }
 
 // drain takes everything queued so far, leaving the mailbox open for more.

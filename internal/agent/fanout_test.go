@@ -715,6 +715,19 @@ func gruntTarget(endpoint string, parallelAgents int) *DelegationTarget {
 // cap, and gates each unrouted child on gate. It returns the agent, submitted and ready to Run.
 func threeWayFanOutParent(t *testing.T, sink domain.EventSink, sessionCap int, gate func(context.Context)) *Agent {
 	t.Helper()
+	return threeWayFanOutParentSeamed(t, sink, sessionCap, gate, nil)
+}
+
+// threeWayFanOutParentSeamed is threeWayFanOutParent with the host's Config.InterjectionPending
+// seam wired to pending; nil leaves the seam absent, exactly as every fixture before it existed.
+func threeWayFanOutParentSeamed(
+	t *testing.T,
+	sink domain.EventSink,
+	sessionCap int,
+	gate func(context.Context),
+	pending func() bool,
+) *Agent {
+	t.Helper()
 	up := newRoutedResponder().
 		route("delegate three things", nil, fanOutScript(
 			[2]string{"c1", "task one"}, [2]string{"c2", "task two"}, [2]string{"c3", "task three"})).
@@ -725,6 +738,7 @@ func threeWayFanOutParent(t *testing.T, sink domain.EventSink, sessionCap int, g
 
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 	cfg.ParallelAgents = sessionCap
+	cfg.InterjectionPending = pending
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -841,5 +855,209 @@ func TestRoutedWidthReachesTheHookView(t *testing.T) {
 	req, _ = a.buildRequest(0)
 	if got := req.View().ParallelAgents(); got != 1 {
 		t.Errorf("unrouted request view width = %d, want the session server's 1", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// A pending queued message pre-empts the delegations not yet started
+// ----------------------------------------------------------------------------
+//
+// The host answers Config.InterjectionPending; the pool reads it once per slot at dequeue and
+// dispatchSerially once per delegation before it resolves. Nothing here drains a message: the
+// tests flip a flag and read what the group committed.
+
+// phasesFor returns the lifecycle phases the sink saw for one delegation, in emission order.
+func phasesFor(events []domain.Event, callID string) []domain.SubAgentPhaseEvent {
+	var out []domain.SubAgentPhaseEvent
+	for _, pe := range subAgentPhases(events) {
+		if pe.CallID == callID {
+			out = append(out, pe)
+		}
+	}
+	return out
+}
+
+// assertSkippedDelegation pins the whole account of a pre-empted delegation: its committed
+// result is the exact skip content as an error, its bracket is ONE finished phase carrying that
+// result and no started phase, and no audit record was booked for a child that never ran.
+func assertSkippedDelegation(t *testing.T, events []domain.Event, result domain.ToolResult) {
+	t.Helper()
+	if !result.IsError || result.Content != skippedDelegationContent {
+		t.Errorf("%s result = %+v, want the exact skip content as an error result", result.CallID, result)
+	}
+	phases := phasesFor(events, result.CallID)
+	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished {
+		t.Fatalf("%s phases = %+v, want exactly one finished phase and no started one", result.CallID, phases)
+	}
+	if phases[0].Cancelled || phases[0].Result.Content != skippedDelegationContent {
+		t.Errorf("%s finished phase = %+v, want the skip result and not Cancelled", result.CallID, phases[0])
+	}
+	for _, ae := range auditEvents(events) {
+		if ae.CallID == result.CallID {
+			t.Errorf("%s was audit-recorded (%+v); a child that never ran books no record", result.CallID, ae)
+		}
+	}
+}
+
+// TestFanOut_PendingInterjectionSkipsTheQueuedChildren is the item's core: under a cap of 2 a
+// three-way group has one child waiting for a worker; the message arrives while the first two run,
+// so the third is never started — it commits the skip result in call order, with a finished phase
+// alone — while both running children finish and commit their real results, and the Turn completes.
+func TestFanOut_PendingInterjectionSkipsTheQueuedChildren(t *testing.T) {
+	sink := &recordingSink{}
+	var pending atomic.Bool
+	arrived := make(chan struct{}, 3)
+	release := make(chan struct{})
+	// The gate holds the two running children until the test has staged the message, so the
+	// third slot can only be dequeued once the seam already answers true.
+	gate := func(ctx context.Context) {
+		arrived <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	go func() {
+		for i := 0; i < 2; i++ {
+			<-arrived
+		}
+		pending.Store(true)
+		close(release)
+	}()
+
+	a := threeWayFanOutParentSeamed(t, sink, 2, gate, pending.Load)
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("parent status = %q, want the Exchange to complete", res.Status)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3 (the skipped slot still commits)", len(results))
+	}
+	if results[0].CallID != "c1" || results[1].CallID != "c2" || results[2].CallID != "c3" {
+		t.Errorf("results committed as %q,%q,%q; want the emitted call order c1,c2,c3",
+			results[0].CallID, results[1].CallID, results[2].CallID)
+	}
+	if results[0].IsError || !strings.Contains(results[0].Content, "child one done") {
+		t.Errorf("c1 result = %+v, want the running child's real result", results[0])
+	}
+	if results[1].IsError || !strings.Contains(results[1].Content, "child two done") {
+		t.Errorf("c2 result = %+v, want the running child's real result", results[1])
+	}
+	assertSkippedDelegation(t, sink.events, results[2])
+	for _, id := range []string{"c1", "c2"} {
+		if phases := phasesFor(sink.events, id); len(phases) != 2 || phases[0].Phase != domain.SubAgentStarted {
+			t.Errorf("%s phases = %+v, want a started/finished pair for a child that ran", id, phases)
+		}
+	}
+}
+
+// TestFanOut_PendingInterjectionNeverTouchesARunningChild pins the boundary of the rule: the seam
+// flips only after every slot has been dequeued and started, so every child runs to its real
+// result — a message never cancels a child, it only pre-empts one that has not begun.
+func TestFanOut_PendingInterjectionNeverTouchesARunningChild(t *testing.T) {
+	sink := &recordingSink{}
+	var pending atomic.Bool
+	probe := newConcurrencyProbe(3, 3*time.Second)
+	// enter rendezvouses all three children, so by the time any of them flips the seam all three
+	// slots have been dequeued and checked.
+	gate := func(ctx context.Context) {
+		probe.enter(ctx)
+		pending.Store(true)
+	}
+
+	a := threeWayFanOutParentSeamed(t, sink, 3, gate, pending.Load)
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if peak := probe.peakInFlight(); peak != 3 {
+		t.Fatalf("peak children in flight = %d, want 3 (the fixture must start all three before the flip)", peak)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3", len(results))
+	}
+	for i, want := range []string{"child one done", "child two done", "child three done"} {
+		if results[i].IsError || !strings.Contains(results[i].Content, want) {
+			t.Errorf("%s result = %+v, want the real result %q (a running child was pre-empted)", results[i].CallID, results[i], want)
+		}
+	}
+}
+
+// TestFanOut_NilSeamRunsEverySlot pins the default: a Config without the delegate never pre-empts,
+// so a three-way group under a cap of 2 runs and commits all three children exactly as it did
+// before the seam existed.
+func TestFanOut_NilSeamRunsEverySlot(t *testing.T) {
+	sink := &recordingSink{}
+	a := threeWayFanOutParent(t, sink, 2, nil)
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3", len(results))
+	}
+	for i, want := range []string{"child one done", "child two done", "child three done"} {
+		if results[i].IsError || !strings.Contains(results[i].Content, want) {
+			t.Errorf("%s result = %+v, want the real result %q", results[i].CallID, results[i], want)
+		}
+		if phases := phasesFor(sink.events, results[i].CallID); len(phases) != 2 {
+			t.Errorf("%s phases = %+v, want a started/finished pair", results[i].CallID, phases)
+		}
+	}
+}
+
+// TestDispatchSerially_PendingInterjectionSkipsTheNextDelegation covers the serial path, which a
+// cap of 1 keeps every group on: the message arrives while the first child runs, the second is
+// skipped with the same result and phase the pool gives, and a leaf tool the parent asks for next —
+// with the seam still true — runs regardless: only delegations are ever pre-empted.
+func TestDispatchSerially_PendingInterjectionSkipsTheNextDelegation(t *testing.T) {
+	sink := &recordingSink{}
+	var pending atomic.Bool
+	looked := 0
+	up := newRoutedResponder().
+		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c2", "task two"})).
+		route("task one", func(context.Context) { pending.Store(true) }, contentScript("child one done")).
+		route("task two", nil, contentScript("child two done")).
+		route("delegate two things", nil, toolCallScript("t1", "look", `{}`)).
+		route("delegate two things", nil, contentScript("parent done"))
+
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "look", readOnly: true, ran: &looked, result: "looked"})
+	cfg.ParallelAgents = 1
+	cfg.InterjectionPending = pending.Load
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("parent status = %q, want the Exchange to complete", res.Status)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3 (two delegations, then the leaf)", len(results))
+	}
+	if results[0].CallID != "c1" || results[0].IsError || !strings.Contains(results[0].Content, "child one done") {
+		t.Errorf("c1 result = %+v, want the running child's real result", results[0])
+	}
+	if results[1].CallID != "c2" {
+		t.Fatalf("second result = %+v, want c2", results[1])
+	}
+	assertSkippedDelegation(t, sink.events, results[1])
+	if looked != 1 || results[2].CallID != "t1" || results[2].IsError {
+		t.Errorf("leaf ran %d times, result %+v; want it to run once with the seam still true", looked, results[2])
 	}
 }

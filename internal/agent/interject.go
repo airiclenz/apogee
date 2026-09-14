@@ -48,6 +48,13 @@ var errEmptyInterjection = errors.New("apogee: interjection is empty")
 // rollback boundary is armed after this window — turn.go) and rides snapshot/resume with
 // its marker intact. AbortExchange discards it along with the rest of the scrapped
 // Exchange, which is the point: the human threw the whole Exchange away.
+//
+// What a STAGED message does before it reaches here is the host's to say through
+// Config.InterjectionPending: while it answers true, the delegations of the running group
+// that have not started are skipped (dispatch.go, skipDelegation) so the boundary this
+// call needs arrives when the children already running finish, instead of after every
+// queued one. That seam is a predicate, not a drain — the message itself still commits
+// only here, at the boundary, on the driving goroutine.
 func (a *Agent) Interject(in domain.UserInput) error {
 	if !a.turns.inExchange {
 		return domain.ErrNoOpenExchange
