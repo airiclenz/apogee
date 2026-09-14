@@ -961,6 +961,12 @@ remember-model: true
 # of your skill library is ever sent to the model — a skill reaches it only when you invoke one with
 # `/id`, exactly as before (ADR 0061). Default on; `false` leaves the band unpainted.
 #
+# `task-list-open` is whether the task-list cards in the transcript start open — every task row
+# painted — or folded to their counted `✦ Task List (done/total)` header. One choice covers every
+# task-list card in the session, and it is the one key here apogee writes as well as reads: clicking
+# a card folds (or opens) them all and records the flip here, silently, so the next session starts
+# the way you left this one. Default on.
+#
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
@@ -969,6 +975,7 @@ ui:
   stall-after: 120s      # engine silence before "· quiet" qualifies the status line; 0 = off
   inspector: false       # true = capture the raw wire traffic /inspect shows; takes effect next start
   # skill-suggestions: true   # false = never paint the skill-suggestion band above the input box
+  task-list-open: true   # false = task-list cards start folded; toggling a card writes this back
 
 # =============================================================================
 # Keeping the session store bounded — every session you run is saved under ~/.apogee/sessions/ and

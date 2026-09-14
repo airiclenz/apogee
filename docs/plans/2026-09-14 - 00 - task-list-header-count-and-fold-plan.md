@@ -97,7 +97,11 @@ NOTES (2026-09-14): `TestToolRegistryTaskListReplaysAlwaysOpen` renamed to `Test
 
 **Commit:** `feat(tui): the task_list card folds again, collapsing to its counted header`
 
-## 3. `ui.task-list-open` config key
+## 3. `ui.task-list-open` config key — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): `internal/config/defaults_test.go` (named in Files) needed no edit — the active `task-list-open: true` template line passes the template gate and the ships-active comparison unchanged, since it spells the default.
+NOTES (2026-09-14): the ten spelled-out `UISettings` literals in `config_test.go` gained `TaskListOpen: true` (they pin the shipped defaults by hand, so the new field had to be stated); the manual's "Four more keys live under `ui:`" count became "Five" with the new paragraph in that run.
+NOTES (2026-09-14): `cmd/apogee` `TestSettingsRowsFormatEffectiveValues` now fails (57 values pinned for 58 keys) — item 4's gate per the plan's regression guard, not run here.
 
 **What:** Add the key that item 4 reads and writes, exactly as `ui.skill-suggestions` is built:
 - `internal/config/config.go`: `UI.TaskListOpen bool` (default `true`) and the user-file `*bool` with `yaml:"task-list-open"`, merged like `SkillSuggestions`.

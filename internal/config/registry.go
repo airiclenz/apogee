@@ -607,6 +607,17 @@ var KeyRegistry = []Key{
 		Read: func(o Options) string { return boolValue(o.UI.SkillSuggestions) },
 	},
 	{
+		// A bool like ui.skill-suggestions beside it, applied the same way (the renderer's own
+		// settingsApplyLocal) — and the one `ui:` key the program writes as well as reads: the fold
+		// gesture on a task-list card records the flip here silently, so the choice outlives the
+		// session (ADR 0035 addendum).
+		Path: "ui.task-list-open", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc: "Start with the task-list cards in the transcript open; a click on one folds them all " +
+			"and records the choice here.",
+		Read: func(o Options) string { return boolValue(o.UI.TaskListOpen) },
+	},
+	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
 		// posture above, for the same reason: one key is not a vocabulary, and the kind carries the
 		// shape while the hook carries the contract the kind cannot.

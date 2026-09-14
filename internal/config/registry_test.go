@@ -296,6 +296,38 @@ func TestSkillSuggestionsRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 	}
 }
 
+// The task-list fold's row is a bool that defaults ON and is editable — the same promise the
+// suggestion band's row makes, plus the one that makes this key different: the fold gesture in the
+// transcript WRITES it (ADR 0035 addendum), so the row has to be one /settings can show and a
+// hand-edit can flip, and it reads back what THIS session resolved rather than the declared
+// default. The live apply and the write-back are the renderer's own (item 4 of the plan); what is
+// asserted here is the row a surface renders it from.
+func TestTaskListOpenRowIsAnEditableBoolDefaultingOn(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("ui.task-list-open")
+	if !ok {
+		t.Fatal("no registry row for ui.task-list-open; /settings could not show the key at all")
+	}
+	if row.Kind != KindBool {
+		t.Errorf("kind = %q, want %q", row.Kind, KindBool)
+	}
+	if row.Default != "true" {
+		t.Errorf("default = %q, want \"true\" — a config that names nothing starts the task-list cards open", row.Default)
+	}
+	if !row.Editable {
+		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
+	}
+
+	folded := Options{UI: UISettings{TaskListOpen: false}}
+	if got := row.Read(folded); got != "false" {
+		t.Errorf("read of a session with the cards folded = %q, want \"false\"", got)
+	}
+	if got := row.Read(Options{UI: defaultUISettings()}); got != "true" {
+		t.Errorf("read of an unconfigured session = %q, want \"true\"", got)
+	}
+}
+
 // The context-fill notice's row is a bool that defaults OFF (ADR 0077): the one top-level boolean
 // beside the seven Floor keys that a config naming nothing leaves off, because the notice steers
 // the model rather than correcting it and ships off until bench evidence turns it on. The row reads

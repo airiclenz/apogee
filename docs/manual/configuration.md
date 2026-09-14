@@ -595,7 +595,7 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)).
 
-Four more keys live under `ui:`, and they change how the screen looks rather than what it says.
+Five more keys live under `ui:`, and they change how the screen looks rather than what it says.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
@@ -607,6 +607,13 @@ yours to pick.
 overflows, and reserves the column it hangs in; off, that column goes back to the text. The flip is
 live, like `ui.skill-suggestions` above it: commit the row in `/settings` and the screen re-lays
 itself in the session you are already in.
+
+`ui.task-list-open` — on by default — is whether the task-list cards in the transcript start open,
+every task row painted, or folded to their counted `✦ Task List (done/total)` header. It is one
+choice for every task-list card in the session, and it is the one `ui:` key apogee writes as well
+as reads: clicking a card folds — or opens — them all and records the flip in `config.yaml`
+silently, so the next session starts the way you left this one; only a write that fails is
+mentioned. The row shows in `/settings` like the rest, and a hand-edit applies live.
 
 `ui.color-scheme` names the palette the screen is drawn in. It defaults to `dark`, `light` is the
 other built-in, and any `~/.apogee/schemes/<name>.yaml` joins them under its own file name —

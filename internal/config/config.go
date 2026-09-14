@@ -310,6 +310,13 @@ type UISettings struct {
 	// reaches the model either way, so this key changes what the human is offered and never what the
 	// session sends. false leaves the band unpainted and the Tab that opens it inert.
 	SkillSuggestions bool
+	// taskListOpen is whether the transcript's task-list cards start open (every row painted) or
+	// folded to their counted header. Default TRUE, the shape the card had before it folded again.
+	// ONE shared state for every task-list card in the transcript: the renderer applies it to
+	// itself (settingsApplyLocal), and the fold gesture on any card writes the flip back here
+	// silently through the settings seam, so the choice outlives the session (ADR 0035 addendum).
+	// Screen-only, like skillSuggestions: nothing about it reaches the model.
+	TaskListOpen bool
 	// unparsedStallAfter is a `stall-after:` value time.ParseDuration could make nothing of, kept as
 	// it was written so Validate can name the text the human typed rather than the value it failed
 	// to become. Empty on every config that resolves — including one that never named the key —
@@ -326,8 +333,8 @@ const defaultStallAfter = 90 * time.Second
 // defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
 // style, with the colour loop on, the scroll bar shown, the default colour scheme, the shipped
 // quiet threshold the stall guard waits out, the Inspector disarmed (a false left at the zero
-// value: an off-state that captures nothing is the absence of the feature), and the skill-suggestion
-// band on. The style is
+// value: an off-state that captures nothing is the absence of the feature), the skill-suggestion
+// band on, and the task-list cards open. The style is
 // ASKED of internal/domain (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
 // so the vocabulary and its default stay in the one package that owns them — the same reason
 // validate does not list the valid names, and the same reason the scheme name comes from
@@ -343,6 +350,7 @@ func defaultUISettings() UISettings {
 		ColorScheme:      scheme.DefaultName,
 		StallAfter:       defaultStallAfter,
 		SkillSuggestions: true,
+		TaskListOpen:     true,
 	}
 }
 
@@ -843,6 +851,10 @@ var keyAccessors = []keyAccessor{
 	},
 	{
 		row:      mustKey("ui.skill-suggestions"),
+		fromFile: fileUI,
+	},
+	{
+		row:      mustKey("ui.task-list-open"),
 		fromFile: fileUI,
 	},
 	{
@@ -2220,6 +2232,11 @@ type uiConfig struct {
 	// SpinnerColor's reason turned around: the default is TRUE, so it is the explicit `false` that
 	// must be distinguishable from an absent key.
 	SkillSuggestions *bool `yaml:"skill-suggestions"`
+	// TaskListOpen is whether the transcript's task-list cards start open or folded. A pointer for
+	// SkillSuggestions's reason: the default is TRUE, so it is the explicit `false` that must be
+	// distinguishable from an absent key — and the key is one the fold gesture writes back, so an
+	// absent key stays absent until the user's first toggle.
+	TaskListOpen *bool `yaml:"task-list-open"`
 }
 
 // toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
@@ -2259,6 +2276,9 @@ func (u uiConfig) toUISettings() UISettings {
 	}
 	if u.SkillSuggestions != nil {
 		s.SkillSuggestions = *u.SkillSuggestions
+	}
+	if u.TaskListOpen != nil {
+		s.TaskListOpen = *u.TaskListOpen
 	}
 	return s
 }
