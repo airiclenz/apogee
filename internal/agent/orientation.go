@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -89,13 +88,11 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 // header would stand alone saying nothing, so the block is "" instead and standingSystem
 // appends nothing.
 //
-// A fact the session cannot USE is omitted the same way: Plan mode writes nothing (ADR 0012),
-// so a Plan session states no scratch dir — a bullet calling a directory "writable" to a model
-// whose every write is refused would be the announced-path regression this block exists to
-// avoid. The mode is read live (Mode(), the same read the tool menu's Plan filter makes), so a
-// Shift+Tab out of Plan brings the line back on the next request; {{scratch}} in the user's own
-// template is untouched, because that prose is theirs to condition. Ask-Before keeps the line —
-// the dir is writable there, one Approval at a time.
+// The scratch bullet is stated in EVERY mode, Plan included: the session scratch dir is the one
+// target Plan runs Apogee's own writers on and the one write Ask-Before does not gate (ADR 0012
+// second loosen, 2026-09-14), so a directory the block calls "writable" is writable on every rung
+// of the ladder — the announced-path regression the 2026-09-14 Plan gate existed to avoid cannot
+// arise, and the gate is gone with it. The mode is NOT an input of this block.
 //
 // The last bullet is the one that speaks about what follows the block rather than about the
 // host: it names the header the workspace blocks ride under and says they are project text, so
@@ -106,18 +103,18 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 //
 // KV cache: every input moves only on a session-level door — the workspace and the roots are
 // the host's wiring, the scratch dir moves only at a session boundary, the context-file cache is
-// refilled only at one too (ADR 0026 §5), the Delegation seats move only on the human's own
-// `/server`, `/model` and `/sub-agents-server` doors, and the mode (since 2026-09-14, the scratch
-// bullet's gate) only on the human's own Shift+Tab — so the block is prefix-cache-stable between
-// those doors, exactly like the {{mode}} and {{scratch}} placeholders it stands beside. A mode
-// flip re-encodes the prefix, and that is accepted: {{mode}} already pays it, and a mode change
-// is a deliberate session-level act, not a per-request churn.
+// refilled only at one too (ADR 0026 §5), and the Delegation seats move only on the human's own
+// `/server`, `/model` and `/sub-agents-server` doors — so the block is prefix-cache-stable
+// between those doors, exactly like the {{scratch}} placeholder it stands beside. The mode left
+// the block's inputs again on 2026-09-14 (it gated the scratch bullet for one day, from the
+// 2026-09-14 Plan omission to the second loosen), so a Shift+Tab re-encodes only what {{mode}}
+// already pays for, never this block.
 func (a *Agent) orientationBlock() string {
 	bullets := make([]string, 0, orientationLineCount-1)
 	if workspace := a.cfg.WorkspaceDir; workspace != "" {
 		bullets = append(bullets, fmt.Sprintf(orientationTemplate[orientationWorkspaceLine], workspace))
 	}
-	if scratch := a.ScratchDir(); scratch != "" && a.Mode() != domain.ModePlan {
+	if scratch := a.ScratchDir(); scratch != "" {
 		bullets = append(bullets, fmt.Sprintf(orientationTemplate[orientationScratchLine], scratch))
 	}
 	if a.cfg.ExtraReadRoots != nil {

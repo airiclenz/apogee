@@ -3129,6 +3129,21 @@ func TestPickerModeOffersTheLadderInOrder(t *testing.T) {
 	}
 }
 
+// The two lower rungs' glosses say where each may write without asking: the session scratch dir
+// is the one target Plan writes and the one write Ask-Before does not gate (ADR 0012 second
+// loosen, 2026-09-14), so a gloss calling Plan write-free or Ask-Before all-gating would misread the
+// ladder to the human choosing a rung. The strings are pinned whole.
+func TestModeGlossNamesTheScratchDirOnTheLowerRungs(t *testing.T) {
+	for mode, want := range map[domain.Mode]string{
+		domain.ModePlan:      "reads and reports; writes only its scratch dir",
+		domain.ModeAskBefore: "asks first for every edit outside its scratch dir and every command",
+	} {
+		if got := modeGloss(mode); got != want {
+			t.Errorf("modeGloss(%s) = %q, want %q", mode, got, want)
+		}
+	}
+}
+
 // ⏎ on a rung does exactly what Shift+Tab onto that rung does — the engine seam first, then
 // opts.Mode, which is what the footer reads — and closes the overlay behind it.
 func TestPickerModeAcceptMovesTheRungLikeShiftTab(t *testing.T) {

@@ -1275,9 +1275,9 @@ func modeRows() []popupRow {
 func modeGloss(mode domain.Mode) string {
 	switch mode {
 	case domain.ModePlan:
-		return "reads and reports; it changes nothing"
+		return "reads and reports; writes only its scratch dir"
 	case domain.ModeAskBefore:
-		return "asks first for every edit and every command"
+		return "asks first for every edit outside its scratch dir and every command"
 	case domain.ModeAllowEdits:
 		return "edits files on its own; commands still ask"
 	case domain.ModeAuto:

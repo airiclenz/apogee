@@ -46,7 +46,8 @@ type ExternalEffectTool interface {
 }
 
 // ReadOnlyTool is an optional interface a Tool implements to declare that it performs
-// no writes. It is the signal Plan mode filters on (only read-only tools run) and that
+// no writes. It is the signal Plan mode filters on (read-only tools run; since the ADR 0012
+// second loosen Apogee's own writers join the menu for the session scratch dir alone) and that
 // Ask-Before uses to skip Approval for a harmless read. A Tool that does not implement
 // it — or implements it returning false — is treated as write-capable, the safe
 // default that gates. IsReadOnly is the helper the loop should call rather than the

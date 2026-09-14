@@ -396,7 +396,8 @@ func classifyTool(tool domain.Tool) toolClass {
 //
 // The sub_agent recursion point is NOT a leaf tool and never reaches this predicate: resolve()
 // Delegates it before the ladder (D3/ADR 0013), and toolMenu keeps it in the Plan menu for the
-// same reason — a Plan sub-agent inherits Plan, so its children are read-only too.
+// same reason — a Plan sub-agent inherits Plan, so its children are read-only too (each with the
+// same one scratch-dir exception, ADR 0012 second loosen).
 func planAdmits(tool domain.Tool) bool {
 	class := classifyTool(tool)
 	return class == classReadOnly || class == classReadOnlySubprocess

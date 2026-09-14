@@ -448,10 +448,11 @@ func newHeadlessCommand() *cobra.Command {
 			"The run is unattended, so it never asks: every gated action is refused rather\n" +
 			"than parked (the count is reported), ask_user and present_document are not\n" +
 			"registered, and no MCP server is contacted. Only two modes make sense here and\n" +
-			"only two are accepted — plan (the default, read-only) and auto (confined and\n" +
-			"unattended); ask-before and allow-edits both exist to consult a human. Auto is\n" +
-			"refused on a host whose confinement backend cannot fence the filesystem: there\n" +
-			"the fallback is approval, and there is nobody here to approve.\n\n" +
+			"only two are accepted — plan (the default: read-only except its own scratch dir)\n" +
+			"and auto (confined and unattended); ask-before and allow-edits both exist to\n" +
+			"consult a human. Auto is refused on a host whose confinement backend cannot fence\n" +
+			"the filesystem: there the fallback is approval, and there is nobody here to\n" +
+			"approve.\n\n" +
 			"Settings resolve exactly as a session's do — flag over APOGEE_* environment over\n" +
 			"config.yaml — so a headless run has the shape a session on this host would have.\n" +
 			"The run is saved to ~/.apogee/sessions like any other session and shows up in\n" +

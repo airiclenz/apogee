@@ -731,10 +731,12 @@ func (d EffortDialect) Valid() bool {
 type Mode string
 
 const (
-	// ModePlan is read-only: no writes, no command execution.
+	// ModePlan is read-only, except Apogee's own writers into the session scratch dir
+	// (ADR 0012 second loosen): no other write, no command execution.
 	ModePlan Mode = "plan"
-	// ModeAskBefore requires an Approval for every write, command, and external reach
-	// (a harmless read runs free).
+	// ModeAskBefore requires an Approval for every write outside the session scratch dir,
+	// every other command and every external reach (a harmless read runs free; a native
+	// write into the scratch dir runs unprompted, ADR 0012 second loosen).
 	ModeAskBefore Mode = "ask-before"
 	// ModeAllowEdits auto-approves Apogee's own workspace-scoped writes (path-safety-
 	// bounded); shell/exec, network, MCP, third-party in-process tools, and any

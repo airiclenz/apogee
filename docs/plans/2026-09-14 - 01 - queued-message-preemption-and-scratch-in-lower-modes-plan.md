@@ -151,7 +151,13 @@ NOTES (2026-09-14): `internal/agent/floorguards_test.go` needed no edit — `Tes
 
 **Commit:** `feat(agent): Plan and Ask-Before run native writes into the session scratch dir unprompted`
 
-## 5. Orientation bullet returns in Plan; mode prose in code, template and TUI glosses
+## 5. Orientation bullet returns in Plan; mode prose in code, template and TUI glosses — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): consequential edit — internal/domain/tools.go: made necessary by the prose-guard rule (its ReadOnlyTool doc said Plan runs only read-only tools; qualified with the scratch-dir writers).
+NOTES (2026-09-14): consequential edit — cmd/apogee/defaults/schedules.yaml: made necessary by the prose-guard rule (the seeded template's plan row said "it changes nothing on disk"; qualified with the firing's scratch dir).
+NOTES (2026-09-14): consequential edit — internal/agent/resolvedpath_test.go: made necessary by the prose-guard rule (a test comment said Ask-Before gates every write; qualified).
+NOTES (2026-09-14): consequential edit — internal/probe/confinement.go: made necessary by the prose-guard rule (a comment likened unfenceable Auto to "a plan run that fails at every write"; reworded to "a plan-shaped run that fails at every terminal command", which is what that path actually denies).
+NOTES (2026-09-14): `internal/tui/schedule.go` `autoBlockedNote` ("runs in plan — read-only, but it runs") was qualified too under the extended read-only rule; no gloss test existed for either picker, so `TestModeGlossNamesTheScratchDirOnTheLowerRungs` and `TestScheduleModeGlossNamesTheScratchDir` are new. The `config.yaml` ask-before line is one line still (112 chars; the template holds longer ones). `internal/agent/loop.go:1387` and `resolution.go:433/462` were already qualified by item 4 and are unchanged.
 
 **What:** Depends on item 4.
 - `internal/agent/orientation.go`: drop the `a.Mode() != domain.ModePlan` gate on the scratch bullet — the line is announced in every mode, text verbatim; rewrite the function's comment: the mode leaves the block's inputs again (prefix-KV-cache constant within a session, as before 2026-09-14).

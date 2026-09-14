@@ -233,8 +233,8 @@
 
 # =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).
-#   plan        — read-only: no writes, no command execution
-#   ask-before  — every write, command, and external reach needs your approval (the default)
+#   plan        — read-only, except its own writes into the session scratch dir; no commands
+#   ask-before  — every write outside the scratch dir, command and external reach asks you first (the default)
 #   allow-edits — Apogee's own workspace edits run without asking; shell/exec, network, MCP,
 #                 and any out-of-workspace write still gate (needs no confinement)
 #   auto        — also runs the unbounded shell/subprocess surface unsupervised, fenced by

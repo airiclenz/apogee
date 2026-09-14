@@ -25,7 +25,8 @@
 # /sessions inside apogee. What the firing LEAVES BEHIND depends on its mode:
 #
 #   plan (the default)  read-only. The model reads, searches and reasons, and it changes
-#                       nothing on disk. The deliverable IS the recorded answer — open the
+#                       nothing on disk outside the firing's own scratch dir. The deliverable
+#                       IS the recorded answer — open the
 #                       run in /sessions to read it. Use this for reviews, audits, digests
 #                       and anything whose output is a report.
 #

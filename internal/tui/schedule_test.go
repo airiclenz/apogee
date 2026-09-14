@@ -1039,6 +1039,20 @@ func TestCycleRowsGlossEveryPreset(t *testing.T) {
 	}
 }
 
+// The plan row's gloss keeps its "read-only — it reads and reports" head — the e2e pop-up frames
+// Find that prefix — and says where a Plan Firing's writes go: its own scratch dir, the one target
+// Plan writes (ADR 0012 second loosen, 2026-09-14). The auto-blocked note that points at plan
+// carries the same qualification.
+func TestScheduleModeGlossNamesTheScratchDir(t *testing.T) {
+	const want = "read-only — it reads and reports; its only writes go to its own scratch dir"
+	if got := scheduleModeGloss(domain.ModePlan); got != want {
+		t.Errorf("scheduleModeGloss(plan) = %q, want %q", got, want)
+	}
+	if note := autoBlockedNote("no fence"); !strings.Contains(note, "read-only but for its scratch dir") {
+		t.Errorf("autoBlockedNote = %q, want it to qualify plan's read-only with the scratch dir", note)
+	}
+}
+
 // The hint's verb follows the kind: nothing in /schedule's three pickers switches the session, and
 // the stop picker's ⏎ ends something.
 func TestPickerHintFollowsTheKind(t *testing.T) {

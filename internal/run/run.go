@@ -19,8 +19,9 @@ import (
 )
 
 // ErrMode is returned when a Spec names an autonomy mode a Firing may not run in. A Firing
-// runs read-only (Plan) or confined-and-unattended (Auto); Ask-Before and Allow-Edits both
-// exist to consult a human, and there is none (ADR 0033, decision 2).
+// runs read-only except for its own scratch dir (Plan) or confined-and-unattended (Auto);
+// Ask-Before and Allow-Edits both exist to consult a human, and there is none (ADR 0033,
+// decision 2).
 var ErrMode = errors.New("apogee: a firing runs in plan or auto mode only")
 
 // Spec is one Firing's complete input. The Config is composed by the CALLER — endpoint,
@@ -112,7 +113,8 @@ type Result struct {
 	// Turns is how many Turns the Exchange took (the final Turn's index plus one).
 	Turns int
 	// Denied is how many gated actions the fail-safe denier refused. A non-zero count on a
-	// Plan Firing means the model kept reaching past its read-only floor; on an Auto Firing
+	// Plan Firing means the model kept reaching past its read-only floor (scratch dir aside —
+	// a write there runs, ADR 0012 second loosen); on an Auto Firing
 	// it means the run needed a human it did not have.
 	Denied int
 	// Faulted reports that the Firing's final Turn was ABANDONED (domain.StepResult.Faulted):

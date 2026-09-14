@@ -123,7 +123,8 @@ func ResidualNotice(backendName string, caps domain.ConfinementCaps, mode domain
 // It is the MIRROR of DegradedNotice's gate, with the mode fixed: an interactive Auto on a host
 // that cannot fence keeps working because every terminal command falls back to the Approval path,
 // and that is precisely the rung an unattended run does not have — its Approver denies rather than
-// asks (ADR 0033, decision 2), so auto there would be a plan run that fails loudly at every write.
+// asks (ADR 0033, decision 2), so auto there would be a plan-shaped run that fails loudly at every
+// terminal command.
 // The unconfined case (`confine-to-workspace: false`) is NOT blocked: that is the user's own
 // explicit "I am the sandbox", the same ladder that lets the session launch in Auto, and neither a
 // schedule nor a headless run is held to a stricter bar than a launch (decision 3).

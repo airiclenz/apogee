@@ -92,8 +92,8 @@ func TestResolvedPathRidesTheCallAndTheApproval(t *testing.T) {
 // drift apart silently, so this pins them together: the pane a human approves, the card a Driver
 // renders, and the sentence the model reads all name the same EvalSymlinks-resolved file. The
 // redirect stays inside the workspace on purpose — the divergence is what is under test, not the
-// fence — and Ask-Before is what gates every write, so the approval carrier is populated for all
-// three.
+// fence — and Ask-Before is what gates every write outside the session scratch dir, so the
+// approval carrier is populated for all three.
 func TestResolvedPathAgreesWithTheResultForEveryWriteKey(t *testing.T) {
 	t.Parallel()
 

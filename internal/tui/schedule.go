@@ -685,7 +685,7 @@ func scheduleAddNote(err error) string {
 // gave and points at the mode that still works, because the prompt is worth scheduling either way.
 func autoBlockedNote(reason string) string {
 	return "a schedule cannot run in auto here: " + reason +
-		"\n  leave the auto out and it runs in plan — read-only, but it runs"
+		"\n  leave the auto out and it runs in plan — read-only but for its scratch dir, and it runs"
 }
 
 // cycleRows is one row per preset: the duration as the argument form spells it, and the same fact in
@@ -715,12 +715,12 @@ func scheduleModeRows(autoBlocked string) []popupRow {
 
 // scheduleModeGloss says what each mode costs and buys inside a Firing, which is not quite what it
 // means in this session: nothing here can ask a human, so auto's promise is that it acts and plan's
-// is that it cannot.
+// is that it cannot — beyond its own scratch dir, the one place a Plan Firing writes (ADR 0012).
 func scheduleModeGloss(mode domain.Mode) string {
 	if mode == domain.ModeAuto {
 		return "acts unattended — confined, and gated actions fail rather than ask"
 	}
-	return "read-only — it reads and reports, and writes nothing"
+	return "read-only — it reads and reports; its only writes go to its own scratch dir"
 }
 
 // scheduleStopRows is one row per live Schedule: its name, its cycle, its mode, and the running mark
