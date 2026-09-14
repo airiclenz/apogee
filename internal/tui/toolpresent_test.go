@@ -2941,6 +2941,7 @@ func TestToolViewSanitizeReachesEveryStringMember(t *testing.T) {
 		RegionFiles: []string{dirty},
 		stat:        plainStat(dirty),
 		argStat:     plainStat(dirty),
+		count:       dirty,
 		name:        dirty,
 		agentName:   dirty,
 		task:        dirty,

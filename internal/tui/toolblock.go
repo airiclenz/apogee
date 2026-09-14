@@ -72,6 +72,13 @@ func renderToolBlock(th theme, view toolView, width int, state blockState) block
 	// this block is clickable.
 	toggle := targetNone
 	label := th.toolLabel.Render(view.Label)
+	// A card that counts itself wears the count beside its label in the faint tone every group
+	// count wears — the umbrella's "✦ Tools (7 calls)" shape (renderSuperGroup), worn here by one
+	// call about its own rows (toolView.count) — and BEFORE any ▶/▼ the targetless shape hangs on
+	// the header, so the indicator stays the row's last word.
+	if view.count != "" {
+		label += " " + th.toolIndicator.Render("("+view.count+")")
+	}
 	if state.elides || blockHidesWhenCollapsed(th, []toolView{view}, width) {
 		toggle = targetHeader
 		if view.Target == "" {

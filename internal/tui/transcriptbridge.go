@@ -415,6 +415,29 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 		}
 		tv.Details = newToolBody(lines)
 	}
+	// The header's count is the third thing re-derived rather than trusted, and for the same reason:
+	// it is not on the wire at all (toolView.count), and the rows it is read off ARE — task_list's
+	// body is exactly its rows (taskListDetail) — so the decoded Details word it again through the
+	// very hook the live producer used (enrichWithResult, toolPresenter.count).
+	//
+	// A record written before the count existed carries the stat that used to close the list
+	// ("2 open") as its retained Summary, and replaying it beside the header count would show one
+	// card counting itself twice. So where the entry counts, the record's own WORDING of the slot is
+	// discarded — the header supersedes it — while a verdict or a promoted line is kept, since those
+	// are what the live card keeps too: a failed call's `error` (absorbFailure), and a refusal's
+	// sentence the tool printed on one line (outputDetail), which the blank stat never takes back.
+	if count := toolRegistry[tv.name].count; count != nil {
+		if !tv.Summary.quoted && !tv.Summary.failed {
+			tv.Summary = branchSummary{}
+		}
+		texts := make([]string, 0, len(w.Details))
+		for _, d := range w.Details {
+			texts = append(texts, d.Text)
+		}
+		if c, ok := count(texts); ok {
+			tv.count = c
+		}
+	}
 	// The regions come back as the domain type the view carries, and the names with them — a record
 	// that has no regions annotates nothing, so its names (if a hand-written blob carried any) are
 	// dropped rather than left to line up against nothing. A record from before they rode the wire

@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
@@ -207,19 +208,19 @@ var taskListCall = domain.ToolCall{
 
 // TestToolRegistryPresentsTheTaskListCall pins the whole card a task_list call draws (ADR 0072):
 // the registry's own label and verb rather than the raw-name fallback a dynamic tool falls to, no
-// target — its one argument IS the list, the same reason git_status carries none — and the list the
-// tool echoed back laid out beneath the branch with the open count in the outcome slot.
+// target — its one argument IS the list, the same reason git_status carries none — the list the
+// tool echoed back laid out beneath the branch, and the header counting the list's done rows over
+// all of them while the outcome slot stays blank (the ratified call of plan "2026-09-14 - 00").
 //
 // The body is asserted to carry the done row UNNUMBERED, which is the prose half of the numbering
 // rule (TestFileContentBodiesAreNumbered, whose walk reaches every registry entry): a task list is
 // the model's own text and sits on no file's lines, so a gutter here would claim a position that
 // does not exist.
 //
-// The PAINT is pinned whole as well, at 80 columns: the block is always open (the ratified call of
-// plan "2026-09-14 - 00", item 1), so its header wears no indicator, every task row is painted in
-// order beneath it, the `N open` stat closes the list as its ┕ row — a targetless block has no
-// leader row for a stat to ride — and neither the model-facing header sentence nor a `+N more lines`
-// marker is anywhere on it.
+// The PAINT is pinned whole as well, at 80 columns: the block is always open (item 1 of that plan),
+// so its header wears no indicator, every task row is painted in order beneath it, no `N open` row
+// closes the list — the header's `(1/3)` is the one count the card wears — and neither the
+// model-facing header sentence nor a `+N more lines` marker is anywhere on it.
 func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 	t.Parallel()
 
@@ -235,11 +236,17 @@ func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 	if tv.Target != "" {
 		t.Errorf("target = %q, want none — the list itself is the target", tv.Target)
 	}
+	if tv.count != "" {
+		t.Errorf("count = %q before the result landed, want none — nothing has been counted yet", tv.count)
+	}
 
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: rendered}, workspaceRoot{})
 
-	if want := "2 open"; tv.Summary.Text != want {
-		t.Errorf("outcome slot = %q, want %q", tv.Summary.Text, want)
+	if want := "1/3"; tv.count != want {
+		t.Errorf("header count = %q, want %q", tv.count, want)
+	}
+	if tv.Summary.Text != "" {
+		t.Errorf("outcome slot = %q, want it blank — the header's count is the card's one reading", tv.Summary.Text)
 	}
 	body := tv.Details.all()
 	var carriesDoneRow bool
@@ -264,18 +271,21 @@ func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 }
 
 // assertTaskListPaint is the always-open shape the three-task fixture paints, shared by the live
-// card and its replayed record so the two are held to ONE picture.
+// card and its replayed record so the two are held to ONE picture: the header counting done rows
+// over all rows, the rows beneath it, and no `N open` row closing the list.
 func assertTaskListPaint(t *testing.T, painted string) {
 	t.Helper()
 	want := []string{
-		"✦ Task List",
+		"✦ Task List (1/3)",
 		"  ┝ [✔] read the plan",
 		"  ┝ [ ] write the code",
-		"  ┝ [ ] run the tests",
-		"  ┕ 2 open",
+		"  ┕ [ ] run the tests",
 	}
 	if got := strings.Split(painted, "\n"); !reflect.DeepEqual(got, want) {
 		t.Errorf("task_list paints:\n%s\nwant the always-open shape:\n%s", painted, strings.Join(want, "\n"))
+	}
+	if strings.Contains(painted, "2 open") {
+		t.Errorf("paint = %q, want no `N open` row — the header's count is the one count the card wears", painted)
 	}
 	if strings.Contains(painted, tasklist.Fence) {
 		t.Errorf("paint = %q, want the model-facing header sentence stripped (display-side; the result text is the model's)", painted)
@@ -315,12 +325,107 @@ func TestToolRegistryTaskListReplaysAlwaysOpen(t *testing.T) {
 	}
 }
 
-// TestToolRegistryTaskListStatCountsOpenRows pins the readings the outcome slot makes off the list
-// the tool echoed back. It counts only rows wearing a marker, so a task whose own text opens with a
-// bracket is never miscounted, and it DECLINES where there is no list to count — a cleared list, a
-// refusal, an error result — which leaves the tool's own sentence in the slot rather than a `0 open`
-// that would read as a finished job.
-func TestToolRegistryTaskListStatCountsOpenRows(t *testing.T) {
+// TestToolRegistryTaskListReplaysAnOldOpenCountRecord pins the one-way read of a record a session
+// saved BEFORE the header count existed: its retained Summary is the `2 open` stat that used to
+// close the list as a ┕ row. The decoder discards that wording where the registry entry counts
+// (fromWireToolView), and words the header's `(1/3)` off the decoded rows instead — so a resumed
+// card counts itself once, in the header, and never twice.
+func TestToolRegistryTaskListReplaysAnOldOpenCountRecord(t *testing.T) {
+	t.Parallel()
+
+	blob, err := session.EncodeTranscript([]session.Entry{{
+		Kind:   session.EntryKindToolCall,
+		CallID: "1",
+		Done:   true,
+		Tool: &session.ToolView{
+			Label: "Task List",
+			Verb:  "updating the task list",
+			Name:  "task_list",
+			Summary: session.BranchSummary{
+				DetailLine: session.DetailLine{Text: "2 open"},
+				Stat:       &session.StatValue{Counted: true, N: 2, NounForOne: "open", NounForMany: "open"},
+			},
+			Details: []session.DetailLine{
+				{Text: "[✔] read the plan"},
+				{Text: "[ ] write the code"},
+				{Text: "[ ] run the tests"},
+			},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+	entries, err := decodeTranscript(blob)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	replayed := &transcript{entries: entries}
+
+	if got := replayed.entries[0].tool.Summary.Text; got != "" {
+		t.Errorf("replayed outcome slot = %q, want the old record's `2 open` discarded — the header count supersedes it", got)
+	}
+	assertTaskListPaint(t, renderPlain(replayed, 80))
+}
+
+// TestToolRegistryTaskListReplayKeepsAVerdictAndAPromotedLine pins the two slot readings the
+// decoder does NOT discard on a counting card, because the live card keeps them too: the `error`
+// verdict a failed call wears (absorbFailure), and a one-line refusal the tool printed and the
+// presenter promoted onto the branch (outputDetail), which the blank stat never takes back. Neither
+// record carries a task row, so neither wears a count.
+func TestToolRegistryTaskListReplayKeepsAVerdictAndAPromotedLine(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		summary session.BranchSummary
+		details []session.DetailLine
+		want    []string
+	}{
+		{
+			name:    "a failed call keeps its verdict",
+			summary: session.BranchSummary{DetailLine: session.DetailLine{Text: "error"}},
+			details: []session.DetailLine{{Text: "the task list holds at most 40 tasks"}},
+			want:    []string{"✦ Task List", "  ┝ the task list holds at most 40 tasks", "  ┕ error"},
+		},
+		{
+			name:    "a promoted refusal keeps its line",
+			summary: session.BranchSummary{DetailLine: session.DetailLine{Text: "task list cleared"}, Quoted: true},
+			want:    []string{"✦ Task List", "  ┕ task list cleared"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			blob, err := session.EncodeTranscript([]session.Entry{{
+				Kind: session.EntryKindToolCall, CallID: "1", Done: true,
+				Tool: &session.ToolView{Label: "Task List", Name: "task_list", Summary: tc.summary, Details: tc.details},
+			}})
+			if err != nil {
+				t.Fatalf("EncodeTranscript: %v", err)
+			}
+			entries, err := decodeTranscript(blob)
+			if err != nil {
+				t.Fatalf("decodeTranscript: %v", err)
+			}
+			replayed := &transcript{entries: entries}
+
+			if got := replayed.entries[0].tool.count; got != "" {
+				t.Errorf("count = %q on a row-less record, want none", got)
+			}
+			if got := strings.Split(renderPlain(replayed, 80), "\n"); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("replayed paint:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
+			}
+		})
+	}
+}
+
+// TestToolRegistryTaskListCountsDoneOverTotal pins the readings the header count makes off the
+// list the tool echoed back: done rows over every row. It counts only rows wearing a marker, so a
+// task whose own text opens with a bracket is never miscounted, and it DECLINES where there is no
+// list to count — a cleared list, a fence-only result, a refusal, an error result — which leaves
+// the header the bare `✦ Task List` rather than a `0/0` that would read as a finished job.
+func TestToolRegistryTaskListCountsDoneOverTotal(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -330,27 +435,27 @@ func TestToolRegistryTaskListStatCountsOpenRows(t *testing.T) {
 		wantOK bool
 	}{
 		{
-			name:   "counts the open rows and not the done ones",
-			result: domain.ToolResult{Content: "Task list — … (2 open, 1 done):\n[✔] one\n[ ] two\n[ ] three"},
-			want:   "2 open",
+			name:   "one of three done",
+			result: domain.ToolResult{Content: fmt.Sprintf(tasklist.HeaderFormat, 2, 1) + "\n[✔] one\n[ ] two\n[ ] three"},
+			want:   "1/3",
 			wantOK: true,
 		},
 		{
-			name:   "a single open task is not pluralised into another word",
-			result: domain.ToolResult{Content: "Task list — … (1 open, 0 done):\n[ ] the only one"},
-			want:   "1 open",
+			name:   "a list with everything ticked",
+			result: domain.ToolResult{Content: fmt.Sprintf(tasklist.HeaderFormat, 0, 3) + "\n[✔] one\n[✔] two\n[✔] three"},
+			want:   "3/3",
 			wantOK: true,
 		},
 		{
-			name:   "a list with everything ticked reads zero open",
-			result: domain.ToolResult{Content: "Task list — … (0 open, 2 done):\n[✔] one\n[✔] two"},
-			want:   "0 open",
+			name:   "a list with nothing ticked",
+			result: domain.ToolResult{Content: fmt.Sprintf(tasklist.HeaderFormat, 2, 0) + "\n[ ] one\n[ ] two"},
+			want:   "0/2",
 			wantOK: true,
 		},
 		{
 			name:   "a task's own bracket is text, not a row marker",
-			result: domain.ToolResult{Content: "Task list — … (1 open, 0 done):\n[ ] fix [ ] in the parser"},
-			want:   "1 open",
+			result: domain.ToolResult{Content: fmt.Sprintf(tasklist.HeaderFormat, 1, 0) + "\n[ ] fix [ ] in the parser"},
+			want:   "0/1",
 			wantOK: true,
 		},
 		{
@@ -359,7 +464,12 @@ func TestToolRegistryTaskListStatCountsOpenRows(t *testing.T) {
 			wantOK: false,
 		},
 		{
-			name:   "a refusal keeps its prose floor",
+			name:   "a fence-only result has no rows to count",
+			result: domain.ToolResult{Content: fmt.Sprintf(tasklist.HeaderFormat, 0, 0)},
+			wantOK: false,
+		},
+		{
+			name:   "a refusal keeps the bare label",
 			result: domain.ToolResult{Content: "the task list holds at most 40 tasks; that call carried 41", IsError: true},
 			wantOK: false,
 		},
@@ -369,12 +479,27 @@ func TestToolRegistryTaskListStatCountsOpenRows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, ok := toolRegistry["task_list"].stat(tc.result)
+			got, ok := toolRegistry["task_list"].count(splitLines(tc.result.Content))
 			if ok != tc.wantOK {
-				t.Fatalf("stat ok = %v, want %v (got %q)", ok, tc.wantOK, got.spell())
+				t.Fatalf("count ok = %v, want %v (got %q)", ok, tc.wantOK, got)
 			}
-			if ok && got.spell() != tc.want {
-				t.Errorf("stat = %q, want %q", got.spell(), tc.want)
+			if ok && got != tc.want {
+				t.Errorf("count = %q, want %q", got, tc.want)
+			}
+
+			tv := presentToolCall(taskListCall, "", workspaceRoot{})
+			tv.enrichWithResult(tc.result, workspaceRoot{})
+			if tv.count != got {
+				t.Errorf("enriched view count = %q, want the hook's %q", tv.count, got)
+			}
+			if !tc.wantOK {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: taskListCall})
+				tr.apply(domain.ToolResultEvent{Result: tc.result})
+				header := strings.Split(renderPlain(tr, 80), "\n")[0]
+				if strings.Contains(header, "(") {
+					t.Errorf("header = %q, want the plain `✦ Task List` — nothing to count", header)
+				}
 			}
 		})
 	}

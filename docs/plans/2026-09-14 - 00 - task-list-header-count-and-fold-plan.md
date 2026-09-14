@@ -41,7 +41,11 @@
 - Fold memory for any other tool card; a general per-kind fold default.
 - The `/settings` pane's own rendering of the new row (it lists every registry row already).
 
-## 1. Header count replaces the `N open` stat
+## 1. Header count replaces the `N open` stat — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): the `count` hook is `func(lines []string) (string, bool)` (the regression guard's `taskListCount(lines)` wording), not the `func(domain.ToolResult)` the What bullet spells — the wire keeps no result content, so one counter serves both producers; the IsError decline is enrichWithResult's early return, and a replayed error record carries no marker row.
+NOTES (2026-09-14): `internal/tui/subagentblock.go` untouched — a grouped member's row (`renderGroupMember`) is a leaderRow with no label on it, and a task_list call is targetless so it never groups (`groupable`); the count is painted at the one site that paints the label (`renderToolBlock`).
+NOTES (2026-09-14): the replay discard is narrowed to the record's own WORDING of the slot — a `failed` verdict (`error`) and a `quoted` promoted line are kept, since the live card keeps both too (absorbFailure; outputDetail's one-liner survives the blank stat); pinned by `TestToolRegistryTaskListReplayKeepsAVerdictAndAPromotedLine`.
 
 **What:** The task-list card's header carries `(done/total)`; its outcome slot goes blank. In `internal/tui`:
 - `toolView` gains a display field for a header count (a string such as `1/3`), escape-stripped by `sanitize` like every other display field and NOT on the wire form: it is re-derived from the retained result on replay, exactly as `alwaysOpen` is today (`transcriptbridge.go` `fromWireToolView`).

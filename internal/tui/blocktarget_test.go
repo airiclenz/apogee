@@ -786,8 +786,8 @@ func TestAlwaysOpenBlockIsNoToggleTarget(t *testing.T) {
 				t.Errorf("marks on an always-open block = %+v, want none — no row toggles", got)
 			}
 			lines := strings.Split(renderPlain(tr, tc.width), "\n")
-			if want := 2 + tc.rows; len(lines) != want {
-				t.Fatalf("the block stands %d rows tall, want %d — header, every task row, the stat:\n%s",
+			if want := 1 + tc.rows; len(lines) != want {
+				t.Fatalf("the block stands %d rows tall, want %d — the header and every task row:\n%s",
 					len(lines), want, strings.Join(lines, "\n"))
 			}
 			for i, ln := range lines {

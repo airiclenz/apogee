@@ -533,6 +533,15 @@ type toolView struct {
 	// write_file's whole file content out of the view for the life of the session.
 	argStat statValue
 
+	// count is the faint `(…)` the header paints beside the label (renderToolBlock) — task_list's
+	// "1/3", done rows over every row — worded by the presenter's count hook (toolPresenter.count)
+	// off the body's lines. It is display text and travels the sanitize seam with the fields above
+	// it, but deliberately NOT the wire (session.ToolView): it is re-derived from the retained rows
+	// on replay (fromWireToolView), exactly as alwaysOpen is re-derived from the retained name, so
+	// a resumed card wears the count the live one did and never one the registry may since have
+	// reworded. A call still in flight carries none: nothing has been counted yet.
+	count string
+
 	name string
 
 	// agentName is the short name a delegation was given (the sub_agent call's optional `name`
@@ -902,7 +911,8 @@ func (tv *toolView) shortenPaths(ws workspaceRoot) {
 
 // sanitize escape-strips every DISPLAY field of the view — label, verb, target, a delegation's name
 // and its retained prompt (toolView.task), the one-line
-// summary, the typed stat standing by to replace it (toolView.stat), each detail line, and the Edit
+// summary, the header's count beside the label (toolView.count), the typed stat standing by to
+// replace it (toolView.stat), each detail line, and the Edit
 // regions a diff body paints from together with the file names over them — so no
 // ESC byte from a tool call or its result can reach the
 // terminal (stripEscapes). It is the tool card's security seam, run on the way out of
@@ -931,6 +941,7 @@ func (tv *toolView) sanitize() {
 	tv.agentName = stripEscapes(tv.agentName)
 	tv.task = stripEscapes(tv.task)
 	tv.Summary.Text = stripEscapes(tv.Summary.Text)
+	tv.count = stripEscapes(tv.count)
 	tv.stat = tv.stat.stripped()
 	tv.Details.stripEscapes()
 	tv.Regions = strippedRegions(tv.Regions)
@@ -1174,6 +1185,13 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	}
 	if known && p.stat != nil {
 		tv.applyStat(p.stat(result))
+	}
+	// The header's count is read off the result's lines rather than the result, so the decoder can
+	// word it again off the same rows once they come back from the record (toolPresenter.count).
+	if known && p.count != nil {
+		if c, ok := p.count(splitLines(result.Content)); ok {
+			tv.count = c
+		}
 	}
 }
 

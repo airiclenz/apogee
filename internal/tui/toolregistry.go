@@ -109,6 +109,17 @@ type toolPresenter struct {
 	// swaps in when the row is too narrow for both (toolView.stat, design call 5).
 	stat func(res domain.ToolResult) (statValue, bool)
 
+	// count words the faint `(…)` the HEADER wears beside the label — the umbrella's own
+	// "✦ Tools (7 calls)" shape, worn here by one card about itself: task_list's `(done/total)`.
+	// It is read off the lines of the result's BODY rather than off the result, because the wire
+	// keeps no result content (session.ToolView): a live card counts the rows the tool echoed back
+	// (enrichWithResult) and a replayed record counts the same rows off its decoded Details
+	// (fromWireToolView), so one counter serves both producers and a resumed card wears the count
+	// the live one did. The bool is "these lines hold nothing to count" — an error's message, a
+	// cleared list, a refusal's sentence — and the header stays the bare label then. The answer
+	// is kept on the view (toolView.count) and never on the wire.
+	count func(lines []string) (string, bool)
+
 	// alwaysOpen says this tool's block has ONE state, open: its collapsed paint is its whole branch
 	// list, so it hides nothing, wears no ▶/▼, and a click on any of its rows selects rather than
 	// folds (collapsedCall, the one predicate that decides the shape; blockHidesWhenCollapsed reads
@@ -454,8 +465,9 @@ var toolRegistry = map[string]toolPresenter{
 		label:      "Task List",
 		verb:       "updating the task list",
 		detail:     taskListDetail, // the rows the model reads, its header sentence stripped
-		stat:       openTasksStat,
-		alwaysOpen: true, // the checklist is what the reader glances at; a fold would hide it
+		stat:       blankStat,      // the header's (done/total) already says how the list stands
+		count:      taskListCount,  // "1/3": done rows over every row the tool echoed back
+		alwaysOpen: true,           // the checklist is what the reader glances at; a fold would hide it
 	},
 	askUserToolName: {
 		label:   "Ask User",
@@ -1016,35 +1028,34 @@ func taggedDiffCounts(content string) (added, removed int) {
 	return added, removed
 }
 
-// openTasksStat words task_list's slot as how many tasks are still to do: the rows of the list the
-// tool echoed back that wear the open marker. The list is the model's OWN text, so this reads only
-// the two markers internal/tasklist puts at the head of a row — the checkbox glyphs the question
-// pane already draws (askCheckedMarker) — and never a row's words, which means a task whose text
-// happens to open with a bracket cannot be miscounted as a row of its own.
+// taskListCount words task_list's header count as the tasks done over the tasks listed — "1/3" —
+// read off the rows of the list the tool echoed back. The list is the model's OWN text, so this
+// reads only the two markers internal/tasklist puts at the head of a row — the checkbox glyphs the
+// question pane already draws (askCheckedMarker) — and never a row's words, which means a task
+// whose text happens to open with a bracket cannot be miscounted as a row of its own.
 //
-// A result carrying no rows at all declines rather than saying "0 open": that is a cleared list or
-// a refusal, and the tool's own sentence says what happened far better than a zero would. An error
-// result declines for the same reason — the failure line is the outcome there — which the presenter
-// already guarantees by never reaching a stat hook on one (toolView.enrichWithResult); stating it
-// here keeps the hook TOTAL on its own, as every stat read off output is.
-func openTasksStat(res domain.ToolResult) (statValue, bool) {
-	if res.IsError {
-		return statValue{}, false
-	}
-	open, rows := 0, 0
-	for _, ln := range splitLines(res.Content) {
+// It takes the body's LINES rather than the result because both producers have to reach it and
+// only one of them holds a result: the live card counts the content the tool returned, while a
+// resumed record has nothing but the decoded rows the session kept (toolPresenter.count). Lines
+// holding no row at all decline rather than saying "0/0": that is a cleared list, a refusal or an
+// error's message, and the bare label says more than a zero would. An error result never reaches
+// the hook live (enrichWithResult returns on IsError first), and its replayed body carries no
+// marker either, so the decline is the same on both paths.
+func taskListCount(lines []string) (string, bool) {
+	done, rows := 0, 0
+	for _, ln := range lines {
 		switch {
-		case strings.HasPrefix(ln, taskListOpenMarker):
-			open++
-			rows++
 		case strings.HasPrefix(ln, taskListDoneMarker):
+			done++
+			rows++
+		case strings.HasPrefix(ln, taskListOpenMarker):
 			rows++
 		}
 	}
 	if rows == 0 {
-		return statValue{}, false
+		return "", false
 	}
-	return countedStat(open, "open"), true
+	return strconv.Itoa(done) + "/" + strconv.Itoa(rows), true
 }
 
 // taskListDetail lays out a task_list result as its task rows alone: the block's first line is
@@ -1057,8 +1068,8 @@ func openTasksStat(res domain.ToolResult) (statValue, bool) {
 // cannot leave a stale sentence on the card.
 //
 // Every remaining line is handed on as BODY, never promoted: a one-task list is still a list, and
-// its single row belongs beneath the header with the open count in the slot beside it
-// (openTasksStat), not in the slot itself. A result that does not open with the fence — a cleared
+// its single row belongs beneath the header with the done-over-total count in the header beside it
+// (taskListCount), not in the slot itself. A result that does not open with the fence — a cleared
 // list echoing nothing, a refusal's sentence — is free-form output and keeps outputDetail's shape.
 func taskListDetail(content string) toolOutcome {
 	first, rest, _ := strings.Cut(content, "\n")
