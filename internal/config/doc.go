@@ -55,8 +55,10 @@
 // configmigrate.go is the one-time fold of the retired
 // top-level upstream keys into `servers:` (ADR 0036 decision 9), and — under its own heading, since
 // it is the opposite kind of write — the CONSENTED migration of ADR 0045's retired per-entry
-// `sub-agents: true` flag onto the root `sub-agents-server:` key. The one-goroutine poller that
-// reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows
+// `sub-agents: true` flag onto the root `sub-agents-server:` key. unknownkeys.go is the walk that
+// announces, at startup, every key of the migrated file the schema does not spell — a notice, never
+// a refusal — and the yaml-tag reader it shares with the registry bijection test. The one-goroutine
+// poller that reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows
 // nothing about YAML or this schema, and it has a second caller in the daemon's schedules watch, so
 // it lives in internal/filewatch.
 //

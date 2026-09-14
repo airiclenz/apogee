@@ -2701,6 +2701,14 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 	if err := yaml.Unmarshal(data, &fc); err != nil {
 		return fileConfig{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
 	}
+	// A key the schema does not spell is announced, never refused: the decoder above has already
+	// ignored it, so the notice is the only trace a misspelled key leaves. It walks the MIGRATED
+	// bytes, so a retired key the fold consumed is not reported a second time. The line reaches
+	// the user at startup only — every live re-read (LoadFileConfig's callers) passes a discarding
+	// notify, so a file edited mid-session stays silent here (ADR 0041; bead apogee-ibd).
+	for _, unknown := range unknownKeys(data) {
+		notify(fmt.Sprintf(unknownKeyNotice, path, unknown.key, unknown.line))
+	}
 	canonicaliseServers(&fc)
 	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
 		return fileConfig{}, err

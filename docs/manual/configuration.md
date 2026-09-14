@@ -202,6 +202,25 @@ safely leaves your file untouched and says so instead. A **live** re-read never 
 belongs to start-up, so an editor left open on a file that still carries a retired key is told to
 restart rather than having the file changed under it.
 
+## Keys apogee does not recognise
+
+A key the schema has no spelling for — a `spiner:` under `ui:`, an `auto-compct:` at the top — is
+not an error: the loader ignores it and runs on the default, exactly as it always has. Since a
+silently ignored key is indistinguishable from one you never wrote, **start-up now says so**, one
+line per key, naming the file, the key as it sits in the tree and the line it is on:
+
+```
+apogee: config ~/.apogee/config.yaml: unknown key "ui.spiner" at line 12 is ignored
+```
+
+The check goes as deep as the schema does — `ui.spiner`, `servers[0].foo`, `mcp-servers[1].foo`,
+`model-profiles.fast.foo` — and stops where a value is yours rather than apogee's: the body of a
+webhook under a reaction's `run:` is never inspected. Two things are deliberately not reported: the
+keys the migration above folds or refuses, which are handled before this check runs, and a retired
+`sub-agents: true` line on a `servers:` entry, which start-up's own offer to move it (see
+[The servers you run models on](#the-servers-you-run-models-on)) is the place to act on. The line
+is printed at start-up only; a file edited while a session is running is re-read without it.
+
 ## Environment overrides
 
 Eight `APOGEE_*` variables are read, and they divide by what each one can reach. Three of them carry

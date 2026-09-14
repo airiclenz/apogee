@@ -34,14 +34,14 @@ func TestRegistryIsBijectionWithFileConfig(t *testing.T) {
 	}
 }
 
-// walkSchema recurses over a config struct's yaml tags, recording into described every path
-// the registry accounts for and failing for every leaf it does not.
+// walkSchema recurses over a config struct's yaml tags — read through schemaKeys, the reader the
+// unknown-key walk shares (unknownkeys.go) — recording into described every path the registry
+// accounts for and failing for every leaf it does not.
 func walkSchema(t *testing.T, typ reflect.Type, prefix string, described map[string]bool) {
 	t.Helper()
-	for i := range typ.NumField() {
-		field := typ.Field(i)
-		name := strings.Split(field.Tag.Get("yaml"), ",")[0]
-		if name == "" || name == "-" {
+	for _, sk := range schemaKeys(typ) {
+		field, name := sk.field, sk.key
+		if name == "" {
 			t.Errorf("%s.%s has no yaml tag, so its on-disk key cannot be described", typ.Name(), field.Name)
 			continue
 		}
@@ -96,14 +96,6 @@ func kindMatchesType(kind Kind, typ reflect.Type) bool {
 		}
 	}
 	return false
-}
-
-// derefType strips pointer indirection so a *uiConfig is walked like a uiConfig.
-func derefType(typ reflect.Type) reflect.Type {
-	for typ.Kind() == reflect.Pointer {
-		typ = typ.Elem()
-	}
-	return typ
 }
 
 // TestRegistryEnumValuesMatchParseSites pins each enum row's vocabulary to the function that
