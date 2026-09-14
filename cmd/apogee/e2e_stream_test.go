@@ -55,6 +55,20 @@ const streamPrompt = "Write a 400-line numbered list, one short sentence per lin
 // TestE2ESmokeInProcess, where the session is idle and nothing is in flight.
 const midStreamWidth = 60
 
+// streamReplyWait bounds every wait for the LAST line of the fixture's reply. The in-process test,
+// its pty twin and the judge's frames all wait for that line and all wait this long, so the budget
+// has one name and one reason and the twins cannot drift apart.
+//
+// The default 5 s is too short by arithmetic before any load is added: 5,784 runes three at a time
+// is 1,928 deltas, and the millisecond between them is a floor rather than a pace — a 1 ms timer
+// fires on the box's next timer tick, ~3 ms on the 9-core dev VM (500 × time.NewTimer(1ms) measured
+// 1.48 s, 2026-09-14), so the stub alone takes ≈ 5.8 s to play the reply there, and the in-process
+// wait, which starts after line 20 and two resizes, timed out once at 5 s beside the parallel suite
+// under -race with 369 of 400 lines painted. The bound is that tick-rounded floor with room for
+// the parallel suite on top. The fixture's 3 runes / 1 ms are pinned by
+// TestE2EStreamFixtureIsTheListItClaims, so the arithmetic here holds for as long as the pin does.
+const streamReplyWait = 15 * time.Second
+
 // streamLine is line n of the fixture's reply.
 func streamLine(n int) string { return fmt.Sprintf("%d. Item %d.", n, n) }
 
@@ -113,12 +127,10 @@ func TestE2EStreamCommitsCompleteAndInOrder(t *testing.T) {
 	waitStreamGrows(t, drv)
 
 	// Step 6 — the reply commits. The last line on the wire is the first thing to wait for; the
-	// record on disk follows once the Exchange settles. The wait is the PTY twin's rather than the
-	// default: 400 lines three runes at a time is some two seconds of scripted delay, and beside
-	// the other parallel e2e tests on a loaded race-enabled box the rest of the reply has been
-	// seen to outrun five seconds.
+	// record on disk follows once the Exchange settles. The wait is the reply's own bound rather
+	// than the default — see streamReplyWait for the arithmetic.
 	drv.WaitFor(func() bool { _, _, ok := drv.Frame().Find(streamLine(streamLines)); return ok },
-		tuitest.Within(15*time.Second), tuitest.Awaiting("the last line of the reply"))
+		tuitest.Within(streamReplyWait), tuitest.Awaiting("the last line of the reply"))
 	committed := waitForCommittedReply(t, sess, streamLine(1))
 	if committed != strings.TrimRight(streamText(), "\n") {
 		t.Errorf("the committed reply is not the reply that was streamed:\n%s",
@@ -406,11 +418,10 @@ func TestE2EStreamPTY(t *testing.T) {
 	waitStreamGrows(t, drv)
 	drv.Resize(e2eSize.W, e2eSize.H)
 
-	// The whole reply, through a real terminal, is slower than the default wait allows: 400 lines
-	// three runes at a time is some two seconds of scripted delay before the pty and the child
-	// process are paid for at all.
+	// The whole reply, through a real terminal, is slower than the default wait allows — see
+	// streamReplyWait for the arithmetic, which the pty and the child process only add to.
 	drv.WaitFor(func() bool { _, _, ok := drv.Frame().Find(streamLine(streamLines)); return ok },
-		tuitest.Within(15*time.Second), tuitest.Awaiting("the last line of the reply"))
+		tuitest.Within(streamReplyWait), tuitest.Awaiting("the last line of the reply"))
 	drv.WaitQuiet(settled)
 	assertWholeStreamRows(t, "the committed frame", drv.Frame())
 
@@ -457,7 +468,8 @@ func TestJudgeStreamFrames(t *testing.T) {
 		artifacts = append(artifacts, judge.FrameArtifact(
 			fmt.Sprintf("the frame while line %d was arriving", at), drv.Frame(), false))
 	}
-	drv.WaitText(streamLine(streamLines))
+	drv.WaitFor(func() bool { _, _, ok := drv.Frame().Find(streamLine(streamLines)); return ok },
+		tuitest.Within(streamReplyWait), tuitest.Awaiting("the last line of the reply"))
 	drv.WaitQuiet(settled)
 	artifacts = append(artifacts, judge.FrameArtifact("the frame once the reply committed",
 		drv.Frame(), false))

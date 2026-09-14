@@ -918,9 +918,10 @@ parallel ones, so a swapped seam is never read across tests; every swap is still
 `t.Cleanup`. The rule is transitive: a helper that starts to `t.Setenv` or swap a seam makes every
 test reaching it serial, and `t.Parallel()` after such a helper is a panic, not a slow test. The
 sweep took `go test -race -count=1 ./cmd/apogee/` from **202 s** serial to **66 s** on the same
-9-core box (three consecutive `-count=3` runs green at ≈ 62 s each), and it is the reason the one
-wait that outran its default on a loaded box — the in-process 400-line reply — now carries the
-PTY twin's 15 s bound. That figure is the isolated package run. Under `make test` the shards
+9-core box (three consecutive `-count=3` runs green at ≈ 62 s each), and it is what tipped the
+one wait that was already marginal at its default — the in-process 400-line reply, whose bound
+is now the named `streamReplyWait` its pty twin and the judge share (the streamed-fixture
+paragraph below has the arithmetic). That figure is the isolated package run. Under `make test` the shards
 already spend the box, so `scripts/test-shards.sh` passes each heavy shard a `-parallel` bound —
 its share of the process budget, 1 at the default sizing — and a shard runs its parallel tests
 that many at a time: the alternative, `go test`'s GOMAXPROCS-wide default in every shard at once,
@@ -946,7 +947,13 @@ package now pays.
 A **streamed** e2e test is the expensive kind, and the reason is arithmetic rather than waste: a
 fixture that streams the checklist's 400-line answer three runes at a time with a millisecond
 between deltas spends ~2 s of scripted delay before the composition and the renderer are paid for
-at all, and ~5 s of wall clock under `-race`. The T-24 set (`cmd/apogee/e2e_stream_test.go`) runs
+at all, and ~5 s of wall clock under `-race`. The millisecond is a floor, not a pace: a 1 ms Go
+timer fires on the box's next timer tick, ~3 ms on the 9-core dev VM (500 × `time.NewTimer(1ms)`
+measured 1.48 s, 2026-09-14), so the stub alone plays the 1,928 deltas in ≈ 5.8 s there — past
+the kit's 5 s default before any load is added, which is why every wait for the reply's last line
+(in process, through the pty, under the judge) shares the one named bound `streamReplyWait`
+(15 s: the tick-rounded floor with room for the parallel suite on top) instead of a per-test
+literal. The T-24 set (`cmd/apogee/e2e_stream_test.go`) runs
 three near-complete passes over that answer — in process, through the pty, and once more for the
 repaint ceiling — and measures **≈ 20 s** under `-race`, ≈ 16 s without it. Two knobs trade
 fidelity for time if that becomes the package's problem: the fixture's `chunk_runes` (3 is what cuts
