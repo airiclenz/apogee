@@ -298,6 +298,10 @@ mechanism directives → tool block**.
   *Note (2026-09-14):* the live mode joins the block's inputs — Plan omits the scratch bullet
   (ADR 0056 D3 note), so the block is constant *between* the human's own doors rather than
   within the session, and a mode flip re-encodes the prefix exactly as `{{mode}}` already does.
+  *Reversed (2026-09-14, later the same day):* the mode leaves the block's inputs again — Plan
+  writes its own scratch dir (ADR 0012 second loosen), so the scratch bullet is stated in every
+  mode and the block is once more constant within the session, moving only on the doors named
+  above.
 - **§7 unchanged.** `newChildAgent` copies `cfg` wholesale and the child renders its own
   `standingSystem`, so a sub-agent gets the block with no carve-out and no wiring of its own.
 - **The shipped template drops what the block now carries.** `defaults/config.yaml` no longer

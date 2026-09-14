@@ -80,8 +80,8 @@ stop. The box
 advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keyboard
 protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
 everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond
-the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
-any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. Clicking the mode
+the box, `⇧⇥` cycles the autonomy mode — Plan (read-only, except for the session's own
+scratch directory) → Ask-Before → Allow-Edits → Auto — at any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. Clicking the mode
 marker in the footer — the glyph, the word, and on Auto its blast-radius word, all one
 target — opens a picker listing the four rungs, so you can name the one you want instead
 of cycling to it; the picker takes the rung through exactly the path `⇧⇥` does. The

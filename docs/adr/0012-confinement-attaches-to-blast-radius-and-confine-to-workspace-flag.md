@@ -235,7 +235,9 @@ Apogee's own `web-fetch` / `http-request` / `web-search` are in the marked class
 as this ADR describes. `confine-to-workspace: false` ("I am the sandbox") returns its verdict
 **before** the class switch, so it still runs everything unattended — the loosen is untouched. In the
 lower three modes every non-read-only tool already gates, so the only visible change there is the
-more honest prompt reason.
+more honest prompt reason. *(Note 2026-09-14: no longer true of every non-read-only tool — Apogee's
+own workspace-scoped writers run unprompted into the session scratch dir in Plan and Ask-Before,
+the amendment of that date below. The network classes this amendment is about still gate there.)*
 
 **(c) The trade-off: an embedder cannot mint a vouched-for network tool.** Because the marker is
 unexported, a host-registered network tool gates in Auto no matter how carefully it filters its own
@@ -366,3 +368,61 @@ Implementation lives in [`docs/plans/2026-09-06 - 04 - read-only-subprocess-clas
 the class definition, the ladder row and the dated record are in
 [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) §4,
 and CONTEXT.md's **Agent mode** and **Confinement** entries carry the prose.
+
+## Amendment (2026-09-14) — the session scratch dir is writable in Plan and Ask-Before (the second loosen)
+
+**Why now.** ADR 0056 D3 gave every session a scratch dir outside the workspace — the one place
+a confined agent may improvise without touching the project — and folded it into the Confinement
+box's writable set, so Allow-Edits and Auto run a native write there unprompted. The two lower
+modes did not: Plan refused it as a write and, to stay honest, its Orientation block dropped the
+`Scratch dir:` bullet (ADR 0056 D3 note, ADR 0023 note of the same day); Ask-Before gated it like
+any other write. Plan therefore had nowhere to draft — a plan, a checklist, a probe it could not
+run — and Ask-Before charged the human an Approval for a write that lands in a per-session dir
+nothing reads. The `IDEAS.md` entry that recorded the gap asked one question — *whether* the lower
+modes may write there at all — and this amendment is the answer: yes, for Apogee's own writers,
+into that one directory, and nothing else moves.
+
+**(a) The rule.** Apogee's own **workspace-scoped writers** (the `workspaceScopedWriter` carriers,
+contract §3) whose resolved target lies **inside the live session scratch dir** **run** in **Plan**
+and **run unprompted** in **Ask-Before**. Plan's tool menu offers those writers again whenever a
+scratch dir is set (`planOffers`, the menu's predicate; `planAdmits` stays the read-only floor the
+ladder runs on every target), and a Plan call aimed anywhere else is refused with a reason that
+names the dir — `plan mode: writes are permitted only inside the session scratch dir <dir>` — so
+the model is told where the write would have run rather than that writing is forbidden. The
+Orientation block states the `Scratch dir:` bullet in every mode again, Plan included. A Plan
+Firing (`/schedule`, the daemon, `apogee headless --mode plan`) writes into its own scratch dir
+the same way. **Nothing else loosens:** every other target is refused in Plan and gated in
+Ask-Before exactly as before; the **terminal / subprocess route** into the scratch dir stays
+`classSubprocess` — refused in Plan, gated in Ask-Before; a per-project `confine-writable-paths`
+entry is *not* a scratch dir and does not join; the middle rung and Auto are untouched.
+
+**(b) This is a LOOSEN — the second — and the core invariant still holds.** *"Never both
+unsupervised and unbounded"* is answered on the bounded half, at the same standing the first
+loosen (2026-09-06) and the Allow-Edits row already accept in place of OS confinement for Apogee's
+own in-process tools: **path-safety bounds the write to the box's writable set**, and the scratch
+dir is one path in that set. Concretely — the dir is **per-session** and created `0700` when the
+session id is minted; it is **one path in the fence**, read off the live box (`ConfinementBox`
+folds it in, `SetScratchDir` moves it), never off a config slice; the target is resolved with
+`EvalRealPath` at **classification** (`classifyWriteTarget`, the single I/O-tainted fact dispatch
+precomputes, from which the ladder's `writeTargetInScratch` and the executor's escape target are
+both read, so the verdict and the write can never describe two paths) and again at **execute**
+through the permit-pinned `os.Root`, so a symlink planted in the dir cannot carry a write out of
+it; and **nothing under `~/.apogee` reads, loads or executes scratch content** — no config, skill,
+library or session loader looks there, and the 14-day GC only deletes. The shell route being
+untouched, the one thing a lower-mode write can do that a read cannot is plant bytes; those bytes
+can execute only through a *later* mode's own gates, and there the pre-existing `argv[0]` fence
+(`security.RefuseExecFromWritablePath`, contract §4 amendment 2026-08-12) already refuses a
+program that resolves inside any `box.WritablePaths` entry — the scratch dir included. That scope
+is **stated here, not changed**: the loosen adds no new way to run what it lets Plan write.
+
+**(c) What Plan is now.** Plan is the read-only mode **plus its own scratch dir**: it explores,
+proposes, and drafts into the one directory nothing else reads. Every sentence in this ADR, the
+contract, CONTEXT.md and the manual that says Plan is read-only or writes nothing is to be read
+with that qualification; the ones this amendment could reach carry it or a dated note.
+
+Implementation lives in [`docs/plans/2026-09-14 - 01 - queued-message-preemption-and-scratch-in-lower-modes-plan.md`](../plans/2026-09-14%20-%2001%20-%20queued-message-preemption-and-scratch-in-lower-modes-plan.md);
+the ladder row and the qualified legend are in
+[`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) §4,
+the announcing side is ADR 0056 D3 and ADR 0023 §6 (each with a dated reversal note), and
+CONTEXT.md's **Agent mode**, **Scratch dir**, **Orientation block** and **Confinement** entries
+carry the prose.

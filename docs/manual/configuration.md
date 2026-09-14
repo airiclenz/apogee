@@ -1445,9 +1445,9 @@ disk would freeze again exactly what building it in unfroze.
 Whenever a system message goes out at all — because you have a prompt, or workspace
 context files (below), or both — apogee places its own short **orientation block**
 right after your prompt, ahead of any workspace context files, naming the workspace,
-this session's scratch directory (in every mode but Plan, which cannot write there) and
-any read-only library roots the model may read
-from. Ahead of them is deliberate: nothing a repository ships can then precede the
+this session's scratch directory (in every mode — Plan included, since the scratch
+directory is the one place Plan may write) and any read-only library roots the model
+may read from. Ahead of them is deliberate: nothing a repository ships can then precede the
 host's own facts. That block is not part of `system-prompt-text`, cannot be edited out
 of it, and is not sent in the one posture where no system message goes out at all —
 `use-default-prompt: false` (or an explicitly empty prompt of your own) together with
@@ -1588,6 +1588,19 @@ construction and behave like `read_file` on every rung: offered and run in Plan,
 prompt in Ask-Before or Allow-Edits, and no box in Auto. What the prompts and the fence
 above are for is the rest — `terminal`, `python_exec`, `run_tests`, `diagnostics`, the
 Console four, and the writing git tools `git_branch` and `git_commit`.
+
+**The session scratch directory is writable on every rung, Plan included.** Each session
+gets its own `~/.apogee/scratch/<session-id>/` — created private to you, named to the
+model by the orientation block and `{{scratch}}`, swept after fourteen days — and it is
+part of the fence in Auto. Since 2026-09-14 it is also the one place apogee's own file
+tools write in **Plan** (any other target is refused with a reason naming the directory)
+and the one write **Ask-Before** does not ask about; Allow-Edits and Auto ran them there
+already. What stays exactly as before: every other write is refused in Plan and gated in
+Ask-Before, and a *command* that writes into the scratch directory — `terminal`,
+`python_exec` — is still command execution, refused in Plan and gated in Ask-Before, so the
+loosen adds nothing a shell could run. Nothing under `~/.apogee` reads or loads what lands
+there, and a program planted in it is refused by the same exec fence that refuses one
+planted in the workspace.
 
 One Linux fence is real but incomplete: on a kernel older than **6.2** (landlock ABI 1–2 —
 Ubuntu 22.04, Debian 12, RHEL 9) the kernel has no way to restrict *truncation*, so a confined

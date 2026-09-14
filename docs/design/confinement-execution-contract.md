@@ -464,7 +464,8 @@ one level down (D2), for free, with no threading.
 > (the system `git`, the Go toolchain), so they now ride the **subproc** row — `confine` in Auto
 > with the caps-insufficient `gate` fallback, `gate` on the middle rungs, `refuse` in Plan (they
 > stay in Plan's read-only menu, which is a UX affordance; the class is the boundary). Tighten-only
-> in every cell; `confine=false` is unaffected.
+> in every cell; `confine=false` is unaffected. *(Since 2026-09-14 Plan's menu is read-only plus
+> the scratch-dir writers — the note on the 2026-08-02 block below.)*
 > **Superseded in part 2026-09-06 (see that block below):** the rule stands for every other marker
 > carrier, but `git_diff_range` — with `git_status` and `git_log` — now carries the
 > `readOnlySubprocess` marker and takes the **RO-subproc** row, run in every mode; `diagnostics`
@@ -480,6 +481,12 @@ one level down (D2), for free, with no threading.
 > recursion point stays (it is `Delegate`d before the ladder, never a leaf). `ReadOnly()` keeps its
 > remaining jobs: it is the terminal-floor input to `classifyTool` and what self-regulation's
 > read/write tally reads. Menu-only change; no ladder cell moves, and no verdict changes.
+> **Note 2026-09-14 (the second loosen, ADR 0012 amendment of that date):** the menu now keys on
+> `planOffers` — `planAdmits` plus Apogee's own **WS-write** carriers whenever a session scratch
+> dir is set — and the Plan ladder row runs a WS-write whose resolved target is inside that dir
+> (`writeTargetInScratch`, read from the same `classifyWriteTarget` resolution as the fence
+> facts). The agreement is unchanged in kind: the menu never offers what the ladder refuses on
+> every target, and `planmenu_test.go` pins it over the registry with and without a scratch dir.
 
 > **Amended 2026-08-12 (the writable box fences `argv[0]` too; hostile-bytes hardening, items 2 and
 > 5).** `box.WritablePaths` was read only by the OS backends that build the *write* fence, so
@@ -613,12 +620,14 @@ neither RO, WS-write, nor External (a third-party in-process writer Apogee canno
 
 Ladder-leaf outcomes: **run** = execute directly, no gate, no `Confine`; **confine** = execute inside
 `Confiner.Confine` (subprocess), no gate; **gate** = route through Approval (allow-for-session caches);
-**refuse** = Plan-mode write refusal.
+**refuse** = Plan-mode write refusal (since 2026-09-14 a WS-write is refused in Plan only when its
+target lies outside the session scratch dir, and the refusal names the dir — the row below).
 
 | tool-class | Plan | Ask-Before | Allow-Edits | Auto · `confine=true` | Auto · `confine=false` |
 |---|---|---|---|---|---|
 | **RO** (and no other marker) | run | run | run | run | run |
 | **RO-subproc** (git read trio) | run | run | run | run | run |
+| **WS-write**, target in the **session scratch dir** (2026-09-14) | **run** | **run** | **run** | **run** (path-safety-bounded) | run |
 | **WS-write**, target **in** workspace | refuse | gate | **run** | **run** (path-safety-bounded) | run |
 | **WS-write**, target **out** of workspace | refuse | gate | gate | **gate** | run |
 | **subproc** (caps sufficient) | refuse² | gate | gate | **confine** | run |

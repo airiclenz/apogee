@@ -179,8 +179,8 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 
 ### Safety and control
 
-- **Four autonomy modes** — read-only Plan, Ask-Before, Allow-Edits, and OS-confined
-  Auto. `Shift+Tab` cycles them at any time, mid-run included, and `/confine` reports or
+- **Four autonomy modes** — read-only Plan (its own per-session scratch directory is the one
+  place it writes), Ask-Before, Allow-Edits, and OS-confined Auto. `Shift+Tab` cycles them at any time, mid-run included, and `/confine` reports or
   changes [Auto's blast radius](docs/manual/configuration.md#auto-modes-blast-radius).
 - **A dangerous-action guard in every mode** — the genuinely destructive commands are
   refused outright, and the merely alarming ones are put in front of you first.

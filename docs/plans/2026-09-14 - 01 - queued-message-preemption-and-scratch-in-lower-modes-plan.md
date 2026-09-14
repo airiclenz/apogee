@@ -203,7 +203,11 @@ NOTES (2026-09-14): the refusal test reads the announced dir off the request's o
 
 **Commit:** `test(e2e): Plan and Ask-Before write the announced scratch dir; Plan names it when it refuses`
 
-## 7. Docs: ADR 0012 second loosen, the execution contract, ADR 0056/0023 notes, CONTEXT.md, manual
+## 7. Docs: ADR 0012 second loosen, the execution contract, ADR 0056/0023 notes, CONTEXT.md, manual — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): the ADR 0012 amendment is headed `## Amendment (2026-09-14) — …` in the file's own house style with (a)/(b)/(c) sub-points, rather than the plan's literal `(c) 2026-09-14 —` label.
+NOTES (2026-09-14): `IDEAS.md` is gitignored (`.gitignore:12`), so its `[P] Scratch dir in Plan / Ask-Before mode …` line was removed on disk but the path is deliberately left off FILES — staging it would fail; the acceptance grep passes against the working file.
+NOTES (2026-09-14): the manual's blast-radius section has no table, so the "row for the scratch dir" landed as a bold-led paragraph after the hardened-git-reads paragraph, matching the section's own shape.
 
 **What:** Depends on item 6. Record the loosen and its security argument:
 - `docs/adr/0012-…`: dated amendment "(c) 2026-09-14 — the session scratch dir is writable in Plan and Ask-Before": the core invariant holds (bounded by path-safety to the box's writable set; the dir is per-session, 0700, one path in the fence, symlinks resolved by `EvalRealPath` at classification and again at execute via the permit-pinned `os.Root`; nothing under `~/.apogee` reads, loads or executes scratch content; the shell route is untouched; a scratch-planted executable can run only through a later mode's own gates — the pre-existing `RefuseExecFromWritablePath` scope, stated, not changed); the 2026-07-25 (b) sentence "in the lower three modes every non-read-only tool already gates" gets a dated note.

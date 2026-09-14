@@ -84,6 +84,11 @@ every mode but **Plan** — Plan writes nothing (ADR 0012), so a Plan session is
 dir rather than a "writable" one it cannot use; a Shift+Tab out of Plan brings the line back on
 the next request. `{{scratch}}` keeps expanding in every mode: that line is the user's own prose
 to condition.
+*Reversed (2026-09-14, later the same day):* Plan announces the dir again. ADR 0012's second
+loosen makes the session scratch dir the one target Plan writes (and the one native write
+Ask-Before does not gate), so the bullet is true in every mode and the block states it in every
+mode; the mode leaves the block's inputs again, and the scratch line moves only at a session
+boundary as it did before this note.
 
 **4. Tracked-file mutation warnings are an always-on structural floor.** When the workspace
 root is a git repository, the agent snapshots `git status --porcelain` immediately before and

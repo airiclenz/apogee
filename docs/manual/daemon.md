@@ -60,7 +60,7 @@ contacted. Only the two modes that need nobody are accepted — `ask-before` and
 
 | `mode:` | What the run leaves behind |
 |---|---|
-| `plan` (the default) | read-only: the deliverable **is** the recorded answer — open the run in `/sessions` to read it. Reviews, audits, digests. |
+| `plan` (the default) | read-only except for the run's own scratch directory: the deliverable **is** the recorded answer — open the run in `/sessions` to read it. Reviews, audits, digests. |
 | `auto` | confined and unattended: the deliverable is the **state of the workspace** afterwards. Point it at a git repository, so you can read the diff and throw it away. |
 
 `auto` is refused outright on a host whose confinement backend cannot fence the

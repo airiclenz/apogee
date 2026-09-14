@@ -39,8 +39,8 @@ records nothing. Either way the startup sweep still applies whatever bound the `
 block names — `--no-save` drops this run's own record, not the retention policy, so a host
 driven only headlessly still keeps its store within `max-age` / `max-count`.
 
-`--mode` takes `plan` (the default, read-only) or `auto` — the two modes that never need
-a human. `ask-before` and `allow-edits` are refused, and so is `auto` on a host whose
+`--mode` takes `plan` (the default — read-only, except for the run's own scratch directory)
+or `auto` — the two modes that never need a human. `ask-before` and `allow-edits` are refused, and so is `auto` on a host whose
 confinement backend cannot fence the filesystem: there the interactive fallback is
 approval, and an unattended run has nobody to approve (see
 [Auto mode's blast radius](configuration.md#auto-modes-blast-radius)). Whatever the mode, every gated

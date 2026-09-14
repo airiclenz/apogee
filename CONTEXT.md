@@ -722,10 +722,13 @@ The autonomy level governing which tool calls need human approval — a **monoto
 privilege ladder**. Four:
 - **Plan** — read-only — including the hardened git read tools (`git_status`, `git_log`,
   `git_diff_range`), which are read-only by construction and so take the read-only row in every
-  mode (the **RO-subproc** class, ADR 0012 amendment 2026-09-06); no writes, no other command
-  execution (explore and propose, touch nothing).
-- **Ask-Before** — workspace reads run free, the hardened git reads above included; every
-  write, every other command, and every external reach requires an Approval (the human is
+  mode (the **RO-subproc** class, ADR 0012 amendment 2026-09-06) — **plus its own Scratch dir**:
+  Apogee's own writers run there unprompted and every other target is refused with a reason
+  naming the dir (ADR 0012's second loosen, 2026-09-14); no other writes, no other command
+  execution (explore, propose, draft into the scratch dir, touch nothing else).
+- **Ask-Before** — workspace reads run free, the hardened git reads above included, and so do
+  Apogee's own writes into the session **Scratch dir** (the one write it does not gate); every
+  other write, every other command, and every external reach requires an Approval (the human is
   the gate).
 - **Allow-Edits** — Apogee's own **workspace-scoped edits** (path-safety-bounded) run
   without asking; shell/exec other than those reads, network, MCP, and anything
@@ -837,8 +840,10 @@ surface (Linux **landlock** applied pre-`execve` on the child; macOS **`sandbox-
 the child; Windows a restricted **low-integrity token** handed to process creation, with the box
 expressed as a mandatory label on the disk and reverted on teardown — one clean subprocess
 granularity on all three), **or** by Apogee's own
-**path-safety-to-workspace** for its own in-process write tools, **url-safety for its own
-network tools**, **and the argv Apogee builds itself for its own read-side git tools** (`git_status`,
+**path-safety to the box's writable set** — the workspace plus the session **Scratch dir**, which
+is why that dir is the one target Apogee's own writers run on in every mode, Plan and Ask-Before
+included (ADR 0012's second loosen, 2026-09-14) — for its own in-process write tools, **url-safety
+for its own network tools**, **and the argv Apogee builds itself for its own read-side git tools** (`git_status`,
 `git_log`, `git_diff_range` — the **RO-subproc** class: hooks and fsmonitor off, a repository whose
 config names a program git would run refused outright, a scrubbed child environment, nothing
 written, so the call is bounded without a box). A third-party tool of any of those kinds, whose
@@ -879,8 +884,10 @@ box carries as an extra writable root (ADR 0056). It exists because a workspace-
 a confined agent nowhere safe for scratch work, so improvisations landed in the workspace (the
 2026-08-22 clobber incident): now scratch tests, probes, and temp files have a home the fence
 allows, named to the model via the **`{{scratch}}`** prompt placeholder — for a user's own prose —
-and by the **Orientation block** that rides on every standing system message in every mode but
-**Plan**: Plan writes nothing, so it announces no scratch dir (`{{scratch}}` still expands there).
+and by the **Orientation block** that rides on every standing system message in every mode,
+**Plan** included: since ADR 0012's second loosen (2026-09-14) the scratch dir is the one place Plan
+writes and the one native write Ask-Before does not gate, so the bullet is true on every rung (the
+terminal route into it stays refused in Plan and gated in Ask-Before).
 Created `0700` when the session id is minted, follows the **active** session across rotation,
 advertised writable only once it actually exists, and swept by a
 best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe. A **Firing**
@@ -909,9 +916,10 @@ one) → context files → mechanism directives → tool block — so no workspa
 repo file cannot open with a forged copy the
 real one then reads as a correction of; every fact it states moves only on a session-level door, so it is prefix-KV-cache safe between them —
 the Delegations line carries no availability state and moves only on the human doors (`/server`,
-`/model`, `/sub-agents-server`), the way the **Scratch dir** moves at a session boundary and the
-**Mode** on Shift+Tab (since 2026-09-14 the scratch line's gate: Plan omits it). A
-fact the session does not have — or, for the scratch dir in Plan, cannot use — is omitted rather than rendered empty. See
+`/model`, `/sub-agents-server`), the way the **Scratch dir** moves at a session boundary (the
+**Mode** gated the scratch line for one day, 2026-09-14, until ADR 0012's second loosen made Plan
+write there too; the mode is no longer an input). A
+fact the session does not have is omitted rather than rendered empty. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §6
 and [ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md).
 _Avoid_: "system prompt" (that is the user's configured template; this is the engine's own text),
