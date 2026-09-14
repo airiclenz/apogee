@@ -2323,10 +2323,11 @@ type toolsConfig struct {
 	// able to stop a session from starting.
 	Disabled []string `yaml:"disabled"`
 	// Enabled names the built-in tools this config puts BACK on the menu — the counterpart to the
-	// switch above, for a tool the build registers default-off (tools.DefaultOffTool) or a rung
-	// below this one disabled. Absent/empty ⇒ nothing is added back, which is today's whole menu
-	// since no tool ships default-off. A name matching no tool is the same startup warning
-	// Disabled's is, and for the same reason.
+	// switch above, for a tool the build registers default-off (domain.DefaultOffTool) or a rung
+	// below this one disabled. Absent/empty ⇒ nothing is added back, so a default-off tool (today
+	// the Console four: console_open, console_send, console_read, console_close) stays off until
+	// named here. A name matching no tool is the same startup warning Disabled's is, and for the
+	// same reason.
 	//
 	// A name in BOTH lists of one block cannot be honoured twice: disabled wins (fail closed) and
 	// the clash is a startup NOTICE naming it (rosterConflictNotice), never a refusal.

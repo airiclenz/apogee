@@ -349,7 +349,7 @@ type Options struct {
 	// subtracts, so a disabled tool is neither offered to the model nor dispatchable.
 	//
 	// ToolsEnabled is the middle rung's ADD direction: a name here lifts a tool the build registers
-	// default-off (tools.DefaultOffTool), so "I want this tool everywhere" never forces a catch-all
+	// default-off (domain.DefaultOffTool), so "I want this tool everywhere" never forces a catch-all
 	// `model-profiles:` entry. A matching profile's own `tools:` axis outranks both, per tool.
 	ToolsDisabled []string
 	ToolsEnabled  []string

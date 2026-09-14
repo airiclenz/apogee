@@ -85,7 +85,7 @@ NOTES (2026-09-14): retry — the prior attempt's ADR and greenfield rewrites we
 **Acceptance:** `! grep -l "Status:\*\* unexecuted" "docs/plans/archived/2026-09-09 - 01 - reaction-core-stage-3-plan.md" "docs/plans/archived/2026-09-09 - 02 - context-fill-notice-plan.md" && git diff --numstat HEAD -- docs/plans/archived/ | awk '{ if ($1 != 1 || $2 != 1) exit 1 }'`
 **Commit:** `chore(plans): archived stage-3 and context-fill plans carry Status: executed`
 
-## 6. `toolsConfig.Enabled` comment — the Console four ship default-off
+## 6. `toolsConfig.Enabled` comment — the Console four ship default-off — ✅ DONE (2026-09-14)
 
 **What:** In `internal/config/config.go` the `Enabled` field comment (base lines 2325-2328) says "Absent/empty ⇒ nothing is added back, which is today's whole menu since no tool ships default-off". The Console four (`console_open`, `console_send`, `console_read`, `console_close`) assert `domain.DefaultOffTool` (`internal/tools/console_*.go`) and are documented as default-off in `docs/manual/configuration.md:125-129`. Rewrite the sentence: absent/empty ⇒ nothing is added back, so a default-off tool (today the Console four, `domain.DefaultOffTool`) stays off until named here. Comment only; no code, no test change.
 **Regression guard.** Spell it `domain.DefaultOffTool` in the rewritten sentence — the interface lives at `internal/domain/tools.go:158` and every Console assertion uses `domain.`; `tools.DefaultOffTool` is not a symbol. Rule: the stale spelling `tools.DefaultOffTool` is fixed everywhere it appears in `internal/config` comments, found with `grep -rn "tools\.DefaultOffTool" internal/config/` (at the base commit: `config.go:2326` and `options.go:352`); Acceptance checks the sweep left none.
