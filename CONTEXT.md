@@ -864,7 +864,8 @@ box carries as an extra writable root (ADR 0056). It exists because a workspace-
 a confined agent nowhere safe for scratch work, so improvisations landed in the workspace (the
 2026-08-22 clobber incident): now scratch tests, probes, and temp files have a home the fence
 allows, named to the model via the **`{{scratch}}`** prompt placeholder — for a user's own prose —
-and, unconditionally, by the **Orientation block** that rides on every standing system message.
+and by the **Orientation block** that rides on every standing system message in every mode but
+**Plan**: Plan writes nothing, so it announces no scratch dir (`{{scratch}}` still expands there).
 Created `0700` when the session id is minted, follows the **active** session across rotation,
 advertised writable only once it actually exists, and swept by a
 best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe. A **Firing**
@@ -891,10 +892,11 @@ directly after the prompt —
 prompt → orientation → delegate block (delegations only) → task list (once the model has written
 one) → context files → mechanism directives → tool block — so no workspace text precedes it and a
 repo file cannot open with a forged copy the
-real one then reads as a correction of; every fact it states is a per-session constant, so it is prefix-KV-cache safe —
+real one then reads as a correction of; every fact it states moves only on a session-level door, so it is prefix-KV-cache safe between them —
 the Delegations line carries no availability state and moves only on the human doors (`/server`,
-`/model`, `/sub-agents-server`), the way the **Scratch dir** moves at a session boundary. A
-fact the session does not have is omitted rather than rendered empty. See
+`/model`, `/sub-agents-server`), the way the **Scratch dir** moves at a session boundary and the
+**Mode** on Shift+Tab (since 2026-09-14 the scratch line's gate: Plan omits it). A
+fact the session does not have — or, for the scratch dir in Plan, cannot use — is omitted rather than rendered empty. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §6
 and [ADR 0069](docs/adr/0069-the-top-level-model-picks-the-delegation-seat.md).
 _Avoid_: "system prompt" (that is the user's configured template; this is the engine's own text),

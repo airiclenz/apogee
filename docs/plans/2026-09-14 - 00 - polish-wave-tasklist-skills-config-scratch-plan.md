@@ -124,7 +124,9 @@ NOTES (2026-09-14): `driveScratchToolCall` now delegates to a tool-agnostic `dri
 
 **Commit.** `fix(agent): native writes into the session scratch dir are in-fence, as the orientation announces`
 
-## 7. Plan mode omits the scratch orientation bullet
+## 7. Plan mode omits the scratch orientation bullet — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): the Auto row of the mode-table test is built over the dispatch tests' `fakeConfiner{caps: capsBoth()}` — `newAgent` refuses Auto without fs-write confinement on this host; no production change.
 
 **What.** Depends on item 6. In `orientationBlock` (`internal/agent/orientation.go:104-110`) skip the `orientationScratchLine` bullet when `a.Mode() == domain.ModePlan` (use the mode constant's real name from `internal/domain`). Update the function's KV-cache comment: the mode is now an input, so a mode flip re-encodes the prefix — accepted, a mode change is a session-level door. `{{scratch}}` (`internal/prompt/prompt.go`, `loop.go:991`) is untouched. Record the change as a dated note under ADR 0056 D3, as a dated one-line note under ADR 0023's 2026-08-25 amendment (`docs/adr/0023-…:292-295`: mode joins the block's inputs; a flip re-encodes the prefix), and in `CONTEXT.md`'s scratch-dir paragraph (:860-876) — one sentence each: Plan announces no scratch dir because Plan writes nothing; amend `CONTEXT.md:867` ("unconditionally, by the Orientation block") and `:894` ("every fact it states is a per-session constant"). Prose guard rule (paragraph-aware — the claim and the word "scratch" seldom share a line): every doc paragraph claiming the orientation block or its scratch bullet is unconditional, mode-independent or a per-session constant — `grep -rn -i -A3 'orientation' CONTEXT.md docs/adr/0023*.md docs/adr/0056*.md docs/manual/*.md | grep -i 'unconditional\|every mode\|per-session constant\|constant \*within\*'` — is corrected.
 

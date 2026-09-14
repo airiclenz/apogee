@@ -295,6 +295,9 @@ mechanism directives → tool block**.
   constant *within* a session, so the block is prefix-KV-cache stable exactly as `{{scratch}}` is.
   A fact the session does not have (no scratch dir yet, no mounted roots) is **omitted**, never
   rendered as an empty path.
+  *Note (2026-09-14):* the live mode joins the block's inputs — Plan omits the scratch bullet
+  (ADR 0056 D3 note), so the block is constant *between* the human's own doors rather than
+  within the session, and a mode flip re-encodes the prefix exactly as `{{mode}}` already does.
 - **§7 unchanged.** `newChildAgent` copies `cfg` wholesale and the child renders its own
   `standingSystem`, so a sub-agent gets the block with no carve-out and no wiring of its own.
 - **The shipped template drops what the block now carries.** `defaults/config.yaml` no longer

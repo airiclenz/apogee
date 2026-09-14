@@ -79,6 +79,12 @@ only. /tmp may not be writable."). Per-session constant, KV-cache safe. This rem
 2's hazard inversion: confinement no longer blocks the safe destination while leaving the
 workspace as the only writable ground.
 
+*Note (2026-09-14):* the Orientation block (ADR 0023 §6 amendment) announces the scratch dir in
+every mode but **Plan** — Plan writes nothing (ADR 0012), so a Plan session is told no scratch
+dir rather than a "writable" one it cannot use; a Shift+Tab out of Plan brings the line back on
+the next request. `{{scratch}}` keeps expanding in every mode: that line is the user's own prose
+to condition.
+
 **4. Tracked-file mutation warnings are an always-on structural floor.** When the workspace
 root is a git repository, the agent snapshots `git status --porcelain` immediately before and
 after each subprocess tool call; differing snapshots append `[warning: this command changed

@@ -270,6 +270,84 @@ func TestOrientation_FollowsAScratchDirMove(t *testing.T) {
 	}
 }
 
+// scratchLine renders the WHOLE scratch bullet — label, path and the guidance that follows —
+// composed from the asset the way the byte-identical guard below composes its block, so a test
+// asserting the line's presence asserts the exact wire line and not only its path-bearing half.
+func scratchLine(path string) string {
+	return fmt.Sprintf(orientationTemplate[orientationScratchLine], path)
+}
+
+// TestOrientation_PlanModeOmitsTheScratchDir: Plan writes nothing (ADR 0012), so a Plan session
+// is told no scratch dir — a "writable" directory the mode refuses every write to is not a fact the
+// model can use. The bullet is DROPPED, not blanked: the remaining bullets keep their order and the
+// block stays byte-identical to what the same session renders with no scratch dir at all.
+func TestOrientation_PlanModeOmitsTheScratchDir(t *testing.T) {
+	cfg := orientationConfig(t)
+	cfg.Mode = domain.ModePlan
+	cfg.ScratchDir = orientationScratchDir
+	cfg.ExtraReadRoots = func() []string { return []string{orientationFirstRoot} }
+
+	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+
+	got := a.orientationBlock()
+
+	if strings.Contains(got, "Scratch dir:") {
+		t.Errorf("a Plan session is told a scratch dir it cannot write:\n%q", got)
+	}
+	want := strings.Join([]string{
+		orientationTemplate[orientationHeaderLine],
+		fmt.Sprintf(orientationTemplate[orientationWorkspaceLine], orientationWorkspaceDir),
+		fmt.Sprintf(orientationTemplate[orientationRootsLine], orientationFirstRoot),
+	}, "\n")
+	if got != want {
+		t.Errorf("the remaining bullets moved:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestOrientation_WritingModesStateTheScratchDir: every other rung of the ladder can write there —
+// Ask-Before one Approval at a time, Allow-Edits and Auto unprompted (plan 2026-09-14 item 6) — so
+// each renders the exact scratch line, guidance and all. Auto is built over a fake Confiner with
+// fs-write caps, the only way past newAgent's Auto gate on a host without confinement.
+func TestOrientation_WritingModesStateTheScratchDir(t *testing.T) {
+	for _, mode := range []domain.Mode{domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto} {
+		t.Run(string(mode), func(t *testing.T) {
+			cfg := orientationConfig(t)
+			cfg.Mode = mode
+			cfg.ScratchDir = orientationScratchDir
+			cfg.Confiner = &fakeConfiner{caps: capsBoth()}
+
+			a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+
+			if block := a.orientationBlock(); !strings.Contains(block, scratchLine(orientationScratchDir)) {
+				t.Errorf("%s omits the scratch line %q:\n%q", mode, scratchLine(orientationScratchDir), block)
+			}
+		})
+	}
+}
+
+// TestOrientation_ScratchDirReturnsWhenPlanIsLeft: the mode is read live, like every other input,
+// so a Shift+Tab from Plan to Allow-Edits mid-session brings the line back on the very next request
+// — the block follows the human's door rather than the mode the session was opened in.
+func TestOrientation_ScratchDirReturnsWhenPlanIsLeft(t *testing.T) {
+	cfg := orientationConfig(t)
+	cfg.Mode = domain.ModePlan
+	cfg.ScratchDir = orientationScratchDir
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+
+	planned := seedSystemMessage(t, a, responder, "hi")
+	a.SetMode(domain.ModeAllowEdits)
+	editing := seedSystemMessage(t, a, responder, "again")
+
+	if strings.Contains(planned, "Scratch dir:") {
+		t.Errorf("the Plan request's block states a scratch dir:\n%q", planned)
+	}
+	if !strings.Contains(editing, scratchLine(orientationScratchDir)) {
+		t.Errorf("the Allow-Edits request's block did not bring the scratch line back:\n%q", editing)
+	}
+}
+
 // withOrientation returns the standing system content a seam test expects: the rendered prompt
 // THAT test configures, then the engine's own orientation block, then — when the agent under test
 // is a delegate — the delegate report block, then the agent's task list when it holds one, then

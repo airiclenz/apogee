@@ -1438,7 +1438,8 @@ disk would freeze again exactly what building it in unfroze.
 Whenever a system message goes out at all — because you have a prompt, or workspace
 context files (below), or both — apogee places its own short **orientation block**
 right after your prompt, ahead of any workspace context files, naming the workspace,
-this session's scratch directory and any read-only library roots the model may read
+this session's scratch directory (in every mode but Plan, which cannot write there) and
+any read-only library roots the model may read
 from. Ahead of them is deliberate: nothing a repository ships can then precede the
 host's own facts. That block is not part of `system-prompt-text`, cannot be edited out
 of it, and is not sent in the one posture where no system message goes out at all —
