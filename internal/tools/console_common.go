@@ -102,9 +102,10 @@ func openConsoleIDs(registry *console.Registry, owner string) string {
 }
 
 // consoleWait turns a wait_ms argument into the window a call collects output for: absent (the
-// JSON zero) takes the tool's default, a negative value collects nothing, and a value past the
-// tool's ceiling is clamped rather than refused — a model asking for a longer window than it may
-// have still gets the longest one it may have.
+// JSON zero) takes the tool's default, a negative value waits for nothing — the call still
+// reports whatever is already buffered when it looks — and a value past the tool's ceiling is
+// clamped rather than refused: a model asking for a longer window than it may have still gets
+// the longest one it may have.
 func consoleWait(waitMS, defaultMS, maxMS int) time.Duration {
 	switch {
 	case waitMS == 0:

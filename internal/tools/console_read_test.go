@@ -19,25 +19,37 @@ func consoleReadCall(callID string, id, waitMS int) domain.ToolCall {
 // openUndrainedConsole opens a Console whose output nobody has taken yet, and returns its id
 // beside the Console itself. It is what a test needs when the OUTPUT is the subject: the open
 // call collects its window from the same buffer every later read draws on, so an ordinary open
-// would have consumed the very bytes the test is about. A negative wait_ms is the documented way
-// to ask for no collection at all (consoleWait).
+// would have consumed the very bytes the test is about.
+//
+// A negative wait_ms shrinks the open's window to nothing (consoleWait), but a zero-length window
+// still hands back whatever the program managed to print BEFORE the open call looked — and a
+// shell racing a goroutine that -race and a loaded host keep descheduling wins that race often
+// enough to flake (apogee-bng). So the program is held at the line before command until the open
+// has returned: the shell blocks in `read` on its terminal, and only then does the helper type
+// the newline that releases it. Nothing the command prints can predate the open, by construction
+// rather than by timing. The released newline's own echo is the one thing the buffer holds
+// besides the command's output.
 //
 // Shared with console_close_test.go, whose subject — the tail nobody read — is the same one.
 func openUndrainedConsole(t *testing.T, ctx context.Context, command string) (int, *console.Console) {
 	t.Helper()
-	res, err := NewConsoleOpen(t.TempDir(), nil).Execute(ctx, consoleOpenCall("open", command, -1))
+	gated := "read release; " + command
+	res, err := NewConsoleOpen(t.TempDir(), nil).Execute(ctx, consoleOpenCall("open", gated, -1))
 	if err != nil || res.IsError {
-		t.Fatalf("console_open(%q) = %q (err=%v)", command, res.Content, err)
+		t.Fatalf("console_open(%q) = %q (err=%v)", gated, res.Content, err)
 	}
 	registry := console.FromContext(ctx)
 	ids := registry.OpenIDs()
 	if len(ids) == 0 {
-		t.Fatalf("console_open(%q) registered nothing", command)
+		t.Fatalf("console_open(%q) registered nothing", gated)
 	}
 	id := ids[len(ids)-1]
 	opened, ok := registry.Get(id)
 	if !ok {
 		t.Fatalf("console %d is not in the registry that just issued it", id)
+	}
+	if _, err := opened.Write([]byte("\n")); err != nil {
+		t.Fatalf("releasing console %d's program: %v", id, err)
 	}
 	return id, opened
 }
