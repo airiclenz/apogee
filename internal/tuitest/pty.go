@@ -290,18 +290,36 @@ func (d *PTYDriver) Close() {
 	})
 }
 
-// awaitExit blocks until the child has been reaped and returns its status, failing the test with
-// the last frame if it never does.
+// awaitExit blocks until the child has been reaped AND its output has been drained, then returns
+// its status — failing the test with the last frame if the child never goes.
+//
+// The two halves arrive by different roads and nothing orders them: the exit status comes through
+// wait(2), the last bytes through the pty, and a child that writes and exits in the same instant is
+// routinely reaped before the output pump has read what it wrote. Returning on the reap alone
+// would let [PTYDriver.Bytes] answer with a wire missing its tail — the alternate-screen release,
+// the cursor-show — which is precisely what the teardown claims read. So the second wait is for the
+// pump's own end: the child's last slave descriptor closes with it, the master reads EOF, and the
+// pump returns with every byte in the buffer. That wait shares the reap's deadline rather than
+// being open-ended, because a slave held open by something the child left behind (a grandchild
+// that kept its stdio) never yields that EOF — and in that case the bytes were pumped long before,
+// so running out the clock is the right answer, not a failure. Close still ends such a pump the
+// only way it can be ended, by closing the master.
 func (d *PTYDriver) awaitExit(what string) int {
 	d.t.Helper()
 
+	deadline := time.NewTimer(DefaultTimeout)
+	defer deadline.Stop()
 	select {
 	case <-d.reaped:
-		return d.code
-	case <-time.After(DefaultTimeout):
+	case <-deadline.C:
 		waiter{screen: d.screen, what: what}.fail(d.t)
 		return 0 // unreachable: fail is a t.Fatalf
 	}
+	select {
+	case <-d.pumped:
+	case <-deadline.C:
+	}
+	return d.code
 }
 
 // send writes into the pty master — the child's input — under the lock the answer pump also holds.

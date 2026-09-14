@@ -117,6 +117,37 @@ func TestPTYDriverRestoresNothingItselfMeasures(t *testing.T) {
 	}
 }
 
+// TestPTYDriverBytesAreCompleteAfterExit pins the ordering between the child's death and its last
+// bytes: what the child wrote right before exiting is in [PTYDriver.Bytes] by the time [PTYDriver.Quit]
+// returns. The two arrive by different roads — the exit status through wait(2), the bytes through
+// the pty — and nothing orders them, so a driver that reported the exit as soon as the child was
+// reaped could hand back a wire missing its tail: the alternate-screen release TestE2ESmokePTY
+// asserts on is exactly such a last byte. The trap's payload is far larger than one pump read on
+// purpose, so that the pump is provably still behind when the shell exits and the old ordering
+// fails every time rather than once in six.
+func TestPTYDriverBytesAreCompleteAfterExit(t *testing.T) {
+	CheckLeaks(t)
+
+	const sentinel = "\033[?1049l"
+	drv := NewPTYDriver(t, "/bin/sh",
+		[]string{"-c", `trap 'i=0; while [ $i -lt 4000 ]; do echo "filler $i"; i=$((i+1)); done
+			printf '` + sentinel + `'; exit 0' INT
+			echo ready; while :; do sleep 0.05; done`},
+		shellEnv(), Size{W: 40, H: 10})
+
+	drv.WaitText("ready")
+	if code := drv.Quit(); code != 0 {
+		t.Errorf("the shell exited %d; want 0", code)
+	}
+	if raw := drv.Bytes(); !strings.HasSuffix(string(raw), "\x1b[?1049l") {
+		tail := raw
+		if len(tail) > 32 {
+			tail = tail[len(tail)-32:]
+		}
+		t.Errorf("Bytes() after Quit ends %q; want the sentinel the child wrote last", tail)
+	}
+}
+
 // TestReplayTraceRebuildsTheScreen pins the other half of the black-box measure: a --tui-trace file
 // replays into the picture it recorded, and into the counters a flicker claim is made against.
 func TestReplayTraceRebuildsTheScreen(t *testing.T) {

@@ -538,7 +538,10 @@ waits — and adds the four things only a real terminal has:
 
 - `Bytes()` — every byte the child wrote to the terminal, unconsumed. Frames are the picture; this
   is the wire, and the teardown claims are about sequences no frame can show: the alternate-screen
-  release, the cursor-show, the final SGR reset.
+  release, the cursor-show, the final SGR reset. It is complete once `Quit()` or `Kill()` has
+  returned: the exit status and the last bytes arrive by different roads (wait(2) and the pty), so
+  the driver waits for the output pump to drain — bounded by the same deadline as the exit itself —
+  before it reports the child gone.
 - `TTYState()` — echo and canonical mode, read off the pty. This is "no `stty sane` needed" as a
   mechanical fact. It is read through the MASTER fd, because `pty.StartWithAttrs` closes the slave
   once the child holds it; a pty pair has one line discipline, and a mode ioctl on the master is
