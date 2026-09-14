@@ -50,7 +50,7 @@ func isReadTool(name string) bool { return readToolNames[name] }
 // isFileMutatingTool reports whether a call to name mutated a file — "was this a write action",
 // over the apogee-complete superset above. It is deliberately NOT "does this call carry a full file
 // payload to syntax-check": a fragment edit and a move mutate the workspace while carrying no file
-// body, and only the content-repair rows (which stay lab Mechanisms) need the narrower question.
+// body. That narrower question belonged to the retired content-repair rows; no Floor guard asks it.
 func isFileMutatingTool(name string) bool { return wave4WriteTools[name] }
 
 // IsFileMutatingTool is isFileMutatingTool's exported face, for the ONE cross-package question this

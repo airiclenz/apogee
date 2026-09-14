@@ -94,7 +94,9 @@ NOTES (2026-09-14): retry — the prior attempt's ADR and greenfield rewrites we
 **Acceptance:** `! grep -q "since no tool ships default-off" internal/config/config.go && ! grep -rq "tools\.DefaultOffTool" internal/config/ && gofmt -l internal/config/ | wc -l | grep -q '^0$' && go vet ./internal/config/ && go test -race -count=1 -run 'TestApplyConfigTools' ./internal/config/`
 **Commit:** `docs(config): toolsConfig.Enabled comment names the default-off Console four`
 
-## 7. `internal/floor/toolnames.go` comment no longer says content-repair rows "stay lab Mechanisms"
+## 7. `internal/floor/toolnames.go` comment no longer says content-repair rows "stay lab Mechanisms" — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): the sweep grep's other hit, line 8 "(the F8 consolidation this package inherits from internal/mechanisms)", is a provenance reference to where the consolidation came from, not a claim that the layer is live — left unchanged.
 
 **What:** `internal/floor/toolnames.go:53` reads "only the content-repair rows (which stay lab Mechanisms) need the narrower question" — the Mechanism layer was deleted (ADR 0071/0076). Rewrite the parenthetical so the sentence stands without the layer: the narrower "does this call carry a full file body" question belonged to the retired content-repair rows and no Floor guard asks it. Comment only (ratified call: the `internal/floor` freeze binds behaviour, not prose). Rule for the sweep, this file only: every comment in `internal/floor/toolnames.go` that names a Mechanism as a live layer — `grep -n -i "mechanism" internal/floor/toolnames.go`; hits in other `internal/floor` files are out of scope (they are historical references the retirement wave exempted).
 **Files:** `internal/floor/toolnames.go`
