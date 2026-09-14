@@ -140,7 +140,10 @@ NOTES (2026-09-14): the Auto row of the mode-table test is built over the dispat
 
 **Commit.** `feat(agent): Plan mode orientation omits the scratch dir it cannot write`
 
-## 8. IDEAS.md: drop the entries this plan resolved
+## 8. IDEAS.md: drop the entries this plan resolved — ✅ DONE (2026-09-14)
+
+NOTES (2026-09-14): `IDEAS.md` is gitignored (`.gitignore:12`) and has never been tracked — the edit is complete in the working tree and the item's acceptance passes, but `git add IDEAS.md` is refused, so this item has nothing to commit; the verifier should record the item as done without a commit (or `git commit --allow-empty` with the SUGGESTED-COMMIT message if the run needs one commit per item).
+NOTES (2026-09-14): the scratch entry was flipped from `[P]` to `[ ]` and reworded as the item text prescribes: the defect half is stated as shipped and the remaining question is named as the ADR 0012 one (Plan/Ask-Before scratch writes); no other entry was touched.
 
 **What.** Depends on items 1–7. Remove from `IDEAS.md` the four entries this plan closed — "skill prediction needs work", "Task list UI is bad" (with its example block), "Config sanity check / clean-up sweep", and the defect half of "All modes can use the scratch dir" — per the file's own rule (a resolved item is removed; the CHANGELOG is the closed trail). The scratch entry's remaining Plan/Ask-Before question stays as an open `[ ]` item reworded to say the defect half shipped and what remains is the ADR 0012 question. The other entries stay untouched.
 
