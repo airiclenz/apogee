@@ -59,11 +59,13 @@ type PTYDriver struct {
 	rawMu sync.Mutex
 	raw   []byte
 
-	// reaped closes when the child has been waited for; code is its exit status, valid from then
-	// on. exited is the public one-shot ([PTYDriver.Exited]).
-	reaped chan struct{}
-	code   int
-	exited chan int
+	// reaped closes when the child has been waited for; code is its exit status and reapedAt the
+	// moment of the reap, both valid from then on. exited is the public one-shot
+	// ([PTYDriver.Exited]).
+	reaped   chan struct{}
+	code     int
+	reapedAt time.Time
+	exited   chan int
 
 	// The two pumps' completion signals, joined by Close so a torn-down driver leaves no
 	// goroutine behind for [CheckLeaks] to find.
@@ -261,13 +263,18 @@ func (d *PTYDriver) Kill() {
 	}
 	select {
 	case <-d.reaped:
-		return
+		// The child went by itself, so there is nothing to signal — but the bytes it wrote on the
+		// way out may still be in the pty, because the reap and the output arrive by different
+		// roads. This path drains the pump the same bounded way a signalled exit does, so that
+		// [PTYDriver.Bytes] is complete once Kill has returned on EVERY road: Quit, Kill on a live
+		// child, Kill on one already gone, and Close, which comes through here.
 	default:
-	}
-	// The child is a session leader (Setsid), so its pid is also its group id: the negative pid
-	// takes anything it spawned with it. A group that is already gone is not an error here.
-	if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err != nil {
-		_ = proc.Kill()
+		// The child is a session leader (Setsid), so its pid is also its group id: the negative
+		// pid takes anything it spawned with it. A group that is already gone is not an error
+		// here.
+		if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err != nil {
+			_ = proc.Kill()
+		}
 	}
 	d.awaitExit("the binary to die after SIGKILL")
 }
@@ -298,12 +305,8 @@ func (d *PTYDriver) Close() {
 // routinely reaped before the output pump has read what it wrote. Returning on the reap alone
 // would let [PTYDriver.Bytes] answer with a wire missing its tail — the alternate-screen release,
 // the cursor-show — which is precisely what the teardown claims read. So the second wait is for the
-// pump's own end: the child's last slave descriptor closes with it, the master reads EOF, and the
-// pump returns with every byte in the buffer. That wait shares the reap's deadline rather than
-// being open-ended, because a slave held open by something the child left behind (a grandchild
-// that kept its stdio) never yields that EOF — and in that case the bytes were pumped long before,
-// so running out the clock is the right answer, not a failure. Close still ends such a pump the
-// only way it can be ended, by closing the master.
+// pump's own end ([PTYDriver.awaitDrain]), and every road out of a run — Quit, Kill on a live
+// child, Kill on one that already went by itself, Close — comes through it.
 func (d *PTYDriver) awaitExit(what string) int {
 	d.t.Helper()
 
@@ -315,11 +318,31 @@ func (d *PTYDriver) awaitExit(what string) int {
 		waiter{screen: d.screen, what: what}.fail(d.t)
 		return 0 // unreachable: fail is a t.Fatalf
 	}
+	d.awaitDrain()
+	return d.code
+}
+
+// awaitDrain waits for the output pump to end after the child has been reaped — the caller has
+// already seen [PTYDriver.reaped] close. The pump ends when the child's last slave descriptor
+// closes with it: the master reads EOF and the pump returns with every byte in the buffer.
+//
+// The wait is bounded rather than open-ended, because a slave held open by something the child left
+// behind (a grandchild that kept its stdio) never yields that EOF — and in that case the bytes were
+// pumped long before, so running out the clock is the right answer, not a failure. The clock is ONE
+// clock, [DefaultTimeout] from the moment of the reap, however many callers ask: a Kill on a child
+// that Quit already drained returns at once, and a Close after a drain that ran out does not run it
+// out again. Close still ends such a pump the only way it can be ended, by closing the master.
+func (d *PTYDriver) awaitDrain() {
+	remaining := DefaultTimeout - time.Since(d.reapedAt)
+	if remaining <= 0 {
+		return
+	}
+	deadline := time.NewTimer(remaining)
+	defer deadline.Stop()
 	select {
 	case <-d.pumped:
 	case <-deadline.C:
 	}
-	return d.code
 }
 
 // send writes into the pty master — the child's input — under the lock the answer pump also holds.
@@ -402,6 +425,7 @@ func (d *PTYDriver) reap() {
 		}
 	}
 	d.code = code
+	d.reapedAt = time.Now()
 	close(d.reaped)
 	d.exited <- code
 	close(d.exited)

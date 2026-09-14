@@ -148,6 +148,39 @@ func TestPTYDriverBytesAreCompleteAfterExit(t *testing.T) {
 	}
 }
 
+// TestPTYDriverKillAfterSelfExitDrainsTheBytes pins the same ordering on the other road out: a
+// child that exits BY ITSELF, whose exit the test has already observed through [PTYDriver.Exited],
+// and then a [PTYDriver.Kill] — the shape of every Close after a run that ended on its own. There
+// is nothing left to signal on that road, and a Kill that returned on that fact alone would leave
+// the pump wherever the exit found it, with the tail of the wire still in the pty. The payload is
+// oversized for the same reason as above: so that the pump is provably behind when the exit lands.
+func TestPTYDriverKillAfterSelfExitDrainsTheBytes(t *testing.T) {
+	CheckLeaks(t)
+
+	const sentinel = "\033[?1049l"
+	drv := NewPTYDriver(t, "/bin/sh",
+		[]string{"-c", `i=0; while [ $i -lt 4000 ]; do echo "filler $i"; i=$((i+1)); done
+			printf '` + sentinel + `'; exit 0`},
+		shellEnv(), Size{W: 40, H: 10})
+
+	select {
+	case code := <-drv.Exited():
+		if code != 0 {
+			t.Errorf("the shell exited %d; want 0", code)
+		}
+	case <-time.After(DefaultTimeout):
+		t.Fatal("the shell did not exit by itself")
+	}
+	drv.Kill()
+	if raw := drv.Bytes(); !strings.HasSuffix(string(raw), "\x1b[?1049l") {
+		tail := raw
+		if len(tail) > 32 {
+			tail = tail[len(tail)-32:]
+		}
+		t.Errorf("Bytes() after Kill on a self-exited child ends %q; want the sentinel the child wrote last", tail)
+	}
+}
+
 // TestReplayTraceRebuildsTheScreen pins the other half of the black-box measure: a --tui-trace file
 // replays into the picture it recorded, and into the counters a flicker claim is made against.
 func TestReplayTraceRebuildsTheScreen(t *testing.T) {
