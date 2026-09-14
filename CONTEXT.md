@@ -7,8 +7,9 @@ every model runs with, fired as builtin **Reactions** beside which the bench may
 own for measurement.
 The hard constraint, inherited unchanged from the predecessor projects: **nothing Apogee puts in
 front of a model may make that model perform worse than the same agent without it.** That floor is
-**Bypass mode** (every **advise** and **shape** Reaction of user or bench-armed origin off;
-builtins, **observe** and **gate** on) —
+**Bypass mode** (every **advise** and **shape** Reaction of user or bench-armed origin off, and the
+engine's own advise builtin — the context-fill notice — with them; the seven Floor guards,
+**observe** and **gate** on) —
 **not** a naked model, because Budget, Compaction and Pruning are structural and load-bearing (a
 truly naked model just overflows its context window). The constraint is **proved at bench
 time** as a ground-truth, distributional non-inferiority gate against Bypass (see
@@ -770,9 +771,9 @@ self-regulating), "off-ramp" (the Capability that named two of them — see
 
 **Bypass mode**:
 A `Config` flag **orthogonal to Agent mode** that skips every armed **advise**, **shape (view)**
-and **shape (work)** [Reaction](#reactions-and-moments) of **user** or **bench-armed** origin —
-exactly what can move the floor — while leaving the engine's own builtins and the agent's structure
-intact
+and **shape (work)** [Reaction](#reactions-and-moments) of **user** or **bench-armed** origin and
+the engine's one advise builtin, the **Context-fill notice** — exactly what can move the floor —
+while leaving the seven Floor guards and the agent's structure intact
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D9). It says
 nothing about the [Floor guards](#floor-guard), which stay on in **every** arm, so the floor is
 *functional* — a baseline that quit at the first stumble would pass the hard constraint trivially —
@@ -1162,7 +1163,8 @@ The line the user row draws: a user Reaction may change the model's **view** and
 may never change the model's **work** or make its **choices**. Of the user row, **observe**,
 **advise** and **gate** ship — a `reactions:` entry's `run:`, `advise:` and `gate:` keys — and
 **shape (view)** is the one reserved cell. **Bypass** switches off the advise
-and shape classes of user and bench-armed origin and nothing else. A **Tool** is not a cell: the
+and shape classes of user and bench-armed origin, plus the engine-origin context-fill notice (the
+one advise builtin), and nothing else. A **Tool** is not a cell: the
 model asks for it by name, and it is admitted on a **replicated** ask across models
 (`docs/design/tool-surface-findings.md`,
 [ADR 0057](docs/adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md) D3).
