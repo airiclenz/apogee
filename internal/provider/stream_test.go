@@ -135,6 +135,9 @@ data: [DONE]
 	}
 }
 
+// TestStream_DropsMalformedEvent pins that a chunk which fails to decode is skipped rather than
+// failing a stream that is otherwise fine — and that the skip is on the record: the terminal
+// Done carries how many were skipped, so a stream capture can be bisected to the bad chunk.
 func TestStream_DropsMalformedEvent(t *testing.T) {
 	t.Parallel()
 
@@ -143,6 +146,8 @@ func TestStream_DropsMalformedEvent(t *testing.T) {
 data: {not valid json
 
 data: {"choices":[{"delta":{"content":"b"}}]}
+
+data: ["also not a chunk"
 
 data: [DONE]
 
@@ -162,7 +167,129 @@ data: [DONE]
 		}
 	}
 	if content != "ab" {
-		t.Errorf("content = %q, want ab (malformed event dropped)", content)
+		t.Errorf("content = %q, want ab (malformed events skipped)", content)
+	}
+	last := deltas[len(deltas)-1]
+	if last.Kind != DeltaDone {
+		t.Fatalf("last delta = %+v, want the terminal Done", last)
+	}
+	if last.MalformedChunks != 2 {
+		t.Errorf("Done.MalformedChunks = %d, want 2 — every skipped chunk is counted", last.MalformedChunks)
+	}
+}
+
+// TestStream_OnlyMalformedChunksIsAFault pins the other half of the count: a stream whose every
+// chunk failed to decode has yielded nothing the consumer could commit, and it ends as a fault
+// naming the count rather than as an empty Done the loop would report as a bare empty reply.
+// Both ends of a stream are held to it — the explicit [DONE] and the server closing.
+func TestStream_OnlyMalformedChunksIsAFault(t *testing.T) {
+	t.Parallel()
+
+	const chunks = `data: {not valid json
+
+data: {"choices": [
+
+data: {"choices":[{"delta":{"content":
+
+`
+	for name, body := range map[string]string{
+		"explicit [DONE]": chunks + "data: [DONE]\n\n",
+		"server closes":   chunks,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := sseServer(body)
+			defer srv.Close()
+
+			deltas := collectStream(NewClient(srv.URL, "m"), Request{})
+
+			if len(deltas) != 1 {
+				t.Fatalf("deltas = %+v, want exactly the one terminal fault", deltas)
+			}
+			fault := deltas[0]
+			if fault.Kind != DeltaError {
+				t.Fatalf("terminal delta = %+v, want a DeltaError", fault)
+			}
+			if !strings.Contains(fault.Err, "(3 malformed chunks skipped)") {
+				t.Errorf("fault %q does not name the three skipped chunks", fault.Err)
+			}
+			if fault.MalformedChunks != 3 {
+				t.Errorf("MalformedChunks = %d, want 3", fault.MalformedChunks)
+			}
+			if fault.Retryable {
+				t.Error("the malformed-only fault is Retryable; the same request would decode no better")
+			}
+		})
+	}
+}
+
+// cutServer returns a server that streams body as an event-stream and then kills the TCP
+// connection without ending the chunked body — the shape a server or proxy dropping a stream
+// mid-reply leaves behind, which the client's chunked reader reports as io.ErrUnexpectedEOF.
+// Returning from the handler would end the body cleanly instead, which the provider commits as a
+// finished reply — the very case this server exists to tell apart.
+func cutServer(body string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, body)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			panic(http.ErrAbortHandler)
+		}
+		conn, _, err := hijacker.Hijack()
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		_ = conn.Close()
+	}))
+}
+
+// TestStream_MidStreamEOFIsRetryable pins the class of a body cut before its terminator: the
+// tokens streamed so far are yielded, then a terminal DeltaError marked Retryable, so the loop
+// re-streams it exactly like an in-band 502 (the text-cap overflow stays non-retryable —
+// assertReplyTextCapFires). The read fault's own text is kept: it is what the give-up path
+// surfaces when the re-stream fails too.
+func TestStream_MidStreamEOFIsRetryable(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"content":"Hel"}}]}
+
+data: {"choices":[{"delta":{"content":"lo"}}]}
+
+`
+	srv := cutServer(body)
+	defer srv.Close()
+
+	deltas := collectStream(NewClient(srv.URL, "m"), Request{})
+
+	var content string
+	for _, d := range deltas {
+		if d.Kind == DeltaContent {
+			content += d.Content
+		}
+		if d.Kind == DeltaDone {
+			t.Fatalf("a cut stream ended in a Done: %+v", d)
+		}
+	}
+	if content != "Hello" {
+		t.Errorf("content before the cut = %q, want Hello", content)
+	}
+	fault := deltas[len(deltas)-1]
+	if fault.Kind != DeltaError {
+		t.Fatalf("last delta = %+v, want the terminal read fault", fault)
+	}
+	if !fault.Retryable {
+		t.Errorf("read fault %q is not Retryable; a mid-stream EOF is the class the loop re-streams", fault.Err)
+	}
+	if !strings.Contains(fault.Err, "apogee: read stream: ") || !strings.Contains(fault.Err, "unexpected EOF") {
+		t.Errorf("read fault = %q, want the read-stream wording naming the unexpected EOF", fault.Err)
+	}
+	if fault.MalformedChunks != 0 {
+		t.Errorf("MalformedChunks = %d on a stream that decoded cleanly, want 0", fault.MalformedChunks)
 	}
 }
 

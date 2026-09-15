@@ -1,0 +1,16 @@
+# The upstream TestE2EUpstreamEOFIsRetriedOnce talks to: a server whose first reply dies mid-stream.
+#
+# Turn 1 streams the first three runes of its text and then KILLS the connection — no terminal
+# chunk, no clean end — so the client's read fails with io.ErrUnexpectedEOF partway through the
+# reply. That is the fault the loop re-streams once, like an in-band 502. Turn 2 is the reply the
+# re-stream gets: the answer the run commits, and the proof that the retry happened is that this
+# text — not the three runes before the cut — is what reaches stdout, after exactly two requests.
+#
+# TestE2EUpstreamEOFTwiceFaults reuses turn 1 in BOTH positions (built in Go from this file), so a
+# second cut lands on a Turn whose one re-stream is already spent and the run faults.
+model: eof-model
+turns:
+    - text: Hello before the cut.
+      cut:
+        after_runes: 3
+    - text: Hello after the retry.

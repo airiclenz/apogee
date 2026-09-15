@@ -98,6 +98,55 @@ func TestCancelInsideRestreamHoldOffStaysResumable(t *testing.T) {
 	}
 }
 
+// eofFaultMsg is the text the provider builds for a body cut before its terminator — the
+// `unexpected EOF` a server or proxy dropping the connection mid-reply leaves the chunked reader
+// with — which arrives at the loop marked Retryable exactly like the in-band 502.
+const eofFaultMsg = "apogee: read stream: unexpected EOF"
+
+// TestRespondAndReviewReStreamsAMidStreamEOFOnce pins that a mid-stream EOF rides the same one
+// re-stream per Turn as a transient in-band error: the Turn re-sends the request once, the second
+// reply commits, and the recovered Turn stays quiet — one StreamResetEvent, no ErrorEvent. It used
+// to fail the Turn on the spot, because the read fault carried no Retryable verdict.
+func TestRespondAndReviewReStreamsAMidStreamEOFOnce(t *testing.T) {
+	shortRestreamHoldoff(t)
+
+	sink := &recordingSink{}
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		retryableErrorScript(eofFaultMsg), // the connection drops mid-reply
+		contentScript("after the cut"),    // the re-stream's answer
+	}}
+	a, err := newAgent(baseConfig(sink), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	req, _ := a.buildRequest(0)
+	run := &turnRun{turn: 0, req: req}
+
+	resp, outcome, carried := a.respondAndReview(context.Background(), run)
+
+	if outcome != turnOK {
+		t.Fatalf("outcome = %v, want turnOK — the EOF is re-streamed, not surfaced", outcome)
+	}
+	if carried != "" {
+		t.Errorf("carried message = %q, want empty", carried)
+	}
+	if resp == nil || resp.Text() != "after the cut" {
+		t.Errorf("resp = %+v, want the re-streamed reply %q committed", resp, "after the cut")
+	}
+	if responder.calls != 2 {
+		t.Errorf("Upstream calls = %d, want 2 — one cut stream, one re-stream", responder.calls)
+	}
+	if !run.restreamSpent {
+		t.Error("restreamSpent = false, want true — the EOF spends the Turn's one re-stream")
+	}
+	if got := countEvents[domain.StreamResetEvent](sink.events); got != 1 {
+		t.Errorf("StreamResetEvents = %d, want 1 — the tokens streamed before the cut are superseded", got)
+	}
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("ErrorEvents = %v, want none — a recovered re-stream is silent", errs)
+	}
+}
+
 // TestRestreamHoldOffThatElapsesStillReStreams is the untouched half of the same branch: when the
 // wait ends because it EXPIRED rather than because the ctx died, the Turn re-streams exactly as it
 // always did. Without this the fix above could pass by never re-streaming at all.

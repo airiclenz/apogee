@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -30,7 +32,8 @@ const (
 	// token usage. Exactly one Done ends a successful stream.
 	DeltaDone DeltaKind = "done"
 	// DeltaError is a terminal fault (transport, bad status, oversized tool args, a reply
-	// past the text cap). No Done follows it.
+	// past the text cap, a stream that carried nothing but undecodable chunks). No Done
+	// follows it.
 	DeltaError DeltaKind = "error"
 	// DeltaContextOverflow is the terminal "prompt too long" signal (a 400 the server
 	// flagged as a context-window rejection).
@@ -49,10 +52,17 @@ type Delta struct {
 	Err          string
 	// Retryable is meaningful only on DeltaError: it reports that the fault's class is one
 	// the client would have retried had it arrived as an HTTP status (429, 5xx, or an
-	// aggregator's "provider_unavailable"), so the caller may re-stream the same request.
-	// It is never set on DeltaContextOverflow — a prompt too long stays too long — and the
-	// provider itself never acts on it, because retrying mid-stream is the loop's call.
+	// aggregator's "provider_unavailable"), or a body read that ended in a mid-stream EOF or a
+	// network timeout, so the caller may re-stream the same request. It is never set on
+	// DeltaContextOverflow — a prompt too long stays too long — nor on the text-cap overflow,
+	// and the provider itself never acts on it, because retrying mid-stream is the loop's call.
 	Retryable bool
+	// MalformedChunks is meaningful on the terminal DeltaDone and DeltaError of a parsed
+	// stream: how many `data:` payloads failed to decode and were skipped. A fault's Err
+	// already names a non-zero count (malformedChunksNote); the field is the same number,
+	// machine-readable, and it is what lets a stream capture be bisected to the chunk a
+	// server shaped wrong. Zero on every stream that decoded cleanly.
+	MalformedChunks int
 }
 
 // Stream performs a streaming completion and yields Deltas as they arrive. It is the SSE
@@ -63,7 +73,12 @@ type Delta struct {
 // (whether drained or broken early). The caller's ctx is the stream's only deadline — there
 // is no inter-chunk idle timeout — and a cancelled or expired ctx ends the body read and
 // surfaces as a terminal DeltaError. Content plus reasoning is capped at maxReplyTextBytes;
-// crossing it ends the stream with a non-retryable terminal DeltaError.
+// crossing it ends the stream with a non-retryable terminal DeltaError. A body read that fails
+// before the terminator — the connection dropped mid-chunk (io.ErrUnexpectedEOF) or a network
+// timeout — is a terminal DeltaError marked Retryable, so the loop can re-stream it the way it
+// re-streams an in-band 502; a chunk that fails to decode is skipped and counted, never dropped
+// silently (Delta.MalformedChunks), and a stream that decoded nothing at all but skipped some is
+// a fault naming that count rather than an empty Done.
 func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	return func(yield func(Delta) bool) {
 		req.Stream = true
@@ -138,11 +153,12 @@ func (c *Client) inBandErrorDelta(werr wireError, raw string, carriedEffort bool
 
 // parseSSE reads the SSE body line by line and yields Deltas. It accumulates every tool
 // call of the reply across their argument fragments — addressed by wire index, id, or
-// last-addressed, and all emitted at the end, never mid-stream — drops a malformed
-// event rather than failing the stream, caps accumulated tool-call arguments, caps the total
-// content plus reasoning text at maxReplyTextBytes, and emits a terminal Done with the last
-// finish reason and any usage chunk — a faithful port of the oracle's parseSSEStream.
-// Returning false from yield (consumer broke) stops cleanly.
+// last-addressed, and all emitted at the end, never mid-stream — skips a malformed event
+// rather than failing the stream (counting it, so the terminal Delta reports how many were
+// skipped and a stream that carried nothing else faults on the count), caps accumulated
+// tool-call arguments, caps the total content plus reasoning text at maxReplyTextBytes, and
+// emits a terminal Done with the last finish reason and any usage chunk — a port of the
+// oracle's parseSSEStream. Returning false from yield (consumer broke) stops cleanly.
 // carriedEffort is carried through from the request Stream built — the in-band error
 // delta needs it, and this is the only seam between that request and the error it explains.
 func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) bool) {
@@ -166,6 +182,30 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 	// not summed here — openToolCalls carries its own maxToolCallBytes cap, on the sum
 	// across every call it holds open.
 	textBytes := 0
+	// How many data: payloads failed to decode. Each is skipped so one bad chunk cannot kill
+	// a stream that is otherwise fine, but never silently: the count rides the terminal Delta,
+	// and a stream that yielded nothing else is faulted on it (finish below).
+	malformed := 0
+
+	// finish ends the stream on its success path: every accumulated tool call, then the
+	// terminal Done. Both ends of a stream — the explicit [DONE] and the server closing the
+	// connection — come through here, so the malformed-only fault is judged once: a stream
+	// that yielded no text, no tool call, and skipped at least one chunk carried nothing the
+	// consumer could commit, and an empty Done would let it pose as a finished empty reply.
+	finish := func(reason string, usage *Usage) {
+		if textBytes == 0 && len(open.entries) == 0 && malformed > 0 {
+			yield(Delta{
+				Kind:            DeltaError,
+				Err:             fmt.Sprintf(malformedOnlyErrFmt, malformed),
+				MalformedChunks: malformed,
+			})
+			return
+		}
+		if !open.flush(yield) {
+			return
+		}
+		yield(Delta{Kind: DeltaDone, FinishReason: reason, Usage: usage, MalformedChunks: malformed})
+	}
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -178,20 +218,18 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 		}
 
 		if data == "[DONE]" {
-			if !open.flush(yield) {
-				return
+			reason := pendingFinish
+			if reason == "" {
+				reason = "stop"
 			}
-			finish := pendingFinish
-			if finish == "" {
-				finish = "stop"
-			}
-			yield(Delta{Kind: DeltaDone, FinishReason: finish, Usage: pendingUsage})
+			finish(reason, pendingUsage)
 			return
 		}
 
 		var chunk sseChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue // drop a malformed event, matching the oracle
+			malformed++ // skip the event, as the oracle did — but on the record
+			continue
 		}
 		if chunk.Error != nil {
 			// An aggregator can answer HTTP 200 and put the provider's failure in-band. It is
@@ -199,7 +237,9 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 			// path ends at the implicit Done and commits a silent empty reply. Every tool call
 			// accumulated so far is dropped with it — none has been emitted, because calls are
 			// held until the stream ends: the reply is faulted, not partly usable.
-			yield(c.inBandErrorDelta(*chunk.Error, data, carriedEffort))
+			fault := c.inBandErrorDelta(*chunk.Error, data, carriedEffort)
+			fault.MalformedChunks = malformed
+			yield(fault)
 			return
 		}
 		if chunk.Usage != nil {
@@ -247,16 +287,51 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 	}
 
 	if err := scanner.Err(); err != nil {
-		yield(Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: read stream: %v", err)})
+		// A read that failed before the terminator. Retryable when the failure is the
+		// connection's, not the reply's: a mid-stream EOF or a network timeout is the class an
+		// HTTP-layer retry would have covered had it struck before the first byte, so the loop
+		// gets to re-stream it exactly like an in-band 502 (isTransientReadError).
+		yield(Delta{
+			Kind:            DeltaError,
+			Err:             fmt.Sprintf("apogee: read stream: %v", err) + malformedChunksNote(malformed),
+			Retryable:       isTransientReadError(err),
+			MalformedChunks: malformed,
+		})
 		return
 	}
 
 	// The stream ended without an explicit [DONE] (server closed the connection): flush
-	// every accumulated tool call and emit a terminal Done, as the oracle does.
-	if !open.flush(yield) {
-		return
+	// every accumulated tool call and emit a terminal Done, as the oracle does. The usage
+	// chunk is not carried on this path, as it never was.
+	finish("stop", nil)
+}
+
+// malformedOnlyErrFmt is the fault for a stream that decoded nothing the consumer could
+// commit — no text, no tool call — while skipping %d chunks it could not decode: the count is
+// the whole diagnosis, and it is what a stream capture is bisected from.
+const malformedOnlyErrFmt = "apogee: stream carried no text and no tool calls (%d malformed chunks skipped)"
+
+// malformedChunksNote is the suffix a terminal fault carries when the stream skipped chunks it
+// could not decode — empty when it skipped none, so a clean stream's fault text is unchanged.
+func malformedChunksNote(count int) string {
+	if count == 0 {
+		return ""
 	}
-	yield(Delta{Kind: DeltaDone, FinishReason: "stop"})
+	return fmt.Sprintf(" (%d malformed chunks skipped)", count)
+}
+
+// isTransientReadError reports whether a body-read fault is one the same request can be expected
+// to survive: the connection closed mid-chunk (io.ErrUnexpectedEOF — a server or a proxy dropping
+// the stream) or a network timeout. Every other read fault — a line past the scanner's buffer,
+// a broken transport — stays non-retryable. A cancelled or expired ctx surfaces through here
+// too (an expired one even reads as a timeout), but the loop checks ctx.Err() before it ever
+// consults Retryable, so the verdict is moot for it.
+func isTransientReadError(err error) bool {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // openToolCalls is the ordered set of tool calls one streamed reply has under accumulation.

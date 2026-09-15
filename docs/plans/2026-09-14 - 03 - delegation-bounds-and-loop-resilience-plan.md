@@ -91,7 +91,11 @@ NOTES (2026-09-15): the kill is Hijack + `conn.Close()`, falling back to `panic(
 
 **Commit:** `feat(stubllm): cut and error turn kinds script a mid-stream EOF and an in-band upstream error`
 
-## 3. A mid-stream EOF is retried like an in-band 502; dropped malformed chunks are counted
+## 3. A mid-stream EOF is retried like an in-band 502; dropped malformed chunks are counted — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the text-cap `Retryable: false` case named in Tests was already pinned by `assertReplyTextCapFires` (TestStream_ReplyTextIsCapped / TestStream_ThinkingCountsTowardTheCap); no duplicate test added.
+NOTES (2026-09-15): "zero text" for the malformed-only fault is content plus reasoning (stream.go's `textBytes`, the same sum the text cap counts), so a reasoning-only reply with skipped chunks still commits its reasoning; the fault is non-retryable (the same request would decode no better).
+NOTES (2026-09-15): `TestE2EUpstreamEOFTwiceFaults` builds its two-cut script in Go from `upstream-eof.yaml` (turn 1 twice) rather than a second fixture; the e2e helper reuses `eventLinesHome` from e2e_eventlines_test.go.
 
 **What:** Depends on item 2. Closes open question 5: `internal/provider/stream.go` yields `read stream: <err>` with `Retryable` unset, so `unexpected EOF` never reaches the one re-stream `internal/agent/loop.go` already grants at `reply.retryable && !t.restreamSpent`. Fix: the scanner fault is `Retryable: true` when `errors.Is(err, io.ErrUnexpectedEOF)` or the error is a net timeout — never for the text-cap overflow. A chunk that fails strict `json.Unmarshal` is no longer dropped silently: the assembler counts them and the `DeltaDone`/fault carries `(N malformed chunks skipped)`; a reply that ends with zero text, zero tool calls and N > 0 is a fault naming the count (`apogee-l8s` bisects from that signal). The existing `StreamResetEvent` is emitted on the re-stream as today; a child gets the same one re-stream as depth 0 (writer call).
 

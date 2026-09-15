@@ -383,10 +383,11 @@ func holdOffRestream(ctx context.Context) bool {
 // message verbatim keeps a give-up indistinguishable from the plain-fault path below. Every
 // other outcome surfaces its own fault here, exactly as before, and carries "".
 //
-// One class of fault is re-streamed rather than surfaced: a TRANSIENT in-band error (the
-// provider's Retryable verdict — a 429/5xx/provider_unavailable an aggregator wrapped in an
-// HTTP 200 partway through the stream, where the client's own HTTP retries can no longer
-// reach it). The Turn re-sends the SAME request once (t.restreamSpent), and only the loop
+// One class of fault is re-streamed rather than surfaced: a TRANSIENT fault (the provider's
+// Retryable verdict — a 429/5xx/provider_unavailable an aggregator wrapped in an HTTP 200
+// partway through the stream, or a body cut mid-stream by an EOF or a network timeout — both
+// past where the client's own HTTP retries can reach). The Turn re-sends the SAME request once
+// (t.restreamSpent) at every depth — a child gets the one re-stream depth 0 gets — and only the loop
 // does it: the provider stays a wire, and StreamResetEvent — the same signal an Outcome{Retry}
 // emits, which a streaming Driver already reads as "discard the partial reply, it is coming
 // again" — is the loop's to emit. A recovered re-stream is SILENT, exactly as a recovered
@@ -699,7 +700,7 @@ type reply struct {
 	finish    domain.FinishReason
 	failed    bool   // a terminal DeltaError / DeltaContextOverflow arrived
 	overflow  bool   // that terminal fault was DeltaContextOverflow: the PROMPT did not fit, so folding the history can make the same request succeed
-	retryable bool   // that terminal fault was TRANSIENT (429 / 5xx / provider_unavailable, in-band): re-sending the same request can succeed
+	retryable bool   // that terminal fault was TRANSIENT (429 / 5xx / provider_unavailable in-band, or a mid-stream EOF / net timeout): re-sending the same request can succeed
 	errMsg    string // the terminal fault message when failed
 }
 
@@ -769,9 +770,9 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 			out.overflow = delta.Kind == provider.DeltaContextOverflow
 			out.errMsg = delta.Err
 			// The provider's transient-class verdict rides out with the fault (an in-band 502 is
-			// a 502), because retrying mid-stream is the LOOP's call, not the provider's: only the
-			// loop owns the Turn and the events. An overflow never carries it — a prompt too long
-			// stays too long.
+			// a 502, and a mid-stream EOF is treated like one), because retrying mid-stream is the
+			// LOOP's call, not the provider's: only the loop owns the Turn and the events. An
+			// overflow never carries it — a prompt too long stays too long.
 			out.retryable = delta.Retryable
 		}
 	}
