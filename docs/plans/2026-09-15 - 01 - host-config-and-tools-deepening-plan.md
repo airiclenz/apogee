@@ -272,7 +272,11 @@ NOTES (2026-09-15): consequential edit — internal/tui/heartbeat.go: made neces
 
 Commit: `refactor(cmd): the in-session Schedule Firing raises through raise and refuses when offline`
 
-## 11. One agent-side Floor-guard table
+## 11. One agent-side Floor-guard table — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): both sides exported rather than "one side" — `config.FloorGuardKeys()` AND the facade `apogee.FloorGuardKeys()` (forwarding `agent.FloorGuardKeys()`): `cmd/apogee` imports neither `internal/agent` nor can `internal/config` reach the table, so the set-equality test needs both lists through an exported door; `apogee.go` is therefore touched alongside `internal/config/reactions.go`.
+NOTES (2026-09-15): `setFloorGuard`'s switch became the `floorGuardFields` map (key → `*config.Options` bool field) so the key set is readable by the test; the write still goes through `optionsFromFloor`/`floorFromOptions`, the one negation seam.
+NOTES (2026-09-15): `internal/agent/builtins_test.go` is new (the plan's Files list names it; it did not exist): it pins each table row's gate to its own `FloorConfig` field, `FloorGuardKeys()` as a fresh copy in ladder order, and `retryGuard`'s fire/no-fire contract.
 
 **What.** `internal/agent/builtins.go` declares `floorGuards = []floorGuard{{key, moment, actionLabel, handler}, …}` in ladder order plus one `retryGuard(fn)` adapter replacing the four identical six-line retry adapters; `guardIDs` (`internal/agent/floorguards.go`), `buildBuiltins`, and `cmd/apogee/wire_settings.go`'s `setFloorGuard` cases derive from the table. `domain.FloorConfig`'s seven `Disable…` bools, the config keys, `floorGuardKeys` in `internal/config/reactions.go` and the registry rows stay as they are (ADR 0071 D5, 0076 D11); a test asserts the table's keys equal `floorGuardKeys`. Depends on item 4.
 

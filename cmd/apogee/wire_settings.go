@@ -807,29 +807,33 @@ func (s *liveSettings) setPruneToolResults(on bool) {
 // the negation a second time.
 //
 // An unknown key is a programming error the seven table rows cannot make, so it changes nothing and
-// the generation is handed back as it stands.
+// the generation is handed back as it stands. The key set floorGuardFields answers for is pinned to
+// the engine's guard table and the config keys (TestFloorGuardTableMatchesTheConfigKeys).
 func (s *liveSettings) setFloorGuard(key string, on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	positive := optionsFromFloor(s.gen.Floor)
-	switch key {
-	case "tool-use-enforcer":
-		positive.ToolUseEnforcer = on
-	case "empty-response-recovery":
-		positive.EmptyResponseRecovery = on
-	case "tool-call-repair":
-		positive.ToolCallRepair = on
-	case "tool-call-salvage":
-		positive.ToolCallSalvage = on
-	case "tool-loop-breaker":
-		positive.ToolLoopBreaker = on
-	case "tool-result-cap":
-		positive.ToolResultCap = on
-	case "read-cache":
-		positive.ReadCache = on
+	if field, known := floorGuardFields[key]; known {
+		*field(&positive) = on
 	}
 	s.gen.Floor = floorFromOptions(positive)
 	return s.generationLocked()
+}
+
+// floorGuardFields maps each Floor-guard key onto the config.Options field that spells it — the
+// key→field mapping setFloorGuard writes through, kept here in the composition root beside
+// floorFromOptions because the file's positive spelling is this package's to know. It is a map
+// rather than a switch so its key set can be read: a test holds it equal to the engine's guard
+// table (apogee.FloorGuardKeys) and the config keys (config.FloorGuardKeys), which is how a guard
+// added to the engine without a row here is caught.
+var floorGuardFields = map[string]func(*config.Options) *bool{
+	"tool-use-enforcer":       func(o *config.Options) *bool { return &o.ToolUseEnforcer },
+	"empty-response-recovery": func(o *config.Options) *bool { return &o.EmptyResponseRecovery },
+	"tool-call-repair":        func(o *config.Options) *bool { return &o.ToolCallRepair },
+	"tool-call-salvage":       func(o *config.Options) *bool { return &o.ToolCallSalvage },
+	"tool-loop-breaker":       func(o *config.Options) *bool { return &o.ToolLoopBreaker },
+	"tool-result-cap":         func(o *config.Options) *bool { return &o.ToolResultCap },
+	"read-cache":              func(o *config.Options) *bool { return &o.ReadCache },
 }
 
 // setContextFillNotice moves the `context-fill-notice:` switch on the held generation and hands

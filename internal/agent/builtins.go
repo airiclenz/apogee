@@ -32,11 +32,28 @@ import (
 // so a guard switched off stops at the next Moment, one switched back on arms again, and nothing
 // already corrected is undone.
 
-// buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON and, each when
-// its switch is, the context-fill notice and the step-budget notice — in the order they fire. Within
-// post-response the order is ratified (ADR 0071): tool-call salvage, then the tool-loop breaker,
-// tool-call repair, empty-response recovery and the tool-use enforcer — the coarser "you are
-// going in circles" judgment before the finer "this call is malformed" one, then the two
+// floorGuard is one row of the Floor-guard table: the guard's key (its config key and the id its
+// builtin fires under, floorguards.go), the one Moment it is consulted at, the action its firing is
+// booked under, the gate that reads its opt-out off the live Floor, and the handler that binds it to
+// an Agent. The gate and the handler are funcs of the Floor and of the Agent rather than values
+// because a package-level table can hold neither a live Generation nor a bound *Agent method: each
+// row is resolved against both when the ladder is built (buildBuiltins).
+type floorGuard struct {
+	key     string
+	moment  domain.Moment
+	action  string
+	gate    func(domain.FloorConfig) bool
+	handler func(*Agent) domain.Handler
+}
+
+// floorGuards is the ONE table of the seven Floor guards, in the order they fire. guardIDs
+// (floorguards.go) and buildBuiltins are both derived from it, and cmd/apogee's settings switch is
+// pinned to its key set through the facade (FloorGuardKeys), so a guard added or renamed here is
+// added or renamed everywhere it is known by name.
+//
+// Within post-response the order is ratified (ADR 0071): tool-call salvage, then the tool-loop
+// breaker, tool-call repair, empty-response recovery and the tool-use enforcer — the coarser "you
+// are going in circles" judgment before the finer "this call is malformed" one, then the two
 // recoveries for a Turn that produced no usable call at all.
 //
 // SALVAGE IS FIRST for a reason of its own: it does not correct the response, it COMPLETES it —
@@ -44,6 +61,104 @@ import (
 // for no retry and does not stop the leg. Running it first is what makes the four below judge
 // the response the model MEANT, so a Turn whose only call was written into the text is answered
 // by dispatching that call rather than by a retry the model did not need.
+//
+// The four retry guards share one adapter (retryGuard) around their internal/floor policy:
+//
+//   - The tool-loop breaker (floor.ToolLoopBreak): a Turn repeating the previous Turn's tool calls
+//     verbatim, or closing an exact A-B-A-B alternation on identical results, is re-streamed with
+//     a directive naming what it has already tried.
+//   - Tool-call repair (floor.ToolCallRepair): a malformed or hallucinated call is re-streamed with
+//     a correction naming what was wrong with it. It judges against the whole registry
+//     (registeredToolNames), not this Turn's menu, so a call the mode merely WITHDREW is left for
+//     that mode to answer — which is why its row closes over the Agent where the other three take
+//     the policy function bare.
+//   - Empty-response recovery (floor.RecoverEmpty): a Turn that produced neither text nor a call is
+//     re-streamed with a nudge rather than faulting the Exchange.
+//   - The tool-use enforcer (floor.EnforceToolUse): a model narrating a second consecutive
+//     text-only Turn, having never called a tool, is re-streamed with a correction naming the
+//     tools it was offered.
+var floorGuards = []floorGuard{
+	{
+		key:    guardToolCallSalvage,
+		moment: domain.MomentPostResponse,
+		action: guardActionSalvage,
+		gate:   func(f domain.FloorConfig) bool { return f.DisableToolCallSalvage },
+		handler: func(a *Agent) domain.Handler {
+			return domain.PostResponseFunc(a.salvageToolCall)
+		},
+	},
+	{
+		key:    guardToolLoopBreaker,
+		moment: domain.MomentPostResponse,
+		action: guardActionRetry,
+		gate:   func(f domain.FloorConfig) bool { return f.DisableToolLoopBreaker },
+		handler: func(*Agent) domain.Handler {
+			return retryGuard(floor.ToolLoopBreak)
+		},
+	},
+	{
+		key:    guardToolCallRepair,
+		moment: domain.MomentPostResponse,
+		action: guardActionRetry,
+		gate:   func(f domain.FloorConfig) bool { return f.DisableToolCallRepair },
+		handler: func(a *Agent) domain.Handler {
+			return retryGuard(func(resp *domain.Response) (string, bool) {
+				return floor.ToolCallRepair(resp, a.registeredToolNames())
+			})
+		},
+	},
+	{
+		key:    guardEmptyResponseRecovery,
+		moment: domain.MomentPostResponse,
+		action: guardActionRetry,
+		gate:   func(f domain.FloorConfig) bool { return f.DisableEmptyResponseRecovery },
+		handler: func(*Agent) domain.Handler {
+			return retryGuard(floor.RecoverEmpty)
+		},
+	},
+	{
+		key:    guardToolUseEnforcer,
+		moment: domain.MomentPostResponse,
+		action: guardActionRetry,
+		gate:   func(f domain.FloorConfig) bool { return f.DisableToolUseEnforcer },
+		handler: func(*Agent) domain.Handler {
+			return retryGuard(floor.EnforceToolUse)
+		},
+	},
+	{
+		key:    guardReadCache,
+		moment: domain.MomentPreToolExec,
+		action: guardActionIntercept,
+		gate:   func(f domain.FloorConfig) bool { return f.DisableReadCache },
+		handler: func(a *Agent) domain.Handler {
+			return domain.PreToolExecFunc(a.cacheRead)
+		},
+	},
+	{
+		key:    guardToolResultCap,
+		moment: domain.MomentPreRequest,
+		action: guardActionCap,
+		gate:   func(f domain.FloorConfig) bool { return f.DisableToolResultCap },
+		handler: func(a *Agent) domain.Handler {
+			return domain.PreRequestFunc(a.capToolResults)
+		},
+	},
+}
+
+// FloorGuardKeys lists the seven Floor guards' keys in the order they fire — the table's key set,
+// exported so the composition root can pin its own key list (the settings switch, the config
+// keys) to it without importing the table. The slice is a fresh copy every call.
+func FloorGuardKeys() []string {
+	keys := make([]string, 0, len(floorGuards))
+	for _, g := range floorGuards {
+		keys = append(keys, g.key)
+	}
+	return keys
+}
+
+// buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON and, each when
+// its switch is, the context-fill notice and the step-budget notice — in the order they fire: the
+// floorGuards table's order, whose doc gives the reasons, then the two notices.
 //
 // gates is the enable set's input, read ONCE here: a guard whose opt-out is set is skipped over,
 // which is the whole of how a Floor gate is honoured now. The relative order of the guards that
@@ -55,33 +170,15 @@ import (
 // the guards ahead of it left it — the fill notice first, since its line measures the result's
 // size, and the step notice after it, whose count the fill line does not move.
 func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice, stepNotice bool) []armedReaction {
-	ladder := make([]armedReaction, 0, len(guardIDs)+2)
+	ladder := make([]armedReaction, 0, len(floorGuards)+2)
 	enabled := func(off bool, r armedReaction) {
 		if !off {
 			ladder = append(ladder, r)
 		}
 	}
-	enabled(gates.DisableToolCallSalvage,
-		engineBuiltin(guardToolCallSalvage, guardActionSalvage, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.salvageToolCall)))
-	enabled(gates.DisableToolLoopBreaker,
-		engineBuiltin(guardToolLoopBreaker, guardActionRetry, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.breakToolLoop)))
-	enabled(gates.DisableToolCallRepair,
-		engineBuiltin(guardToolCallRepair, guardActionRetry, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.repairToolCall)))
-	enabled(gates.DisableEmptyResponseRecovery,
-		engineBuiltin(guardEmptyResponseRecovery, guardActionRetry, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.recoverEmptyResponse)))
-	enabled(gates.DisableToolUseEnforcer,
-		engineBuiltin(guardToolUseEnforcer, guardActionRetry, domain.MomentPostResponse,
-			domain.PostResponseFunc(a.enforceToolUse)))
-	enabled(gates.DisableReadCache,
-		engineBuiltin(guardReadCache, guardActionIntercept, domain.MomentPreToolExec,
-			domain.PreToolExecFunc(a.cacheRead)))
-	enabled(gates.DisableToolResultCap,
-		engineBuiltin(guardToolResultCap, guardActionCap, domain.MomentPreRequest,
-			domain.PreRequestFunc(a.capToolResults)))
+	for _, g := range floorGuards {
+		enabled(g.gate(gates), engineBuiltin(g.key, g.action, g.moment, g.handler(a)))
+	}
 	enabled(!notice,
 		classedBuiltin(contextFillNoticeID, actionNotice, domain.ClassAdvise, domain.MomentPostToolResult,
 			domain.PostToolResultFunc(a.contextFillNotice)))
@@ -89,6 +186,19 @@ func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice, stepNotice bool)
 		classedBuiltin(stepBudgetNoticeID, actionNotice, domain.ClassAdvise, domain.MomentPostToolResult,
 			domain.PostToolResultFunc(a.stepBudgetNotice)))
 	return ladder
+}
+
+// retryGuard adapts one retry-shaped Floor policy — given the response, a correction and whether
+// it fired — into the post-response handler the four retry guards share: a policy that fired asks
+// for the Turn to be re-streamed with its correction injected, and one that did not books nothing.
+func retryGuard(policy func(*domain.Response) (string, bool)) domain.Handler {
+	return domain.PostResponseFunc(func(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
+		correction, fired := policy(resp)
+		if !fired {
+			return domain.Outcome{}, nil
+		}
+		return domain.Outcome{Retry: true, Inject: correction}, nil
+	})
 }
 
 // engineBuiltin builds one Floor guard: an engine-origin, shape-view Reaction on the single Moment
@@ -166,50 +276,6 @@ func (a *Agent) salvageToolCall(_ context.Context, resp *domain.Response) (domai
 		Edited: true,
 		Detail: fmt.Sprintf("salvaged %s from content", strings.Join(names, ", ")),
 	}, nil
-}
-
-// breakToolLoop is the tool-loop breaker (floor.ToolLoopBreak): a Turn repeating the previous
-// Turn's tool calls verbatim, or closing an exact A-B-A-B alternation on identical results, is
-// re-streamed with a directive naming what it has already tried.
-func (a *Agent) breakToolLoop(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	directive, fired := floor.ToolLoopBreak(resp)
-	if !fired {
-		return domain.Outcome{}, nil
-	}
-	return domain.Outcome{Retry: true, Inject: directive}, nil
-}
-
-// repairToolCall is the tool-call repair guard (floor.ToolCallRepair): a malformed or
-// hallucinated call is re-streamed with a correction naming what was wrong with it. It judges
-// against the whole registry (registeredToolNames), not this Turn's menu, so a call the mode
-// merely WITHDREW is left for that mode to answer.
-func (a *Agent) repairToolCall(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	correction, fired := floor.ToolCallRepair(resp, a.registeredToolNames())
-	if !fired {
-		return domain.Outcome{}, nil
-	}
-	return domain.Outcome{Retry: true, Inject: correction}, nil
-}
-
-// recoverEmptyResponse is the empty-response recovery (floor.RecoverEmpty): a Turn that produced
-// neither text nor a call is re-streamed with a nudge rather than faulting the Exchange.
-func (a *Agent) recoverEmptyResponse(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	nudge, fired := floor.RecoverEmpty(resp)
-	if !fired {
-		return domain.Outcome{}, nil
-	}
-	return domain.Outcome{Retry: true, Inject: nudge}, nil
-}
-
-// enforceToolUse is the tool-use enforcer (floor.EnforceToolUse): a model narrating a second
-// consecutive text-only Turn, having never called a tool, is re-streamed with a correction
-// naming the tools it was offered.
-func (a *Agent) enforceToolUse(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	correction, fired := floor.EnforceToolUse(resp)
-	if !fired {
-		return domain.Outcome{}, nil
-	}
-	return domain.Outcome{Retry: true, Inject: correction}, nil
 }
 
 // cacheRead is the read cache (floor.CacheRead): a re-read of a file this Exchange already read

@@ -61,6 +61,11 @@ var floorGuardKeys = []string{
 	"read-cache",
 }
 
+// FloorGuardKeys returns the seven Floor guards' config keys (floorGuardKeys) as a fresh copy. It is
+// exported for the composition root, which pins its own key set — the settings switch — to this
+// list and to the engine's guard table through one test, since neither side can import the other.
+func FloorGuardKeys() []string { return slices.Clone(floorGuardKeys) }
+
 // contextFillNoticeKey is the config key of the engine's context-fill notice (ADR 0077), which is
 // also the id its builtin advise Reaction fires under (internal/agent's fillnotice.go). It is
 // refused as an entry's `id:` for the Floor guards' reason, and kept as a second literal beside

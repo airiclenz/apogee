@@ -29,17 +29,10 @@ const (
 	guardActionSalvage   = "salvage"
 )
 
-// guardIDs is every Floor-guard key, in the ladder's firing order. It is the set armReactions
-// reserves (reactions.go) — ALL seven, whatever the enable set currently holds — so a
-// `reactions:` entry named after a guard the user switched OFF is refused just as loudly as one
-// named after a guard that is on: the id is the guard's identity whether or not it is armed
-// today, and a swap that turns the guard back on must never find its name already taken.
-var guardIDs = []string{
-	guardToolCallSalvage,
-	guardToolLoopBreaker,
-	guardToolCallRepair,
-	guardEmptyResponseRecovery,
-	guardToolUseEnforcer,
-	guardReadCache,
-	guardToolResultCap,
-}
+// guardIDs is every Floor-guard key, in the ladder's firing order — the floorGuards table's key
+// column (builtins.go), read once at init. It is the set armReactions reserves (reactions.go) —
+// ALL seven, whatever the enable set currently holds — so a `reactions:` entry named after a guard
+// the user switched OFF is refused just as loudly as one named after a guard that is on: the id is
+// the guard's identity whether or not it is armed today, and a swap that turns the guard back on
+// must never find its name already taken.
+var guardIDs = FloorGuardKeys()

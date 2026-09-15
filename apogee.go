@@ -170,6 +170,12 @@ type ModelProfile = domain.ModelProfile
 // template whose placeholders are substituted per request; see Config.SystemPrompt.
 func DefaultSystemPrompt() string { return config.DefaultSystemPrompt() }
 
+// FloorGuardKeys lists the seven Floor guards' keys in the order the engine fires them — the key
+// column of the engine's guard table, which is also the id each guard's firing is reported under
+// and the config key that switches it off (ADR 0071). It is exported so the composition root can
+// pin its own key list to the engine's without importing internal/agent.
+func FloorGuardKeys() []string { return agent.FloorGuardKeys() }
+
 // ShippedProfile resolves model against the SHIPPED shape table alone — the built-in tier of the
 // per-model resolution (ADR 0044), matched case-insensitively on a substring of the model name —
 // and reports whether any entry matched. A model the table does not know answers the zero

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -591,6 +593,65 @@ func TestOptionsFromFloorInvertsFloorFromOptions(t *testing.T) {
 			t.Errorf("optionsFromFloor(floorFromOptions(%+v)) = %+v; the seven keys must survive the round trip",
 				positive, got)
 		}
+	}
+}
+
+// The seven Floor-guard keys are known by name in three places that cannot import one another —
+// the engine's guard table (apogee.FloorGuardKeys), the config keys a file spells and an entry's
+// `id:` is refused against (config.FloorGuardKeys), and this package's key→field map behind
+// setFloorGuard with the seven table rows that apply through it — so this is the one test that
+// holds them to one SET. Set rather than list: config keeps the enforcer first, the engine keeps
+// salvage first, and neither order is the other's business. A guard added to the engine without a
+// config key, or a row here without a guard, is what fails.
+func TestFloorGuardTableMatchesTheConfigKeys(t *testing.T) {
+	t.Parallel()
+	sorted := func(keys []string) []string {
+		out := slices.Clone(keys)
+		slices.Sort(out)
+		return out
+	}
+	engine := sorted(apogee.FloorGuardKeys())
+	if len(engine) != 7 {
+		t.Fatalf("apogee.FloorGuardKeys() = %v, want the seven Floor guards", engine)
+	}
+	if file := sorted(config.FloorGuardKeys()); !slices.Equal(file, engine) {
+		t.Errorf("config.FloorGuardKeys() = %v, want the engine's %v", file, engine)
+	}
+	if fields := sorted(slices.Collect(maps.Keys(floorGuardFields))); !slices.Equal(fields, engine) {
+		t.Errorf("floorGuardFields keys = %v, want the engine's %v", fields, engine)
+	}
+
+	// The rows that apply through applyFloorGuard are exactly the engine's keys: one row per guard,
+	// and no row applying a key the engine does not gate.
+	floorApply := reflect.ValueOf(applyFloorGuard).Pointer()
+	var rows []string
+	for _, entry := range settingsTable {
+		if reflect.ValueOf(entry.apply).Pointer() == floorApply {
+			rows = append(rows, entry.key)
+		}
+	}
+	if rows = sorted(rows); !slices.Equal(rows, engine) {
+		t.Errorf("settingsTable rows applying through applyFloorGuard = %v, want the engine's %v", rows, engine)
+	}
+
+	// And each key moves its own field and no other's: setting one key on over an all-off Options
+	// leaves exactly one Disable… gate off at the engine, and the seven keys leave seven different
+	// ones — the map is a bijection onto the seven bools.
+	gateType := reflect.TypeFor[apogee.FloorConfig]()
+	moved := make([]string, 0, len(engine))
+	for _, key := range engine {
+		var positive config.Options
+		*floorGuardFields[key](&positive) = true
+		gates := reflect.ValueOf(floorFromOptions(positive))
+		for i := 0; i < gateType.NumField(); i++ {
+			if !gates.Field(i).Bool() {
+				moved = append(moved, gateType.Field(i).Name)
+			}
+		}
+	}
+	slices.Sort(moved)
+	if distinct := slices.Compact(slices.Clone(moved)); len(moved) != 7 || len(distinct) != 7 {
+		t.Errorf("the seven keys moved the gates %v, want each Disable… gate exactly once", moved)
 	}
 }
 
