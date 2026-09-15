@@ -10,9 +10,23 @@ import (
 
 // ToolLoopBreak is the tool-loop breaker guard (the `tool-loop-breaker` key, ADR 0071): when a
 // response repeats the exact tool calls of the immediately-previous assistant Turn OF THE CURRENT
-// EXCHANGE, it hands back a directive naming the repeated tools and steering the model at its
-// remaining work, which the engine re-streams the Turn with. ok is false — the no-op case — for a
-// response with no tool calls, or one whose calls differ from that Turn's.
+// EXCHANGE — or closes an exact A-B-A-B alternation over the Exchange's last four tool Turns — it
+// hands back a directive naming the repeated tools and steering the model at its remaining work,
+// which the engine re-streams the Turn with. ok is false — the no-op case — for a response with no
+// tool calls, or one that neither rule matches.
+//
+// Two rules, both on byte-identical keys (name + arguments, computeToolCallKey), no fuzzy match:
+//
+//   - the immediate repeat: key(now) == key(-1), whatever the results were — the model has already
+//     seen what that call buys and asked for it again;
+//   - the alternation: key(now) == key(-2) && key(-1) == key(-3), AND the Turn pair the alternation
+//     repeats drew byte-identical tool results (resultKey of -1 == -3). The result check is what
+//     keeps a POLL out of the rule: `console_read` / `read_file` between other calls while a build
+//     runs (ADR 0059's design for a dev server) is progress as long as its output moves, and a
+//     loop only once it stalls — `sub_agent(noop)` / `task_list` alternating on the same task_list
+//     output (review 28b8d620, fourteen calls) is the case the rule exists for. Only the pair's
+//     first member has a result at both positions — the current response has not run yet — so
+//     that is the one compared; a three-tool-Turn Exchange has no -3 and never fires the rule.
 //
 // EXCHANGE-SCOPED, and that is the whole guard's boundary (CONTEXT.md: Exchange). A repeat is only
 // a loop within the one user request it repeats inside: a human who asks for the same thing again
@@ -41,11 +55,32 @@ func ToolLoopBreak(resp *domain.Response) (directive string, ok bool) {
 	}
 	conv := resp.View().Conversation()
 	ex := domain.CurrentExchange(conv)
-	prev := previousToolCallKey(ex)
-	if prev == "" || prev != computeToolCallKey(calls) {
+	if !repeatsToolTurns(exchangeToolTurns(ex), computeToolCallKey(calls)) {
 		return "", false
 	}
 	return buildToolLoopDirective(conv, ex, calls), true
+}
+
+// alternationWindow is how many committed tool Turns the A-B-A-B rule reads: the three before the
+// current response, which closes the four-Turn window the rule is defined over.
+const alternationWindow = 3
+
+// repeatsToolTurns applies the two repeat rules to the Exchange's committed tool Turns (oldest
+// first) and the current response's key: the immediate repeat of the last Turn, or the A-B-A-B
+// alternation whose repeated first member drew identical results (see ToolLoopBreak).
+func repeatsToolTurns(turns []toolTurn, now string) bool {
+	n := len(turns)
+	if n == 0 {
+		return false
+	}
+	if turns[n-1].callKey == now {
+		return true
+	}
+	if n < alternationWindow {
+		return false
+	}
+	first, second, third := turns[n-3], turns[n-2], turns[n-1]
+	return now == second.callKey && first.callKey == third.callKey && first.resultKey == third.resultKey
 }
 
 // computeToolCallKey renders an order-independent key for a set of tool calls (apogee-sim
@@ -73,24 +108,91 @@ func computeToolCallKey(calls []domain.ToolCall) string {
 	return b.String()
 }
 
-// previousToolCallKey returns the key of the most recent assistant Turn IN ex that issued tool
-// calls, or "" if there is none — which is also what an unopened Exchange yields, RangeAfter being
-// a no-op there. It walks the Exchange body forward and keeps the last match rather than scanning
-// backwards from the end of the conversation, because the Exchange exposes no backward walk and
-// the body is short.
+// toolTurn is one tool-calling assistant Turn of the Exchange body as the repeat rules read it: the
+// order-independent key of its calls and, keyed the same way, the results those calls drew.
+type toolTurn struct {
+	callKey   string
+	resultKey string
+}
+
+// exchangeToolTurns returns the tool Turns of ex in order, oldest first, or nil if there are none
+// — which is also what an unopened Exchange yields, RangeAfter being a no-op there. A Turn's
+// results are the RoleTool messages that follow its assistant message up to the next assistant
+// message, each paired back to the call it answers by ToolCallID and keyed by that call's name and
+// arguments plus its content — never by the call ID, which every Turn mints afresh. The walk goes
+// forward rather than scanning backwards from the end of the conversation, because the Exchange
+// exposes no backward walk and the body is short.
 //
 // This is where apogee departs from apogee-sim's previousToolCallKey @pin, which scanned the whole
 // conversation: the sim had no Exchange, so its scan crossed user requests and drew the directive
 // on a legitimate re-ask (fixed 2026-09-03).
-func previousToolCallKey(ex domain.ExchangeView) string {
-	var key string
+func exchangeToolTurns(ex domain.ExchangeView) []toolTurn {
+	var turns []toolTurn
+	var calls []domain.ToolCall
+	var results []domain.Message
+	flush := func() {
+		if calls == nil {
+			return
+		}
+		turns = append(turns, toolTurn{
+			callKey:   computeToolCallKey(calls),
+			resultKey: computeToolResultKey(calls, results),
+		})
+		calls, results = nil, nil
+	}
 	ex.RangeAfter(func(_ int, m domain.Message) bool {
-		if m.Role == domain.RoleAssistant && len(m.ToolCalls) > 0 {
-			key = computeToolCallKey(m.ToolCalls)
+		switch {
+		case m.Role == domain.RoleAssistant && len(m.ToolCalls) > 0:
+			flush()
+			calls = m.ToolCalls
+		case m.Role == domain.RoleAssistant:
+			flush()
+		case m.Role == domain.RoleTool && calls != nil:
+			results = append(results, m)
 		}
 		return true
 	})
-	return key
+	flush()
+	return turns
+}
+
+// computeToolResultKey renders an order-independent key for the results a Turn's calls drew: each
+// result is filed under the name and arguments of the call it answers and sorted with them, so two
+// Turns of the same calls compare equal exactly when every call drew byte-identical content. A
+// result answering no call of the Turn is skipped.
+func computeToolResultKey(calls []domain.ToolCall, results []domain.Message) string {
+	callsByID := make(map[string]domain.ToolCall, len(calls))
+	for _, tc := range calls {
+		callsByID[tc.ID] = tc
+	}
+	type entry struct{ name, args, content string }
+	entries := make([]entry, 0, len(results))
+	for _, m := range results {
+		tc, ok := callsByID[m.ToolCallID]
+		if !ok {
+			continue
+		}
+		entries = append(entries, entry{name: tc.Tool, args: string(tc.Arguments), content: m.Content})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].name != entries[j].name {
+			return entries[i].name < entries[j].name
+		}
+		if entries[i].args != entries[j].args {
+			return entries[i].args < entries[j].args
+		}
+		return entries[i].content < entries[j].content
+	})
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString(e.name)
+		b.WriteByte(':')
+		b.WriteString(e.args)
+		b.WriteByte('=')
+		b.WriteString(e.content)
+		b.WriteByte(';')
+	}
+	return b.String()
 }
 
 // The directive's fixed fragments, each one asset file (prompts/*.txt) named for its role. The

@@ -57,7 +57,7 @@ boolean named after it.
 # ~/.apogee/config.yaml
 tool-call-repair: true         # correct an unknown or malformed tool call and retry it
 tool-call-salvage: true        # run a tool call the model wrote as JSON in its text instead of on the wire
-tool-loop-breaker: true        # break an identical repeated tool call with a directive naming the repeat
+tool-loop-breaker: true        # break an identical repeated tool call, or an exact A-B-A-B alternation, with a directive naming the repeat
 empty-response-recovery: true  # retry an empty reply with a completion-check nudge
 tool-use-enforcer: true        # retry a turn that narrated where the model was asked to act
 read-cache: true               # cap a re-read of a file unchanged since apogee last read it

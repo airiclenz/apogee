@@ -1392,7 +1392,8 @@ type fileConfig struct {
 	// ToolCallSalvage gates the dispatch of a tool call a native-profile model wrote as JSON in
 	// its text instead of on the wire.
 	ToolCallSalvage *bool `yaml:"tool-call-salvage"`
-	// ToolLoopBreaker gates the directive that answers a turn repeating the previous turn's calls.
+	// ToolLoopBreaker gates the directive that answers a turn repeating the previous turn's calls
+	// or closing an exact A-B-A-B alternation.
 	ToolLoopBreaker *bool `yaml:"tool-loop-breaker"`
 	// ToolResultCap gates trimming older oversized tool results in the PROJECTED request; the
 	// conversation itself is never rewritten.

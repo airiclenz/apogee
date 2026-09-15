@@ -23,7 +23,7 @@ func loopResponse(history []domain.Message, calls ...domain.ToolCall) *domain.Re
 
 // A response repeating the previous turn's exact tool calls draws the loop-breaking directive
 // (apogee-sim detectToolCallLoop + retryWithToolLoopDirective @pin), which names the repeated tool
-// and credits the file already written.
+// and credits the file already written. The A-B-A-B alternation rule has its own cases below.
 func TestToolLoopBreakOnIdenticalRepeat(t *testing.T) {
 	t.Parallel()
 
@@ -218,5 +218,136 @@ func TestToolLoopBreakRecapsTheCurrentExchangeOnly(t *testing.T) {
 	}
 	if !strings.Contains(directive, "b.go") {
 		t.Errorf("directive = %q, want it to credit the file this Exchange read", directive)
+	}
+}
+
+// alternationHistory is the A-B-A Exchange body the A-B-A-B rule closes on: the two tool Turns
+// aCall and bCall alternating, with aCall answered by aResults[0] the first time and aResults[1]
+// the second, so a test decides whether A's output stalled or moved between its two runs.
+func alternationHistory(aCall, bCall domain.ToolCall, aResults [2]string) []domain.Message {
+	first, second := aCall, aCall
+	first.ID, second.ID = "a1", "a2"
+	middle := bCall
+	middle.ID = "b1"
+	return []domain.Message{
+		domaintest.UserMessage("finish the task"),
+		domaintest.AssistantCallsMessage(first),
+		domaintest.ToolResultMessage("a1", aResults[0]),
+		domaintest.AssistantCallsMessage(middle),
+		domaintest.ToolResultMessage("b1", "nothing to do"),
+		domaintest.AssistantCallsMessage(second),
+		domaintest.ToolResultMessage("a2", aResults[1]),
+	}
+}
+
+// An exact A-B-A-B alternation over the Exchange's last four tool Turns — byte-identical keys AND
+// byte-identical results for the repeated first member — is the loop the immediate-repeat rule
+// could never see (review 28b8d620: sub_agent(noop) / task_list for fourteen calls). The fourth
+// call draws the directive, which names the tool it repeats.
+func TestToolLoopBreakOnAnAlternatingRepeat(t *testing.T) {
+	t.Parallel()
+
+	taskList := domaintest.Call("t", "task_list", map[string]string{})
+	noop := domaintest.Call("s", "sub_agent", map[string]string{"task": "noop"})
+	history := alternationHistory(taskList, noop, [2]string{"1. [ ] finish", "1. [ ] finish"})
+	directive, ok := ToolLoopBreak(loopResponse(history, noop))
+
+	if !ok {
+		t.Fatal("ToolLoopBreak returned ok = false on an exact A-B-A-B alternation with an identical task_list result")
+	}
+	if !strings.Contains(directive, "in a loop") || !strings.Contains(directive, "sub_agent") {
+		t.Errorf("directive = %q, want the loop-breaking wording naming sub_agent", directive)
+	}
+}
+
+// The alternation rule needs the repeated pair's results to be byte-identical: a poll whose output
+// moves — console_read or read_file between other calls while a build runs (ADR 0059) — is
+// progress, not a loop, however identical its keys are.
+func TestToolLoopBreakLetsAMovingPollThrough(t *testing.T) {
+	t.Parallel()
+
+	build := domaintest.Call("b", "run_command", map[string]string{"command": "make"})
+	for _, poll := range []domain.ToolCall{
+		domaintest.Call("p", "console_read", map[string]string{"id": "dev"}),
+		domaintest.ReadCall("p", "build.log"),
+	} {
+		t.Run(poll.Tool, func(t *testing.T) {
+			t.Parallel()
+
+			history := alternationHistory(poll, build, [2]string{"compiling 3/10", "compiling 7/10"})
+			if directive, ok := ToolLoopBreak(loopResponse(history, build)); ok {
+				t.Errorf("ToolLoopBreak = (%q, true) on a poll whose output moved, want no directive", directive)
+			}
+		})
+	}
+}
+
+// The alternation rule matches byte-identical keys only: A-B-A-C (a different fourth call) and
+// A-B-A'-B (the repeated call with changed arguments) are not the pattern, whatever the results.
+func TestToolLoopBreakAlternationNeedsExactKeys(t *testing.T) {
+	t.Parallel()
+
+	taskList := domaintest.Call("t", "task_list", map[string]string{})
+	noop := domaintest.Call("s", "sub_agent", map[string]string{"task": "noop"})
+	cases := []struct {
+		name    string
+		history []domain.Message
+		now     domain.ToolCall
+	}{
+		{
+			name:    "A-B-A-C",
+			history: alternationHistory(taskList, noop, [2]string{"same", "same"}),
+			now:     domaintest.Call("c", "sub_agent", map[string]string{"task": "write the report"}),
+		},
+		{
+			name: "A-B-A'-B with changed args",
+			history: func() []domain.Message {
+				h := alternationHistory(taskList, noop, [2]string{"same", "same"})
+				h[5] = domaintest.AssistantCallsMessage(domaintest.Call("a2", "task_list", map[string]string{"filter": "open"}))
+				return h
+			}(),
+			now: noop,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if directive, ok := ToolLoopBreak(loopResponse(tc.history, tc.now)); ok {
+				t.Errorf("ToolLoopBreak = (%q, true), want no directive", directive)
+			}
+		})
+	}
+}
+
+// The alternation rule reads four tool Turns: an Exchange holding only A-B has no -3 to match the
+// response's A against, so it never fires — the immediate-repeat rule is the only one that can fire
+// this early, and the Turns differ.
+func TestToolLoopBreakAlternationNeedsFourToolTurns(t *testing.T) {
+	t.Parallel()
+
+	taskList := domaintest.Call("a1", "task_list", map[string]string{})
+	history := []domain.Message{
+		domaintest.UserMessage("finish the task"),
+		domaintest.AssistantCallsMessage(taskList),
+		domaintest.ToolResultMessage("a1", "same"),
+		domaintest.AssistantCallsMessage(domaintest.Call("b1", "sub_agent", map[string]string{"task": "noop"})),
+		domaintest.ToolResultMessage("b1", "nothing to do"),
+	}
+	if directive, ok := ToolLoopBreak(loopResponse(history, taskList)); ok {
+		t.Errorf("ToolLoopBreak = (%q, true) on a three-Turn Exchange, want no directive", directive)
+	}
+}
+
+// The immediate repeat still fires on its own terms — results are not consulted: A-A after an
+// A-B-A run is the repeat it always was, even though its two results differ.
+func TestToolLoopBreakImmediateRepeatIgnoresResults(t *testing.T) {
+	t.Parallel()
+
+	taskList := domaintest.Call("t", "task_list", map[string]string{})
+	noop := domaintest.Call("s", "sub_agent", map[string]string{"task": "noop"})
+	history := alternationHistory(taskList, noop, [2]string{"before", "after"})
+	if _, ok := ToolLoopBreak(loopResponse(history, taskList)); !ok {
+		t.Error("ToolLoopBreak returned ok = false on an immediate repeat, want the directive whatever the results")
 	}
 }

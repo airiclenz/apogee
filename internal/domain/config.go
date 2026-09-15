@@ -467,8 +467,9 @@ type FloorConfig struct {
 	// out as JSON in its text instead of on the wire, letting that text stand as the reply.
 	DisableToolCallSalvage bool
 
-	// DisableToolLoopBreaker stops the engine breaking an identical repeated tool call with a
-	// directive naming the repeat, letting the loop run to the Turn budget.
+	// DisableToolLoopBreaker stops the engine breaking an identical repeated tool call — or an
+	// exact A-B-A-B alternation whose repeated pair drew identical results — with a directive
+	// naming the repeat, letting the loop run to the Turn budget.
 	DisableToolLoopBreaker bool
 
 	// DisableToolResultCap stops the engine truncating stale oversized tool results in the

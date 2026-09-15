@@ -434,7 +434,7 @@ var KeyRegistry = []Key{
 	{
 		Path: "tool-loop-breaker", Kind: KindBool, Default: "true",
 		Editable: true,
-		Desc:     "Floor guard: break an identical repeated tool call with a directive naming the repeat.",
+		Desc:     "Floor guard: break an identical repeated tool call, or an exact A-B-A-B alternation, with a directive naming the repeat.",
 		Read:     func(o Options) string { return boolValue(o.ToolLoopBreaker) },
 	},
 	{

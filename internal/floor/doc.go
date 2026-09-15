@@ -37,8 +37,9 @@
 // The guards. repair.go is the tool-call repair guard — an unknown tool, malformed arguments or a
 // missing required parameter answered with the correction the Turn re-streams with, a call naming a
 // tool the engine has but the menu withdrew left to the mode that withdrew it. loopbreak.go is
-// the tool-loop breaker — a response repeating the previous Turn's exact calls, WITHIN THE CURRENT
-// EXCHANGE, answered with the directive that names the repeat and steers at the remaining work. tooluse.go is the tool-use
+// the tool-loop breaker — a response repeating the previous Turn's exact calls, or closing an exact
+// A-B-A-B alternation on identical results, WITHIN THE CURRENT EXCHANGE, answered with the directive
+// that names the repeat and steers at the remaining work. tooluse.go is the tool-use
 // enforcer — a second narration where an action was asked for answered with the correction that
 // lists the menu and tells the model to call one of it. emptyreply.go is the empty-response
 // recovery — a reply carrying neither text nor a tool call answered with the completion-check

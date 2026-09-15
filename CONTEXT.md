@@ -792,7 +792,10 @@ editable live in `/settings`) whose key names it:
   correcting one, so it runs **first** and does not short-circuit: the four repair guards below it
   judge the response the model meant rather than a Turn that only looked empty.
 - **tool-loop breaker** (`tool-loop-breaker`) — a response repeating the previous Turn's exact
-  calls answered with a directive that names the repeat and steers at the remaining work.
+  calls, or closing an exact A-B-A-B alternation over the Exchange's last four tool Turns whose
+  repeated pair drew byte-identical tool results (a poll whose output moves is progress, not a
+  loop — ADR 0059), answered with a directive that names the repeat and steers at the remaining
+  work. Byte-identical keys only, no fuzzy match.
   **[Exchange](#turns-and-stepping)-scoped**, scan and recap both: a human re-asking for the same
   thing opens a new Exchange, and its first call is the work just asked for rather than a loop.
 - **empty-response recovery** (`empty-response-recovery`) — a reply carrying neither text nor a

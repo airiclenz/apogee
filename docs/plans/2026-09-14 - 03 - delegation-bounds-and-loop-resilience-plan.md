@@ -254,7 +254,14 @@ NOTES (2026-09-15): only a certainly-absent file (`fs.ErrNotExist`) counts as mi
 
 **Commit:** `fix(agent): a child's missing output, vendor markup or sub-sentence reply is a fault, not a report`
 
-## 10. The loop breaker catches exact A-B-A-B repeats
+## 10. The loop breaker catches exact A-B-A-B repeats — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): "the repeated pair's tool results are byte-identical" is applied to the one member that has a result at both positions — the pair's first call (Turns -3 and -1); the current response has not run yet, so its own result cannot be compared.
+NOTES (2026-09-15): `previousToolCallKey` is replaced by `exchangeToolTurns` (keys + result keys per tool Turn) rather than kept beside it — one walk of the Exchange body serves both rules; its apogee-sim departure note moved with it.
+NOTES (2026-09-15): consequential edit — internal/agent/builtins.go: made necessary by the breaker's second rule (the `breakToolLoop` doc comment described it as the previous-Turn repeat only).
+NOTES (2026-09-15): consequential edit — internal/config/options.go, internal/config/config.go: made necessary by the breaker's second rule (the key's field comments described the previous-turn repeat only; found by widening the prose grep).
+NOTES (2026-09-15): the prose grep's surviving hits are test-scenario strings in `loopbreak_test.go` (the immediate-repeat cases' own assertions) and `internal/domain/tools_test.go` (duplicate JSON keys, unrelated to the breaker) — neither describes the guard's rule.
+NOTES (2026-09-15): floorguards_test.go gains an engine-level A-B-A-B case (`TestFloorGuard_ToolLoopBreakerOnAnAlternatingRepeat`) beyond the plan's "Exchange-scoped case stays green": it is the only test that reads the engine's real tool-result commit shape (fresh call IDs per Turn).
 
 **What:** `internal/floor/loopbreak.go` `ToolLoopBreak` compares the current tool call key with `previousToolCallKey` only, so `sub_agent(noop)` / `task_list` alternation (review `28b8d620`, 14 calls) never fires. Extend: over the last FOUR tool Turns of the Exchange (`ExchangeView`), fire when `key(now) == key(-2) && key(-1) == key(-3)` with byte-identical keys (name + canonical arguments), in addition to the existing immediate repeat. Directive text unchanged; the guard stays a Floor guard under its existing key (ADR 0071). No fuzzy or windowed-count matching (writer call).
 

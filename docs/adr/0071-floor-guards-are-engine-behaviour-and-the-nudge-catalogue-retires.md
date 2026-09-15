@@ -72,7 +72,7 @@ Six catalogued rows pass the test and are promoted, keeping their decision logic
 | `tool_use_enforcer` | **tool-use enforcer** | Off-ramp (ADR 0070): fires only after a reply that narrated an action instead of calling the tool. |
 | `empty_response_recovery` | **empty-response recovery** | Off-ramp (ADR 0070): fires only after a reply with no text and no tool calls. |
 | `validate` | **tool-call repair** | Fires only on a tool call the engine has already rejected as malformed — post-failure by construction. |
-| `tool_loop_interceptor` | **tool-loop breaker** | Fires only on an identical repeat Turn — a failure the model has already committed twice. |
+| `tool_loop_interceptor` | **tool-loop breaker** | Fires only on an identical repeat Turn — a failure the model has already committed twice — or, since the 2026-09-15 amendment, on an exact A-B-A-B alternation whose repeated pair drew identical results. |
 | `tool_result_cap` | **tool-result cap** | Shapes the request (a 40%-budget per-result cap, most-recent Turn protected); says nothing to the model about what to do. |
 | `cached_content_intercept` | **read cache** | Intercepts a redundant successful re-read; the one row with measured evidence (`catalogue.md:191`). |
 
@@ -268,3 +268,16 @@ for: no invocation and no environment can silently lower the floor.
 The shipped surface is therefore correct as it stands and does not move: the seven registry rows
 keep `Editable: true`, and `CONTEXT.md` §Floor guard keeps recording each key as "file-only
 boolean (no flag, no env; editable live in `/settings`)". This ADR yields to them.
+
+## Amendment (2026-09-15) — the tool-loop breaker's A-B-A-B rule
+
+**Decision 1's tool-loop breaker row — "fires only on an identical repeat Turn" — gains a second
+rule: an exact A-B-A-B alternation over the current Exchange's last four tool Turns, matched on
+byte-identical keys (name + canonical arguments) and only when the repeated pair's tool results
+are byte-identical too.** The immediate-repeat rule saw nothing in the 2026-09-14 session-mining
+review's `sub_agent(noop)` / `task_list` alternation (`28b8d620`, fourteen calls), because no Turn
+there repeated the one before it. The row still passes the Floor-guard test: both rules fire only
+on a failure the model has already committed twice, and the result check is what keeps a poll —
+`console_read` or `read_file` between other calls while a build runs, ADR 0059's design for a dev
+server — out of the rule while its output moves; a stalled poll is the loop. No fuzzy or
+windowed-count matching; the directive, the key and the Exchange scope are unchanged.

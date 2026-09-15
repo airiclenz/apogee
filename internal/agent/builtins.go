@@ -169,7 +169,8 @@ func (a *Agent) salvageToolCall(_ context.Context, resp *domain.Response) (domai
 }
 
 // breakToolLoop is the tool-loop breaker (floor.ToolLoopBreak): a Turn repeating the previous
-// Turn's tool calls verbatim is re-streamed with a directive naming what it has already tried.
+// Turn's tool calls verbatim, or closing an exact A-B-A-B alternation on identical results, is
+// re-streamed with a directive naming what it has already tried.
 func (a *Agent) breakToolLoop(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
 	directive, fired := floor.ToolLoopBreak(resp)
 	if !fired {

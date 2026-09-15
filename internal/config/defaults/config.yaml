@@ -664,8 +664,9 @@ empty-response-recovery: true
 # false to let the bad call reach the tool path and fail there.
 tool-call-repair: true
 
-# Break a loop: when a turn repeats the previous turn's calls exactly, apogee answers with a
-# directive that names the repeat and points at the work still left. Set this to false to let the
+# Break a loop: when a turn repeats the previous turn's calls exactly, or closes an exact A-B-A-B
+# alternation whose repeated pair drew identical results, apogee answers with a directive that
+# names the repeat and points at the work still left. Set this to false to let the
 # repeat run on until the turn budget stops it.
 tool-loop-breaker: true
 

@@ -185,6 +185,43 @@ func TestFloorGuard_ToolLoopBreakerOnAnIdenticalRepeat(t *testing.T) {
 	}
 }
 
+// The breaker's second rule through the loop: a Turn closing an exact A-B-A-B alternation over the
+// Exchange's last four tool Turns — the same two calls, byte-identical, and the repeated first
+// member's results byte-identical too — draws the directive on the fourth call, where the
+// immediate-repeat rule never sees a repeat. The engine's own commit shape (one RoleTool message
+// per call, fresh IDs each Turn) is what the scan reads here.
+func TestFloorGuard_ToolLoopBreakerOnAnAlternatingRepeat(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink,
+		fakeTool{name: "status", readOnly: true, result: "1. [ ] finish"},
+		fakeTool{name: "poke", readOnly: true, result: "nothing to do"},
+	)
+	cfg.Bypass = true
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "status", `{}`),
+		toolCallScript("c2", "poke", `{"task":"noop"}`),
+		toolCallScript("c3", "status", `{}`),
+		toolCallScript("c4", "poke", `{"task":"noop"}`), // closes A-B-A-B on the same status result
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "finish the task")
+
+	if len(responder.got) != 5 {
+		t.Fatalf("provider was called %d times, want 5 (the fourth call re-streamed once)", len(responder.got))
+	}
+	if n := guardFireCountFor(sink.events, guardToolLoopBreaker); n != 1 {
+		t.Fatalf("the loop breaker fired %d times, want 1", n)
+	}
+	if retried := responder.got[4].Messages; wireUserIndexContaining(retried, "poke") < 0 {
+		t.Errorf("the loop directive does not name the repeated tool: %+v", retried)
+	}
+}
+
 // The loop breaker runs FIRST at the post-response seam (ADR 0071's ratified order) and the first
 // guard to fire wins: a response that is BOTH an identical repeat and a malformed call draws the
 // loop directive, and the repair guard does not run.

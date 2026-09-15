@@ -288,7 +288,8 @@ type Options struct {
 	// its text instead of on the wire.
 	ToolCallSalvage bool
 
-	// ToolLoopBreaker keeps the directive that answers a turn repeating the previous turn's calls.
+	// ToolLoopBreaker keeps the directive that answers a turn repeating the previous turn's calls
+	// or closing an exact A-B-A-B alternation.
 	ToolLoopBreaker bool
 
 	// ToolResultCap keeps the trimming of older oversized tool results in the projected request.
