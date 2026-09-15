@@ -547,7 +547,7 @@ one level down (D2), for free, with no threading.
 > longer gate it, and Auto runs it **unconfined**, exactly as it runs `read_file`. This is a
 > **LOOSEN**, the first in §4, and what bounds it is the mint: the marker is spellable only inside
 > `internal/tools`, and only for a tool that on every reachable path spawns git through `runGit`,
-> passes `gitDiffHardeningArgs` on every diff-producing invocation, validates each ref it accepts,
+> passes `gitexec.DiffHardeningArgs` on every diff-producing invocation, validates each ref it accepts,
 > and writes nothing to the tree, the index or the repository. A tool that grows a path missing any
 > of those loses the marker in the same change.
 >
@@ -557,7 +557,7 @@ one level down (D2), for free, with no threading.
 > repository names (`internal/gitexec`, reached through `runGit`), the `argv[0]` fence (2026-08-12)
 > and the PATH-scrubbed child environment (2026-08-13) the blocks above record, the outright
 > refusal of a repository whose own config names a program git would execute (2026-08-14, widened
-> 2026-08-26), `gitDiffHardeningArgs`' `--no-textconv --no-ext-diff` on every diff-producing path,
+> 2026-08-26), `gitexec.DiffHardeningArgs`' `--no-textconv --no-ext-diff` on every diff-producing path,
 > and the two-part ref guard (`validRef` plus `looksLikeOption`). The engine, meanwhile, already
 > runs that same hardened read-side git **unattended in every mode** for its tree-snapshot floor
 > (`tools.RunGitQuery`, `internal/agent/treesnapshot.go`), so refusing the model the identical read

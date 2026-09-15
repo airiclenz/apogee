@@ -19,7 +19,7 @@ import "github.com/airiclenz/apogee/internal/domain"
 // neutralise the programs a repository names (internal/gitexec, reached through runGit), the
 // outright refusal of a repository whose own config names a program git would execute
 // (gitexec's repo-local command-config probe), the argv[0] fence, --no-textconv and
-// --no-ext-diff on every diff-producing path (gitDiffHardeningArgs), and the two-part ref
+// --no-ext-diff on every diff-producing path (gitexec.DiffHardeningArgs), and the two-part ref
 // guard (validRef plus looksLikeOption). The engine already runs that same hardened
 // read-side git unattended in every mode for its tree-snapshot floor (tools.RunGitQuery,
 // internal/agent/treesnapshot.go), so refusing the model the identical read in Plan was a
@@ -31,7 +31,7 @@ import "github.com/airiclenz/apogee/internal/domain"
 //   - spawns git through runGit alone, so internal/gitexec's hardening options,
 //     GIT_CONFIG_NOSYSTEM, the repo-local command-config refusal and the argv[0] fence all
 //     apply;
-//   - passes gitDiffHardeningArgs on every diff-producing invocation — and on a blob read by
+//   - passes gitexec.DiffHardeningArgs on every diff-producing invocation — and on a blob read by
 //     path (git_show), where --no-textconv is what keeps the repository's textconv driver off
 //     the object;
 //   - validates each ref it accepts with validRef AND looksLikeOption;

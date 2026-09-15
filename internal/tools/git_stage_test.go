@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 )
 
 // stagedNote is the wording a caller injects; the helper must return it verbatim on a stage and
@@ -28,7 +29,7 @@ func gitStatusPorcelain(t *testing.T, root string) string {
 	}
 	cmd := exec.Command(gitPath, "status", "--porcelain")
 	cmd.Dir = root
-	cmd.Env = safeGitEnv("")
+	cmd.Env = gitexec.SafeEnv("")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git status: %v\n%s", err, out)

@@ -153,10 +153,10 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 // default is DELIBERATE and is a conscious trust decision, not a leak: the stdio command is chosen
 // by the host in global config (the same trust level as the toolchain Apogee invokes), and many
 // MCP servers need inherited PATH/HOME/runtime vars to function. It is broader than the git tool's
-// allowlisted env (safeGitEnv) on purpose. The opt-in for a host that wants to run a LESS-trusted
+// allowlisted env (gitexec.SafeEnv) on purpose. The opt-in for a host that wants to run a LESS-trusted
 // stdio server is cfg.EnvAllowlist (`env-allowlist:` in config): naming it scrubs the launch down
 // to those keys plus the platform's essentials, with PATH scoped away from the workspace exactly as
-// safeGitEnv scopes git's, and an explicitly empty list hands the child the platform floor alone.
+// gitexec.SafeEnv scopes git's, and an explicitly empty list hands the child the platform floor alone.
 // cfg.Env is appended last either way, so a per-server variable still wins.
 func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
 	if strings.TrimSpace(cfg.Command) == "" {
@@ -171,7 +171,7 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 	switch {
 	case cfg.EnvAllowlist != nil:
 		// The opt-in scrub: only the named keys (plus the platform's essentials) reach the child,
-		// with PATH scoped away from the workspace as safeGitEnv scopes git's. cfg.Env is appended
+		// with PATH scoped away from the workspace as gitexec.SafeEnv scopes git's. cfg.Env is appended
 		// last so a per-server variable still wins over an inherited one of the same name.
 		cmd.Env = append(stdioHost.ScopeEnv(workspaceRoot, *cfg.EnvAllowlist, nil), cfg.Env...)
 	case len(cfg.Env) > 0:

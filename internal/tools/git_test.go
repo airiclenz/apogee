@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -49,7 +50,7 @@ func gitRepo(t *testing.T) string {
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
 		// A deterministic identity + main branch so the tests do not depend on host config.
-		cmd.Env = append(safeGitEnv(""),
+		cmd.Env = append(gitexec.SafeEnv(""),
 			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 		)
@@ -59,7 +60,7 @@ func gitRepo(t *testing.T) string {
 	}
 	run("init", "-b", "main")
 	// The env vars above cover only this helper's own git calls; the tools under
-	// test run git with the scrubbed host env (safeGitEnv), which carries no
+	// test run git with the scrubbed host env (gitexec.SafeEnv), which carries no
 	// identity on CI runners — a repo-local identity keeps their commits working.
 	run("config", "user.name", "Test")
 	run("config", "user.email", "test@example.com")
@@ -397,7 +398,7 @@ func TestGitBranch_SwitchToPathShapedNameKeepsEdits(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
-		cmd.Env = append(safeGitEnv(""),
+		cmd.Env = append(gitexec.SafeEnv(""),
 			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 		)
@@ -582,7 +583,7 @@ func gitRepoWithBareRemote(t *testing.T, remoteName string) (string, func(args .
 		t.Helper()
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
-		cmd.Env = append(safeGitEnv(""),
+		cmd.Env = append(gitexec.SafeEnv(""),
 			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 		)
@@ -700,7 +701,7 @@ func TestRemoteBranchesListed(t *testing.T) {
 func TestGitDiffRange_ShowsDiff(t *testing.T) {
 	root := gitRepo(t)
 	gitPath, _ := exec.LookPath("git")
-	env := append(safeGitEnv(""),
+	env := append(gitexec.SafeEnv(""),
 		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 	)
@@ -932,7 +933,7 @@ func TestGitStatus_ReportsStagedUnstagedAndUntracked(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
-		cmd.Env = safeGitEnv("")
+		cmd.Env = gitexec.SafeEnv("")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -1072,7 +1073,7 @@ func TestGitStatus_PassesIgnoreSubmodulesDirty(t *testing.T) {
 
 // TestGitReadTrio_ArgvCarriesTheHardening pins the argv of ALL THREE reads the readOnlySubprocess
 // marker is minted for. The marker's own doc names the conditions a tool must keep to carry it —
-// runGit, gitDiffHardeningArgs on every diff-producing path, the ref guards — and the first two of
+// runGit, gitexec.DiffHardeningArgs on every diff-producing path, the ref guards — and the first two of
 // those are visible in the command line, so this is where a refactor that quietly drops one is
 // caught. Without it the marker could go on taking the read-only row for a git that no longer
 // refuses the repository's own textconv and ext-diff drivers.
@@ -1194,12 +1195,12 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 	}
 }
 
-// hasHardeningPair reports whether argv carries gitDiffHardeningArgs as adjacent elements — the
+// hasHardeningPair reports whether argv carries gitexec.DiffHardeningArgs as adjacent elements — the
 // two drivers (--no-textconv, --no-ext-diff) a repository could otherwise make git execute on a
 // read path.
 func hasHardeningPair(argv []string) bool {
-	for i := 0; i+len(gitDiffHardeningArgs) <= len(argv); i++ {
-		if slices.Equal(argv[i:i+len(gitDiffHardeningArgs)], gitDiffHardeningArgs) {
+	for i := 0; i+len(gitexec.DiffHardeningArgs) <= len(argv); i++ {
+		if slices.Equal(argv[i:i+len(gitexec.DiffHardeningArgs)], gitexec.DiffHardeningArgs) {
 			return true
 		}
 	}
@@ -1251,7 +1252,7 @@ func TestGitStatus_DetachedHead(t *testing.T) {
 	gitPath, _ := exec.LookPath("git")
 	cmd := exec.Command(gitPath, "checkout", "--detach")
 	cmd.Dir = root
-	cmd.Env = safeGitEnv("")
+	cmd.Env = gitexec.SafeEnv("")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git checkout --detach: %v\n%s", err, out)
 	}
@@ -1327,7 +1328,7 @@ func commitInRepo(t *testing.T, root, name, subject string) {
 	for _, args := range [][]string{{"add", name}, {"commit", "-m", subject}} {
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
-		cmd.Env = safeGitEnv("")
+		cmd.Env = gitexec.SafeEnv("")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -1517,7 +1518,7 @@ func TestGitLog_EmptyRepo(t *testing.T) {
 	root := t.TempDir()
 	cmd := exec.Command(gitPath, "init", "-b", "main")
 	cmd.Dir = root
-	cmd.Env = safeGitEnv("")
+	cmd.Env = gitexec.SafeEnv("")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
@@ -1593,7 +1594,7 @@ func runInRepo(t *testing.T, root string, args ...string) {
 	}
 	cmd := exec.Command(gitPath, args...)
 	cmd.Dir = root
-	cmd.Env = append(safeGitEnv(""),
+	cmd.Env = append(gitexec.SafeEnv(""),
 		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 	)
@@ -1649,7 +1650,7 @@ func TestGitBranch_DoesNotRunRepoSuppliedHook(t *testing.T) {
 // an inspection, and the defence differs by SCOPE. A driver the REPOSITORY configures is a
 // command-valued repo-local key, so the widened refusal gives the call no git at all; a driver in
 // the OPERATOR's own global config is theirs and still applies, so the call runs and
-// gitDiffHardeningArgs (--no-textconv, --no-ext-diff) is what keeps the inspection from executing
+// gitexec.DiffHardeningArgs (--no-textconv, --no-ext-diff) is what keeps the inspection from executing
 // it, reporting the real stored bytes instead. Either way the driver never runs.
 func TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver(t *testing.T) {
 	posixScriptHost(t)
@@ -1704,7 +1705,7 @@ func TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver(t *testing.T) {
 				// Guard against a vacuous pass: without git reading the injected HOME there is
 				// no global driver to leave alone.
 				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
-					"config", "--global", "--name-only", "--get-regexp", gitCommandConfigName.String())
+					"config", "--global", "--name-only", "--get-regexp", gitexec.CommandConfigName.String())
 				if err != nil || seen.ExitCode != 0 {
 					t.Skip("this git did not read the injected HOME config; nothing to assert")
 				}
@@ -1843,7 +1844,7 @@ func TestGit_FilterRefusalStaysRepoLocal(t *testing.T) {
 				// Guard against a vacuous pass: without git reading the injected HOME there is
 				// no global driver to leave alone.
 				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
-					"config", "--global", "--name-only", "--get-regexp", gitCommandConfigName.String())
+					"config", "--global", "--name-only", "--get-regexp", gitexec.CommandConfigName.String())
 				if err != nil || seen.ExitCode != 0 {
 					t.Skip("this git did not read the injected HOME config; nothing to assert")
 				}
@@ -2090,7 +2091,7 @@ func commitFileForTest(t *testing.T, root, name, content, message string) {
 	for _, args := range [][]string{{"add", name}, {"commit", "-m", message}} {
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
-		cmd.Env = append(safeGitEnv(""),
+		cmd.Env = append(gitexec.SafeEnv(""),
 			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 		)

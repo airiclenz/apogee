@@ -58,7 +58,7 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   is unchanged by default — the full process environment plus `cfg.Env`, the deliberate trust
   decision above — with `EnvAllowlist` (`env-allowlist:`) as the per-server opt-in for a
   less-trusted server: named non-nil, the launch inherits only those keys plus the platform's
-  essentials, PATH scoped away from the workspace as `safeGitEnv` scopes git's, and `cfg.Env` is
+  essentials, PATH scoped away from the workspace as `gitexec.SafeEnv` scopes git's, and `cfg.Env` is
   appended last either way. The launched process is held in a **process group** (POSIX) / **Job Object**
   (Windows) via `platform.NewProcessTeardown`, and `Close` reaps that container after the session's
   own shutdown, so a descendant the server spawned cannot outlive the session — the SDK's

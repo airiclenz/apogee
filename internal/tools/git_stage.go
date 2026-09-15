@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/gitexec"
 )
 
 // Git-aware file operations (2026-08-22) — the shared best-effort index update
@@ -64,7 +66,7 @@ func stageGitPaths(ctx context.Context, root, successNote string, paths ...strin
 
 	// A missing git and the exec fence's refusal are both silent skips: staging is a courtesy on
 	// top of an operation that already stands, and neither is something the model can act on.
-	gitPath, _, ok := gitProgram(ctx, root)
+	gitPath, _, ok := gitexec.Program(ctx, root, lookGit)
 	if !ok {
 		return ""
 	}

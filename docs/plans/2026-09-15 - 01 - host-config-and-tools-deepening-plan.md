@@ -380,7 +380,7 @@ NOTES (2026-09-15): the mirror's package-specific field guidance (which env scru
 
 Commit: `refactor(tools): execution tools use subprocess.SubprocessSpec directly`
 
-## 16. `git.go`'s one-line re-exports go
+## 16. `git.go`'s one-line re-exports go — ✅ DONE (2026-09-16)
 
 **What.** The eight `gitexec` re-exports in `internal/tools/git.go` are deleted; callers name `gitexec.*` directly. The two six-line `runGit`/`runGitUnchecked` adapters and the `lookGit` seam stay. Depends on item 15.
 

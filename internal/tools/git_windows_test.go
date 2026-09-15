@@ -5,6 +5,8 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/gitexec"
 )
 
 // TestSafeGitEnv_WindowsCarriesTheSystemFloor pins the Windows half of the git tools'
@@ -15,7 +17,7 @@ import (
 func TestSafeGitEnv_WindowsCarriesTheSystemFloor(t *testing.T) {
 	t.Parallel()
 
-	env := safeGitEnv("")
+	env := gitexec.SafeEnv("")
 	for _, key := range []string{"SYSTEMROOT=", "COMSPEC=", "PATHEXT="} {
 		var found bool
 		for _, entry := range env {
@@ -25,7 +27,7 @@ func TestSafeGitEnv_WindowsCarriesTheSystemFloor(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("safeGitEnv() = %q, missing the Windows essential %q", env, strings.TrimSuffix(key, "="))
+			t.Errorf("gitexec.SafeEnv() = %q, missing the Windows essential %q", env, strings.TrimSuffix(key, "="))
 		}
 	}
 }

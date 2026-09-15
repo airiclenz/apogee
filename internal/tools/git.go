@@ -57,43 +57,18 @@ const gitTimeout = 15 * time.Second
 // separate diff ceiling.
 const gitDiffTimeout = 10 * time.Second
 
-// safeGitEnv returns the allowlisted, PATH-scoped environment every git subprocess inherits
-// (gitexec.SafeEnv). It stays a package var so a test can substitute the lookup; the allowlist
-// itself, and the reasoning behind it, live in internal/gitexec.
-var safeGitEnv = gitexec.SafeEnv
-
-// gitDiffHardeningArgs are the diff-level refusals the read paths carry — --no-textconv and
-// --no-ext-diff, the two drivers a plain diff or log would otherwise execute. The value lives in
-// internal/gitexec beside the hardening every invocation carries; the read tools splice it into
-// their own argv, which is why it is named here at all.
-var gitDiffHardeningArgs = gitexec.DiffHardeningArgs
-
 // lookGit is the PATH lookup security.ResolveProgram performs for git (a package var so a test
-// can inject a fake resolver). Every resolution this package makes hands it to gitexec, so a
-// swap here reaches the whole git family and nothing else.
+// can inject a fake resolver). Every resolution this package makes — each gitexec.Program and
+// gitexec.Resolve call — hands it to gitexec, so a swap here reaches the whole git family and
+// nothing else. The environment, the diff-level hardening (gitexec.DiffHardeningArgs) and the
+// command-config pattern are gitexec's own names; this package holds no aliases for them.
 var lookGit gitexec.LookFunc = exec.LookPath
-
-// gitProgram resolves the system git for a call scoped to root and applies the exec fence to
-// what it found. ok=false carries the model-facing message in refusal: the graceful "git not
-// available" when no git is on PATH (§3a), and the fence's own refusal — which NAMES the
-// resolved path — when the git that was found is one the model could have written (a
-// workspace-resident PATH entry).
-func gitProgram(ctx context.Context, root string) (gitPath, refusal string, ok bool) {
-	return gitexec.Program(ctx, root, lookGit)
-}
-
-// resolveGit is gitProgram's error-returning form, for the callers that pass the failure ON as
-// an error rather than rendering it into a tool result: it keeps the fence's sentinel
-// (security.ErrExecFromWritablePath) intact through errors.Is, which a message string cannot.
-func resolveGit(ctx context.Context, root string) (string, error) {
-	return gitexec.Resolve(ctx, root, lookGit)
-}
 
 // runGit runs git with gitArgs in root under the per-call timeout and the hardened, scrubbed
 // environment, honouring the confinement handle the disposition installed (if any), and returns
 // the captured outcome in the core's shape. Every git TOOL invocation goes through here; the
 // hardening, the repo-local command-config refusal and its memoised probe are gitexec.Capture's.
-// A missing git is signalled by the caller's gitProgram, not here. The Go error is non-nil only
+// A missing git is signalled by the caller's gitexec.Program, not here. The Go error is non-nil only
 // for ctx cancellation or a confinement-unavailable demotion (the runSubprocess contract).
 func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocess.SubprocessResult, error) {
 	return gitexec.Capture(ctx, gitPath, root, timeout, gitArgs...)
@@ -105,11 +80,6 @@ func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gi
 func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocess.SubprocessResult, error) {
 	return gitexec.CaptureUnchecked(ctx, gitPath, root, nil, timeout, gitArgs...)
 }
-
-// gitCommandConfigName matches every config name whose VALUE is a program git executes — the
-// pattern the repo-local refusal is built on (gitexec.CommandConfigName), named here for the
-// tests that ask git the same question the probe asks it.
-var gitCommandConfigName = gitexec.CommandConfigName
 
 // RunGitQuery runs one read-side git command in root for the ENGINE itself and returns its
 // standard output alone. It is the funnel entry for apogee's own bookkeeping git — today the
@@ -134,7 +104,7 @@ func RunGitQuery(ctx context.Context, root string, timeout time.Duration, args .
 	if len(args) == 0 {
 		return "", errors.New("apogee: RunGitQuery: no git subcommand")
 	}
-	gitPath, err := resolveGit(ctx, root)
+	gitPath, err := gitexec.Resolve(ctx, root, lookGit)
 	if err != nil {
 		return "", err
 	}
@@ -220,7 +190,7 @@ func (t *GitBranch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, errMsg), nil
 	}
 
-	gitPath, refusal, ok := gitProgram(ctx, t.root)
+	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
 	if !ok {
 		return errorResult(call.ID, refusal), nil
 	}
@@ -413,7 +383,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, "message is required and must be a non-empty string"), nil
 	}
 
-	gitPath, refusal, ok := gitProgram(ctx, t.root)
+	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
 	if !ok {
 		return errorResult(call.ID, refusal), nil
 	}
@@ -463,7 +433,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	//
 	// --no-gpg-sign is the same treatment for the other program a commit can launch: a repo-local
 	// commit.gpgsign=true plus a gpg.program pointing at an attacker-authored script would run it
-	// on every commit. gpg.program is refused outright (gitCommandConfigName), so this covers the
+	// on every commit. gpg.program is refused outright (gitexec.CommandConfigName), so this covers the
 	// residual — the operator's OWN global gpg.program, which the refusal deliberately leaves
 	// alone — by not asking for a signature at all. apogee's commits are unsigned by design; a
 	// commit the operator wants signed is one they make themselves.
@@ -569,7 +539,7 @@ func (t *GitDiffRange) ReadOnly() bool { return true }
 func (t *GitDiffRange) Subprocess() bool { return true }
 
 // readOnlySubprocess mints the RO-subproc marker for git_diff_range: every invocation
-// goes through runGit, carries gitDiffHardeningArgs, validates both refs with validRef
+// goes through runGit, carries gitexec.DiffHardeningArgs, validates both refs with validRef
 // plus looksLikeOption, and writes nothing (readonly_subprocess.go).
 func (t *GitDiffRange) readOnlySubprocess() {}
 
@@ -602,7 +572,7 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 		return errorResult(call.ID, "invalid head ref: "+args.Head), nil
 	}
 
-	gitArgs := append([]string{"diff"}, gitDiffHardeningArgs...)
+	gitArgs := append([]string{"diff"}, gitexec.DiffHardeningArgs...)
 	gitArgs = append(gitArgs, args.Base+"..."+args.Head)
 	if args.Stat {
 		gitArgs = append(gitArgs, "--stat")
@@ -625,7 +595,7 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 		gitArgs = append(gitArgs, paths...)
 	}
 
-	gitPath, refusal, ok := gitProgram(ctx, t.root)
+	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
 	if !ok {
 		return errorResult(call.ID, refusal), nil
 	}
@@ -709,7 +679,7 @@ func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return domain.ToolResult{}, err
 	}
 
-	gitPath, refusal, ok := gitProgram(ctx, t.root)
+	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
 	if !ok {
 		return errorResult(call.ID, refusal), nil
 	}
@@ -959,7 +929,7 @@ func (t *GitLog) ReadOnly() bool { return true }
 func (t *GitLog) Subprocess() bool { return true }
 
 // readOnlySubprocess mints the RO-subproc marker for git_log: its one invocation goes through
-// runGit, carries gitDiffHardeningArgs, validates its ref with validRef plus looksLikeOption,
+// runGit, carries gitexec.DiffHardeningArgs, validates its ref with validRef plus looksLikeOption,
 // and writes nothing (readonly_subprocess.go).
 func (t *GitLog) readOnlySubprocess() {}
 
@@ -988,7 +958,7 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 		return errorResult(call.ID, "invalid ref: "+ref), nil
 	}
 
-	gitPath, refusal, ok := gitProgram(ctx, t.root)
+	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
 	if !ok {
 		return errorResult(call.ID, refusal), nil
 	}
@@ -1000,7 +970,7 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 	// reported as success. With "--" the same call fails loudly ("fatal: bad revision").
 	// A path the call DID ask for goes after that "--" — the one place git reads it as a
 	// pathspec and nothing else — workspace-relative, since the process runs in the root.
-	gitArgs := append([]string{"log"}, gitDiffHardeningArgs...)
+	gitArgs := append([]string{"log"}, gitexec.DiffHardeningArgs...)
 	gitArgs = append(gitArgs,
 		fmt.Sprintf("--max-count=%d", clampGitLogCount(args.MaxCount)),
 		"--date="+gitLogDateFormat,
@@ -1115,7 +1085,7 @@ func (t *GitShow) ReadOnly() bool { return true }
 func (t *GitShow) Subprocess() bool { return true }
 
 // readOnlySubprocess mints the RO-subproc marker for git_show: its one invocation goes through
-// runGit, carries gitDiffHardeningArgs (--no-textconv matters here — `git show <ref>:<path>`
+// runGit, carries gitexec.DiffHardeningArgs (--no-textconv matters here — `git show <ref>:<path>`
 // would otherwise run the repository's textconv driver on the blob), validates its ref with
 // validRef plus looksLikeOption, fences its path with resolveInRoot, and writes nothing
 // (readonly_subprocess.go).
@@ -1166,12 +1136,12 @@ func (t *GitShow) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		return errorResult(call.ID, "git_show: path must name a file inside the workspace, not the workspace root"), nil
 	}
 
-	gitPath, refusal, ok := gitProgram(ctx, t.root)
+	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
 	if !ok {
 		return errorResult(call.ID, refusal), nil
 	}
 
-	gitArgs := append([]string{"show"}, gitDiffHardeningArgs...)
+	gitArgs := append([]string{"show"}, gitexec.DiffHardeningArgs...)
 	gitArgs = append(gitArgs, ref+":./"+rel)
 	res, err := runGit(ctx, gitPath, t.root, gitDiffTimeout, gitArgs...)
 	if err != nil {
