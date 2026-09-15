@@ -12,9 +12,9 @@ import (
 )
 
 // fakeGoRecord is what the fake `go` of these tests writes per invocation: the directory it ran
-// in and the three pinned variables as it saw them, one record per line, so a test can find the
-// record of ITS probe by the home it named even if the process-wide library probed concurrently
-// through the same PATH.
+// in and the three pinned variables as it saw them, one record per line. Each installFakeGo bakes
+// its own log path into its own script, so a fake's log carries only the probes run through THAT
+// fake — every record in it is the test's own, whatever the process-wide library did meanwhile.
 type fakeGoRecord struct {
 	dir         string
 	toolchain   string
@@ -97,7 +97,7 @@ func TestProbeToolchainRootsMountsTheTwoAnswersAsRealDirectories(t *testing.T) {
 	}
 	installFakeGo(t, []string{gorootLink, modcache}, 0)
 
-	got := probeToolchainRoots(context.Background(), t.TempDir(), t.TempDir())
+	got := probeToolchainRoots(context.Background(), t.TempDir())
 
 	want := []string{realPath(t, goroot), realPath(t, modcache)}
 	if !slices.Equal(got, want) {
@@ -120,37 +120,36 @@ func TestProbeToolchainRootsDropsAnAnswerThatIsNotADirectory(t *testing.T) {
 	}
 	installFakeGo(t, []string{filepath.Join(tmp, "absent"), "", file, goroot}, 0)
 
-	got := probeToolchainRoots(context.Background(), t.TempDir(), t.TempDir())
+	got := probeToolchainRoots(context.Background(), t.TempDir())
 
 	if want := []string{realPath(t, goroot)}; !slices.Equal(got, want) {
 		t.Errorf("probeToolchainRoots() = %v; want only the existing directory %v", got, want)
 	}
 }
 
-// TestProbeToolchainRootsRunsInTheHomeWithThePins: the probe runs in the apogee home — never the
-// workspace, whose go.mod would steer `go env` into a toolchain download — and with the three
-// pins set whatever the process environment says, while HOME still reaches it (GOMODCACHE defaults
-// beneath it).
-func TestProbeToolchainRootsRunsInTheHomeWithThePins(t *testing.T) {
-	home := realPath(t, t.TempDir())
+// TestProbeToolchainRootsRunsInTheTempRootWithThePins: the probe runs in the temp root — never
+// the workspace, whose go.mod would steer `go env` into a toolchain download, and never a
+// directory the caller minted and may reclaim — and with the three pins set whatever the process
+// environment says, while HOME still reaches it (GOMODCACHE defaults beneath it). The fake's `$PWD`
+// is the kernel's resolved cwd, so a symlinked temp root (macOS /var) is compared through realPath.
+func TestProbeToolchainRootsRunsInTheTempRootWithThePins(t *testing.T) {
+	answer := realPath(t, t.TempDir())
 	workspace := t.TempDir()
 	t.Setenv("GOTOOLCHAIN", "go1.99.0+auto")
 	t.Setenv("GOWORK", filepath.Join(workspace, "go.work"))
 	t.Setenv("GOFLAGS", "-mod=mod")
-	log := installFakeGo(t, []string{home}, 0)
+	log := installFakeGo(t, []string{answer}, 0)
 
-	probeToolchainRoots(context.Background(), home, workspace)
+	probeToolchainRoots(context.Background(), workspace)
 
-	var mine []fakeGoRecord
-	for _, rec := range fakeGoRecords(t, log) {
-		if rec.dir == home {
-			mine = append(mine, rec)
-		}
+	records := fakeGoRecords(t, log)
+	if len(records) != 1 {
+		t.Fatalf("the fake go ran %d time(s); want exactly the probe's one", len(records))
 	}
-	if len(mine) != 1 {
-		t.Fatalf("the fake go ran %d time(s) in the home %s; want exactly the probe's one", len(mine), home)
+	rec := records[0]
+	if want := realPath(t, os.TempDir()); rec.dir != want {
+		t.Errorf("the probe ran in %s; want the temp root %s — neither the workspace nor a caller's dir", rec.dir, want)
 	}
-	rec := mine[0]
 	if rec.toolchain != "local" || rec.work != "off" || rec.flags != "-mod=readonly" {
 		t.Errorf("the probe ran with GOTOOLCHAIN=%q GOWORK=%q GOFLAGS=%q; want local / off / -mod=readonly "+
 			"whatever the process exported", rec.toolchain, rec.work, rec.flags)
@@ -164,7 +163,7 @@ func TestProbeToolchainRootsRunsInTheHomeWithThePins(t *testing.T) {
 func TestProbeToolchainRootsYieldsNothingWithoutGo(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	if got := probeToolchainRoots(context.Background(), t.TempDir(), t.TempDir()); got != nil {
+	if got := probeToolchainRoots(context.Background(), t.TempDir()); got != nil {
 		t.Errorf("probeToolchainRoots() = %v with no go on PATH; want nil", got)
 	}
 }
@@ -176,7 +175,7 @@ func TestProbeToolchainRootsYieldsNothingWhenTheProbeFails(t *testing.T) {
 	goroot := t.TempDir()
 	installFakeGo(t, []string{goroot, "go: downloading go1.99.0 (linux/amd64)"}, 1)
 
-	if got := probeToolchainRoots(context.Background(), t.TempDir(), t.TempDir()); got != nil {
+	if got := probeToolchainRoots(context.Background(), t.TempDir()); got != nil {
 		t.Errorf("probeToolchainRoots() = %v from a failing probe; want nil", got)
 	}
 }
@@ -192,22 +191,43 @@ func TestToolchainLibraryProbesOnceAndAnswersLive(t *testing.T) {
 	if got := lib.roots(); got != nil {
 		t.Fatalf("a library nobody started answers %v; want nil", got)
 	}
-	home := realPath(t, t.TempDir())
-	lib.start(home, t.TempDir())
-	lib.start(t.TempDir(), t.TempDir())
+	lib.start(t.TempDir())
+	lib.start(t.TempDir())
 	lib.wait()
 
 	if got, want := lib.roots(), []string{realPath(t, goroot)}; !slices.Equal(got, want) {
 		t.Errorf("roots() = %v after the probe; want %v", got, want)
 	}
-	var runs int
-	for _, rec := range fakeGoRecords(t, log) {
-		if rec.dir == home {
-			runs++
-		}
-	}
-	if runs != 1 {
+	if runs := len(fakeGoRecords(t, log)); runs != 1 {
 		t.Errorf("the fake go ran %d time(s) for the library; want once, the second start being a no-op", runs)
+	}
+}
+
+// TestToolchainLibraryOutlivesTheCallerThatStartedIt: the probe's cwd is not the caller's to
+// reclaim. A library started with a workspace that is removed the moment start returns — the
+// shape of a unit test whose t.TempDir home went away before the goroutine execed `go env` — still
+// probes once and answers the directory the fake named, because the probe runs in the temp root
+// and not in anything the caller owns.
+func TestToolchainLibraryOutlivesTheCallerThatStartedIt(t *testing.T) {
+	goroot := t.TempDir()
+	log := installFakeGo(t, []string{goroot}, 0)
+	lib := newToolchainLibrary()
+
+	workspace, err := os.MkdirTemp("", "apogee-booter-*")
+	if err != nil {
+		t.Fatalf("mint the booter's workspace: %v", err)
+	}
+	lib.start(workspace)
+	if err := os.RemoveAll(workspace); err != nil {
+		t.Fatalf("reclaim the booter's workspace: %v", err)
+	}
+	lib.wait()
+
+	if got, want := lib.roots(), []string{realPath(t, goroot)}; !slices.Equal(got, want) {
+		t.Errorf("roots() = %v after the caller's directory went away; want %v", got, want)
+	}
+	if runs := len(fakeGoRecords(t, log)); runs != 1 {
+		t.Errorf("the fake go ran %d time(s); want once", runs)
 	}
 }
 

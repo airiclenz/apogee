@@ -86,8 +86,10 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 	// The Go toolchain's own trees — GOROOT and the module cache — probed once for the process and
 	// off the boot path (toolchain_roots.go): they join the skill libraries on the read roots the
 	// Config below composes, and a session whose model asks for a standard-library file before the
-	// probe has answered simply finds the roots on its next call.
-	hostToolchain.start(roots.config, roots.workspace)
+	// probe has answered simply finds the roots on its next call. The probe runs in the temp
+	// root, not this boot's home — the answer is the machine's, and the goroutine outlives the
+	// caller — so the workspace is all it takes: what its PATH is scoped out of.
+	hostToolchain.start(roots.workspace)
 
 	// The Bridge late-binds the event sink and approval gate to the Bubble Tea program
 	// the launcher starts. Its Sink/Approver are installed in Config before construction

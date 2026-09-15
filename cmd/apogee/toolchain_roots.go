@@ -40,7 +40,7 @@ var toolchainProbeArgs = []string{"env", "GOROOT", "GOMODCACHE"}
 // toolchainProbePins are the toolchain settings the probe runs with WHATEVER the host environment
 // says, appended after the inherited keys so a duplicate spelling loses (os/exec resolves duplicates
 // last-wins). They are the read-only three of internal/tools' goVetPins, for the same reasons:
-//   - GOTOOLCHAIN=local — the probe runs in the apogee home rather than the workspace precisely so
+//   - GOTOOLCHAIN=local — the probe runs in the temp root rather than the workspace precisely so
 //     no go.mod steers it, but a GOTOOLCHAIN the operator exported could still make `go env`
 //     download and execute a different toolchain before it answered (probed 2026-09-14: a go.mod
 //     carrying a newer `go` line made `go env` attempt exactly that and fail).
@@ -73,18 +73,23 @@ var toolchainProbeEnvKeys = append(
 // `$HOME/go/pkg/mod` or a module cache no build has created yet is resolved or dropped HERE rather
 // than announced on the orientation line and then refused.
 //
-// The probe runs in home — never the workspace, whose go.mod could steer it — with the pins above
-// over a PATH scoped out of workspace, and it is silent: no `go` on PATH, a failing or timed-out
-// run, and an unusable answer all yield fewer roots, never an error. A tree the model cannot
-// read is a smaller library, not a broken session.
-func probeToolchainRoots(ctx context.Context, home, workspace string) []string {
+// The probe runs in the temp root (os.TempDir as the process reads it) — never the workspace,
+// whose go.mod could steer it, and never a caller's directory: the answer is a fact of the
+// machine, and the probe runs on a goroutine that outlives whoever started it, so its cwd must be
+// one whose life is the process's and that nobody reclaims (the first booter's apogee home was
+// found removed before `go env` ran, 2026-09-15). A parent go.mod cannot steer it either: `go env
+// GOROOT GOMODCACHE` is not module-scoped, and the pins above hold whatever the tree says. It runs
+// with those pins over a PATH scoped out of workspace, and it is silent: no `go` on PATH, a
+// failing or timed-out run, and an unusable answer all yield fewer roots, never an error. A tree
+// the model cannot read is a smaller library, not a broken session.
+func probeToolchainRoots(ctx context.Context, workspace string) []string {
 	goBinary, err := exec.LookPath("go")
 	if err != nil {
 		return nil
 	}
 	result, err := subprocess.RunSubprocess(ctx, subprocess.SubprocessSpec{
 		Argv:        append([]string{goBinary}, toolchainProbeArgs...),
-		Dir:         home,
+		Dir:         os.TempDir(),
 		Timeout:     toolchainProbeTimeout,
 		Env:         toolchainProbeEnv(workspace),
 		SplitStdout: true,
@@ -144,13 +149,15 @@ func newToolchainLibrary() *toolchainLibrary {
 	return &toolchainLibrary{done: make(chan struct{})}
 }
 
-// start launches the probe in the background, once; every later call is a no-op, whatever home
-// and workspace it names, because the answer does not depend on them — the first caller's are
-// merely where the probe runs and what its PATH is scoped out of.
-func (l *toolchainLibrary) start(home, workspace string) {
+// start launches the probe in the background, once; every later call is a no-op, whatever
+// workspace it names, because the answer does not depend on it — the first caller's is merely
+// what the probe's PATH is scoped out of. Where the probe runs is not the caller's to name: it
+// runs in the temp root (probeToolchainRoots), which outlives every caller, where a caller's own
+// directory — a test's temporary home — may be gone before the goroutine execs.
+func (l *toolchainLibrary) start(workspace string) {
 	l.once.Do(func() {
 		go func() {
-			roots := probeToolchainRoots(context.Background(), home, workspace)
+			roots := probeToolchainRoots(context.Background(), workspace)
 			l.mu.Lock()
 			l.probed = roots
 			l.mu.Unlock()

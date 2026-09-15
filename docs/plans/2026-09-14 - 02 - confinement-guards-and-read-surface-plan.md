@@ -444,7 +444,7 @@ NOTES (2026-09-15): the per-site did-you-mean tests live as one table in `path_s
 
 **Commit:** `fix(tools): not-found refusals suggest the nearest path, atomic edits say nothing was written, unknown tools get a near-match`
 
-## 17. Toolchain probe survives the first booter's home going away
+## 17. Toolchain probe survives the first booter's home going away — ✅ DONE (2026-09-15)
 
 NOTES (2026-09-15): added from the run's ledger — a FOLLOW-UP the verifier of item 4 (commit `6d413e8e`) raised on the whole-package run; depends on nothing; this item has NOT been through the plan's regression-check block. Finding, verbatim: `hostToolchain` probes ONCE with `Dir` = the first booter's home; in `go test ./cmd/apogee/` that is a `t.TempDir()` removed at that test's end, `go env` fails on `chdir` and the process never announces GOROOT: `TestE2EAnnouncedToolchainRootsAreReadable` fails in the full package run (4/4 at HEAD) and breaks the closeout `make check`; fix in `cmd/apogee/toolchain_roots.go` (probe in a dir that outlives the caller, e.g. os.TempDir or no Dir).
 

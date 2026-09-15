@@ -279,8 +279,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// Firing never moves it, so the live func below answers the one dir the run announced.
 	scratchDir := ensureScratchDir(in.roots.scratch, in.recordID)
 	// The toolchain roots' probe, started here for the Drivers that reach this composer with no
-	// session before it (headless, the daemon); inside a session it is the no-op second start.
-	hostToolchain.start(in.roots.config, in.roots.workspace)
+	// session before it (headless, the daemon); inside a session it is the no-op second start. It
+	// runs in the temp root, never this run's home or workspace (toolchain_roots.go) — the
+	// workspace is only what its PATH is scoped out of.
+	hostToolchain.start(in.roots.workspace)
 
 	cfg := apogee.Config{
 		Endpoint: in.entry.Endpoint,
