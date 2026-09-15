@@ -89,6 +89,10 @@ loosen makes the session scratch dir the one target Plan writes (and the one nat
 Ask-Before does not gate), so the bullet is true in every mode and the block states it in every
 mode; the mode leaves the block's inputs again, and the scratch line moves only at a session
 boundary as it did before this note.
+*Note (2026-09-15):* the mode is a block input again, for a different bullet: Plan renders a
+**Mode** bullet naming the tool families it withholds (ADR 0023 §6 note of the same date); the
+scratch bullet rides in every mode exactly as the reversal above left it, and still moves only
+at a session boundary.
 *Note (2026-09-15):* the box now carries the scratch dir by name (`ConfinementBox.ScratchDir`,
 folded by the same `Config.ConfinementBox()`), and every **confined** spawn seeds the toolchain's
 temp and cache variables beneath it — `TMPDIR`, `TMP`, `TEMP`, `GOTMPDIR` = `<scratch>/tmp`,

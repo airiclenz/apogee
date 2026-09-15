@@ -1,0 +1,26 @@
+# The upstream TestE2EPlanModeAnnouncesWhatItWithholds talks to: a model in Plan mode that is asked
+# to verify a change the way the default prompt tells every mode to — by running the project's
+# tests — and answers from what its orientation told it instead of reaching for a tool it cannot see.
+#
+# There is no tool call on purpose. The assertion is on the REQUEST, not the reply: the system
+# prompt the stub received has to carry the Plan Mode bullet naming the withheld families, and the
+# tool menu on that same request has to offer none of them — the announced list and the menu are
+# held against each other by the test, so a bullet that named a family Plan still offered, or a
+# menu that withheld one the bullet did not name, fails here rather than in a user's session.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Plan mode withholds
+    # The prompt: the one turn whose request the test reads the orientation and the menu off.
+    - when:
+        last_message: verify the change by running the tests
+      text: In plan mode I would run go test ./... to verify it.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

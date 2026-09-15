@@ -330,7 +330,10 @@ NOTES (2026-09-15): retry (verifier FIX) — every ordinary-pane `domain.Approva
 
 **Commit:** `fix(tui): the approval popup hides the session-allow row on a forced gate`
 
-## 12. Plan mode says what it withholds
+## 12. Plan mode says what it withholds — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the qualified prompt line keeps its two-line wrap and gains a comma — "build or linter / where the mode allows it, rather than declaring it done from reading alone" — the plan's quoted fragment is the first line's tail, not a replacement of the sentence.
+NOTES (2026-09-15): the Plan template carries its one `%s` as the writers clause (`planScratchWritersClause`, rendered exactly when a scratch dir is set), keeping the asset's one-`%s`-per-bullet rule; the e2e also asserts `read_file` IS on the announcing request's menu so the negative assertion is against a populated menu.
 
 **What:** Recast at the regression check (2026-09-14). Depends on item 1. Announced-surface regression (review headline 10): `internal/config/defaults/prompt.txt` line 8 tells every mode to "run the project's own tests, build or linter" while Plan withholds `terminal`/`run_tests`. Fix: (a) the line becomes `Verify by running: after a change, run the project's own tests, build or linter where the mode allows it` — `prompt.txt` is `//go:embed`ded and reaches every default-prompt install at the next binary; the manual notes "the embedded default prompt now says …". (b) `internal/agent/orientation.go` renders, in Plan only, the exact bullet `- Mode: plan — reads, plus Apogee's own writers into the session scratch dir only; terminal, run_tests, python_exec, web_fetch, web_search, http_request and MCP tools are withheld. Report what you would run.` (the writers clause dropped when no scratch dir is set; `orientation.txt` gains the template line as `orientationPlanLine` before `orientationContextFilesLine`, `orientationLineCount` bumped; the item RE-INTRODUCES the mode as a block input and re-words the KV-cache paragraph plan 01 item 5 rewrote). Contract §4 unchanged.
 

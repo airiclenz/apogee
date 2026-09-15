@@ -6,7 +6,7 @@ and the code around it, so the change you make fits what is already there.
 Keep edits small and focused — one intent per edit, unrelated lines untouched,
 the surrounding style matched rather than rewritten.
 Verify by running: after a change, run the project's own tests, build or linter
-rather than declaring it done from reading alone.
+where the mode allows it, rather than declaring it done from reading alone.
 Finish the whole task. When a step fails, fix it and run it again; stop early
 only when you are blocked, and then say exactly what blocked you.
 

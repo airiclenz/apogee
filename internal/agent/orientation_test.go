@@ -332,8 +332,9 @@ func TestOrientation_RootsLineLetsAToolchainReadItsOwnRoots(t *testing.T) {
 // TestOrientation_EveryModeStatesTheScratchDir: the session scratch dir is writable on every rung
 // of the ladder — Plan runs Apogee's own writers there and nowhere else, Ask-Before runs them there
 // unprompted (ADR 0012 second loosen, 2026-09-14) — so every mode, Plan included, renders the
-// exact scratch line, and the line is byte-equal across modes: the mode is not an input of the
-// block. Auto is built over a fake Confiner with fs-write caps, the only way past newAgent's Auto
+// exact scratch line, and the line is byte-equal across modes: the mode is an input of the block
+// for the Mode bullet alone (TestOrientation_PlanStatesWhatItWithholds), never for the scratch
+// line. Auto is built over a fake Confiner with fs-write caps, the only way past newAgent's Auto
 // gate on a host without confinement.
 func TestOrientation_EveryModeStatesTheScratchDir(t *testing.T) {
 	want := scratchLine(orientationScratchDir)
@@ -380,6 +381,136 @@ func TestOrientation_WritingModesStateTheScratchDir(t *testing.T) {
 				t.Errorf("%s omits the scratch line %q:\n%q", mode, scratchLine(orientationScratchDir), block)
 			}
 		})
+	}
+}
+
+// planModeBullet is the Plan-only Mode bullet exactly as it stands on the wire, spelled out here so
+// the tests pin the announcement itself rather than borrowing it from the asset they are checking.
+// planModeBulletNoScratch is the same bullet with the writers clause dropped — what a Plan session
+// with no scratch dir set is told, because its menu offers no writer at all.
+const (
+	planModeBullet = "- Mode: plan — reads, plus Apogee's own writers into the session scratch dir only; " +
+		"terminal, run_tests, python_exec, web_fetch, web_search, http_request and MCP tools are withheld. " +
+		"Report what you would run."
+	planModeBulletNoScratch = "- Mode: plan — reads; " +
+		"terminal, run_tests, python_exec, web_fetch, web_search, http_request and MCP tools are withheld. " +
+		"Report what you would run."
+)
+
+// modeLine returns the block's `- Mode:` bullet, or "" when the block renders none.
+func modeLine(block string) string {
+	for _, line := range strings.Split(block, "\n") {
+		if strings.HasPrefix(line, "- Mode:") {
+			return line
+		}
+	}
+	return ""
+}
+
+// TestOrientation_PlanStatesWhatItWithholds: in Plan the block carries the exact Mode bullet — the
+// subprocess and network families the menu withholds, and the scratch-dir writers clause exactly
+// when a scratch dir is set, which is when planOffers puts those writers on the menu. The bullet
+// rides after the Delegations bullet and ahead of the context-files bullet, which stays last.
+func TestOrientation_PlanStatesWhatItWithholds(t *testing.T) {
+	t.Run("with a scratch dir", func(t *testing.T) {
+		dir := t.TempDir()
+		writeWorkspaceFile(t, dir, "AGENTS.md", "Run make check before committing.")
+		cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
+		cfg.SystemPrompt = "You are apogee working in {{workspace}}."
+		cfg.Mode = domain.ModePlan
+		cfg.ScratchDir = orientationScratchDir
+
+		a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+
+		block := a.orientationBlock()
+		if got := modeLine(block); got != planModeBullet {
+			t.Errorf("Plan renders the Mode bullet %q, want %q:\n%q", got, planModeBullet, block)
+		}
+		lines := strings.Split(block, "\n")
+		if last := lines[len(lines)-1]; !strings.HasPrefix(last, "- Workspace context files follow") {
+			t.Errorf("the context-files bullet no longer closes the block:\n%q", block)
+		}
+		if !strings.Contains(block, scratchLine(orientationScratchDir)) {
+			t.Errorf("Plan lost the scratch line beside its Mode bullet:\n%q", block)
+		}
+	})
+	t.Run("without a scratch dir", func(t *testing.T) {
+		cfg := orientationConfig(t) // no ScratchDir
+		cfg.Mode = domain.ModePlan
+
+		a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+
+		block := a.orientationBlock()
+		if got := modeLine(block); got != planModeBulletNoScratch {
+			t.Errorf("Plan without a scratch dir renders the Mode bullet %q, want %q:\n%q",
+				got, planModeBulletNoScratch, block)
+		}
+	})
+}
+
+// TestOrientation_WritingModesStateNoModeBullet: the Mode bullet is Plan's alone — the three rungs
+// above it withhold nothing the prompt template promises, so they render no bullet at all rather
+// than an empty one. Auto is built over a fake Confiner with fs-write caps, the only way past
+// newAgent's Auto gate on a host without confinement.
+func TestOrientation_WritingModesStateNoModeBullet(t *testing.T) {
+	for _, mode := range []domain.Mode{domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto} {
+		t.Run(string(mode), func(t *testing.T) {
+			cfg := orientationConfig(t)
+			cfg.Mode = mode
+			cfg.ScratchDir = orientationScratchDir
+			cfg.Confiner = &fakeConfiner{caps: capsBoth()}
+
+			a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+
+			if block := a.orientationBlock(); modeLine(block) != "" {
+				t.Errorf("%s renders a Mode bullet it has no use for:\n%q", mode, block)
+			}
+		})
+	}
+}
+
+// TestOrientation_PlanBulletFollowsAModeFlip: the mode is read fresh per request, so a Shift+Tab
+// into Plan announces the withheld families on the very next request and one out of it drops them.
+func TestOrientation_PlanBulletFollowsAModeFlip(t *testing.T) {
+	cfg := orientationConfig(t)
+	cfg.Mode = domain.ModeAskBefore
+	cfg.ScratchDir = orientationScratchDir
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+
+	before := seedSystemMessage(t, a, responder, "hi")
+	a.SetMode(domain.ModePlan)
+	during := seedSystemMessage(t, a, responder, "again")
+	a.SetMode(domain.ModeAskBefore)
+	after := seedSystemMessage(t, a, responder, "once more")
+
+	if strings.Contains(before, planModeBullet) {
+		t.Errorf("Ask-Before's request carries the Plan bullet:\n%q", before)
+	}
+	if !strings.Contains(during, planModeBullet) {
+		t.Errorf("the request after the flip into Plan is missing the bullet:\n%q", during)
+	}
+	if strings.Contains(after, planModeBullet) {
+		t.Errorf("the request after the flip out of Plan still carries the bullet:\n%q", after)
+	}
+}
+
+// TestOrientation_TemplateCarriesThePlanLine pins the asset's shape at the constant: the Plan
+// template sits at orientationPlanLine, opens with the Mode label and carries exactly the one %s
+// the writers clause fills — so a reordered or reworded asset fails here, not in a model's session.
+func TestOrientation_TemplateCarriesThePlanLine(t *testing.T) {
+	t.Parallel()
+
+	if n := len(orientationTemplate); n != orientationLineCount {
+		t.Fatalf("the template has %d lines, want orientationLineCount = %d", n, orientationLineCount)
+	}
+	line := orientationTemplate[orientationPlanLine]
+	if !strings.HasPrefix(line, "- Mode: plan — reads%s;") {
+		t.Errorf("the Plan template does not open with the Mode label and its writers slot: %q", line)
+	}
+	if got := fmt.Sprintf(line, planScratchWritersClause); got != planModeBullet {
+		t.Errorf("the Plan template renders %q, want %q", got, planModeBullet)
 	}
 }
 

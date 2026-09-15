@@ -1447,8 +1447,17 @@ context files (below), or both — apogee places its own short **orientation blo
 right after your prompt, ahead of any workspace context files, naming the workspace,
 this session's scratch directory (in every mode — Plan included, since the scratch
 directory is the one place Plan may write) and any read-only library roots the model
-may read from. Ahead of them is deliberate: nothing a repository ships can then precede the
-host's own facts. That block is not part of `system-prompt-text`, cannot be edited out
+may read from. In **Plan** it carries one bullet more, `Mode: plan — …`, naming what
+the mode withholds — `terminal`, `run_tests`, `python_exec`, `web_fetch`, `web_search`,
+`http_request` and MCP tools — and asking the model to report what it would run instead;
+the other three rungs, which withhold nothing the prompt promises, carry no such line.
+The bullet is worded from the live Plan tool menu (its "writers into the session scratch
+dir" clause rides exactly when a scratch directory is set), so the announcement and the
+menu never disagree. The embedded default prompt now says "run the project's own tests,
+build or linter *where the mode allows it*" — it is built into the binary, so every
+default-prompt install has that wording from the next binary on; a `system-prompt-text:`
+of your own is yours to qualify. Ahead of them is deliberate: nothing a repository ships
+can then precede the host's own facts. That block is not part of `system-prompt-text`, cannot be edited out
 of it, and is not sent in the one posture where no system message goes out at all —
 `use-default-prompt: false` (or an explicitly empty prompt of your own) together with
 no context files.

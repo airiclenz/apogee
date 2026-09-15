@@ -302,6 +302,16 @@ mechanism directives → tool block**.
   writes its own scratch dir (ADR 0012 second loosen), so the scratch bullet is stated in every
   mode and the block is once more constant within the session, moving only on the doors named
   above.
+  *Note (2026-09-15):* the mode is a block input again, for a bullet of its own: Plan renders
+  the **Mode** bullet — `- Mode: plan — reads, plus Apogee's own writers into the session
+  scratch dir only; terminal, run_tests, python_exec, web_fetch, web_search, http_request and
+  MCP tools are withheld. Report what you would run.` (the writers clause dropped when no
+  scratch dir is set) — because the shipped template tells every mode to verify by running the
+  project's tests and Plan's menu offers no tool that could. The bullet is worded from the live
+  menu (`planOffers`), so the announcement and the menu cannot disagree; the scratch bullet
+  rides in every mode as the reversal above left it. The block therefore moves on the human's
+  own Shift+Tab as well — the same keypress `{{mode}}` already re-encodes the prefix on — and
+  on no door of its own.
 - **§7 unchanged.** `newChildAgent` copies `cfg` wholesale and the child renders its own
   `standingSystem`, so a sub-agent gets the block with no carve-out and no wiring of its own.
 - **The shipped template drops what the block now carries.** `defaults/config.yaml` no longer

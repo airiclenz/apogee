@@ -3,8 +3,9 @@ package agent
 // The engine-owned orientation block: the part of the standing system content (loop.go's
 // standingSystem) that rides DIRECTLY AFTER the rendered prompt template and AHEAD of the
 // workspace context files' blocks. It states the host facts a model needs to get oriented —
-// where the workspace is, where its own writable scratch dir is, and which read-only roots it
-// may reach — as harness text the engine composes itself, so no edit to the user-editable
+// where the workspace is, where its own writable scratch dir is, which read-only roots it may
+// reach and, in Plan, which tool families the mode withholds — as harness text the engine
+// composes itself, so no edit to the user-editable
 // prompt template can lose them and no install seeded before the facts existed is left without
 // them. Where the host offers the model a Delegation seat (ADR 0069) it states that too — what
 // each of the two seats IS — because a choice between two opaque labels is not a choice.
@@ -24,14 +25,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The orientation asset (prompts/orientation.txt) is POSITIONAL: line 0 is the header and every
 // line after it is one bullet. Each rendered bullet is a template carrying exactly one %s — the
-// path or paths it names, or the Delegations bullet's rendered seat clauses; the context-files
-// bullet is a literal line with no verb at all — it names a header shape rather than a path. The
-// constants below are those line numbers, and orientationLineCount is the shape the loader
+// path or paths it names, the Delegations bullet's rendered seat clauses, or the Mode bullet's
+// scratch-writers clause; the context-files bullet is a literal line with no verb at all — it
+// names a header shape rather than a path. The constants below are those line numbers, and
+// orientationLineCount is the shape the loader
 // enforces — a bullet added to the asset without a constant beside it fails the build's first test
 // run rather than rendering as a stray line.
 //
@@ -47,9 +50,16 @@ const (
 	orientationScratchLine
 	orientationRootsLine
 	orientationDelegationsLine
+	orientationPlanLine
 	orientationContextFilesLine
 	orientationLineCount
 )
+
+// planScratchWritersClause is the Mode bullet's one %s: the clause stating that Plan runs Apogee's
+// own writers on the session scratch dir (ADR 0012 second loosen), rendered exactly when a scratch
+// dir is set — the same condition planOffers puts those writers on the menu under — and dropped
+// otherwise, so the bullet never offers a target the menu does not.
+const planScratchWritersClause = ", plus Apogee's own writers into the session scratch dir only"
 
 // orientationTemplate is the embedded asset split into its header and bullet templates. It is a
 // build-time constant in everything but name: mustPrompt panics on a missing asset and the
@@ -92,7 +102,18 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 // target Plan runs Apogee's own writers on and the one write Ask-Before does not gate (ADR 0012
 // second loosen, 2026-09-14), so a directory the block calls "writable" is writable on every rung
 // of the ladder — the announced-path regression the 2026-09-14 Plan gate existed to avoid cannot
-// arise, and the gate is gone with it. The mode is NOT an input of this block.
+// arise, and the gate is gone with it.
+//
+// The live mode IS an input of this block, for one bullet: in Plan, and only in Plan, the Mode
+// bullet says what the menu withholds — the subprocess and network families (terminal, run_tests,
+// python_exec, web_fetch, web_search, http_request) and MCP tools — and asks the model to report
+// what it would run, because the prompt template tells every mode to verify by running the
+// project's tests and a Plan model that was told nothing else would reach for a tool it cannot
+// see. The bullet is worded from the live menu: its writers clause rides exactly when the menu
+// offers the scratch-dir writers (planOffers's scratchSet), and the families it names are the
+// classes planOffers never admits (contract §4), so the announcement and the menu cannot disagree
+// — the e2e in cmd/apogee holds the two against each other. Every other mode renders no Mode
+// bullet: their menus withhold nothing the template promises.
 //
 // The last bullet is the one that speaks about what follows the block rather than about the
 // host: it names the header the workspace blocks ride under and says they are project text, so
@@ -105,12 +126,14 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 // the host's wiring (the roots settle once, when the host's off-boot toolchain probe answers,
 // which is one early re-encode and never a per-turn one), the scratch dir moves only at a
 // session boundary, the context-file cache is
-// refilled only at one too (ADR 0026 §5), and the Delegation seats move only on the human's own
-// `/server`, `/model` and `/sub-agents-server` doors — so the block is prefix-cache-stable
-// between those doors, exactly like the {{scratch}} placeholder it stands beside. The mode left
-// the block's inputs again on 2026-09-14 (it gated the scratch bullet for one day, from the
-// 2026-09-14 Plan omission to the second loosen), so a Shift+Tab re-encodes only what {{mode}}
-// already pays for, never this block.
+// refilled only at one too (ADR 0026 §5), the Delegation seats move only on the human's own
+// `/server`, `/model` and `/sub-agents-server` doors, and the mode moves only on the human's own
+// Shift+Tab — so the block is prefix-cache-stable between those doors, exactly like the
+// {{scratch}} and {{mode}} placeholders it stands beside. The mode re-joined the block's inputs
+// on 2026-09-15 (it had gated the scratch bullet for one day on 2026-09-14, from the Plan omission
+// to the second loosen, and then left again): a flip into or out of Plan re-encodes the prefix
+// from the Mode bullet down, which is the re-encode {{mode}} already pays for on the same
+// keypress — the block adds no door of its own.
 func (a *Agent) orientationBlock() string {
 	bullets := make([]string, 0, orientationLineCount-1)
 	if workspace := a.cfg.WorkspaceDir; workspace != "" {
@@ -129,6 +152,13 @@ func (a *Agent) orientationBlock() string {
 	}
 	if seats := a.delegationSeats(); seats != "" {
 		bullets = append(bullets, fmt.Sprintf(orientationTemplate[orientationDelegationsLine], seats))
+	}
+	if a.Mode() == domain.ModePlan {
+		writers := ""
+		if a.ScratchDir() != "" {
+			writers = planScratchWritersClause
+		}
+		bullets = append(bullets, fmt.Sprintf(orientationTemplate[orientationPlanLine], writers))
 	}
 	if a.hasContextBlocks() {
 		bullets = append(bullets, orientationTemplate[orientationContextFilesLine])
