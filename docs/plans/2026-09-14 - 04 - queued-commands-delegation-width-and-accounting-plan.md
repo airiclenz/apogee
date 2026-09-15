@@ -124,7 +124,11 @@ cmd/apogee/e2e_parallel_test.go — parallelHome, launchParallelSession, childRe
 
 **Commit:** `feat(agent): a fan-out's last result states the delegation width`
 
-## 5. `/clear` and `/new` reset the usage tallies — engine and view
+## 5. `/clear` and `/new` reset the usage tallies — engine and view — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the engine test lives in `internal/agent/minilang_test.go` (the file that already holds the ClearContext tests, under its "Context controls" section) rather than the plan's `agent_test.go`; `internal/tui/fold_test.go` is not edited — its `mainUsage` helper is reused by the new `usage_test.go` cases, which cover the zero base the fold adds onto.
+NOTES (2026-09-15): consequential edit — internal/tui/model.go: made necessary by the resetSessionView zeroing (the `usageBase` field comment named only launch and resume as the boundaries the engine's reading restarts at).
+NOTES (2026-09-15): `docs/manual/sessions.md` gained one sentence on the `/clear` bullet (user-facing behaviour changed).
 
 **What:** Closes the 2026-08-20 deferred defect the `resetSessionView` comment records (no bead survived the migration): `usage` and `delegateUsage` are inherited across `/new` and `/clear` (`34297e2a` carries 45.8M delegate tokens with zero `sub_agent` calls). Fix: `internal/agent/agent.go` `ClearContext` zeroes `a.usage` exactly as `RestoreSession` does (embedder-visible: the tally is per context, documented on the method); `internal/tui/commandrun.go` `resetSessionView` zeroes `usage`, `usageBase` and `delegateUsage`; `fold.go`'s `usageSum(usageBase, totals)` starts from zero after either verb. The `/usage` pane and the saved META reflect the reset.
 

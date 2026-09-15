@@ -56,7 +56,9 @@ still remembers.
   only the conversation you steered would understate it by a wide margin; `/usage`
   is where the two halves are read apart again.
 - `/clear` (or `/new`) closes the current session into history and starts a fresh
-  one — neither deletes; discarding is an explicit `^d` in the browser.
+  one — neither deletes; discarding is an explicit `^d` in the browser. The closed
+  session keeps its token accounting; the fresh one starts from zero, in `/usage`
+  and in its own record alike.
 - A session killed mid-task resumes to the last completed turn and says so;
   `/continue` then picks the unfinished work back up, while sending a new message
   instead discards it and continues fresh. A delegation that was still running when

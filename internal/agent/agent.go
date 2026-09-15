@@ -1434,12 +1434,20 @@ func (a *Agent) Snapshot() (domain.Session, error) {
 // the conversation just forgotten was doing, so carrying it into the new session would leave the
 // model reading a plan for a job it can no longer see. The list is the model's to write, and a
 // new session starts with a blank one.
+//
+// The cumulative usage tally is zeroed here too, exactly as RestoreSession zeroes it: the tally is
+// PER CONTEXT — the sums and the call count belong to the conversation this call drops — so the
+// first UsageEvent of the new session counts one call, not the forgotten session's calls plus one.
+// An embedder keeping its own accounting reads the cumulative fields as "since this context was
+// opened"; a Driver that wants the closed conversation's totals takes them from its last event
+// before the clear (the TUI's saveAtIdle captures its record before this call).
 func (a *Agent) ClearContext() error {
 	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
 	a.consoles.CloseAll()
 	_ = a.tasks.Replace(nil) // clearing cannot break a cap, so the validated error is not one
+	a.usage = usageTally{}   // the sums belong to the conversation that just left
 	a.reloadContextFiles()
 	a.conv = *domain.NewConversation(nil)
 	a.rearmFillNotice() // the climb the ladder tracked is gone with the conversation

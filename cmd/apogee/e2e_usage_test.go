@@ -11,6 +11,7 @@ package main
 // about the frames both surfaces painted.
 
 import (
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
@@ -145,6 +147,74 @@ func TestE2EUsageReportsCachedTokensAndDelegateSpend(t *testing.T) {
 	if got, alone := tokensValue(t, resumed[5]), resumePrompt6+resumeCompletion6; got <= alone {
 		t.Errorf("the resumed total is %s (%d): it restarted from the new message's own %d rather "+
 			"than continuing the record", resumed[5], got, alone)
+	}
+}
+
+// TestE2EClearResetsUsage pins the session boundary through the accounting: a /clear closes the
+// session that spent into history WITH its own tally, and the fresh session it opens starts from
+// nothing — so after one reply the /usage pane reads that reply alone, and the META its first save
+// writes carries only that reply's tokens. Until 2026-09-15 both inherited the closed session's spend
+// (the engine's tally and the view's base stood across the boundary), which is the defect this
+// test closes.
+func TestE2EClearResetsUsage(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "cached-usage"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+
+	// The session that spends: two calls, the second answered mostly from the cache.
+	submit(drv, coldPrompt)
+	drv.WaitText("The workspace holds one file")
+	submit(drv, warmPrompt)
+	drv.WaitText("One line, and it says hello.")
+	drv.WaitFor(func() bool { return len(sess.sessionRecords()) == 1 },
+		tuitest.Awaiting("the spending session to reach the session store"))
+
+	// The boundary, then one reply in the fresh session. The cold prompt is re-asked because the
+	// fixture answers it repeatedly and reports no cache share, so the pane it leaves has no cached
+	// column — one fewer place for the closed session's numbers to hide.
+	submit(drv, "/clear")
+	drv.WaitGone("One line, and it says hello.")
+	submit(drv, coldPrompt)
+	drv.WaitText("The workspace holds one file")
+
+	usage := openUsage(t, drv)
+	main := usageCells(t, usage, "main")
+	wantMain := []string{"main", "1", format.Tokens(coldPrompt6), format.Tokens(coldCompletion6),
+		format.Tokens(coldPrompt6 + coldCompletion6)}
+	if !slices.Equal(main, wantMain) {
+		t.Errorf("after /clear the main row is %q; the one reply the fresh session got is %q", main, wantMain)
+	}
+	closePane(drv, usagePaneMarker)
+
+	// The records: the closed session kept its two calls, the fresh one wrote its one.
+	drv.WaitFor(func() bool { return len(sess.sessionRecords()) == 2 },
+		tuitest.Awaiting("the fresh session's first save to reach the session store"))
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+	store := session.NewStore(filepath.Join(sess.Home(), "sessions"))
+	metas, err := store.List()
+	if err != nil {
+		t.Fatalf("list the session store: %v", err)
+	}
+	if len(metas) != 2 {
+		t.Fatalf("the store holds %d records, want 2 — the closed session and the fresh one", len(metas))
+	}
+	fresh, closed := metas[0], metas[1] // List sorts UpdatedAt descending
+	wantFresh := session.Usage{Calls: 1, PromptTokens: coldPrompt6, CompletionTokens: coldCompletion6,
+		TotalTokens: coldPrompt6 + coldCompletion6}
+	if fresh.Usage != wantFresh {
+		t.Errorf("the fresh session's META usage = %+v, want its one reply's own %+v", fresh.Usage, wantFresh)
+	}
+	wantClosed := session.Usage{Calls: 2, PromptTokens: coldPrompt6 + warmPrompt6,
+		CompletionTokens:   coldCompletion6 + warmCompletion6,
+		TotalTokens:        coldPrompt6 + warmPrompt6 + coldCompletion6 + warmCompletion6,
+		CachedPromptTokens: warmCached6}
+	if closed.Usage != wantClosed {
+		t.Errorf("the closed session's META usage = %+v, want the two calls it spent %+v — the flush ran "+
+			"before the reset", closed.Usage, wantClosed)
 	}
 }
 

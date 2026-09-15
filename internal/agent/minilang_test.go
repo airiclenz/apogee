@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ----------------------------------------------------------------------------
@@ -39,6 +40,59 @@ func TestClearContextEmptiesConversationKeepsTurnIndex(t *testing.T) {
 	}
 	if a.turns.index != turnBefore {
 		t.Errorf("turnIndex changed by clear: %d → %d (the counter must keep advancing)", turnBefore, a.turns.index)
+	}
+}
+
+// TestClearContextResetsTheUsageTally pins the accounting half of the /clear boundary, the same
+// half RestoreSession already keeps (TestRestoreSession_ResetsTheUsageTally): the cumulative fields
+// belong to the conversation the clear drops, so the first reading of the new context counts one
+// call carrying that call's own tokens — not the forgotten conversation's calls plus one.
+func TestClearContextResetsTheUsageTally(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, err := newAgent(baseConfig(sink), &scriptedResponder{scripts: [][]provider.Delta{
+		usageScript("first", provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19}),
+		usageScript("second", provider.Usage{PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35}),
+	}})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if got := usageEvents(sink.events); len(got) != 1 || got[0].CumulativeCalls != 1 {
+		t.Fatalf("pre-clear usage events = %+v, want one reading at call 1", got)
+	}
+
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+
+	if a.usage != (usageTally{}) {
+		t.Errorf("tally after ClearContext = %+v, want zero — the sums belong to the dropped conversation", a.usage)
+	}
+	if err := a.Submit(domain.UserInput{Text: "again"}); err != nil {
+		t.Fatalf("Submit (cleared): %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step (cleared): %v", err)
+	}
+	got := usageEvents(sink.events)
+	if len(got) != 2 {
+		t.Fatalf("emitted %d UsageEvents, want 2 (one per completion)", len(got))
+	}
+	last := got[1]
+	if last.CumulativeCalls != 1 {
+		t.Errorf("post-clear CumulativeCalls = %d, want 1 — the dropped conversation's calls are "+
+			"still being counted against the new one", last.CumulativeCalls)
+	}
+	if last.CumulativeTotalTokens != 35 {
+		t.Errorf("post-clear CumulativeTotalTokens = %d, want 35 (this call alone)",
+			last.CumulativeTotalTokens)
 	}
 }
 

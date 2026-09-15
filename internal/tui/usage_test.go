@@ -545,3 +545,83 @@ func TestUsageAccumulatesOverAResumedReading(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// The session boundary /clear and /new draw through the accounting (resetSessionView)
+// ----------------------------------------------------------------------------
+
+// TestClearResetsTheUsageTallies pins the view half of the /clear boundary. The sums belong to the
+// session the verb closes — its record took them before the reset — so the pane and the record of
+// the fresh session report only what the fresh session spends: a resumed base is forgotten along
+// with the readings folded onto it, the engine's own tally restarts at zero at the same boundary
+// (ClearContext), and the first reading after the clear is the whole of the accounting. A delegate
+// sum a resumed record carried falls with it under /new, the alias that shares the seam.
+func TestClearResetsTheUsageTallies(t *testing.T) {
+	t.Parallel()
+	stored := session.Usage{Calls: 40, PromptTokens: 480000, CompletionTokens: 20000, TotalTokens: 500000}
+
+	t.Run("/clear then one reply reports that reply alone", func(t *testing.T) {
+		t.Parallel()
+		m := resumedUsageModel(t, stored)
+		m = m.foldEvent(mainUsage(5000, 300, 5300, 5000, 300, 5300, 1))
+		if m.usage.Calls != 41 {
+			t.Fatalf("precondition: the resumed session has spent %+v, want 41 calls to clear away", m.usage)
+		}
+
+		m.input.SetValue("/clear")
+		m = step(t, m, keyEnter())
+
+		if m.usage != (usageTotals{}) || m.usageBase != (usageTotals{}) {
+			t.Fatalf("after /clear usage = %+v, base = %+v, want both zero — the spend went with the closed session",
+				m.usage, m.usageBase)
+		}
+		m = m.foldEvent(mainUsage(700, 40, 740, 700, 40, 740, 1))
+
+		want := usageTotals{Calls: 1, PromptTokens: 700, CompletionTokens: 40, TotalTokens: 740}
+		if m.usage != want {
+			t.Errorf("totals = %+v, want exactly the reply's own %+v — nothing of the closed session is added", m.usage, want)
+		}
+		m.usagePane = usagePane{open: true}
+		rows := m.usageRows()
+		if len(rows) != 2 {
+			t.Fatalf("rows = %q, want the header and the main agent alone", rows)
+		}
+		if got, want := rows[1], usageRow(usageMainLabel, want, m.ctxUsed, m.opts.ContextWindow, false); !equalRow(got, want) {
+			t.Errorf("the main row = %q, want %q — the pane reads the reply alone", got, want)
+		}
+		payload, ok := m.snapshotPayload(domain.Session{})
+		if !ok {
+			t.Fatal("snapshotPayload declined to build a payload")
+		}
+		if got := payload.usage; got != session.Usage(want) {
+			t.Errorf("saved totals = %+v, want the same %+v the pane reports", got, want)
+		}
+	})
+
+	t.Run("/new drops the delegate sum a resumed record carried", func(t *testing.T) {
+		t.Parallel()
+		m := resumedUsageModel(t, stored)
+		m.delegateUsage = childTotals
+		if got := m.delegateUsageTotal(); got != childTotals {
+			t.Fatalf("precondition: the delegate total = %+v, want the record's %+v", got, childTotals)
+		}
+
+		m.input.SetValue("/new")
+		m = step(t, m, keyEnter())
+
+		if m.delegateUsage != (usageTotals{}) {
+			t.Errorf("delegateUsage after /new = %+v, want zero — the closed session's delegates spent it", m.delegateUsage)
+		}
+		if got := m.delegateUsageTotal(); got != (usageTotals{}) {
+			t.Errorf("delegateUsageTotal after /new = %+v, want zero — no run of the fresh session has reported", got)
+		}
+		payload, ok := m.snapshotPayload(domain.Session{})
+		if !ok {
+			t.Fatal("snapshotPayload declined to build a payload")
+		}
+		if payload.usage != (session.Usage{}) || payload.delegateUsage != (session.Usage{}) {
+			t.Errorf("saved usage = %+v, delegate = %+v, want both zero — the fresh record starts from nothing",
+				payload.usage, payload.delegateUsage)
+		}
+	})
+}

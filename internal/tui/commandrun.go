@@ -227,14 +227,19 @@ func (m *Model) resetSessionView() {
 	m.detached = false // re-arm follow-the-tail: the fresh transcript opens at its tail like a launch
 	// The gauge, the generation clock and the throughput fall with the discarded conversation — the
 	// same reason compactDoneMsg zeroes the gauge on a fold.
-	//
-	// The CUMULATIVE accounting beside them (m.usage) does NOT fall with them: this boundary has
-	// never reset it, and the reset above deliberately does not reach it, so /clear leaves the
-	// session's token totals standing exactly as it always has. That asymmetry is preserved rather
-	// than endorsed — the fresh session inherits the closed one's spend, both in the /usage pane and
-	// in the record its first save writes — and it is recorded as a deferred defect (2026-08-20)
-	// rather than corrected here, because correcting it is a behaviour change.
 	m.liveStats.reset()
+	// So does the CUMULATIVE accounting beside them: the sums belong to the session just closed, and
+	// its record took them (saveAtIdle runs BEFORE this reset, so the closing record keeps its own
+	// tally). The engine zeroes its tally at the same boundary (ClearContext, like RestoreSession),
+	// so the base the fold adds its readings onto is zero from here — a resumed record's offset was
+	// that record's, not this session's — and the /usage pane and the first save of the fresh
+	// session report only what the fresh session spends. The delegate half falls the same way: the
+	// run heads it stood in for went with the transcript above, and a restored record's sum was the
+	// closed session's. Until 2026-09-15 the three stood across this boundary, so a fresh session
+	// inherited the closed one's spend (the 2026-08-20 deferred defect this closes).
+	m.usage = usageTotals{}
+	m.usageBase = usageTotals{}
+	m.delegateUsage = usageTotals{}
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
 	// A bound reset queues a Rotate above, which opens a fresh Session record, and a fresh record
 	// names itself; a pre-bound one had no session to rotate. Either way: unlatch the naming call,

@@ -415,8 +415,9 @@ type Model struct {
 
 	// usageBase is the accounting the session record carried when this session was (re)opened: the
 	// main agent's stored totals on either resume path (replayResumed, resumeLoaded), and the zero
-	// value on a fresh launch. It exists because the ENGINE's cumulative reading restarts at zero on
-	// every resume — a fresh Agent on --resume, RestoreSession's reset on a browser restore — so the
+	// value on a fresh launch or after /clear (resetSessionView). It exists because the ENGINE's
+	// cumulative reading restarts at zero on every session boundary — a fresh Agent on --resume,
+	// RestoreSession's reset on a browser restore, ClearContext's on /clear — so the
 	// usage fold adds that reading ON TOP of this base instead of letting it replace what the record
 	// carried in (foldStats). Without it a resumed session's spend collapses to whatever the first
 	// post-resume reading says. The offset is the renderer's own because it is the Driver that seeds
