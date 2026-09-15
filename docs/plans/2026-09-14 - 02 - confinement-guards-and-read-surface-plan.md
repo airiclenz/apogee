@@ -71,7 +71,14 @@ NOTES (2026-09-15): gate verified — plan 01 is absent from docs/plans/ and pre
 
 **Commit:** none (gate only).
 
-## 2. Toolchain temp and cache dirs point into the scratch dir on confined runs
+## 2. Toolchain temp and cache dirs point into the scratch dir on confined runs — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `ScratchEnv` returns `([]string, error)` rather than the plan's bare `[]string` — the mkdir is part of the helper and a failed mkdir must not be swallowed; `run` and the `console_open` hook return it wrapped (`seed scratch env for <argv0>: …`) the way a non-demote Confine failure already is.
+NOTES (2026-09-15): the seeded key list is exported as `subprocess.ScratchEnvKeys()` (a function over the one entry table, so keys and values cannot drift) and `goToolchainEnvKeys` is built from it — which also lets a host `GOCACHE`/`GOTMPDIR` through to an UNCONFINED `diagnostics` vet where the allowlist used to drop them; that is the "pass the seeded keys through" reading and the one constant item 4's probe can share.
+NOTES (2026-09-15): the `orientation_test.go` pin is a new `TestOrientation_ScratchLineStatesTheConfinedCaches` holding the clause verbatim — the file has no goldens, `scratchLine` composes the bullet from the template itself, so no existing golden needed updating.
+NOTES (2026-09-15): consequential edit — internal/domain/config.go: made necessary by the box's new `ScratchDir` field (the `Config.ScratchDir` comment named only the WritablePaths fold).
+NOTES (2026-09-15): consequential edit — docs/manual/configuration.md (Windows paragraph): made necessary by the seed — "not something Apogee does yet" was false once the variables are set on every platform; reworded to say the Windows toolchains honouring them under the low-integrity token is unverified (`apogee-m3p` stays the tracker, Windows caches out of scope).
+NOTES (2026-09-15): `internal/subprocess/doc.go` gained the `scratchenv.go` file-map line (new file in a mapped package).
 
 **What:** Under a confinement box every subprocess apogee spawns (`terminal`, `python_exec`, `run_tests`, `diagnostics`, `console_open`) gets `TMPDIR`, `TMP`, `TEMP`, `GOTMPDIR` = `<scratch>/tmp`, `GOCACHE` = `<scratch>/go-build`, `XDG_CACHE_HOME` = `<scratch>/cache` (gh, pip and friends follow it), the directories created before the spawn. Unconfined runs keep the host env byte-identical. Binding calls:
 - `domain.ConfinementBox` gains `ScratchDir string`; `ConfinementBox()` (`internal/domain/confinement.go`) folds it from the session scratch dir the box already lists as writable.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // ----------------------------------------------------------------------------
@@ -286,17 +287,20 @@ func goVetSpec(goPath, root, abs string) subprocessSpec {
 // program whose behaviour is steered by GIT_* and a pager, and borrowing it for the Go
 // toolchain both dropped the operator's own Go hardening and put nothing back. This list
 // carries only what a build cache needs, and goVetPins below decides everything else.
-var goToolchainEnvKeys = []string{
+var goToolchainEnvKeys = append([]string{
 	// PATH — the toolchain resolves programs of its own (the compiler, the vet tool);
 	// ScopeEnv strips the entries inside root, so none of them come from the workspace.
 	"PATH",
 	// HOME — GOCACHE and GOMODCACHE default beneath it, and go refuses to build with no
 	// build cache at all.
 	"HOME",
-	// The build's scratch space, and (on Linux) where GOCACHE lands when the user moved
-	// their cache root.
-	"TMPDIR", "TMP", "TEMP", "XDG_CACHE_HOME",
-}
+},
+	// The build's scratch space and cache root: the temp spellings, GOTMPDIR, GOCACHE and
+	// XDG_CACHE_HOME — the very keys a confined run seeds beneath the session scratch dir
+	// (subprocess.ScratchEnv), so the allowlist is read from that one list and can never
+	// strip a seeded key.
+	subprocess.ScratchEnvKeys()...,
+)
 
 // goVetPins are the toolchain settings the vet subprocess runs with WHATEVER the host
 // environment or the vetted repository says. They are appended after the inherited keys,

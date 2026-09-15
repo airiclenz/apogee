@@ -1602,6 +1602,16 @@ loosen adds nothing a shell could run. Nothing under `~/.apogee` reads or loads 
 there, and a program planted in it is refused by the same exec fence that refuses one
 planted in the workspace.
 
+**A confined command's temp and cache files land in the scratch directory too.** `/tmp` and
+`~/.cache` are outside the fence, so on every confined run — `terminal`, `python_exec`,
+`run_tests`, `diagnostics` and the Console four — apogee sets `TMPDIR`, `TMP`, `TEMP` and
+`GOTMPDIR` to `<scratch>/tmp`, `GOCACHE` to `<scratch>/go-build` and `XDG_CACHE_HOME` to
+`<scratch>/cache`, creating the directories first; `gh`, `pip` and everything else that
+follows `XDG_CACHE_HOME` lands there with them. The caches are cold per session and are
+swept with the scratch directory. Nothing is set on an unconfined run: the command sees your
+environment exactly as your shell has it. The orientation block tells the model as much on
+its `Scratch dir:` line.
+
 One Linux fence is real but incomplete: on a kernel older than **6.2** (landlock ABI 1–2 —
 Ubuntu 22.04, Debian 12, RHEL 9) the kernel has no way to restrict *truncation*, so a confined
 command still cannot create or write a file outside the workspace but can empty one that is
@@ -1625,9 +1635,10 @@ workspace, the first confined command of a session visibly pauses while it runs
 command in that session pays nothing. And one limit: what the Windows fence covers is
 workspace-scoped writes. A low-integrity process cannot write to an unmarked directory
 at all, so a confined `go build`, `pip install` or `npm ci` fails when it reaches its
-cache or `%TEMP%` outside the workspace — giving the toolchain a box-local temp and
-cache directory is a recorded follow-on in the issue register (`bd`, `apogee-m3p`), not
-something Apogee does yet.
+cache or `%TEMP%` outside the workspace. The scratch-directory redirect above sets the same
+variables on Windows, but whether the toolchains honour them under the low-integrity token
+is unverified — the Windows caches are a recorded follow-on in the issue register (`bd`,
+`apogee-m3p`).
 
 If the machine is disposable and you would rather have Auto unfenced there, `/confine`
 is the route. `/confine` (or `/confine status`) reports the backend, what it can

@@ -277,6 +277,27 @@ func scratchLine(path string) string {
 	return fmt.Sprintf(orientationTemplate[orientationScratchLine], path)
 }
 
+// scratchConfinedCachesClause is the qualified tail of the scratch bullet, pinned verbatim: the
+// subprocess funnel and console_open seed TMPDIR and the Go build cache beneath the scratch dir on
+// a CONFINED run only (subprocess.ScratchEnv), so the clause names that condition rather than
+// promising the redirect on every rung. A reworded template fails here, not in a model's session.
+const scratchConfinedCachesClause = "/tmp may be denied by workspace confinement; " +
+	"under workspace confinement TMPDIR and the Go build cache point here."
+
+// TestOrientation_ScratchLineStatesTheConfinedCaches pins the bullet's guidance tail against the
+// exact clause the confined-run seed is announced with — a model that reads the line is told where
+// its toolchain's temp and cache files land under confinement, and told it only for that case.
+func TestOrientation_ScratchLineStatesTheConfinedCaches(t *testing.T) {
+	t.Parallel()
+
+	line := scratchLine(orientationScratchDir)
+
+	if !strings.HasSuffix(line, " "+scratchConfinedCachesClause) {
+		t.Errorf("the scratch bullet does not end with the confined-caches clause %q:\n%q",
+			scratchConfinedCachesClause, line)
+	}
+}
+
 // TestOrientation_EveryModeStatesTheScratchDir: the session scratch dir is writable on every rung
 // of the ladder — Plan runs Apogee's own writers there and nowhere else, Ask-Before runs them there
 // unprompted (ADR 0012 second loosen, 2026-09-14) — so every mode, Plan included, renders the

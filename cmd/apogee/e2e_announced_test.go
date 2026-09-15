@@ -285,6 +285,72 @@ func TestE2EAnnouncedScratchDirRunsUnpromptedInAuto(t *testing.T) {
 	}
 }
 
+// announcedScratchCachesPrompt is what the caches fixture's model is asked, and the phrase
+// announced-scratch-caches.yaml keys its one tool turn on.
+const announcedScratchCachesPrompt = "Show me where the toolchain caches live."
+
+// TestE2EAnnouncedScratchDirHoldsTheToolchainCaches is the invariant over the scratch bullet's
+// own tail: the orientation tells the model that under workspace confinement TMPDIR and the Go
+// build cache point at the scratch dir, so a confined command asking its toolchain where it will
+// write must be told exactly that dir — the announced spelling, read off the system prompt the
+// stub received, never a path this test built. The command names no path of its own: `go env
+// GOCACHE` and `$TMPDIR` are what a real build reads, so what they print is what the seed made
+// true (subprocess.ScratchEnv), and a seed that pointed anywhere else fails here.
+func TestE2EAnnouncedScratchDirHoldsTheToolchainCaches(t *testing.T) {
+	guardHome(t)
+	installFenceableConfiner(t)
+
+	stub := stubllm.New(t, loadScript(t, "announced-scratch-caches"))
+	fx := announcedSkillFixture(t, stub)
+	appendHomeConfig(t, fx.home, announcedStandingPrompt)
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIOn(t, drv, stub, fx.home, fx.ws, "--mode", "auto")
+	panes := watchApprovalPanes(t, drv)
+
+	submit(drv, announcedScratchCachesPrompt)
+	drv.WaitText("Caches answered.")
+	drv.WaitQuiet(settled)
+
+	scratch := announcedScratchDirOnTheWire(t, stub)
+	results := toolResults(stub)
+	if len(results) != 1 {
+		t.Fatalf("the run produced %d tool results; want the fixture's one:\n%s",
+			len(results), strings.Join(results, "\n---\n"))
+	}
+	// The result is the command's output: the build cache on the first line, TMPDIR on the
+	// second, each of which has to start with the announced dir — a value that merely contained
+	// it, or one under a scratch dir of a different spelling, is not the announcement kept.
+	var printed []string
+	for _, line := range strings.Split(results[0], "\n") {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, scratch+string(filepath.Separator)) {
+			printed = append(printed, line)
+		}
+	}
+	if len(printed) != 2 {
+		t.Errorf("the confined command printed %d path(s) under the announced scratch dir %s; "+
+			"want GOCACHE and TMPDIR both there:\n%s", len(printed), scratch, results[0])
+	} else {
+		if got, want := printed[0], filepath.Join(scratch, "go-build"); got != want {
+			t.Errorf("go env GOCACHE printed %q, want the announced dir's build cache %q", got, want)
+		}
+		if got, want := printed[1], filepath.Join(scratch, "tmp"); got != want {
+			t.Errorf("$TMPDIR printed %q, want the announced dir's temp dir %q", got, want)
+		}
+	}
+
+	if n := panes(); n != 0 {
+		t.Errorf("the run raised %d approval pane(s); want none for a path apogee itself named", n)
+	}
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+	stub.AssertConsumed(t)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
 // installFenceableConfiner keeps this suite's question about who was ASKED rather than about the
 // machine it runs on. Auto on a backend that cannot fence the filesystem gates every terminal
 // command through Approval instead (ADR 0012, "confine if you can, gate if you can't"), so a

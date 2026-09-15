@@ -49,7 +49,9 @@ type SubprocessSpec struct {
 	// variable (apogee's own and the host-configured ones), with the child's PATH scoped out of
 	// the workspace; and the test runner takes subprocessEnv, the same minus the credentials,
 	// because a test suite needs the toolchain variables its user's shell has but no subprocess
-	// of the model's needs apogee's key.
+	// of the model's needs apogee's key. On a CONFINED run whose box names a ScratchDir, the
+	// funnel appends ScratchEnv's temp and cache entries on top of whichever of those it was
+	// handed (or the inherited environment); an unconfined run gets exactly what is here.
 	Env []string
 	// SplitStdout asks for the child's standard output to be captured ON ITS OWN
 	// (SubprocessResult.Stdout) instead of interleaved with stderr. A caller that CONSUMES the
@@ -259,6 +261,17 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 		// The box the run was fenced by rides along on the result: it is what the denial
 		// labels name the writable roots from, and this is the only place it is in hand.
 		box = conf.Box
+		// A confined toolchain is pointed at the scratch dir for its temp and cache files —
+		// /tmp and ~/.cache are outside the fence. The seed is appended AFTER the spec's own
+		// environment (or the inherited one) so it wins the last-wins duplicate resolution,
+		// and after Confine so the wrapper the backend interposed inherits it too.
+		if conf.Box.ScratchDir != "" {
+			seed, err := ScratchEnv(conf.Box)
+			if err != nil {
+				return SubprocessResult{}, fmt.Errorf("seed scratch env for %s: %w", spec.Argv[0], err)
+			}
+			cmd.Env = append(cmd.Environ(), seed...)
+		}
 	}
 
 	// A CONFINED run's output is watched live for an OS-denial signature; the first match

@@ -201,6 +201,108 @@ func TestRunSubprocessDenialWatchNeverWatchesUnconfined(t *testing.T) {
 	}
 }
 
+// scratchEnvProbe is a POSIX line printing the three variables the confined seed is measured by:
+// one temp spelling, the Go build cache and the XDG cache root, space-separated on one line.
+const scratchEnvProbe = `echo "$TMPDIR $GOCACHE $XDG_CACHE_HOME"`
+
+// TestRunSubprocessConfinedRunSeedsTheScratchEnv pins the confined-run seed at the funnel: a run
+// under a box naming a ScratchDir sees TMPDIR, GOCACHE and XDG_CACHE_HOME pointing beneath that
+// dir — `tmp`, `go-build` and `cache` — and the directories exist by the time the child runs, so
+// a toolchain that would otherwise reach for /tmp or ~/.cache (both outside the fence) writes
+// where the box allows. The spec hands in an explicit Env carrying the host's own TMPDIR, so the
+// test also proves the seed wins the last-wins duplicate resolution rather than merely filling a
+// gap.
+func TestRunSubprocessConfinedRunSeedsTheScratchEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the seed it pins is platform-independent")
+	}
+	t.Parallel()
+
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	if err := os.MkdirAll(scratch, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir(), ScratchDir: scratch},
+	})
+	spec := SubprocessSpec{
+		Argv: []string{"/bin/sh", "-c", scratchEnvProbe},
+		Env:  []string{"PATH=" + os.Getenv("PATH"), "TMPDIR=/host/tmp"},
+	}
+
+	res, err := RunSubprocess(ctx, spec)
+
+	if err != nil {
+		t.Fatalf("RunSubprocess err = %v, want nil", err)
+	}
+	want := strings.Join([]string{
+		filepath.Join(scratch, "tmp"),
+		filepath.Join(scratch, "go-build"),
+		filepath.Join(scratch, "cache"),
+	}, " ")
+	if got := strings.TrimSpace(res.CombinedOutput); got != want {
+		t.Errorf("confined child printed %q, want the three scratch paths %q", got, want)
+	}
+	for _, sub := range []string{"tmp", "go-build", "cache"} {
+		if info, err := os.Stat(filepath.Join(scratch, sub)); err != nil || !info.IsDir() {
+			t.Errorf("scratch/%s was not created before the spawn: %v", sub, err)
+		}
+	}
+}
+
+// TestRunSubprocessUnconfinedRunKeepsTheHostEnv is the other half of the seed's contract: with
+// no box on the context the child's environment is exactly what the caller handed in — the host
+// values print unchanged and nothing is created under the scratch-shaped temp dir.
+func TestRunSubprocessUnconfinedRunKeepsTheHostEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the contract it pins is platform-independent")
+	}
+	t.Parallel()
+
+	spec := SubprocessSpec{
+		Argv: []string{"/bin/sh", "-c", scratchEnvProbe},
+		Env: []string{
+			"PATH=" + os.Getenv("PATH"),
+			"TMPDIR=/host/tmp", "GOCACHE=/host/go-build", "XDG_CACHE_HOME=/host/cache",
+		},
+	}
+
+	res, err := RunSubprocess(context.Background(), spec)
+
+	if err != nil {
+		t.Fatalf("RunSubprocess err = %v, want nil", err)
+	}
+	if got, want := strings.TrimSpace(res.CombinedOutput), "/host/tmp /host/go-build /host/cache"; got != want {
+		t.Errorf("unconfined child printed %q, want the host values %q unchanged", got, want)
+	}
+}
+
+// TestScratchEnvKeysMatchTheSeed pins the allowlist contract: every key ScratchEnv seeds is
+// named by ScratchEnvKeys, in the same order, so an environment allowlist built from the keys can
+// never strip a seeded value.
+func TestScratchEnvKeysMatchTheSeed(t *testing.T) {
+	t.Parallel()
+
+	seed, err := ScratchEnv(domain.ConfinementBox{ScratchDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("ScratchEnv err = %v, want nil", err)
+	}
+
+	keys := ScratchEnvKeys()
+	if len(keys) != len(seed) {
+		t.Fatalf("ScratchEnvKeys names %d keys, ScratchEnv seeds %d entries", len(keys), len(seed))
+	}
+	for i, entry := range seed {
+		if !strings.HasPrefix(entry, keys[i]+"=") {
+			t.Errorf("seed[%d] = %q, want key %q", i, entry, keys[i])
+		}
+	}
+	if seed, err := ScratchEnv(domain.ConfinementBox{}); err != nil || seed != nil {
+		t.Errorf("ScratchEnv on a box with no ScratchDir = %v, %v; want nil, nil", seed, err)
+	}
+}
+
 // oversizeStdoutScript is a POSIX line printing a deterministic payload past the output cap, so
 // the two stdout paths — the capped one and the streaming one — can be measured against the SAME
 // bytes. yes/head is used rather than a Go writer because the point is what a real child process

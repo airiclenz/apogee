@@ -99,7 +99,9 @@ type Config struct {
 	// (`~/.apogee/scratch/<session-id>/` under the shipped composition root) — the one place a
 	// confined subprocess may write besides the workspace itself, so scratch work has somewhere
 	// safe to land instead of improvising into the project tree (the 2026-08-22 clobber incident).
-	// ConfinementBox() folds it into WritablePaths, and the host owns its lifecycle: minting the
+	// ConfinementBox() folds it into WritablePaths and names it on the box's own ScratchDir — the
+	// dir a confined spawn seeds the toolchain's temp and cache variables beneath
+	// (subprocess.ScratchEnv) — and the host owns its lifecycle: minting the
 	// per-session path, creating it, and garbage-collecting stale siblings. Empty — the default,
 	// and what a Driver that manages no sessions passes — adds nothing, leaving the box exactly
 	// what it was before this field existed. It is the construction seed; the live, session-

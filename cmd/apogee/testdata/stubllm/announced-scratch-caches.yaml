@@ -1,0 +1,38 @@
+# The upstream TestE2EAnnouncedScratchDirHoldsTheToolchainCaches talks to: a model that asks its
+# toolchain where it will write, and gets told the place apogee announced.
+#
+# The one tool turn carries a capture whose pattern lifts the path out of the orientation block's
+# own `- Scratch dir: %s — writable and outside the workspace; …` line
+# (internal/agent/prompts/orientation.txt). The command itself names no path at all: it asks the Go
+# toolchain for its build cache and the shell for its TMPDIR, and the test holds what they printed
+# against the dir the capture read off that very request. That is the point of the fixture — the
+# orientation promises that under workspace confinement TMPDIR and the Go build cache point at the
+# scratch dir, and a confined run is what makes the promise true (subprocess.ScratchEnv); a seed
+# that pointed anywhere else, or a wording that named a dir the seed did not, fails here rather
+# than in a user's session.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced scratch caches
+    # The prompt, and the one turn that reads the orientation.
+    - when:
+        last_message: toolchain caches live
+      captures:
+        - {name: scratch, from: system, pattern: 'Scratch dir: (\S+) — writable'}
+      tool_calls:
+        - id: cache-probe
+          name: terminal
+          arguments: '{"command":"go env GOCACHE; echo $TMPDIR"}'
+    # The wrap-up, once the probe has come back.
+    - when:
+        tool_result: terminal
+      text: Caches answered.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

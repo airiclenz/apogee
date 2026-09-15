@@ -949,6 +949,19 @@ handed.
 > agent nowhere safe for scratch work, so its improvisations landed in the workspace (the 2026-08-22
 > incident's hazard inversion); the `{{scratch}}` prompt placeholder names the dir to the model.
 
+> **Implemented 2026-09-15 (plan `2026-09-14 - 02`, item 2).** The recommendation above — a
+> box widened with the *host's* detected cache and temp dirs — was never implemented, and is now
+> closed the other way round: the caches are moved into the box instead of the box being widened
+> to them. `ConfinementBox` carries `ScratchDir` by name, and every **confined** spawn seeds
+> `TMPDIR`, `TMP`, `TEMP`, `GOTMPDIR` = `<scratch>/tmp`, `GOCACHE` = `<scratch>/go-build` and
+> `XDG_CACHE_HOME` = `<scratch>/cache` (directories created before the spawn) through ONE shared
+> helper, `subprocess.ScratchEnv`, called from the funnel `run` after `Confine` and from
+> `console_open`'s confined branch — never per tool. Cold per-session caches, deliberately: a
+> confined `go build`, `pip install` or `gh` now writes where the fence already allows, the host's
+> own caches are neither read nor made writable, and an unconfined run's environment is byte-
+> identical to the host's. The `Confine` contract (§2) is still unaffected: the seed lands on
+> `cmd.Env` after the backend prepared the command, so the wrapper it interposed inherits it.
+
 ---
 
 ## 8. Acceptance map — P3.1 done; what each successor implements

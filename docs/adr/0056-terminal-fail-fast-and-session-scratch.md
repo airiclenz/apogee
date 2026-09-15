@@ -89,6 +89,16 @@ loosen makes the session scratch dir the one target Plan writes (and the one nat
 Ask-Before does not gate), so the bullet is true in every mode and the block states it in every
 mode; the mode leaves the block's inputs again, and the scratch line moves only at a session
 boundary as it did before this note.
+*Note (2026-09-15):* the box now carries the scratch dir by name (`ConfinementBox.ScratchDir`,
+folded by the same `Config.ConfinementBox()`), and every **confined** spawn seeds the toolchain's
+temp and cache variables beneath it — `TMPDIR`, `TMP`, `TEMP`, `GOTMPDIR` = `<scratch>/tmp`,
+`GOCACHE` = `<scratch>/go-build`, `XDG_CACHE_HOME` = `<scratch>/cache`, the directories created
+before the spawn — through one shared helper (`subprocess.ScratchEnv`) called from the subprocess
+funnel and from `console_open`'s confined branch. Cold per-session caches, so a confined `go
+build`, `pip` or `gh` no longer fails on a denied `/tmp` or `~/.cache`; the writable box is not
+widened, and an unconfined run's environment stays byte-identical to the host's. The orientation's
+scratch bullet says so, qualified to confined runs: "under workspace confinement TMPDIR and the Go
+build cache point here."
 
 **4. Tracked-file mutation warnings are an always-on structural floor.** When the workspace
 root is a git repository, the agent snapshots `git status --porcelain` immediately before and

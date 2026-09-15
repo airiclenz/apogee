@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -278,6 +279,61 @@ func TestConsoleOpen_ConfinesThroughTheHandleOnContext(t *testing.T) {
 	}
 	if confiner.confineCount() != 1 {
 		t.Errorf("Confine called %d times, want 1", confiner.confineCount())
+	}
+}
+
+// TestConsoleOpen_ConfinedConsoleCarriesTheSeededScratchEnv pins that a Console gets what the
+// subprocess funnel gives every other confined run: the Prepare hook the tool builds seeds the
+// child's environment with TMPDIR (and the rest of subprocess.ScratchEnv) beneath the box's
+// ScratchDir, after Confine and on top of the tool's own scrubbed environment, and the dir exists
+// by the time the hook returns. The hook is exercised on a command of the test's own — it is what
+// the process layer calls with the assembled *exec.Cmd, so the seed measured here is the seed the
+// pseudo-terminal starts with.
+func TestConsoleOpen_ConfinedConsoleCarriesTheSeededScratchEnv(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	// Not parallel: the package-level opener swap.
+	var captured console.OpenSpec
+	restore := openConsole
+	openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
+		captured = spec
+		return registry.Open(spec)
+	}
+	t.Cleanup(func() { openConsole = restore })
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	if err := os.MkdirAll(scratch, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := consoleTestCtx(t)
+	ctx = domain.WithConfinement(ctx, domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir(), ScratchDir: scratch},
+	})
+
+	res, err := NewConsoleOpen(t.TempDir(), nil).Execute(ctx, consoleOpenCall("c1", "sh", 100))
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if res.IsError {
+		t.Fatalf("open produced an error result: %q", res.Content)
+	}
+	if !captured.Confined || captured.Prepare == nil {
+		t.Fatalf("the opened Console is not confined (Confined=%v, Prepare nil=%v)", captured.Confined, captured.Prepare == nil)
+	}
+	cmd := exec.Command("sh")
+	cmd.Env = captured.Env
+	if err := captured.Prepare(cmd); err != nil {
+		t.Fatalf("Prepare err = %v, want nil", err)
+	}
+	want := "TMPDIR=" + filepath.Join(scratch, "tmp")
+	if !slices.Contains(cmd.Env, want) {
+		t.Errorf("the confined Console's environment lacks %q:\n%q", want, cmd.Env)
+	}
+	if !slices.Contains(cmd.Env, consoleTermVar) {
+		t.Errorf("the seed dropped the tool's own environment; %q is missing", consoleTermVar)
+	}
+	if info, err := os.Stat(filepath.Join(scratch, "tmp")); err != nil || !info.IsDir() {
+		t.Errorf("scratch/tmp was not created by the hook: %v", err)
 	}
 }
 

@@ -188,7 +188,8 @@ func TestConfigConfinementBox(t *testing.T) {
 		{
 			// The session scratch dir (workspace-clobber hardening, 2026-08-22): a set
 			// ScratchDir joins WritablePaths — appended after the host's own paths — so a
-			// confined subprocess may write there and nowhere else new.
+			// confined subprocess may write there and nowhere else new; it also rides on the
+			// box's own ScratchDir so the spawn can seed the toolchain caches beneath it.
 			name: "a set ScratchDir joins WritablePaths",
 			cfg: Config{
 				WorkspaceDir:         "/work/space",
@@ -198,6 +199,7 @@ func TestConfigConfinementBox(t *testing.T) {
 			want: ConfinementBox{
 				WorkspaceRoot: "/work/space",
 				WritablePaths: []string{"/tmp/build", "/home/u/.apogee/scratch/2026-08-22-abcd"},
+				ScratchDir:    "/home/u/.apogee/scratch/2026-08-22-abcd",
 			},
 		},
 		{
@@ -209,6 +211,7 @@ func TestConfigConfinementBox(t *testing.T) {
 			want: ConfinementBox{
 				WorkspaceRoot: "/work/space",
 				WritablePaths: []string{"/home/u/.apogee/scratch/2026-08-22-abcd"},
+				ScratchDir:    "/home/u/.apogee/scratch/2026-08-22-abcd",
 			},
 		},
 		{

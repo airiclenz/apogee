@@ -25,6 +25,8 @@
 //
 // subprocess.go is the whole core — the ceilings and the default timeout, the spec and result
 // shapes, the capped output buffer, the teardown seam, and the run functions themselves.
+// scratchenv.go seeds a confined child's temp and cache variables beneath the session scratch dir
+// (ScratchEnv), the one seed the funnel and console_open share.
 // cmdline_unix.go is a no-op because execve takes a real argv; cmdline_other.go hands Windows the
 // raw command line verbatim through SysProcAttr.CmdLine, bypassing the argv joining cmd.exe cannot
 // read.

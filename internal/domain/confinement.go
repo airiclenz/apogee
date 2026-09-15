@@ -78,13 +78,20 @@ type ConfinementBox struct {
 	WorkspaceRoot string
 	WritablePaths []string
 	NetworkAllow  []string // per-project tightening; empty = network open (ADR 0012)
+	// ScratchDir is the session scratch dir the box already lists among WritablePaths, named on
+	// its own so a confined spawn can point the toolchain's temp and cache variables (TMPDIR,
+	// GOCACHE, XDG_CACHE_HOME, … — subprocess.ScratchEnv) beneath it. Empty when the session has
+	// no scratch dir, in which case nothing is seeded and the child's environment is left alone.
+	ScratchDir string
 }
 
 // ConfinementBox is the full box this Config declares: the workspace root a subprocess is fenced
 // to, the extra writable paths a confined toolchain needs — plus the session's ScratchDir when one
-// is set — and the per-project network tightening list (confinement-execution-contract §7). It is
-// the single place those Confine* fields (and ScratchDir) are folded into a box, so a new call
-// site can no longer open a silent confinement hole by forgetting one of them. The returned slices
+// is set, which also rides on the box's own ScratchDir field so a confined spawn can seed the
+// toolchain's temp and cache dirs beneath it — and the per-project network tightening list
+// (confinement-execution-contract §7). It is the single place those Confine* fields (and
+// ScratchDir) are folded into a box, so a new call site can no longer open a silent confinement
+// hole by forgetting one of them. The returned slices
 // alias Config's — except WritablePaths when a ScratchDir is folded in, which is then a fresh
 // slice so the append can never scribble on the host's ConfineWritablePaths backing array; either
 // way the box is read-only policy, never mutated by its readers. A caller that wants a
@@ -101,6 +108,7 @@ func (c Config) ConfinementBox() ConfinementBox {
 		WorkspaceRoot: c.WorkspaceDir,
 		WritablePaths: writable,
 		NetworkAllow:  c.ConfineNetworkAllow,
+		ScratchDir:    c.ScratchDir,
 	}
 }
 
