@@ -185,9 +185,14 @@ func runOf(base domain.EventBase) runRef {
 }
 
 // parkedText is one run's in-progress assistant text, set aside because ANOTHER run's tokens took
-// the single live buffer while it was streaming (transcript.parked). It is committed when that run
-// next commits — its MessageEvent, its next tool call — or when the run ends without ever having
-// done so (closeRun), which is what keeps a cancelled delegate's half-sentence its own.
+// the single live buffer while it was streaming (transcript.parked) — a sibling's at the same depth
+// or a parent's, a child's or a grandchild's across depths, since every hand-over parks (displace).
+// It is committed when that run next commits — its MessageEvent, its next tool call — or, for a
+// delegation that never does, at the run's own SubAgentFinished phase (addSubAgentPhase), cancelled
+// or not: the phase is the one boundary EVERY delegation crosses, including a member of a fan-out
+// group later dropped whole, which no ToolResultEvent ever follows. The report fold (closeRun) is
+// the belt-and-braces exit behind it, which is what keeps a cancelled delegate's half-sentence its
+// own even where a phase never reached the view.
 type parkedText struct {
 	run  runRef
 	text streamBuf
@@ -545,37 +550,32 @@ func (t *transcript) setRoot(r runRef) {
 	t.root = r
 }
 
-// displace empties the live buffer slot for the run whose event is arriving, by the rule that fits
-// the switch. It is the one place the transcript decides what a run hand-over MEANS, so the three
-// events that can trigger one — a token, a message, a tool call — cannot come to disagree.
+// displace empties the live buffer slot for the run whose event is arriving. It is the one place
+// the transcript decides what a run hand-over MEANS, so the three events that can trigger one — a
+// token, a message, a tool call — cannot come to disagree: the displaced text is PARKED under its
+// own run, whatever the depths of the two runs, because the run that streamed it may still be going
+// and committing here would shred its answer into fragments.
 //
-// A switch between runs at the SAME depth is concurrent siblings alternating through the single
-// slot (ADR 0039): the displaced text is parked, because the run that streamed it is still going
-// and committing here would shred its answer into one block per token batch.
-//
-// A switch across depths is the serial hand-over the buffer was built for, and keeps its original
-// rule: the previous streamer is finished with the slot — a parent cannot stream while its delegate
-// does — so its text is committed at once, inside its OWN run. That is what keeps an abandoned
-// delegate's half-sentence the child's: without it, a delegate that faulted before its MessageEvent
-// would leave text for the parent's next event to adopt as a top-level answer, or to overwrite.
+// A switch between runs at the same depth is concurrent siblings alternating through the single
+// slot (ADR 0039). A switch across depths used to be read as the serial hand-over the buffer was
+// built for — "a parent cannot stream while its delegate does" — and committed the displaced text at
+// once; that is false under fan-out with nested children, where sibling B's grandchild streaming
+// mid-sentence of A would commit A's partial text as a fragment that A's later MessageEvent then
+// repeated whole. Parking on every switch is what makes a run's text reach its entries exactly
+// once: nothing precedes the canonical MessageEvent, and a run that never sends one is committed at
+// its own SubAgentFinished phase (addSubAgentPhase) or, top-level, on the cancel (commitCancelled).
+// The cost is stated, not hidden: a parked run paints nothing from the other run's first token
+// until its own next token (render.go's preview reads the live buffer alone), which is what a
+// displaced sibling always showed.
 func (t *transcript) displace(run runRef) {
 	if !t.streaming || t.pendingRun == run {
 		return
 	}
-	if t.pendingRun.depth == run.depth {
-		t.park()
-		return
-	}
-	open := t.pendingRun
-	text := trimBlankLines(t.takePending(open))
-	if text == "" {
-		return
-	}
-	t.place(entry{kind: entryAssistant, text: text, depth: open.depth, spawnCallID: open.spawn})
+	t.park()
 }
 
 // park sets the live buffer aside under its own run instead of committing it, and empties the
-// slot for the run whose tokens are arriving. It is what a SIBLING switch does now that children
+// slot for the run whose tokens are arriving. It is what every run switch does now that children
 // interleave (displace): the text waits for its own run's commit point.
 func (t *transcript) park() {
 	if !t.streaming {
@@ -1197,9 +1197,11 @@ func (t *transcript) finalizeNarration(run runRef) {
 }
 
 // closeRun commits what a finished run streamed and never committed — the half-sentence a delegate
-// was midway through when it faulted, was cancelled, or was displaced from the buffer by a sibling
-// and then reported. It runs as the run's report folds into its head (addToolResult), which is the
-// last moment the text can still be placed inside the block it belongs to.
+// was midway through when it faulted, was cancelled, or was displaced from the buffer by another
+// run and then reported. It runs as the run's report folds into its head (addToolResult), which is
+// the last moment the text can still be placed inside the block it belongs to. It is the
+// belt-and-braces exit: the run's SubAgentFinished phase normally committed the residue already
+// (addSubAgentPhase), and a residue already committed leaves nothing here to place.
 //
 // head is the run's own call block, taken by value: place may insert, and an insertion invalidates
 // every pointer into the entries slice.
@@ -1207,11 +1209,17 @@ func (t *transcript) closeRun(head entry) {
 	if !head.headsRun() {
 		return
 	}
-	run := runRef{depth: head.depth + 1, spawn: head.callID}
-	if t.streaming && t.pendingRun == run {
-		t.park()
-	}
-	text := trimBlankLines(t.unpark(run).String())
+	t.commitResidue(runRef{depth: head.depth + 1, spawn: head.callID})
+}
+
+// commitResidue commits everything the run streamed and never committed — its parked text plus the
+// live buffer when the run still holds it — as one assistant entry inside the run, and nothing when
+// there is none. It is the commit point of a run that ENDED without a commit point of its own: a
+// delegate that faulted, was cancelled or was dropped with its group before its MessageEvent, whose
+// text would otherwise wait in the parked slot forever. Its two callers are the run's finished
+// phase (addSubAgentPhase) and its report fold (closeRun); whichever runs second finds nothing.
+func (t *transcript) commitResidue(run runRef) {
+	text := trimBlankLines(t.takePending(run))
 	if text == "" {
 		return
 	}
@@ -1231,7 +1239,8 @@ func (t *transcript) closeRun(head entry) {
 //
 // A whitespace-only buffer commits nothing: an Exchange cancelled before the first token leaves the
 // note standing alone, as it always did. Depth ≥ 1 buffers are not this method's to touch — a
-// delegate's own half-sentence is closeRun's, at the moment its report folds into its head.
+// delegate's own half-sentence is committed at its own SubAgentFinished phase (addSubAgentPhase),
+// or as its report folds into its head (closeRun).
 func (t *transcript) commitCancelled() {
 	text := trimBlankLines(t.takePending(runRef{}))
 	if text == "" {
@@ -1330,16 +1339,29 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 // phase arriving after its own result, which the orderings make impossible but the fold does not
 // assume — keeps the view it has and takes the phase alone.
 //
-// Nothing is appended, ever: a phase is a fact about a block the transcript already holds, and an
-// event naming no such block (a phase for a run this view never saw) folds nothing at all.
+// The finished phase is also where the run's streamed RESIDUE is committed — what the child streamed
+// and never committed, parked when another run took the buffer (displace) — as one assistant entry
+// inside the run (commitResidue). Every finished phase does it, cancelled or not, because the phase
+// is the one boundary every delegation crosses: a fan-out group is dropped whole when ANY member is
+// cancelled and no ToolResultEvent follows for any slot, so a sibling that FAULTED mid-stream (its
+// phase came earlier, Cancelled=false) would never reach closeRun; keyed on the cancelled exit
+// alone, its words would be lost. The residue is placed BEFORE the head is looked up: place may
+// insert, and an insertion invalidates every pointer into the entries slice.
 //
-// A CANCELLED finished folds nothing either, and deliberately does not even record the phase. That
-// phase exists to close the bracket for a log reader (ADR 0075 decision 12); on screen the
-// delegation was rolled back, so it carries no report to enrich with and must keep reading as
+// Beyond that residue nothing is appended: a phase is a fact about a block the transcript already
+// holds, and an event naming no such block (a phase for a run this view never saw) folds nothing
+// onto any head.
+//
+// A CANCELLED finished folds nothing onto the head either, and deliberately does not even record the
+// phase. That phase exists to close the bracket for a log reader (ADR 0075 decision 12); on screen
+// the delegation was rolled back, so it carries no report to enrich with and must keep reading as
 // interrupted. Storing the phase is what would break that: subAgentReported and childPhaseOf both
 // answer from it, so a cancelled head would tick ✓ and lose its live star — the interrupted mark
 // closeInterruptedCalls gives it is the honest one.
 func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
+	if e.Phase == domain.SubAgentFinished {
+		t.commitResidue(runOf(e.EventBase))
+	}
 	if e.Cancelled {
 		return
 	}

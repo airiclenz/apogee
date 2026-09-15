@@ -298,7 +298,11 @@ NOTES (2026-09-15): consequential edit — internal/context/toolresult.go: the f
 
 **Commit:** `fix(agent): degenerate child narration is a fault; sub_agent results cap at 64 KiB`
 
-## 12. A child's streamed text is committed once: `displace` parks on every cross-depth switch
+## 12. A child's streamed text is committed once: `displace` parks on every cross-depth switch — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the shared body of the phase exit and `closeRun` is one helper, `commitResidue(run)` (drains parked text plus the live buffer via `takePending`); `closeRun` is now a one-line call to it — behaviour unchanged, kept as belt-and-braces per the item.
+NOTES (2026-09-15): the residue is committed on the phase BEFORE the head look-up in `addSubAgentPhase` (place may insert and move the slice); a Finished phase for a run with no head still commits, falling back to `place`'s append, the same fallback every un-headed entry takes.
+NOTES (2026-09-15): the two re-pinned tests keep the parent's event (readCall / parent MessageEvent) between the child's token and the cancelled phase, so each covers both halves — the park on the parent's switch and the commit at the phase.
 
 **What:** Recast at the regression check (2026-09-14). Fixes the fragment-then-duplicate bug (review headline 13): `internal/tui/transcript.go` `displace` parks the buffered run on a same-depth switch but COMMITS it as an entry on a cross-depth switch ("a parent cannot stream while its delegate does") — false under fan-out with nested children, where sibling B's grandchild streaming mid-A commits A's partial text as a fragment and A's later `MessageEvent` commits the whole text again. Fix (writer call): `displace` always parks; `closeRun` keeps committing an abandoned run's residue; `commitAssistant` on a canonical `MessageEvent` replaces any fragment entries already committed for that run (matched by `SpawnCallID` + depth) instead of appending. The session record (`session.Entry` per run) follows. Visible change (stated, not guarded): a parked run paints nothing — `render.go`'s preview reads only the live buffer, never `t.parked` — so from the other run's first token until its own next token the parked run's view shows no partial text, where today the cross-depth switch left it on screen as a committed fragment; this is the existing same-depth sibling behaviour, now uniform.
 

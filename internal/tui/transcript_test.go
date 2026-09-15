@@ -410,7 +410,8 @@ func TestTranscriptBlankMessageCommitsNothing(t *testing.T) {
 // commitCancelled is the depth-0 commit point, and it drains the top-level buffer wherever the
 // buffer is: a delegate streaming at depth 1 has PARKED the parent's half-sentence out of the live
 // buffer, and a cancel landing in that window must still commit it. The delegate's own buffer is
-// not its to touch — that text waits for closeRun, at the moment the run's report folds in.
+// not its to touch — that text waits for its own run's finished phase (addSubAgentPhase), or for
+// closeRun at the moment the run's report folds in.
 func TestCommitCancelledRecoversAParkedTopLevelPartial(t *testing.T) {
 	tr := feed(
 		domain.TokenEvent{Text: "Item 1."},
@@ -1895,14 +1896,21 @@ func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
 
 // TestSubAgentStreamResidueIsNotAttributedToTheParent pins the committed side: a delegate that
 // streamed and then never sent its MessageEvent (faulted, abandoned, cancelled) leaves text in the
-// buffer, and the parent's next event must not adopt it. The buffer closes at ITS OWN depth, so the
-// residue lands inside the run rather than as a permanent top-level answer in the main transcript.
+// buffer, and the parent's next event must not adopt it. The parent's event PARKS the text under
+// the run that streamed it (displace), and the run's own finished phase commits it — here the
+// cancelled exit, which no ToolResultEvent ever follows — so the residue lands inside the run
+// rather than as a permanent top-level answer in the main transcript.
 func TestSubAgentStreamResidueIsNotAttributedToTheParent(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
-	streamAt(tr, 1, "child words")
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
 
 	readCall(tr, "c1", "a.go", 1, 5, 0)
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Phase:     domain.SubAgentFinished,
+		Cancelled: true,
+	})
 
 	committed := 0
 	for i := range tr.entries {
@@ -1925,16 +1933,22 @@ func TestSubAgentStreamResidueIsNotAttributedToTheParent(t *testing.T) {
 // TestParentMessageKeepsTheDelegatesStreamInsideItsRun is the residue rule on the MESSAGE path,
 // where the loss is silent rather than misattributed. commitAssistant has a rescue for a blank
 // canonical text — it falls back to the buffer — but a parent that answers with words of its own
-// never reaches it, so without the foreign-depth close the abandoned delegate's streamed words would
-// be overwritten by the parent's answer and vanish from the transcript entirely. Closing at the
-// buffer's OWN depth first keeps them, inside the run they were streamed in, and the parent's
-// answer still commits as the top-level answer it is.
+// never reaches it, so without the park on the parent's switch the abandoned delegate's streamed
+// words would be overwritten by the parent's answer and vanish from the transcript entirely.
+// Parking them under the run that streamed them (displace) and committing them at that run's
+// finished phase keeps them inside the run, and the parent's answer still commits as the top-level
+// answer it is.
 func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
-	streamAt(tr, 1, "child words")
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
 
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 0}, Text: "parent answer"})
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Phase:     domain.SubAgentFinished,
+		Cancelled: true,
+	})
 
 	var child, parent *entry
 	for i := range tr.entries {

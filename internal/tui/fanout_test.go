@@ -383,6 +383,103 @@ func TestAbandonedChildStreamCommitsWhenItsRunEnds(t *testing.T) {
 	}
 }
 
+// TestNestedChildStreamMidSiblingCommitsTheSiblingOnce is the fragment-then-duplicate bug (the
+// 2026-09-14 session-mining review, headline 13). Two depth-1 siblings run at once; B delegates in
+// turn, and B's grandchild streams and calls a tool while A is mid-sentence. The hand-over to the
+// grandchild crosses depths, and used to COMMIT A's partial text as an entry — "a parent cannot
+// stream while its delegate does" being false for a sibling's descendant — so A's later
+// MessageEvent committed the whole text a second time. The switch now parks whatever the depths
+// (displace): A's run holds exactly one answer, the whole one, and no entry anywhere carries the
+// fragment alone.
+func TestNestedChildStreamMidSiblingCommitsTheSiblingOnce(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	subAgentCall(tr, "s2", "survey the docs", 0)
+	// B's own delegation: the sub_agent call that heads the grandchild's run, at B's depth.
+	tr.apply(domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s2"},
+		Call:      domain.ToolCall{ID: "g1", Tool: "sub_agent", Arguments: []byte(`{"task":"list the docs"}`)},
+	})
+
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "the tests "})
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 2, CallID: "g1"}, Text: "listing"})
+	tr.apply(domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: 2, CallID: "g1"},
+		Call:      domain.ToolCall{ID: "g1r", Tool: "read_file", Arguments: []byte(`{"path":"docs/a.md"}`)},
+	})
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "all pass"})
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "the tests all pass"})
+
+	head := headIndex(t, tr, "s1")
+	span := tr.entries[head+1 : head+1+subAgentSpan(tr.entries, head)]
+	if len(span) != 1 || span[0].kind != entryAssistant || span[0].text != "the tests all pass" {
+		t.Fatalf("run s1 committed %d entries, want its one whole answer:\n%s", len(span), plainRender(tr))
+	}
+	for i, e := range tr.entries {
+		if e.kind == entryAssistant && e.text == "the tests" {
+			t.Errorf("entry %d is the fragment A streamed before the hand-over, committed on its own", i)
+		}
+	}
+	// The grandchild's own narration landed inside ITS run, under B, exactly as before.
+	if g := headIndex(t, tr, "g1"); tr.entries[g+1].text != "listing" || tr.entries[g+1].spawnCallID != "g1" {
+		t.Errorf("the grandchild's narration did not land in its own run:\n%s", plainRender(tr))
+	}
+}
+
+// TestFaultedSiblingResidueCommitsAtItsFinishedPhase is the parked text's exit for a group that
+// never reports. A fan-out is dropped whole when any member is cancelled: no ToolResultEvent follows
+// for any slot, so closeRun never runs for any of them. A sibling that FAULTED mid-sentence got its
+// finished phase earlier, with Cancelled=false — that phase, not the cancelled exit alone, is what
+// commits its residue inside its run; the cancelled member's phase does the same for its own words.
+func TestFaultedSiblingResidueCommitsAtItsFinishedPhase(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	subAgentCall(tr, "s2", "survey the docs", 0)
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "halfway through"})
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s2"}, Text: "still going"})
+
+	// s1 faults: its finished phase carries the error result and is not cancelled.
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Phase:     domain.SubAgentFinished,
+		Result:    domain.ToolResult{CallID: "s1", Content: "upstream: 502", IsError: true},
+	})
+	// The human stops the group: s2's bracket closes cancelled, and no result burst ever comes.
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s2"},
+		Phase:     domain.SubAgentFinished,
+		Cancelled: true,
+	})
+
+	for _, tc := range []struct{ spawn, want string }{
+		{spawn: "s1", want: "halfway through"},
+		{spawn: "s2", want: "still going"},
+	} {
+		head := headIndex(t, tr, tc.spawn)
+		span := tr.entries[head+1 : head+1+subAgentSpan(tr.entries, head)]
+		var got []string
+		for _, e := range span {
+			if e.kind == entryAssistant {
+				got = append(got, e.text)
+			}
+		}
+		if len(got) != 1 || got[0] != tc.want {
+			t.Errorf("run %s committed %q at its finished phase, want exactly [%q]:\n%s",
+				tc.spawn, got, tc.want, plainRender(tr))
+		}
+	}
+	if tr.entries[headIndex(t, tr, "s1")].phase != domain.SubAgentFinished {
+		t.Errorf("the faulted sibling's head did not take its finished phase")
+	}
+	if len(tr.parked) != 0 || tr.streaming {
+		t.Errorf("text still waiting after both phases: parked %d, streaming %v", len(tr.parked), tr.streaming)
+	}
+}
+
 // A host note landing between two announcements of one fan-out does not split the group. The
 // delegations are grouped by ADJACENCY of blocks (subAgentGroup), so a note parked between them
 // would be a permanent divider: two "✦ Sub-Agent (1)" headers where the reader was promised one.

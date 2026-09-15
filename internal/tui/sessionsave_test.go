@@ -387,3 +387,43 @@ func TestSaveCarriesBothHalvesOfTheSessionsSpend(t *testing.T) {
 		t.Errorf("saved delegate usage = %+v, want the two heads' readings summed %+v", got, want)
 	}
 }
+
+// TestSavedRecordHoldsANestedChildsSiblingOnce is the session-record side of the once-only commit:
+// the record persists the committed entries (encodeTranscript), so a sibling whose partial text was
+// committed as a fragment at a cross-depth hand-over and then whole at its MessageEvent used to be
+// saved twice and replayed twice. The hand-over parks (displace), and the record carries the one
+// whole answer.
+func TestSavedRecordHoldsANestedChildsSiblingOnce(t *testing.T) {
+	var src transcript
+	src.addUser("survey everything", nil)
+	src.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 0},
+		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"survey the tests"}`)}})
+	src.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 0},
+		Call: domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: []byte(`{"task":"survey the docs"}`)}})
+	src.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s2"},
+		Call: domain.ToolCall{ID: "g1", Tool: "sub_agent", Arguments: []byte(`{"task":"list the docs"}`)}})
+	src.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "the tests "})
+	src.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 2, CallID: "g1"}, Text: "listing"})
+	src.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 2, CallID: "g1"},
+		Call: domain.ToolCall{ID: "g1r", Tool: "read_file", Arguments: []byte(`{"path":"docs/a.md"}`)}})
+	src.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "all pass"})
+	src.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "the tests all pass"})
+
+	blob, err := encodeTranscript(&src)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	entries, err := decodeTranscript(blob)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var got []string
+	for _, e := range entries {
+		if e.kind == entryAssistant && e.spawnCallID == "s1" {
+			got = append(got, e.text)
+		}
+	}
+	if len(got) != 1 || got[0] != "the tests all pass" {
+		t.Errorf("the saved record holds %q for run s1, want exactly its one whole answer", got)
+	}
+}
