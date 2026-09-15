@@ -151,12 +151,20 @@ func DefaultDangerousRules() []Rule {
 		// `<name>.git/config` does match, which is the same control plane by another path.
 		// WritesOnly: reading `.git/config` (inspecting remotes) is ordinary in-workspace
 		// work — the rule guards the write that plants delayed execution, not the read.
+		// ShellWriteView: the same read through the terminal — `ls -la .git/hooks`,
+		// `cat .git/config`, `cmp .beads/hooks/commit-msg .git/hooks/commit-msg` — is
+		// judged by what the command line writes (writeTargetsOf), so only a redirect into
+		// the control plane or a mutating leader naming it (`echo x > .git/config`,
+		// `rm -rf .git/hooks`, `git config -f .git/config …`) still refuses. This is the ONE
+		// rule that opts in (owner call, 2026-09-14 — ADR 0049): its subject is in-workspace
+		// and read as a matter of course, where the secret-file rules' subjects are not.
 		{
-			ID:         "write-git-control-plane",
-			Tier:       TierHardRefuse,
-			Reason:     "write or delete under a repository's git control plane (.git/hooks, .git/config)",
-			Pattern:    `\.git/(?:hooks|config|modules)\b`,
-			WritesOnly: true,
+			ID:             "write-git-control-plane",
+			Tier:           TierHardRefuse,
+			Reason:         "write or delete under a repository's git control plane (.git/hooks, .git/config)",
+			Pattern:        `\.git/(?:hooks|config|modules)\b`,
+			WritesOnly:     true,
+			ShellWriteView: true,
 		},
 		// Writes / deletes reaching apogee's own control plane — a Tier-2 forced LOOK, the one
 		// force-approval rule written among the hard refuses above, because its subject is the
@@ -181,7 +189,9 @@ func DefaultDangerousRules() []Rule {
 		// skill run starts by listing its own skill directory and copy_file-ing resources
 		// out of it, and without the class this rule refused that first step outright. The Hint
 		// exists because WritesOnly only helps tools that DECLARE read-source keys — the
-		// terminal declares none, so a shell command that merely reads from the home skill
+		// terminal declares none, and this rule keeps the FULL shell text rather than the
+		// shell write view `write-git-control-plane` opts into (ShellWriteView; owner call,
+		// 2026-09-14 — ADR 0049), so a shell command that merely reads from the home skill
 		// library still trips this write rule, and the write-flavoured Reason alone sends a
 		// small model looping on rewrites of the write half. The hint names the sanctioned
 		// route instead — and at Tier 2 it now rides the Approval prompt as its remedy line and

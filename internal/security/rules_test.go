@@ -253,7 +253,9 @@ func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
 // TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute pins the known
 // false positive the rule's Hint exists for: the terminal declares no read-source keys, so
 // a shell command that only READS from the home skill library still trips the write rule.
-// The look stands (WritesOnly narrows by declared class, not by parsing shell text) — but
+// The look stands — this rule keeps the full shell text and does not opt into the shell write
+// view that `write-git-control-plane` alone takes (Rule.ShellWriteView; owner call, 2026-09-14
+// — ADR 0049), so the call is put through the terminal's own declaration and still stops — but
 // the Decision must carry the Hint naming the dedicated tools, so a small model reroutes
 // instead of looping on rewrites of the write half of its command. At Tier 2 that Hint is
 // what the Approval prompt shows the human as its remedy and what a denied call hands back
@@ -263,7 +265,7 @@ func TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute(t *
 	g := DefaultDangerousActionGuard()
 
 	call := terminalCall("cp /home/u/.apogee/skills/x/prompts/a.md /tmp/")
-	d := g.Inspect(call, nil, nil)
+	d := g.Inspect(call, shellTool, nil)
 
 	if d.Tier != TierForceApproval {
 		t.Fatalf("Inspect tier = %d, want TierForceApproval (rule=%q)", d.Tier, d.RuleID)

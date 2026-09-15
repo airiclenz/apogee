@@ -354,23 +354,32 @@ func TestDangerousActionGuard_UnparseableArgsStillInspected(t *testing.T) {
 }
 
 // stubTool is the minimal domain.Tool the class-aware cases need: a name, an inert
-// Execute, and the three optional class declarations under test (domain.ReadOnlyTool via
-// readOnly, domain.ReadSourceTool via sourceKeys, domain.PromptTool via promptKeys — nil
-// means no declaration takes effect, since ReadSourceArgKeys and PromptArgKeys both treat
-// an empty answer as "none").
+// Execute, and the four optional class declarations under test (domain.ReadOnlyTool via
+// readOnly, domain.ReadSourceTool via sourceKeys, domain.PromptTool via promptKeys,
+// domain.ShellCommandTool via shellKeys — nil means no declaration takes effect, since
+// ReadSourceArgKeys, PromptArgKeys and ShellCommandArgKeys all treat an empty answer as
+// "none").
 type stubTool struct {
 	name       string
 	readOnly   bool
 	sourceKeys []string
 	promptKeys []string
+	shellKeys  []string
 }
 
-func (s stubTool) Name() string             { return s.name }
-func (s stubTool) Description() string      { return "" }
-func (s stubTool) Schema() json.RawMessage  { return nil }
-func (s stubTool) ReadOnly() bool           { return s.readOnly }
-func (s stubTool) ReadSourceKeys() []string { return s.sourceKeys }
-func (s stubTool) PromptArgKeys() []string  { return s.promptKeys }
+func (s stubTool) Name() string               { return s.name }
+func (s stubTool) Description() string        { return "" }
+func (s stubTool) Schema() json.RawMessage    { return nil }
+func (s stubTool) ReadOnly() bool             { return s.readOnly }
+func (s stubTool) ReadSourceKeys() []string   { return s.sourceKeys }
+func (s stubTool) PromptArgKeys() []string    { return s.promptKeys }
+func (s stubTool) ShellCommandKeys() []string { return s.shellKeys }
+
+// shellTool is the stub shaped like terminal: write-capable, its `command` declared a shell
+// command line. Every shell-write-view case passes it — never nil — so the narrowing is
+// shown to be earned by the declaration.
+var shellTool = stubTool{name: "terminal", shellKeys: []string{"command"}}
+
 func (s stubTool) Execute(context.Context, domain.ToolCall) (domain.ToolResult, error) {
 	return domain.ToolResult{}, nil
 }
@@ -594,6 +603,8 @@ func TestWriteShapedViewDropsPromptAndSourceKeysTogether(t *testing.T) {
 // exemption: exactly the four whose pattern is a bare write/delete target path. A new
 // path-shaped rule must set the field deliberately; a command-shaped rule must not carry
 // it (TestCommandShapedRulesIgnoreTheToolClass is the behavioural half of that claim).
+// The shell write view is narrower still: exactly ONE of the four opts in (owner call,
+// 2026-09-14 — ADR 0049), and the guard's Rules copy carries the flag through.
 func TestWriteShapedDefaultRulesCarryWritesOnly(t *testing.T) {
 	t.Parallel()
 	want := map[string]bool{
@@ -602,10 +613,86 @@ func TestWriteShapedDefaultRulesCarryWritesOnly(t *testing.T) {
 		"write-git-control-plane":      true,
 		"write-apogee-control-plane":   true,
 	}
-	for _, r := range DefaultDangerousRules() {
+	wantShellView := map[string]bool{"write-git-control-plane": true}
+	for _, r := range DefaultDangerousActionGuard().Rules() {
 		if r.WritesOnly != want[r.ID] {
 			t.Errorf("rule %q WritesOnly = %v, want %v", r.ID, r.WritesOnly, want[r.ID])
 		}
+		if r.ShellWriteView != wantShellView[r.ID] {
+			t.Errorf("rule %q ShellWriteView = %v, want %v", r.ID, r.ShellWriteView, wantShellView[r.ID])
+		}
+	}
+}
+
+// TestShellWriteViewJudgesWhatTheCommandWrites pins the shell write view (apogee-2ay): through
+// a tool that declares its command line (domain.ShellCommandTool), the one rule that opted in —
+// write-git-control-plane — sees only what the line writes, so the three review commands that
+// tripped it pass, while a redirect or a mutating leader naming the control plane still
+// refuses. The rules that did NOT opt in keep the full text: the secret-file reads stay refused
+// and the ~/.apogee read still forces the look, Hint and all. A tool without the marker — a
+// python line, the unknown nil tool — is judged word for word as before.
+func TestShellWriteViewJudgesWhatTheCommandWrites(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	cases := []struct {
+		name     string
+		call     domain.ToolCall
+		tool     domain.Tool
+		wantTier Tier
+		wantRule string
+	}{
+		// The review's three commands pass through the terminal.
+		{"listing the hooks dir", terminalCall("ls -la .git/hooks"), shellTool, TierNone, ""},
+		{"comparing a hook against its source", terminalCall("cmp .beads/hooks/commit-msg .git/hooks/commit-msg"), shellTool, TierNone, ""},
+		{"reading the git config", terminalCall("cat .git/config"), shellTool, TierNone, ""},
+		// Writes into the control plane still refuse.
+		{"a redirect into the git config", terminalCall("echo x > .git/config"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		{"deleting the hooks dir", terminalCall("rm -rf .git/hooks"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		{"git config writing the workspace config", terminalCall("git config -f .git/config user.name x"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		{"a read chained with a write", terminalCall("cat .git/config && cp x .git/hooks/pre-commit"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		{"a cd into the hooks dir before the delete", terminalCall("cd .git/hooks && rm -rf pre-commit"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		{"a variable naming the hooks dir before the delete", terminalCall("d=.git/hooks; rm -rf $d"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		// Full-text rules are untouched by the view.
+		{"reading an ssh key", terminalCall("cat ~/.ssh/id_rsa"), shellTool, TierHardRefuse, "write-ssh-keys"},
+		{"reading the aws credentials", terminalCall("cat ~/.aws/credentials"), shellTool, TierHardRefuse, "write-credential-persistence"},
+		{"listing apogee's home still forces the look", terminalCall("ls ~/.apogee"), shellTool, TierForceApproval, "write-apogee-control-plane"},
+		// No marker, no view.
+		{"a python line naming the hooks dir", argCall("python_exec", map[string]any{"code": "open('.git/hooks/pre-commit', 'w')"}), stubTool{name: "python_exec"}, TierHardRefuse, "write-git-control-plane"},
+		{"the unknown tool keeps the floor", terminalCall("ls -la .git/hooks"), nil, TierHardRefuse, "write-git-control-plane"},
+		{"a workdir is not a command line", argCall("terminal", map[string]any{"command": "ls", "workdir": ".git/hooks"}), shellTool, TierHardRefuse, "write-git-control-plane"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call, tc.tool, nil)
+
+			if d.Tier != tc.wantTier {
+				t.Fatalf("Inspect(%s) tier = %d, want %d (rule=%q reason=%q)",
+					tc.call.Arguments, d.Tier, tc.wantTier, d.RuleID, d.Reason)
+			}
+			if d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%s) rule = %q, want %q", tc.call.Arguments, d.RuleID, tc.wantRule)
+			}
+			if tc.wantRule == "write-apogee-control-plane" && d.Hint == "" {
+				t.Error("Decision.Hint is empty, want the forced look's hint naming the sanctioned read route")
+			}
+		})
+	}
+}
+
+// TestShellWriteViewSurvivesMalformedArguments pins the fail-closed edge: a call whose
+// arguments are not a JSON object earns no narrowing, so the declared shell tool is judged on
+// the raw bytes like any other.
+func TestShellWriteViewSurvivesMalformedArguments(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	call := domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: json.RawMessage(`"ls -la .git/hooks`)}
+
+	if d := g.Inspect(call, shellTool, nil); d.Tier != TierHardRefuse {
+		t.Fatalf("malformed shell call tier = %d, want TierHardRefuse (rule=%q)", d.Tier, d.RuleID)
 	}
 }
 

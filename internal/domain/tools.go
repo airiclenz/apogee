@@ -138,6 +138,34 @@ func IsSubprocessTool(t Tool) bool {
 	return ok && st.Subprocess()
 }
 
+// ShellCommandTool is an optional interface a SubprocessTool implements to declare which of
+// its argument keys carry a SHELL COMMAND LINE — text a POSIX shell parses into leaders,
+// operands, pipelines and redirects. The dangerous-action guard consults it so a write-shaped
+// rule that has opted into the shell write view judges only what that line can WRITE — its
+// redirect targets and the operands of leaders that mutate — instead of every word of it:
+// `ls -la .git/hooks` names a repository's control plane and cannot touch it. It declares an
+// ARGUMENT SHAPE, not trust: only a tool that hands the value to a shell as a command line
+// may implement it (terminal, console_open). An interpreter tool (python_exec) carries a
+// program no shell grammar describes, an MCP tool carries whatever it likes, and neither
+// implements this — they stay fully inspected, so a third-party tool cannot narrow the floor
+// by declaration. ShellCommandArgKeys is the helper the guard calls rather than the type
+// assertion directly.
+type ShellCommandTool interface {
+	Tool
+	// ShellCommandKeys returns the argument keys whose value is a shell command line.
+	ShellCommandKeys() []string
+}
+
+// ShellCommandArgKeys returns the argument keys t has declared as shell command lines via
+// ShellCommandTool. A tool that makes no such declaration — including a nil t — has none, the
+// safe default: every one of its arguments is judged as written, word for word.
+func ShellCommandArgKeys(t Tool) []string {
+	if sc, ok := t.(ShellCommandTool); ok {
+		return sc.ShellCommandKeys()
+	}
+	return nil
+}
+
 // DefaultOffTool is an optional interface a Tool implements to declare that it is present in
 // this BUILD but absent from the DEFAULT menu: registered code nobody is offered until a global
 // `tools.enabled:` entry or a matching Model profile's roster axis lifts it (ADR 0057). It exists

@@ -176,3 +176,34 @@ repo cloned under the scratch dir no longer trips `write-git-control-plane` on i
 The token ends at whitespace or a shell metacharacter, so `cat <scratch>/x;rm -rf /` still
 hard-refuses on its second half. The width is unchanged: everything under the token is inside
 the session's own writable box.
+
+## Note (2026-09-14) — the git control-plane rule reads a shell line for what it writes
+
+Bead `apogee-2ay`: `write-git-control-plane` is a WritesOnly rule, but WritesOnly narrowed only by
+a tool's *declared* argument classes — `copy_file`'s read-source key, a read-only tool's whole
+call — and the terminal declares none, so `ls -la .git/hooks`, `cat .git/config` and
+`cmp .beads/hooks/commit-msg .git/hooks/commit-msg` were hard-refused as writes during the
+2026-09-14 session-mining review. The earlier reading — "WritesOnly narrows by declared class,
+not by parsing shell text" — is superseded for this one rule.
+
+**The shell write view.** A tool that hands an argument to the shell as a command line declares
+it (`domain.ShellCommandTool` — `terminal` and `console_open`, never `python_exec` or an MCP
+tool), and a rule that opts in (`Rule.ShellWriteView`) judges that argument by what the line can
+WRITE (`internal/security/shellwrites.go`, `writeTargetsOf`): its output-redirect targets and the
+operands of leaders that mutate (`rm`, `mv`, `cp`, `tee`, `sed -i`, a `git` verb that writes, …)
+or that the guard does not know — an unknown leader fails closed — while a read leader (`ls`,
+`cat`, `cmp`, `grep`, a `git` read verb, `find` without `-delete`/`-exec`, …) contributes nothing.
+Pipelines, `&&` / `||` / `;` chains and command substitutions are split first; a heredoc body is
+payload. A builtin that moves what a LATER command's operands resolve to — `cd`, `export`, `set`,
+`unset` — is not a read leader: `cd .git/hooks && rm -rf pre-commit` names the control plane only
+in the `cd`, so those operands feed the view too (owner decision, 2026-09-15), and a command that
+is nothing but a `NAME=value` assignment (`d=.git/hooks; rm -rf $d`) feeds its value the same
+way. Nothing is synthesised: `git config -f .git/config user.name x` is refused because the
+path is an OPERAND of a mutating verb, not because the guard inferred `.git/config` from
+`git config`.
+
+**Scope (owner call, 2026-09-14).** Only `write-git-control-plane` opts in. The secret-file rules
+(`write-ssh-keys`, `write-credential-persistence`) and the `~/.apogee` forced look keep the full
+shell text: `cat ~/.ssh/id_rsa` stays refused, `ls ~/.apogee` still stops for the look and its
+Hint still reads "needs approval, even for a read". A tool without the marker is judged word for
+word whatever the rule says, so a third-party tool cannot narrow the floor by declaration.

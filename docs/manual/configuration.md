@@ -1698,7 +1698,10 @@ workspace's own directory included; a relative target such as `./build` is allow
 fork bomb, a write to `~/.ssh`, to a credential or persistence file, or to a repository's
 `.git/hooks`. The model gets back an error naming why, and — where the matched rule knows a
 sanctioned route — where to go instead: the `rm -rf` refusal, for one, says to re-issue the
-path relative to the workspace or delete through the native tools.
+path relative to the workspace or delete through the native tools. The git control-plane
+rule reads a terminal command for what it *writes*: `cat .git/config` or `ls -la .git/hooks`
+passes as the read it is, while `echo x > .git/config`, `rm -rf .git/hooks` or a program the
+guard does not know naming that path still refuses.
 
 **Tier 2 forces the approval prompt**, even on the auto rung where nothing else would ask.
 These are the idioms that are usually legitimate and occasionally catastrophic: `curl … |

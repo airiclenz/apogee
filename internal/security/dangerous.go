@@ -78,6 +78,17 @@ type Rule struct {
 	// of the floor. False (the zero value, and every config-supplied rule) means the
 	// rule is matched against the full text of every call, the pre-field behaviour.
 	WritesOnly bool
+	// ShellWriteView opts a WritesOnly rule into the shell write view: for a tool that
+	// declares which argument carries a shell command line (domain.ShellCommandTool —
+	// terminal, console_open), the rule is matched against what that line can WRITE
+	// (writeTargetsOf: redirect targets and the operands of leaders that mutate or are
+	// unknown) in place of the line's every word, so `ls -la .git/hooks` or `cat .git/config`
+	// is the read it is. It is opt-in per rule, and only `write-git-control-plane` opts in
+	// (owner call, 2026-09-14 — ADR 0049): the secret-file rules and the `~/.apogee` forced
+	// look keep the full shell text, so what they refuse or put to the human is unchanged.
+	// A tool without the marker — python_exec, every MCP tool — is judged on its full text
+	// whatever the rule says. Meaningless without WritesOnly.
+	ShellWriteView bool
 
 	re *regexp.Regexp // compiled lazily by compile()
 }
@@ -126,8 +137,10 @@ func DefaultDangerousActionGuard() *DangerousActionGuard {
 // normalizes it, and returns the strictest matching rule's Decision (TierNone when
 // nothing matches). A WritesOnly rule additionally respects the tool's own declared
 // class: it is skipped when the tool is read-only, and judges a text that omits the
-// tool's declared read-source values (see the Rule field's doc). It never errors and
-// never executes anything — pure inspection.
+// tool's declared read-source values (see the Rule field's doc); one that also carries
+// ShellWriteView judges a tool's declared shell command line (domain.ShellCommandTool) by
+// what it writes rather than by every word it names. It never errors and never executes
+// anything — pure inspection.
 //
 // exemptPaths are paths whose spellings NO rule may see: maskExempt removes them from both
 // views before any rule runs, hard-refuse rules included. Today the caller names the
@@ -148,11 +161,22 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, e
 	// The write-shaped view of the same call: identical unless the tool declares
 	// read-source keys, in which case those values are out of a write rule's sight too.
 	writes := full
-	if sources := domain.ReadSourceArgKeys(tool); len(sources) > 0 {
-		dropped := make([]string, 0, len(prompts)+len(sources))
-		dropped = append(dropped, prompts...)
-		dropped = append(dropped, sources...)
+	sources := domain.ReadSourceArgKeys(tool)
+	dropped := make([]string, 0, len(prompts)+len(sources))
+	dropped = append(dropped, prompts...)
+	dropped = append(dropped, sources...)
+	if len(sources) > 0 {
 		writes = maskExempt(normalize(inspectableText(call, dropped)), exemptPaths)
+	}
+
+	// The shell write view of the same call, for the rules that opted in: identical unless
+	// the tool declares a shell command-line argument, in which case that argument is
+	// replaced by what its command line can write (writeTargetsOf).
+	shellWrites := writes
+	if shellKeys := domain.ShellCommandArgKeys(tool); len(shellKeys) > 0 {
+		if text, ok := shellWriteText(call, shellKeys, dropped); ok {
+			shellWrites = maskExempt(normalize(text), exemptPaths)
+		}
 	}
 
 	for _, r := range g.rules {
@@ -160,7 +184,11 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, e
 			if readOnly {
 				continue
 			}
-			if r.re.MatchString(writes) {
+			view := writes
+			if r.ShellWriteView {
+				view = shellWrites
+			}
+			if r.re.MatchString(view) {
 				return Decision{Tier: r.Tier, RuleID: r.ID, Reason: r.Reason, Hint: r.Hint}
 			}
 			continue
@@ -177,7 +205,10 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, e
 func (g *DangerousActionGuard) Rules() []Rule {
 	out := make([]Rule, len(g.rules))
 	for i, r := range g.rules {
-		out[i] = Rule{ID: r.ID, Pattern: r.Pattern, Tier: r.Tier, Reason: r.Reason, Hint: r.Hint, WritesOnly: r.WritesOnly}
+		out[i] = Rule{
+			ID: r.ID, Pattern: r.Pattern, Tier: r.Tier, Reason: r.Reason, Hint: r.Hint,
+			WritesOnly: r.WritesOnly, ShellWriteView: r.ShellWriteView,
+		}
 	}
 	return out
 }
@@ -262,6 +293,44 @@ func inspectableText(call domain.ToolCall, dropKeys []string) string {
 	}
 	collectStrings(decoded, &b, skip)
 	return b.String()
+}
+
+// shellWriteText is inspectableText's shell-aware twin for the write view a ShellWriteView
+// rule matches: the tool name and every string leaf in the arguments except the payload
+// keys, dropKeys and the shell command-line keys — whose values contribute their write
+// targets (writeTargetsOf) instead of their words. ok is false when the arguments are not a
+// JSON object, in which case the caller keeps the write-shaped view it already has (the raw
+// bytes, fully judged): the narrowing is earned by a well-formed call, never by a malformed one.
+func shellWriteText(call domain.ToolCall, shellKeys, dropKeys []string) (text string, ok bool) {
+	var args map[string]any
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return "", false
+	}
+	shell := make(map[string]bool, len(shellKeys))
+	for _, k := range shellKeys {
+		shell[foldKey(k)] = true
+	}
+	dropped := make(map[string]bool, len(dropKeys))
+	for _, k := range dropKeys {
+		dropped[foldKey(k)] = true
+	}
+	skip := func(key string) bool {
+		return isPayloadKey(key) || dropped[foldKey(key)] || shell[foldKey(key)]
+	}
+
+	var b strings.Builder
+	b.WriteString(call.Tool)
+	b.WriteByte(' ')
+	collectStrings(args, &b, skip)
+	for key, value := range args {
+		line, isString := value.(string)
+		if !shell[foldKey(key)] || !isString {
+			continue
+		}
+		b.WriteByte(' ')
+		b.WriteString(writeTargetsOf(line))
+	}
+	return b.String(), true
 }
 
 // collectStrings walks a decoded JSON value appending every string leaf (space-joined) so

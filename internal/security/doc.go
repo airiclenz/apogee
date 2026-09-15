@@ -44,8 +44,12 @@
 //     the coverage rather than losing it. A declared read-source argument
 //     (domain.ReadSourceTool — copy_file's source) is out of the WRITE-shaped rules'
 //     sight only (Rule.WritesOnly), which a read-only tool skips outright, so listing or
-//     materializing the home skill library under ~/.apogee is not judged a "write". Tools
-//     that declare nothing stay fully inspected.
+//     materializing the home skill library under ~/.apogee is not judged a "write". A
+//     declared shell command line (domain.ShellCommandTool — terminal's and console_open's
+//     command) is read for what it WRITES by the one write-shaped rule that opted in
+//     (Rule.ShellWriteView — write-git-control-plane; shellwrites.go), so `cat .git/config`
+//     is the read it is while `echo x > .git/config` still refuses. Tools that declare
+//     nothing stay fully inspected.
 //   - The circuit-breaker (CircuitBreaker): halts a runaway loop of identical failing
 //     calls, surfacing an ErrorEvent rather than spinning.
 //   - The audit record (AuditLog): an append-only call / decision / result trail.
@@ -75,7 +79,11 @@
 // quotes a guarded path nor a delegated task that names one is an action. rules.go is the
 // content: DefaultDangerousRules, the narrow precision-over-recall built-in floor with a comment
 // per rule saying where its boundary is, and MergeDangerousRules, which encodes who may loosen it
-// (global may add or remove, project may only add — ADR 0012).
+// (global may add or remove, project may only add — ADR 0012). shellwrites.go is the shell
+// write view those two lean on: writeTargetsOf, the verb-aware reading of a command line that
+// keeps its redirect targets and the operands of mutating or unknown leaders and drops what a
+// read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared
+// its command-line argument (domain.ShellCommandTool).
 //
 // The runaway halt and the trail. circuitbreaker.go trips after DefaultCircuitBreakerThreshold
 // consecutive identical FAILING calls, keyed by a (tool, arguments) signature that any success

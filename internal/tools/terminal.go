@@ -85,6 +85,11 @@ func (t *Terminal) ReadOnly() bool { return false }
 // keys on to confine it in Auto rather than gating it (domain.SubprocessTool).
 func (t *Terminal) Subprocess() bool { return true }
 
+// ShellCommandKeys declares `command` as the shell command line this tool hands to the shell —
+// the marker (domain.ShellCommandTool) that lets a write-shaped dangerous-action rule judge what
+// the line writes rather than every word it names.
+func (t *Terminal) ShellCommandKeys() []string { return []string{"command"} }
+
 // runTerminalSubprocess runs the shell command (a package var so a test can capture the exact
 // argv and environment this tool builds without launching one — the shape python_exec and
 // run_tests already use).

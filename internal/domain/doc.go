@@ -65,8 +65,8 @@
 //
 // Tools and confinement. tools.go is the open Tool extension point (ADR 0002) with ToolCall,
 // ToolResult, the ToolRegistry, and the marker interfaces the dispatch disposition reads —
-// ReadOnlyTool, SubprocessTool, ExternalEffectTool, ReadSourceTool, PromptTool — plus
-// ApprovalScoper, read on the approval path rather than by the dispatch disposition, and
+// ReadOnlyTool, SubprocessTool, ExternalEffectTool, ReadSourceTool, PromptTool, ShellCommandTool —
+// plus ApprovalScoper, read on the approval path rather than by the dispatch disposition, and
 // DefaultOffTool, read by the registry assembly when it composes the default menu. It also holds
 // FoldArgumentKey, CollidingArgumentKeys and RepeatedArgumentKeys — the one fold every reader of
 // an argument object agrees on (the executor's decode matches keys case-insensitively), the check
