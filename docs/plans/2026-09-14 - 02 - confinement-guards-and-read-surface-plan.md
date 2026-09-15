@@ -55,7 +55,9 @@
 - DENIED: classifying Plan mode by `IsReadOnly` (contract §4 fn 2 stands); a `load_skill` list mode (ADR 0065 §6); refusing GOROOT for `terminal` (no read fence exists); a post-refusal obfuscation audit event (bench-evidence class).
 - Line-number prefixes in `read_file` output (open question 9 — unmined); `grep -c`-style counts beyond `count_only`; any change to VERSION.
 
-## 1. Gate: plan 2026-09-14 - 01 is archived
+## 1. Gate: plan 2026-09-14 - 01 is archived — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): gate verified — plan 01 is absent from docs/plans/ and present under docs/plans/archived/; the archived copy keeps `**Status:** unexecuted` (archived-plan convention) and all seven items carry `✅ DONE (2026-09-14)`; acceptance command passed; the three files items 3 and 12 will edit (cmd/apogee/e2e_announced_test.go, cmd/apogee/wire_boot.go, internal/agent/orientation.go — orientationBlock at line 112) exist at HEAD.
 
 **What:** Verify `docs/plans/2026-09-14 - 01 - queued-message-preemption-and-scratch-in-lower-modes-plan.md` no longer exists under `docs/plans/` and its archived copy under `docs/plans/archived/` reads `**Status:** executed` (or every item carries a DONE marker). Items 3 and 12 of this plan edit `cmd/apogee/e2e_announced_test.go`, `cmd/apogee/wire_boot.go` and `internal/agent/orientation.go`, which that plan rewrites. No code change.
 
