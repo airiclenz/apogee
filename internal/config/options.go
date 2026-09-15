@@ -316,6 +316,11 @@ type Options struct {
 	// human's to stop.
 	DelegateMaxSteps int
 
+	// delegateMaxDepth bounds how deep delegation may nest (default 1: the session delegates,
+	// its delegates do not; at least 1), loaded from the config file only. ApplyConfig sets it
+	// from settings; the composition root folds it into apogee.Config.Delegation.MaxDepth.
+	DelegateMaxDepth int
+
 	// autoTitle gates the automatic session-naming call — the cosmetic out-of-band completion that
 	// names a new Session record from its first prompt (default true), loaded from the config file
 	// only. ApplyConfig sets it from settings; runRoot folds it into tui.Options.AutoTitle. It gates

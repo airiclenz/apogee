@@ -258,7 +258,7 @@ func TestFanOut_CapOneKeepsTheGroupSerial(t *testing.T) {
 
 // TestFanOut_DepthOneStaysSerial pins decision 3: only the top-level agent fans out. A depth-1
 // child that itself emits two delegations runs its grandchildren one at a time even though the
-// cap it inherited says 4.
+// cap it inherited says 4. The depth bound is raised to 2 so the grandchildren can exist at all.
 func TestFanOut_DepthOneStaysSerial(t *testing.T) {
 	sink := &recordingSink{}
 	probe := newConcurrencyProbe(2, 150*time.Millisecond)
@@ -271,6 +271,7 @@ func TestFanOut_DepthOneStaysSerial(t *testing.T) {
 		route("delegate two things", nil, contentScript("parent done"))
 
 	a := fanOutAgent(t, sink, 4, up)
+	a.cfg.Delegation.MaxDepth = 2
 	if _, err := a.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

@@ -55,6 +55,7 @@ func fabricatedSettings() config.Options {
 		ContextFillNotice:     true,
 		UndoSnapshots:         true,
 		DelegateMaxSteps:      40,
+		DelegateMaxDepth:      2,
 		AutoTitle:             false,
 		RememberModel:         true,
 		ContextWindow:         32768,
@@ -405,6 +406,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"context-fill-notice":     "true",  // opted IN in the fixture: a default-off row reports the value, never the default
 		"undo-snapshots":          "true",
 		"delegate-max-steps":      "40",
+		"delegate-max-depth":      "2",
 		"auto-title":              "false",
 		"remember-model":          "true",
 		"context-window":          "32768",

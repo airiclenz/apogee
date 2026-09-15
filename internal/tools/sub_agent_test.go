@@ -184,6 +184,18 @@ func TestSubAgentSchemaOffersAnOptionalMaxSteps(t *testing.T) {
 	if !strings.Contains(desc, "lower cap") {
 		t.Errorf("max_steps description = %q, want it to say the argument only LOWERS the cap", desc)
 	}
+	if !strings.Contains(desc, "clamped") {
+		t.Errorf("max_steps description = %q, want it to say a request above the cap is CLAMPED and announced", desc)
+	}
+	// The two schema floors are text the model reads, never a check the engine runs: a `max_steps`
+	// of 0 was never a way to ask for "unbounded", and a task shorter than a sentence is not a
+	// delegation. Pinned as numbers so a hand edit cannot quietly turn them into strings.
+	if prop["minimum"] != float64(1) {
+		t.Errorf("max_steps minimum = %v, want 1", prop["minimum"])
+	}
+	if got := schema.Properties["task"]["minLength"]; got != float64(20) {
+		t.Errorf("task minLength = %v, want 20", got)
+	}
 	if len(schema.Required) != 1 || schema.Required[0] != "task" {
 		t.Errorf("required = %v, want [task] — max_steps must stay optional", schema.Required)
 	}
@@ -217,18 +229,21 @@ func TestSubAgentArgsParsesTheOptionalMaxSteps(t *testing.T) {
 	}
 }
 
-// wantPlainSubAgentSchema is the sub_agent schema as it was published before seat choice existed
-// (ADR 0069). It is spelled out here rather than derived, because "byte-identical" is the whole
-// claim: the plain variant is prefill on every request of every session that never enables the
-// choice, so a stray comma or a reordered property in the shared template would be paid for by
-// every model that was never offered a seat — and would break the KV-cache prefix of a running one.
+// wantPlainSubAgentSchema is the sub_agent schema as the plain variant publishes it: the schema
+// shipped before seat choice existed (ADR 0069), plus the two schema floors — `minLength` on task,
+// `minimum` on max_steps — and the rewritten max_steps description that landed with them (plan
+// 2026-09-14 - 03, item 4). It is spelled out here rather than derived, because "byte-identical" is
+// the whole claim: the plain variant is prefill on every request of every session that never
+// enables the choice, so a stray comma or a reordered property in the shared template would be paid
+// for by every model that was never offered a seat — and would break the KV-cache prefix of a
+// running one. `run_on` is the ONE property the seat-choice variant appends, and it stays last.
 const wantPlainSubAgentSchema = `{
   "type": "object",
   "required": ["task"],
   "properties": {
-    "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
+    "task": {"type": "string", "minLength": 20, "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
-    "max_steps": {"type": "integer", "description": "optional; lower cap for this delegation only; ignored when 0 or above the configured cap"}
+    "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."}
   }
 }`
 

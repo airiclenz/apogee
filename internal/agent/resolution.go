@@ -239,8 +239,11 @@ type resolutionInput struct {
 	// set. The Plan refusal names it, so the model is told WHERE a write would have run; the
 	// box (ConfinementBox) folds the same dir into WritablePaths but does not carry it apart.
 	scratchDir string
-	// atDepthBound is true when spawning a sub-agent here would reach maxSubAgentDepth.
+	// atDepthBound is true when spawning a sub-agent here would reach the recursion bound
+	// (Agent.maxDepth, the `delegate-max-depth` key); maxDepth is that bound, for the refusal
+	// to name.
 	atDepthBound bool
+	maxDepth     int
 	// approverPresent reports whether an Approver is configured (a gate with none refuses).
 	approverPresent bool
 	// box is the prebuilt confinement box a Confine verdict carries.
@@ -276,9 +279,8 @@ func resolve(in resolutionInput) resolution {
 	if isSubAgentCall(in.call) {
 		if in.atDepthBound {
 			return resolution{
-				kind: resolveRefuse,
-				reason: fmt.Sprintf(
-					"sub-agent depth limit reached (max %d): cannot spawn a deeper sub-agent", maxSubAgentDepth),
+				kind:          resolveRefuse,
+				reason:        depthLimitReason(in.maxDepth),
 				auditDecision: in.guard.Audit,
 				auditReason:   in.guard.Reason,
 			}

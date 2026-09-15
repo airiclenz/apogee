@@ -34,16 +34,23 @@ const (
 
 // subAgentSchemaTemplate is the sub_agent schema with ONE hole: the optional `run_on` property the
 // seat-choice variant fills and the plain variant leaves empty. Keeping both variants in one
-// literal is what makes the plain schema byte-identical to the schema shipped before seat choice
-// existed — a second literal would be a second thing to keep in step, and the plain variant is
-// prefill on every request of every session that never enables the choice.
+// literal is what keeps the plain schema byte-identical across the two constructors — a second
+// literal would be a second thing to keep in step, and the plain variant is prefill on every
+// request of every session that never enables the choice.
+//
+// The two floors — `minLength` on task, `minimum` on max_steps — are SCHEMA TEXT the model reads,
+// not a validator the engine runs: nothing in apogee refuses a call over them (the recursion point
+// still checks only that the task is non-empty). They tell a small model, in the one place it looks
+// before composing a call, that a three-word task is not a delegation and that `max_steps: 0` was
+// never a way to ask for "unbounded" (a request above the configured cap is applied AS the cap and
+// the result says so — plan 2026-09-14 - 03, item 4).
 const subAgentSchemaTemplate = `{
   "type": "object",
   "required": ["task"],
   "properties": {
-    "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
+    "task": {"type": "string", "minLength": 20, "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
-    "max_steps": {"type": "integer", "description": "optional; lower cap for this delegation only; ignored when 0 or above the configured cap"}%s
+    "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."}%s
   }
 }`
 

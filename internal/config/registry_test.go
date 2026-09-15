@@ -439,6 +439,8 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"working-window", "lots", "0 or more"},
 		{"delegate-max-steps", "-1", "0 or more"},
 		{"delegate-max-steps", "eighty", "0 or more"},
+		{"delegate-max-depth", "0", "at least 1"},
+		{"delegate-max-depth", "deep", "at least 1"},
 		{"present.port", "70000", "0-65535"},
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
@@ -495,6 +497,9 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		// default, which the settings surface has to be able to write back.
 		{"delegate-max-steps", "0"},
 		{"delegate-max-steps", "80"},
+		// 1 is the shipped default, and 2 is the one deeper bound a human is likely to write.
+		{"delegate-max-depth", "1"},
+		{"delegate-max-depth", "2"},
 		{"present.port", "0"},
 		{"present.port", "8080"},
 		{"mode", string(domain.ModeAuto)},

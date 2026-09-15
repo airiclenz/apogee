@@ -337,6 +337,7 @@ func TestSeat_ChildRosterDropsTheRunOnArgument(t *testing.T) {
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.Tools = seatChoiceRegistry(t)
+	cfg.Delegation.MaxDepth = 2 // the child keeps sub_agent only under a bound above the default
 	parent, err := newAgent(cfg, &scriptedResponder{})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -374,6 +375,7 @@ func TestSeat_PlainParentRosterIsInheritedUnchanged(t *testing.T) {
 	t.Parallel()
 
 	cfg := configWithTools(&recordingSink{}, tools.NewSubAgent(), fakeTool{name: "w"})
+	cfg.Delegation.MaxDepth = 2 // the child keeps sub_agent only under a bound above the default
 	parent, err := newAgent(cfg, &scriptedResponder{})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

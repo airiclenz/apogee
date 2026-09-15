@@ -224,6 +224,10 @@ type liveSettings struct {
 	// delegations of the runs this session raises even though the session keeps the one it opened
 	// with. Same posture as inspector below.
 	delegateMaxSteps int
+	// delegateMaxDepth mirrors `delegate-max-depth:` on exactly the same footing — read off the
+	// file into the constructed Config, no setter behind it, mirrored for the Firings this
+	// session raises.
+	delegateMaxDepth int
 
 	// inspector mirrors `ui.inspector:`, whose live apply is the WRITE alone — the wire observer is
 	// installed while THIS session's provider client is constructed and there is no seam to arm one
@@ -299,6 +303,7 @@ func newLiveSettings(opts config.Options) *liveSettings {
 		},
 
 		delegateMaxSteps: opts.DelegateMaxSteps,
+		delegateMaxDepth: opts.DelegateMaxDepth,
 	}
 }
 
@@ -861,6 +866,15 @@ func (s *liveSettings) setDelegateMaxSteps(steps int) {
 	s.delegateMaxSteps = steps
 }
 
+// setDelegateMaxDepth mirrors `delegate-max-depth:`, on setDelegateMaxSteps's footing: the bound
+// is a field of the Config an Agent was constructed with, so the store is the whole of what the
+// value can reach in this process, and what it reaches is the next Firing's own delegations.
+func (s *liveSettings) setDelegateMaxDepth(depth int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.delegateMaxDepth = depth
+}
+
 // setInspector mirrors `ui.inspector:`. Unlike the two above there is no engine seam this shadows —
 // the capture is armed while a provider client is CONSTRUCTED — so the store is the whole of what
 // the value can reach in this process, and what it reaches is the next Firing's own client.
@@ -922,6 +936,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.UI.Inspector = s.inspector
 	next.UndoSnapshots = s.undoSnapshots
 	next.DelegateMaxSteps = s.delegateMaxSteps
+	next.DelegateMaxDepth = s.delegateMaxDepth
 
 	// And the Reaction surface, which is pushed as ONE value and comes back as four keys: the
 	// reaction list, the `bypass:` switch, the `context-fill-notice:` switch, and the seven Floor
@@ -1470,6 +1485,12 @@ var settingsTable = []settingsEntry{
 		apply:   applyDelegateMaxSteps,
 	},
 	{
+		key: "delegate-max-depth",
+		// As delegate-max-steps above: no member, no seam, no re-resolution.
+		reaches: reachesWithoutAMember,
+		apply:   applyDelegateMaxDepth,
+	},
+	{
 		key:     "undo-snapshots",
 		reaches: reachesWithoutAMember,
 		apply:   applyUndoSnapshots,
@@ -1855,6 +1876,22 @@ func applyDelegateMaxSteps(a settingsApplier, key, value string) (string, error)
 	}
 	if a.live != nil {
 		a.live.setDelegateMaxSteps(steps)
+	}
+	return "", nil
+}
+
+// applyDelegateMaxDepth is `delegate-max-depth:`, on applyDelegateMaxSteps's footing exactly: the
+// bound is a field of the Config an Agent was CONSTRUCTED with, so the write is the whole of the
+// apply for this session, and the mirror onto the holder is what bounds the delegations of the
+// Firings it raises. Success, no note, the Description's "takes effect at the next start" carrying
+// the promise; the value is parsed because a value that is to be recorded has to be read.
+func applyDelegateMaxDepth(a settingsApplier, key, value string) (string, error) {
+	depth, err := settingInt(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.setDelegateMaxDepth(depth)
 	}
 	return "", nil
 }

@@ -464,6 +464,14 @@ var KeyRegistry = []Key{
 		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxSteps) },
 	},
 	{
+		Path: "delegate-max-depth", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxDepth),
+		Editable: true,
+		Validate: validateDelegateMaxDepth,
+		Desc: "How deep delegation may nest: 1 lets the session delegate and its delegates not; " +
+			"at least 1; takes effect at the next start.",
+		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxDepth) },
+	},
+	{
 		Path: "undo-snapshots", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc: "Snapshot the workspace around each exchange so /undo survives a relaunch and " +
@@ -845,6 +853,23 @@ func validateDelegateMaxSteps(value string) error {
 	if err != nil || n < 0 {
 		return fmt.Errorf("apogee: invalid delegate-max-steps %q: want a Turn count of 0 or more "+
 			"(0 lets a delegation run unbounded; %d is the default)", value, defaultDelegateMaxSteps)
+	}
+	return nil
+}
+
+// defaultDelegateMaxDepth is the built-in bound on how deep delegation nests: the session delegates
+// and its delegates do not. The registry row advertises it and the loader resolves an unstated key
+// to it, so the two cannot drift apart; the engine reads a zero Config field as the same 1.
+const defaultDelegateMaxDepth = 1
+
+// validateDelegateMaxDepth refuses a bound below 1. Unlike the step cap there is no "unbounded"
+// spelling and no "off": 0 would mean the session itself may not delegate, which is not what a
+// depth bound is for — a session that wants no delegation disables the tool.
+func validateDelegateMaxDepth(value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 1 {
+		return fmt.Errorf("apogee: invalid delegate-max-depth %q: must be at least 1 "+
+			"(%d is the default: the session delegates, its delegates do not)", value, defaultDelegateMaxDepth)
 	}
 	return nil
 }

@@ -183,7 +183,11 @@ point** (not a leaf — never confined/gated as a unit; each *child* call gets t
 disposition one level down), the orchestrator threads mode/approver/confiner/tool-subset
 verbatim-or-stricter, the sub-agent's **live guard state is isolated** (a fresh
 circuit-breaker + audit log — `Guards.ForSubAgent`) over a **shared, read-only
-dangerous-action floor** (unloosenable one level down), and recursion is depth-bounded.
+dangerous-action floor** (unloosenable one level down), and recursion is depth-bounded by the
+`delegate-max-depth` key (`Config.Delegation.MaxDepth`), default **1**: the top-level agent
+delegates and its delegates are never offered `sub_agent`; `2` lets a sub-agent delegate in turn
+(ADR 0013 decision 4, superseded 2026-09-15). A `max_steps` ask above `delegate-max-steps` is
+applied as the cap and the delegation's result says so in one appended line.
 When one reply carries several `sub_agent` calls, the **top-level** agent runs them
 **concurrently** up to the server's **Parallel agents** cap (depth-0 only — a sub-agent's
 own delegations run serially inline; a reply split across **Delegation seats** takes the

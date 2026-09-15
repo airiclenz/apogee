@@ -751,6 +751,17 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// A plain int on disk: 0 is not a value here (the bound is at least 1), so an absent key
+		// and a 0 resolve alike, to the default — the settings surface refuses the 0 outright.
+		row: mustKey("delegate-max-depth"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.DelegateMaxDepth = defaultDelegateMaxDepth
+			if fc.DelegateMaxDepth >= 1 {
+				o.DelegateMaxDepth = fc.DelegateMaxDepth
+			}
+		},
+	},
+	{
 		row: mustKey("undo-snapshots"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.UndoSnapshots = fc.UndoSnapshots == nil || *fc.UndoSnapshots
@@ -1373,6 +1384,11 @@ type fileConfig struct {
 	// It feeds domain.Config.Delegation.MaxSteps; the `sub_agent` tool can lower it for one
 	// delegation but never raise it.
 	DelegateMaxSteps *int `yaml:"delegate-max-steps"`
+	// DelegateMaxDepth bounds how deep delegation may NEST: the session (depth 0) delegates, and a
+	// delegate at this depth is never offered `sub_agent`. File-only (no flag/env), and a plain
+	// int rather than a pointer because 0 is not a value here — the bound is at least 1, so an
+	// absent key and a 0 both resolve to the built-in 1. It feeds domain.Config.Delegation.MaxDepth.
+	DelegateMaxDepth int `yaml:"delegate-max-depth"`
 	// UndoSnapshots gates the SNAPSHOT-backed undo store (ADR 0074): with it on, apogee images the
 	// workspace around each exchange in a git object database of the session's own, outside the
 	// workspace, so `/undo` survives a relaunch and reaches writes that never went through apogee's

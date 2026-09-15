@@ -144,6 +144,11 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.DelegateMaxSteps = 0 },
 		},
 		{
+			name: "delegate-max-depth is file-only and defaults 1",
+			file: fileConfig{DelegateMaxDepth: 2},
+			want: func(o *Options) { o.DelegateMaxDepth = 2 },
+		},
+		{
 			name: "auto-title is file-only and defaults true",
 			file: fileConfig{AutoTitle: boolptr(false)},
 			want: func(o *Options) { o.AutoTitle = false },
@@ -315,6 +320,7 @@ func wantDefaults() Options {
 		UseShippedSkills: true,
 		UseDefaultPrompt: true,
 		DelegateMaxSteps: defaultDelegateMaxSteps,
+		DelegateMaxDepth: defaultDelegateMaxDepth,
 		AutoTitle:        true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
@@ -537,6 +543,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"ContextFillNotice": true,
 		"UndoSnapshots":     true,
 		"DelegateMaxSteps":  true,
+		"DelegateMaxDepth":  true,
 		"UseShippedSkills":  true,
 		"UseDefaultPrompt":  true,
 		"AutoTitle":         true, "RememberModel": true,
@@ -593,6 +600,7 @@ func everyKeyFileConfig() fileConfig {
 		UseShippedSkills:  boolptr(false),
 		UseDefaultPrompt:  boolptr(false),
 		DelegateMaxSteps:  intptr(12),
+		DelegateMaxDepth:  2,
 		RememberModel:     boolptr(true),
 		ContextWindow:     64000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
@@ -1920,6 +1928,63 @@ func TestApplyConfigDelegateMaxSteps(t *testing.T) {
 				t.Errorf("opts.delegateMaxSteps = %d; want %d", opts.DelegateMaxSteps, tt.want)
 			}
 		})
+	}
+}
+
+// The delegate-max-depth key parses into opts.delegateMaxDepth: a file-only key (no flag/env)
+// beside the step cap above. Unlike that cap it has no "off" spelling — the bound is at least 1 —
+// so a plain int carries it and a 0 on disk resolves exactly as an absent key does, to the built-in
+// 1; the settings surface refuses the 0 outright (TestDelegateMaxDepthSettingKeyValidator). The
+// opts → Config.Delegation.MaxDepth threading is the composition root's.
+func TestApplyConfigDelegateMaxDepth(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		file string
+		want int
+	}{
+		{"a stated bound", "delegate-max-depth: 2\n", 2},
+		{"an absent key takes the built-in default", "", defaultDelegateMaxDepth},
+		{"a 0 is not a value here and resolves as absent", "delegate-max-depth: 0\n", defaultDelegateMaxDepth},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.DelegateMaxDepth != tt.want {
+				t.Errorf("opts.delegateMaxDepth = %d; want %d", opts.DelegateMaxDepth, tt.want)
+			}
+		})
+	}
+}
+
+// TestDelegateMaxDepthSettingKeyValidator pins the one refusal the depth bound has: a value below
+// 1 is refused with the reason spelled, and the default and a deeper bound are both writable.
+func TestDelegateMaxDepthSettingKeyValidator(t *testing.T) {
+	t.Parallel()
+	row, ok := LookupKey("delegate-max-depth")
+	if !ok || row.Validate == nil {
+		t.Fatal("delegate-max-depth has no validate hook")
+	}
+	for _, value := range []string{"1", "2"} {
+		if err := row.Validate(value); err != nil {
+			t.Errorf("validate delegate-max-depth = %q: %v; want it accepted", value, err)
+		}
+	}
+	for _, value := range []string{"0", "-1", "deep"} {
+		err := row.Validate(value)
+		if err == nil {
+			t.Errorf("validate delegate-max-depth = %q: want a refusal", value)
+			continue
+		}
+		if !strings.Contains(err.Error(), "delegate-max-depth") || !strings.Contains(err.Error(), "must be at least 1") {
+			t.Errorf("error = %v, want it to name the key and say the bound is at least 1", err)
+		}
 	}
 }
 

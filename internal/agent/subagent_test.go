@@ -310,10 +310,12 @@ func TestSubAgent_SubsetCannotCallOmittedTool(t *testing.T) {
 
 // TestSubAgent_MaxDepthRefusesAndWithholdsTool proves the recursion bound: a sub-agent AT the
 // max depth is not offered sub_agent in its menu, and the recursion point refuses defensively
-// if the call is emitted anyway — so an unbounded tower of sub-agents is impossible.
+// if the call is emitted anyway — so an unbounded tower of sub-agents is impossible. The bound is
+// raised to 2 (`delegate-max-depth: 2`) so the tower has a middle level to prove it with.
 func TestSubAgent_MaxDepthRefusesAndWithholdsTool(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.Delegation.MaxDepth = 2
 
 	// Drive: parent (d0) spawns d1, d1 spawns d2, d2 attempts to spawn d3 (refused at the
 	// bound), d2 finishes, d1 finishes, parent finishes.
@@ -340,7 +342,7 @@ func TestSubAgent_MaxDepthRefusesAndWithholdsTool(t *testing.T) {
 
 	// And a sub-agent constructed at the bound must not even be offered the tool: build the
 	// child registry the orchestrator would hand a depth-2 child and assert sub_agent is gone.
-	atBound := &Agent{tools: a.tools, depth: maxSubAgentDepth - 1}
+	atBound := &Agent{cfg: cfg, tools: a.tools, depth: cfg.Delegation.MaxDepth - 1}
 	childReg := atBound.defaultSubAgentTools()
 	if _, ok := childReg.Lookup(tools.SubAgentToolName); ok {
 		t.Error("a child constructed at the depth bound must not be offered the sub_agent tool")
@@ -350,16 +352,55 @@ func TestSubAgent_MaxDepthRefusesAndWithholdsTool(t *testing.T) {
 // TestSubAgent_RecursionPointRefusesAtBound proves the SECONDARY (defense-in-depth) bound: the
 // recursion point itself refuses a spawn at the max depth even if the tool were somehow
 // emitted (the primary defense withholds the tool from the menu; this is the belt-and-braces).
+// The refusal names the configured bound, so the model reads the number it ran into.
 func TestSubAgent_RecursionPointRefusesAtBound(t *testing.T) {
 	t.Parallel()
-	atBound := &Agent{depth: maxSubAgentDepth}
+	cfg := domain.Config{Delegation: domain.DelegationConfig{MaxDepth: 2}}
+	atBound := &Agent{cfg: cfg, depth: cfg.Delegation.MaxDepth}
 	res, outcome := atBound.runSubAgent(context.Background(),
 		domain.ToolCall{ID: "c1", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(subAgentArgs("recurse"))})
 	if outcome != dispatchDone {
 		t.Fatalf("outcome = %v, want dispatchDone", outcome)
 	}
-	if !res.IsError || !strings.Contains(res.Content, "depth limit") {
-		t.Errorf("at-bound recursion = %+v, want a depth-limit refusal", res)
+	if !res.IsError || !strings.Contains(res.Content, "depth limit reached (max 2)") {
+		t.Errorf("at-bound recursion = %+v, want a depth-limit refusal naming the bound", res)
+	}
+}
+
+// TestSubAgent_DepthBoundFollowsTheKey pins where the bound is read from — Config.Delegation.MaxDepth,
+// the `delegate-max-depth` key — and its default: a depth-0 parent under the default (1) hands its
+// child no sub_agent, while under 2 the depth-0 parent's child keeps it and the depth-1 parent's
+// child loses it. The menu is the PRIMARY defence, so it is the menu that is asserted.
+func TestSubAgent_DepthBoundFollowsTheKey(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		maxDepth    int
+		parentDepth int
+		wantOffered bool
+	}{
+		{"the default withholds sub_agent from a depth-0 parent's child", 0, 0, false},
+		{"an explicit 1 is the default spelled out", 1, 0, false},
+		{"under 2 a depth-0 parent's child is offered sub_agent", 2, 0, true},
+		{"under 2 a depth-1 parent's child is not", 2, 1, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore, fakeTool{name: "w"})
+			cfg.Delegation.MaxDepth = tc.maxDepth
+			parent := &Agent{cfg: cfg, tools: cfg.Tools, depth: tc.parentDepth}
+
+			roster := parent.defaultSubAgentTools()
+
+			if _, offered := roster.Lookup(tools.SubAgentToolName); offered != tc.wantOffered {
+				t.Errorf("child of a depth-%d parent under MaxDepth %d is offered sub_agent = %v, want %v",
+					tc.parentDepth, tc.maxDepth, offered, tc.wantOffered)
+			}
+			if _, hasLeaf := roster.Lookup("w"); !hasLeaf {
+				t.Error("the child's roster lost a leaf tool while sub_agent was decided")
+			}
+		})
 	}
 }
 
@@ -677,12 +718,40 @@ func TestSubAgent_ChildInheritsTheLiveNoticeSwitch(t *testing.T) {
 	}
 }
 
-// TestSubAgent_DepthLimitConstant guards the recursion bound's value so a careless change is
-// caught (the orchestrator and its tests assume this ceiling).
-func TestSubAgent_DepthLimitConstant(t *testing.T) {
+// TestSubAgent_DepthZeroReadsAsOne guards the engine's floor on the recursion bound: an embedder's
+// untouched Config (MaxDepth 0) delegates ONCE — the zero is the built-in default, never "no
+// delegation" — and a stated bound is read verbatim. Driven end to end: the depth-0 parent's
+// delegation runs, and the child's own sub_agent call resolves as an unknown tool because the
+// menu withheld it.
+func TestSubAgent_DepthZeroReadsAsOne(t *testing.T) {
 	t.Parallel()
-	if maxSubAgentDepth < 1 {
-		t.Fatalf("maxSubAgentDepth = %d, must allow at least one level of delegation", maxSubAgentDepth)
+	if got := (&Agent{}).maxDepth(); got != 1 {
+		t.Fatalf("maxDepth() on a zero Config = %d, want 1 — 0 is the default, not \"no delegation\"", got)
+	}
+	if got := (&Agent{cfg: domain.Config{Delegation: domain.DelegationConfig{MaxDepth: 3}}}).maxDepth(); got != 3 {
+		t.Fatalf("maxDepth() under MaxDepth 3 = %d, want 3", got)
+	}
+
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.Delegation.MaxDepth = 0
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "level 1"), // parent → d1
+		subAgentCallScript("c2", "level 2"), // d1 → (withheld: d2 would be past the default bound)
+		contentScript("d1 done after refusal"),
+		contentScript("parent done"),
+	}}
+	a, _ := newAgent(cfg, responder)
+	_ = a.Submit(domain.UserInput{Text: "go"})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !hasToolResultContaining(sink.events, 0, "d1 done after refusal") {
+		t.Error("the depth-0 parent's delegation never ran — a zero MaxDepth must still delegate once")
+	}
+	if !hasToolResultContaining(sink.events, 1, "unknown tool") {
+		t.Error("expected the depth-1 child's sub_agent call to resolve as an unknown tool (withheld at the default bound)")
 	}
 }
 
@@ -1214,7 +1283,11 @@ func TestSubAgent_StepCapZeroIsUnbounded(t *testing.T) {
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 	cfg.Delegation.MaxSteps = 0
 
-	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
+	// The call asks for a cap of its own: against an UNBOUNDED cap the ask is ignored and — the
+	// exact Content below is the pin — no clamp note is written for it either.
+	scripts := [][]provider.Delta{
+		toolCallScript("c1", tools.SubAgentToolName, subAgentArgsCapped("trawl the repo", 2)),
+	}
 	scripts = append(scripts, cappedChildTurns(4)...)
 	scripts = append(scripts, contentScript("the child's own final answer"), contentScript("parent done"))
 	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
@@ -1231,7 +1304,7 @@ func TestSubAgent_StepCapZeroIsUnbounded(t *testing.T) {
 		t.Fatal("no sub_agent tool result emitted")
 	}
 	if sub.IsError || sub.Content != "the child's own final answer" {
-		t.Errorf("sub_agent result = %+v, want the child's own final answer (cap 0 = unbounded)", sub)
+		t.Errorf("sub_agent result = %+v, want the child's own final answer alone (cap 0 = unbounded; no clamp note)", sub)
 	}
 	if got := countCapErrors(sink.events, 1); got != 0 {
 		t.Errorf("step-cap ErrorEvents = %d with the cap switched off, want 0", got)
@@ -1239,17 +1312,21 @@ func TestSubAgent_StepCapZeroIsUnbounded(t *testing.T) {
 }
 
 // TestSubAgent_MaxStepsArgumentOnlyLowersTheCap pins the argument's one direction: a request
-// BELOW the configured cap binds this delegation, a request ABOVE it changes nothing. The model
-// may make a delegation cheaper, never longer than the host allows.
+// BELOW the configured cap binds this delegation, a request ABOVE it is applied as the cap — and
+// SAID SO, as a note appended to the result body below the partial marker, which stays the first
+// line. The model may make a delegation cheaper, never longer than the host allows, and it is told
+// when it tried.
 func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 	cases := []struct {
 		name       string
 		configured int
 		requested  int
 		wantSteps  int
+		wantNote   string
 	}{
-		{"a lower request binds", 3, 2, 2},
-		{"a higher request is ignored", 3, 9, 3},
+		{"a lower request binds", 3, 2, 2, ""},
+		{"a higher request is clamped and announced", 3, 9, 3,
+			"[max_steps 9 requested; the configured cap is 3 — 3 applied]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1286,6 +1363,16 @@ func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 			}
 			if want := fmt.Sprintf(stepCapResultFormat, tc.wantSteps); !strings.HasPrefix(sub.Content, want+"\n") {
 				t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, want)
+			}
+			if tc.wantNote == "" {
+				if strings.Contains(sub.Content, "requested; the configured cap") {
+					t.Errorf("sub_agent result = %q, carries a clamp note for a request that bound", sub.Content)
+				}
+				return
+			}
+			// Appended, never prefixed: the note is the last line of the body, under the marker.
+			if !strings.HasSuffix(sub.Content, "\n"+tc.wantNote) {
+				t.Errorf("sub_agent result = %q, want it to end with the clamp note %q", sub.Content, tc.wantNote)
 			}
 		})
 	}

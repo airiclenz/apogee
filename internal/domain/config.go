@@ -478,6 +478,12 @@ type DelegationConfig struct {
 	// engine ends it; 0 = unbounded. The host folds in the `delegate-max-steps:` key
 	// (default 80); an embedder sets it directly.
 	MaxSteps int
+	// MaxDepth bounds the recursion: a child at this depth is never offered `sub_agent` and the
+	// recursion point refuses a spawn from it (the top-level agent is depth 0, so 1 = the top-level
+	// agent delegates and its delegates do not). 0 reads as the built-in default of 1 — never as
+	// "no delegation", so an embedder's zero Config still delegates once. The host folds in the
+	// `delegate-max-depth:` key (default 1, at least 1); an embedder sets it directly.
+	MaxDepth int
 }
 
 // ContextConfig governs the structural context reducers — Budget, Compaction and Pruning —

@@ -620,20 +620,20 @@ const startupOnlyContract = "takes effect at the next start."
 // Driver could have been composed without. `editor` is re-read off a fresh projection of the file
 // every time an external edit starts (ADR 0041 decision 1); the other five are read once, while
 // the session is being built, and say so in their Descriptions. `ui.inspector`,
-// `delegate-max-steps`, `working-window` and `undo-snapshots` still mirror their value onto the
-// live holder for the Firings a session raises, and do nothing at all where a Driver composed
-// none — which is why they are exempt rather than reaching for one.
+// `delegate-max-steps`, `delegate-max-depth`, `working-window` and `undo-snapshots` still mirror
+// their value onto the live holder for the Firings a session raises, and do nothing at all where a
+// Driver composed none — which is why they are exempt rather than reaching for one.
 var settingKeysWithNoMemberToReach = []string{
-	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "working-window",
-	"undo-snapshots", "sessions.max-age", "sessions.max-count",
+	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "delegate-max-depth",
+	"working-window", "undo-snapshots", "sessions.max-age", "sessions.max-count",
 }
 
 // The five START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
 // that must not refuse either. `ui.inspector` decides whether a wire observer is installed while
 // the provider client is constructed, `response-reserve` is read into the budget the session opens
 // with, `undo-snapshots` decides whether the session's undo store is opened while its id is minted,
-// and `delegate-max-steps` and `working-window` are fields of the Config the engine was
-// constructed with, so this session genuinely cannot move any of them — but the file the next one starts from HAS moved,
+// and `delegate-max-steps`, `delegate-max-depth` and `working-window` are fields of the Config the
+// engine was constructed with, so this session genuinely cannot move any of them — but the file the next one starts from HAS moved,
 // which is the whole of what the key promises. Refusing would report a failed apply over a
 // save that did exactly that, which is the defect this pins.
 //
@@ -645,6 +645,7 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 		{key: "ui.inspector", value: "true"},
 		{key: "response-reserve", value: "0.25"},
 		{key: "delegate-max-steps", value: "40"},
+		{key: "delegate-max-depth", value: "2"},
 		{key: "working-window", value: "200000"},
 		{key: "undo-snapshots", value: "false"},
 	}

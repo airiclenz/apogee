@@ -95,6 +95,16 @@ the model cannot even request a deeper spawn; and the recursion point **also** r
 defensively if a spawn is somehow requested at the bound. Three levels (depth 0→1→2) is ample
 for real delegation while making a runaway tower structurally impossible.
 
+> **Superseded 2026-09-15 (plan 2026-09-14 - 03, item 4).** The bound is no longer the constant
+> `maxSubAgentDepth = 2`: it is `Config.Delegation.MaxDepth`, fed by the top-level
+> `delegate-max-depth` key, **default 1** — the session delegates, its delegates do not. The
+> session-mining review (2026-09-14) found that a middle layer buys nothing on the task pool while
+> putting every result one hand-off further from the human, so two levels is now an opt-in
+> (`delegate-max-depth: 2`), never the default. The mechanism is unchanged: at depth ≥ MaxDepth the
+> tool is withheld from the menu and the recursion point refuses defensively. The engine reads a
+> zero field as the default 1, never as "no delegation" — an embedder's untouched Config still
+> delegates once. "Three levels is ample" is retired with the constant.
+
 **5 — Stepping is top-level-only; a sub-agent runs atomically within the parent Turn.** The
 driver runs the nested `Agent` to its Exchange boundary in one shot
 ([broad plan #15](../plans/archived/implementation-plan-apogee-merge.md)). While it runs, the parent is
@@ -228,7 +238,7 @@ Neither the Decision nor the realisation's rule changes — only which accessor 
   rather than only the first.
 - **Race-freedom is unchanged.** The chain is still a walk of `modeMu`-guarded accessors, each
   read under the lock of the agent that owns the field, and each child still holds a read-only
-  closure with no seam to mutate an ancestor. The walk is bounded by `maxSubAgentDepth`.
+  closure with no seam to mutate an ancestor. The walk is bounded by the recursion bound (`Config.Delegation.MaxDepth`, the `delegate-max-depth` key).
 
 **Acceptance:** with parent→child→grandchild all spawned in Auto, tightening the **top-level**
 agent to Plan mid-run refuses the grandchild's next write and its `effectiveMode()` reads Plan;

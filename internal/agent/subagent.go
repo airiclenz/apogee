@@ -34,14 +34,41 @@ import (
 // Agent to its Exchange boundary in one shot, behind a seam a later snapshot-schema-additive
 // change can swap for a suspendable driver.
 
-// maxSubAgentDepth bounds sub-agent recursion so a model cannot spawn an unbounded tower of
-// sub-agents (each level costs a full nested loop). The top-level agent is depth 0; a depth-0
-// agent may spawn a depth-1 sub-agent and a depth-1 may spawn a depth-2, but a depth-2
-// sub-agent is the deepest: at maxSubAgentDepth the sub_agent tool is withheld from the
-// nested tool set AND the recursion point refuses defensively, so the bound holds even if the
-// menu is bypassed. Three levels is ample for real delegation while making a runaway tower
-// structurally impossible.
-const maxSubAgentDepth = 2
+// defaultMaxSubAgentDepth is what a Config.Delegation.MaxDepth of 0 reads as: the top-level agent
+// (depth 0) delegates, and its delegates do not. It is the engine's own floor rather than the
+// host's — the `delegate-max-depth` key defaults to the same 1 and refuses 0, so a zero only ever
+// reaches here from an embedder's untouched Config, and that embedder must still get one level of
+// delegation rather than none (ADR 0013 decision 4, superseded 2026-09-15).
+const defaultMaxSubAgentDepth = 1
+
+// maxDepth is the recursion bound this Agent runs under, so a model cannot spawn an unbounded
+// tower of sub-agents (each level costs a full nested loop). The top-level agent is depth 0; an
+// agent at depth maxDepth is the deepest: there the sub_agent tool is withheld from the nested tool
+// set AND the recursion point refuses defensively, so the bound holds even if the menu is
+// bypassed. It reads Config.Delegation.MaxDepth (the `delegate-max-depth` key), and reads its zero
+// value as defaultMaxSubAgentDepth rather than as "no delegation".
+func (a *Agent) maxDepth() int {
+	if a.cfg.Delegation.MaxDepth > 0 {
+		return a.cfg.Delegation.MaxDepth
+	}
+	return defaultMaxSubAgentDepth
+}
+
+// depthLimitReason is the refusal both bound-keepers hand the model — the recursion point and the
+// resolver's defensive branch — spelled once so the two cannot drift.
+func depthLimitReason(maxDepth int) string {
+	return fmt.Sprintf("sub-agent depth limit reached (max %d): cannot spawn a deeper sub-agent", maxDepth)
+}
+
+// stepCapClampNoteFormat is the line a delegation's result carries when its spawning call asked for
+// a `max_steps` ABOVE the configured cap: the request is applied AS the cap (the model may make a
+// delegation cheaper, never longer than the host allows), and this says so, because a clamp the
+// parent never hears about is a knob it goes on turning. The verbs are `requested` / `applied`
+// (what the model asked, what it got); the middle clause names the cap so the parent learns the
+// number to stop exceeding. Appended in the SeatFallbackNote slot — a body note, never the head —
+// so stepCapResultFormat and subAgentFaultPrefix stay the first line every reader anchors on.
+// Not written at all against an unbounded cap (0): that request is ignored, as it always was.
+const stepCapClampNoteFormat = "[max_steps %d requested; the configured cap is %d — %d applied]"
 
 // stepCapResultFormat is the marker line the PARENT model receives when a delegation ended at its
 // step cap (Agent.stepCap): a NON-error result whose first line says the answer that follows is
@@ -202,11 +229,10 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // returned ToolResult is what the PARENT model sees on its next Turn (the delegated work
 // summarised back into the parent conversation).
 func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
-	if a.depth >= maxSubAgentDepth {
+	if a.depth >= a.maxDepth() {
 		// Defensive floor: the tool is withheld from the menu at the bound, but refuse here
 		// too so the bound holds even if a model emits the call anyway.
-		return errorToolResult(call.ID, fmt.Sprintf(
-			"sub-agent depth limit reached (max %d): cannot spawn a deeper sub-agent", maxSubAgentDepth)), dispatchDone
+		return errorToolResult(call.ID, depthLimitReason(a.maxDepth())), dispatchDone
 	}
 
 	var args tools.SubAgentArgs
@@ -243,10 +269,17 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	// The call's optional max_steps can only ever LOWER the configured cap: a model may say "this
 	// one is small, stop it sooner", never "let me run longer than the host allows". Both values
 	// must be positive for the request to bite — a request against an UNBOUNDED cap (0, the key
-	// switched off) is ignored too, because the host turning the bound off is a deliberate posture
-	// the model does not get to reinstate per call.
-	if args.MaxSteps > 0 && sub.stepCap > 0 && args.MaxSteps < sub.stepCap {
-		sub.stepCap = args.MaxSteps
+	// switched off) is ignored, because the host turning the bound off is a deliberate posture
+	// the model does not get to reinstate per call. A request ABOVE a positive cap is applied as
+	// the cap and REMEMBERED, so the result can say so (delegationResult): the clamp used to be
+	// silent, and a parent that never hears its ask was cut keeps asking.
+	if args.MaxSteps > 0 && sub.stepCap > 0 {
+		switch {
+		case args.MaxSteps < sub.stepCap:
+			sub.stepCap = args.MaxSteps
+		case args.MaxSteps > sub.stepCap:
+			sub.capRequested = args.MaxSteps
+		}
 	}
 	// The out-of-band namer's two handles, declared ABOVE the reaping defer so that defer can stop
 	// and join the naming goroutine before anything the child owns is torn down (ADR 0068). Both
@@ -426,6 +459,12 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// apply the note sits immediately above it.
 	if a.seatFallback {
 		result.Content += "\n" + SeatFallbackNote
+	}
+	// And the clamp note, in the same slot for the same reason: a parent whose max_steps was cut
+	// down to the configured cap must learn that from the result whichever way the delegation
+	// ended, and must learn it below the head line, never in front of it.
+	if a.capRequested > 0 {
+		result.Content += "\n" + fmt.Sprintf(stepCapClampNoteFormat, a.capRequested, a.stepCap, a.stepCap)
 	}
 
 	// The parent notice, appended once for EVERY outcome that produces a result (ADR 0063 D3) —
@@ -796,7 +835,7 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 		// Withhold sub_agent from a child that would itself be AT the depth bound: it must
 		// not be able to recurse, so it never sees the tool. (The recursion point also
 		// refuses defensively — defence in depth.)
-		if t.Name() == tools.SubAgentToolName && childDepth >= maxSubAgentDepth {
+		if t.Name() == tools.SubAgentToolName && childDepth >= a.maxDepth() {
 			continue
 		}
 		names = append(names, t.Name())

@@ -252,6 +252,7 @@ func TestInterjectChild_ReachesAGrandchild(t *testing.T) {
 	sink := &recordingSink{}
 	looked := 0
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "look", readOnly: true, ran: &looked, result: "looked"})
+	cfg.Delegation.MaxDepth = 2 // a grandchild exists only under a bound above the default
 
 	responder := &requestLogResponder{scripts: [][]provider.Delta{
 		subAgentCallScript("c1", "level 1"), // [0] parent → child

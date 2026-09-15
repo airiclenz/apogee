@@ -711,6 +711,17 @@ context-fill-notice: false
 # delegate-max-steps: 80
 
 # =============================================================================
+# How deep delegation may nest. Your session is depth 0 and may hand work to a sub-agent; this
+# number says how many levels down that may go. At 1, the default, the sub-agents your session
+# spawns get no sub_agent tool of their own, so every delegation is one level deep and every
+# report comes straight back to the agent you are talking to. Raise it to 2 to let a sub-agent
+# delegate in turn — each level costs a full nested loop and puts the result one hand-off further
+# from you, so raise it only for work that genuinely needs a middle layer. It must be at least 1;
+# a session that should not delegate at all disables the sub_agent tool instead. Config-file only
+# (no flag or env). Default: 1.
+# delegate-max-depth: 1
+
+# =============================================================================
 # Snapshot the workspace for /undo. With this on, apogee images your whole workspace around each
 # exchange — once immediately before the exchange's first write-capable tool call, once when the
 # exchange ends — into a small object database of that session's own under ~/.apogee/snapshots/.

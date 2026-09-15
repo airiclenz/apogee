@@ -752,7 +752,8 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		writeTargetInScratch:   target.inScratch,
 		writeEscapeTarget:      target.escape,
 		scratchDir:             a.ScratchDir(),
-		atDepthBound:           a.depth >= maxSubAgentDepth,
+		atDepthBound:           a.depth >= a.maxDepth(),
+		maxDepth:               a.maxDepth(),
 		approverPresent:        a.cfg.Approver != nil,
 		box:                    a.confinementBox(),
 	}

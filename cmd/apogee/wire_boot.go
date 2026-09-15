@@ -364,9 +364,14 @@ func (w *rootWiring) resolveConfig() error {
 		},
 		// And how far a delegation of this session's may run before the engine ends it: the
 		// `delegate-max-steps` key (default 80; 0 ⇒ unbounded, what a delegation cost before the
-		// cap existed). It rides here for the reply cap's reason — this Config is what a scheduled
-		// Firing copies, so a delegate is bounded the same whether a human is watching or not.
-		Delegation: apogee.DelegationConfig{MaxSteps: w.opts.DelegateMaxSteps},
+		// cap existed), and how deep delegation may nest: `delegate-max-depth` (default 1 — the
+		// session delegates, its delegates do not). They ride here for the reply cap's reason —
+		// this Config is what a scheduled Firing copies, so a delegate is bounded the same whether
+		// a human is watching or not.
+		Delegation: apogee.DelegationConfig{
+			MaxSteps: w.opts.DelegateMaxSteps,
+			MaxDepth: w.opts.DelegateMaxDepth,
+		},
 		// And which Floor guards this session runs WITHOUT (ADR 0071). The seven keys are positive in
 		// the file and negative at the engine, and floorFromOptions is the one place that turns one
 		// spelling into the other. It rides here for the reply cap's reason as well: this Config is

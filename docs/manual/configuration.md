@@ -704,7 +704,17 @@ unfinished, so what your agent receives is a report rather than an interrupted s
 The default is **80**; `0` lets a delegation run unbounded, which is what it did before
 this key existed. It bounds sub-agents only, never the session you are talking to. A
 `sub_agent` call may ask for a lower ceiling of its own through its `max_steps` argument;
-it can never raise this one.
+it can never raise this one — a higher ask is applied as the ceiling, and the result your
+agent receives says so in one line, so it learns the number instead of asking again.
+
+How **deep** delegation may nest is `delegate-max-depth:` (a file-only key). Your session
+is depth 0 and may hand work to a sub-agent; at the default of **1** the sub-agents it
+spawns get no `sub_agent` tool of their own, so every delegation is one level deep and
+every report comes straight back to the agent you are talking to. Raise it to `2` to let a
+sub-agent delegate in turn — each level costs a full nested loop and puts the result one
+hand-off further from you, so raise it only for work that genuinely needs a middle layer.
+It must be at least `1`; a session that should not delegate at all disables the
+`sub_agent` tool instead (`tools.disabled`).
 
 The context **window** these budgets are measured against is discovered from the
 server — live, not once: apogee asks every ten seconds, so switching the loaded model

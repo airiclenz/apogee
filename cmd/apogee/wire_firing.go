@@ -388,10 +388,14 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 			// tool results the way the session it was raised from does.
 			PruneToolResults: in.opts.PruneToolResults,
 		},
-		// The `delegate-max-steps` bound on a sub-agent's Exchange (default 80; 0 ⇒ unbounded).
-		// A Firing runs while nobody watches, which is exactly the case a runaway delegation
-		// must not be able to become.
-		Delegation: apogee.DelegationConfig{MaxSteps: in.opts.DelegateMaxSteps},
+		// The `delegate-max-steps` bound on a sub-agent's Exchange (default 80; 0 ⇒ unbounded)
+		// and the `delegate-max-depth` bound on how deep delegation nests (default 1). A Firing
+		// runs while nobody watches, which is exactly the case a runaway delegation must not be
+		// able to become.
+		Delegation: apogee.DelegationConfig{
+			MaxSteps: in.opts.DelegateMaxSteps,
+			MaxDepth: in.opts.DelegateMaxDepth,
+		},
 		// The seven Floor-guard gates the session resolved, negated at the one seam that negates them
 		// (floorFromOptions). A Firing is composed out of the session's LIVE options, so a guard
 		// switched off in `/settings` is off for the run this session raises as well.
