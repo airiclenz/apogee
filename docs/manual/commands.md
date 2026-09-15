@@ -13,8 +13,9 @@ through, or go back and fix a misspelled name. Accepting a command from the menu
 which case the menu completes it to `/command ` and waits for you to type them; `/model`,
 `/server`, `/sub-agents-server` and `/skills` are the exception to that exception and run straight
 away, since bare they only open a picker or print a report. The menu stays open while the model is working, too —
-commands that need a quiet engine wear an `— idle only` tag for as long as the engine
-is busy, and say so if you pick one anyway, while `/version`, `/usage`,
+commands that need a quiet engine wear a `— runs at idle` tag for as long as the engine
+is busy, and picking one anyway **queues** it — it shows as a `queued command: /…` row above
+the box and runs as soon as the model is done — while `/version`, `/usage`,
 `/inspect`, `/thinking`, `/effort`, `/schedule`, `/schedule-stop`, `/sub-agents-server`, `/skills`' listing and
 `/confine`'s status report answer immediately. Once the engine is idle that tag is gone from the menu entirely — there
 is nothing left for it to warn about. A token
@@ -22,7 +23,7 @@ lights up in the box exactly when it resolves — the `skill` role for a skill y
 has, the `file-ref` role for a file your workspace has (violet and green under `dark`) — so
 a typo is visible before you send.
 
-| What you type | Does | While the model works |
+| What you type | Does | While the model works (✅ runs now; ⧖ queued, runs at idle) |
 |---|---|---|
 | `/<skill-id>` | Invoke a skill — type its id anywhere in your message | ✅ rides the queued message |
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
@@ -35,20 +36,20 @@ a typo is visible before you send.
 | `/effort` | Set how hard the model thinks this session — opens a picker of the levels this model supports, plus `auto` (back to the profile); the resolved effort reads in the footer, and the command is hidden when the model reports no dial — see [below](configuration.md) | ✅ |
 | `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright | ✅ |
 | `/schedule-stop` | Take a schedule off the clock — the only one straight away, a picker when several are live | ✅ |
-| `/clear` (or `/new`) | Close this session into history and start a fresh one | — |
-| `/compact` | Summarise the conversation to reclaim context | — |
-| `/continue` | Ask the model to keep going | — |
-| `/undo` | Put back what the last exchange changed — every write to your workspace, apogee's own file tools and a `terminal`, Python or MCP write alike; bare previews it, `/undo confirm` applies it, and the record survives a relaunch — see [below](#undoing-the-agents-file-writes--undo-and-redo) | — |
-| `/redo` | Put back what the last `/undo confirm` took away — same two steps, bare previews, `/redo confirm` applies it — see [below](#undoing-the-agents-file-writes--undo-and-redo) | — |
-| `/sessions` | Browse saved sessions — resume, rename, or delete | — |
-| `/rename` | Rename this session — `/rename <name>` sets it, bare `/rename` asks the model for one | — |
-| `/model` | Switch model — the Launch profiles [llama-launcher](configuration.md#local-servers--llama-launcher) defines when one is configured, what this server serves when not; picker, or `/model <name>` | — |
-| `/server` | Move this session to another server you configured — picker, or `/server <name>` | — |
+| `/clear` (or `/new`) | Close this session into history and start a fresh one | ⧖ |
+| `/compact` | Summarise the conversation to reclaim context | ⧖ |
+| `/continue` | Ask the model to keep going | ⧖ |
+| `/undo` | Put back what the last exchange changed — every write to your workspace, apogee's own file tools and a `terminal`, Python or MCP write alike; bare previews it, `/undo confirm` applies it, and the record survives a relaunch — see [below](#undoing-the-agents-file-writes--undo-and-redo) | ⧖ |
+| `/redo` | Put back what the last `/undo confirm` took away — same two steps, bare previews, `/redo confirm` applies it — see [below](#undoing-the-agents-file-writes--undo-and-redo) | ⧖ |
+| `/sessions` | Browse saved sessions — resume, rename, or delete | ⧖ |
+| `/rename` | Rename this session — `/rename <name>` sets it, bare `/rename` asks the model for one | ⧖ |
+| `/model` | Switch model — the Launch profiles [llama-launcher](configuration.md#local-servers--llama-launcher) defines when one is configured, what this server serves when not; picker, or `/model <name>` | ⧖ |
+| `/server` | Move this session to another server you configured — picker, or `/server <name>` | ⧖ |
 | `/sub-agents-server` | Pick the `servers:` entry this session's delegations run on — picker, or `/sub-agents-server <name>`; the choice is recorded and the next delegation goes there. Each row names that entry's endpoint and, where it has one, its `description:`. The picker's last row is `auto`, and taking it — or `/sub-agents-server auto` — clears the recorded key and runs delegations on this session's own server — see [below](configuration.md#the-servers-you-run-models-on) | ✅ |
-| `/unload-model` | Free the model of the server this session is on — see [below](configuration.md#local-servers--llama-launcher) | — |
-| `/stop-server` | Stop the server this session is on — see [below](configuration.md#local-servers--llama-launcher) | — |
-| `/color-scheme` | Recolour the screen — bare lists what you can switch to, `/color-scheme <name>` switches and saves, `/color-scheme export <name>` writes an editable copy of a built-in to `~/.apogee/schemes/` | — |
-| `/settings` | Browse and change every setting, live — see [below](#the-settings-screen--settings) | — |
+| `/unload-model` | Free the model of the server this session is on — see [below](configuration.md#local-servers--llama-launcher) | ⧖ |
+| `/stop-server` | Stop the server this session is on — see [below](configuration.md#local-servers--llama-launcher) | ⧖ |
+| `/color-scheme` | Recolour the screen — bare lists what you can switch to, `/color-scheme <name>` switches and saves, `/color-scheme export <name>` writes an editable copy of a built-in to `~/.apogee/schemes/` | ⧖ |
+| `/settings` | Browse and change every setting, live — see [below](#the-settings-screen--settings) | ⧖ |
 
 A lone `/word` that names neither a command nor a skill is **not** sent to the model:
 apogee says `unknown command or skill: /…` and leaves your line in the box to fix.
@@ -73,8 +74,14 @@ column of words; paragraph breaks are kept.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works, and a queued message does not wait for sub-agents that have not started yet:
-those are skipped, the model is told so, and your message lands once the running ones finish —
-`⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
+those are skipped, the model is told so, and your message lands once the running ones finish.
+A command that needs a quiet engine queues the same way — `⏎` on `/clear` mid-run stages a
+`queued command: /clear` row above the box, below any queued messages, and the queued commands
+run in the order you typed them the moment the model is idle, **before** any queued message is
+sent, so a `/clear` typed ahead of a message clears first. `⌫` on an empty box takes the newest
+row back into the editor — a queued command first, then a queued message. Stopping the run does
+not drop a queued command: it runs at that idle, while queued messages are held for your next
+`⏎` — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
 prompts you have already sent in this workspace, `esc` twice stops a run, `⌃c` quits.
 Stopping is a double-tap, like quitting: the first `esc` arms the gesture for one second —
 the status line says `press esc again to stop` for as long as it is armed — and a second
@@ -445,7 +452,7 @@ writes that it has always kept — this process's alone, held in memory — and 
 works on those. When there is nothing to take back it names the reason in the same breath,
 so the narrower answer never reads as a broken one.
 
-Both verbs are **idle only** — they wait until the model has finished.
+Both verbs **run at idle** — typed while the model works, they queue and run once it has finished.
 
 ## The settings screen — `/settings`
 
@@ -462,7 +469,7 @@ than a choice to scan: `↑/↓` move the `❯`, a fixed two-line `Description:`
 list says what the key under the cursor is for, and `esc` closes the pane and hands the
 transcript back. Section labels stand in white above the rows they open, the row being typed
 into is lit, and the mouse works where the keys do — a click selects a row, the wheel walks
-the list one row per notch. It needs a quiet engine, so it is **idle only**.
+the list one row per notch. It needs a quiet engine, so typed mid-run it queues and **opens at idle**.
 
 **Editing writes one key, when you ask.** `⏎` on a true/false row toggles it, `⏎` on a row
 with a fixed set of values — `mode:`, `server:` — opens that list to pick from, `⏎` on a

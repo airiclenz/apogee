@@ -1658,9 +1658,11 @@ security one: it breaks the row's measure, and every row of this frame is square
 **What it shows, and when.** A message typed while the agent is working is *staged*, not sent: it
 waits its turn and goes out at the next safe seam. Every staged message waiting to go out shows as
 one row in a band sitting directly above the input box — the slot closest to the box, below the
-status line. The band exists only while something is queued, in whichever state holds it: a live
-queue draining as the agent runs, or a queue held over at idle after a stop. An empty queue paints
-nothing at all — no rows, and no frame either.
+status line. A **command** that needs a quiet engine, typed or accepted from the menu while the
+agent works, is *queued* the same way and shows in the same band (its row is described below). The
+band exists only while something is queued, in whichever state holds it: a live queue draining as
+the agent runs, or a queue held over at idle after a stop. An empty queue paints nothing at all —
+no rows, and no frame either.
 
 **One group, framed.** The rows are one contiguous block, never interleaved with other chrome, and
 the group is framed by one blank band row above and one below so it reads as its own object between
@@ -1679,6 +1681,16 @@ the ⧖ staged-interjection marker, one space, then the message flattened to a s
 whitespace collapse to one space) as a preview. The message itself is untouched; this is only how a
 waiting row is shown. A row addressed to a **sub-agent** leads with where it is going —
 `  ⧖ queued for scout — check the tests` — for the reason the run view's own section gives above.
+
+**A queued command's row.** `  ⧖ queued command: /clear` — the same indent, marker and faint field
+as a message row, then the line it will run (`/verb`, with its arguments when the verb read any),
+labelled as a command because a bare `/verb` would read like a skill token and this band is the one
+place on screen that says the line is waiting to **run** rather than to be sent. The queued commands
+paint **below** every staged message, oldest to newest among themselves, so a queued command is
+always the row nearest the box — the one Backspace takes back first. They count in the band's row
+budget, its cap and the status line's `N queued` readout exactly as message rows do; what they do
+not share is the hold: a stop or a fault holds messages only, and the queued commands run at that
+very idle, so the `N queued messages held` note counts messages alone.
 
 **Order and cap.** Rows are in delivery order, oldest first — so the row nearest the input box is
 the newest, the one Backspace takes back. At most three content rows show at once
@@ -2028,7 +2040,7 @@ and its one-line summary render as **vertically aligned columns**, each padded t
 in it, so every summary in the pane starts at the same screen column however long the verbs and
 skill names beside them run — and in the merged `/` menu a skill's description is aligned against
 the command summaries above it, so the two kinds read as one table rather than two lists stacked.
-The busy-state `— idle only` tag is a column of its own after the summary, and it costs the pane
+The busy-state `— runs at idle` tag is a column of its own after the summary, and it costs the pane
 nothing while the engine is idle, because a column no row fills collapses away. `@`'s file rows
 have one field and so no columns to align: they render exactly as they always did. The full rule
 is the **Column contract** under "One overlay for 'which one?'" below, which governs every pop-up
@@ -2233,7 +2245,7 @@ the `· ⏎ opens $EDITOR` or `· use /confine` pointer of a key this pane will 
 tier is one column rather than three because a row is only ever one of those things at a time, and
 it and the mark before it both collapse away on a configuration with nothing overridden, nothing
 read-only and nothing edited yet — the same collapse that costs the `/` menu nothing for its
-`— idle only` tag. **A key this session changed here wears a ` *` on its value cell** — `false *` —
+`— runs at idle` tag. **A key this session changed here wears a ` *` on its value cell** — `false *` —
 and nothing else: an edit applies on the `⏎` that persists it (ADR 0037), so there is no pending
 value to point at and what is left worth saying is which rows were touched. Its **section headings
 are single-cell rows**, so they sit at the pane's left
@@ -2270,8 +2282,10 @@ does not cancel an actuation, because the launcher's own cancel is `/stop-server
 returns.
 
 **The box never goes dead while the model works.** Every region stays open. A command that needs a
-quiescent engine is not hidden — its row fills the menu's `— idle only` column in the pane's faint
-unselected style, and accepting it anyway prints the note and leaves the draft exactly as it was.
+quiescent engine is not hidden — its row fills the menu's `— runs at idle` column in the pane's faint
+unselected style, and accepting it anyway **queues** it: the verb token alone is cut out of the
+draft and joins the staged band above the box as a `queued command: /verb` row, to run at the next
+idle, and the rest of the draft stays exactly as it was.
 The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
 cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
 verbs that only report (`/version`, `/skills`, `/usage`, `/inspect`, `/thinking`, `/confine` with no

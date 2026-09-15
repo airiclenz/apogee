@@ -161,6 +161,14 @@ editable. A natural completion (`exchangeDoneMsg`, and `compactDoneMsg`, which i
 auto-sends what is left, because the human pressed `⏎` on those rows and has no reason to expect a
 second keypress is needed. A deferred quit beats a flush outright.
 
+> **Amended 2026-09-14 — the hold is a hold on MESSAGES.** The commands queued while the worker ran
+> (decision 10, amended the same day) are not held by a stop or a fault: they run at that very idle,
+> FIFO, before the `N queued messages held` note is stated — so Esc×2 does not drop a queued `/clear`,
+> it runs it — while the staged messages stay held for the next `⏎` exactly as before. The
+> errored → idle `⏎` dismissal drains the queue the same way. A natural completion runs the queued
+> commands first and then auto-sends what is staged, unless a queued verb opened a worker of its own,
+> in which case the flush waits for that worker's fold.
+
 **8. Mid-run delivery is 1:1; an idle flush joins into ONE message.** Each row delivered at a
 boundary becomes its own marked user message, so the transcript↔history mapping is exact and the
 scrollback records what the model saw *and when*. A flush instead joins every held row's text with
@@ -191,6 +199,28 @@ idle-only, because offering a command that would be refused misleads.
 > stands unchanged — commands still never queue, and an idle-only verb still earns
 > `commands run at idle — not queued` with the human's line left in the box. ADR 0027 also repairs
 > a defect on this path: a staged interjection carries its `SkillIDs` instead of dropping them.
+
+> **Amended 2026-09-14 — commands QUEUE.** The "commands never queue" clause of this decision, and
+> the 2026-07-28 block's restatement of it, no longer hold; the same amendment retires
+> [ADR 0027](0027-one-slash-namespace-with-inline-skill-tokens.md) decision 6's refusal clause
+> ("accepting it prints `commandsAtIdleNote` with the draft untouched") and the matching sentence
+> of its *What this amends in ADR 0025* section. An idle-only verb typed while a worker works — any
+> verb without `whileRunning` (`/clear`, `/color-scheme`, `/compact`, `/continue`, `/model`, `/new`,
+> `/redo`, `/rename`, `/server`, `/sessions`, `/settings`, `/stop-server`, `/undo`,
+> `/unload-model`) — is **queued** rather than refused: the parsed line joins
+> `Model.deferredCommands`, the band above the box paints it as its own row
+> (`queued command: /verb`, below the staged messages, so it is always the row nearest the box),
+> the menu's tag reads `— runs at idle`, and the queue drains FIFO through the ordinary command
+> path at the next idle — a natural completion, a stop, or the errored → idle dismissal — **before**
+> any held or staged message is sent, so a queued `/clear` clears before a queued message lands. A
+> verb that opens a worker of its own (`/compact`, `/continue`) stops the drain, and what is left
+> waits for that worker's own terminal fold. Backspace on an empty box pops the newest queued command
+> back into the editor first (it is nearest the box), then the newest staged message; the reporting
+> verbs still run on the spot; a line that could not run even at idle (a parse error) is answered by
+> its usage note at once rather than deferred. The queue is the host's own bookkeeping — the engine
+> learns nothing of a queued command until it runs (ADR 0031) — and it is session-ephemeral like the
+> staged rows (decision 9): a deferred quit runs nothing. The dropdown accept queues the bare verb
+> cut out of the draft and leaves the rest of the message verbatim, exactly as it would have run it.
 
 **11. The one deliberate behavioural loss: the single-key transcript scroll while running.** Keys
 that used to scroll the transcript mid-run (j/k/space) now type. PgUp/PgDn and the mouse wheel keep

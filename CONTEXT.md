@@ -680,12 +680,18 @@ Staged and held rows are session-ephemeral — sessions record what was committe
 Mid-run delivery is 1:1 (one row, one marked message); a flush at idle joins the rows into ONE
 **unmarked** message, because exactly one unmarked user message opens an Exchange. A **Skill** or
 a **File reference** named in a staged message is message content and rides the Interjection with
-it; a `/command` never queues, and which ones may run mid-run is a **per-command** policy rather
-than a blanket "at idle" rule — the reporting verbs (`/version`, `/skills`, `/confine` status) and
-the Schedule pair (`/schedule`, `/schedule-stop`, which touch only the scheduler library and never
-this session's engine — [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md)) run
-immediately, every other verb is offered *tagged* in the menu and refused with a note that leaves
-the line in the box (ADR 0027, amending ADR 0025's decision 10). See
+it; a `/command` is not message content, and which ones may run mid-run is a **per-command**
+policy rather than a blanket "at idle" rule — the reporting verbs (`/version`, `/skills`,
+`/confine` status) and the Schedule pair (`/schedule`, `/schedule-stop`, which touch only the
+scheduler library and never this session's engine —
+[ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md)) run
+immediately, every other verb is offered *tagged* `— runs at idle` in the menu and, typed or
+accepted mid-run, is **queued**: it shows as a `queued command: /verb` row in the band above the
+box (below the staged messages; Backspace on an empty box pops it back first), and the queue runs
+FIFO at the next idle — a completion, a stop, or an error's dismissal — before any held or staged
+message is sent, so a queued `/clear` clears before a queued message lands (ADR 0025 decisions 7
+and 10, amended 2026-09-14, superseding ADR 0027 decision 6's refusal). The queue is the host's
+alone — the engine learns nothing of a queued command until it runs (ADR 0031). See
 [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md).
 The same message shape reaches a **Sub-agent**. Inside its **Run view** the prompt box addresses
 that child: `Agent.InterjectChild` queues the message into the child's own engine-side mailbox and

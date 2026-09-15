@@ -20,8 +20,8 @@ import (
 // the box is editable — the namespace is most wanted exactly where it used to vanish, on the
 // message being composed while the model works, so an interjection reaches a file, a skill and a
 // reporting command as easily as a submitted message does (see computeAutocomplete; a command that
-// needs a quiescent engine is offered TAGGED rather than hidden, and refused with a note if it is
-// accepted anyway). It is painted by the shared selector-popup
+// needs a quiescent engine is offered TAGGED "— runs at idle" rather than hidden, and queued to run
+// at the next idle if it is accepted anyway). It is painted by the shared selector-popup
 // module (popup.go) — a titled, bordered pane rendered above the input box, in a slot that
 // shrinks the transcript viewport to make room. The overlay completes the TOKEN AT THE CARET
 // (caretToken): forward typing at the end of the draft is only its commonest case, and going back
@@ -137,8 +137,9 @@ type autocompleteState struct {
 // interjection as in a submitted message (it resolves at delivery, fresh) and a skill "/token" is
 // message content that rides the interjection the same way. A COMMAND is the one that cannot
 // simply ride, so the menu tells the truth about it instead of hiding it: the verbs that only
-// report run mid-run, the ones that need a quiescent engine are TAGGED "— idle only"
-// (commandSuggestions) and are queued to run at the next idle if accepted (queueCommand). An
+// report run mid-run, the ones that need a quiescent engine are TAGGED "— runs at idle"
+// (commandSuggestions, idleOnlyTag) and are queued to run at the next idle if accepted
+// (queueCommand). An
 // offered row that says what it will do is worth more than a namespace that disappears.
 //
 // Each region is scoped to the TOKEN AT THE CARET, never to the whole line and no longer to the end

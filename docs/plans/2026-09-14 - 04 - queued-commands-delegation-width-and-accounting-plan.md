@@ -83,7 +83,11 @@ internal/tui/autocomplete.go — acceptAutocomplete, removeCompletionToken, comm
 
 **Commit:** `feat(tui): an idle-only command typed mid-run is queued and runs at idle`
 
-## 3. The docs record that commands queue
+## 3. The docs record that commands queue — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `internal/tui/interject.go` (in Files) was not edited — item 2 already reworded its doc comments (stageInterjection, stageCommand, popDeferredCommand, stagedRowBodies) and the sweep found nothing stale there.
+NOTES (2026-09-15): consequential edit — docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md: made necessary by the ADR 0025 D10 amendment — its decision 7 said mid-run acceptance of /model and /server "earns the standing note"; a dated parenthetical now records that the line is queued.
+NOTES (2026-09-15): the "— idle only" menu tag was renamed to "— runs at idle" by item 2 (`idleOnlyTag`, autocomplete.go:409); the docs and comments naming the old tag text (manual, layout.md ×3, ADR 0027/0028 amendments, doc.go, command.go, autocomplete.go) were updated in the same sweep since the old text is now false. ADR 0025's original D10 text and its 2026-07-28 block keep their wording as the historical record; the new dated block supersedes them explicitly.
 
 **What:** Depends on item 2. ADR 0025 gains a dated amendment superseding D10 ("commands never queue") and ADR 0027 D6, stating the item-2 shape (queued as a staged row, FIFO at idle, before the held queue, survives Esc×2). Rule for the prose sweep: every sentence stating that a command is refused, "runs at idle — not queued", or "never queues" — `grep -rn "not queued\|never queue\|idle-only\|idle only" docs/ CONTEXT.md internal/tui layout.md` — is reworded or deleted; CONTEXT.md **Interjection** entry, `docs/manual/commands.md` keys paragraph (the line plan 01 item 3 already edits), `layout.md` staged-band section (the new row), and the `internal/tui/interject.go` doc comment.
 

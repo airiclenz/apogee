@@ -152,6 +152,9 @@ than running them, and mid-run acceptance earns the standing note.
 `runsBareAtAccept` (`internal/tui/command.go:94`), because the bare form only opens the picker and
 mutates nothing until that picker's own accept, where a `/model ` nobody meant to finish would just
 stand in the box. The idle-only tag and the mid-run standing note are unchanged.)*
+*(Amended 2026-09-14: mid-run acceptance no longer earns a note — the line is **queued** and runs
+at the next idle, [ADR 0025](0025-interjections-commit-at-the-between-steps-boundary.md) decision
+10 as amended that day; the tag reads `— runs at idle`.)*
 Idle-only is not incidental —
 both end in idle-only engine calls, and a user-initiated switch racing the deferred `pendingRebind`
 path would make "latest wins" ambiguous between the human and the server.

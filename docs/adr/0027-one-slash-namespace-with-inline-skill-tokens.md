@@ -115,6 +115,14 @@ row is rendered **tagged** `— idle only` rather than hidden — the human lear
 why it is refused — and accepting it prints `commandsAtIdleNote` with the draft untouched. Skill
 and file tokens are message content and simply ride the interjection.
 
+> **Amended 2026-09-14 by [ADR 0025](0025-interjections-commit-at-the-between-steps-boundary.md)
+> (decision 10, amended the same day).** The refusal clause is retired: an idle-only verb accepted
+> or entered while a worker works is **queued** — the row is tagged `— runs at idle`, the line joins
+> the band above the box as a `queued command: /verb` row, and it runs FIFO at the next idle before
+> any held message is sent. The per-command policy itself, `Model.commandRunnable` as the one gate
+> both routes consult, and the tagged-not-hidden row all stand; only what accepting a tagged row
+> does has changed, and the dropdown accept still cuts only the verb token out of the draft.
+
 `/confine`'s status form is runnable mid-run for a structural reason, not a hopeful one:
 `ConfineToWorkspace()` reads the live flag under the Agent's own `RWMutex`, the `SetMode` class
 [ADR 0011](0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md) names. `/skills` is safe
@@ -149,8 +157,9 @@ pre-existing rule: the verb delimiter is space or tab, never a newline).
 pickers stay idle-only, because offering a command that would be refused misleads."* Decision 6
 above replaces the second clause: the menu opens for every region while running, and what would
 have misled is answered by **tagging the row** instead of hiding the namespace. Everything else in
-ADR 0025 stands — commands still never queue, an idle-only verb still earns
-`commands run at idle — not queued`, and staging still commits at the between-Steps boundary. The
+ADR 0025 stands, and staging still commits at the between-Steps boundary. *(This section once
+also read "commands still never queue, an idle-only verb still earns `commands run at idle — not
+queued`"; ADR 0025's 2026-09-14 amendment to decision 10 reversed that — commands queue.)* The
 one behavioural repair on that path is decision 2's: a staged interjection now carries its
 `SkillIDs` instead of silently dropping them.
 

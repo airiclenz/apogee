@@ -389,8 +389,8 @@ func verbArgsOf[T any](p parsedInput) T {
 
 // safeWhileRunning reports whether this parsed command LINE may be driven while a worker works.
 // It is the whole of the per-command policy, in one pure place both ⏎ (stageInterjection) and the
-// dropdown's accept (acceptAutocomplete) read, so the menu's "— idle only" tag and what the key
-// actually does can never disagree.
+// dropdown's accept (acceptAutocomplete) read, so the menu's "— runs at idle" tag and what the key
+// actually does — run now, or queue for the next idle — can never disagree.
 //
 // Three tests, because the policy is about the line and not only about the verb. The verb's own
 // commandSpec.whileRunning says it does nothing this session's engine must be quiescent for —

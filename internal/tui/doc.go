@@ -129,7 +129,10 @@
 // on the message being composed for next — under the per-command policy the table carries
 // (commandSpec.whileRunning, read off the parsed line by [parsedInput.safeWhileRunning] so
 // "/confine" and "/confine off" can differ): the reporting verbs run mid-run, every other row is
-// TAGGED "— idle only" in the menu and earns commandsAtIdleNote instead of running, and skill and
+// TAGGED "— runs at idle" in the menu and is QUEUED instead of running ([Model.queueCommand] —
+// a "queued command: /verb" row in the band above the box, drained FIFO at the next idle by
+// [Model.runDeferredCommands] before any held message is sent; ADR 0025 D7 and D10, amended
+// 2026-09-14), and skill and
 // file tokens are simply message content that rides the interjection. /clear (aliased by /new) and
 // /compact drive the engine's context seams ([Engine.ClearContext]/[Engine.Compact]); /version and
 // /skills are pure reports written straight into the scrollback; /schedule and /schedule-stop drive
@@ -797,9 +800,10 @@
 // pending question, the highlight and the ticked set); commandrun.go the third cluster lifted out
 // of model.go (ADR 0043) — what a
 // recognised /command DOES ([Model.runCommand]'s switchboard, [Model.startNewSession]'s session
-// reset, [Model.launchExchange]'s worker start) beside the refusals an unrunnable line meets
-// ([Model.refuseUnknownSlash], [Model.refuseIdleOnlyCommand]) and the [Model.commandRunnable] gate
-// both invocation routes share, while the parse that classifies the line stays in command.go and
+// reset, [Model.launchExchange]'s worker start) beside the refusal an unknown line meets
+// ([Model.refuseUnknownSlash]), the queue an idle-only line typed mid-run joins
+// ([Model.queueCommand], drained by [Model.runDeferredCommands]) and the [Model.commandRunnable]
+// gate both invocation routes share, while the parse that classifies the line stays in command.go and
 // [Model.submit] stays with the input concern; heartbeat.go the fourth cluster lifted out of
 // model.go beside them (ADR 0043) — the upstream heartbeat end to end (ADR 0024): the
 // [heartbeatState] the footer and the send gate read, the tick chain that keeps it current
