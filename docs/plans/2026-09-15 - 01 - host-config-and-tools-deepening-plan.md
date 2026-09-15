@@ -133,7 +133,10 @@ NOTES (2026-09-15): the `wire.go` test-mirror sentence also names `wire_live_tes
 
 Commit: `fix(tui,session,cmd): seam value not forwarded live; dead export and stale comments removed`
 
-## 4. Gate: plan 2026-09-14 - 04 is archived
+## 4. Gate: plan 2026-09-14 - 04 is archived — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): gate PASSED — `ls "docs/plans/archived/" | grep -c "2026-09-14 - 0[234]"` = 3; `ls docs/plans/ | grep -c "2026-09-14 - 0[234]"` = 0; archived plan 04 is tracked (commit 4de244b4) with all 7 items ✅ done. Working tree clean.
+NOTES (2026-09-15): observation only — the archived 02/03/04 plan files still carry `**Status:** unexecuted` at line 6 despite every item being ✅ done and the archive commits landing; header not refreshed by the archive step. Not edited (item says no change).
 
 **What.** Verify `docs/plans/archived/2026-09-14 - 04 - queued-commands-delegation-width-and-accounting-plan.md` exists and `docs/plans/` holds no `2026-09-14 - 02/03/04` file. If not, STOP the run here (resume later). No code change.
 
