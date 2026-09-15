@@ -242,7 +242,10 @@ NOTES (2026-09-15): consequential edit — docs/adr/0026-workspace-context-files
 
 Commit: `refactor(agent): a delegate is constructed from a delegation value, not overwritten`
 
-## 9. One `isDelegate()` predicate
+## 9. One `isDelegate()` predicate — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `internal/agent/hookpermit_test.go` (named in Files) needed no edit — after item 7 it carries no depth or task predicate; left untouched. `internal/agent/compact.go` likewise holds no child-ness read (only the `midExchangeCompaction` contract flag the guard exempts) — unchanged.
+NOTES (2026-09-15): the new test `TestIsDelegate_TopLevelFalseChildTrue` lives in `agent_test.go` (not in Files) and reuses `delegateOn` from `delegatereport_test.go` to build a real parent/child pair rather than poking `depth`.
 
 **What.** Replace every "is this a child?" test (`depth > 0`, `spawnCallID != ""`, `task != ""`, `stepCap`, `liveMode`, `midExchangeCompaction` reads used as child-ness) across `internal/agent/{agent,children,compact,dispatch,loop}.go` with `a.isDelegate()` reading item 8's value. Rule: every site that tests one of those fields for child-ness — `grep -n "depth > 0\|depth == 0\|callID != \"\"\|task != \"\"" internal/agent/*.go`. Depends on item 8.
 

@@ -181,7 +181,7 @@ func (a *Agent) InterjectChild(spawnCallID string, in domain.UserInput) error {
 //
 // turn is the Turn the messages are about to reach, which is what the events report.
 func (a *Agent) drainMailbox(turn int) {
-	if a.depth == 0 {
+	if !a.isDelegate() {
 		return
 	}
 	queued := a.mailbox.drain()

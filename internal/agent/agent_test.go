@@ -402,3 +402,19 @@ func TestTurnEventReportsACancelledTurn(t *testing.T) {
 		t.Errorf("TurnEvent status = %q, want %q", got[0].Status, domain.StatusCancelled)
 	}
 }
+
+// TestIsDelegate_TopLevelFalseChildTrue pins the one child-ness predicate: the Agent the host
+// drives answers false, the delegate newChildAgent constructs from it answers true, and every
+// "is this a child?" gate in the engine reads that answer rather than a field of its own.
+func TestIsDelegate_TopLevelFalseChildTrue(t *testing.T) {
+	t.Parallel()
+
+	parent, child := delegateOn(t, delegateReportConfig(t))
+
+	if parent.isDelegate() {
+		t.Error("a top-level Agent answers isDelegate() = true, want false")
+	}
+	if !child.isDelegate() {
+		t.Error("a delegate answers isDelegate() = false, want true")
+	}
+}

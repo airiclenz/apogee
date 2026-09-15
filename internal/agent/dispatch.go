@@ -112,7 +112,7 @@ func (a *Agent) fanOutWidth(delegations int) int {
 // classification: a beat landing between two calls of the same reply must not be able to make the
 // group look split when it was not.
 func (a *Agent) fanOutWidthFor(calls []domain.ToolCall) int {
-	if len(calls) < 2 || a.depth != 0 {
+	if len(calls) < 2 || a.isDelegate() {
 		return 1
 	}
 	target := a.delegationTarget()
@@ -217,7 +217,7 @@ func (a *Agent) askedSeat(call domain.ToolCall) delegationSeat {
 // SPLIT across both seats is sized differently, and that is a fact about one reply rather than
 // about this agent, which is why it lives in fanOutWidthFor and not here.
 func (a *Agent) delegationWidth() int {
-	if a.depth != 0 {
+	if a.isDelegate() {
 		return 1
 	}
 	if width := a.delegationCap(); width > 1 {
@@ -313,7 +313,7 @@ type dispatchSlot struct {
 //
 // Width 1 is the per-call loop: prepare, run and commit each call before the next is looked at,
 // so a call's result is in history before its successor's ToolCallEvent — the path every leaf
-// group takes, and a delegation group's whenever fanOutWidthFor says 1 (cap < 2, depth > 0, or a
+// group takes, and a delegation group's whenever fanOutWidthFor says 1 (cap < 2, a delegate, or a
 // single call). Above 1 the whole group is prepared, then run through a pool of width workers,
 // then committed in emitted-call order — a delegation is atomic within the parent Turn, so a
 // cancelled group is dropped whole, unappended, after the join (ADR 0013 §5).
@@ -599,11 +599,11 @@ func skippedDelegationResult(callID string) domain.ToolResult {
 
 // interjectionPending answers whether a user message is waiting for this Agent's next boundary —
 // the one predicate that decides a delegation about to start is skipped instead. It is one rule
-// for every depth: at depth 0 it is the host's Config.InterjectionPending seam (nil ⇒ never), and
-// at depth > 0 it is this child's own mailbox (children.go), because a message queued for a child
+// for every depth: at the top level it is the host's Config.InterjectionPending seam (nil ⇒ never),
+// and on a delegate (isDelegate) it is this child's own mailbox (children.go), because a message queued for a child
 // waits on that child's grandchildren exactly as the human's waits on its children.
 func (a *Agent) interjectionPending() bool {
-	if a.depth > 0 {
+	if a.isDelegate() {
 		return a.mailbox.hasPending()
 	}
 	if a.cfg.InterjectionPending == nil {
@@ -1220,14 +1220,14 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// agent, whose Consoles no delegation's end may reap.
 	ctx = domain.WithConsoleOwner(ctx, a.consoleOwner)
 
-	if a.task != "" {
+	if a.isDelegate() {
 		// Install this Agent's delegated task so a tool that puts a QUESTION to the human can name
 		// the agent asking it (domain.AskRequest.SubAgentTask), the way an ApprovalRequest already
 		// names it. The Approval path needs no carrier — the loop builds that request itself
 		// (approve) — but ask_user builds its own, one interface boundary away from the Agent that
 		// knows the task, so the identity rides the call's context (ADR 0039 decision 12).
-		// Nothing is installed at depth 0: there, the top-level agent is the only thing that could
-		// be asking. No AskRequest is built under this value any more (2026-09-15, plan
+		// Nothing is installed on a top-level Agent (isDelegate false): there, it is the only thing
+		// that could be asking. No AskRequest is built under this value any more (2026-09-15, plan
 		// 2026-09-14 - 03, item 5: ask_user is withheld from every sub-agent); it is still
 		// installed because it is the child's identity on the ctx, not the question's.
 		ctx = domain.WithSubAgentTask(ctx, a.task)

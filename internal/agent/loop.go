@@ -95,7 +95,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// have to `/undo` twice to take back work they asked for once (ADR 0051, ratified call 8).
 		// The closing half of the pair carries the same gate for the same reason, at the one owner
 		// of Exchange end (Agent.closeUndoGroup, reached through turnLifecycle.onClose).
-		if a.journal != nil && a.depth == 0 {
+		if a.journal != nil && !a.isDelegate() {
 			a.journal.BeginGroup()
 		}
 		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are
@@ -580,7 +580,7 @@ func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Respon
 // picks between the empty and the capped wording for it. Its placement is load-bearing — a child's
 // EMPTY capped reply is the reply whose reasoning spend is worth the most and the delegate wording
 // below carries no such number, so emptiness is judged before depth is. Only a reply that did carry
-// visible text reaches the DELEGATE rule: a child's (a.depth > 0) that hit the output cap faults
+// visible text reaches the DELEGATE rule: a child's (isDelegate) that hit the output cap faults
 // for that text — see cappedDelegateReplyErrFmt for why a truncated delegate answer cannot be
 // allowed to pose as the delegation's result.
 func (a *Agent) replyFault(resp *domain.Response) (string, bool) {
@@ -590,7 +590,7 @@ func (a *Agent) replyFault(resp *domain.Response) (string, bool) {
 	if strings.TrimSpace(resp.Text()) == "" {
 		return a.emptyReplyFault(resp), true
 	}
-	if a.depth > 0 && resp.FinishReason() == domain.FinishLength {
+	if a.isDelegate() && resp.FinishReason() == domain.FinishLength {
 		return fmt.Sprintf(cappedDelegateReplyErrFmt, a.maxOutputTokens()), true
 	}
 	return "", false

@@ -652,7 +652,7 @@ func (a *Agent) Close() error {
 // Best-effort by contract, like every close on the way out: a process that resists teardown must
 // not stop the Agent from closing its client, and there is no caller left to report it to.
 func (a *Agent) closeConsoles() {
-	if a.depth > 0 {
+	if a.isDelegate() {
 		a.consoles.CloseOwnedBy(a.consoleOwner)
 		return
 	}
@@ -1130,7 +1130,7 @@ func (a *Agent) RedoRevert(generation uint64) (undo.Report, error) {
 // ErrorEvent from "undo" and NEVER fails the Exchange — the group falls back to what the write
 // funnel recorded, which is the coverage ADR 0051 shipped.
 func (a *Agent) closeUndoGroup() {
-	if a.journal == nil || a.depth != 0 {
+	if a.journal == nil || a.isDelegate() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), undoCloseTimeout)
@@ -1277,6 +1277,18 @@ func (a *Agent) displayName() string {
 	a.nameMu.RLock()
 	defer a.nameMu.RUnlock()
 	return a.name
+}
+
+// isDelegate answers whether this Agent is a DELEGATED one — a child spawned by a sub_agent call
+// and constructed from a delegation value (newChildAgent) — as opposed to the top-level Agent the
+// host drives. It is the ONE child-ness predicate: every "is this a child?" gate in the engine
+// reads it, so the fact has a single spelling and a single source, the nesting depth ADR 0013
+// stamps on every Event (depth stays a numeric field for base and WithSubAgentDepth). The
+// spawning call id and the task are consequences of being a delegate, never tests for it; the
+// delegate caps (stepCap, tokenCap, timeCap) are BOUNDS a delegate may or may not carry, so they
+// gate their own enforcement and nothing else.
+func (a *Agent) isDelegate() bool {
+	return a.depth > 0
 }
 
 // SetContextFiles replaces the workspace context-file names folded into the standing system

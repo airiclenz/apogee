@@ -2,7 +2,7 @@ package agent
 
 // The engine-owned DELEGATE REPORT BLOCK: the part of the standing system content (loop.go's
 // standingSystem) that rides between the orientation block and the workspace context files'
-// blocks, and only on a DELEGATED Agent (depth > 0). It states the one fact a child cannot learn
+// blocks, and only on a DELEGATED Agent (isDelegate). It states the one fact a child cannot learn
 // from any configured source — the agent that delegated the task sees nothing of this conversation
 // and receives only the child's FINAL reply — and asks for that reply in the shape a parent can
 // act on: what was found, what changed, what is unfinished, cited by path:line rather than pasted.
@@ -58,15 +58,15 @@ func mustFirstSentence(s string) string {
 	return s[:end+1]
 }
 
-// delegateReportBlock returns the block for a DELEGATED Agent and "" for a top-level one. Depth is
-// the whole gate: a child is a child however it was spawned, so a routed delegation and an
+// delegateReportBlock returns the block for a DELEGATED Agent and "" for a top-level one. isDelegate
+// is the whole gate: a child is a child however it was spawned, so a routed delegation and an
 // unrouted one carry the identical text, and a grandchild carries it too — every agent whose reply
 // is consumed by another agent rather than read by the human.
 //
 // KV cache: a constant, so like the orientation block it is prefix-cache-stable for the life of a
 // session (ADR 0023 §6).
 func (a *Agent) delegateReportBlock() string {
-	if a.depth <= 0 {
+	if !a.isDelegate() {
 		return ""
 	}
 	return DelegateReportBlock
