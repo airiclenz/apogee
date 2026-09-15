@@ -12,6 +12,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // ----------------------------------------------------------------------------
@@ -260,18 +261,18 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// runs that work in the user's shell — but the runner it starts is repo-authored code, which
 	// under this threat model is untrusted bytes with no business reading the key apogee talks to
 	// its inference server with.
-	res, err := runTestsSubprocess(ctx, subprocessSpec{
-		argv:    append([]string{program}, runnerArgs...),
-		dir:     t.root,
-		timeout: runTestsTimeout,
-		env:     subprocessEnv(t.secretEnv),
+	res, err := runTestsSubprocess(ctx, subprocess.SubprocessSpec{
+		Argv:    append([]string{program}, runnerArgs...),
+		Dir:     t.root,
+		Timeout: runTestsTimeout,
+		Env:     subprocessEnv(t.secretEnv),
 	})
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
 
 	condensed := condenseTestOutput(runner, displayCommand(runner, runnerArgs), res)
-	if res.exitCode != 0 || res.timedOut {
+	if res.ExitCode != 0 || res.TimedOut {
 		return errorResult(call.ID, condensed), nil
 	}
 	return okResult(call.ID, condensed), nil
@@ -407,14 +408,14 @@ func displayCommand(runner testRunner, args []string) string {
 // A failing run with no recognisable failing test — a compile error, a pytest collection error —
 // falls back to the HEAD of the log, because that is where all three runners report the failure
 // that stopped them before any test ran.
-func condenseTestOutput(runner testRunner, display string, res subprocessResult) string {
+func condenseTestOutput(runner testRunner, display string, res subprocess.SubprocessResult) string {
 	// The command echo is model-supplied text (a filter is copied into it verbatim), so it is
 	// clipped like any other quoted line BEFORE the footer reserves room for it. Unclipped, a
 	// filter longer than the cap would push the footer alone past the byte limit this tool
 	// advertises — the one thing capCondensed cannot cut back.
 	display = clipLine(display)
-	lines := strings.Split(res.combinedOutput, "\n")
-	failed := res.exitCode != 0 || res.timedOut
+	lines := strings.Split(res.CombinedOutput, "\n")
+	failed := res.ExitCode != 0 || res.TimedOut
 	blocks := collectFailureBlocks(runner, lines)
 
 	var b strings.Builder
@@ -424,14 +425,14 @@ func condenseTestOutput(runner testRunner, display string, res subprocessResult)
 	}
 	fmt.Fprintf(&b, "%s (%s)", verdict, runner.name)
 	switch {
-	case res.timedOut:
+	case res.TimedOut:
 		fmt.Fprintf(&b, " — timed out after %s", runTestsTimeout)
 	case failed:
-		fmt.Fprintf(&b, " — exit code %d", res.exitCode)
+		fmt.Fprintf(&b, " — exit code %d", res.ExitCode)
 	}
 	b.WriteByte('\n')
 
-	if counts := runner.tally(res.combinedOutput, len(blocks)); counts != "" {
+	if counts := runner.tally(res.CombinedOutput, len(blocks)); counts != "" {
 		b.WriteString(counts + "\n")
 	}
 
@@ -458,7 +459,7 @@ func condenseTestOutput(runner testRunner, display string, res subprocessResult)
 	}
 
 	footer = append(footer, fmt.Sprintf("[condensed from %d bytes of output; run `%s` with terminal for the full log]",
-		len(res.combinedOutput), display))
+		len(res.CombinedOutput), display))
 	return capCondensed(b.String(), footer)
 }
 

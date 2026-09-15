@@ -1705,7 +1705,7 @@ func TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver(t *testing.T) {
 				// no global driver to leave alone.
 				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
 					"config", "--global", "--name-only", "--get-regexp", gitCommandConfigName.String())
-				if err != nil || seen.exitCode != 0 {
+				if err != nil || seen.ExitCode != 0 {
 					t.Skip("this git did not read the injected HOME config; nothing to assert")
 				}
 			}
@@ -1844,7 +1844,7 @@ func TestGit_FilterRefusalStaysRepoLocal(t *testing.T) {
 				// no global driver to leave alone.
 				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
 					"config", "--global", "--name-only", "--get-regexp", gitCommandConfigName.String())
-				if err != nil || seen.exitCode != 0 {
+				if err != nil || seen.ExitCode != 0 {
 					t.Skip("this git did not read the injected HOME config; nothing to assert")
 				}
 			}

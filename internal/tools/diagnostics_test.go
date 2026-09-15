@@ -326,17 +326,17 @@ func TestDiagnostics_VetSubprocessEnvironmentIsPinned(t *testing.T) {
 	abs := filepath.Join(root, "pkg", "file.go")
 	spec := goVetSpec("/usr/bin/go", root, abs)
 
-	if got, want := spec.argv, []string{"/usr/bin/go", "vet", filepath.Join(root, "pkg")}; !slices.Equal(got, want) {
+	if got, want := spec.Argv, []string{"/usr/bin/go", "vet", filepath.Join(root, "pkg")}; !slices.Equal(got, want) {
 		t.Errorf("vet argv = %q, want %q (the PACKAGE directory, not the file)", got, want)
 	}
-	if spec.dir != root {
-		t.Errorf("vet dir = %q, want the workspace root %q", spec.dir, root)
+	if spec.Dir != root {
+		t.Errorf("vet dir = %q, want the workspace root %q", spec.Dir, root)
 	}
-	if spec.timeout != vetTimeout {
-		t.Errorf("vet timeout = %v, want %v", spec.timeout, vetTimeout)
+	if spec.Timeout != vetTimeout {
+		t.Errorf("vet timeout = %v, want %v", spec.Timeout, vetTimeout)
 	}
 
-	env := envValues(spec.env)
+	env := envValues(spec.Env)
 	// The pins: each one is the value the toolchain runs on whatever the host said.
 	for key, want := range map[string]string{
 		"GOFLAGS":     "-mod=readonly",

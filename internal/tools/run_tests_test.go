@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // writeProject writes a fixture project (paths are slash-separated, relative to the root) into a
@@ -44,13 +45,13 @@ func runTestsCall(t *testing.T, root string, args map[string]any) domain.ToolRes
 
 // withCapturedTestRun swaps the runner subprocess for one that records the spec and launches
 // nothing, so a test can pin the exact argv and environment the tool builds.
-func withCapturedTestRun(t *testing.T) *subprocessSpec {
+func withCapturedTestRun(t *testing.T) *subprocess.SubprocessSpec {
 	t.Helper()
 	orig := runTestsSubprocess
-	var captured subprocessSpec
-	runTestsSubprocess = func(_ context.Context, spec subprocessSpec) (subprocessResult, error) {
+	var captured subprocess.SubprocessSpec
+	runTestsSubprocess = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
 		captured = spec
-		return subprocessResult{}, nil
+		return subprocess.SubprocessResult{}, nil
 	}
 	t.Cleanup(func() { runTestsSubprocess = orig })
 	return &captured
@@ -368,21 +369,21 @@ func TestRunTestsDropsApogeeCredentialsFromTheRunnerEnvironment(t *testing.T) {
 	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
 	runTestsCall(t, root, nil)
 
-	if captured.env == nil {
-		t.Fatal("spec.env is nil: the runner would inherit the parent environment whole, credentials included")
+	if captured.Env == nil {
+		t.Fatal("spec.Env is nil: the runner would inherit the parent environment whole, credentials included")
 	}
-	if value, ok := envValue(captured.env, "APOGEE_API_KEY"); ok {
+	if value, ok := envValue(captured.Env, "APOGEE_API_KEY"); ok {
 		t.Errorf("APOGEE_API_KEY = %q reached the runner environment, want it dropped", value)
 	}
-	for _, entry := range captured.env {
+	for _, entry := range captured.Env {
 		if strings.Contains(entry, "sk-secret-value") {
 			t.Errorf("the api key survived under another name: %q", entry)
 		}
 	}
-	if value, _ := envValue(captured.env, "APOGEE_ENDPOINT"); value != "http://192.0.2.1:1111" {
+	if value, _ := envValue(captured.Env, "APOGEE_ENDPOINT"); value != "http://192.0.2.1:1111" {
 		t.Errorf("APOGEE_ENDPOINT = %q, want it inherited (only the SECRETS are dropped)", value)
 	}
-	if _, ok := envValue(captured.env, "PATH"); !ok {
+	if _, ok := envValue(captured.Env, "PATH"); !ok {
 		t.Error("PATH did not survive: a test suite runs in the operator's environment")
 	}
 }
@@ -410,10 +411,10 @@ func TestRunTestsDropsTheConfiguredSecretNamesFromTheRunnerEnvironment(t *testin
 	if err != nil {
 		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v (%q)", err, res.Content)
 	}
-	if value, ok := envValue(captured.env, "APOGEE_TEST_PROVIDER_KEY"); ok {
+	if value, ok := envValue(captured.Env, "APOGEE_TEST_PROVIDER_KEY"); ok {
 		t.Errorf("APOGEE_TEST_PROVIDER_KEY = %q reached the runner environment, want the configured name dropped", value)
 	}
-	if value, _ := envValue(captured.env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
+	if value, _ := envValue(captured.Env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
 		t.Errorf("APOGEE_TEST_ENDPOINT = %q, want it inherited (only the NAMED variables are dropped)", value)
 	}
 }
@@ -447,7 +448,7 @@ func TestRunTestsCondensesRunnerReportedCounts(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := condenseTestOutput(tc.runner, "cmd", subprocessResult{combinedOutput: tc.output, exitCode: 1})
+			got := condenseTestOutput(tc.runner, "cmd", subprocess.SubprocessResult{CombinedOutput: tc.output, ExitCode: 1})
 			if !strings.HasPrefix(got, "FAIL ("+tc.runner.name+")") {
 				t.Errorf("the verdict must lead: %q", firstLineOf(got))
 			}
@@ -468,7 +469,7 @@ func TestRunTestsCondensesAFailureWithNoRecognisableTest(t *testing.T) {
 	t.Parallel()
 
 	output := "# example.test/x [example.test/x.test]\n./x_test.go:6:2: undefined: helper\nFAIL\texample.test/x [build failed]\n"
-	got := condenseTestOutput(goTestRunner, "go test ./...", subprocessResult{combinedOutput: output, exitCode: 2})
+	got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{CombinedOutput: output, ExitCode: 2})
 
 	if !strings.Contains(got, "undefined: helper") {
 		t.Errorf("a build failure's own message must survive the condensing:\n%s", got)
@@ -490,7 +491,7 @@ func TestRunTestsCapKeepsTheClosingNote(t *testing.T) {
 		fmt.Fprintf(&out, "--- FAIL: TestHuge%03d (0.00s)\n", i)
 		out.WriteString("    " + strings.Repeat("d", 400) + "\n")
 	}
-	got := condenseTestOutput(goTestRunner, "go test ./...", subprocessResult{combinedOutput: out.String(), exitCode: 1})
+	got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{CombinedOutput: out.String(), ExitCode: 1})
 
 	assertUnderCap(t, got)
 	if !strings.HasSuffix(strings.TrimRight(got, "\n"), "full log]") {
@@ -509,7 +510,7 @@ func TestRunTestsCapHoldsAgainstAnOversizedFilter(t *testing.T) {
 
 	filter := strings.Repeat("T", 20000)
 	display := displayCommand(goTestRunner, goTestRunner.args("", filter))
-	got := condenseTestOutput(goTestRunner, display, subprocessResult{combinedOutput: "ok\n", exitCode: 0})
+	got := condenseTestOutput(goTestRunner, display, subprocess.SubprocessResult{CombinedOutput: "ok\n", ExitCode: 0})
 
 	assertUnderCap(t, got)
 	if !strings.HasSuffix(strings.TrimRight(got, "\n"), "full log]") {

@@ -260,7 +260,7 @@ func TestTerminalResolvesTheShellToAnAbsoluteProgram(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("result = %q, want an ordinary PATH to resolve the platform shell", res.Content)
 	}
-	if len(captured.argv) == 0 || !filepath.IsAbs(captured.argv[0]) {
-		t.Errorf("argv = %q, want argv[0] resolved to an absolute program", captured.argv)
+	if len(captured.Argv) == 0 || !filepath.IsAbs(captured.Argv[0]) {
+		t.Errorf("argv = %q, want argv[0] resolved to an absolute program", captured.Argv)
 	}
 }

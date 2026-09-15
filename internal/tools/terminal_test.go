@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // fakeConfiner is a caps-injected Confiner for the execution-tool tests. It records each
@@ -135,23 +136,23 @@ func TestTerminal_DropsTheConfiguredSecretNamesFromTheChildEnvironment(t *testin
 	if _, err := term.Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if value, ok := envValue(captured.env, "APOGEE_TEST_PROVIDER_KEY"); ok {
+	if value, ok := envValue(captured.Env, "APOGEE_TEST_PROVIDER_KEY"); ok {
 		t.Errorf("APOGEE_TEST_PROVIDER_KEY = %q reached the shell environment, want the configured name dropped", value)
 	}
-	if value, _ := envValue(captured.env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
+	if value, _ := envValue(captured.Env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
 		t.Errorf("APOGEE_TEST_ENDPOINT = %q, want it inherited (only the NAMED variables are dropped)", value)
 	}
 }
 
 // withCapturedTerminalRun swaps the shell runner for one that records the spec and launches
 // nothing, so a test can pin the exact environment the tool builds on every platform.
-func withCapturedTerminalRun(t *testing.T) *subprocessSpec {
+func withCapturedTerminalRun(t *testing.T) *subprocess.SubprocessSpec {
 	t.Helper()
 	orig := runTerminalSubprocess
-	var captured subprocessSpec
-	runTerminalSubprocess = func(_ context.Context, spec subprocessSpec) (subprocessResult, error) {
+	var captured subprocess.SubprocessSpec
+	runTerminalSubprocess = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
 		captured = spec
-		return subprocessResult{}, nil
+		return subprocess.SubprocessResult{}, nil
 	}
 	t.Cleanup(func() { runTerminalSubprocess = orig })
 	return &captured
@@ -179,7 +180,7 @@ func TestTerminal_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
 	if _, err := NewTerminal(root, nil).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	entries := envPathEntries(t, captured.env)
+	entries := envPathEntries(t, captured.Env)
 	if slices.Contains(entries, inside) {
 		t.Errorf("PATH = %q still names the in-workspace entry %q", entries, inside)
 	}
@@ -189,7 +190,7 @@ func TestTerminal_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
 	if slices.Contains(entries, filepath.Join("relative", "bin")) {
 		t.Errorf("PATH = %q kept a non-absolute entry, which names a directory inside the child's own cwd", entries)
 	}
-	if value, _ := envValue(captured.env, "APOGEE_TERMINAL_ENV_PROBE"); value != "kept" {
+	if value, _ := envValue(captured.Env, "APOGEE_TERMINAL_ENV_PROBE"); value != "kept" {
 		t.Errorf("APOGEE_TERMINAL_ENV_PROBE = %q, want it inherited (only PATH is rewritten)", value)
 	}
 }
@@ -592,14 +593,14 @@ func TestSubprocessToolResultShellHint(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name     string
-		res      subprocessResult
+		res      subprocess.SubprocessResult
 		wantHint bool
 	}{
-		{"bad substitution", subprocessResult{exitCode: 2, combinedOutput: "sh: 1: Bad substitution\n"}, true},
-		{"process substitution", subprocessResult{exitCode: 2, combinedOutput: "sh: 1: Syntax error: \"(\" unexpected\n"}, true},
-		{"shopt", subprocessResult{exitCode: 127, combinedOutput: "sh: 1: shopt: not found\n"}, true},
-		{"other failure", subprocessResult{exitCode: 1, combinedOutput: "no such file\n"}, false},
-		{"clean run that printed the words", subprocessResult{exitCode: 0, combinedOutput: "Bad substitution\n"}, false},
+		{"bad substitution", subprocess.SubprocessResult{ExitCode: 2, CombinedOutput: "sh: 1: Bad substitution\n"}, true},
+		{"process substitution", subprocess.SubprocessResult{ExitCode: 2, CombinedOutput: "sh: 1: Syntax error: \"(\" unexpected\n"}, true},
+		{"shopt", subprocess.SubprocessResult{ExitCode: 127, CombinedOutput: "sh: 1: shopt: not found\n"}, true},
+		{"other failure", subprocess.SubprocessResult{ExitCode: 1, CombinedOutput: "no such file\n"}, false},
+		{"clean run that printed the words", subprocess.SubprocessResult{ExitCode: 0, CombinedOutput: "Bad substitution\n"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -627,7 +628,7 @@ func TestTerminal_PrependsFailFastPreambleToThePOSIXLine(t *testing.T) {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
 	want := platform.FailFastPreamble() + "echo hi"
-	if got := captured.argv[len(captured.argv)-1]; got != want {
+	if got := captured.Argv[len(captured.Argv)-1]; got != want {
 		t.Errorf("shell line = %q, want %q (preamble + the model's line)", got, want)
 	}
 }
@@ -646,11 +647,11 @@ func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
 	if _, err := NewTerminal(t.TempDir(), nil).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if got := captured.argv[len(captured.argv)-1]; got != "echo hi" {
+	if got := captured.Argv[len(captured.Argv)-1]; got != "echo hi" {
 		t.Errorf("shell line = %q, want the verbatim %q (no preamble on the cmd path)", got, "echo hi")
 	}
-	if strings.Contains(captured.cmdline, "set -e") {
-		t.Errorf("cmdline = %q, want no preamble on the verbatim cmd.exe line", captured.cmdline)
+	if strings.Contains(captured.Cmdline, "set -e") {
+		t.Errorf("cmdline = %q, want no preamble on the verbatim cmd.exe line", captured.Cmdline)
 	}
 }
 
@@ -679,37 +680,37 @@ func TestSubprocessToolResultFailFastNote(t *testing.T) {
 	box := domain.ConfinementBox{WorkspaceRoot: "/ws"}
 	cases := []struct {
 		name        string
-		res         subprocessResult
+		res         subprocess.SubprocessResult
 		wantLine    string
 		wantNote    bool
 		wantStopped string
 		wantContent string
 	}{
-		{name: "fail-fast failure names the mode", res: subprocessResult{exitCode: 1, failFast: true},
+		{name: "fail-fast failure names the mode", res: subprocess.SubprocessResult{ExitCode: 1, FailFast: true},
 			wantLine: "[exit code 1", wantNote: true},
-		{name: "failure without the preamble keeps the plain line", res: subprocessResult{exitCode: 1},
+		{name: "failure without the preamble keeps the plain line", res: subprocess.SubprocessResult{ExitCode: 1},
 			wantLine: "[exit code 1]"},
-		{name: "clean exit under the preamble has no exit-code line", res: subprocessResult{
-			combinedOutput: "hello\n", exitCode: 0, failFast: true}},
-		{name: "a timeout is not a fail-fast stop", res: subprocessResult{
-			exitCode: -1, failFast: true, timedOut: true}, wantLine: "[exit code -1]"},
-		{name: "a signalled exit is not a fail-fast stop", res: subprocessResult{
-			exitCode: -1, failFast: true}, wantLine: "[exit code -1]"},
-		{name: "a denial kill is not a fail-fast stop, whatever its code", res: subprocessResult{
-			combinedOutput: "mkdir: /etc/x: Operation not permitted\n", exitCode: 1, failFast: true,
-			confined: true, denialStopped: true, box: box}, wantLine: "[exit code 1]\n" + confinementDenialStopLabel(box)},
-		{name: "the trap's last line names the stopped command above the marker", res: subprocessResult{
-			combinedOutput: "ls: cannot access 'x[1]'\n" + platform.FailFastStopPrefix + "ls x[1]\n",
-			exitCode:       2, failFast: true},
+		{name: "clean exit under the preamble has no exit-code line", res: subprocess.SubprocessResult{
+			CombinedOutput: "hello\n", ExitCode: 0, FailFast: true}},
+		{name: "a timeout is not a fail-fast stop", res: subprocess.SubprocessResult{
+			ExitCode: -1, FailFast: true, TimedOut: true}, wantLine: "[exit code -1]"},
+		{name: "a signalled exit is not a fail-fast stop", res: subprocess.SubprocessResult{
+			ExitCode: -1, FailFast: true}, wantLine: "[exit code -1]"},
+		{name: "a denial kill is not a fail-fast stop, whatever its code", res: subprocess.SubprocessResult{
+			CombinedOutput: "mkdir: /etc/x: Operation not permitted\n", ExitCode: 1, FailFast: true,
+			Confined: true, DenialStopped: true, Box: box}, wantLine: "[exit code 1]\n" + confinementDenialStopLabel(box)},
+		{name: "the trap's last line names the stopped command above the marker", res: subprocess.SubprocessResult{
+			CombinedOutput: "ls: cannot access 'x[1]'\n" + platform.FailFastStopPrefix + "ls x[1]\n",
+			ExitCode:       2, FailFast: true},
 			wantLine: "[exit code 2", wantNote: true, wantStopped: "ls x[1]",
 			wantContent: "ls: cannot access 'x[1]'\n\nfail-fast: the line stopped at `ls x[1]`\n[exit code 2" + failFastExitNote + "]"},
-		{name: "a trap line that is not last stays in the output", res: subprocessResult{
-			combinedOutput: platform.FailFastStopPrefix + "false\nstill writing\n", exitCode: 1, failFast: true},
+		{name: "a trap line that is not last stays in the output", res: subprocess.SubprocessResult{
+			CombinedOutput: platform.FailFastStopPrefix + "false\nstill writing\n", ExitCode: 1, FailFast: true},
 			wantLine: "[exit code 1", wantNote: true,
 			wantContent: platform.FailFastStopPrefix + "false\nstill writing\n\n[exit code 1" + failFastExitNote + "]"},
-		{name: "a denial kill never names a stopped command", res: subprocessResult{
-			combinedOutput: platform.FailFastStopPrefix + "mkdir /etc/x\n", exitCode: 1, failFast: true,
-			confined: true, denialStopped: true, box: box},
+		{name: "a denial kill never names a stopped command", res: subprocess.SubprocessResult{
+			CombinedOutput: platform.FailFastStopPrefix + "mkdir /etc/x\n", ExitCode: 1, FailFast: true,
+			Confined: true, DenialStopped: true, Box: box},
 			wantLine: "[exit code 1]\n" + confinementDenialStopLabel(box)},
 	}
 	for _, tc := range cases {
@@ -736,7 +737,7 @@ func TestSubprocessToolResultFailFastNote(t *testing.T) {
 			if tc.wantContent != "" && res.Content != tc.wantContent {
 				t.Errorf("content = %q, want exactly %q", res.Content, tc.wantContent)
 			}
-			if tc.res.timedOut && !strings.Contains(res.Content, "command timed out") {
+			if tc.res.TimedOut && !strings.Contains(res.Content, "command timed out") {
 				t.Errorf("content = %q, want the timeout line", res.Content)
 			}
 		})
@@ -770,7 +771,7 @@ func TestSubprocessToolResultNamesTheStoppedCommandPerShell(t *testing.T) {
 				t.Fatalf("%s: `%s` exited 0, want `set -e` to stop it", tc.shell, command)
 			}
 
-			res := subprocessToolResult("c1", subprocessResult{combinedOutput: string(out), exitCode: 1, failFast: true})
+			res := subprocessToolResult("c1", subprocess.SubprocessResult{CombinedOutput: string(out), ExitCode: 1, FailFast: true})
 
 			lines := strings.Split(res.Content, "\n")
 			last := lines[len(lines)-1]
@@ -823,30 +824,30 @@ func TestSubprocessToolResultDenialLabel(t *testing.T) {
 	box := domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/scratch/s1"}}
 	cases := []struct {
 		name      string
-		res       subprocessResult
+		res       subprocess.SubprocessResult
 		wantLabel bool
 	}{
-		{"confined error with strerror text", subprocessResult{
-			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1, confined: true, box: box}, true},
-		{"confined error with Go errno text", subprocessResult{
-			combinedOutput: "open /etc/f: operation not permitted", exitCode: 1, confined: true, box: box}, true},
-		{"confined error with bare EPERM", subprocessResult{
-			combinedOutput: "write failed: EPERM", exitCode: 2, confined: true, box: box}, true},
-		{"unconfined error with strerror text", subprocessResult{
-			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1, confined: false}, false},
-		{"confined success with strerror text", subprocessResult{
-			combinedOutput: "grep found: Operation not permitted", exitCode: 0, confined: true, box: box}, false},
-		{"confined error without a signature", subprocessResult{
-			combinedOutput: "no such file or directory", exitCode: 1, confined: true, box: box}, false},
+		{"confined error with strerror text", subprocess.SubprocessResult{
+			CombinedOutput: "touch: /etc/f: Operation not permitted", ExitCode: 1, Confined: true, Box: box}, true},
+		{"confined error with Go errno text", subprocess.SubprocessResult{
+			CombinedOutput: "open /etc/f: operation not permitted", ExitCode: 1, Confined: true, Box: box}, true},
+		{"confined error with bare EPERM", subprocess.SubprocessResult{
+			CombinedOutput: "write failed: EPERM", ExitCode: 2, Confined: true, Box: box}, true},
+		{"unconfined error with strerror text", subprocess.SubprocessResult{
+			CombinedOutput: "touch: /etc/f: Operation not permitted", ExitCode: 1, Confined: false}, false},
+		{"confined success with strerror text", subprocess.SubprocessResult{
+			CombinedOutput: "grep found: Operation not permitted", ExitCode: 0, Confined: true, Box: box}, false},
+		{"confined error without a signature", subprocess.SubprocessResult{
+			CombinedOutput: "no such file or directory", ExitCode: 1, Confined: true, Box: box}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			res := subprocessToolResult("c1", tc.res)
-			if got := strings.Contains(res.Content, confinementDenialLabel(tc.res.box)); got != tc.wantLabel {
+			if got := strings.Contains(res.Content, confinementDenialLabel(tc.res.Box)); got != tc.wantLabel {
 				t.Errorf("label present = %v, want %v (content = %q)", got, tc.wantLabel, res.Content)
 			}
-			if wantErr := tc.res.exitCode != 0; res.IsError != wantErr {
+			if wantErr := tc.res.ExitCode != 0; res.IsError != wantErr {
 				t.Errorf("IsError = %v, want %v", res.IsError, wantErr)
 			}
 		})
@@ -899,32 +900,32 @@ func TestSubprocessToolResultDenialStopLabel(t *testing.T) {
 	box := domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/scratch/s1"}}
 	cases := []struct {
 		name          string
-		res           subprocessResult
+		res           subprocess.SubprocessResult
 		wantStopLabel bool
 		wantErr       bool
 		wantAnyLikely bool
 	}{
-		{"stopped kill (signalled exit)", subprocessResult{
-			combinedOutput: "mkdir: /tmp/srtest: Operation not permitted", exitCode: -1,
-			confined: true, denialStopped: true, box: box}, true, true, false},
-		{"stopped but self-exited non-zero", subprocessResult{
-			combinedOutput: "mkdir: /tmp/srtest: Operation not permitted", exitCode: 1,
-			confined: true, denialStopped: true, box: box}, true, true, false},
-		{"watch matched but the run finished cleanly", subprocessResult{
-			combinedOutput: "grep found: Operation not permitted", exitCode: 0,
-			confined: true, denialStopped: true, box: box}, false, false, false},
-		{"confined failure without the watch verdict keeps the likely label", subprocessResult{
-			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1,
-			confined: true, box: box}, false, true, true},
+		{"stopped kill (signalled exit)", subprocess.SubprocessResult{
+			CombinedOutput: "mkdir: /tmp/srtest: Operation not permitted", ExitCode: -1,
+			Confined: true, DenialStopped: true, Box: box}, true, true, false},
+		{"stopped but self-exited non-zero", subprocess.SubprocessResult{
+			CombinedOutput: "mkdir: /tmp/srtest: Operation not permitted", ExitCode: 1,
+			Confined: true, DenialStopped: true, Box: box}, true, true, false},
+		{"watch matched but the run finished cleanly", subprocess.SubprocessResult{
+			CombinedOutput: "grep found: Operation not permitted", ExitCode: 0,
+			Confined: true, DenialStopped: true, Box: box}, false, false, false},
+		{"confined failure without the watch verdict keeps the likely label", subprocess.SubprocessResult{
+			CombinedOutput: "touch: /etc/f: Operation not permitted", ExitCode: 1,
+			Confined: true, Box: box}, false, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			res := subprocessToolResult("c1", tc.res)
-			if got := strings.Contains(res.Content, confinementDenialStopLabel(tc.res.box)); got != tc.wantStopLabel {
+			if got := strings.Contains(res.Content, confinementDenialStopLabel(tc.res.Box)); got != tc.wantStopLabel {
 				t.Errorf("stop label present = %v, want %v (content = %q)", got, tc.wantStopLabel, res.Content)
 			}
-			if got := strings.Contains(res.Content, confinementDenialLabel(tc.res.box)); got != tc.wantAnyLikely {
+			if got := strings.Contains(res.Content, confinementDenialLabel(tc.res.Box)); got != tc.wantAnyLikely {
 				t.Errorf("likely label present = %v, want %v (content = %q)", got, tc.wantAnyLikely, res.Content)
 			}
 			if res.IsError != tc.wantErr {

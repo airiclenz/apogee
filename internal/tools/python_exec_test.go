@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 func pythonCall(id, code string) domain.ToolCall {
@@ -47,13 +48,13 @@ func withFakePythonVersion(t *testing.T, major, minor int, ok bool) {
 
 // withCapturedPythonRun swaps the interpreter runner for one that records the spec and launches
 // nothing, so a test can pin the exact argv and environment the tool builds.
-func withCapturedPythonRun(t *testing.T) *subprocessSpec {
+func withCapturedPythonRun(t *testing.T) *subprocess.SubprocessSpec {
 	t.Helper()
 	orig := runPythonSubprocess
-	var captured subprocessSpec
-	runPythonSubprocess = func(_ context.Context, spec subprocessSpec) (subprocessResult, error) {
+	var captured subprocess.SubprocessSpec
+	runPythonSubprocess = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
 		captured = spec
-		return subprocessResult{}, nil
+		return subprocess.SubprocessResult{}, nil
 	}
 	t.Cleanup(func() { runPythonSubprocess = orig })
 	return &captured
@@ -252,13 +253,13 @@ func TestPythonExec_IsolationFollowsTheInterpreterVersion(t *testing.T) {
 			if _, err := NewPythonExec(t.TempDir(), nil).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 				t.Fatalf("Execute err = %v, want nil", err)
 			}
-			if got := captured.argv; !slices.Equal(got, tc.wantArgv) {
+			if got := captured.Argv; !slices.Equal(got, tc.wantArgv) {
 				t.Errorf("argv = %q, want %q", got, tc.wantArgv)
 			}
-			if value, ok := envValue(captured.env, "PYTHONSAFEPATH"); !ok || value != "1" {
+			if value, ok := envValue(captured.Env, "PYTHONSAFEPATH"); !ok || value != "1" {
 				t.Errorf("PYTHONSAFEPATH = %q (present=%v), want \"1\" on every version", value, ok)
 			}
-			if _, ok := envValue(captured.env, "PYTHONPATH"); ok {
+			if _, ok := envValue(captured.Env, "PYTHONPATH"); ok {
 				t.Error("PYTHONPATH must never be set by the tool: its entries precede the stdlib")
 			}
 		})
@@ -279,18 +280,18 @@ func TestPythonExec_DropsApogeeCredentialsFromTheChildEnvironment(t *testing.T) 
 	if _, err := NewPythonExec(t.TempDir(), nil).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if value, ok := envValue(captured.env, "APOGEE_API_KEY"); ok {
+	if value, ok := envValue(captured.Env, "APOGEE_API_KEY"); ok {
 		t.Errorf("APOGEE_API_KEY = %q reached the child environment, want it dropped", value)
 	}
-	for _, entry := range captured.env {
+	for _, entry := range captured.Env {
 		if strings.Contains(entry, "sk-secret-value") {
 			t.Errorf("the api key survived under another name: %q", entry)
 		}
 	}
-	if value, _ := envValue(captured.env, "APOGEE_ENDPOINT"); value != "http://192.0.2.1:1111" {
+	if value, _ := envValue(captured.Env, "APOGEE_ENDPOINT"); value != "http://192.0.2.1:1111" {
 		t.Errorf("APOGEE_ENDPOINT = %q, want it inherited (only the SECRETS are dropped)", value)
 	}
-	if _, ok := envValue(captured.env, "PATH"); !ok {
+	if _, ok := envValue(captured.Env, "PATH"); !ok {
 		t.Error("PATH did not survive: the interpreter runs in the operator's environment")
 	}
 }
@@ -311,10 +312,10 @@ func TestPythonExec_DropsTheConfiguredSecretNamesFromTheChildEnvironment(t *test
 	if _, err := py.Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if value, ok := envValue(captured.env, "APOGEE_TEST_PROVIDER_KEY"); ok {
+	if value, ok := envValue(captured.Env, "APOGEE_TEST_PROVIDER_KEY"); ok {
 		t.Errorf("APOGEE_TEST_PROVIDER_KEY = %q reached the child environment, want the configured name dropped", value)
 	}
-	if value, _ := envValue(captured.env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
+	if value, _ := envValue(captured.Env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
 		t.Errorf("APOGEE_TEST_ENDPOINT = %q, want it inherited (only the NAMED variables are dropped)", value)
 	}
 }
@@ -327,7 +328,7 @@ func TestPythonVersionSpec_DropsTheConfiguredSecretNames(t *testing.T) {
 	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
 
 	spec := pythonVersionSpec("/usr/bin/python3", t.TempDir(), []string{"APOGEE_TEST_PROVIDER_KEY"})
-	if value, ok := envValue(spec.env, "APOGEE_TEST_PROVIDER_KEY"); ok {
+	if value, ok := envValue(spec.Env, "APOGEE_TEST_PROVIDER_KEY"); ok {
 		t.Errorf("APOGEE_TEST_PROVIDER_KEY = %q reached the probe environment, want the configured name dropped", value)
 	}
 }
@@ -348,7 +349,7 @@ func TestPythonExec_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
 	if _, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	entries := envPathEntries(t, captured.env)
+	entries := envPathEntries(t, captured.Env)
 	if slices.Contains(entries, inside) {
 		t.Errorf("PATH = %q still names the in-workspace entry %q", entries, inside)
 	}
@@ -358,10 +359,10 @@ func TestPythonExec_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
 	if got := slices.Contains(entries, filepath.Join("relative", "bin")); got {
 		t.Errorf("PATH = %q kept a non-absolute entry, which names a directory inside the child's own cwd", entries)
 	}
-	if value, _ := envValue(captured.env, "APOGEE_PYTHON_ENV_PROBE"); value != "kept" {
+	if value, _ := envValue(captured.Env, "APOGEE_PYTHON_ENV_PROBE"); value != "kept" {
 		t.Errorf("APOGEE_PYTHON_ENV_PROBE = %q, want it inherited (only PATH is rewritten)", value)
 	}
-	if last := captured.env[len(captured.env)-1]; last != pythonSafePathVar {
+	if last := captured.Env[len(captured.Env)-1]; last != pythonSafePathVar {
 		t.Errorf("env tail = %q, want %q appended last so it wins over an inherited spelling", last, pythonSafePathVar)
 	}
 }
@@ -376,7 +377,7 @@ func TestPythonVersionSpec_ScopesTheWorkspaceOffTheProbePATH(t *testing.T) {
 	t.Setenv("PATH", path)
 
 	spec := pythonVersionSpec(filepath.Join(outside, "python3"), root, nil)
-	entries := envPathEntries(t, spec.env)
+	entries := envPathEntries(t, spec.Env)
 	if slices.Contains(entries, inside) {
 		t.Errorf("probe PATH = %q still names the in-workspace entry %q", entries, inside)
 	}

@@ -70,7 +70,7 @@ func stageGitPaths(ctx context.Context, root, successNote string, paths ...strin
 	}
 
 	probe, err := runGit(ctx, gitPath, root, gitTimeout, "ls-files", "--error-unmatch", "--", literalPathspec(paths[0]))
-	if err != nil || probe.exitCode != 0 {
+	if err != nil || probe.ExitCode != 0 {
 		return ""
 	}
 
@@ -86,8 +86,8 @@ func stageGitPaths(ctx context.Context, root, successNote string, paths ...strin
 	if err != nil {
 		return stagingSkipped(err.Error())
 	}
-	if add.exitCode != 0 {
-		return stagingSkipped(add.combinedOutput)
+	if add.ExitCode != 0 {
+		return stagingSkipped(add.CombinedOutput)
 	}
 	return successNote
 }

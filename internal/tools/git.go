@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // ----------------------------------------------------------------------------
@@ -90,27 +91,19 @@ func resolveGit(ctx context.Context, root string) (string, error) {
 
 // runGit runs git with gitArgs in root under the per-call timeout and the hardened, scrubbed
 // environment, honouring the confinement handle the disposition installed (if any), and returns
-// the captured outcome in this package's shape. Every git TOOL invocation goes through here; the
+// the captured outcome in the core's shape. Every git TOOL invocation goes through here; the
 // hardening, the repo-local command-config refusal and its memoised probe are gitexec.Capture's.
 // A missing git is signalled by the caller's gitProgram, not here. The Go error is non-nil only
 // for ctx cancellation or a confinement-unavailable demotion (the runSubprocess contract).
-func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
-	res, err := gitexec.Capture(ctx, gitPath, root, timeout, gitArgs...)
-	if err != nil {
-		return subprocessResult{}, err
-	}
-	return fromCore(res), nil
+func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocess.SubprocessResult, error) {
+	return gitexec.Capture(ctx, gitPath, root, timeout, gitArgs...)
 }
 
 // runGitUnchecked is runGit without the command-config probe — the shape a test asserting what
 // the probe itself would see needs. Nothing a MODEL causes may use it: every tool goes through
 // runGit.
-func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
-	res, err := gitexec.CaptureUnchecked(ctx, gitPath, root, nil, timeout, gitArgs...)
-	if err != nil {
-		return subprocessResult{}, err
-	}
-	return fromCore(res), nil
+func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocess.SubprocessResult, error) {
+	return gitexec.CaptureUnchecked(ctx, gitPath, root, nil, timeout, gitArgs...)
 }
 
 // gitCommandConfigName matches every config name whose VALUE is a program git executes — the
@@ -150,9 +143,9 @@ func RunGitQuery(ctx context.Context, root string, timeout time.Duration, args .
 
 // gitResultText renders a captured git outcome as text the model reads: the
 // combined output trimmed, or the fallback when git printed nothing on success.
-func gitResultText(res subprocessResult, successFallback string) string {
-	out := strings.TrimSpace(res.combinedOutput)
-	if res.exitCode == 0 && out == "" {
+func gitResultText(res subprocess.SubprocessResult, successFallback string) string {
+	out := strings.TrimSpace(res.CombinedOutput)
+	if res.ExitCode == 0 && out == "" {
 		return successFallback
 	}
 	return out
@@ -236,11 +229,11 @@ func (t *GitBranch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.exitCode != 0 {
+	if res.ExitCode != 0 {
 		return errorResult(call.ID, gitResultText(res, "git branch failed")), nil
 	}
 	if args.Action == "list" {
-		res.combinedOutput = renderBranchList(res.combinedOutput)
+		res.CombinedOutput = renderBranchList(res.CombinedOutput)
 	}
 	return okResult(call.ID, gitResultText(res, branchSuccessMessage(args))), nil
 }
@@ -437,7 +430,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		if err != nil {
 			return domain.ToolResult{}, err
 		}
-		if remotes.exitCode == 0 && remoteBranchesListed(remotes.combinedOutput) {
+		if remotes.ExitCode == 0 && remoteBranchesListed(remotes.CombinedOutput) {
 			return errorResult(call.ID, "cannot amend a commit that has been pushed to a remote; create a new commit instead"), nil
 		}
 	}
@@ -458,7 +451,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		if err != nil {
 			return domain.ToolResult{}, err
 		}
-		if res.exitCode != 0 {
+		if res.ExitCode != 0 {
 			return errorResult(call.ID, gitResultText(res, "git add failed")), nil
 		}
 	}
@@ -485,7 +478,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.exitCode != 0 {
+	if res.ExitCode != 0 {
 		return errorResult(call.ID, gitResultText(res, "git commit failed")), nil
 	}
 
@@ -495,8 +488,8 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if summary.exitCode == 0 {
-		if text := strings.TrimSpace(summary.combinedOutput); text != "" {
+	if summary.ExitCode == 0 {
+		if text := strings.TrimSpace(summary.CombinedOutput); text != "" {
 			return okResult(call.ID, text), nil
 		}
 	}
@@ -641,7 +634,7 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.exitCode != 0 {
+	if res.ExitCode != 0 {
 		return errorResult(call.ID, gitResultText(res, "git diff failed")), nil
 	}
 	return okResult(call.ID, gitResultText(res, "No differences found")), nil
@@ -737,10 +730,10 @@ func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.exitCode != 0 {
+	if res.ExitCode != 0 {
 		return errorResult(call.ID, gitResultText(res, "git status failed")), nil
 	}
-	rep := parseGitStatus(res.combinedOutput)
+	rep := parseGitStatus(res.CombinedOutput)
 	return okSummary(call.ID, renderGitStatus(rep), rep.changedFiles()), nil
 }
 
@@ -1026,7 +1019,7 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.exitCode != 0 {
+	if res.ExitCode != 0 {
 		return errorResult(call.ID, gitResultText(res, "git log failed")), nil
 	}
 	return okResult(call.ID, gitResultText(res, "No commits found")), nil
@@ -1184,16 +1177,16 @@ func (t *GitShow) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.exitCode != 0 {
+	if res.ExitCode != 0 {
 		return errorResult(call.ID, fmt.Sprintf("git_show: cannot read %s at %s: %s",
 			rel, ref, gitResultText(res, "git show failed"))), nil
 	}
-	if looksBinary([]byte(res.combinedOutput)) {
+	if looksBinary([]byte(res.CombinedOutput)) {
 		return errorResult(call.ID, fmt.Sprintf("git_show: %s at %s is a binary file (%d bytes)",
-			rel, ref, len(res.combinedOutput))), nil
+			rel, ref, len(res.CombinedOutput))), nil
 	}
 
-	text, span, rangeFailure := renderFile(rel+" @ "+ref, res.combinedOutput, args.readFileArgs)
+	text, span, rangeFailure := renderFile(rel+" @ "+ref, res.CombinedOutput, args.readFileArgs)
 	if rangeFailure != "" {
 		return errorResult(call.ID, rangeFailure), nil
 	}

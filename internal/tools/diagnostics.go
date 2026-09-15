@@ -253,12 +253,12 @@ func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, h
 		// reach dispatch rather than being swallowed as a finding).
 		return "", false, runErr
 	}
-	out := strings.TrimSpace(res.combinedOutput)
-	if res.exitCode == 0 {
+	out := strings.TrimSpace(res.CombinedOutput)
+	if res.ExitCode == 0 {
 		return "", false, nil
 	}
 	if out == "" {
-		out = "go vet reported problems (exit code " + strconv.Itoa(res.exitCode) + ")"
+		out = "go vet reported problems (exit code " + strconv.Itoa(res.ExitCode) + ")"
 	}
 	return out, true, nil
 }
@@ -273,12 +273,12 @@ func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, h
 // inside root (abs was already resolved through the fence). That widening is what
 // vettedPackageLine states on the result, so the sentence the operator approved and the
 // scope the subprocess read are the same sentence.
-func goVetSpec(goPath, root, abs string) subprocessSpec {
-	return subprocessSpec{
-		argv:    []string{goPath, "vet", filepath.Dir(abs)},
-		dir:     root,
-		timeout: vetTimeout,
-		env:     goVetEnv(root),
+func goVetSpec(goPath, root, abs string) subprocess.SubprocessSpec {
+	return subprocess.SubprocessSpec{
+		Argv:    []string{goPath, "vet", filepath.Dir(abs)},
+		Dir:     root,
+		Timeout: vetTimeout,
+		Env:     goVetEnv(root),
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 var terminalSpec = toolSpec{
@@ -146,17 +147,17 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	spec := subprocessSpec{
-		argv:     argv,
-		cmdline:  cmdline,
-		dir:      dir,
-		timeout:  time.Duration(args.TimeoutSeconds) * time.Second,
-		failFast: failFast,
+	spec := subprocess.SubprocessSpec{
+		Argv:     argv,
+		Cmdline:  cmdline,
+		Dir:      dir,
+		Timeout:  time.Duration(args.TimeoutSeconds) * time.Second,
+		FailFast: failFast,
 		// The command line runs in the operator's own environment — minus the credential
 		// variables, which a model-chosen command line has no use for and could exfiltrate,
 		// and minus the PATH entries that resolve inside the workspace, which would let the
 		// model plant the programs its own command line then executes.
-		env: subprocessEnvScopedPath(t.root, t.secretEnv),
+		Env: subprocessEnvScopedPath(t.root, t.secretEnv),
 	}
 	res, err := runTerminalSubprocess(ctx, spec)
 	if err != nil {
@@ -187,7 +188,7 @@ func preflightCommandLine(command string, posix bool) error {
 }
 
 // failFastExitNote is what the exit-code line adds when the run was launched under the
-// fail-fast preamble (subprocessResult.failFast): the non-zero code may be `set -e` stopping
+// fail-fast preamble (subprocess.SubprocessResult.FailFast): the non-zero code may be `set -e` stopping
 // the line at its first failed command, which is invisible in the output — the aborted lines
 // simply never printed. Naming it at the point of failure is what a small model acts on; a
 // sentence in the tool description a dozen calls back is not (ratified design call 5).
@@ -207,8 +208,8 @@ const failFastStoppedLine = "fail-fast: the line stopped at `%s`"
 // the kill-on-denial watch stopped were not stopped by `set -e`, whatever the preamble said:
 // blaming fail-fast for a confinement kill would send the model guarding a command that was
 // refused, not failed.
-func isFailFastStop(res subprocessResult) bool {
-	return res.failFast && !res.timedOut && !res.denialStopped && res.exitCode > 0
+func isFailFastStop(res subprocess.SubprocessResult) bool {
+	return res.FailFast && !res.TimedOut && !res.DenialStopped && res.ExitCode > 0
 }
 
 // splitFailFastStop takes the preamble's `failed at: <cmd>` line off the end of output. It
@@ -283,7 +284,7 @@ func looksLikeBashism(output string) bool {
 }
 
 // subprocessToolResult renders a captured subprocess outcome as a ToolResult. A result from a
-// run that had a working directory (subprocessResult.dir) opens with the `cwd:` line
+// run that had a working directory (subprocess.SubprocessResult.Dir) opens with the `cwd:` line
 // (cwdLinePrefix); one built with no dir opens with the output itself. A non-zero
 // exit is an error result (so the model sees the command failed) carrying the captured
 // output and exit code; a clean exit is a success result with the output. A failed run whose
@@ -296,22 +297,22 @@ func looksLikeBashism(output string) bool {
 // result from a CONFINED run whose output looks like an OS denial carries
 // confinementDenialLabel — both best-effort, never forced onto a clean exit, and both still
 // follow on their own line after the exit-code line. Both are rendered from the box the run
-// was fenced by (subprocessResult.box), so the model reads the writable roots by path.
-func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult {
+// was fenced by (subprocess.SubprocessResult.Box), so the model reads the writable roots by path.
+func subprocessToolResult(callID string, res subprocess.SubprocessResult) domain.ToolResult {
 	var b strings.Builder
-	if res.dir != "" {
-		b.WriteString(cwdLinePrefix + res.dir + "\n")
+	if res.Dir != "" {
+		b.WriteString(cwdLinePrefix + res.Dir + "\n")
 	}
-	if res.timedOut {
+	if res.TimedOut {
 		b.WriteString("command timed out\n")
 	}
-	if res.drainWedged {
+	if res.DrainWedged {
 		// The exit code alone cannot say this: the leader may have exited 0 and left the
 		// pipe held by something else, which runSubprocess reports as -1 rather than as a
 		// success. Name the reason so the reader is not left guessing at the code.
 		b.WriteString("output was cut short: something the command left running still held the pipe and was killed\n")
 	}
-	output, note, stoppedAt := res.combinedOutput, "", ""
+	output, note, stoppedAt := res.CombinedOutput, "", ""
 	if isFailFastStop(res) {
 		note = failFastExitNote
 		if command, rest, ok := splitFailFastStop(output); ok {
@@ -319,19 +320,19 @@ func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult
 		}
 	}
 	b.WriteString(output)
-	if res.exitCode != 0 {
-		if looksLikeBashism(res.combinedOutput) {
+	if res.ExitCode != 0 {
+		if looksLikeBashism(res.CombinedOutput) {
 			b.WriteString("\n" + shellHintLine)
 		}
 		if stoppedAt != "" {
 			fmt.Fprintf(&b, "\n"+failFastStoppedLine, stoppedAt)
 		}
-		fmt.Fprintf(&b, "\n[exit code %d%s]", res.exitCode, note)
+		fmt.Fprintf(&b, "\n[exit code %d%s]", res.ExitCode, note)
 		switch {
-		case res.denialStopped:
-			b.WriteString("\n" + confinementDenialStopLabel(res.box))
-		case res.confined && platform.LooksLikeConfinementDenial(res.combinedOutput):
-			b.WriteString("\n" + confinementDenialLabel(res.box))
+		case res.DenialStopped:
+			b.WriteString("\n" + confinementDenialStopLabel(res.Box))
+		case res.Confined && platform.LooksLikeConfinementDenial(res.CombinedOutput):
+			b.WriteString("\n" + confinementDenialLabel(res.Box))
 		}
 		return errorResult(callID, b.String())
 	}

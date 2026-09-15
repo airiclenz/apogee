@@ -12,6 +12,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 var pythonExecSpec = toolSpec{
@@ -97,10 +98,10 @@ const (
 // of the 3.11 boundary without depending on the Python the host happens to ship.
 var interpreterVersion = func(ctx context.Context, interp, workspaceRoot string, secretEnv []string) (major, minor int, ok bool) {
 	res, err := runSubprocess(ctx, pythonVersionSpec(interp, workspaceRoot, secretEnv))
-	if err != nil || res.exitCode != 0 {
+	if err != nil || res.ExitCode != 0 {
 		return 0, 0, false
 	}
-	return parsePythonVersion(res.combinedOutput)
+	return parsePythonVersion(res.CombinedOutput)
 }
 
 // pythonVersionSpec is the version probe's subprocess spec, named so a test can read the
@@ -112,12 +113,12 @@ var interpreterVersion = func(ctx context.Context, interp, workspaceRoot string,
 // would otherwise front sys.path for the -c program. Its environment is the same one the
 // snippet itself gets (minus PYTHONSAFEPATH, which only matters for the snippet): inherited,
 // less apogee's credentials, with the workspace scoped off PATH.
-func pythonVersionSpec(interp, workspaceRoot string, secretEnv []string) subprocessSpec {
-	return subprocessSpec{
-		argv:    []string{interp, "-c", pythonVersionProgram},
-		dir:     filepath.Dir(interp),
-		timeout: pythonVersionProbeTimeout,
-		env:     subprocessEnvScopedPath(workspaceRoot, secretEnv),
+func pythonVersionSpec(interp, workspaceRoot string, secretEnv []string) subprocess.SubprocessSpec {
+	return subprocess.SubprocessSpec{
+		Argv:    []string{interp, "-c", pythonVersionProgram},
+		Dir:     filepath.Dir(interp),
+		Timeout: pythonVersionProbeTimeout,
+		Env:     subprocessEnvScopedPath(workspaceRoot, secretEnv),
 	}
 }
 
@@ -257,12 +258,12 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// outright — under -I), and an interpreter that does not honour it is isolated instead.
 	// Both are decided here rather than in the snippet, so nothing is injected into the `code`
 	// the operator approved.
-	spec := subprocessSpec{
-		argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(ctx, interp, t.root, t.secretEnv))),
-		dir:     dir,
-		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
-		stdin:   args.Code,
-		env:     subprocessEnvScopedPath(t.root, t.secretEnv, pythonSafePathVar),
+	spec := subprocess.SubprocessSpec{
+		Argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(ctx, interp, t.root, t.secretEnv))),
+		Dir:     dir,
+		Timeout: time.Duration(args.TimeoutSeconds) * time.Second,
+		Stdin:   args.Code,
+		Env:     subprocessEnvScopedPath(t.root, t.secretEnv, pythonSafePathVar),
 	}
 	res, err := runPythonSubprocess(ctx, spec)
 	if err != nil {

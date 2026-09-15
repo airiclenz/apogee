@@ -120,6 +120,12 @@ type SubprocessResult struct {
 	// LAST command failed exits the same way — so the note it drives is worded as the mode that
 	// was in force, not as a verdict on which command failed.
 	FailFast bool
+	// Dir is the working directory the run was launched in (SubprocessSpec.Dir), carried
+	// through so a caller's rendering can open with a `cwd:` line — a model that reads relative
+	// paths in a command's output needs to know what they are relative to, and a `workdir` it
+	// passed three calls ago is not where it looks. Empty for a result built by a caller that
+	// never ran a process (a test table, a stub), where no line is rendered.
+	Dir string
 }
 
 // NewProcessTeardown builds the per-run process-tree teardown for cmd. It is this package's seam
@@ -313,6 +319,7 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	}
 	res.DenialStopped = denialWatch != nil && denialWatch.Detected()
 	res.FailFast = spec.FailFast
+	res.Dir = spec.Dir
 	return res, nil
 }
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // TestRunSubprocessReapsTheProcessGroupOnACleanExit pins the half of the §2.4 teardown that
@@ -34,12 +35,12 @@ func TestRunSubprocessReapsTheProcessGroupOnACleanExit(t *testing.T) {
 	// drain (TestRunSubprocessReportsAWedgedDrain owns that).
 	script := fmt.Sprintf(`sleep 300 >/dev/null 2>&1 & echo $! > %s`, strconv.Quote(pidFile))
 
-	res, err := runSubprocess(context.Background(), subprocessSpec{argv: []string{"/bin/sh", "-c", script}})
+	res, err := runSubprocess(context.Background(), subprocess.SubprocessSpec{Argv: []string{"/bin/sh", "-c", script}})
 	if err != nil {
 		t.Fatalf("runSubprocess err = %v, want nil", err)
 	}
-	if res.exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0 — the shell itself exited cleanly (output %q)", res.exitCode, res.combinedOutput)
+	if res.ExitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0 — the shell itself exited cleanly (output %q)", res.ExitCode, res.CombinedOutput)
 	}
 
 	pid := waitForPIDFile(t, pidFile)

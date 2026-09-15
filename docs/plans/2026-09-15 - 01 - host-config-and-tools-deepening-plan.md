@@ -359,7 +359,12 @@ NOTES (2026-09-15): the separator-variant cases already sat in TestDangerousActi
 
 Commit: `refactor(security): the footgun guard folds argument keys the way dispatch does`
 
-## 15. The subprocess mirror is deleted
+## 15. The subprocess mirror is deleted — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the mirror was not a pure rename — `subprocessResult.dir` (threaded on by `runSubprocess` for the `cwd:` line, plan `2026-09-14 - 02`) had no counterpart in the core; rather than re-thread it in the tools or widen `subprocessToolResult`'s signature, `subprocess.SubprocessResult` gains `Dir` (set from `SubprocessSpec.Dir` in the core's `run`), so a stubbed seam still yields no `cwd:` line and every test's behaviour is unchanged — `internal/subprocess/subprocess.go` joins Files.
+NOTES (2026-09-15): the item's test enumeration was a floor — `diagnostics_test.go`, `exec_fence_test.go` and `git_test.go` also read the mirror's lower-case fields (`spec.argv`/`spec.dir`, `captured.argv`, `seen.exitCode`) and `git_stage.go` reads `probe.exitCode`/`add.combinedOutput`; all four follow the rename.
+NOTES (2026-09-15): consequential edit — internal/tools/doc.go: made necessary by deleting the mirror its package map described as "the seam that converts this package's spec into the core's".
+NOTES (2026-09-15): the mirror's package-specific field guidance (which env scrub each tool takes; the execution tools leave SplitStdout false) moved into `runSubprocess`'s doc comment rather than being lost with the struct.
 
 **What.** Delete `subprocessSpec`/`subprocessResult` and `core()`/`fromCore()` in `internal/tools/exec_common.go`; the execution tools (`terminal.go`, `python_exec.go`, `run_tests.go`, `diagnostics.go`, `console_open.go`, `git.go`) build `subprocess.SubprocessSpec` and read `subprocess.Result` directly — a pure rename. Package-var test seams are NOT changed. Depends on item 4.
 

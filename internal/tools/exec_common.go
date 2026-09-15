@@ -19,52 +19,6 @@ import (
 // against the very same number the funnel enforces rather than a second copy of it.
 const maxSubprocessOutputBytes = subprocess.MaxSubprocessOutputBytes
 
-// subprocessSpec is the platform-agnostic description of one subprocess execution: the argv
-// to run, the working directory, the per-call timeout, and the optional stdin. The execution
-// tools (terminal, python-exec) build a spec and hand it to runSubprocess, which owns the
-// confinement handoff and the process-group teardown so each tool stays a thin front-end.
-type subprocessSpec struct {
-	// argv is the fully-resolved command and arguments (argv[0] is the program). It is
-	// never empty when a tool calls runSubprocess.
-	argv []string
-	// dir is the working directory; empty means the process inherits the caller's.
-	dir string
-	// timeout bounds the run; zero means subprocess.DefaultSubprocessTimeout.
-	timeout time.Duration
-	// stdin, when non-empty, is fed to the process on its standard input.
-	stdin string
-	// env, when non-nil, is the exact environment the process runs with (each entry
-	// "KEY=value"); nil means it inherits the caller's environment. EVERY tool that runs
-	// something for the MODEL sets it — none of them inherits whole: git and the Go toolchain
-	// take an allowlist scoped by platform.Host.ScopeEnv; the shell and interpreter tools take
-	// subprocessEnvScopedPath() — the caller's environment minus every credential variable
-	// (apogee's own and the host-configured ones), with the child's PATH scoped out of the
-	// workspace; and the test runner takes subprocessEnv(), the same minus the credentials,
-	// because a test suite needs the toolchain variables its user's shell has but no subprocess
-	// of the model's needs apogee's key.
-	env []string
-	// splitStdout asks for the child's standard output to be captured ON ITS OWN
-	// (subprocessResult.stdout) instead of interleaved with stderr. A caller that CONSUMES the
-	// output as a payload sets it — a caller splicing a child's stdout into a file it will
-	// write needs it clean, since a diagnostic in the middle of that would land in the file as
-	// if it were code. The execution tools leave it false: they SHOW the model what a command
-	// printed, and the interleaved order is the truthful one there.
-	splitStdout bool
-	// cmdline, when non-empty, is the verbatim process command line to launch argv with
-	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
-	// POSIX and for any argv that is a real argv; a tool handing a SHELL LINE to
-	// cmd.exe on Windows sets it, because os/exec's argv joining mangles the quotes the
-	// shell needs (internal/subprocess/cmdline_other.go).
-	cmdline string
-	// failFast reports that the caller prepended platform.FailFastPreamble to the line it is
-	// running, so a non-zero exit may be the preamble aborting the script at its first failed
-	// command rather than the line as a whole finishing badly. It rides through onto the
-	// result, where subprocessToolResult says so on the exit-code line — the model acts on the
-	// last tool result, not on a system-prompt line from a dozen calls earlier. Only the
-	// terminal's POSIX branch sets it: python_exec, git and the Console family prepend nothing.
-	failFast bool
-}
-
 // apogeeSecretEnvVars names the environment variables that carry apogee's OWN credentials. A
 // subprocess launched for the MODEL — a shell command line, a Python snippet — has no business
 // reading the key apogee talks to its inference server with: the model chooses what that
@@ -164,56 +118,6 @@ func isApogeeSecretEnv(entry string) bool {
 	return false
 }
 
-// subprocessResult is the captured outcome of one subprocess execution.
-type subprocessResult struct {
-	// combinedOutput is stdout and stderr interleaved (capped), what the model reads. A spec
-	// that split the streams (splitStdout) leaves it holding stderr ALONE — that caller took
-	// the child's stdout as data, so what remains here is only what the command complained.
-	combinedOutput string
-	// stdout is the child's standard output alone (capped), captured only when the spec set
-	// splitStdout; it is empty for every caller that reads combinedOutput.
-	stdout string
-	// exitCode is the process exit status; 0 on success, the child's code on a clean
-	// non-zero exit, and -1 when the process was killed by a signal (e.g. a timeout).
-	exitCode int
-	// timedOut reports that the run was cut short by its own timeout (vs the model's ctx).
-	timedOut bool
-	// drainWedged reports that the process had exited but something it left running was still
-	// holding the output pipe when platform.ProcessWaitDelay expired, so exec cut the drain
-	// short and killed what was left. The captured output may be missing its tail, and the run
-	// is not a success however cleanly the leader itself exited.
-	drainWedged bool
-	// confined reports that the run actually executed inside the confinement fence — a
-	// Confinement handle was on ctx and its Confiner wrapped the cmd before it started.
-	// subprocessToolResult keys on it to label a likely OS denial (EPERM-shaped output on a
-	// failed confined run) so the model learns WHY a write outside the box failed; an
-	// unconfined run must never carry that label, however EPERM-shaped its output.
-	confined bool
-	// box is the confinement policy the run actually executed under, carried through so the
-	// denial labels can name the writable roots BY PATH instead of describing them. It is the
-	// zero box on an unconfined run, where no label is rendered at all.
-	box domain.ConfinementBox
-	// denialStopped reports that the live kill-on-denial watch on a CONFINED run matched an
-	// OS-denial signature and issued the process-group kill (fix A of the 2026-08-22
-	// workspace-clobber incident). subprocessToolResult keys on it for the definitive
-	// stopped-by-confinement label — but only on a non-zero exit: a run that still finished
-	// cleanly (the match landed after the process was already done, or matched output that
-	// was not a fatal denial) keeps its success result untouched.
-	denialStopped bool
-	// failFast carries the spec's failFast through to the rendering: the run was launched under
-	// the fail-fast preamble, so subprocessToolResult can tell the model that a non-zero exit
-	// stopped the rest of the line. It says nothing about whether the preamble actually fired —
-	// a line whose LAST command failed exits the same way — so the note it drives is worded as
-	// the mode that was in force, not as a verdict on which command failed.
-	failFast bool
-	// dir is the working directory the run was launched in (subprocessSpec.dir), threaded
-	// through so subprocessToolResult can open the result with a `cwd:` line — a model that
-	// reads relative paths in a command's output needs to know what they are relative to, and
-	// a `workdir` it passed three calls ago is not where it looks. Empty for a result built by
-	// a caller that never ran a process (a test table, a stub), where no line is rendered.
-	dir string
-}
-
 // confinementDenialLabel is the line appended to a FAILED confined result whose output looks
 // like an OS confinement denial. It NAMES the roots the run may write to, because a model that
 // is only told a fence exists has nowhere to put the file: the paths are what let it route the
@@ -224,7 +128,7 @@ func confinementDenialLabel(box domain.ConfinementBox) string {
 }
 
 // confinementDenialStopLabel is the line appended when the live kill-on-denial watch stopped
-// the run itself (subprocessResult.denialStopped, console.Console.DenialStopped): stronger than
+// the run itself (subprocess.SubprocessResult.DenialStopped, console.Console.DenialStopped): stronger than
 // the "likely" label above, because here the harness matched the denial as it streamed and
 // killed the process group, so the model is told plainly that the rest of its script did not
 // run. It names the writable roots for the same reason that one does — the model's next act is
@@ -233,7 +137,7 @@ func confinementDenialLabel(box domain.ConfinementBox) string {
 // what the watch scans with.
 //
 // Both labels sit beside the funnel rather than beside one tool: the one-shot execution tools
-// read them off subprocessResult and the Console family reads the stop label off a live
+// read them off subprocess.SubprocessResult and the Console family reads the stop label off a live
 // Console, and there is one wording for the fence however the model met it.
 func confinementDenialStopLabel(box domain.ConfinementBox) string {
 	return "[blocked by workspace confinement: an operation was denied, so the command was" +
@@ -276,59 +180,27 @@ func resolveWorkdirInRoot(workdir, root string) (string, error) {
 // that owns the §2.4 confinement-and-teardown contract for every spawner apogee has: the
 // process-tree teardown, the confinement handoff that fails CLOSED, the live kill-on-denial watch
 // on a confined run, the output cap and the timeout clamp
-// (docs/design/confinement-execution-contract.md).
+// (docs/design/confinement-execution-contract.md). The execution tools build the core's
+// subprocess.SubprocessSpec directly and read its subprocess.SubprocessResult back; what this
+// funnel adds is the one seam every tool and the hook door go through, which is what the tests'
+// package-var seams (runTerminalSubprocess, runPythonSubprocess, runTestsSubprocess) capture.
 //
-// This package keeps its own spec and result shapes and converts at the seam rather than aliasing
-// the core's, so the execution tools and their tests go on building the spec they always built by
-// field name; the two shapes are the same values under this package's spelling.
+// Two of the spec's fields carry a rule of this package's own. Env: EVERY tool that runs
+// something for the MODEL sets it — none of them inherits whole. git and the Go toolchain take an
+// allowlist scoped by platform.Host.ScopeEnv; the shell and interpreter tools take
+// subprocessEnvScopedPath() — the caller's environment minus every credential variable (apogee's
+// own and the host-configured ones), with the child's PATH scoped out of the workspace; and the
+// test runner takes subprocessEnv(), the same minus the credentials, because a test suite needs
+// the toolchain variables its user's shell has but no subprocess of the model's needs apogee's
+// key. SplitStdout: the execution tools leave it false — they SHOW the model what a command
+// printed, and the interleaved order is the truthful one there; only a caller that CONSUMES the
+// output as a payload (RunHookSubprocess) sets it.
 //
 // The returned error is non-nil only for ctx cancellation (so the loop rolls the Turn back) or a
-// confinement-unavailable demotion; a clean non-zero process exit is a normal result (exitCode
+// confinement-unavailable demotion; a clean non-zero process exit is a normal result (ExitCode
 // set), not a Go error — the model reads it and routes around it.
-func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, error) {
-	res, err := subprocess.RunSubprocess(ctx, spec.core())
-	if err != nil {
-		return subprocessResult{}, err
-	}
-	out := fromCore(res)
-	// The spec's dir is not a fact the core reports back, so it is threaded on HERE, at the one
-	// funnel every execution tool runs through: a result that reaches subprocessToolResult
-	// carries the directory it really ran in, and a stubbed runner (the tests' captured specs)
-	// carries none.
-	out.dir = spec.dir
-	return out, nil
-}
-
-// core renders the spec in the shared core's shape. It is a field-for-field rename and nothing
-// else: a field added here without a line added there would be silently dropped, so the two
-// structs are edited together.
-func (s subprocessSpec) core() subprocess.SubprocessSpec {
-	return subprocess.SubprocessSpec{
-		Argv:        s.argv,
-		Dir:         s.dir,
-		Timeout:     s.timeout,
-		Stdin:       s.stdin,
-		Env:         s.env,
-		SplitStdout: s.splitStdout,
-		Cmdline:     s.cmdline,
-		FailFast:    s.failFast,
-	}
-}
-
-// fromCore renders the core's result in this package's shape, the other half of the same
-// field-for-field rename.
-func fromCore(res subprocess.SubprocessResult) subprocessResult {
-	return subprocessResult{
-		combinedOutput: res.CombinedOutput,
-		stdout:         res.Stdout,
-		exitCode:       res.ExitCode,
-		timedOut:       res.TimedOut,
-		drainWedged:    res.DrainWedged,
-		confined:       res.Confined,
-		box:            res.Box,
-		denialStopped:  res.DenialStopped,
-		failFast:       res.FailFast,
-	}
+func runSubprocess(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+	return subprocess.RunSubprocess(ctx, spec)
 }
 
 // maxSubprocessErrorExcerptBytes caps how much of a failed command's diagnostics RunHookSubprocess
@@ -397,13 +269,13 @@ func RunHookSubprocess(
 		argv = append([]string{program}, argv[1:]...)
 	}
 
-	res, err := runSubprocess(ctx, subprocessSpec{
-		argv:        argv,
-		dir:         dir,
-		timeout:     timeout,
-		stdin:       stdin,
-		env:         subprocessEnv(secretEnv, extraEnv...),
-		splitStdout: true,
+	res, err := runSubprocess(ctx, subprocess.SubprocessSpec{
+		Argv:        argv,
+		Dir:         dir,
+		Timeout:     timeout,
+		Stdin:       stdin,
+		Env:         subprocessEnv(secretEnv, extraEnv...),
+		SplitStdout: true,
 	})
 	if err != nil {
 		return "", err
@@ -411,14 +283,14 @@ func RunHookSubprocess(
 
 	// argv is known non-empty here: runSubprocess refuses an empty one above.
 	switch {
-	case res.timedOut:
-		return "", fmt.Errorf("apogee: %s timed out%s", argv[0], diagnosticsExcerpt(res.combinedOutput))
-	case res.drainWedged:
-		return "", fmt.Errorf("apogee: %s left its output pipe held open%s", argv[0], diagnosticsExcerpt(res.combinedOutput))
-	case res.exitCode != 0:
-		return "", fmt.Errorf("apogee: %s exited %d%s", argv[0], res.exitCode, diagnosticsExcerpt(res.combinedOutput))
+	case res.TimedOut:
+		return "", fmt.Errorf("apogee: %s timed out%s", argv[0], diagnosticsExcerpt(res.CombinedOutput))
+	case res.DrainWedged:
+		return "", fmt.Errorf("apogee: %s left its output pipe held open%s", argv[0], diagnosticsExcerpt(res.CombinedOutput))
+	case res.ExitCode != 0:
+		return "", fmt.Errorf("apogee: %s exited %d%s", argv[0], res.ExitCode, diagnosticsExcerpt(res.CombinedOutput))
 	}
-	return res.stdout, nil
+	return res.Stdout, nil
 }
 
 // diagnosticsExcerpt renders a failed command's stderr for an error message: a bounded TAIL —
