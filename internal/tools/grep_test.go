@@ -888,3 +888,127 @@ func TestGrep_Execute_SkipsABinaryFile(t *testing.T) {
 		t.Errorf("text file did not match: %q", result.Content)
 	}
 }
+
+// TestGrep_Execute_ClipsWideRows: a `.jsonl` record thousands of characters wide is worth its
+// neighbourhood, not the whole row — the line is clipped to maxGrepRowChars around its first
+// match with `…` at each cut end, the header counts the rows it clipped, and a row within
+// the bound is untouched.
+func TestGrep_Execute_ClipsWideRows(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wide := strings.Repeat("a", 1500) + "needle" + strings.Repeat("b", 1494)
+	if len(wide) != 3000 {
+		t.Fatalf("fixture is %d chars, want 3000", len(wide))
+	}
+	content := "{\"short\":\"needle\"}\n" + wide + "\n"
+	if err := os.WriteFile(filepath.Join(root, "rows.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"pattern": "needle"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	lines := strings.Split(result.Content, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want header + 2 rows: %q", len(lines), result.Content)
+	}
+	if lines[0] != "[2 total matches in the workspace, showing 1-2 (1 rows clipped at 512 chars)]" {
+		t.Errorf("header = %q", lines[0])
+	}
+	if lines[1] != "rows.jsonl:1:{\"short\":\"needle\"}" {
+		t.Errorf("the short row changed: %q", lines[1])
+	}
+	row := strings.TrimPrefix(lines[2], "rows.jsonl:2:")
+	if row == lines[2] {
+		t.Fatalf("wide row lost its location: %q", lines[2])
+	}
+	if !strings.HasPrefix(row, "…") || !strings.HasSuffix(row, "…") {
+		t.Errorf("clipped row is not marked at both ends: %q", row)
+	}
+	kept := strings.TrimSuffix(strings.TrimPrefix(row, "…"), "…")
+	if n := len([]rune(kept)); n != maxGrepRowChars {
+		t.Errorf("clipped row keeps %d chars, want %d", n, maxGrepRowChars)
+	}
+	if !strings.Contains(kept, "needle") {
+		t.Errorf("clipped row lost the match: %q", kept)
+	}
+	if strings.Index(kept, "needle") != maxGrepRowChars/2 {
+		t.Errorf("match sits at %d, want centred at %d", strings.Index(kept, "needle"), maxGrepRowChars/2)
+	}
+}
+
+// TestClipRow covers the window's edges: a match near the start clips only the tail, one near
+// the end only the head, and a multibyte rune is never split.
+func TestClipRow(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		text       string
+		column     int
+		wantPrefix string
+		wantSuffix string
+		wantChars  int
+		wantCut    bool
+	}{
+		{"within the bound", strings.Repeat("x", maxGrepRowChars), 0, "x", "x", maxGrepRowChars, false},
+		{"match at the head clips the tail only", "needle" + strings.Repeat("x", 1000), 0, "needle", "…", maxGrepRowChars + 1, true},
+		{"match at the tail clips the head only", strings.Repeat("x", 1000) + "needle", 1000, "…", "needle", maxGrepRowChars + 1, true},
+		{"multibyte runes are counted whole", strings.Repeat("é", 1000), 500 * 2, "…", "…", maxGrepRowChars + 2, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, cut := clipRow(tc.text, tc.column)
+
+			if cut != tc.wantCut {
+				t.Errorf("cut = %v, want %v", cut, tc.wantCut)
+			}
+			if !strings.HasPrefix(got, tc.wantPrefix) || !strings.HasSuffix(got, tc.wantSuffix) {
+				t.Errorf("clipped row = %.20q…%.20q, want prefix %q and suffix %q", got, got[max(0, len(got)-20):], tc.wantPrefix, tc.wantSuffix)
+			}
+			if n := len([]rune(got)); n != tc.wantChars {
+				t.Errorf("clipped row is %d chars, want %d", n, tc.wantChars)
+			}
+		})
+	}
+}
+
+// TestGrep_Execute_CapNudge: once the match cap bites, the header ends with the nudge that
+// says how to get under it — and it names only the arguments grep honours today.
+func TestGrep_Execute_CapNudge(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	content := strings.Repeat("needle\n", maxGrepMatches+5)
+	if err := os.WriteFile(filepath.Join(root, "hay.txt"), []byte(content), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"pattern": "needle", "max_results": 1}))
+
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	header := strings.SplitN(result.Content, "\n", 2)[0]
+	want := "[1000 total matches (capped at 1000) in the workspace, showing 1-1] — narrow with include or path"
+	if header != want {
+		t.Errorf("header = %q, want %q", header, want)
+	}
+	if !strings.HasSuffix(header, "— narrow with include or path") {
+		t.Errorf("header does not end with the nudge: %q", header)
+	}
+}

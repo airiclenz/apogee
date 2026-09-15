@@ -10,13 +10,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
 var grepSpec = toolSpec{
 	name:        "grep",
-	description: "Search workspace files for lines matching a regular expression. Returns file:line:text matches; with context_lines set, the surrounding lines ride along as file:line-text; an absolute path under a configured read-only root (such as the skills library) can be searched too.",
+	description: "Search workspace files for lines matching a regular expression. Returns file:line:text matches (a line wider than 512 characters is clipped around its first match); with context_lines set, the surrounding lines ride along as file:line-text; an absolute path under a configured read-only root (such as the skills library) can be searched too.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["pattern"],
@@ -44,6 +45,22 @@ type grepArgs struct {
 // pattern on a large workspace cannot exhaust memory; the result notes truncation.
 const maxGrepMatches = 1000
 
+// grepCapNudge closes the header once the match cap bit: the model is told HOW to get under
+// it rather than left to page through a capped total. It names the arguments grep honours
+// today — naming one it silently ignores (decodeArgs drops unknown fields) would announce a
+// knob that does nothing.
+const grepCapNudge = " — narrow with include or path"
+
+// maxGrepRowChars bounds the characters of a matched line that reach the model. A minified
+// bundle or a `.jsonl` record can put tens of thousands of characters on one line, and a
+// match inside one is worth its neighbourhood, not the whole row: a wider line is clipped
+// to this many characters around its first match, `…` marking each cut end, and the header
+// counts the rows it clipped.
+const maxGrepRowChars = 512
+
+// clipMark marks a cut end of a clipped row.
+const clipMark = "…"
+
 // maxGrepContextLines bounds context_lines. A larger request is silently narrowed rather
 // than refused — the number is the model's hint about how much surrounding code it wants,
 // not a contract worth failing a search over.
@@ -52,11 +69,13 @@ const maxGrepContextLines = 10
 // grepMatch is one matching line. openPath is the workspace-relative name the file is
 // opened by through the fence; display is the name the match is REPORTED under (relative to
 // the searched directory, which differs from openPath whenever `path` names a subtree);
-// line is 1-based.
+// line is 1-based; column is the byte offset of the first match in text, which is where a
+// clipped row is centred.
 type grepMatch struct {
 	openPath string
 	display  string
 	line     int
+	column   int
 	text     string
 }
 
@@ -233,8 +252,8 @@ func (t *Grep) searchFile(target searchTarget, rel, display string, re *regexp.R
 	for scanner.Scan() {
 		lineNumber++
 		line := scanner.Text()
-		if re.MatchString(line) {
-			*matches = append(*matches, grepMatch{openPath: rel, display: display, line: lineNumber, text: line})
+		if loc := re.FindStringIndex(line); loc != nil {
+			*matches = append(*matches, grepMatch{openPath: rel, display: display, line: lineNumber, column: loc[0], text: line})
 			if len(*matches) >= maxGrepMatches {
 				return
 			}
@@ -288,7 +307,9 @@ func matchesInclude(name string, globs []string) bool {
 }
 
 // renderMatches paginates from offset and prepends a header naming the total count and the
-// scope the search ran over (searchScope). It returns the total as a domain.MatchedLines on
+// scope the search ran over (searchScope), plus how many of the page's rows were clipped
+// (clipWideRows) and, once the match cap bit, the nudge that says how to narrow the search
+// (grepCapNudge). It returns the total as a domain.MatchedLines on
 // BOTH paths — a search that found nothing reports Total 0 rather than no summary, so a host
 // reads a number instead of testing the "No matches found" sentence for a prefix.
 //
@@ -315,18 +336,78 @@ func (t *Grep) renderMatches(target searchTarget, scope string, matches []grepMa
 	if end > total {
 		end = total
 	}
-	shown := matches[start:end]
+	shown, clipped := clipWideRows(matches[start:end])
 
-	capped := ""
+	capped, nudge := "", ""
 	if total >= maxGrepMatches {
 		capped = fmt.Sprintf(" (capped at %d)", maxGrepMatches)
+		nudge = grepCapNudge
 	}
-	header := fmt.Sprintf("[%d total matches%s in %s, showing %d-%d]", total, capped, scope, start+1, end)
+	clippedNote := ""
+	if clipped > 0 {
+		clippedNote = fmt.Sprintf(" (%d rows clipped at %d chars)", clipped, maxGrepRowChars)
+	}
+	header := fmt.Sprintf("[%d total matches%s in %s, showing %d-%d%s]%s", total, capped, scope, start+1, end, clippedNote, nudge)
 	body := plainMatchLines(shown)
 	if contextLines > 0 {
 		body = t.renderContextMatches(target, shown, contextLines)
 	}
 	return header + "\n" + strings.Join(body, "\n"), domain.MatchedLines{Total: total}
+}
+
+// clipWideRows returns a copy of the page's matches with every row wider than maxGrepRowChars
+// clipped around its first match (clipRow), and how many rows it clipped. It runs BEFORE the
+// renderers, so a wide row is clipped the same way whether or not context was asked for; a
+// page with no wide row is handed back as it was.
+func clipWideRows(matches []grepMatch) ([]grepMatch, int) {
+	clipped := 0
+	var out []grepMatch
+	for i, m := range matches {
+		text, cut := clipRow(m.text, m.column)
+		if !cut {
+			continue
+		}
+		if out == nil {
+			out = make([]grepMatch, len(matches))
+			copy(out, matches)
+		}
+		out[i].text = text
+		clipped++
+	}
+	if out == nil {
+		return matches, 0
+	}
+	return out, clipped
+}
+
+// clipRow clips a matched line wider than maxGrepRowChars to a window of that many characters
+// centred on the byte offset column of its first match, with clipMark at each cut end. It
+// counts characters, not bytes, so a multibyte rune is never split. A line within the bound is
+// returned as it is with false.
+func clipRow(text string, column int) (string, bool) {
+	runes := []rune(text)
+	if len(runes) <= maxGrepRowChars {
+		return text, false
+	}
+	matchAt := utf8.RuneCountInString(text[:min(column, len(text))])
+	start := matchAt - maxGrepRowChars/2
+	if start > len(runes)-maxGrepRowChars {
+		start = len(runes) - maxGrepRowChars
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxGrepRowChars
+
+	var b strings.Builder
+	if start > 0 {
+		b.WriteString(clipMark)
+	}
+	b.WriteString(string(runes[start:end]))
+	if end < len(runes) {
+		b.WriteString(clipMark)
+	}
+	return b.String(), true
 }
 
 // plainMatchLines renders matches in the bare "display:line:text" form — the output shape

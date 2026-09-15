@@ -236,7 +236,11 @@ NOTES (2026-09-15): consequential edit — internal/eventjson/encode_test.go, in
 
 **Commit:** `feat(agent): @file references cap at 32k tokens; PDF extraction joins word-per-line runs`
 
-## 8. `web_fetch` returns text for HTML; `grep` clips wide rows and nudges on the cap
+## 8. `web_fetch` returns text for HTML; `grep` clips wide rows and nudges on the cap — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the clip runs in `renderMatches` on the page of shown rows (`clipWideRows`, before `plainMatchLines`) rather than inside `plainMatchLines` itself, so a wide row is clipped the same way on the context_lines path, which renders matched rows through `renderFileGroup`; `grepMatch` gains a `column` (byte offset of the first match, from `FindStringIndex`) so the window can centre on it.
+NOTES (2026-09-15): the cap nudge sits after the header's closing bracket (`[…, showing 1-1] — narrow with include or path`) so the header line ends with the exact nudge; the clipped count sits inside the bracket after the `showing` range.
+NOTES (2026-09-15): `contentLooksHTML` (Content-Type or doctype sniff) stays in `web_search_render.go` and is what `web_fetch` keys the page render on, so a server that omits the header still gets text; the truncation note is unchanged (it describes the capped response).
 
 **What:** `internal/tools/web_fetch.go` `renderFetchResult`: a `text/html` body runs through the cleaner `web_search_render.go` already owns (hoist it to `internal/tools/htmltext.go`, one function both call), `raw: true` (new bool arg) returns the body as today; description says so. `internal/tools/grep.go` `plainMatchLines`: a matched line longer than 512 chars is clipped to 512 around the first match with `…` at the cut ends and the header counts them `(N rows clipped at 512 chars)`; when `total >= maxGrepMatches` the header ends `— narrow with include or path` (item 14 extends it to `exclude` when it adds the argument). `docs/manual/commands.md` paragraphs for both.
 

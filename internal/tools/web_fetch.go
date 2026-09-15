@@ -14,18 +14,20 @@ import (
 
 var webFetchSpec = toolSpec{
 	name:        "web_fetch",
-	description: "Fetch the contents of an http(s) URL with a GET request and return the response status and body. Use this to read a web page or a raw file by URL. Blocked URLs (loopback, private, or metadata addresses, and disallowed hosts) are refused.",
+	description: "Fetch the contents of an http(s) URL with a GET request and return the response status and body. Use this to read a web page or a raw file by URL. An HTML page comes back as its readable text (scripts and styles dropped, block breaks kept); pass raw: true for the markup itself. Blocked URLs (loopback, private, or metadata addresses, and disallowed hosts) are refused.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["url"],
   "properties": {
-    "url": {"type": "string", "description": "The absolute http(s) URL to fetch with a GET request."}
+    "url": {"type": "string", "description": "The absolute http(s) URL to fetch with a GET request."},
+    "raw": {"type": "boolean", "description": "Return an HTML body as its markup instead of its readable text (default false)"}
   }
 }`),
 }
 
 type webFetchArgs struct {
 	URL string `json:"url"`
+	Raw bool   `json:"raw"`
 }
 
 // WebFetch performs a single GET against an http(s) URL and returns the response status and
@@ -73,7 +75,7 @@ func (t *WebFetch) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if msg != "" {
 		return errorResult(call.ID, msg), nil
 	}
-	return okResult(call.ID, renderFetchResult(resp)), nil
+	return okResult(call.ID, renderFetchResult(resp, args.Raw)), nil
 }
 
 // maxLocationBytes caps the redirect target rendered to the model. The response HEADER block is
@@ -84,8 +86,12 @@ func (t *WebFetch) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 const maxLocationBytes = 2048
 
 // renderFetchResult formats the GET response for the model: a status line, the resolved
-// content type, the redirect target on a 3xx, and the (capped) body.
-func renderFetchResult(resp netResponse) string {
+// content type, the redirect target on a 3xx, and the (capped) body. An HTML body — by
+// Content-Type or by its own doctype (contentLooksHTML) — is rendered as readable text through
+// the page form of cleanHTMLText, since a small model handed a page's markup spends its window
+// on scripts and attributes before it reaches the prose; raw asks for the markup as it came.
+// The truncation note refers to the RESPONSE the funnel capped, whichever form the body takes.
+func renderFetchResult(resp netResponse, raw bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "HTTP %s\n", resp.status)
 	if ct := resp.header.Get("Content-Type"); ct != "" {
@@ -103,7 +109,11 @@ func renderFetchResult(resp netResponse) string {
 		fmt.Fprintf(&b, "Location: %s\n", loc)
 	}
 	b.WriteString("\n")
-	b.WriteString(resp.body)
+	body := resp.body
+	if !raw && contentLooksHTML(resp.header.Get("Content-Type"), body) {
+		body = cleanHTMLText(body, htmlPage)
+	}
+	b.WriteString(body)
 	if resp.truncated {
 		fmt.Fprintf(&b, "\n\n[response truncated at %d bytes]", maxNetworkResponseBytes)
 	}

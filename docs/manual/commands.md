@@ -243,6 +243,22 @@ file whose leading bytes hold a NUL — an executable, an archive, an image — 
 walks past such a file on the same test. A PDF is the one exception: it is detected by its content
 and returned as extracted text.
 
+**A wide match row is clipped.** A `grep` hit on a minified bundle or a `.jsonl` record can sit on
+a line thousands of characters wide, and the match is worth its neighbourhood, not the whole row:
+a matched line wider than 512 characters comes back as the 512 characters around its first match,
+with `…` marking each cut end, and the header counts what it clipped —
+`[2 total matches in the workspace, showing 1-2 (1 rows clipped at 512 chars)]`. A line within the
+bound is untouched, and `read_file` still serves the whole row. A search that hits the 1000-match
+cap says how to get under it: its header ends `— narrow with include or path`.
+
+**A fetched page arrives as text.** `web_fetch` renders an HTML response — by its `Content-Type`,
+or by its own doctype when the server sends none — as the page's readable text: `<script>`,
+`<style>` and `<noscript>` bodies and comments are dropped, each paragraph, heading, list item and
+table row is a line of its own, a `<pre>` keeps its lines and indentation, and every other tag
+becomes a space. The status line and `Content-Type` header still come first. To see the markup
+itself — to find a link's `href`, a form's fields, a meta tag — pass `raw: true`; a non-HTML body
+(plain text, JSON, a raw file) is never touched either way.
+
 **A near miss gets a suggestion.** When `read_file`, `list_dir`, `grep` or `find_files` is handed a
 path that is not there, the refusal does not stop at saying so: it adds a `did you mean:` clause
 naming up to five entries of the named parent directory whose names begin with the name that is

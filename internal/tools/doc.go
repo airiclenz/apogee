@@ -253,11 +253,13 @@
 // Network. network.go is the funnel itself — networkTool.do, the single path from a tool to
 // the network — carrying the URLGuard pre-flight and dial-time checks, the one per-call
 // deadline, the response cap, and the unexported url-filter marker the disposition keys on.
-// web_fetch.go is web_fetch (GET plus its body rendering), http_request.go is http_request
-// (any method, headers, body), and web_search.go is web_search — provider selection between
-// the built-in DuckDuckGo, a configured custom endpoint and off, plus the SetEndpoint
-// re-point. web_search_render.go is that tool's rendering half: the DuckDuckGo HTML parse and
-// the generic HTML-to-text cleaning, best-effort by design.
+// web_fetch.go is web_fetch (GET plus its body rendering — an HTML page as readable text unless
+// raw asks for the markup), http_request.go is http_request (any method, headers, body), and
+// web_search.go is web_search — provider selection between the built-in DuckDuckGo, a
+// configured custom endpoint and off, plus the SetEndpoint re-point. web_search_render.go is
+// that tool's rendering half: the DuckDuckGo HTML parse, best-effort by design. htmltext.go is
+// the HTML-to-text cleaner both share — cleanHTMLText, whose fragment form folds a search
+// snippet to one line and whose page form drops script and style bodies and keeps block breaks.
 //
 // Host delegates and the recursion point. ask_user.go is ask_user over the host's Asker,
 // including the queueing that keeps concurrent askers off one prompt. present_document.go is

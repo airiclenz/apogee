@@ -2,19 +2,19 @@ package tools
 
 import (
 	"fmt"
-	"html"
 	"net/url"
 	"regexp"
 	"strings"
 )
 
 // ----------------------------------------------------------------------------
-// web_search rendering — DuckDuckGo HTML parsing + generic HTML cleaning
+// web_search rendering — DuckDuckGo HTML parsing over the shared HTML cleaner (htmltext.go)
 // ----------------------------------------------------------------------------
 //
 // The built-in DuckDuckGo provider returns a full HTML page; parseDDGResults extracts
 // structured title/url/snippet results from it. A custom endpoint may return HTML too
-// (parsed structurally when it is a DDG mirror, cleaned to plain text otherwise) or an
+// (parsed structurally when it is a DDG mirror, cleaned to one line of plain text by the
+// fragment form of cleanHTMLText otherwise) or an
 // already-clean JSON/text document (passed through verbatim). All parsing is best-effort
 // by design: a rate-limit or consent page carries no result anchors and renders as
 // "No results", never a crash. If DDG ever reorders the anchor attributes (href before
@@ -32,7 +32,6 @@ var (
 	ddgResultLinkRE = regexp.MustCompile(`(?s)<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)
 	ddgSnippetRE    = regexp.MustCompile(`(?s)<a[^>]+class="result__snippet"[^>]*>(.*?)</a>`)
 	ddgUddgRE       = regexp.MustCompile(`uddg=([^&]+)`)
-	htmlTagRE       = regexp.MustCompile(`(?s)<[^>]+>`)
 )
 
 // searchResult is one parsed search hit.
@@ -71,7 +70,7 @@ func renderSearch(provider searchProvider, resp netResponse, query string) (stri
 		if results := parseDDGResults(resp.body); len(results) > 0 {
 			return renderStructuredResults(results)
 		}
-		cleaned := cleanHTMLText(resp.body)
+		cleaned := cleanHTMLText(resp.body, htmlFragment)
 		if cleaned == "" {
 			return "No results found for: " + query, 0
 		}
@@ -96,14 +95,14 @@ func parseDDGResults(body string) []searchResult {
 
 	results := make([]searchResult, 0, len(links))
 	for i, m := range links {
-		title := cleanHTMLText(m[2])
+		title := cleanHTMLText(m[2], htmlFragment)
 		target := ddgRealURL(m[1])
 		if title == "" || target == "" {
 			continue
 		}
 		snippet := ""
 		if i < len(snippets) {
-			snippet = cleanHTMLText(snippets[i][1])
+			snippet = cleanHTMLText(snippets[i][1], htmlFragment)
 		}
 		results = append(results, searchResult{title: title, url: target, snippet: snippet})
 	}
@@ -123,15 +122,6 @@ func ddgRealURL(href string) string {
 		return ""
 	}
 	return href
-}
-
-// cleanHTMLText strips tags from an HTML fragment and normalizes it to a single line: tags
-// become spaces, entities decode (stdlib html covers the full named set; &nbsp; becomes
-// U+00A0, which unicode counts as space), and whitespace runs collapse to single spaces.
-func cleanHTMLText(s string) string {
-	s = htmlTagRE.ReplaceAllString(s, " ")
-	s = html.UnescapeString(s)
-	return strings.Join(strings.Fields(s), " ")
 }
 
 // contentLooksHTML reports whether a response is HTML, by Content-Type or by sniffing the

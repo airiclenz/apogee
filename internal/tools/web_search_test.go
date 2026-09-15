@@ -106,3 +106,33 @@ func searchContent(t *testing.T, tool *WebSearch) string {
 	}
 	return res.Content
 }
+
+// TestCleanHTMLText_FragmentFormIsUnchanged pins the fragment form byte-for-byte: it is the
+// form web_search's titles, snippets and generic-page fallback go through, and the hoist of
+// the cleaner beside web_fetch's page form (htmltext.go) must not move a byte of it — tags
+// become spaces, entities decode, whitespace collapses to ONE line, and a script body is
+// text like any other (the page form, not this one, drops it).
+func TestCleanHTMLText_FragmentFormIsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"tags become spaces and whitespace collapses", "<html><body>\n  <h1>Results</h1>\n  <p>alpha &amp;\n  beta</p>\n</body></html>", "Results alpha & beta"},
+		{"a script body survives", "<p>one</p><script>x()</script><style>b{}</style>", "one x() b{}"},
+		{"nested inline markup joins with single spaces", "<b>Go</b>&nbsp;<i>Docs</i> &lt;tag&gt;", "Go Docs <tag>"},
+		{"empty", "<br/>", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := cleanHTMLText(tc.in, htmlFragment); got != tc.want {
+				t.Errorf("cleanHTMLText(%q, htmlFragment) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
