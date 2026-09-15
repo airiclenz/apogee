@@ -69,11 +69,6 @@ const (
 	EntryKindCompacted   = "compacted"
 )
 
-// interruptedSummary is the outcome CloseInterruptedCalls words a still-open call with — the one
-// wording no live fold ever writes, because it describes what befell a call between the write and
-// the read rather than anything the call reported.
-const interruptedSummary = "interrupted — the run did not finish"
-
 // envelope is the top-level serialized form of the scrollback: a version tag plus the committed
 // entries in display order. The version gates forward compatibility for the whole blob; individual
 // entry kinds are additive within a version. It stays unexported — callers hand over and receive
@@ -385,34 +380,4 @@ func stripStatValue(v *StatValue) {
 	}
 	v.NounForOne = sanitize.StripEscapes(v.NounForOne)
 	v.NounForMany = sanitize.StripEscapes(v.NounForMany)
-}
-
-// CloseInterruptedCalls closes every tool call a decoded record left OPEN, wording each one with the
-// outcome that actually befell it, and reports how many it closed.
-//
-// A record can be written mid-Turn while a delegation runs (the progress save, ADR 0022's 2026-08-25
-// addendum), so the blob's last sub_agent head — and every child call standing under it — is stored
-// open, and the work behind it died with the engine that was running it. A resume that replayed
-// those as stored would show a dead child as running, with no later fold able to correct it: the
-// result those calls are waiting for is never coming, because a resumed record re-attempts the
-// delegating Turn from its boundary rather than rejoining it (ADR 0007). It also covers records the
-// cancelled-Turn path has always written with open calls.
-//
-// It is a pass over the whole slice rather than a per-entry rewrite, because the caller needs the
-// COUNT — one note is worth adding when anything was closed. An entry already settled is skipped by
-// the clause that skips every other closed call, and so is a toolCall carrying no card at all: Tool
-// is a pointer on the wire, and a hand-written or truncated blob can perfectly well omit it.
-//
-// It mutates the entries in place, which is what a freshly decoded slice is for.
-func CloseInterruptedCalls(entries []Entry) (closed int) {
-	for i := range entries {
-		e := &entries[i]
-		if e.Kind != EntryKindToolCall || e.Done || e.Tool == nil {
-			continue
-		}
-		e.Done = true
-		e.Tool.Summary = BranchSummary{DetailLine: DetailLine{Text: interruptedSummary}}
-		closed++
-	}
-	return closed
 }

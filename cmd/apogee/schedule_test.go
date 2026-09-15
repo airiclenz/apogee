@@ -420,8 +420,9 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prevRunner })
 
-	// The session's own boot-time dir, exactly as the composition root seeds it onto the Config a
-	// Firing copies — the value this Firing must NOT run in.
+	// The session's own boot-time dir, exactly as the composition root seeds it onto the session's
+	// Config — the value this Firing must NOT run in, because firingConfig builds its own Config
+	// (wire_firing.go) and mints the Firing's own scratch dir rather than copying the session's.
 	seed := ensureScratchDir(roots.scratch, "2026-08-24T09-00-00-session")
 	if seed == "" {
 		t.Fatal("could not create the session's seed scratch dir")
@@ -464,8 +465,8 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 // Composed against the package's runner seam rather than a live model, which is why this test does
 // not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
 func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
-	// The launch entry's own ceiling — the number seeded onto the Config a Firing copies, and the one
-	// that must not survive the move below.
+	// The launch entry's own ceiling — the number seeded onto the session's Config, and the one that
+	// must not survive the move below: firingConfig reads the cap off the entry it binds to.
 	const launchCap = 2048
 
 	for _, tt := range []struct {
@@ -543,8 +544,8 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 // Composed against the package's runner seam rather than a live model, which is why this test does
 // not call t.Parallel: it replaces a package-level var, exactly as the tests above it do.
 func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testing.T) {
-	// The launch entry's own share — the number seeded onto the Config a Firing copies, and the one
-	// that must not survive the move below.
+	// The launch entry's own share — the number seeded onto the session's Config, and the one that
+	// must not survive the move below: firingConfig reads the share off the entry it binds to.
 	const launchShare = 0.5
 
 	for _, tt := range []struct {

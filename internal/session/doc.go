@@ -11,9 +11,10 @@
 // opaque bytes.
 //
 // transcript.go holds the neutral transcript model and codec — the exported wire form of a
-// scrollback (Entry and its views), TranscriptVersion, EncodeTranscript/DecodeTranscript and
-// CloseInterruptedCalls — so any Driver, not the TUI alone, can write and replay the Transcript
-// blob (ADR 0031).
+// scrollback (Entry and its views), TranscriptVersion and EncodeTranscript/DecodeTranscript — so
+// any Driver, not the TUI alone, can write and replay the Transcript blob (ADR 0031). What a
+// replay makes of a call the record left open is the reading Driver's own pass over its entries
+// (the TUI's closeInterruptedCalls, internal/tui/transcriptbridge.go).
 //
 // The Store owns the on-disk format and naming so its callers never duplicate that
 // knowledge. Ids from NewID are sortable UTC stamps with a random suffix; Save writes

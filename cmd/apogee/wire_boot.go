@@ -334,15 +334,16 @@ func (w *rootWiring) resolveConfig() error {
 		// runs at a Turn boundary before Compaction is ever reached.
 		// MaxOutputTokens is the startup entry's own `max-output-tokens:` pin (0 ⇒ unpinned, and the
 		// engine derives the reply cap from the room its Budget reserves — ADR 0046). It is seeded
-		// here as well as at the bind, because this Config is also what a scheduled Firing copies:
-		// a Firing running while nobody watches is exactly the case a runaway reply must not.
+		// here as well as at the bind so the session runs capped from its first Turn. A scheduled
+		// Firing does not copy this Config: firingConfig (wire_firing.go) builds its own from the
+		// same Options and the entry it binds to (firingInputs), which is how a run nobody watches
+		// gets the same cap without sharing the session's value.
 		// WorkingWindow is the top-level `working-window:` key (0 ⇒ unbounded, and the working room
-		// IS the advertised window). It rides here for the reply cap's reason too: this Config is
-		// what a scheduled Firing copies, so a run nobody watches works in the room the human bounded.
+		// IS the advertised window); firingConfig seeds it from the same key, so a run nobody
+		// watches works in the room the human bounded.
 		// ResponseReserveFraction is the top-level `response-reserve:` share (0 ⇒ unset, and the
-		// Budget holds its own built-in fifth back). It rides here for the reply cap's reason: this
-		// Config is what a scheduled Firing copies, so the window is divided the same way whether a
-		// human is watching or not.
+		// Budget holds its own built-in fifth back); firingConfig seeds it the same way, so the
+		// window is divided alike whether a human is watching or not.
 		Context: apogee.ContextConfig{
 			MaxContextTokens:        w.opts.ContextWindow,
 			WorkingWindow:           w.opts.WorkingWindow,
@@ -356,9 +357,9 @@ func (w *rootWiring) resolveConfig() error {
 		// cap existed), how deep delegation may nest: `delegate-max-depth` (default 1 — the
 		// session delegates, its delegates do not), and what one delegation may spend in prompt
 		// tokens and wall clock: `delegate-max-tokens` (default 20M) and `delegate-timeout`
-		// (default 2h), 0 disabling either. They ride here for the reply cap's reason — this
-		// Config is what a scheduled Firing copies, so a delegate is bounded the same whether a
-		// human is watching or not.
+		// (default 2h), 0 disabling either. firingConfig reads the same four keys off the Options a
+		// Firing is raised with, so a delegate is bounded the same whether a human is watching or
+		// not.
 		Delegation: apogee.DelegationConfig{
 			MaxSteps:  w.opts.DelegateMaxSteps,
 			MaxDepth:  w.opts.DelegateMaxDepth,
@@ -367,14 +368,13 @@ func (w *rootWiring) resolveConfig() error {
 		},
 		// And which Floor guards this session runs WITHOUT (ADR 0071). The seven keys are positive in
 		// the file and negative at the engine, and floorFromOptions is the one place that turns one
-		// spelling into the other. It rides here for the reply cap's reason as well: this Config is
-		// what a scheduled Firing copies, so a guard the human took away is taken away for the runs
-		// nobody watches too.
+		// spelling into the other — firingConfig calls it on the same Options, so a guard the human
+		// took away is taken away for the runs nobody watches too.
 		Floor: floorFromOptions(w.opts),
 		// And whether the engine's context-fill notice is on (ADR 0077): the `context-fill-notice`
 		// key, default off. Not a Floor guard, so it is carried as is — no negation — beside Bypass,
-		// which switches it off with the rest of the advise class. It rides here for the reply
-		// cap's reason too: this Config is what a scheduled Firing copies.
+		// which switches it off with the rest of the advise class; firingConfig carries it the same
+		// way.
 		ContextFillNotice: w.opts.ContextFillNotice,
 		// And the `step-budget-notice` switch beside it, its twin in every respect (ADR 0077,
 		// 2026-09-15 addendum): carried as is, off by default, off under Bypass.

@@ -114,7 +114,10 @@ Commit: `refactor(userexec): one fenced bounded runner behind reactions and api-
 
 Commit: `fix(cmd): headless and daemon Firings sweep stale snapshot dirs`
 
-## 3. Small in-passing defects and doc drift
+## 3. Small in-passing defects and doc drift — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): (c) is a no-op per the regression guard — `base` is still documented as kept for stage 2 (bead apogee-089); `newDelegationWiring`/`newSubAgentServer` and their callers untouched.
+NOTES (2026-09-15): the `wire.go` test-mirror sentence also names `wire_live_test.go` and `wire_verbs_test.go`, which exist and were missing from the list it corrects; the options projection is described as exercised through `wire_boot_test.go`, `wire_settings_test.go` and `settingsrows_test.go` (the files that call `rootWiring.options()`), since no `wire_options_test.go` exists.
 
 **What.** (a) `internal/tui/sink.go` nils `SeamClosedEvent.Value` before forwarding to the Update goroutine (the value is valid only during `Emit`, per `internal/domain/events.go`). (b) `internal/session/transcript.go`: delete the exported `CloseInterruptedCalls` (zero callers; the TUI keeps its own over TUI cards). (c) `cmd/apogee/delegation.go`: stop threading the base `apogee.Config` through its five sites when nothing reads it — verify by grep at implement time; keep any site that reads a field. (d) Docs: `cmd/apogee/wire.go` names a test file that does not exist; `cmd/apogee/wire_boot.go`'s comment claims a Firing copies this Config (stale since `firingConfig`). Rule: every comment naming `wire_options_test.go` or "copies this Config" — `grep -rn "wire_options_test\|copies this Config" cmd/apogee`.
 

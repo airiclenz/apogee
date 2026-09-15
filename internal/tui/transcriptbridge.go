@@ -102,10 +102,10 @@ func decodeTranscript(data []byte) ([]entry, error) {
 // open calls.
 //
 // It runs over the TUI's OWN entries rather than the wire's, which is why it is a pass here and not
-// a call into [session.CloseInterruptedCalls] (the same rewrite, for the Drivers that read the
-// neutral entries): the caller needs the COUNT of what it closed in the scrollback it is about to
-// replay (one note is added when anything was closed, replayScrollback), and by this point the
-// entries are cards, not payloads. An entry the firing rule already closed is skipped by the same
+// a codec step in internal/session (which decodes what was stored and closes nothing): the caller
+// needs the COUNT of what it closed in the scrollback it is about to replay (one note is added
+// when anything was closed, replayScrollback), and by this point the entries are cards, not
+// payloads. An entry the firing rule already closed is skipped by the same
 // clause that skips every other settled call — it comes back done, and its own account of itself
 // (scheduleInterruptedSummary) stands.
 //

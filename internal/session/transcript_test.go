@@ -339,44 +339,6 @@ func containsESC(s string) bool {
 	return false
 }
 
-// TestCloseInterruptedCallsClosesWhatTheRecordCaughtOpen proves the fact-rewrite a resume owes the
-// reader: a call still open in the blob is waiting for a result that is never coming, because the
-// engine running it died with the process that wrote the record. It comes back closed and worded as
-// interrupted, and the count is what lets the caller add one note for the whole replay.
-//
-// The tool-less toolCall is the other half: Tool is a POINTER on the wire, so a truncated or
-// hand-written blob can perfectly well carry a call with no card, and a pass that dereferenced it
-// blindly would panic on a file rather than degrade.
-func TestCloseInterruptedCallsClosesWhatTheRecordCaughtOpen(t *testing.T) {
-	t.Parallel()
-	blob := []byte(`{"version":1,"entries":[` +
-		`{"kind":"toolCall","callID":"open","tool":{"label":"Sub-Agent","summary":{}}},` +
-		`{"kind":"toolCall","callID":"settled","done":true,"tool":{"label":"Read","summary":{"text":"10 lines"}}},` +
-		`{"kind":"toolCall","callID":"c1"},` +
-		`{"kind":"assistant","text":"still talking"}]}`)
-	entries, err := DecodeTranscript(blob)
-	if err != nil {
-		t.Fatalf("DecodeTranscript: %v", err)
-	}
-
-	if closed := CloseInterruptedCalls(entries); closed != 1 {
-		t.Fatalf("CloseInterruptedCalls closed %d calls, want the one open card", closed)
-	}
-	if !entries[0].Done || entries[0].Tool.Summary.Text != interruptedSummary {
-		t.Errorf("the open call did not come back interrupted: done=%v summary=%q",
-			entries[0].Done, entries[0].Tool.Summary.Text)
-	}
-	if entries[1].Tool.Summary.Text != "10 lines" {
-		t.Errorf("a settled call was rewritten: %q", entries[1].Tool.Summary.Text)
-	}
-	if entries[2].Tool != nil || entries[2].Done {
-		t.Errorf("the card-less call was touched: %#v", entries[2])
-	}
-	if entries[3].Done {
-		t.Errorf("a non-call entry was closed: %#v", entries[3])
-	}
-}
-
 // TestDecodeTranscriptKeepsAnUnknownKind pins where the skip rule lives. A kind this build does not
 // know is a FUTURE variant within the same version, and the codec hands it back as stored: the
 // consumer decides whether it can paint it, because only the consumer knows its own vocabulary.

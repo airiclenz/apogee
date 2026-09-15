@@ -72,10 +72,21 @@ var _ domain.EventSink = (*teaSink)(nil)
 // nicety — every other variant depends on the tokens that preceded it: StreamResetEvent
 // discards them, MessageEvent/ToolCallEvent commit them as narration, and UsageEvent times
 // the generation the first token started.
+//
+// A SeamClosedEvent crosses without its Value: the seam's payload is a live reference into the
+// engine's working value, valid only for the duration of this call (domain.SeamClosedEvent), and
+// the Update goroutine reads the Msg after Emit has returned — by which point the engine is
+// mutating what it points at. Nothing on the TUI side reads it, so the copy that crosses carries
+// Seam and Fired and a nil Value. The caller's own copy is untouched: a Reaction Runner wrapping
+// this sink matches on the value it was handed, not on what was forwarded.
 func (s *teaSink) Emit(e domain.Event) {
 	if tok, ok := e.(domain.TokenEvent); ok {
 		s.emitToken(tok)
 		return
+	}
+	if seam, ok := e.(domain.SeamClosedEvent); ok {
+		seam.Value = nil
+		e = seam
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

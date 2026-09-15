@@ -128,8 +128,9 @@ func (f *transcriptFold) appendText(kind, text string, base domain.EventBase) {
 // appendToolCall records the call the model asked for: its id (what the result pairs back by), the
 // raw tool name, and the bounded copy of the arguments it sent. The entry is stored OPEN — Done
 // stays false until appendToolResult closes it — which is what makes a record written while a
-// delegation was still running replay as interrupted rather than as finished
-// ([session.CloseInterruptedCalls]).
+// delegation was still running replay as interrupted rather than as finished: the reading Driver
+// closes what it finds open and words it so (the TUI's closeInterruptedCalls,
+// internal/tui/transcriptbridge.go).
 func (f *transcriptFold) appendToolCall(ev domain.ToolCallEvent) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

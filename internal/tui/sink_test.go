@@ -241,3 +241,40 @@ func TestTeaSinkUnboundIsNoOp(t *testing.T) {
 	sink := &teaSink{prog: &programRef{}} // never bound
 	sink.Emit(domain.TokenEvent{Text: "x"})
 }
+
+// TestSinkForwardsSeamClosedWithoutTheLiveValue pins the one field the bridge strips: a
+// SeamClosedEvent's Value is a live reference into the engine's working value, valid only while
+// Emit runs (domain.SeamClosedEvent), and the Update goroutine reads its Msg after that. The copy
+// that crosses keeps Seam and Fired and carries a nil Value — and the event the caller handed over
+// is untouched, because a Reaction Runner wrapping the sink matches on that copy after forwarding.
+func TestSinkForwardsSeamClosedWithoutTheLiveValue(t *testing.T) {
+	t.Parallel()
+	sink, prog := newTestSink(t)
+
+	payload := &domain.Request{}
+	ev := domain.SeamClosedEvent{
+		EventBase: domain.EventBase{Turn: 3},
+		Seam:      domain.MomentPreRequest,
+		Fired:     []string{"r1"},
+		Value:     payload,
+	}
+	sink.Emit(ev)
+
+	got := prog.events()
+	if len(got) != 1 {
+		t.Fatalf("captured %d events; want 1: %#v", len(got), got)
+	}
+	seam, ok := got[0].(domain.SeamClosedEvent)
+	if !ok {
+		t.Fatalf("forwarded %T; want domain.SeamClosedEvent", got[0])
+	}
+	if seam.Value != nil {
+		t.Errorf("the live Value crossed to the Update goroutine: %#v", seam.Value)
+	}
+	if seam.Seam != ev.Seam || seam.Turn != ev.Turn || !reflect.DeepEqual(seam.Fired, ev.Fired) {
+		t.Errorf("the forwarded copy lost a fact: got %#v; want Seam/Turn/Fired of %#v", seam, ev)
+	}
+	if ev.Value != payload {
+		t.Errorf("the caller's own event was rewritten: Value = %#v", ev.Value)
+	}
+}
