@@ -54,7 +54,9 @@
 - The delegate ledger and re-dispatch note (`apogee-clb`); shared context files on `sub_agent` (`apogee-vi5`); a raised-cap retry and the forced-reasoning compaction-cap allowance — item 13's former first half, removed at the 2026-09-14 re-check (`apogee-tfp`); the deepseek stream capture (`apogee-l8s`); cloud `parallel-agents` default (`apogee-9se`, plan 04 announces the width).
 - Fuzzy loop detection, a "Nothing to do" text heuristic, a wall-clock bound on the parent, VERSION.
 
-## 1. Gate: plan 2026-09-14 - 01 is archived
+## 1. Gate: plan 2026-09-14 - 01 is archived — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): gate verified — plan 01 is absent from `docs/plans/`, present at `docs/plans/archived/2026-09-14 - 01 - queued-message-preemption-and-scratch-in-lower-modes-plan.md` with all 7 items marked ✅ DONE (2026-09-14), archived by commit 0d64c233; its header `**Status:** unexecuted` line is stale but matches the other archived 2026-09-14 plans (house convention, not a defect).
 
 **What:** Verify `docs/plans/2026-09-14 - 01 - queued-message-preemption-and-scratch-in-lower-modes-plan.md` is gone from `docs/plans/` and archived under `docs/plans/archived/` as executed. Items 5, 8 and 9 edit `internal/agent/loop.go` (`toolMenu`), `dispatch.go` and `internal/domain/config.go`, which that plan rewrites. No code change.
 
