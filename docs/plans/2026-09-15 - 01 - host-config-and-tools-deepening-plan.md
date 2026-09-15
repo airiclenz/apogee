@@ -149,7 +149,10 @@ NOTES (2026-09-15): observation only — the archived 02/03/04 plan files still 
 
 Commit: none (gate item).
 
-## 5. The facade exports the product's prompt and shape; the bench can dial through them
+## 5. The facade exports the product's prompt and shape; the bench can dial through them — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — cmd/apogee/doc.go: made necessary by the new `resolveModelBindings` in modelprofile.go (the package map's half-line role for that file now names it).
+NOTES (2026-09-15): folding startup onto the rebind's resolution means a pre-bound start whose shipped/user profile carries roster deltas now prints the `tools: … (profile)` line to stderr beside the built-in-match line (the rebind already emitted both on the notice channel); a cold start names no model and prints nothing, as before.
 
 **What.** `apogee.go` gains two forwarders — `DefaultSystemPrompt() string` (→ `config.DefaultSystemPrompt`) and `ShippedProfile(model string) (ModelProfile, bool)` (→ `profiles.Resolve` over `profiles.Shipped()`); resolution itself stays in `cmd/apogee` (ADR 0044 D8, 0023 D2). `cmd/apogee/wire_boot.go`'s inline prompt+profile resolution calls the same function `rebindSpecFor` uses (`cmd/apogee/wire_settings.go`), so the binary spells it once. `example_test.go`'s facade-completeness guard lists both; `benchreadiness_test.go` asserts a bench-shaped `Config` built through them carries a non-empty prompt and a shipped shape. ADR 0044 gets a dated amendment noting the facade reachability. Depends on item 4.
 

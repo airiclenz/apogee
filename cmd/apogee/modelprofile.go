@@ -12,18 +12,67 @@ package main
 // (ADR 0037).
 //
 // It lives in a file of its own for what it is: one small resolution with notices of its own,
-// reached from several wiring points and testable without a session.
+// reached from several wiring points and testable without a session. The two points that also
+// need the model's system-prompt template beside the profile — startup and the rebind — read the
+// pair through resolveModelBindings, so the binary spells that resolution exactly once.
 
 import (
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/profiles"
 )
+
+// modelBindings is what resolving ONE model name yields in this binary: the system-prompt
+// template selected for it (ADR 0023) and the Model profile it speaks the wire in (ADR 0044),
+// with the notices that resolution says out loud — the built-in shape match and the roster deltas
+// the profile brings (ADR 0057 decision 8) — in the order they are spoken. The two travel together
+// because they are the same kind of fact, a per-model binding, and every point the binary learns
+// which model it is bound to needs both at once: startup and the rebind an observed model change
+// drives read them through resolveModelBindings, so the binary spells the pair exactly once.
+type modelBindings struct {
+	SystemPrompt string
+	Profile      apogee.ModelProfile
+	Notices      []string
+}
+
+// resolveModelBindings resolves the per-model pair for model out of opts — its `system-prompt*`
+// keys against home for the template, its `model-profiles:` map over the shipped shape table for
+// the profile. A template that cannot be read, or one carrying an unknown placeholder, is returned
+// as the error it is: the prompt is structural configuration, and the two callers fail their step
+// on it rather than degrade quietly around it. A cold start names no model at all, which selects
+// the global template and the zero profile, silently; the first beat's rebind re-runs exactly this
+// call with the model the server reports.
+func resolveModelBindings(opts config.Options, home, model string) (modelBindings, error) {
+	sysPrompt, err := config.ResolveSystemPrompt(opts.SystemPrompt, model, home, opts.UseDefaultPrompt, os.ReadFile)
+	if err != nil {
+		return modelBindings{}, err
+	}
+	bindings := modelBindings{SystemPrompt: sysPrompt}
+
+	// The shape the model speaks the wire in. A built-in match announces itself, because to the
+	// human this is one kind of fact: something apogee decided about this model that nobody typed.
+	profile, notice := resolveModelProfile(model, opts.ModelProfiles)
+	bindings.Profile = profile
+	if notice != "" {
+		bindings.Notices = append(bindings.Notices, notice)
+	}
+
+	// And the profile's THIRD axis, which is the one axis a human can otherwise only infer from a
+	// tool that stopped being offered: a model whose roster deltas are non-empty says so in one
+	// line, on the channel the shape above already travels. Silent when the matched entry spells no
+	// `tools:` axis, which is every profile that predates the axis.
+	if notice := rosterDeltaNotice(profile.Tools); notice != "" {
+		bindings.Notices = append(bindings.Notices, notice)
+	}
+	return bindings, nil
+}
 
 // resolveModelProfile picks the Model profile for model and returns it with the one-line notice the
 // resolution deserves. user is the resolved `model-profiles:` map; the shipped shape table is this

@@ -101,6 +101,15 @@ which hands the engine a resolved `domain.ModelProfile` at startup, in the rebin
 watched-config edit. The engine stays wire-silent about the host's configuration
 ([ADR 0031](0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)),
 so a bench Driver drives the same doors directly.
+*(**Amended 2026-09-15:** the two inputs a Driver needs to dial the product's agent are reachable
+through the facade — `apogee.DefaultSystemPrompt()` forwards the embedded default template
+([ADR 0064](0064-the-system-prompt-ships-an-embedded-default.md)) and
+`apogee.ShippedProfile(model)` resolves the shipped tier alone, reporting whether it matched. The
+resolution proper — the user's `model-profiles:` tier over the shipped one, with its notices —
+stays in cmd/apogee (`resolveModelBindings`, one function behind startup and the rebind); the facade
+exports the product's two constants so a bench that cannot import internal/* builds a Config that
+carries a non-empty prompt and a shipped shape rather than a promptless, zero-profile approximation
+of the product, and this point is not weakened by it.)*
 
 ## Considered and rejected
 

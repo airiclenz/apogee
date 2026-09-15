@@ -2454,32 +2454,20 @@ func rebindSpecFor(
 	next := opts
 	next.Model = model
 
-	sysPrompt, err := config.ResolveSystemPrompt(next.SystemPrompt, model, roots.config, next.UseDefaultPrompt, os.ReadFile)
+	// The per-model pair — the template and the shape the NEW model speaks the wire in — through
+	// the one resolution startup uses too (resolveModelBindings), so the two doors cannot drift.
+	// What it says out loud travels on the per-session notice channel, because to the human a
+	// built-in shape match and the roster deltas it brings are one kind of fact: something apogee
+	// decided about this model that nobody typed.
+	bindings, err := resolveModelBindings(next, roots.config, model)
 	if err != nil {
 		return apogee.RebindSpec{}, nil, err
 	}
-
-	var notices []string
+	notices := bindings.Notices
 
 	bound := window
 	if pinnedWindow > 0 {
 		bound = pinnedWindow
-	}
-
-	// The shape the NEW model speaks the wire in (ADR 0044). A built-in match announces itself on the
-	// per-session notice channel, because to the human this is one kind of fact: something apogee
-	// decided about this model that nobody typed.
-	profile, notice := resolveModelProfile(model, next.ModelProfiles)
-	if notice != "" {
-		notices = append(notices, notice)
-	}
-
-	// And the profile's THIRD axis, which is the one axis a human can otherwise only infer from a
-	// tool that stopped being offered: a switch whose roster deltas are non-empty says so in one
-	// line (ADR 0057 decision 8), on the channel the shape above already travels. Silent when the
-	// matched entry spells no `tools:` axis, which is every profile that predates the axis.
-	if notice := rosterDeltaNotice(profile.Tools); notice != "" {
-		notices = append(notices, notice)
 	}
 
 	// The share the bound entry resolves to, which rebindInputs already wrote onto the copy this
@@ -2490,10 +2478,10 @@ func rebindSpecFor(
 
 	return apogee.RebindSpec{
 		Model:                   model,
-		SystemPrompt:            sysPrompt,
+		SystemPrompt:            bindings.SystemPrompt,
 		MaxContextTokens:        bound,
 		MaxOutputTokens:         &outputCap,
 		ResponseReserveFraction: &reserve,
-		Profile:                 profile,
+		Profile:                 bindings.Profile,
 	}, notices, nil
 }

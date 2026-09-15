@@ -128,6 +128,8 @@ var (
 	_ = apogee.DecodeSession
 	_ = apogee.NewReactionRunner
 	_ = apogee.NewEventLines
+	_ = apogee.DefaultSystemPrompt
+	_ = apogee.ShippedProfile
 )
 
 // Re-exported consts and sentinel errors — one reference each.

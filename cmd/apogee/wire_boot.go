@@ -129,25 +129,21 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 // The tool registry is deliberately NOT here: it is folded onto the same
 // Config by the live-session assembly below, which is where the MCP connections it depends on are.
 func (w *rootWiring) resolveConfig() error {
-	// The system prompt this session STARTS with (ADR 0023), selected for the model as configured
-	// — which on a cold start is no model at all, so this selects the global template and the
-	// per-model entry lands seconds later, on the first beat's rebind (rebindSpecFor re-runs
-	// exactly this call with the observed model). A selected file that cannot be read, or a
-	// template carrying an unknown placeholder, fails startup naming the config key — the prompt is
-	// structural configuration, not something to degrade quietly around. With nothing configured at
-	// all, this resolves apogee's own embedded default (ADR 0064) unless `use-default-prompt: false`
-	// asked for a promptless run.
-	sysPrompt, err := config.ResolveSystemPrompt(w.opts.SystemPrompt, w.opts.Model, w.roots.config, w.opts.UseDefaultPrompt, os.ReadFile)
+	// The system prompt this session STARTS with (ADR 0023) and the shape it STARTS reading
+	// responses in (ADR 0044), both selected for the model as configured — which on a cold start is
+	// no model at all, so this selects the global template and the zero profile, and the per-model
+	// pair lands seconds later, on the first beat's rebind (rebindSpecFor re-runs exactly this call
+	// with the observed model). A selected file that cannot be read, or a template carrying an
+	// unknown placeholder, fails startup naming the config key — the prompt is structural
+	// configuration, not something to degrade quietly around. With nothing configured at all, this
+	// resolves apogee's own embedded default (ADR 0064) unless `use-default-prompt: false` asked
+	// for a promptless run. What the resolution says out loud — a built-in shape match, the roster
+	// deltas it brings — goes to stderr, pre-alt-screen like every other launch notice.
+	bindings, err := resolveModelBindings(w.opts, w.roots.config, w.opts.Model)
 	if err != nil {
 		return err
 	}
-
-	// The shape this session STARTS reading responses in (ADR 0044), matched on the model as
-	// configured — the system prompt's own story: a cold start names no model, nothing matches, and
-	// the first beat's rebind re-runs exactly this resolution against the model the server reports.
-	// A built-in match says so on stderr, pre-alt-screen like every other launch notice.
-	profile, notice := resolveModelProfile(w.opts.Model, w.opts.ModelProfiles)
-	if notice != "" {
+	for _, notice := range bindings.Notices {
 		fmt.Fprintln(os.Stderr, notice)
 	}
 
@@ -282,13 +278,13 @@ func (w *rootWiring) resolveConfig() error {
 		// resolved above for THIS model out of the `model-profiles:` map and the shipped shape
 		// table. A model neither tier knows gets the zero profile: native tool calls with no inline
 		// thinking, exactly as an unprofiled model has always behaved.
-		Profile: profile,
+		Profile: bindings.Profile,
 		// The resolved system-prompt TEMPLATE (ADR 0023), which the loop renders fresh per request
 		// and seeds as the first system message — the user's own prompt, or apogee's embedded
 		// default when nothing is configured (ADR 0064). Empty ⇒ no prompt, which now takes an
 		// explicit `use-default-prompt: false`: the request opens with the user's own message,
 		// exactly as it did before this key existed.
-		SystemPrompt: sysPrompt,
+		SystemPrompt: bindings.SystemPrompt,
 		// The workspace context files (`context-files:`, file-only): the names the engine looks for
 		// in the workspace root at every session boundary, whose content rides the same first system
 		// message as the prompt above — verbatim, never as a template. Nil ⇒ the feature is off, and

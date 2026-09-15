@@ -80,6 +80,8 @@
 // and which tools it is offered, matched axis-wise out of the `model-profiles:` map and
 // the shipped table, plus the two one-line notices that resolution produces: a built-in
 // match announcing itself (ADR 0044) and a switch's non-empty roster deltas (ADR 0057);
+// and the one call (resolveModelBindings) that pairs it with the model's system-prompt
+// template, which startup and the rebind both read so the binary spells the pair once;
 // delegation.go the Sub-agent
 // server — the second heartbeat on the entry `sub-agents-server:` names, the Delegation
 // target each of its beats resolves for the engine to route spawns against, the one

@@ -677,3 +677,44 @@ func TestBenchReadinessLeaveOneOutArms(t *testing.T) {
 		})
 	}
 }
+
+// TestBenchConfigDialsTheProductsPromptAndShape proves a Driver that cannot import internal/* can
+// still dial the PRODUCT's agent rather than an approximation of it: the facade hands out the
+// default system-prompt template and the shipped per-model shape, and a bench-shaped Config built
+// from them constructs. Before the facade exported the two, a bench either ran promptless and
+// zero-profile or copied both out of the repo — and its baselines drifted from what the TUI runs.
+func TestBenchConfigDialsTheProductsPromptAndShape(t *testing.T) {
+	t.Parallel()
+	const model = "gpt-oss-20b"
+
+	prompt := apogee.DefaultSystemPrompt()
+	profile, shipped := apogee.ShippedProfile(model)
+
+	if prompt == "" {
+		t.Fatal("DefaultSystemPrompt() is empty; the product's own prompt is not reachable through the facade")
+	}
+	if !shipped {
+		t.Fatalf("ShippedProfile(%q) matched nothing; the shipped shape table is not reachable through the facade", model)
+	}
+	if profile.Thinking.Style != apogee.ThinkingHarmony {
+		t.Fatalf("ShippedProfile(%q).Thinking.Style = %q, want %q (the shape the product reads gpt-oss in)", model, profile.Thinking.Style, apogee.ThinkingHarmony)
+	}
+	if unknown, ok := apogee.ShippedProfile("nothing-shipped-knows"); ok || unknown.Thinking.Style != "" || unknown.ToolCallFormat != "" {
+		t.Fatalf("ShippedProfile of an unknown model = (%+v, %v), want the zero profile and false", unknown, ok)
+	}
+
+	ag, err := apogee.New(apogee.Config{
+		Endpoint:     "http://localhost:11434",
+		Model:        model,
+		Mode:         apogee.ModeAskBefore,
+		Approver:     allowAll{},
+		Events:       &recSink{},
+		SystemPrompt: prompt,
+		Profile:      profile,
+		WorkspaceDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("New with the product's prompt and shape: %v", err)
+	}
+	_ = ag.Close()
+}

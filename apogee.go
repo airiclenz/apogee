@@ -40,8 +40,10 @@ import (
 	"io"
 
 	"github.com/airiclenz/apogee/internal/agent"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/reactions"
 )
 
@@ -159,6 +161,26 @@ type ContextFileNote = domain.ContextFileNote
 // the host sets it via Config.Profile (a zero profile is native tool calls, no inline thinking,
 // no roster deltas).
 type ModelProfile = domain.ModelProfile
+
+// DefaultSystemPrompt returns the system-prompt TEMPLATE the product runs on when nothing is
+// configured (ADR 0064) — the text cmd/apogee resolves for Config.SystemPrompt on a stock
+// install. It is exported so a Driver that cannot import internal/* (the bench, ADR 0031) can
+// dial the product's own agent rather than a promptless approximation of it: what it hands the
+// engine is then byte-for-byte what the TUI hands it. Like every configured prompt it is a
+// template whose placeholders are substituted per request; see Config.SystemPrompt.
+func DefaultSystemPrompt() string { return config.DefaultSystemPrompt() }
+
+// ShippedProfile resolves model against the SHIPPED shape table alone — the built-in tier of the
+// per-model resolution (ADR 0044), matched case-insensitively on a substring of the model name —
+// and reports whether any entry matched. A model the table does not know answers the zero
+// profile and false, which is the pass-through the product gives it too. It is the Driver-side
+// counterpart of the product's own resolution, which stays in cmd/apogee with the user's
+// `model-profiles:` tier layered above this one (ADR 0044 §8): a bench sets Config.Profile from
+// this call so the model it drives is read in the shape the TUI would read it in.
+func ShippedProfile(model string) (ModelProfile, bool) {
+	decision := profiles.Resolve(model, nil, profiles.Shipped())
+	return decision.Profile, decision.Source == profiles.SourceShipped
+}
 
 // ToolCallFormat selects how a model emits tool calls (native / markdown-fenced / custom-regex).
 type ToolCallFormat = domain.ToolCallFormat
