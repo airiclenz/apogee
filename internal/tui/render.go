@@ -853,7 +853,8 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 		return renderOrphanResult(th, in.text, inner, in.expanded).railed(th, in.depth)
 	case entryError:
 		return plainPaint(railLines(th, hangingWrap(th, th.errorText, glyphAssistant+" ", in.text, inner), in.depth))
-	case entryNote:
+	case entryNote, entryCompacted:
+		// A fold's trace paints as the note it reads as; its kind is for the record, not the eye.
 		return plainPaint(railLines(th, hangingWrap(th, th.noteText, "· ", in.text, inner), in.depth))
 	case entryPresented:
 		return plainPaint(railLines(th, renderPresentedBlock(th, in.presented, inner), in.depth))

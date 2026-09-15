@@ -756,3 +756,111 @@ func TestFoldSubAgentNamedEventLeavesABorrowedBoxAlone(t *testing.T) {
 		t.Errorf("placeholder = %q; want the borrowed box left alone", got)
 	}
 }
+
+// compactedNotes is every fold trace the transcript holds, in list order — the entries a reader of
+// the record finds by kind (entryCompacted) rather than by wording.
+func compactedNotes(m Model) []entry {
+	var notes []entry
+	for _, e := range m.transcript.entries {
+		if e.kind == entryCompacted {
+			notes = append(notes, e)
+		}
+	}
+	return notes
+}
+
+// TestFoldStatsWritesTheFoldsTraceAtEveryDepth pins where an automatic fold leaves its mark. The
+// fold itself is quiet on success (agent/compact.go, autoCompact), so its one signal is the
+// maintenance reading the summary call emits — and that reading is where the trace is written, at
+// the depth that folded: the main agent's Exchange-opening fold lands a depth-0 note at the tail,
+// and a child's Turn-boundary fold lands one INSIDE the child's own block, under the run its
+// spawning call opened, so the record can answer whose context was folded and when.
+func TestFoldStatsWritesTheFoldsTraceAtEveryDepth(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+
+	// The main agent's own fold, outside any /compact worker.
+	mainFold := mainUsage(8000, 400, 8400, 9000, 600, 9600, 2)
+	mainFold.Maintenance = true
+	m = m.foldEvent(mainFold)
+
+	notes := compactedNotes(m)
+	if len(notes) != 1 {
+		t.Fatalf("a depth-0 maintenance reading left %d compacted notes, want 1", len(notes))
+	}
+	if n := notes[0]; n.depth != 0 || n.spawnCallID != "" || n.text != compactedNoteText {
+		t.Errorf("the main agent's trace = %+v; want %q at depth 0 under no run", n, compactedNoteText)
+	}
+
+	// A delegation opens, and its child folds at a Turn boundary while it is still running.
+	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent",
+		Arguments: []byte(`{"task":"survey the tests"}`)}})
+	m = m.foldEvent(domain.SubAgentPhaseEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Phase: domain.SubAgentStarted})
+	childFold := mainUsage(6000, 300, 6300, 7000, 500, 7500, 3)
+	childFold.EventBase = domain.EventBase{Depth: 1, CallID: "s1"}
+	childFold.Maintenance = true
+	m = m.foldEvent(childFold)
+
+	notes = compactedNotes(m)
+	if len(notes) != 2 {
+		t.Fatalf("the child's maintenance reading left %d compacted notes in total, want 2", len(notes))
+	}
+	if n := notes[1]; n.depth != 1 || n.spawnCallID != "s1" {
+		t.Errorf("the child's trace = %+v; want depth 1 under run s1", n)
+	}
+	// Inside the run's block: the head's span reaches it, so a collapsed run elides it with the
+	// rest of the child's work rather than showing a fold note the parent never made.
+	entries := m.transcript.entries
+	head := -1
+	for i, e := range entries {
+		if e.headsRunFor("s1") {
+			head = i
+		}
+	}
+	if head < 0 {
+		t.Fatal("the delegation's head is not in the transcript")
+	}
+	last := head + subAgentSpan(entries, head)
+	if entries[last].kind != entryCompacted {
+		t.Errorf("the child's trace is not the last entry of its run's span; the span ends on %+v", entries[last])
+	}
+	if !m.transcript.hasOpenToolCall() {
+		t.Error("the delegation was closed by its child's fold; a trace is a note, not a result")
+	}
+}
+
+// TestCompactCommandLeavesExactlyOneTrace pins the one exception to the reading-keyed rule: the
+// /compact worker's summary call emits the same maintenance reading an automatic fold does, but
+// its terminal Msg is what says whether the fold LANDED (a skip and a fault carry the same reading
+// and fold nothing), so the reading's note is skipped while that worker runs and foldCompactDone
+// writes the one note — under the fold's own kind, with the wording the notice always had.
+func TestCompactCommandLeavesExactlyOneTrace(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	m.input.SetValue("/compact")
+	m, _ = stepCmd(t, m, keyEnter())
+	if got := m.acts.at(runRef{}).act.kind; got != actCompacting {
+		t.Fatalf("top-level activity = %v after /compact, want compacting (the guard keys on it)", got)
+	}
+
+	reading := mainUsage(8000, 400, 8400, 9000, 600, 9600, 2)
+	reading.Maintenance = true
+	m = m.foldEvent(reading)
+	if n := len(compactedNotes(m)); n != 0 {
+		t.Fatalf("the /compact worker's reading left %d notes before the worker reported, want 0", n)
+	}
+
+	m = step(t, m, compactDoneMsg{})
+
+	notes := compactedNotes(m)
+	if len(notes) != 1 {
+		t.Fatalf("/compact left %d compacted notes, want exactly 1", len(notes))
+	}
+	if got := notes[0].text; got != "context compacted" {
+		t.Errorf("the note reads %q, want the wording the notice always had", got)
+	}
+	if got := plain(m.View()); !strings.Contains(got, "context compacted") {
+		t.Errorf("the trace is not painted as the note it reads as:\n%s", got)
+	}
+}

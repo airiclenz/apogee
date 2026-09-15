@@ -434,7 +434,7 @@ const scheduleFaultLead = "final turn abandoned"
 // (entry.callID) and the prompt as its body. It is left `!done`: the block is open until the
 // Firing's completed or failed Event enriches it, which is what enrichFiring scans for.
 func (t *transcript) addFiring(ev schedule.Event) {
-	t.entries = append(t.entries, entry{
+	t.commit(entry{
 		kind:   entrySchedule,
 		callID: ev.ScheduleID,
 		tool:   presentFiring(ev),

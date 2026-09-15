@@ -649,6 +649,13 @@ type toolView struct {
 	// plan "2026-08-29 - 02"), which is why sanitize leaves it alone — a surface that later shows
 	// it is the surface that must strip it, the way every other card field is stripped here.
 	argsWire json.RawMessage
+
+	// chars is the byte length of the result's content as the tool returned it — what the call put
+	// back into the context — read off the result at the fold (transcript.addToolResult) before any
+	// presenter shapes it, and carried on the wire beside argsWire (session.ToolView.Chars) for the
+	// same reason it is: a record that says what each call asked should say how much it got back.
+	// Nothing paints it; it is the record's number, not the card's. Zero while the call is open.
+	chars int
 }
 
 // headsRun reports whether this card is a delegation's — the sub_agent call whose block heads a run

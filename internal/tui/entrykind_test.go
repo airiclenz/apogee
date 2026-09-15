@@ -7,6 +7,8 @@ import (
 	"maps"
 	"slices"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // entryKindSource is the file the kind-coverage guard reads. It is the table's OWN file, and it is
@@ -113,4 +115,35 @@ func declaresEntryKind(gen *ast.GenDecl) bool {
 	}
 	id, ok := first.Type.(*ast.Ident)
 	return ok && id.Name == entryKindType
+}
+
+// TestEntryKindCompactedIsANoteInEveryRuleButItsName pins the row the fold's trace answers with:
+// it persists under [session.EntryKindCompacted] and decodes back to itself, it is a host note (so
+// at depth 0 it parks at the tail exactly as the plain note it replaced did, and inside a run it
+// stays that run's), it is cacheable, and it claims nothing a note does not — no block state, no
+// live star, no prompt stop. The row is asserted field by field because the structural guard above
+// only proves the row EXISTS.
+func TestEntryKindCompactedIsANoteInEveryRuleButItsName(t *testing.T) {
+	t.Parallel()
+
+	if got := entryCompacted.persistedName(); got != session.EntryKindCompacted {
+		t.Errorf("persistedName = %q, want %q", got, session.EntryKindCompacted)
+	}
+	if got, ok := entryKindByName[session.EntryKindCompacted]; !ok || got != entryCompacted {
+		t.Errorf("entryKindByName[%q] = %v, %v; want entryCompacted", session.EntryKindCompacted, got, ok)
+	}
+	if !entryCompacted.isHostNote() {
+		t.Error("a compacted note is not a host note; at depth 0 it would land inside a run's stretch")
+	}
+	if !entryCompacted.cacheable() {
+		t.Error("a compacted note is not cacheable; every note is")
+	}
+	if entryCompacted.carriesBlockState() || entryCompacted.hasLiveStar() || entryCompacted.isUserPrompt() {
+		t.Error("a compacted note claims a block state, a live star or a prompt stop; a note has none")
+	}
+	// An older build that does not know the name skips the entry on replay (fromWireEntry); the
+	// table's inverse is what it misses on, so a name it never claimed must be absent here.
+	if _, ok := entryKindByName["compacted-v2"]; ok {
+		t.Error("an unknown kind string resolved; replay's skip rule relies on the miss")
+	}
 }

@@ -49,6 +49,18 @@ still remembers.
   run's tool use can still be read back off the file. It stays a summary and not a
   transport: a write or edit's file content is left out (the card's own diff already
   carries it), and any other oversize value is stored as its size instead of its bytes.
+- Every entry in a record carries **when it was committed** (`at`, a UTC timestamp),
+  and every tool card the **size of what came back** (`chars`, the byte length of the
+  result before the card summarised it) — so a saved run can answer how long a step
+  took and how much each call put into the context. Neither is shown on screen; the
+  order of a record stays the order things happened per run, not clock order, because
+  concurrent sub-agents each keep their own stretch. A record written before these
+  fields existed reads with them empty. A **compaction** leaves a `compacted` entry at
+  the depth it folded — in the conversation for a `/compact` or the main agent's own
+  fold, inside a sub-agent's block for that sub-agent's — painted as the same dim
+  `context compacted` note it always was, so the record says whose context was folded
+  and when. A headless run (`apogee headless`, a `/schedule` firing) writes none of
+  these three.
 - A record stores what the session spent in two halves — the main agent's tokens
   and the sum its sub-agents reported — and the browser row shows their **sum**,
   the whole session's spend. A run that hands most of its work to delegates costs

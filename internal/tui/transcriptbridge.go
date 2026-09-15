@@ -132,6 +132,7 @@ func closeInterruptedCalls(entries []entry) (closed int) {
 func toWireEntry(e *entry, kind string) session.Entry {
 	w := session.Entry{
 		Kind:        kind,
+		At:          e.at,
 		Text:        e.text,
 		Depth:       e.depth,
 		CallID:      e.callID,
@@ -186,6 +187,7 @@ func toWireToolView(tv toolView) *session.ToolView {
 		StatValue: toWireStatValue(tv.stat),
 		Task:      tv.task,
 		Args:      tv.argsWire,
+		Chars:     tv.chars,
 		Summary: session.BranchSummary{
 			DetailLine: session.DetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
 			Quoted:     tv.Summary.quoted,
@@ -269,6 +271,7 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 	}
 	e := entry{
 		kind:        kind,
+		at:          w.At,
 		text:        w.Text,
 		depth:       w.Depth,
 		callID:      w.CallID,
@@ -359,6 +362,8 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 		// is the one the record kept, arguments included, rather than one that quietly lost them on
 		// the next save (toolView.argsWire).
 		argsWire: w.Args,
+		// The result's size comes back as the number it is: a count, never display text.
+		chars: w.Chars,
 		// A value with arithmetic in it has nothing to strip and comes back as the numbers it is.
 		stat:    fromWireStatValue(w.StatValue, w.Stat),
 		task:    w.Task,

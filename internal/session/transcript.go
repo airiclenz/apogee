@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
@@ -45,10 +46,16 @@ const TranscriptVersion = 1
 // degrades to resuming with no scrollback replay.
 var ErrTranscriptVersion = errors.New("apogee: unsupported transcript version")
 
-// The nine persisted entry kinds. The kind is serialized as a STRING enum rather than a Driver's
+// The ten persisted entry kinds. The kind is serialized as a STRING enum rather than a Driver's
 // own iota, so a future reordering of that Driver's constants can never re-interpret an old file.
 // A Driver kind with no name here — the TUI's one-time start-up box, say — is simply never written,
 // and a name this build does not know decodes as an entry of an unrecognised kind.
+//
+// EntryKindCompacted is a note with a kind of its own: the trace a Compaction leaves in the
+// scrollback at the depth it folded — the human's own conversation or a delegate's run — so a reader
+// of the record can tell WHEN a context was folded and whose, which a plain note's text alone could
+// not answer once its wording moved. An older build skips it on replay, as it skips any name it does
+// not know.
 const (
 	EntryKindUser        = "user"
 	EntryKindAssistant   = "assistant"
@@ -59,6 +66,7 @@ const (
 	EntryKindPresented   = "presented"
 	EntryKindInterjected = "interjected"
 	EntryKindSchedule    = "schedule"
+	EntryKindCompacted   = "compacted"
 )
 
 // interruptedSummary is the outcome CloseInterruptedCalls words a still-open call with — the one
@@ -85,11 +93,22 @@ type envelope struct {
 // cannot place, and a blob written before a member existed decodes to that member's zero — which is
 // the reading such a record was actually written under. A member can also be RETIRED on the mirror
 // of that rule: json.Unmarshal ignores what no field claims any more.
+//
+// At is the one member that takes omitzero rather than omitempty: omitempty never omits a struct,
+// and a zero time written out would put a "0001-01-01" stamp on every record written before the
+// member existed. With omitzero a zero At writes no bytes, which keeps the v1 goldens byte-identical.
 type Entry struct {
-	Kind   string `json:"kind"`
-	Text   string `json:"text,omitempty"`
-	Depth  int    `json:"depth,omitempty"`
-	CallID string `json:"callID,omitempty"`
+	Kind string `json:"kind"`
+	// At is the wall clock at which the entry was COMMITTED to the scrollback, UTC — set by the
+	// Driver that folded it, and zero for a record written before it existed or by a Driver that
+	// stamps nothing. It answers "when" for a reader of the record; it does not order the list. The
+	// list order is RUN order: in a fan-out a run's entry is inserted at that run's end, so two
+	// siblings' stamps interleave while their entries stay contiguous, and only a serial transcript
+	// is non-decreasing in At.
+	At     time.Time `json:"at,omitzero"`
+	Text   string    `json:"text,omitempty"`
+	Depth  int       `json:"depth,omitempty"`
+	CallID string    `json:"callID,omitempty"`
 	// SpawnCallID is the run identity of a delegated entry: the id of the sub_agent call that
 	// spawned the agent whose event it folded from. A top-level entry writes nothing, and a blob
 	// written before it existed decodes to "" for every entry — the one run a serialized session
@@ -157,6 +176,12 @@ type SkillSpan struct {
 // delegate's tool use can still be read back once its run is closed. It is STORED and not replayed:
 // the codec hands it back exactly as it stands, and the surface that eventually shows it is the
 // surface that must strip it.
+//
+// Chars is the size of what the call got BACK — the byte length of the result's content as the
+// tool returned it, measured at the fold and before any presenter summarised it — so a record says
+// how much each call put into the context without carrying the content itself. Zero for a call
+// still open, for a record written before the member existed, and for a result that carried
+// nothing.
 type ToolView struct {
 	Label       string          `json:"label,omitempty"`
 	Verb        string          `json:"verb,omitempty"`
@@ -171,6 +196,7 @@ type ToolView struct {
 	Regions     []EditRegion    `json:"regions,omitempty"`
 	RegionFiles []string        `json:"regionFiles,omitempty"`
 	Args        json.RawMessage `json:"args,omitempty"`
+	Chars       int             `json:"chars,omitempty"`
 }
 
 // DetailLine is one line of a tool card's body. Kind is stored as its underlying integer value, so

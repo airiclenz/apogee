@@ -543,7 +543,10 @@ func (m Model) foldCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 		m.transcript.addNote("nothing to compact")
 	default:
 		m.ctxUsed = 0
-		m.transcript.addNote("context compacted")
+		// Under its own kind, so the record can find the fold (transcript.addCompacted). The
+		// maintenance reading the summary call emitted has already folded through foldStats, which
+		// skipped its note because this worker was running — this is the one note /compact leaves.
+		m.transcript.addCompacted(runRef{})
 	}
 	cmd := m.finishWorker(stateIdle)
 	m.refreshViewport()

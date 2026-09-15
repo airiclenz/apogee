@@ -499,6 +499,11 @@ func TestAutoTitleLeavesTheTranscriptUntouched(t *testing.T) {
 
 	withTitle := newTitlingModel(t, named, &titleSeam{}, true)
 	without := newTitlingModel(t, bare, &titleSeam{}, false)
+	// The two transcripts are compared whole, so both run on one pinned clock: every committed
+	// entry is stamped with its commit time (transcript.stamp), and two wall clocks read
+	// microseconds apart would differ on the stamp alone.
+	withTitle.transcript.now = pinnedClock(fixedCommitTime)
+	without.transcript.now = pinnedClock(fixedCommitTime)
 
 	withTitle, _ = sendPrompt(t, withTitle, "fix the broken parser in tokenizer.go")
 	without, _ = sendPrompt(t, without, "fix the broken parser in tokenizer.go")

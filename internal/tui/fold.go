@@ -173,6 +173,15 @@ func (m Model) foldStats(e domain.Event) Model {
 		if e.ServedModel != "" && !slices.Contains(m.servedModels, e.ServedModel) {
 			m.servedModels = append(slices.Clone(m.servedModels), e.ServedModel)
 		}
+		// A maintenance reading is the ONE signal an automatic fold gives — a child's at every
+		// quiescent Turn boundary, the main agent's at an Exchange opening — because the fold itself
+		// is quiet on success (agent/compact.go, autoCompact). So the reading is where the fold's
+		// trace is written, at the depth that folded (transcript.addCompacted), ahead of the depth
+		// guard below. The /compact worker's own reading is the exception: its terminal Msg writes
+		// the note (foldCompactDone), and a second one here would say the fold happened twice.
+		if e.Maintenance && !(e.Depth == 0 && m.acts.at(runRef{}).act.kind == actCompacting) {
+			m.transcript.addCompacted(runOf(e.EventBase))
+		}
 		if e.Depth != 0 {
 			break // a delegate's fill, which is its run block's business and not the gauge's
 		}

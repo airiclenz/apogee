@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -162,7 +163,7 @@ func TestTranscriptCodecRoundTrip(t *testing.T) {
 // onto the branch, and what a resume owes a promoted summary is pinned by
 // TestTranscriptCodecReplaysAPromotedSummaryAsShown rather than restated here.
 func firedBlockEntries() []entry {
-	tr := &transcript{}
+	tr := &transcript{now: pinnedClock(fixedCommitTime)}
 	tr.addFiring(schedule.Event{
 		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
 		Prompt: "check the log\nand tidy it",
@@ -197,9 +198,7 @@ func TestTranscriptCodecRoundTripsAFiringBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeTranscript: %v", err)
 	}
-	if !reflect.DeepEqual(got, firedBlockEntries()) {
-		t.Errorf("round-trip mismatch:\n got = %+v\nwant = %+v", got, firedBlockEntries())
-	}
+	assertSameEntries(t, got, firedBlockEntries())
 }
 
 // TestTranscriptCodecClosesAnUnfinishedFiringBlock pins the one entry a resume deliberately does not
@@ -1088,6 +1087,49 @@ func TestTranscriptCodecRoundTripsSkillTokenSpans(t *testing.T) {
 	}
 }
 
+// fixedCommitTime is the instant a pinned transcript clock stamps every entry with: UTC, with no
+// monotonic reading, so it compares and serializes as the wall-clock instant it is.
+var fixedCommitTime = time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+
+// pinnedClock is a transcript clock that always answers at — what a test that asserts on the
+// stamps hands [transcript.now] in place of the wall clock.
+func pinnedClock(at time.Time) func() time.Time {
+	return func() time.Time { return at }
+}
+
+// tickingClock is a transcript clock that advances by step on every read, from start — so a test
+// can pin the ORDER of stamps a serial transcript takes without relying on the wall clock moving
+// between two calls made microseconds apart.
+func tickingClock(start time.Time, step time.Duration) func() time.Time {
+	next := start
+	return func() time.Time {
+		at := next
+		next = next.Add(step)
+		return at
+	}
+}
+
+// assertSameEntries is DeepEqual over two entry lists with the commit stamps compared by
+// [time.Time.Equal] rather than by structure: a wall clock is an instant, and two instants that
+// agree can still differ in representation (a monotonic reading, a location pointer) — which is
+// exactly the difference a round trip through the codec introduces and the assertion must not see.
+func assertSameEntries(t *testing.T, got, want []entry) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("entries = %d, want %d:\n got = %+v\nwant = %+v", len(got), len(want), got, want)
+	}
+	for i := range got {
+		if !got[i].at.Equal(want[i].at) {
+			t.Errorf("entry %d at = %v, want %v", i, got[i].at, want[i].at)
+		}
+		g, w := got[i], want[i]
+		g.at, w.at = time.Time{}, time.Time{}
+		if !reflect.DeepEqual(g, w) {
+			t.Errorf("entry %d mismatch:\n got = %+v\nwant = %+v", i, g, w)
+		}
+	}
+}
+
 func assertNoESC(t *testing.T, s string) {
 	t.Helper()
 	if strings.ContainsRune(s, 0x1b) {
@@ -1255,7 +1297,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			return out
 		}
 		wantEntry := []string{
-			"Kind", "Text", "Depth", "CallID", "SpawnCallID", "Done",
+			"Kind", "At", "Text", "Depth", "CallID", "SpawnCallID", "Done",
 			"CtxUsed", "CtxLimit", "CtxModel",
 			"UsageCalls", "UsagePromptTokens", "UsageCachedPromptTokens", "UsageCompletionTokens",
 			"UsageTotalTokens",
@@ -1266,7 +1308,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		}
 		wantTool := []string{
 			"Label", "Verb", "Target", "Name", "Solo", "Stat", "StatValue", "Task", "Summary",
-			"Details", "Regions", "RegionFiles", "Args",
+			"Details", "Regions", "RegionFiles", "Args", "Chars",
 		}
 		if got := fields(session.ToolView{}); !slices.Equal(got, wantTool) {
 			t.Errorf("session.ToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
@@ -2028,5 +2070,129 @@ func TestTranscriptCodecReDerivesSkillFetchSolo(t *testing.T) {
 		if groupable(e.tool) {
 			t.Errorf("entry %d is groupable after decode; it would fold into a Tools umbrella", i)
 		}
+	}
+}
+
+// TestTranscriptBridgeStampsEveryCommitFromOneClock pins the two facts a record's timestamps rest
+// on. Every committed entry carries the commit time the transcript's one clock read — a send, a
+// streamed answer, a tool call placed under the run, a host note — so on a SERIAL transcript the
+// stamps are non-decreasing in list order; and a round trip through the codec brings each stamp
+// back Equal, which is the comparison a wall clock admits (a representation can change across the
+// trip, an instant cannot). The clock is pinned and ticking so the order is a fact about the seams
+// and not about how fast the test ran.
+func TestTranscriptBridgeStampsEveryCommitFromOneClock(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{now: tickingClock(fixedCommitTime, time.Second)}
+	tr.addUser("read main.go", nil)
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "package main"}})
+	tr.apply(domain.MessageEvent{Text: "done"})
+	tr.addNote("cancelled")
+
+	if len(tr.entries) != 4 {
+		t.Fatalf("entries = %d, want 4 (send, call, answer, note)", len(tr.entries))
+	}
+	for i, e := range tr.entries {
+		if e.at.IsZero() {
+			t.Errorf("entry %d (%v) was committed without a stamp", i, e.kind)
+		}
+		if i > 0 && e.at.Before(tr.entries[i-1].at) {
+			t.Errorf("entry %d is stamped %v, before entry %d's %v — a serial transcript is non-decreasing", i, e.at, i-1, tr.entries[i-1].at)
+		}
+	}
+	if want := fixedCommitTime; !tr.entries[0].at.Equal(want) {
+		t.Errorf("the first commit is stamped %v, want the clock's first reading %v", tr.entries[0].at, want)
+	}
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if !strings.Contains(string(data), `"at":"2026-09-14T12:00:00Z"`) {
+		t.Errorf("the stamp did not reach the wire as an RFC 3339 UTC instant:\n%s", data)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	assertSameEntries(t, got, tr.entries)
+}
+
+// TestTranscriptBridgeReplaysAStampAsStored pins that a decoded entry keeps the record's time: the
+// replay path appends what the codec handed back, and neither it nor a later commit restamps an
+// entry that already carries a date — the record is the truth about when that entry happened.
+func TestTranscriptBridgeReplaysAStampAsStored(t *testing.T) {
+	t.Parallel()
+	stored := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
+	tr := &transcript{now: pinnedClock(fixedCommitTime)}
+	tr.replay([]entry{{kind: entryUser, text: "then", at: stored}})
+	tr.addUser("now", nil)
+
+	if got := tr.entries[0].at; !got.Equal(stored) {
+		t.Errorf("the replayed entry is stamped %v, want the record's %v", got, stored)
+	}
+	if got := tr.entries[1].at; !got.Equal(fixedCommitTime) {
+		t.Errorf("the fresh commit is stamped %v, want the clock's %v", got, fixedCommitTime)
+	}
+}
+
+// TestTranscriptBridgeRecordsTheResultSize pins the record's number for what a call got back: the
+// byte length of the result's content, read at the fold before any presenter shapes it, carried
+// on the card and on the wire as "chars", and back. The card's own body is capped and summarised,
+// so the count is the only place the record says how much the call actually put into the context.
+func TestTranscriptBridgeRecordsTheResultSize(t *testing.T) {
+	t.Parallel()
+	const content = "line one\nline two\nline three\n"
+	tr := &transcript{now: pinnedClock(fixedCommitTime)}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}})
+	if got := tr.entries[0].tool.chars; got != 0 {
+		t.Errorf("an open call reports chars = %d, want 0 until its result lands", got)
+	}
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: content}})
+
+	if got, want := tr.entries[0].tool.chars, len(content); got != want {
+		t.Fatalf("chars = %d, want the result's %d bytes", got, want)
+	}
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if !strings.Contains(string(data), fmt.Sprintf(`"chars":%d`, len(content))) {
+		t.Errorf("the result size did not reach the wire:\n%s", data)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if got[0].tool.chars != len(content) {
+		t.Errorf("replayed chars = %d, want %d", got[0].tool.chars, len(content))
+	}
+}
+
+// TestTranscriptBridgeRoundTripsACompactedNote pins the fold's trace on the wire: the note goes out
+// under its own kind string, at the depth and run it folded in, and comes back as the same kind —
+// so a resumed scrollback paints the fold where the live one did, and a reader of the record can
+// find every fold by kind rather than by wording.
+func TestTranscriptBridgeRoundTripsACompactedNote(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{now: pinnedClock(fixedCommitTime)}
+	tr.addCompacted(runRef{depth: 1, spawn: "s1"})
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if !strings.Contains(string(data), `"kind":"compacted"`) {
+		t.Errorf("the fold's trace did not reach the wire under its kind:\n%s", data)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 1 || got[0].kind != entryCompacted || got[0].depth != 1 || got[0].spawnCallID != "s1" {
+		t.Errorf("replayed = %+v; want one compacted entry at depth 1 under run s1", got)
+	}
+	if got[0].text != compactedNoteText {
+		t.Errorf("replayed text = %q, want %q", got[0].text, compactedNoteText)
 	}
 }

@@ -167,7 +167,12 @@ internal/provider/wirejson.go — chatCompletionResponse; internal/eventjson/enc
 
 **Commit:** `feat(session): the record carries served_models — the ids the upstream actually answered with`
 
-## 7. Entries carry a timestamp and a result size; a fold leaves a `compacted` note at every depth
+## 7. Entries carry a timestamp and a result size; a fold leaves a `compacted` note at every depth — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `internal/tui/schedule.go` and `internal/tui/toolview.go` edited though not in the item's Files — `addFiring` is a direct-append seam the plan names in Read-first and now routes through the one clock (`transcript.commit`), and `toolView.chars` is where the TUI half of `ToolView.Chars` has to live; `internal/tui/subagentblock.go` (listed) needed no change — it reads no entry kind the new one affects.
+NOTES (2026-09-15): `internal/tui/autotitle_test.go` — `TestAutoTitleLeavesTheTranscriptUntouched` DeepEquals two independently built transcripts, which now differ on the wall-clock stamp alone; both models are pinned to one clock (`pinnedClock(fixedCommitTime)`), the assertion itself is unchanged.
+NOTES (2026-09-15): the `session.Entry` / `session.ToolView` member enumeration in `TestTranscriptCodecPersistsANamedDelegationAsItsTarget` ("widening the wire needs its own decision") was extended with `At` and `Chars` — this plan is that decision.
+NOTES (2026-09-15): limit, as the plan states — the automatic fold's note is keyed on the maintenance `UsageEvent`, which `compactCompleter` emits when the summary call returns and before the reducer applies it; a fold that faults or skips AFTER a counted summary call (empty summary, too-short tail) still leaves the note, and a server that omits usage leaves none.
 
 **What:** `internal/session/transcript.go` `Entry` gains `At time.Time` (`json:"at,omitzero"`, the wall clock at commit, set by the TUI fold only; list order is run order, not time order, in a fan-out) and `ToolView` gains `Chars int` (`json:"chars,omitempty"`, `len(result.Content)` at the fold); the tolerant codec reads old records with zero values. `internal/tui/commandrun.go` `foldCompactDone` writes the note with kind `compacted` (today a plain note) and a child's fold — signalled by its maintenance `UsageEvent` — writes the same note under the child's block — so open questions 6 and 7 become answerable from the record. The transcript replay ignores both fields (no paint change); the record's readers are the `/sessions` pane and `internal/run`, and a headless / Firing record written through `internal/run` carries neither `at` nor `chars` (Out of scope). `docs/manual/sessions.md` record section lists the fields.
 

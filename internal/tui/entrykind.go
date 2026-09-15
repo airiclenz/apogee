@@ -28,6 +28,7 @@ const (
 	entryStartup
 	entryInterjected
 	entrySchedule
+	entryCompacted
 )
 
 // entryKindRule is one kind's answer to every question the view asks ABOUT A KIND. Each field is
@@ -106,6 +107,11 @@ var entryKindRules = map[entryKind]entryKindRule{
 	// above. It is a host note because a Firing is the program's own headless run announcing itself
 	// in the scrollback while the conversation is elsewhere (ADR 0033).
 	entrySchedule: {persistedName: session.EntryKindSchedule, carriesBlockState: true, cacheable: true, isHostNote: true},
+	// "compacted" — the trace a fold leaves — joined [session.TranscriptVersion] 1 on the same
+	// additive terms. It is a note in every rule but its name: painted as one (renderEntryLines),
+	// and a host note so that at depth 0 it parks at the tail exactly as the plain "context
+	// compacted" note did before it had a kind of its own, and inside a run it stays that run's.
+	entryCompacted: {persistedName: session.EntryKindCompacted, cacheable: true, isHostNote: true},
 }
 
 // entryKindByName is the decode-side inverse of the table's persistedName column, built once at

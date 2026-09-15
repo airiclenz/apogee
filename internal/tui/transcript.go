@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -78,6 +79,12 @@ type transcript struct {
 	// 0011), and every copy has to reach the one cache. It is nil on a hand-built transcript, which
 	// renders uncached — every cache method is nil-safe.
 	paints *paintCache
+	// now is the ONE clock every committed entry is stamped from ([transcript.stamp]): nil — the
+	// production value and a hand-built test transcript's — reads time.Now() in UTC, and a test
+	// that asserts on the stamps pins it. It is a field rather than a package variable so two
+	// transcripts in one test can run on two clocks, and it is preserved across reset for ws's
+	// reason: a clock is a fact about the run, not about the conversation.
+	now func() time.Time
 }
 
 // streamChunkBytes is how large a [streamBuf] chunk grows before the next append starts a new one.
@@ -312,6 +319,12 @@ type entry struct {
 	// ones the fill above skips. It is what makes a delegate's spend reportable per agent long after
 	// its run closed, where ctxUsed only ever says how full its window was at the end.
 	usage usageTotals
+	// at is the wall clock at which the entry was committed (UTC, [transcript.stamp]), so the
+	// record can say WHEN each thing happened. It is persisted (session.Entry.At) and never
+	// painted: the list order is run order, which is what the scrollback and every grouping rule
+	// read, and in a fan-out that order is not time order. Zero on an entry replayed from a
+	// record that predates the stamp.
+	at time.Time
 }
 
 // skillSpan is one invoked "/token" LOCATED in a sent message's text: the byte range [start,end)
@@ -405,6 +418,7 @@ type startupView struct {
 // the standing assumption that the list only ever grows at the end (paintcache.go), and everything
 // from the insertion point on has just moved up one. dropFrom is that assumption's guard.
 func (t *transcript) place(e entry) {
+	e = t.stamp(e)
 	at := t.runEnd(e.spawnCallID)
 	if at >= len(t.entries) {
 		at = t.tailBeforeHostNotes(e)
@@ -417,6 +431,33 @@ func (t *transcript) place(e entry) {
 	copy(t.entries[at+1:], t.entries[at:])
 	t.entries[at] = e
 	t.paints.dropFrom(at)
+}
+
+// stamp sets the entry's commit time off the transcript's clock — UTC, and through time.Now().UTC()
+// stripped of its monotonic reading, so a stamp compares and serializes as the wall-clock instant
+// it is. It is the one seat of the clock: place and every direct-append seam (commit) run through
+// it, so no producer decides for itself whether an entry is dated. An entry that already carries a
+// stamp — one replayed from a record — is never restamped, because the record's time is the truth
+// about when that entry happened.
+func (t *transcript) stamp(e entry) entry {
+	if !e.at.IsZero() {
+		return e
+	}
+	if t.now != nil {
+		e.at = t.now()
+	} else {
+		e.at = time.Now().UTC()
+	}
+	return e
+}
+
+// commit appends one entry at the END of the list, stamped — the seam every producer that does not
+// go through place uses (the human's own sends, a host note, a Firing block), so the two commit
+// paths share the one clock. It is deliberately not place: those producers append by rule (a
+// prompt opens what follows it; a note is parked at the tail by [transcript.tailBeforeHostNotes]'s
+// own contract), and routing them through the run-placement rule would change where they land.
+func (t *transcript) commit(e entry) {
+	t.entries = append(t.entries, t.stamp(e))
 }
 
 // runEnd is the index one past the last entry of the run that the sub_agent call spawn opened —
@@ -647,7 +688,7 @@ func (t *transcript) takePending(run runRef) string {
 // parsed inputs (joinedInterjections) re-bases them onto the composition, and spansWithin drops
 // any that still fail to land.
 func (t *transcript) addUser(text string, spans []skillSpan) {
-	t.entries = append(t.entries, entry{
+	t.commit(entry{
 		kind:       entryUser,
 		text:       text,
 		skillSpans: spansWithin(text, spans),
@@ -666,7 +707,7 @@ func (t *transcript) addUser(text string, spans []skillSpan) {
 // reason: a skill rides an interjection (ADR 0027), so the delivered block must record what the
 // model was given, and a delivered remark differs from a flushed one only in when it landed.
 func (t *transcript) addInterjected(text string, spans []skillSpan) {
-	t.entries = append(t.entries, entry{
+	t.commit(entry{
 		kind:       entryInterjected,
 		text:       text,
 		skillSpans: spansWithin(text, spans),
@@ -707,7 +748,7 @@ func (t *transcript) addUserAt(depth int, spawn string, in domain.UserInput) {
 // harmless: stripEscapes is idempotent, and it hands its input straight back unallocated whenever
 // there is nothing to rewrite — no control character, no DEL, no invalid UTF-8 byte.
 func (t *transcript) addNote(text string) {
-	t.entries = append(t.entries, entry{kind: entryNote, text: stripEscapes(text)})
+	t.commit(entry{kind: entryNote, text: stripEscapes(text)})
 }
 
 // addEphemeralNote appends a note that the human sees but the session record never keeps. It is
@@ -735,7 +776,7 @@ func (t *transcript) addNote(text string) {
 // context-file names the session loaded — untrusted DISK input in both cases, since no codec
 // sanitizes a session record's Meta and a repo names its own files.
 func (t *transcript) addEphemeralNote(text string) {
-	t.entries = append(t.entries, entry{kind: entryNote, text: stripEscapes(text), ephemeral: true})
+	t.commit(entry{kind: entryNote, text: stripEscapes(text), ephemeral: true})
 }
 
 // addPresented records the presentation entry for one shown document — rung 0 of the ladder,
@@ -822,7 +863,7 @@ func (t *transcript) reset() {
 	// scrollback) before anything renders again, so pruning against the entry count at the next
 	// render would find index 3 occupied and hand back the previous session's paint (paintcache.go).
 	t.paints.clear()
-	// t.debug, t.ws and t.taskListOpen are deliberately preserved across a session reset.
+	// t.debug, t.ws, t.taskListOpen and t.now are deliberately preserved across a session reset.
 }
 
 // replay appends already-decoded committed entries after whatever the transcript already holds —
@@ -1291,6 +1332,10 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		e := &t.entries[i]
 		if e.kind == entryToolCall && !e.done && e.callID == result.CallID {
+			// The size of what came back is read off the result itself, before any presenter shapes
+			// it, and on every pairing — a delegation's report included, whatever its phase already
+			// folded: the number is the record's (toolView.chars), not the card's.
+			e.tool.chars = len(result.Content)
 			// A delegation whose finished phase already folded THIS result into the view is enriched
 			// once and no more (addSubAgentPhase): the fold appends the report's lines to the body
 			// (toolBody.with), so a second one would say the whole report twice. Everything else the
@@ -1974,6 +2019,29 @@ func (t *transcript) addPrune(results, tokens int, run runRef) {
 	t.place(entry{
 		kind:        entryNote,
 		text:        fmt.Sprintf("pruned %d tool results (~%d tokens)", results, tokens),
+		depth:       run.depth,
+		spawnCallID: run.spawn,
+	})
+}
+
+// compactedNoteText is the one wording a fold leaves in the scrollback, at every depth and from
+// both of its signals (addCompacted).
+const compactedNoteText = "context compacted"
+
+// addCompacted records that the run's context was FOLDED — the trace a Compaction leaves in the
+// scrollback, under its own kind (entryCompacted) so a reader of the record can find every fold
+// without matching on a note's wording. It is placed at the run that folded, exactly as addPrune is:
+// a delegate's fold lands inside the delegate's own block, and the human's own conversation takes
+// the note at depth 0, parked at the tail like any host note.
+//
+// Its two callers key on the two signals a fold gives: the /compact worker's terminal Msg
+// (foldCompactDone), and — for every automatic fold, a child's included, which is quiet on success
+// — the maintenance UsageEvent the summary call emits (foldStats). The wording is one string for
+// both, because it is the same thing that happened.
+func (t *transcript) addCompacted(run runRef) {
+	t.place(entry{
+		kind:        entryCompacted,
+		text:        compactedNoteText,
 		depth:       run.depth,
 		spawnCallID: run.spawn,
 	})

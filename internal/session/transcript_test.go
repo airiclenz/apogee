@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 // goldenV1 pins the exact v1 wire shape of a scrollback blob: field names, their order, the string
@@ -111,6 +113,93 @@ func TestTranscriptGoldenV1RoundTrips(t *testing.T) {
 	}
 	if string(data) != goldenV1 {
 		t.Errorf("golden wire shape mismatch:\n got = %s\nwant = %s", data, goldenV1)
+	}
+}
+
+// TestTranscriptGoldenV1WritesNoStampForAnUndatedEntry pins the additive rule the two newest
+// members ride on: an entry with a zero At and a card with a zero Chars write neither key. That is
+// what keeps every blob written before the members existed byte-identical on a re-save (goldenV1
+// above already carries no "at" and no "chars"), and it is only true because At takes omitzero —
+// omitempty never omits a struct, and a zero time written out would date every old record 0001.
+func TestTranscriptGoldenV1WritesNoStampForAnUndatedEntry(t *testing.T) {
+	t.Parallel()
+	data, err := EncodeTranscript([]Entry{
+		{Kind: EntryKindNote, Text: "cancelled"},
+		{Kind: EntryKindToolCall, CallID: "c1", Tool: &ToolView{Label: "Read"}},
+	})
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+	for _, key := range []string{`"at"`, `"chars"`} {
+		if strings.Contains(string(data), key) {
+			t.Errorf("an undated entry wrote %s: %s", key, data)
+		}
+	}
+}
+
+// TestTranscriptRoundTripsTheStampAndResultSize is the golden for the two members a record gained
+// with them: the commit time as an RFC 3339 UTC stamp, the result size as a plain count, and both
+// back exactly. The stamp is compared with Equal, never by structure — a wall clock is an instant,
+// and two representations of one instant are the same fact.
+func TestTranscriptRoundTripsTheStampAndResultSize(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 9, 14, 12, 30, 15, 0, time.UTC)
+	entries := []Entry{
+		{Kind: EntryKindUser, At: at, Text: "hi"},
+		{Kind: EntryKindToolCall, At: at.Add(time.Second), CallID: "c1", Done: true,
+			Tool: &ToolView{Label: "Read", Summary: BranchSummary{DetailLine: DetailLine{Text: "1 - 10"}}, Chars: 4096}},
+		{Kind: EntryKindCompacted, At: at.Add(2 * time.Second), Text: "context compacted", Depth: 1, SpawnCallID: "s1"},
+	}
+
+	data, err := EncodeTranscript(entries)
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+	const golden = `{"version":1,"entries":[` +
+		`{"kind":"user","at":"2026-09-14T12:30:15Z","text":"hi"},` +
+		`{"kind":"toolCall","at":"2026-09-14T12:30:16Z","callID":"c1","done":true,` +
+		`"tool":{"label":"Read","summary":{"text":"1 - 10"},"chars":4096}},` +
+		`{"kind":"compacted","at":"2026-09-14T12:30:17Z","text":"context compacted","depth":1,"spawnCallID":"s1"}` +
+		`]}`
+	if string(data) != golden {
+		t.Fatalf("golden wire shape mismatch:\n got = %s\nwant = %s", data, golden)
+	}
+
+	got, err := DecodeTranscript(data)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	if len(got) != len(entries) {
+		t.Fatalf("decoded %d entries, want %d", len(got), len(entries))
+	}
+	for i := range got {
+		if !got[i].At.Equal(entries[i].At) {
+			t.Errorf("entry %d At = %v, want %v", i, got[i].At, entries[i].At)
+		}
+	}
+	if got[1].Tool == nil || got[1].Tool.Chars != 4096 {
+		t.Errorf("entry 1 Chars did not survive the trip: %#v", got[1].Tool)
+	}
+	if got[2].Kind != EntryKindCompacted {
+		t.Errorf("entry 2 kind = %q, want %q", got[2].Kind, EntryKindCompacted)
+	}
+}
+
+// TestDecodeTranscriptReadsAnUndatedRecordAsZero pins the tolerant half: a blob written before the
+// members existed decodes to a zero At and a zero Chars — the reading such a record was actually
+// written under — rather than failing or inventing a date.
+func TestDecodeTranscriptReadsAnUndatedRecordAsZero(t *testing.T) {
+	t.Parallel()
+	got, err := DecodeTranscript([]byte(`{"version":1,"entries":[` +
+		`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Read","summary":{"text":"ok"}}}]}`))
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	if len(got) != 1 || !got[0].At.IsZero() {
+		t.Errorf("an undated entry decoded with At = %v; want zero", got[0].At)
+	}
+	if got[0].Tool == nil || got[0].Tool.Chars != 0 {
+		t.Errorf("a record without chars decoded to %#v; want Chars 0", got[0].Tool)
 	}
 }
 
