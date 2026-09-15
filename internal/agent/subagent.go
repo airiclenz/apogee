@@ -900,6 +900,7 @@ type delegation struct {
 	seatFallback  bool                   // asked for the Sub-agent server and got the session one (ADR 0069 decision 9)
 	effortDialect provider.EffortDialect // the wire shape of an effort intent on the server this child speaks to (ADR 0060 §3)
 	upstreamOwned bool                   // a routed spawn dialled its own client and the child closes it; an unrouted one borrows the session's
+	dial          Dialer                 // the parent's Dialer, inherited: the seam a routed grandchild's client is dialled through (Dialer)
 	tap           *wireTap               // the Inspector seam of a client this spawn BUILT, bound once the child's identity is stamped; nil when unrouted
 
 	consoleOwner   string             // the engine-minted Console privilege key (console.Registry.MintOwner), never the model-chosen call id
@@ -1047,7 +1048,8 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	//
 	// The client is built rather than mutated — provider.Client.SetModel rebinds the model and
 	// deliberately never the endpoint — so the child's wire target moves atomically with its key,
-	// the same idiom SwitchUpstream takes for the session (rebind.go). The parent's own responder is
+	// the same idiom SwitchUpstream takes for the session (rebind.go), and it is built through the
+	// parent's Dialer, the one seam every dial in the engine crosses. The parent's own responder is
 	// untouched: routing changes what a SPAWN builds, never what the session speaks to.
 	// tap is the Inspector's capture seam for a client this spawn BUILDS (below). An unrouted spawn
 	// builds none — it speaks over the parent's connection, whose tap is already bound to the
@@ -1119,8 +1121,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 		}
 		var opts []provider.Option
 		opts, tap = armWireCapture(childCfg)
-		upstream = provider.NewClient(target.Endpoint, target.Model,
-			append(opts, provider.WithAPIKey(target.APIKey))...)
+		upstream = a.dial(target.Endpoint, target.Model, target.APIKey, opts...)
 		ownsUpstream = true
 	}
 
@@ -1167,6 +1168,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 		// could tell the difference.
 		effortDialect: a.effortDialect,
 		upstreamOwned: ownsUpstream,
+		dial:          a.dial,
 		tap:           tap,
 		// The Console privilege key, minted by the registry that compares it rather than taken from
 		// the spawning call's id: that id is the model's to choose, and a text-format parser numbering

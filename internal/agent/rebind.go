@@ -346,8 +346,8 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 		return errMissingEndpoint
 	}
 
-	// Commit — from here on nothing can fail (provider.NewClient never does; a malformed
-	// endpoint surfaces at request time, matching construction).
+	// Commit — from here on nothing can fail (a Dialer never does — provider.NewClient, the
+	// default, reports a malformed endpoint at request time, matching construction).
 	// The Inspector's capture is re-armed onto the new client, since an observer belongs to the
 	// client it was built with: without this a `/server` switch would silently disarm a session
 	// that started with `ui.inspector` on. The tap binds to THIS Agent, which is the one that will
@@ -361,7 +361,7 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	// swallowed: the switch has already committed above, and provider teardown reports nothing a
 	// caller could act on (Client.Close always succeeds), so surfacing it would say the move failed.
 	_ = a.closeOwnedUpstream(a.upstream)
-	a.upstream = provider.NewClient(spec.Endpoint, "", append(opts, provider.WithAPIKey(spec.APIKey))...)
+	a.upstream = a.dial(spec.Endpoint, "", spec.APIKey, opts...)
 	a.ownsUpstream = true
 	a.cfg.Endpoint = spec.Endpoint
 	a.cfg.APIKey = spec.APIKey

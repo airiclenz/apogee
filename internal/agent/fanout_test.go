@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"iter"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -682,26 +679,38 @@ func TestDelegationCapPicksTheGoverningServer(t *testing.T) {
 	}
 }
 
-// gruntUpstream is the Sub-agent server these tests route to: an OpenAI-compatible httptest
-// endpoint answering every child with one canned reply. It is a real HTTP server because a routed
-// child dials a provider client of its own (ADR 0045, subagent.go) rather than borrowing the
-// parent's responder — so the only place to observe routed children at once is the wire.
-//
-// gate runs on net/http's goroutine before the reply streams, which is where these tests measure
+// gruntEndpoint is the Sub-agent server address these tests route to. Nothing listens there: a
+// routed child dials a client of its own (ADR 0045, subagent.go) rather than borrowing the parent's
+// responder, and that dial crosses the parent's Dialer — so routeToGrunt installs a fake one that
+// answers the address with an in-process gruntResponder, and the children are observed there.
+const gruntEndpoint = "http://grunt.local:1111"
+
+// gruntResponder is the Sub-agent server's stand-in: it answers every child with one canned reply,
+// after gate has run on the asking child's goroutine — which is where these tests measure
 // concurrency, exactly as routedResponder's gate does for an unrouted child.
-func gruntUpstream(t *testing.T, gate func(context.Context), reply string) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if gate != nil {
-			gate(r.Context())
+type gruntResponder struct {
+	gate  func(context.Context)
+	reply string
+}
+
+func (g gruntResponder) Stream(ctx context.Context, _ provider.Request) iter.Seq[provider.Delta] {
+	return func(yield func(provider.Delta) bool) {
+		if g.gate != nil {
+			g.gate(ctx)
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q},\"finish_reason\":null}]}\n\n", reply)
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+		for _, d := range contentScript(g.reply) {
+			if !yield(d) {
+				return
+			}
+		}
+	}
+}
+
+// routeToGrunt points a's routed spawns at the grunt server: every dial a's children make through
+// the Dialer is answered by grunt, and the target latched carries the given fan-out width.
+func routeToGrunt(a *Agent, grunt gruntResponder, parallelAgents int) {
+	a.dial = dialerTo(grunt).dial
+	a.SetDelegationTarget(gruntTarget(gruntEndpoint, parallelAgents))
 }
 
 // gruntTarget is a usable Delegation target pointing at endpoint with the given fan-out width.
@@ -759,10 +768,9 @@ func threeWayFanOutParentSeamed(
 func TestFanOut_RoutedWidthComesFromTheTargetCap(t *testing.T) {
 	sink := &recordingSink{}
 	probe := newConcurrencyProbe(3, 3*time.Second)
-	srv := gruntUpstream(t, probe.enter, "grunt child done")
 
 	a := threeWayFanOutParent(t, sink, 1 /* the session server is serial */, nil)
-	a.SetDelegationTarget(gruntTarget(srv.URL, 3))
+	routeToGrunt(a, gruntResponder{gate: probe.enter, reply: "grunt child done"}, 3)
 
 	res, err := a.Run(context.Background())
 	if err != nil {
@@ -803,18 +811,18 @@ func TestFanOut_LatchClearedMidGroupKeepsTheGroupWidth(t *testing.T) {
 	var once sync.Once
 	// The first routed child to reach the Sub-agent server drops the target — a beat observing the
 	// grunt box gone, landing squarely mid-group — and only then joins the rendezvous.
-	srv := gruntUpstream(t, func(ctx context.Context) {
+	grunt := gruntResponder{gate: func(ctx context.Context) {
 		once.Do(func() {
 			if p := parent.Load(); p != nil {
 				p.SetDelegationTarget(nil)
 			}
 		})
 		probe.enter(ctx)
-	}, "grunt child done")
+	}, reply: "grunt child done"}
 
 	a := threeWayFanOutParent(t, sink, 1 /* falling back to this would be serial */, probe.enter)
 	parent.Store(a)
-	a.SetDelegationTarget(gruntTarget(srv.URL, 3))
+	routeToGrunt(a, grunt, 3)
 
 	if _, err := a.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -1127,10 +1135,9 @@ func TestFanOut_GroupInsideTheWidthStatesNothing(t *testing.T) {
 // server replaces that cap (delegationCap), so the line says 2.
 func TestFanOut_WidthLineStatesTheRoutedWidth(t *testing.T) {
 	sink := &recordingSink{}
-	srv := gruntUpstream(t, nil, "grunt child done")
 
 	a := threeWayFanOutParent(t, sink, 4 /* would fit all three on the session server */, nil)
-	a.SetDelegationTarget(gruntTarget(srv.URL, 2))
+	routeToGrunt(a, gruntResponder{reply: "grunt child done"}, 2)
 	if _, err := a.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

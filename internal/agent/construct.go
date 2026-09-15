@@ -171,6 +171,7 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 // Agent IS the session's root: nothing above it holds an instance to share.
 func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.guards = security.NewDefaultGuards()
+	a.dial = dialProvider                                  // the real provider client, until the constructor that took WithDialer says otherwise (New, Resume)
 	a.effortDialect = toProviderDialect(cfg.EffortDialect) // the wire shape this server reads an effort intent in, so a Driver that never rebinds still speaks it (ADR 0060, ADR 0031)
 	a.delegation = &delegationLatch{}                      // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045)
 	a.journal = undo.New()                                 // the per-Exchange undo record (ADR 0051)
@@ -194,6 +195,7 @@ func (d *delegation) seed(a *Agent) {
 	a.timeCap = d.timeCap
 	a.now = d.now
 	a.effortDialect = d.effortDialect
+	a.dial = d.dial                  // the parent's seam, so a grandchild's routed dial crosses the same one the host injected
 	a.ownsUpstream = d.upstreamOwned // a routed child closes the client it dialled; an unrouted one must never close the session's out from under the parent still speaking over it (Agent.Close)
 	a.guards = d.guards
 	a.contextFiles = d.contextFiles

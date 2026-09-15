@@ -10,15 +10,9 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"iter"
-	"net/http"
-	"net/http/httptest"
 	"slices"
-	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -40,53 +34,6 @@ func (r *modelBindingResponder) Stream(context.Context, provider.Request) iter.S
 }
 
 func (r *modelBindingResponder) SetModel(model string) { r.bound = append(r.bound, model) }
-
-// recordedRequest is what the fake Upstream below noted about one chat request: the model id on
-// the wire and the Authorization header — the two facts a switch has to have moved together.
-type recordedRequest struct {
-	model string
-	auth  string
-}
-
-// recordedUpstream is an OpenAI-compatible httptest server that records every chat request and
-// answers with one canned SSE reply. Its mutex is real: the handler runs on net/http's goroutine
-// while the test reads from its own.
-type recordedUpstream struct {
-	*httptest.Server
-
-	mu   sync.Mutex
-	seen []recordedRequest
-}
-
-func newRecordedUpstream(t *testing.T, reply string) *recordedUpstream {
-	t.Helper()
-	up := &recordedUpstream{}
-	up.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Model string `json:"model"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		up.mu.Lock()
-		up.seen = append(up.seen, recordedRequest{model: body.Model, auth: r.Header.Get("Authorization")})
-		up.mu.Unlock()
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q},\"finish_reason\":null}]}\n\n", reply)
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	}))
-	t.Cleanup(up.Close)
-	return up
-}
-
-func (u *recordedUpstream) requests() []recordedRequest {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return slices.Clone(u.seen)
-}
 
 // TestSwitchUpstreamUnbindsTheModelAndKeepsTheSession: a switch moves the endpoint and the key,
 // leaves NO model bound (Submit refuses with errNoModelBound until the new server's first
@@ -144,25 +91,38 @@ func TestSwitchUpstreamUnbindsTheModelAndKeepsTheSession(t *testing.T) {
 	}
 }
 
-// TestSwitchUpstreamSwapsTheProviderClient: the switch really re-points the wire. After it, a
-// Rebind binds the new server's model on a NEW client — the request lands on the new endpoint
-// carrying the new model id and the new key — while the retired responder sees neither the
-// SetModel nor the request. This is the "a new Client, not a mutated one" contract in action.
+// TestSwitchUpstreamSwapsTheProviderClient: the switch really re-points the wire. It dials a NEW
+// client through the Dialer — the new endpoint and the new key together, with no model bound — and
+// the Rebind that follows binds the new server's model on THAT client, whose request is the only
+// one after the switch; the retired responder sees neither the SetModel nor the request. This is
+// the "a new Client, not a mutated one" contract in action, observed at the dial seam (the header
+// the key becomes on the wire is the provider client's own contract, apikey_test.go).
 func TestSwitchUpstreamSwapsTheProviderClient(t *testing.T) {
-	upstream := newRecordedUpstream(t, "from the new server")
+	const (
+		oldEndpoint = "http://old.local:1111"
+		newEndpoint = "http://new.local:2222"
+	)
+	retired := &modelBindingResponder{reply: "from the old server"}
+	fresh := &modelBindingResponder{reply: "from the new server"}
+	dialer := dialerAnswering(func(endpoint string) provider.Responder {
+		if endpoint == newEndpoint {
+			return fresh
+		}
+		return retired
+	})
 
 	cfg := baseConfig(&recordingSink{})
+	cfg.Endpoint = oldEndpoint
 	cfg.APIKey = "old-key"
-	retired := &modelBindingResponder{reply: "from the old server"}
 
-	a, err := newAgent(cfg, retired)
+	a, err := New(cfg, WithDialer(dialer.dial))
 	if err != nil {
-		t.Fatalf("newAgent: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	runExchange(t, a, "before the switch")
 	answered := retired.requests
 
-	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: upstream.URL, APIKey: "new-key"}); err != nil {
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: newEndpoint, APIKey: "new-key"}); err != nil {
 		t.Fatalf("SwitchUpstream: %v", err)
 	}
 	// The new server's first observed model, applied through the ONE binding path.
@@ -178,15 +138,18 @@ func TestSwitchUpstreamSwapsTheProviderClient(t *testing.T) {
 		t.Errorf("the retired responder answered %d requests, want %d — the wire still points at it", retired.requests, answered)
 	}
 
-	got := upstream.requests()
-	if len(got) != 1 {
-		t.Fatalf("the new upstream saw %d requests, want 1", len(got))
+	dials := dialer.dialled()
+	if len(dials) != 2 {
+		t.Fatalf("dials through the seam = %+v, want the session's and the switch's", dials)
 	}
-	if got[0].model != "new-model" {
-		t.Errorf("new upstream request model = %q, want %q", got[0].model, "new-model")
+	if want := (dialRecord{endpoint: newEndpoint, model: "", apiKey: "new-key"}); dials[1] != want {
+		t.Errorf("the switch dialled %+v, want %+v — endpoint and key move together, with no model bound", dials[1], want)
 	}
-	if got[0].auth != "Bearer new-key" {
-		t.Errorf("new upstream Authorization = %q, want the new server's key", got[0].auth)
+	if !slices.Equal(fresh.bound, []string{"new-model"}) {
+		t.Errorf("the new client was bound to %v, want the Rebind's %q", fresh.bound, "new-model")
+	}
+	if fresh.requests != 1 {
+		t.Errorf("the new client answered %d requests, want exactly the Exchange after the switch", fresh.requests)
 	}
 }
 

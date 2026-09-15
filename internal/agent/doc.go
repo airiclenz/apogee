@@ -18,7 +18,8 @@
 // Thirty files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
-// The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
+// The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume (and the
+// Dialer seam their WithDialer option replaces: the one crossing every provider dial makes), Close,
 // Submit, Step, Run, AbortExchange, Snapshot, the one live-generation swap (SetReactions) the
 // Bypass and Floor setters wrap, and the setters for mode, compaction,
 // context files and the parallel-agent cap. construct.go is newAgent and newDelegateAgent over

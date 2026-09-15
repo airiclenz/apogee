@@ -3,9 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -312,14 +309,6 @@ func TestDelegationNaming_ALateReplyIsDropped(t *testing.T) {
 // so the host puts the naming completion on the machine already warm for this run rather than on
 // the orchestrator's.
 func TestDelegationNaming_ARoutedChildIsNamedAsRouted(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"child done\"},\"finish_reason\":null}]}\n\n")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	}))
-	t.Cleanup(srv.Close)
-
 	sink := newLockedSink()
 	namer := &stubNamer{reply: "Config Loader Audit"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
@@ -331,11 +320,11 @@ func TestDelegationNaming_ARoutedChildIsNamedAsRouted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	// The routed spawn's whole difference: the child builds its own client on the target and owns
-	// it (routedspawn_test.go's routingParent shape), which is the fact Routed reports.
-	target := routedTarget()
-	target.Endpoint, target.APIKey = srv.URL, ""
-	a.SetDelegationTarget(target)
+	// The routed spawn's whole difference: the child dials its own client on the target — through
+	// the Dialer, answered here by an in-process grunt — and owns it (routedspawn_test.go's
+	// routingParent shape), which is the fact Routed reports.
+	a.dial = dialerTo(echoResponder{reply: "child done"}).dial
+	a.SetDelegationTarget(routedTarget())
 
 	runNamingParent(t, a)
 

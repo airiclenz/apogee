@@ -382,16 +382,21 @@ func TestLatchSwapReachesOnlyLaterSpawns(t *testing.T) {
 // child is the one that tears it down — nothing else holds it, and the parent's Close must not be
 // made responsible for a connection to a server the session never spoke to. Ownership and the
 // teardown it authorises are both asserted: the flag alone would not prove Close reaches the wire.
+// The real client's Close is invisible from here (it reaps idle sockets), so the Dialer answers the
+// spawn's dial with a counting closer and the teardown the ownership flag authorises is watched
+// firing on it.
 func TestRoutedSpawnClosesItsOwnClient(t *testing.T) {
 	t.Parallel()
 
 	parent := routingParent(t)
+	dialled := &closingResponder{}
+	parent.dial = dialerTo(dialled).dial
 	parent.SetDelegationTarget(routedTarget())
 
 	child := spawn(t, parent)
 
-	if _, ok := child.upstream.(*provider.Client); !ok {
-		t.Fatalf("routed child Upstream = %T, want the client the spawn dialled", child.upstream)
+	if child.upstream != dialled {
+		t.Fatalf("routed child Upstream = %T, want the client the spawn dialled through the Dialer", child.upstream)
 	}
 	if !child.ownsUpstream {
 		t.Fatal("routed child does not own the client it dialled — nothing would ever close it")
@@ -400,10 +405,6 @@ func TestRoutedSpawnClosesItsOwnClient(t *testing.T) {
 		t.Error("routing gave the parent ownership of a client it did not build")
 	}
 
-	// The real client's Close is invisible from here (it reaps idle sockets), so stand a counting
-	// closer in its place to watch the teardown the ownership flag authorises actually fire.
-	dialled := &closingResponder{}
-	child.upstream = dialled
 	if err := child.Close(); err != nil {
 		t.Fatalf("routed child Close: %v", err)
 	}

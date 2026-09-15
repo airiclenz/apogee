@@ -260,7 +260,11 @@ NOTES (2026-09-15): the new test `TestIsDelegate_TopLevelFalseChildTrue` lives i
 
 Commit: `refactor(agent): one isDelegate predicate`
 
-## 10. Every dial crosses one `Dialer` seam
+## 10. Every dial crosses one `Dialer` seam — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — internal/agent/doc.go: made necessary by the Dialer seam and WithDialer option landing in agent.go (the package map's agent.go role line names them).
+NOTES (2026-09-15): the httptest list shrank to exactly the four files the guard names — apikey_test.go, construct_test.go, harness_test.go, routedspawn_test.go (its wire test) — no further HTTP-testing file needed naming; fanout_test.go's `gruntUpstream` became a `gruntResponder` behind the fake Dialer (`routeToGrunt`).
+NOTES (2026-09-15): the dial-only tests that build the parent through white-box `newAgent` install the fake by writing the Agent's `dial` field (same-package tests already poke sibling fields); the option path itself is covered by `New`/`Resume` in dialer_test.go and the reworked `TestSwitchUpstreamSwapsTheProviderClient`.
 
 **What.** Add `type Dialer func(endpoint, model, apiKey string, opts ...provider.Option) provider.Responder` in `internal/agent` with a `WithDialer` constructor option on `New`/`Resume` (default `provider.NewClient`); the Agent holds it and `SwitchUpstream` (`rebind.go`), the routed spawn (`subagent.go`) and the child inherit it. `apogee.go` gains nothing (facade stays thin; tests reach the option through `internal/agent`). Tests in `routedspawn_test.go`, `switchupstream_test.go` and the other five agent test files that stand up `httptest.NewServer` for a dial switch to a fake Dialer returning the fake Responder ADR 0001 relies on. Depends on item 8.
 

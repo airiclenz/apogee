@@ -59,6 +59,13 @@ type Agent struct {
 	cfg      domain.Config
 	upstream provider.Responder // provider seam (Decision C): fake in tests, real HTTP via New
 
+	// dial is the one seam every provider dial this Agent ever makes crosses (Dialer): New and
+	// Resume dial the session's client through it, SwitchUpstream dials the replacement, and a
+	// ROUTED spawn dials the child's own client with it before handing the same Dialer down, so a
+	// host that injected one sees every connection its engine opens. Seeded with dialProvider at
+	// construction and replaced only by WithDialer, on the constructor that took the option.
+	dial Dialer
+
 	// builtins are the engine's OWN Reactions — the seven Floor guards and, when its switch is
 	// on, the context-fill notice (builtins.go) — which fire first at every seam Moment. A Floor
 	// guard is never switched off by Bypass (ADR 0076 D1/D9); the notice, the one builtin of
@@ -582,20 +589,74 @@ func (t *usageTally) record(base domain.EventBase, model, served string, window,
 	}
 }
 
+// Dialer opens the provider connection an Agent speaks over: a Responder bound to endpoint and
+// model, carrying apiKey on every request — the bearer token, and an empty key sends no auth
+// header — with opts applied to the client it builds. It is the ONE seam every dial in the engine
+// crosses: the session's client (New, Resume), the replacement a `/server` switch binds
+// (SwitchUpstream, ADR 0024) and the client a ROUTED spawn builds for its child (ADR 0045), which
+// inherits the Dialer in turn. The default is dialProvider, the real OpenAI-compatible client;
+// a test injects one through WithDialer and receives every connection the engine would have opened,
+// in-process and in order, without standing up an HTTP server.
+//
+// A Dialer never fails — construction cannot, so neither can a switch or a spawn (rebind.go's
+// commit point relies on it): a malformed endpoint surfaces at request time, matching the real
+// client. opts is the Inspector's wire observer when cfg.Inspector asks for it (armWireCapture),
+// and nothing else today; a fake that speaks no wire may ignore it.
+type Dialer func(endpoint, model, apiKey string, opts ...provider.Option) provider.Responder
+
+// dialProvider is the default Dialer: the real OpenAI-compatible provider client at endpoint,
+// bound to model and carrying apiKey — the one site in the engine that builds a provider.Client.
+func dialProvider(endpoint, model, apiKey string, opts ...provider.Option) provider.Responder {
+	return provider.NewClient(endpoint, model, append(opts, provider.WithAPIKey(apiKey))...)
+}
+
+// Option configures New or Resume beyond what Config states: the seams a Config cannot carry
+// because they are code, not settings (functional-options pattern; every Option has a default and
+// only a host with a reason overrides it). The root facade forwards none of them — a Driver that
+// needs one reaches this package directly.
+type Option func(*constructOptions)
+
+// constructOptions is what the Options resolve to before an Agent exists: the values New and
+// Resume read while they build. Its zero value is not usable; resolveOptions seeds the defaults.
+type constructOptions struct {
+	dial Dialer
+}
+
+// WithDialer replaces the Dialer every provider dial of the constructed Agent — and of every
+// Agent it spawns — crosses (see Dialer). nil is ignored, leaving the default in place.
+func WithDialer(dial Dialer) Option {
+	return func(o *constructOptions) {
+		if dial != nil {
+			o.dial = dial
+		}
+	}
+}
+
+// resolveOptions applies opts over the defaults.
+func resolveOptions(opts []Option) constructOptions {
+	o := constructOptions{dial: dialProvider}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o
+}
+
 // New constructs an Agent from cfg. It validates the configuration — including the
 // Auto-mode/Confinement gate (ADR 0004) and the armed Reaction set (ADR 0076,
 // a duplicate or ill-formed id is a startup error) — and returns an error rather than
 // silently degrading a misconfigured surface. The root facade forwards apogee.New
-// here, binding the real OpenAI-compatible provider client at cfg.Endpoint (P1.1)
-// carrying cfg.APIKey — unconditionally, since an empty key sends no auth header — and,
-// only when cfg.Inspector asks for it, the Inspector's wire observer (wireTap).
-func New(cfg domain.Config) (*Agent, error) {
-	opts, tap := armWireCapture(cfg)
-	a, err := newAgent(cfg, provider.NewClient(cfg.Endpoint, cfg.Model,
-		append(opts, provider.WithAPIKey(cfg.APIKey))...))
+// here, dialling the session's client at cfg.Endpoint through the Dialer (P1.1; the real
+// OpenAI-compatible client unless WithDialer says otherwise) carrying cfg.APIKey —
+// unconditionally, since an empty key sends no auth header — and, only when cfg.Inspector
+// asks for it, the Inspector's wire observer (wireTap).
+func New(cfg domain.Config, opts ...Option) (*Agent, error) {
+	o := resolveOptions(opts)
+	wire, tap := armWireCapture(cfg)
+	a, err := newAgent(cfg, o.dial(cfg.Endpoint, cfg.Model, cfg.APIKey, wire...))
 	if err != nil {
 		return nil, err
 	}
+	a.dial = o.dial       // the seam the dial above crossed is the one every later dial of this Agent crosses
 	a.ownsUpstream = true // this Agent dialled that client, so Close is the one that tears it down
 	tap.bind(a)
 	return a, nil
@@ -604,14 +665,16 @@ func New(cfg domain.Config) (*Agent, error) {
 // Resume reconstructs an Agent from a prior Session snapshot. Config supplies the
 // live delegates (Approver, Confiner, EventSink) and state roots again — only the
 // serializable conversation state comes from snap. External connections (MCP,
-// network) reconnect fresh; no server-side state is restored (ADR 0008).
-func Resume(cfg domain.Config, snap domain.Session) (*Agent, error) {
-	opts, tap := armWireCapture(cfg)
-	a, err := resumeAgent(cfg, snap, provider.NewClient(cfg.Endpoint, cfg.Model,
-		append(opts, provider.WithAPIKey(cfg.APIKey))...))
+// network) reconnect fresh; no server-side state is restored (ADR 0008). It takes the
+// same Options as New: a resumed session dials its own client, through the same seam.
+func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, error) {
+	o := resolveOptions(opts)
+	wire, tap := armWireCapture(cfg)
+	a, err := resumeAgent(cfg, snap, o.dial(cfg.Endpoint, cfg.Model, cfg.APIKey, wire...))
 	if err != nil {
 		return nil, err
 	}
+	a.dial = o.dial       // as in New
 	a.ownsUpstream = true // as in New: a resumed session dials its own client and owns it
 	tap.bind(a)
 	return a, nil
