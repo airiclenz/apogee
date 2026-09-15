@@ -120,9 +120,10 @@
 // two write tools taking a source and a destination instead of a path and a payload. Both refuse
 // an occupied destination unless the call passes overwrite (a silent clobber is the one mistake a
 // model cannot take back — the undo journal below is the HUMAN's lever, never the model's, and it
-// still cannot tell an intended clobber from an accident), both refuse a directory at either end
-// (a recursive copy is a different tool
-// with a different blast radius), and both go through internal/security's os.Root-pinned
+// still cannot tell an intended clobber from an accident), move_file refuses a directory at either
+// end (a directory rename would run unjournalled) while copy_file (2026-09-15) copies a directory
+// SOURCE recursively — the tree enumerated through its own fence, every destination journalled as
+// one undo step, each file copied by the single-file primitive — and both go through internal/security's os.Root-pinned
 // primitives — SafeCopyFileFrom for the copy, SafeRename plus SafeCopyFile and SafeRemove for the
 // move — so the fence is decided at OPERATION time at BOTH ends, never on a re-walked path string.
 // The two ends need not share a root: copy_file (2026-08-12) resolves its SOURCE over the READ

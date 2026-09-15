@@ -463,7 +463,12 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 	if _, statErr := os.Stat(marker); statErr == nil {
 		t.Fatalf("the workspace json.py ran: `import json` must resolve to the stdlib, got %q", res.Content)
 	}
-	if strings.Contains(res.Content, root) {
-		t.Errorf("json resolved inside the workspace: %q", res.Content)
+	// The result opens with the `cwd:` line naming the workspace, so the pin reads the output
+	// beneath it: that is where a shadowed json would spell the workspace path.
+	if output := StripCwdLine(res.Content); strings.Contains(output, root) {
+		t.Errorf("json resolved inside the workspace: %q", output)
+	}
+	if !strings.HasPrefix(res.Content, "cwd: "+root+"\n") {
+		t.Errorf("result = %q, want it to open with the cwd line", res.Content)
 	}
 }

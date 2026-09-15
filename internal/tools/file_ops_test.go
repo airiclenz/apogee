@@ -134,16 +134,176 @@ func TestCopyFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 	}
 }
 
-// TestCopyFile_RefusesDirectories: these tools are FILE operations. A directory source is refused
-// (a recursive copy is a different tool with a different blast radius), and so is a directory
-// destination — `cp foo bar/` habits would otherwise land a file named after the directory.
-func TestCopyFile_RefusesDirectories(t *testing.T) {
+// directoryFixture lays out the three-file tree the directory-copy tests read: two files at the
+// top, one nested, with a mode worth preserving on the script.
+func directoryFixture(t *testing.T, dir string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	writeFixture(t, filepath.Join(dir, "a.txt"), "alpha", 0o644)
+	writeFixture(t, filepath.Join(dir, "run.sh"), "#!/bin/sh\n", 0o755)
+	writeFixture(t, filepath.Join(dir, "nested", "b.txt"), "beta", 0o644)
+}
+
+// TestCopyFile_CopiesADirectory (2026-09-15): a directory source copies recursively — every
+// regular file lands under the same relative path with its bytes and its mode, the result names
+// the file count, and the source is untouched. A symlink inside the tree is not reproduced: the
+// copy is what the tree HOLDS, never what a link points at.
+func TestCopyFile_CopiesADirectory(t *testing.T) {
 	t.Parallel()
 
 	root := tempRoot(t)
-	if err := os.MkdirAll(filepath.Join(root, "dir"), 0o755); err != nil {
+	directoryFixture(t, filepath.Join(root, "dir"))
+	if err := os.Symlink("a.txt", filepath.Join(root, "dir", "link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	result := runFileOp(t, NewCopyFile(root, ReadMounts{}), map[string]any{"source": "dir", "destination": "copy"})
+	if result.IsError {
+		t.Fatalf("directory copy refused: %q", result.Content)
+	}
+	if want := "copied dir to copy (3 files)"; result.Content != want {
+		t.Errorf("result = %q, want %q", result.Content, want)
+	}
+	for rel, want := range map[string]string{"a.txt": "alpha", "run.sh": "#!/bin/sh\n", "nested/b.txt": "beta"} {
+		if got, err := os.ReadFile(filepath.Join(root, "copy", rel)); err != nil || string(got) != want {
+			t.Errorf("copy/%s = %q, %v; want %q", rel, got, err, want)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(root, "copy", "run.sh")); err != nil || info.Mode().Perm() != 0o755 {
+		t.Errorf("copy/run.sh mode = %v, %v; want 0755 preserved", info, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "copy", "link.txt")); !os.IsNotExist(err) {
+		t.Errorf("copy/link.txt exists (err=%v), want the symlink left out of the copy", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "dir", "a.txt")); string(got) != "alpha" {
+		t.Errorf("source after copy = %q, want it untouched", got)
+	}
+}
+
+// TestCopyFile_DirectoryRefusals pins every refusal the directory branch gives, each ONE sentence
+// the model can act on: an occupied destination for want of overwrite (and that with overwrite the
+// copy lands INTO it), a file where a directory would go, a destination outside the workspace —
+// refused up front because the approved-escape permit is exact-path and a tree is many paths — and
+// a tree with nothing in it.
+func TestCopyFile_DirectoryRefusals(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	directoryFixture(t, filepath.Join(root, "dir"))
+	if err := os.MkdirAll(filepath.Join(root, "taken"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	writeFixture(t, filepath.Join(root, "taken", "a.txt"), "stale", 0o644)
+	writeFixture(t, filepath.Join(root, "f.txt"), "x", 0o644)
+	outside := filepath.Join(filepath.Dir(root), "elsewhere-"+filepath.Base(root))
+
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "existing directory destination without overwrite",
+			args: map[string]any{"source": "dir", "destination": "taken"},
+			want: "destination already exists: taken (give the full path of the new directory, or pass overwrite: true",
+		},
+		{
+			name: "file destination",
+			args: map[string]any{"source": "dir", "destination": "f.txt", "overwrite": true},
+			want: "destination is a file: f.txt",
+		},
+		{
+			name: "destination outside the workspace",
+			args: map[string]any{"source": "dir", "destination": outside},
+			want: "cannot copy a directory outside the workspace: " + outside,
+		},
+		{
+			name: "empty directory",
+			args: map[string]any{"source": "empty", "destination": "copy"},
+			want: "nothing to copy: empty holds no regular files",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := runFileOp(t, NewCopyFile(root, ReadMounts{}), tc.args)
+			if !result.IsError {
+				t.Fatalf("%s must be refused: %q", tc.name, result.Content)
+			}
+			if !strings.Contains(result.Content, tc.want) {
+				t.Errorf("refusal = %q, want it to contain %q", result.Content, tc.want)
+			}
+		})
+	}
+
+	t.Run("overwrite copies into the existing directory", func(t *testing.T) {
+		t.Parallel()
+
+		result := runFileOp(t, NewCopyFile(root, ReadMounts{}), map[string]any{
+			"source": "dir", "destination": "taken", "overwrite": true,
+		})
+		if result.IsError {
+			t.Fatalf("overwrite into an existing directory refused: %q", result.Content)
+		}
+		if got, _ := os.ReadFile(filepath.Join(root, "taken", "a.txt")); string(got) != "alpha" {
+			t.Errorf("taken/a.txt = %q, want the source's %q replacing the stale bytes", got, "alpha")
+		}
+		if got, _ := os.ReadFile(filepath.Join(root, "taken", "nested", "b.txt")); string(got) != "beta" {
+			t.Errorf("taken/nested/b.txt = %q, want %q", got, "beta")
+		}
+	})
+}
+
+// TestCopyFile_RefusesAShippedDirectory: the virtual-mount branch copies ONE file — a tree under a
+// shipped mount has no host path to enumerate through a fence — and says so in the words the
+// manual gives.
+func TestCopyFile_RefusesAShippedDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+
+	result := runFileOp(t, NewCopyFile(root, demoMount()), map[string]any{"source": "demo:notes", "destination": "notes"})
+	if !result.IsError {
+		t.Fatalf("a shipped directory must be refused: %q", result.Content)
+	}
+	if want := "directories under a shipped mount are not supported"; !strings.Contains(result.Content, want) {
+		t.Errorf("refusal = %q, want it to contain %q", result.Content, want)
+	}
+}
+
+// TestMoveFile_RefusesADirectorySource: move_file stays a FILE operation. A directory move would
+// run SafeRename unjournalled, so the shared check's "not a file" arm refuses it — the arm
+// copy_file no longer reaches, which is why this row exists.
+func TestMoveFile_RefusesADirectorySource(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	directoryFixture(t, filepath.Join(root, "dir"))
+
+	result := runFileOp(t, NewMoveFile(root), map[string]any{"source": "dir", "destination": "moved"})
+	if !result.IsError {
+		t.Fatalf("a directory move must be refused: %q", result.Content)
+	}
+	if want := "not a file: dir"; !strings.Contains(result.Content, want) {
+		t.Errorf("refusal = %q, want it to contain %q", result.Content, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dir", "a.txt")); err != nil {
+		t.Errorf("source tree after the refusal: %v, want it untouched", err)
+	}
+}
+
+// TestCopyFile_RefusesADirectoryDestinationForAFile: a directory DESTINATION for a file source is
+// still refused — `cp foo bar/` habits would otherwise land a file named after the directory.
+func TestCopyFile_RefusesADirectoryDestinationForAFile(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
 	if err := os.MkdirAll(filepath.Join(root, "into"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -154,11 +314,6 @@ func TestCopyFile_RefusesDirectories(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{
-			name: "directory source",
-			args: map[string]any{"source": "dir", "destination": "copy"},
-			want: "not a file",
-		},
 		{
 			name: "directory destination",
 			args: map[string]any{"source": "f.txt", "destination": "into", "overwrite": true},

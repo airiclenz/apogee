@@ -413,8 +413,10 @@ func SafeOpen(root, input string) (*os.File, error) {
 //
 // Mode: the destination lands with the SOURCE's mode, whether or not it already existed. That
 // is what distinguishes a copy from a write: the point of copying a 0755 script is to end up
-// with a 0755 script. A source that is not a regular file (a directory, a device) is refused —
-// the caller's own "not a file" wording is the model-facing one, this is the backstop.
+// with a 0755 script. A source that is not a regular file (a directory, a device) is refused:
+// this primitive copies ONE file, and a caller copying a tree (copy_file's directory branch)
+// enumerates it through its own fence and calls this once per file — the caller's own "not a
+// file" wording is the model-facing one, this is the backstop.
 //
 // The content is streamed, so a copy costs no more memory than its buffer however large the
 // file is; there is no fsync, for the same reason SafeWriteFile has none.

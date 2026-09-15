@@ -400,6 +400,37 @@ func TestViewDiff_RefusesComponentSwappedMidRead(t *testing.T) {
 	}
 }
 
+// TestViewDiff_NewFileDiffsAgainstEmpty pins that an absent path is a legitimate empty side, not
+// a refusal (2026-09-15): the preview of a file the model is about to create is every line added,
+// with the diffstat to match. Only ABSENCE reads that way — the refusals TestViewDiff_ToolErrors
+// pins keep their words.
+func TestViewDiff_NewFileDiffsAgainstEmpty(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	result, err := NewViewDiff(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "new/file.txt", "newContent": "one\ntwo\n"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("an absent path was refused: %q", result.Content)
+	}
+	if !strings.HasPrefix(result.Content, "+ one\n+ two\n") || strings.Contains(result.Content, "\n- ") {
+		t.Errorf("diff = %q, want every line added and nothing removed", result.Content)
+	}
+	stat, ok := result.Summary.(domain.DiffStat)
+	if !ok {
+		t.Fatalf("Summary = %T, want domain.DiffStat", result.Summary)
+	}
+	if stat.Added != 2 || stat.Removed != 0 {
+		t.Errorf("stat = %+v, want 2 added, 0 removed", stat)
+	}
+}
+
+// TestViewDiff_ToolErrors pins the refusals view_diff keeps once absence became a diff: a missing
+// argument, an escape and a directory are still errors in their own words.
 func TestViewDiff_ToolErrors(t *testing.T) {
 	t.Parallel()
 
@@ -412,8 +443,11 @@ func TestViewDiff_ToolErrors(t *testing.T) {
 		wantContain string
 	}{
 		{"missing path", map[string]any{"newContent": "x"}, "path is required"},
-		{"file not found", map[string]any{"path": "nope.txt", "newContent": "x"}, "file not found"},
 		{"path escape", map[string]any{"path": "../escape.txt", "newContent": "x"}, "outside the workspace"},
+		{"directory", map[string]any{"path": "sub", "newContent": "x"}, "not a file: sub"},
+	}
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
 	}
 
 	for _, tc := range cases {

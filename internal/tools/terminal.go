@@ -15,7 +15,7 @@ import (
 
 var terminalSpec = toolSpec{
 	name:        "terminal",
-	description: "Run a shell command line and capture its output and exit code. One-shot (a fresh process per call); supports pipes, redirection, and globbing through the platform shell. On POSIX the line runs fail-fast (`set -e`, and `pipefail` where the shell supports it): the first command that exits non-zero stops the rest of the line, so guard expected non-zero exits (`grep … || true`).",
+	description: "Run a shell command line and capture its output and exit code. One-shot (a fresh process per call); supports pipes, redirection, and globbing through the platform shell. On POSIX the line runs fail-fast (`set -e`, and `pipefail` where the shell supports it): the first command that exits non-zero stops the rest of the line, so guard expected non-zero exits (`grep … || true`). The shell is POSIX sh (dash on Debian-family hosts — no bash arrays, [[ ]] or process substitution); use python_exec for anything bash-only.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["command"],
@@ -230,9 +230,65 @@ func splitFailFastStop(output string) (command, rest string, ok bool) {
 	return command, trimmed[:start], true
 }
 
-// subprocessToolResult renders a captured subprocess outcome as a ToolResult. A non-zero
+// cwdLinePrefix opens the first line of every result a subprocess tool renders from a run
+// that has a working directory: `cwd: /path/to/dir`. The line says what the command's own
+// relative paths were relative to — the workspace root, or the `workdir` the call named — so a
+// model reading `./build/out` in the output knows where that is without a second call, and a
+// model that changed directories inside the line is reminded it did not change where the NEXT
+// call starts. StripCwdLine is its one reader on the host side; the model reads it as text.
+const cwdLinePrefix = "cwd: "
+
+// StripCwdLine takes the `cwd:` line (cwdLinePrefix) off the front of a terminal or python_exec
+// result's content and returns the rest, or content unchanged when no such line opens it. It is
+// the ONE strip every host-side consumer of that content shares — the TUI's success detail, the
+// TUI's failure body and headless narration — so the three cannot drift into different readings
+// of where the output begins: the line is written for the model, and a card or a narration line
+// that already names the command has nothing to gain from repeating the directory above its
+// first line of output.
+func StripCwdLine(content string) string {
+	if !strings.HasPrefix(content, cwdLinePrefix) {
+		return content
+	}
+	if _, rest, found := strings.Cut(content, "\n"); found {
+		return rest
+	}
+	return ""
+}
+
+// shellHintLine is the line a failed result gains when its output carries one of the tell-tale
+// complaints sh makes about a bash-only construct (bashismSignatures): the model wrote bash,
+// and the description's disclosure of the shell is a dozen calls back. It is rendered on its
+// own line ABOVE the exit-code marker, never inside the brackets, for the reason
+// failFastStoppedLine is (the TUI reads the code out of the last bracketed line).
+const shellHintLine = "hint: the shell is sh, not bash"
+
+// bashismSignatures are the stderr fragments dash (and any POSIX sh) prints when handed a
+// bash-only construct: `${var//x/y}` and `${!ref}` ("Bad substitution"), `<(cmd)` and `arr=(a b)`
+// (`Syntax error: "(" unexpected`) and `shopt` itself. Each is matched as a substring of the
+// captured output, so the exact wording of the surrounding line does not matter.
+var bashismSignatures = []string{
+	"Bad substitution",
+	`Syntax error: "(" unexpected`,
+	"shopt: not found",
+}
+
+// looksLikeBashism reports whether a failed run's output carries one of bashismSignatures.
+func looksLikeBashism(output string) bool {
+	for _, signature := range bashismSignatures {
+		if strings.Contains(output, signature) {
+			return true
+		}
+	}
+	return false
+}
+
+// subprocessToolResult renders a captured subprocess outcome as a ToolResult. A result from a
+// run that had a working directory (subprocessResult.dir) opens with the `cwd:` line
+// (cwdLinePrefix); one built with no dir opens with the output itself. A non-zero
 // exit is an error result (so the model sees the command failed) carrying the captured
-// output and exit code; a clean exit is a success result with the output. A failed run that
+// output and exit code; a clean exit is a success result with the output. A failed run whose
+// output carries a bash-ism complaint (looksLikeBashism) says the shell is sh on the line above
+// the exit-code line (shellHintLine). A failed run that
 // `set -e` stopped (isFailFastStop) says so inside the exit-code line (failFastExitNote) and,
 // where the preamble's bash-only trap named the command, on the line above it
 // (failFastStoppedLine) — a timeout, a signalled exit or a denial kill gets neither. An error
@@ -243,6 +299,9 @@ func splitFailFastStop(output string) (command, rest string, ok bool) {
 // was fenced by (subprocessResult.box), so the model reads the writable roots by path.
 func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult {
 	var b strings.Builder
+	if res.dir != "" {
+		b.WriteString(cwdLinePrefix + res.dir + "\n")
+	}
 	if res.timedOut {
 		b.WriteString("command timed out\n")
 	}
@@ -261,6 +320,9 @@ func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult
 	}
 	b.WriteString(output)
 	if res.exitCode != 0 {
+		if looksLikeBashism(res.combinedOutput) {
+			b.WriteString("\n" + shellHintLine)
+		}
 		if stoppedAt != "" {
 			fmt.Fprintf(&b, "\n"+failFastStoppedLine, stoppedAt)
 		}

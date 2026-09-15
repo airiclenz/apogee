@@ -45,6 +45,26 @@ func readWorkspaceFileBounded(path, root string) ([]byte, string) {
 	return readOpenedBounded(f, path)
 }
 
+// readWorkspaceFileBoundedOrAbsent is readWorkspaceFileBounded for the one caller that treats an
+// ABSENT path as a legitimate empty side rather than a refusal — view_diff previewing the file it
+// is about to create. Absence is read off the safeOpen error alone (errors.Is fs.ErrNotExist): a
+// path whose chain escapes the root, a root that will not open, a directory and an over-cap file
+// are all still refused in readWorkspaceFileBounded's own words, so a fence refusal is never
+// disguised as an empty file. absent is true, with no bytes and no message, exactly when the
+// open said the path is not there.
+func readWorkspaceFileBoundedOrAbsent(path, root string) (data []byte, absent bool, failMessage string) {
+	f, err := safeOpen(path, root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, true, ""
+	}
+	if err != nil {
+		return nil, false, readFileErrorMessage(err, path)
+	}
+	defer func() { _ = f.Close() }()
+	data, failMessage = readOpenedBounded(f, path)
+	return data, false, failMessage
+}
+
 // readOpenedBounded is that contract from the OPEN onwards — the fstat, the directory and cap
 // refusals, the bounded read and the growth backstop — over an already-opened handle named by the
 // spelling a refusal should quote. It takes an fs.File rather than an *os.File so a virtual mount,

@@ -11,7 +11,7 @@ import (
 
 var viewDiffSpec = toolSpec{
 	name:        "view_diff",
-	description: "Show a line-by-line diff between a file's current content and a proposed new content.",
+	description: "Show a line-by-line diff between a file's current content and a proposed new content. A path that does not exist yet diffs against empty, so the preview of a new file is every line added.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path", "newContent"],
@@ -44,14 +44,17 @@ func NewViewDiff(root string) *ViewDiff { return &ViewDiff{toolSpec: viewDiffSpe
 func (t *ViewDiff) ReadOnly() bool { return true }
 
 // Execute reads the file named in call.Arguments and returns a deterministic unified-style
-// line diff against newContent, honouring ctx cancellation. A missing file, an oversized
-// file or content, or a path escape is reported as an IsError result; identical content
-// reports "No changes". A real diff carries its diffstat as a domain.DiffStat summary; the
-// no-changes sentinel carries none, because there is no diff to describe.
+// line diff against newContent, honouring ctx cancellation. A file that does not exist yet
+// diffs against EMPTY — the preview of a file the model is about to create is every line
+// added, which is what it asked to see — while an oversized file or content, a directory, or a
+// path escape is reported as an IsError result; identical content reports "No changes". A real
+// diff carries its diffstat as a domain.DiffStat summary; the no-changes sentinel carries none,
+// because there is no diff to describe.
 //
 // Both sides are bounded before any table is built: the old side is read through the same
-// one-handle bounded read the read tools use (readWorkspaceFileBounded — the workspace fence
-// at OPEN time plus maxFileReadBytes on the descriptor that is read, no check/use gap), and
+// one-handle bounded read the read tools use (readWorkspaceFileBoundedOrAbsent — the workspace
+// fence at OPEN time plus maxFileReadBytes on the descriptor that is read, no check/use gap,
+// with absence read off the open and nothing else so a refusal never reads as empty), and
 // newContent is held to maxFileContentBytes, the ceiling the write tools apply to model-authored
 // content. The quadratic table itself is capped by maxDiffTableCells (see unifiedLineDiff), so
 // a preview of a large generated file degrades to a diffstat instead of exhausting memory.
@@ -76,7 +79,7 @@ func (t *ViewDiff) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 			len(args.NewContent), maxFileContentBytes)), nil
 	}
 
-	current, failMessage := readWorkspaceFileBounded(args.Path, t.root)
+	current, _, failMessage := readWorkspaceFileBoundedOrAbsent(args.Path, t.root)
 	if failMessage != "" {
 		return errorResult(call.ID, failMessage), nil
 	}

@@ -411,6 +411,46 @@ func TestCopyFileJournalsTheDestinationOnly(t *testing.T) {
 	}
 }
 
+// TestCopyDirectoryJournalsEveryDestination (2026-09-15): a directory copy is ONE undo step that
+// records every file it landed — created files as deletions, a clobbered file's pre-image as a
+// restore — so an undo takes the whole copy back and the source tree is untouched throughout.
+func TestCopyDirectoryJournalsEveryDestination(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	directoryFixture(t, filepath.Join(root, "dir"))
+	if err := os.MkdirAll(filepath.Join(root, "copy"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	writeFixtureFile(t, filepath.Join(root, "copy", "a.txt"), "displaced")
+
+	journal, changes := journalledChanges(t, NewCopyFile(root, ReadMounts{}), map[string]any{
+		"source": "dir", "destination": "copy", "overwrite": true,
+	})
+	if len(changes) != 3 {
+		t.Fatalf("a three-file copy recorded %d changes, want one per file: %+v", len(changes), changes)
+	}
+	assertChange(t, changes, 0, filepath.Join(root, "copy", "a.txt"), undo.ActionRestore)
+	assertChange(t, changes, 1, filepath.Join(root, "copy", "nested", "b.txt"), undo.ActionDelete)
+	assertChange(t, changes, 2, filepath.Join(root, "copy", "run.sh"), undo.ActionDelete)
+
+	revertCleanly(t, journal)
+
+	if got, _ := readOrAbsent(t, filepath.Join(root, "copy", "a.txt")); got != "displaced" {
+		t.Errorf("copy/a.txt after undo = %q, want the pre-image %q", got, "displaced")
+	}
+	for _, rel := range []string{"nested/b.txt", "run.sh"} {
+		if _, exists := readOrAbsent(t, filepath.Join(root, "copy", rel)); exists {
+			t.Errorf("copy/%s still exists after undo, want it taken back", rel)
+		}
+	}
+	for rel, want := range map[string]string{"a.txt": "alpha", "run.sh": "#!/bin/sh\n", "nested/b.txt": "beta"} {
+		if got, _ := readOrAbsent(t, filepath.Join(root, "dir", rel)); got != want {
+			t.Errorf("source dir/%s after undo = %q, want it untouched", rel, got)
+		}
+	}
+}
+
 // TestMoveFileJournalsBothEnds is the plan's move round-trip: a move changes two files, so it
 // records two, and undoing it restores the source and removes the destination. The record order
 // is the order the writes happened — source first — so the preview reads like the move did.

@@ -304,9 +304,12 @@ func (s *narrationSink) remember(call domain.ToolCall) {
 
 // resultLine words one Depth-0 result: `← <tool> ok`, or `← <tool> error: <first line>` for a
 // failed call — `← <tool> error` when the failure carried no text at all, rather than a colon with
-// nothing after it. A result whose call this sink never saw — a stub driving the sink out of order,
-// or a call at a depth the sink does not narrate — is named by its id alone, so the line still says
-// which result it is.
+// nothing after it. The first line is the first line the COMMAND wrote: a terminal or python_exec
+// result opens with a `cwd:` line the tool writes for the model, and that comes off first
+// (tools.StripCwdLine — the one strip the TUI's card shares) so the narration never reads
+// `← terminal error: cwd: /ws`. A result whose call this sink never saw — a stub driving the sink
+// out of order, or a call at a depth the sink does not narrate — is named by its id alone, so the
+// line still says which result it is.
 func (s *narrationSink) resultLine(result domain.ToolResult) string {
 	call, ok := s.calls[result.CallID]
 	if !ok {
@@ -315,7 +318,7 @@ func (s *narrationSink) resultLine(result domain.ToolResult) string {
 	if !result.IsError {
 		return "← " + call.tool + " ok"
 	}
-	first, _, _ := strings.Cut(result.Content, "\n")
+	first, _, _ := strings.Cut(tools.StripCwdLine(result.Content), "\n")
 	if first = narrationLine(first); first == "" {
 		return "← " + call.tool + " error"
 	}

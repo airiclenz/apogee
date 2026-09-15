@@ -206,6 +206,12 @@ type subprocessResult struct {
 	// a line whose LAST command failed exits the same way — so the note it drives is worded as
 	// the mode that was in force, not as a verdict on which command failed.
 	failFast bool
+	// dir is the working directory the run was launched in (subprocessSpec.dir), threaded
+	// through so subprocessToolResult can open the result with a `cwd:` line — a model that
+	// reads relative paths in a command's output needs to know what they are relative to, and
+	// a `workdir` it passed three calls ago is not where it looks. Empty for a result built by
+	// a caller that never ran a process (a test table, a stub), where no line is rendered.
+	dir string
 }
 
 // confinementDenialLabel is the line appended to a FAILED confined result whose output looks
@@ -284,7 +290,13 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	if err != nil {
 		return subprocessResult{}, err
 	}
-	return fromCore(res), nil
+	out := fromCore(res)
+	// The spec's dir is not a fact the core reports back, so it is threaded on HERE, at the one
+	// funnel every execution tool runs through: a result that reaches subprocessToolResult
+	// carries the directory it really ran in, and a stubbed runner (the tests' captured specs)
+	// carries none.
+	out.dir = spec.dir
+	return out, nil
 }
 
 // core renders the spec in the shared core's shape. It is a field-for-field rename and nothing

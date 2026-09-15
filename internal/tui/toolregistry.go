@@ -9,6 +9,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/title"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // ----------------------------------------------------------------------------
@@ -331,16 +332,16 @@ var toolRegistry = map[string]toolPresenter{
 		label:   "Terminal",
 		verb:    "running",
 		target:  stringArg("command"),
-		failure: exitCodeFailure,
-		detail:  outputDetail,
+		failure: subprocessFailure,
+		detail:  subprocessDetail,
 		stat:    exitCodeStat,
 	},
 	"python_exec": {
 		label:   "Python",
 		verb:    "running python",
 		target:  firstLineArg("code"),
-		failure: exitCodeFailure,
-		detail:  outputDetail,
+		failure: subprocessFailure,
+		detail:  subprocessDetail,
 		stat:    exitCodeStat,
 	},
 	// The Console family (ADR 0059) drives ONE live process across four calls, so the four rows
@@ -720,6 +721,24 @@ func exitMarkerPhrase(marker *regexp.Regexp, content string) (phrase, output str
 // failure.
 func exitCodeFailure(content string) (string, string, bool) {
 	return exitMarkerPhrase(exitCodeMarker, content)
+}
+
+// subprocessFailure is exitCodeFailure for the two one-shot execution tools, whose result opens
+// with the `cwd:` line the tool writes for the model (internal/tools, StripCwdLine). The line
+// comes off BEFORE the marker is read, the way consoleDetail takes the status line off a Console
+// result: the row already names the command, and a body opening with the directory it ran in
+// would spend its first line on what the card says nowhere else only because the model needs it.
+// This is the FAILURE route (absorbFailure → failure hook → outputBody), which does not pass
+// through the success detail, so the strip has to be applied on both.
+func subprocessFailure(content string) (string, string, bool) {
+	return exitCodeFailure(tools.StripCwdLine(content))
+}
+
+// subprocessDetail is outputDetail for the same two tools on the SUCCESS route, with the `cwd:`
+// line taken off first for the reason subprocessFailure gives; the one-line promotion and the
+// "(no output)" reading are then decided on the output the command actually printed.
+func subprocessDetail(content string) toolOutcome {
+	return outputDetail(tools.StripCwdLine(content))
 }
 
 // consoleStatusStat words the slot of the three Console calls that report on a live process

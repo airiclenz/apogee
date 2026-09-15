@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -34,7 +38,7 @@ var copyFileSpec = toolSpec{
 	// Both descriptions state the destination is the new file's own PATH, not a directory to
 	// drop the file into: a model carrying `cp foo bar/` habits would otherwise create a file
 	// literally named "bar" and believe it had filled a directory.
-	description: "Copy a file to a new path within the workspace, preserving its permissions. The destination is the full path of the new file, not a directory to copy into. Refuses to replace an existing destination unless overwrite is true. The source may also be an absolute path under a configured read-only root (such as the skills library); the destination must stay within the workspace.",
+	description: "Copy a file to a new path within the workspace, preserving its permissions. The destination is the full path of the new file, not a directory to copy into. A directory source is copied recursively (its regular files, under the same relative paths) onto the destination as the new directory's own path. Refuses to replace an existing destination unless overwrite is true. The source may also be an absolute path under a configured read-only root (such as the skills library); the destination must stay within the workspace.",
 	schema:      fileOpsSchema("File path to copy from", "File path to copy to"),
 }
 
@@ -68,10 +72,11 @@ type fileOpsArgs struct {
 	Overwrite   bool   `json:"overwrite"`
 }
 
-// CopyFile copies a file onto a workspace path, preserving the source's mode. Its destination is
-// always workspace-fenced; its SOURCE resolves over a readScope, so an ABSOLUTE path under a
-// configured read-only root is a legal source — a copy's source is a read. It is a write tool —
-// the loop routes it through Approval in Ask-Before before Execute is called.
+// CopyFile copies a file onto a workspace path, preserving the source's mode — or, since
+// 2026-09-15, a whole directory (copyDirectory). Its destination is always workspace-fenced; its
+// SOURCE resolves over a readScope, so an ABSOLUTE path under a configured read-only root is a
+// legal source — a copy's source is a read. It is a write tool — the loop routes it through
+// Approval in Ask-Before before Execute is called.
 type CopyFile struct {
 	toolSpec
 	root  string
@@ -110,9 +115,12 @@ func (t *CopyFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool
 }
 
 // Execute copies the source file onto the destination path, honouring ctx cancellation. Bad
-// arguments, a missing or non-file source, an occupied destination the call did not ask to
-// overwrite, and a path escaping ITS OWN root are all reported as IsError results. The copy is
-// atomic at the destination name: it either fully lands or the destination is untouched.
+// arguments, a missing source, an occupied destination the call did not ask to overwrite, and a
+// path escaping ITS OWN root are all reported as IsError results. The copy is atomic at the
+// destination name: it either fully lands or the destination is untouched. A source that is a
+// DIRECTORY takes the recursive branch (copyDirectory) before the shared per-file check runs —
+// that check's "not a file" arm stays for move_file, whose rename of a directory would run
+// SafeRename unjournalled.
 //
 // The source's root AND the spelling of the source path are chosen ONCE per call, together
 // (readScope.locate, the workspace-first absolute-only order): the argument AS GIVEN under the
@@ -138,6 +146,11 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	sourceRoot, source, err := t.scope.locate(args.Source)
 	if err != nil {
 		sourceRoot, source = t.root, args.Source
+	}
+	if args.Source != "" {
+		if info, statErr := statInRoot(source, sourceRoot); statErr == nil && info.IsDir() {
+			return t.copyDirectory(ctx, call, args, sourceRoot, source)
+		}
 	}
 	if refusal := checkFileOpsPathsFrom(ctx, args, source, sourceRoot, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
@@ -167,6 +180,130 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	return okResult(call.ID, fmt.Sprintf("copied %s to %s%s", args.Source, args.Destination, resolved)), nil
 }
 
+// maxCopyDirectoryFiles bounds how many files one directory copy may land. Every destination is
+// journalled before the first byte moves (journaledMutation captures a pre-image per path), so an
+// unbounded tree — a `node_modules`, a build output — would hold that many records in memory and
+// take that many undo steps; a model that hits the cap is told to copy the subtrees separately.
+const maxCopyDirectoryFiles = 2000
+
+// copyDirectory is Execute's DIRECTORY branch (2026-09-15): the source tree is enumerated
+// through the fence of its own root (directoryFiles), every destination path is handed to ONE
+// journaledMutation — so an undo takes the whole copy back as one step and a clobbered file's
+// pre-image is captured before anything lands — and each file is copied with SafeCopyFileFrom,
+// the same primitive a single-file copy uses, so the symlink-spelling rules, the source's mode
+// and the staged-and-renamed destination all hold per file. The result names the file count.
+//
+// The destination is judged by the shared destination check with the directory reading of its
+// wording: an existing directory is refused unless overwrite is true, in which case the copy
+// lands INTO it, replacing the files it already holds under the same names and leaving the rest.
+//
+// A destination that resolves OUTSIDE the workspace is refused here with one sentence naming the
+// reason, before the funnel: the write permit an approved escape carries is exact-path
+// (security's openPermittedRoot compares the resolved name to the ONE approved target), so a
+// directory copy — many paths — could never land under it and every child would be refused with
+// its own ErrPathEscape. One refusal that says why is what the model can act on.
+func (t *CopyFile) copyDirectory(
+	ctx context.Context,
+	call domain.ToolCall,
+	args fileOpsArgs,
+	sourceRoot, source string,
+) (domain.ToolResult, error) {
+	if args.Destination == "" {
+		return errorResult(call.ID, "destination is required"), nil
+	}
+	if _, err := resolveInRoot(args.Destination, t.root); errors.Is(err, ErrPathEscape) {
+		return errorResult(call.ID, "cannot copy a directory outside the workspace: "+args.Destination+
+			" (an approved write lands on one path, and a directory copy writes many — copy the files one at a time)"), nil
+	}
+	if refusal := checkFileOpsDestination(ctx, args, t.root, true); refusal != "" {
+		return errorResult(call.ID, refusal), nil
+	}
+
+	files, err := directoryFiles(source, sourceRoot)
+	if err != nil {
+		return errorResult(call.ID, escapeOrMessage(err, "directory not found: "+args.Source)), nil
+	}
+	if len(files) == 0 {
+		return errorResult(call.ID, "nothing to copy: "+args.Source+" holds no regular files"), nil
+	}
+	if len(files) > maxCopyDirectoryFiles {
+		return errorResult(call.ID, fmt.Sprintf("directory too large to copy: %s holds more than %d files (copy its subdirectories separately)",
+			args.Source, maxCopyDirectoryFiles)), nil
+	}
+
+	resolved := resolvedTargetNote(args.Destination, t.root)
+	paths := make([]mutationPath, len(files))
+	for i, rel := range files {
+		paths[i] = mutationPath{input: filepath.Join(args.Destination, rel), root: t.root, post: postReadBack}
+	}
+	err = journaledMutation(ctx, paths, func(escape string) ([]bool, error) {
+		landed := make([]bool, len(files))
+		for i, rel := range files {
+			if err := ctx.Err(); err != nil {
+				return landed, err
+			}
+			if err := security.SafeCopyFileFrom(sourceRoot, filepath.Join(source, rel), t.root,
+				filepath.Join(args.Destination, rel), escape); err != nil {
+				// Say how far the copy got: the files before this one are in place (and
+				// journalled), so the model knows what to retry and an undo knows what to take back.
+				return landed, fmt.Errorf("copied %d of %d files, then %s: %w", i, len(files), rel, err)
+			}
+			landed[i] = true
+		}
+		return landed, nil
+	})
+	if err != nil {
+		// A cancellation mid-tree is the loop's to roll back, as it is at Execute's door; the
+		// files that landed before it are journalled, so an undo still takes them back.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return domain.ToolResult{}, ctxErr
+		}
+		return errorResult(call.ID, err.Error()), nil
+	}
+	return okResult(call.ID, fmt.Sprintf("copied %s to %s (%d files)%s", args.Source, args.Destination, len(files), resolved)), nil
+}
+
+// directoryFiles enumerates the regular files under dir — spelled as the copy will name it under
+// root — as slash-free relative paths in a stable (sorted) order, EVERY directory opened through
+// root's fence (safeOpen) so a subtree that leaves the root is refused rather than walked. It
+// never descends through a symlink and lists only real regular files: a linked directory could
+// loop, and a link, a device or a socket is not something a copy reproduces — which is the same
+// reading find_files gives a tree, whose walk names real files alone.
+func directoryFiles(dir, root string) ([]string, error) {
+	var files []string
+	var walk func(rel string) error
+	walk = func(rel string) error {
+		d, err := safeOpen(filepath.Join(dir, rel), root)
+		if err != nil {
+			return err
+		}
+		entries, err := d.ReadDir(-1)
+		_ = d.Close()
+		if err != nil {
+			return err
+		}
+		// A directory HANDLE yields entries in filesystem order; the copy's journal and its
+		// result should not depend on it.
+		slices.SortFunc(entries, func(a, b os.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
+		for _, entry := range entries {
+			child := filepath.Join(rel, entry.Name())
+			switch {
+			case entry.Type().IsDir():
+				if err := walk(child); err != nil {
+					return err
+				}
+			case entry.Type().IsRegular():
+				files = append(files, child)
+			}
+		}
+		return nil
+	}
+	if err := walk(""); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
 // copyFromMount is Execute's virtual-mount branch: a copy whose SOURCE lives in a tree with no
 // host path (path_virtual.go), which is how a shipped skill's bundled file is materialized into
 // the workspace. The bytes are read through the mount's bounded read and written through the
@@ -187,13 +324,13 @@ func (t *CopyFile) copyFromMount(ctx context.Context, call domain.ToolCall, v vi
 		return errorResult(call.ID, escapeOrMessage(err, "file not found: "+args.Source)), nil
 	}
 	if info.IsDir() {
-		return errorResult(call.ID, "not a file: "+args.Source+" (directories are not supported)"), nil
+		return errorResult(call.ID, "not a file: "+args.Source+" (directories under a shipped mount are not supported)"), nil
 	}
 	data, failure := v.readBounded()
 	if failure != "" {
 		return errorResult(call.ID, failure), nil
 	}
-	if refusal := checkFileOpsDestination(ctx, args, t.root); refusal != "" {
+	if refusal := checkFileOpsDestination(ctx, args, t.root, false); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
 
@@ -352,7 +489,9 @@ func checkFileOpsPaths(ctx context.Context, args fileOpsArgs, root string) strin
 // filesystem, and returns the model-facing refusal (empty when the operation may proceed): a source
 // under sourceRoot that exists and is a regular FILE, and a destination under destinationRoot the
 // operation is allowed to land on — absent, or an existing file the call explicitly asked to
-// overwrite.
+// overwrite. The "not a file" arm is move_file's: a directory move would run SafeRename
+// unjournalled, so it is refused here, while copy_file branches on a directory source BEFORE
+// reaching this check (copyDirectory).
 //
 // The two roots differ for copy_file alone, whose source may have matched a configured read-only
 // root (a copy's source is a read) while its destination stays workspace-fenced; move_file passes
@@ -393,14 +532,18 @@ func checkFileOpsPathsFrom(
 		return "not a file: " + args.Source + " (directories are not supported)"
 	}
 
-	return checkFileOpsDestination(ctx, args, destinationRoot)
+	return checkFileOpsDestination(ctx, args, destinationRoot, false)
 }
 
 // checkFileOpsDestination is the DESTINATION half of that check, on its own because copy_file's
 // virtual-mount branch has no source to stat through a fence — the mount is the fence — while its
 // destination is judged by exactly these rules. Splitting it is what keeps the two copy routes
 // giving one answer, refusal wording included, to the same destination mistake.
-func checkFileOpsDestination(ctx context.Context, args fileOpsArgs, destinationRoot string) string {
+//
+// sourceIsDir is the directory copy's reading of an occupied destination (copyDirectory): an
+// existing directory there is where the copy would land INTO, so it is refused for want of
+// overwrite rather than for being a directory, and an existing file cannot become one.
+func checkFileOpsDestination(ctx context.Context, args fileOpsArgs, destinationRoot string, sourceIsDir bool) string {
 	destination, err := statWriteTarget(ctx, args.Destination, destinationRoot)
 	switch {
 	// A root that will not open leads, ahead of both the escape arm and the free-to-land arm:
@@ -411,6 +554,12 @@ func checkFileOpsDestination(ctx context.Context, args fileOpsArgs, destinationR
 		return err.Error()
 	case err != nil:
 		return "" // no destination there yet — free to land
+	case sourceIsDir && destination.IsDir() && !args.Overwrite:
+		return "destination already exists: " + args.Destination + " (give the full path of the new directory, or pass overwrite: true to copy into it, replacing the files it already holds)"
+	case sourceIsDir && destination.IsDir():
+		return ""
+	case sourceIsDir:
+		return "destination is a file: " + args.Destination + " (a directory copies onto a directory path)"
 	case destination.IsDir():
 		return "destination is a directory: " + args.Destination + " (give the full path of the new file)"
 	case !args.Overwrite:

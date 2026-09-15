@@ -376,7 +376,9 @@ For a skill on disk that address is the absolute path of its folder. For one apo
 [ships](configuration.md#skills-apogee-ships--use-shipped-skills) there is no folder on your
 machine, so the address is `shipped:<id>` — `shipped:debugging/checklist.md` names a file
 inside the binary. Both spellings work in `read_file`, `list_dir`, `grep`, `find_files` and as
-the **source** of a `copy_file`, which is how you take a bundled file out into your project.
+the **source** of a `copy_file`, which is how you take a bundled file out into your project —
+one file at a time: directories under a shipped mount are not supported as a `copy_file` source
+(a folder on disk copies whole; `/skills export` is the way to take a whole shipped skill out).
 Neither is writable: `shipped:` is refused by every write, and the skill folders on disk are
 mounted read-only. To edit a shipped skill, take a copy of it first: `/skills export <id>` writes
 the whole folder — SKILL.md and everything bundled beside it — to `~/.apogee/skills/<id>/`, and

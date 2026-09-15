@@ -513,13 +513,104 @@ func TestTerminal_PreambleLeavesSuccessOutputUntouched(t *testing.T) {
 		t.Skip("POSIX shell command; covered on unix")
 	}
 	t.Parallel()
-	term := NewTerminal(t.TempDir(), nil)
+	root := tempRoot(t)
+	term := NewTerminal(root, nil)
 	res, err := term.Execute(context.Background(), terminalCall("c1", "echo hello"))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if res.IsError || res.Content != "hello\n" {
-		t.Errorf("result = %q (IsError=%v), want exactly %q with exit 0", res.Content, res.IsError, "hello\n")
+	if want := "cwd: " + root + "\nhello\n"; res.IsError || res.Content != want {
+		t.Errorf("result = %q (IsError=%v), want exactly %q with exit 0", res.Content, res.IsError, want)
+	}
+}
+
+// TestTerminal_ResultOpensWithTheWorkingDirectory pins the `cwd:` line (2026-09-15): the first
+// line of every result names the directory the command ran in — the workspace root by default,
+// the `workdir` the call named otherwise — and StripCwdLine takes exactly that line off again
+// for the host-side surfaces that already name the command.
+func TestTerminal_ResultOpensWithTheWorkingDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell command; covered on unix")
+	}
+	t.Parallel()
+	root := tempRoot(t)
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	term := NewTerminal(root, nil)
+
+	res, err := term.Execute(context.Background(), callWith(t, "c1", map[string]any{"command": "pwd", "workdir": "sub"}))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	first, rest, _ := strings.Cut(res.Content, "\n")
+	if want := "cwd: " + filepath.Join(root, "sub"); first != want {
+		t.Errorf("first line = %q, want %q", first, want)
+	}
+	if got := StripCwdLine(res.Content); got != rest {
+		t.Errorf("StripCwdLine = %q, want the output after the cwd line %q", got, rest)
+	}
+	if !strings.Contains(rest, "sub") {
+		t.Errorf("output = %q, want pwd's answer under sub", rest)
+	}
+
+	// A failed run opens with the line too, and the strip leaves the exit-code marker in place.
+	res, err = term.Execute(context.Background(), terminalCall("c2", "false"))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if !res.IsError || !strings.HasPrefix(res.Content, "cwd: "+root+"\n") {
+		t.Errorf("failed result = %q (IsError=%v), want it to open with the cwd line", res.Content, res.IsError)
+	}
+	if got := StripCwdLine(res.Content); !strings.HasSuffix(got, "[exit code 1"+failFastExitNote+"]") {
+		t.Errorf("stripped failure = %q, want the exit-code marker kept", got)
+	}
+}
+
+// TestStripCwdLine pins the strip on the shapes the consumers hand it: a cwd line comes off
+// whole, a body with none is returned untouched, and a cwd line with nothing after it is empty.
+func TestStripCwdLine(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ in, want string }{
+		{"cwd: /ws\nhello\n", "hello\n"},
+		{"cwd: /ws\n\n[exit code 1]", "\n[exit code 1]"},
+		{"hello\n", "hello\n"},
+		{"cwd: /ws", ""},
+		{"", ""},
+		{"\ncwd: /ws\n", "\ncwd: /ws\n"},
+	} {
+		if got := StripCwdLine(tc.in); got != tc.want {
+			t.Errorf("StripCwdLine(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestSubprocessToolResultShellHint pins the bash-ism hint (2026-09-15): a failed run whose
+// output carries one of sh's tell-tale complaints about a bash-only construct gains the hint on
+// its own line above the exit-code marker; a clean run, and a failure in other words, do not.
+func TestSubprocessToolResultShellHint(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		res      subprocessResult
+		wantHint bool
+	}{
+		{"bad substitution", subprocessResult{exitCode: 2, combinedOutput: "sh: 1: Bad substitution\n"}, true},
+		{"process substitution", subprocessResult{exitCode: 2, combinedOutput: "sh: 1: Syntax error: \"(\" unexpected\n"}, true},
+		{"shopt", subprocessResult{exitCode: 127, combinedOutput: "sh: 1: shopt: not found\n"}, true},
+		{"other failure", subprocessResult{exitCode: 1, combinedOutput: "no such file\n"}, false},
+		{"clean run that printed the words", subprocessResult{exitCode: 0, combinedOutput: "Bad substitution\n"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			content := subprocessToolResult("c1", tc.res).Content
+			if got := strings.Contains(content, shellHintLine); got != tc.wantHint {
+				t.Errorf("hint present = %v, want %v: %q", got, tc.wantHint, content)
+			}
+			if tc.wantHint && !strings.Contains(content, shellHintLine+"\n[exit code") {
+				t.Errorf("hint must sit on its own line above the marker: %q", content)
+			}
+		})
 	}
 }
 
@@ -569,7 +660,7 @@ func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
 func TestTerminal_DescriptionDisclosesFailFast(t *testing.T) {
 	t.Parallel()
 	desc := NewTerminal(t.TempDir(), nil).Description()
-	for _, want := range []string{"fail-fast", "set -e", "|| true"} {
+	for _, want := range []string{"fail-fast", "set -e", "|| true", "POSIX sh (dash on Debian-family hosts", "use python_exec for anything bash-only"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("description does not name %q: %q", want, desc)
 		}

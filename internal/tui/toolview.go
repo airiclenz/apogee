@@ -1205,7 +1205,9 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 //
 // A hook that worded the slot also hands back the output left once it has read the failure off it,
 // and that output lays out beneath the branch. A failed subprocess call therefore reads as its
-// clean twin does — the exit code in the slot over the lines the command printed — instead of
+// clean twin does — the exit code in the slot over the lines the command printed, the `cwd:` line
+// the tool wrote for the model taken off by its hook (subprocessFailure) exactly as the clean
+// twin's detail takes it off (subprocessDetail) — instead of
 // spending the slot on whichever line the output happened to open with. It is laid out through the
 // clean twin's own builder for the same reason (outputBody): that body is output a slot beside it
 // already summarises, and it answers the per-line flood cap exactly as the clean run's does.

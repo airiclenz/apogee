@@ -700,6 +700,21 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		wantSummary: "error: exit 1",
 		wantBody:    []string{"fail-fast: the line stopped at `[ -f missing ]`"},
 	}, {
+		// The `cwd:` line the tool opens every run's result with (internal/tools, StripCwdLine) is
+		// written for the model and comes off the body on the failure route too: the row names the
+		// command, and the exit code is still read off the marker beneath it.
+		name:        "the cwd line comes off a failed run's body",
+		call:        domain.ToolCall{ID: "10", Tool: "terminal", Arguments: []byte(`{"command":"ls missing"}`)},
+		content:     "cwd: /ws\nls: cannot access 'missing': No such file or directory\n[exit code 2]",
+		wantSummary: "error: exit 2",
+		wantBody:    []string{"ls: cannot access 'missing': No such file or directory"},
+	}, {
+		name:        "python_exec's cwd line comes off the same way",
+		call:        domain.ToolCall{ID: "11", Tool: "python_exec", Arguments: []byte(`{"code":"raise SystemExit(1)"}`)},
+		content:     "cwd: /ws\nSystemExit: 1\n[exit code 1]",
+		wantSummary: "error: exit 1",
+		wantBody:    []string{"SystemExit: 1"},
+	}, {
 		name:        "a subprocess result with no marker says the word and keeps its whole message",
 		call:        domain.ToolCall{ID: "6", Tool: "terminal", Arguments: []byte(`{"command":"sleep 90"}`)},
 		content:     "command timed out\npartial output",
@@ -794,6 +809,28 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			call:        domain.ToolCall{ID: "4", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},
 			result:      domain.ToolResult{CallID: "4", Content: "\n"},
 			wantSummary: "exit 0",
+		},
+		{
+			// The `cwd:` line the tool writes for the model (internal/tools, StripCwdLine) is not
+			// output the command printed: `true` still reads "(no output)" with it there.
+			name:        "the cwd line is not output: empty output beneath it is still the exit code alone",
+			call:        domain.ToolCall{ID: "4c", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},
+			result:      domain.ToolResult{CallID: "4c", Content: "cwd: /ws\n"},
+			wantSummary: "exit 0",
+		},
+		{
+			name:        "one line beneath the cwd line still promotes",
+			call:        domain.ToolCall{ID: "3c", Tool: "terminal", Arguments: []byte(`{"command":"echo hello"}`)},
+			result:      domain.ToolResult{CallID: "3c", Content: "cwd: /ws\nhello\n"},
+			wantSummary: "hello",
+			wantStat:    "exit 0",
+		},
+		{
+			name:        "python_exec's cwd line comes off its body too",
+			call:        domain.ToolCall{ID: "26c", Tool: "python_exec", Arguments: []byte(`{"code":"print(1)\nprint(2)"}`)},
+			result:      domain.ToolResult{CallID: "26c", Content: "cwd: /ws\n1\n2\n"},
+			wantSummary: "exit 0",
+			wantBody:    []string{"1", "2"},
 		},
 		{
 			// git_commit is the one tool that never promotes: its one-line output repeats the
