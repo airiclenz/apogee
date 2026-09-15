@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -76,6 +77,23 @@ func readOpenedBounded(f fs.File, path string) ([]byte, string) {
 		return nil, fmt.Sprintf("file too large: %d bytes (max %d)", size, maxFileReadBytes)
 	}
 	return data, ""
+}
+
+// binarySniffBytes is how much of a file's head the binary sniff inspects: the leading bytes are
+// enough to catch an executable, an archive or an image, and cheap enough to take on every file grep
+// walks.
+const binarySniffBytes = 512
+
+// looksBinary reports whether head — a file's leading bytes, at most binarySniffBytes of them
+// are inspected — holds a NUL, the one byte no text encoding apogee serves a model produces. It is
+// the ONE sniff the read tools share: grep skips such a file silently (searchFile), read_file
+// refuses it out loud (readableText), and both judge the same bytes by the same rule so a file grep
+// walked past is never one read_file then serves as forty thousand lines of noise.
+func looksBinary(head []byte) bool {
+	if len(head) > binarySniffBytes {
+		head = head[:binarySniffBytes]
+	}
+	return bytes.IndexByte(head, 0) >= 0
 }
 
 // readAllBounded reads at most max bytes from r, reporting within=false when r holds more —

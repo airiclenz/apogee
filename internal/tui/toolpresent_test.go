@@ -69,6 +69,17 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "main.go", wantDetail: "100 lines",
 		},
 		{
+			// The tool caps an open-ended read at 400 lines and reports THAT span, so the slot says
+			// what came back — never the file's 1,000 lines — and the tail line stays in the body.
+			name: "read_file capped by default → the capped span's line count",
+			call: domain.ToolCall{ID: "1a", Tool: "read_file", Arguments: []byte(`{"path":"CHANGELOG.md"}`)},
+			result: domain.ToolResult{CallID: "1a", Content: "[File: CHANGELOG.md, 1000 lines total, showing lines 1-400]\n# Changelog\n[showing lines 1-400 of 1000 — pass start_line/end_line for the rest]",
+				Summary: domain.ReadSpan{Start: 1, End: 400, Total: 1000}},
+			wantLabel:  "Read",
+			wantVerb:   "reading",
+			wantTarget: "CHANGELOG.md", wantDetail: "400 lines",
+		},
+		{
 			name:       "read_file with no summary → the verbatim first line",
 			call:       domain.ToolCall{ID: "1b", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
 			result:     domain.ToolResult{CallID: "1b", Content: "[File: main.go, 120 lines total, showing lines 1-100]\npackage main"},
@@ -1720,6 +1731,7 @@ func TestToolStat(t *testing.T) {
 		{name: "read words its span as a line count", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 100, Total: 120}}, want: "100 lines", wantOK: true},
 		{name: "a one-line read is singular", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 7, End: 7, Total: 9}}, want: "1 line", wantOK: true},
 		{name: "an empty file reads zero, never a negative", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 0}}, want: "0 lines", wantOK: true},
+		{name: "a default-capped read counts the capped span, not the file", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 400, Total: 1000}}, want: "400 lines", wantOK: true},
 		{name: "list keeps the fixed 'entries' plural", tool: "list_dir", result: domain.ToolResult{Summary: domain.ListedEntries{Total: 1}}, want: "1 entries", wantOK: true},
 		{name: "grep words hits", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 3}}, want: "3 hits", wantOK: true},
 		{name: "grep finding nothing is a number", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 0}}, want: "0 hits", wantOK: true},

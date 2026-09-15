@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -611,6 +612,35 @@ func TestReadScopeReadBounded(t *testing.T) {
 			}
 			if tc.wantFail == "" && string(data) != tc.wantContent {
 				t.Errorf("content = %q, want %q", data, tc.wantContent)
+			}
+		})
+	}
+}
+
+// TestLooksBinary pins the one sniff grep and read_file share: a NUL inside the first
+// binarySniffBytes bytes says binary, a NUL past them does not (the sniff is a head test, not a
+// scan), and text — empty included — passes.
+func TestLooksBinary(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		head []byte
+		want bool
+	}{
+		{name: "empty is text", head: nil, want: false},
+		{name: "plain text is text", head: []byte("package tools\n"), want: false},
+		{name: "a NUL in the head is binary", head: []byte("\x7fELF\x02\x01\x01\x00"), want: true},
+		{name: "a NUL on the last sniffed byte is binary", head: append(bytes.Repeat([]byte("a"), binarySniffBytes-1), 0), want: true},
+		{name: "a NUL just past the sniff is text", head: append(bytes.Repeat([]byte("a"), binarySniffBytes), 0), want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := looksBinary(tc.head); got != tc.want {
+				t.Errorf("looksBinary = %v, want %v", got, tc.want)
 			}
 		})
 	}

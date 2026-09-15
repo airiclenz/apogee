@@ -528,7 +528,9 @@ func blankStat(domain.ToolResult) (statValue, bool) { return plainStat(""), true
 
 // readSpanStat words read_file's slot as the number of lines the call returned, counted off the
 // span the tool reports (domain.ReadSpan, 1-based and inclusive). A file with no lines at all
-// yields a span whose End precedes its Start, which is 0 lines rather than a negative count.
+// yields a span whose End precedes its Start, which is 0 lines rather than a negative count. A read
+// the tool capped by default reports the CAPPED span — 1-400 of a longer file — so the slot says
+// what came back, never how long the file is; a locate's windows report the union's reach.
 func readSpanStat(res domain.ToolResult) (statValue, bool) {
 	v, ok := res.Summary.(domain.ReadSpan)
 	if !ok {

@@ -977,3 +977,305 @@ func TestReadFile_Execute_MissingFileSuggestionsQuoteThePinnedPath(t *testing.T)
 		t.Errorf("content = %q, want %q", result.Content, want)
 	}
 }
+
+// TestReadFile_Execute_CapsAnOpenEndedRead pins the default bound: a call that sets neither
+// end_line nor max_lines gets at most defaultReadLines lines or defaultReadBytes bytes, the
+// exact tail naming what was shown and how to get the rest, and a span stating the CAPPED range.
+// An explicit end_line or max_lines is honoured as written; a start_line on its own is still
+// open-ended and is capped from where it starts.
+func TestReadFile_Execute_CapsAnOpenEndedRead(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "long.txt"), []byte(strings.Join(numberedLines(1000), "\n")), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// Thirty lines of 1,400 bytes each: 41 KiB in far fewer than 400 lines, so only the byte
+	// bound can bite. 29 whole lines plus 28 joining newlines is 40,628 bytes — under the cap —
+	// and the thirtieth would push past it.
+	wide := strings.Repeat(strings.Repeat("w", 1400)+"\n", 29) + strings.Repeat("w", 1400)
+	if err := os.WriteFile(filepath.Join(root, "wide.txt"), []byte(wide), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool := NewReadFile(root, ReadMounts{})
+
+	cases := []struct {
+		name       string
+		args       map[string]any
+		wantHeader string
+		wantFirst  string // the first body line
+		wantLast   string // the last body line before any tail
+		wantTail   string // the exact final line; "" when none
+		wantSpan   domain.ReadSpan
+	}{
+		{
+			name:       "a bare read stops at 400 lines and says so",
+			args:       map[string]any{"path": "long.txt"},
+			wantHeader: "[File: long.txt, 1000 lines total, showing lines 1-400]",
+			wantFirst:  "line 1",
+			wantLast:   "line 400",
+			wantTail:   "[showing lines 1-400 of 1000 — pass start_line/end_line for the rest]",
+			wantSpan:   domain.ReadSpan{Start: 1, End: 400, Total: 1000},
+		},
+		{
+			name:       "a start_line alone is capped from where it starts",
+			args:       map[string]any{"path": "long.txt", "start_line": 401},
+			wantHeader: "[File: long.txt, 1000 lines total, showing lines 401-800]",
+			wantFirst:  "line 401",
+			wantLast:   "line 800",
+			wantTail:   "[showing lines 401-800 of 1000 — pass start_line/end_line for the rest]",
+			wantSpan:   domain.ReadSpan{Start: 401, End: 800, Total: 1000},
+		},
+		{
+			name:       "an explicit max_lines above the cap is honoured",
+			args:       map[string]any{"path": "long.txt", "max_lines": 800},
+			wantHeader: "[File: long.txt, 1000 lines total, showing lines 1-800]",
+			wantFirst:  "line 1",
+			wantLast:   "line 800",
+			wantTail:   "[...truncated at 800 lines]",
+			wantSpan:   domain.ReadSpan{Start: 1, End: 800, Total: 1000},
+		},
+		{
+			name:       "an explicit end_line above the cap is honoured with no tail",
+			args:       map[string]any{"path": "long.txt", "start_line": 1, "end_line": 600},
+			wantHeader: "[File: long.txt, 1000 lines total, showing lines 1-600]",
+			wantFirst:  "line 1",
+			wantLast:   "line 600",
+			wantSpan:   domain.ReadSpan{Start: 1, End: 600, Total: 1000},
+		},
+		{
+			name:       "the byte bound bites before the line bound on wide lines",
+			args:       map[string]any{"path": "wide.txt"},
+			wantHeader: "[File: wide.txt, 30 lines total, showing lines 1-29]",
+			wantFirst:  strings.Repeat("w", 1400),
+			wantLast:   strings.Repeat("w", 1400),
+			wantTail:   "[showing lines 1-29 of 30 — pass start_line/end_line for the rest]",
+			wantSpan:   domain.ReadSpan{Start: 1, End: 29, Total: 30},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("IsError = true (content: %q)", result.Content)
+			}
+			lines := strings.Split(result.Content, "\n")
+			if lines[0] != tc.wantHeader {
+				t.Errorf("header = %q, want %q", lines[0], tc.wantHeader)
+			}
+			body := lines[1:]
+			if tc.wantTail != "" {
+				if got := body[len(body)-1]; got != tc.wantTail {
+					t.Errorf("tail = %q, want %q", got, tc.wantTail)
+				}
+				body = body[:len(body)-1]
+			}
+			if wantLines := tc.wantSpan.End - tc.wantSpan.Start + 1; len(body) != wantLines {
+				t.Errorf("body holds %d lines, want %d", len(body), wantLines)
+			}
+			if body[0] != tc.wantFirst || body[len(body)-1] != tc.wantLast {
+				t.Errorf("body runs %q..%q, want %q..%q", body[0], body[len(body)-1], tc.wantFirst, tc.wantLast)
+			}
+			span, ok := result.Summary.(domain.ReadSpan)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.ReadSpan", result.Summary)
+			}
+			if !reflect.DeepEqual(span, tc.wantSpan) {
+				t.Errorf("Summary = %+v, want %+v", span, tc.wantSpan)
+			}
+		})
+	}
+}
+
+// TestReadFile_Execute_RefusesABadRange pins the two range refusals: an end_line before its
+// start_line and a start_line past the file's last line are IsError results with the exact
+// sentence, never the empty "0 lines" success they used to be. A start_line ON the last line is
+// still a read.
+func TestReadFile_Execute_RefusesABadRange(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("a\nb\nc\nd"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool := NewReadFile(root, ReadMounts{})
+
+	cases := []struct {
+		name    string
+		args    map[string]any
+		wantErr string // "" means the read succeeds
+	}{
+		{
+			name:    "an inverted range is refused",
+			args:    map[string]any{"path": "f.txt", "start_line": 3, "end_line": 2},
+			wantErr: "read_file: end_line (2) is before start_line (3)",
+		},
+		{
+			name:    "a start past the end is refused",
+			args:    map[string]any{"path": "f.txt", "start_line": 5},
+			wantErr: "read_file: start_line (5) is past the end of the file (4 lines)",
+		},
+		{
+			name:    "the inversion is judged before the end",
+			args:    map[string]any{"path": "f.txt", "start_line": 9, "end_line": 8},
+			wantErr: "read_file: end_line (8) is before start_line (9)",
+		},
+		{
+			name: "a start on the last line reads it",
+			args: map[string]any{"path": "f.txt", "start_line": 4},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if tc.wantErr == "" {
+				if result.IsError || result.Content != "[File: f.txt, 4 lines total, showing lines 4-4]\nd" {
+					t.Fatalf("IsError = %v, Content = %q", result.IsError, result.Content)
+				}
+				return
+			}
+			if !result.IsError {
+				t.Fatalf("IsError = false (content: %q)", result.Content)
+			}
+			if result.Content != tc.wantErr {
+				t.Errorf("Content = %q, want %q", result.Content, tc.wantErr)
+			}
+			if result.Summary != nil {
+				t.Errorf("Summary = %#v on a refusal, want nil", result.Summary)
+			}
+		})
+	}
+}
+
+// TestReadFile_Execute_WindowsALocateWithNoRange pins the locate window: with no range on the
+// call, the content is the ±10 lines around each hit, windows that overlap or touch are merged,
+// windows that do not meet are joined by a lone "…" line, each is clipped to the file, and the
+// span is the union's first Start and last End. A range on the call leaves the old whole-range
+// body in place (TestReadFile_Execute_LocatesASubstring pins the miss and the whole-file union).
+func TestReadFile_Execute_WindowsALocateWithNoRange(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "long.txt"), []byte(strings.Join(numberedLines(100), "\n")), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool := NewReadFile(root, ReadMounts{})
+
+	// window is lines from..to of the file, joined as the body would join them.
+	window := func(from, to int) string {
+		return strings.Join(numberedLines(to)[from-1:], "\n")
+	}
+
+	cases := []struct {
+		name        string
+		args        map[string]any
+		wantContent string
+		wantSpan    domain.ReadSpan
+	}{
+		{
+			name: "two far-apart hits give two windows joined by an ellipsis",
+			args: map[string]any{"path": "long.txt", "locate": "line 30"},
+			// "line 30" is on line 30 alone; "line 3" would also hit 3, 31-39.
+			wantContent: "[File: long.txt, 100 lines total, showing lines 20-40]\nLocated \"line 30\" on lines: 30\n" +
+				window(20, 40),
+			wantSpan: domain.ReadSpan{Start: 20, End: 40, Total: 100, Locate: "line 30", LocatedOn: []int{30}},
+		},
+		{
+			name: "hits whose windows overlap merge into one",
+			args: map[string]any{"path": "long.txt", "locate": "line 5"},
+			// Hits on 5 and 50-59: windows 1-15 and 40-69.
+			wantContent: "[File: long.txt, 100 lines total, showing lines 1-69]\nLocated \"line 5\" on lines: 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59\n" +
+				window(1, 15) + "\n…\n" + window(40, 69),
+			wantSpan: domain.ReadSpan{Start: 1, End: 69, Total: 100, Locate: "line 5", LocatedOn: []int{5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59}},
+		},
+		{
+			name: "a window is clipped to the file's last line",
+			args: map[string]any{"path": "long.txt", "locate": "line 95"},
+			wantContent: "[File: long.txt, 100 lines total, showing lines 85-100]\nLocated \"line 95\" on lines: 95\n" +
+				window(85, 100),
+			wantSpan: domain.ReadSpan{Start: 85, End: 100, Total: 100, Locate: "line 95", LocatedOn: []int{95}},
+		},
+		{
+			name: "a range on the call keeps the whole range beneath the located line",
+			args: map[string]any{"path": "long.txt", "locate": "line 30", "start_line": 1, "end_line": 3},
+			wantContent: "[File: long.txt, 100 lines total, showing lines 1-3]\nLocated \"line 30\" on lines: 30\n" +
+				window(1, 3),
+			wantSpan: domain.ReadSpan{Start: 1, End: 3, Total: 100, Locate: "line 30", LocatedOn: []int{30}},
+		},
+		{
+			name: "a miss renders the plain capped body",
+			args: map[string]any{"path": "long.txt", "locate": "absent"},
+			wantContent: "[File: long.txt, 100 lines total, showing lines 1-100]\nLocated \"absent\" on no lines\n" +
+				window(1, 100),
+			wantSpan: domain.ReadSpan{Start: 1, End: 100, Total: 100, Locate: "absent"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("IsError = true (content: %q)", result.Content)
+			}
+			if result.Content != tc.wantContent {
+				t.Errorf("Content = %q, want %q", result.Content, tc.wantContent)
+			}
+			span, ok := result.Summary.(domain.ReadSpan)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.ReadSpan", result.Summary)
+			}
+			if !reflect.DeepEqual(span, tc.wantSpan) {
+				t.Errorf("Summary = %+v, want %+v", span, tc.wantSpan)
+			}
+		})
+	}
+}
+
+// TestReadFile_Execute_RefusesABinaryFile pins the binary refusal: a NUL in the file's head is an
+// IsError result naming the path and its size, with not one byte of the file in the transcript. A
+// text file is judged by the same sniff and reads as before.
+func TestReadFile_Execute_RefusesABinaryFile(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	binary := append([]byte("\x7fELF\x02\x01\x01\x00"), []byte(strings.Repeat("x", 100))...)
+	if err := os.WriteFile(filepath.Join(root, "tool.bin"), binary, 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	result, err := NewReadFile(root, ReadMounts{}).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "tool.bin"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false (content: %q)", result.Content)
+	}
+	if want := "read_file: tool.bin is a binary file (108 bytes)"; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+}

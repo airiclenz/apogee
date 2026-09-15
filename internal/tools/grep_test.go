@@ -857,3 +857,34 @@ func TestGrep_Execute_MissingPathSuggestsSiblings(t *testing.T) {
 		})
 	}
 }
+
+// TestGrep_Execute_SkipsABinaryFile pins that grep walks past a file the shared sniff calls
+// binary (looksBinary) — the same judgement read_file refuses such a file on — while the text
+// file beside it still matches.
+func TestGrep_Execute_SkipsABinaryFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "tool.bin"), []byte("needle\x00needle"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("needle in text"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"pattern": "needle"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	if strings.Contains(result.Content, "tool.bin") {
+		t.Errorf("binary file was searched: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "notes.txt:1:needle in text") {
+		t.Errorf("text file did not match: %q", result.Content)
+	}
+}

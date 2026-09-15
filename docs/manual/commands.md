@@ -215,6 +215,29 @@ marker, which is how you tell it from a line of its own. The full layout — the
 sides, the `⋯` rule between regions that do not touch, the per-file headers a multi-file diff paints
 — is specified in [`docs/layout/split-diff-layout.md`](../layout/split-diff-layout.md).
 
+**How much a read returns.** A `read_file` call that names no end — no `end_line` and no
+`max_lines` — comes back bounded: the first 400 lines, or the first 40 KiB of them, whichever runs
+out first (always whole lines, never a line cut in the middle), and when that bound bit, the body
+ends with a tail saying so and how to get the rest:
+
+```
+[showing lines 1-400 of 1180 — pass start_line/end_line for the rest]
+```
+
+The header and the block's line count state the lines that actually came back, not the file's
+length. A `start_line` on its own is still open-ended and is bounded from where it starts, so
+"the rest" is paged the same way; an explicit `end_line` or `max_lines` is honoured as written,
+however large. Two ranges are refused rather than answered with nothing: an `end_line` before its
+`start_line` (`read_file: end_line (2) is before start_line (3)`) and a `start_line` past the
+file's last line (`read_file: start_line (500) is past the end of the file (120 lines)`). A
+`locate` with no range no longer returns the whole file beneath its `Located …` line: the content
+is the ten lines around each hit, windows that overlap merged, and a lone `…` line between windows
+that do not meet — a term that occurs nowhere renders the bounded body as a plain read would. A
+file whose leading bytes hold a NUL — an executable, an archive, an image — is refused in one line
+(`read_file: build/apogee is a binary file (10094249 bytes)`) rather than served as text; `grep`
+walks past such a file on the same test. A PDF is the one exception: it is detected by its content
+and returned as extracted text.
+
 **A near miss gets a suggestion.** When `read_file`, `list_dir`, `grep` or `find_files` is handed a
 path that is not there, the refusal does not stop at saying so: it adds a `did you mean:` clause
 naming up to five entries of the named parent directory whose names begin with the name that is

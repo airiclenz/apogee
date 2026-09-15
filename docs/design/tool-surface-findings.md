@@ -38,6 +38,13 @@ experiment, not a decision:
   lesson 2 below says they may not; `read_file`'s description advertises locate by name to hedge
   it, and a sighting of models no longer locating reopens this arm rather than re-filing it as a
   gap.
+  *Update 2026-09-15:* the 2026-09-14 session-mining round found the parameter IS used — and
+  that a bare `locate:` returned the whole file beneath its `Located …` line (a 594-line file for
+  one hit), while 1,410 reads ran past 500 lines with no range at all. `read_file` is now bounded
+  by default (400 lines / 40 KiB with a paging tail), refuses an inverted or past-the-end range
+  instead of answering "0 lines", windows a range-less `locate` to ±10 lines around each hit, and
+  refuses a binary on the sniff `grep` already skipped on. The name-not-parameter question this
+  arm keeps open is unchanged by it; what changed is that finding the parameter now pays.
 - **(d)** measure whether sub-35B models use `view_diff` at all.
   *Update 2026-08-16:* second independent flag (deepseek-v4-flash), which paired it with a
   `write_file` dry-run — see the second-round block below; decide the two together.

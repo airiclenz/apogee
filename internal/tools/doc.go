@@ -195,8 +195,9 @@
 // family's shared argument shape and error wording in one place.
 //
 // Reading and discovery. read_file.go is read_file, the line-spanned read that attaches a
-// ReadSpan and, when its optional locate term is given, also reports the absolute line
-// numbers where a substring sits. Its PDF text extraction is NOT here: the sniff, the walk, the
+// ReadSpan, bounds an open-ended call to 400 lines / 40 KiB, refuses a bad range or a binary,
+// and, when its optional locate term is given, also reports the absolute line numbers where a
+// substring sits and windows the content around them. Its PDF text extraction is NOT here: the sniff, the walk, the
 // [Page N] markers and the model-facing failure wording live in internal/doctext, which the @file
 // resolver reads the same documents through. list_dir.go is list_dir, the
 // depth-bounded listing. grep.go is grep — the pure-Go content search plus the include-glob
@@ -289,7 +290,8 @@
 // capturePreImage / commit / commitReadBack, which is what makes them the whole of this
 // package's undo capture (ADR 0051 §3). path_read.go is
 // the READ half carved out beside it: the one-handle bounded read every read tool goes through,
-// the model-facing wording a fenced failure is rendered as, and readScope — the READ-only
+// the binary sniff grep and read_file share (looksBinary), the model-facing wording a fenced
+// failure is rendered as, and readScope — the READ-only
 // multi-root resolver that tries the workspace first and then any extra read-only roots the
 // host mounts, returning the matched root so a caller pins every later fenced operation to it —
 // plus ReadMounts, the one value a read tool is wired with, and searchTarget, the resolved subject

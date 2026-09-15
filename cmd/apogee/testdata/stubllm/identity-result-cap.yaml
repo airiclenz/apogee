@@ -13,12 +13,14 @@
 model: identity-model
 turns:
     # Turn 1 — the oversized read. It enters the conversation whole; nothing is capped yet, because
-    # the guard protects everything from the most recent tool-calling Turn onward.
+    # the guard protects everything from the most recent tool-calling Turn onward. The range is
+    # explicit because a bare read_file is bounded to 400 lines by default (internal/tools/read_file.go
+    # defaultReadLines) — a result that size would never reach the guard's ceiling.
     - when:
         last_message: ^Read big.txt
       tool_calls:
         - name: read_file
-          arguments: '{"path":"big.txt"}'
+          arguments: '{"path":"big.txt","start_line":1,"end_line":1000}'
     # Turn 2 — a second, small read. It is what puts a later tool-calling Turn in the conversation,
     # so the big result above is no longer protected when the NEXT request is projected.
     - when:

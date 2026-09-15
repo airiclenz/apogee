@@ -186,7 +186,12 @@ NOTES (2026-09-15): the note's gate keeps `!timedOut` beside the plan's `!denial
 
 **Commit:** `fix(tools): fail-fast note names the stopped command and is silent on a confinement kill`
 
-## 6. `read_file` is bounded by default, refuses inverted ranges, windows `locate` and sniffs binaries
+## 6. `read_file` is bounded by default, refuses inverted ranges, windows `locate` and sniffs binaries — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): a `start_line` with no `end_line`/`max_lines` is also capped (from where it starts) rather than dumping the remainder — the item's literal text caps only a call with none of the three, but a model following the tail's "pass start_line/end_line" hint with start_line alone would otherwise be served the whole rest of the file; the tail generalises to `[showing lines S-E of M …]`.
+NOTES (2026-09-15): the byte cap never returns an empty body — a single line wider than 40 KiB is shown whole (lines are never cut mid-way); grep's `mergeContextSpans` became a wrapper over the new `mergeLineWindows` so the locate windows and grep's context share one merge.
+NOTES (2026-09-15): consequential edit — cmd/apogee/testdata/stubllm/identity-result-cap.yaml: made necessary by the default read cap (the fixture's bare `read_file big.txt` now returns 400 of 1,000 lines, under the tool-result-cap ceiling the row exists to trip; the script names `start_line: 1, end_line: 1000` explicitly).
+NOTES (2026-09-15): consequential edit — internal/tools/doc.go: made necessary by the shared sniff moving into path_read.go and read_file.go's new bounds (package map wording).
 
 **What:** `internal/tools/read_file.go` `renderFile`:
 - No `start_line`/`end_line`/`max_lines` ⇒ at most 400 lines or 40 KiB (`defaultReadLines`, `defaultReadBytes`, constants), the body followed by the exact tail `[showing lines 1-400 of M — pass start_line/end_line for the rest]`. An explicit range or `max_lines` is honoured as today; the `read-cache` guard's rewritten `max_lines` composes unchanged.

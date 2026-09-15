@@ -2,7 +2,6 @@ package tools
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -202,8 +201,8 @@ func (t *Grep) search(ctx context.Context, target searchTarget, re *regexp.Regex
 }
 
 // searchFile appends a grepMatch for every matching line in the file named by rel within
-// root, skipping a file that is oversized or binary (contains a NUL byte in its leading
-// bytes).
+// root, skipping a file that is oversized or binary (looksBinary — the sniff read_file shares,
+// so the two tools never disagree about which files are text).
 //
 // rel is opened THROUGH the target's own fence (target.open — os.Root-pinned on disk), so a walked entry
 // that is a symlink out of that root — a clone can plant `notes.txt -> ~/.ssh/id_rsa`, and
@@ -224,8 +223,8 @@ func (t *Grep) searchFile(target searchTarget, rel, display string, re *regexp.R
 	}
 
 	reader := bufio.NewReader(file)
-	if sniff, _ := reader.Peek(512); bytes.IndexByte(sniff, 0) >= 0 {
-		return // binary file
+	if sniff, _ := reader.Peek(binarySniffBytes); looksBinary(sniff) {
+		return
 	}
 
 	scanner := bufio.NewScanner(reader)
@@ -396,17 +395,30 @@ func (t *Grep) renderFileGroup(target searchTarget, group []grepMatch, contextLi
 }
 
 // mergeContextSpans turns each match's ±contextLines window into disjoint, non-touching
-// spans in ascending order. Windows that overlap OR merely touch are merged, so no line is
-// ever printed twice and a "--" separator only ever falls on a real gap. Matches arrive in
-// ascending line order (one forward scan per file).
+// spans in ascending order (mergeLineWindows over the matches' line numbers). Matches arrive
+// in ascending line order (one forward scan per file).
 func mergeContextSpans(group []grepMatch, contextLines int) []lineSpan {
-	spans := make([]lineSpan, 0, len(group))
-	for _, m := range group {
-		from := m.line - contextLines
+	lines := make([]int, len(group))
+	for i, m := range group {
+		lines[i] = m.line
+	}
+	return mergeLineWindows(lines, contextLines)
+}
+
+// mergeLineWindows turns each 1-based line number's ±contextLines window into disjoint,
+// non-touching spans in ascending order. Windows that overlap OR merely touch are merged, so
+// no line is ever printed twice and a separator only ever falls on a real gap. The numbers
+// must arrive ascending. A span's `to` is NOT clipped to the file's length — grep reads its
+// context by line number and never asks for a line past the end, and read_file's locate
+// windows clip it against the lines they hold (locateWindows).
+func mergeLineWindows(lineNumbers []int, contextLines int) []lineSpan {
+	spans := make([]lineSpan, 0, len(lineNumbers))
+	for _, n := range lineNumbers {
+		from := n - contextLines
 		if from < 1 {
 			from = 1
 		}
-		span := lineSpan{from: from, to: m.line + contextLines}
+		span := lineSpan{from: from, to: n + contextLines}
 		if last := len(spans) - 1; last >= 0 && span.from <= spans[last].to+1 {
 			if span.to > spans[last].to {
 				spans[last].to = span.to
