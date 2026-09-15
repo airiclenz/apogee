@@ -2428,3 +2428,67 @@ func TestDispatch_UnknownToolNamesItsNearMatch(t *testing.T) {
 		}
 	})
 }
+
+// TestDispatch_SerialDelegationPanicRecoversAtTheChildBoundary is the serial-path mirror of
+// TestFanOut_ChildPanicRecoversWithoutKillingTheSibling: a reply carrying ONE sub_agent call
+// never reaches the pool, so the delegation runs inline through executeDelegate — and a panic
+// raised inside that child is still contained at runSubAgent's frame, the one recover boundary
+// both paths share. The parent Step continues with an error tool result naming the panic, the
+// ErrorEvent carries the parent's current Turn, and the parent Exchange completes.
+func TestDispatch_SerialDelegationPanicRecoversAtTheChildBoundary(t *testing.T) {
+	sink := &recordingSink{}
+	up := newRoutedResponder().
+		route("delegate one thing", nil, fanOutScript([2]string{"c1", "exploding task"})).
+		route("exploding task", func(context.Context) { panic("child boom") }, nil).
+		route("delegate one thing", nil, contentScript("parent done"))
+
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate one thing"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("parent status = %q, want the Exchange to survive a serial child panic", res.Status)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 1 {
+		t.Fatalf("depth-0 tool results = %d, want 1", len(results))
+	}
+	if !results[0].IsError || !strings.Contains(results[0].Content, "panicked") {
+		t.Errorf("panicking child's result = %+v, want a recovered-panic error result", results[0])
+	}
+
+	// The ErrorEvent is the parent's account of the fault: stamped at depth 0 with the Turn the
+	// delegating Step ran in — the same Turn its tool result landed under.
+	var resultTurn = -1
+	for _, e := range sink.events {
+		if re, ok := e.(domain.ToolResultEvent); ok && re.Depth == 0 {
+			resultTurn = re.Turn
+		}
+	}
+	var recovered *domain.ErrorEvent
+	for _, e := range sink.events {
+		if ee, ok := e.(domain.ErrorEvent); ok && strings.Contains(ee.Err, "child boom") {
+			recovered = &ee
+			break
+		}
+	}
+	if recovered == nil {
+		t.Fatal("no ErrorEvent surfaced for the recovered serial child panic")
+	}
+	if recovered.Depth != 0 || recovered.Turn != resultTurn {
+		t.Errorf("recovered ErrorEvent stamped depth %d turn %d, want depth 0 turn %d (the delegating Step's)",
+			recovered.Depth, recovered.Turn, resultTurn)
+	}
+	if recovered.Source != tools.SubAgentToolName {
+		t.Errorf("recovered ErrorEvent source = %q, want %q", recovered.Source, tools.SubAgentToolName)
+	}
+}

@@ -559,7 +559,28 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // The nested loop's events already reached the parent's EventSink at Depth+1 as they ran; the
 // returned ToolResult is what the PARENT model sees on its next Turn (the delegated work
 // summarised back into the parent conversation).
-func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
+//
+// This frame is the ONE recover boundary of every delegation (ADR 0039 decision 4: each child
+// keeps panic recovery at its own boundary). Both paths enter here — the serial executeDelegate
+// and the pool's runDelegation worker — so a panic raised anywhere in the child's life becomes
+// this call's error result on either path, and the parent Step carries on with it exactly as it
+// carries on with a recovered leaf-tool panic (executeTool). The defer is registered FIRST so it
+// runs LAST: after the reaping defer below has unregistered the child, closed its mailbox and
+// released its resources, and still around it, so a panic raised inside that teardown is caught
+// here too. The ErrorEvent is stamped with this Agent's current Turn — the same value dispatchTools
+// carries as `turn` — read live because the signature stays the shared `(ctx, call)` one.
+func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result domain.ToolResult, outcome dispatchOutcome) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.cfg.Events.Emit(domain.ErrorEvent{
+				EventBase: a.base(a.turns.index),
+				Source:    call.Tool,
+				Err:       fmt.Sprintf("panic: %v", r),
+			})
+			result = errorToolResult(call.ID, fmt.Sprintf("tool %q panicked", call.Tool))
+			outcome = dispatchDone
+		}
+	}()
 	if a.depth >= a.maxDepth() {
 		// Defensive floor: the tool is withheld from the menu at the bound, but refuse here
 		// too so the bound holds even if a model emits the call anyway.

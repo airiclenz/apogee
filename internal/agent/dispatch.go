@@ -560,25 +560,13 @@ func (a *Agent) skipDelegation(turn int, call domain.ToolCall) domain.ToolResult
 }
 
 // runDelegation is one worker's whole job: drive this call's nested Agent to its boundary. The
-// recover sits HERE, inside the goroutine, because that is the only place it can be: a panic
-// crossing a goroutine's top frame takes the process down with it, so the per-child fault
-// boundary ADR 0007 promises has to be the child's own goroutine. A recovered child becomes an
-// error tool-result its sibling and the parent Exchange survive.
-//
-// The serial path deliberately keeps its existing shape here — a delegation panic there still
-// unwinds to the driver, exactly as before this fan-out existed.
-func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCall) (result domain.ToolResult, outcome dispatchOutcome) {
-	defer func() {
-		if r := recover(); r != nil {
-			a.cfg.Events.Emit(domain.ErrorEvent{
-				EventBase: a.base(turn),
-				Source:    call.Tool,
-				Err:       fmt.Sprintf("panic: %v", r),
-			})
-			result = errorToolResult(call.ID, fmt.Sprintf("tool %q panicked", call.Tool))
-			outcome = dispatchDone
-		}
-	}()
+// recover that keeps a child's panic from crossing this goroutine's top frame — which would take
+// the process down with it — sits in runSubAgent's own frame, inside every worker's call chain,
+// so the per-child fault boundary ADR 0007 promises is the child's boundary on both paths: a
+// recovered child becomes an error tool-result its sibling and the parent Exchange survive, and a
+// serial delegation is contained exactly as a pooled one is (ADR 0039 decision 4). Nothing in
+// this frame runs after runSubAgent returns, so nothing here is left outside that boundary.
+func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
 	return a.runSubAgent(ctx, call)
 }
 

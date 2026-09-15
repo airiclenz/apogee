@@ -160,7 +160,10 @@ NOTES (2026-09-15): consequential edit — docs/manual/reactions.md: made necess
 
 Commit: `refactor(reactions): one payload document in domain; observe firings build it too`
 
-## 5. One recover boundary for every delegation
+## 5. One recover boundary for every delegation — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — internal/agent/fanout_test.go: TestFanOut_ChildPanicRecoversWithoutKillingTheSibling's doc comment said the boundary's "new home" was the worker; rewritten to name runSubAgent's frame and the serial mirror test — made necessary by moving the recover out of runDelegation.
+NOTES (2026-09-15): runDelegation keeps its `(ctx, turn, call)` signature with `turn` now unread there (the recover reads `a.turns.index`), per the guard's "stays as the phase-bracketing wrapper item 6's run phase absorbs".
 
 **What.** Recast at the regression check (2026-09-15). Move the `recover()` that today lives only in the pool's `runDelegation` (`internal/agent/dispatch.go`) into `runSubAgent`'s own frame (`internal/agent/subagent.go` — the entry both paths share; see the guard), so a serial delegation panic is contained at the child's boundary exactly as a fan-out one is (ADR 0039 D4: each child keeps panic recovery at its own boundary). Delete the "serial path deliberately keeps its existing shape" comment. Depends on item 1.
 
