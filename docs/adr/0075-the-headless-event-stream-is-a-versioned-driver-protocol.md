@@ -171,8 +171,9 @@ also is — and why the TUI is checked, as part of the same change, that a rolle
 renders no spurious finished line.
 
 **13. `--format` reaches headless only.** The flag is installed in `runHeadless` and nowhere else:
-the daemon composes its Firings through `firingConfig` and `runOnce` directly (`daemonfire.go`) and
-never passes through `runHeadless`, and `probe` runs no loop. The daemon keeps its prose log
+the daemon composes its Firings through `firingConfig` and `runOnce` directly (`daemonfire.go`;
+amended 2026-09-15: through `raise`, the same act headless calls, with no `narrate` hook and so no
+Event lines) and never passes through `runHeadless`, and `probe` runs no loop. The daemon keeps its prose log
 (ADR 0034 decision 7): its stdout multiplexes N Firings, which needs a per-stream identity this
 envelope has no field for. `probe` stays a prose report. Both are separate beads if wanted.
 

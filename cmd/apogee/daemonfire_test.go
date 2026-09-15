@@ -179,11 +179,13 @@ func TestDaemonFireFallsBackToTheStartupServer(t *testing.T) {
 	}
 }
 
-// Every daemon Firing runs in a scratch dir of its OWN, named after the record it will be saved
-// under (residuals sweep item 6, 2026-08-24). A daemon has no session host to mint one for it, so
-// before this its model was offered no writable scratch inside the box at all and put its working
-// files wherever else it could reach; two entries firing on the same minute must land in separate
-// dirs for the same reason two sessions do.
+// Every daemon Firing runs in a scratch dir of its OWN (residuals sweep item 6, 2026-08-24). A
+// daemon has no session host to mint one for it, so before this its model was offered no writable
+// scratch inside the box at all and put its working files wherever else it could reach; two entries
+// firing on the same minute must land in separate dirs for the same reason two sessions do. That
+// the dir is named after the record it will be saved under is raise's own guarantee, pinned once
+// for every Driver (TestRaiseMintsOneIDForRecordAndScratch, wire_firing_test.go); what this Driver
+// owes is that each tick raises afresh rather than reusing a per-daemon dir.
 func TestDaemonFireGivesEachFiringItsOwnScratchDir(t *testing.T) {
 	harness := newDaemonFireHarness(t, config.Options{
 		HostAlias: "startup",
@@ -191,16 +193,13 @@ func TestDaemonFireGivesEachFiringItsOwnScratchDir(t *testing.T) {
 		Model:     "startup-model",
 		Servers:   []config.ServerEntry{{Name: "startup", Endpoint: "http://startup.invalid", Model: "startup-model"}},
 	})
-	roots, err := resolveRoots(harness.wiring.opts.ConfigDir, "")
-	if err != nil {
-		t.Fatalf("resolveRoots: %v", err)
-	}
 
 	first := harness.fire(t, entryFor(t, "audit", daemon.Action{}))
-	assertFiringScratchDir(t, first.RecordID, first.Config.ScratchDir, roots.scratch)
-
 	second := harness.fire(t, entryFor(t, "audit", daemon.Action{}))
-	assertFiringScratchDir(t, second.RecordID, second.Config.ScratchDir, roots.scratch)
+
+	if first.Config.ScratchDir == "" {
+		t.Fatal("the firing was fenced no scratch dir at all")
+	}
 	if second.Config.ScratchDir == first.Config.ScratchDir {
 		t.Errorf("two firings of the same schedule shared the scratch dir %q; each one owns its own",
 			first.Config.ScratchDir)
@@ -344,6 +343,10 @@ func TestDaemonFireReportsWhatTheRunDid(t *testing.T) {
 		FinalText: "three findings",
 		Turns:     7,
 		Denied:    2,
+		// Nothing wrong with the context files of a run whose report is empty: the field crosses
+		// because the Outcome is one shape for every Driver (firingOutcome), and the daemon log
+		// never renders it — the anomalies it would carry are logged as they happen instead.
+		ContextAnomalies: nil,
 		// The whole Firing's spend, the run's own plus both delegations' — the sum /sessions
 		// shows — and the delegations as a COUNT, which is all the report line says of them.
 		TotalTokens: 41984,

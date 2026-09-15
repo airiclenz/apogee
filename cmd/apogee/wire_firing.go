@@ -13,6 +13,7 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -748,4 +749,32 @@ func raise(
 	}
 	res, err := runOnce(ctx, spec)
 	return res, notices, err
+}
+
+// firingOutcome is what a raised Firing reports to the scheduler: everything the run learned about
+// itself, mapped onto [schedule.Outcome] in ONE place so every Driver's Firing tells the same
+// story from the same fields. The library reads none of it — it is runner-agnostic (ADR 0033) and
+// never imports the runner's shapes — and a Driver renders the Firing from these fields alone: the
+// answer without decoding a record, the counts without a second seam onto the run.
+//
+// It carries the context-file ANOMALIES and only those — a file present but unreadable, standing
+// content past its Budget share — because the plain loaded-files line is a launch's narration and a
+// Firing's narration is the record it leaves behind (contextAnomalies, schedule.go). The text
+// crosses as plain data: internal/notice composes, the surface that renders it strips at its own
+// seam. On a failure that still produced a Result the fields are the salvage; on a failure carrying
+// a ZERO run.Result they are all empty, which is the shape a refusal-free failure with nothing to
+// report has always had.
+func firingOutcome(res run.Result) schedule.Outcome {
+	return schedule.Outcome{
+		RecordID:         res.SessionID,
+		Title:            res.Title,
+		FinalText:        res.FinalText,
+		Turns:            res.Turns,
+		Denied:           res.Denied,
+		Faulted:          res.Faulted,
+		Fault:            res.Fault,
+		ContextAnomalies: contextAnomalies(res.ContextFiles),
+		TotalTokens:      firingSpend(res),
+		SubAgents:        len(res.SubAgents),
+	}
 }

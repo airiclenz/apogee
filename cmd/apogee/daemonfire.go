@@ -3,8 +3,8 @@ package main
 // The daemon's Firing composition (ADR 0034, ADR 0055) — the third Driver over the embeddable
 // engine (ADR 0031), beside the TUI's scheduleWiring (schedule.go) and runHeadless (headless.go).
 //
-// A Firing raised here is the same unattended run those two compose — literally the same composer,
-// firingConfig in wire_firing.go — resolved from a different set of facts: not the session's live
+// A Firing raised here is the same unattended run those two compose — literally the same act,
+// raise in wire_firing.go — resolved from a different set of facts: not the session's live
 // binding and not one command's flags, but one validated entry of
 // `~/.apogee/daemon/schedules.yaml` — which server it names, which model, which workspace, which
 // mode — read against a `config.yaml` this process loaded once at startup.
@@ -25,7 +25,6 @@ import (
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/reactions"
-	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -270,40 +269,6 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		return schedule.Outcome{}, err
 	}
 
-	// This Firing's own Reaction Runner (ADR 0073), built as soon as the workspace it is rooted in is
-	// known — a daemon's workspace is the SCHEDULE ENTRY's, so two adopted schedules can be rooted
-	// in two different trees and the `workspace:` filter has to be compared against the one this
-	// tick runs in.
-	//
-	// Per Firing rather than per daemon for that reason and one more: the Schedule this run belongs to
-	// is stamped onto every payload the Runner hands out, so a Reaction can tell "the 6am docs sweep
-	// finished" from "the nightly audit finished" without a single field of per-event plumbing.
-	//
-	// A Reaction's trouble goes on the daemon log, which is this Driver's whole user interface (ADR
-	// 0034 decision 10), through daemonLogWriter rather than daemonLog.line — the writer is the
-	// sanitiser this journal's one-line-per-event shape needs, and it takes the report as DATA, so a
-	// `%` in some script's stderr is a percent sign rather than a format verb.
-	//
-	// The drain is deferred here rather than after the composition below, so a Firing refused by the
-	// offline gate — or by a composition that failed — takes its workers down with it. A daemon runs
-	// for weeks; a Runner leaked per refused tick is a leak that accumulates.
-	//
-	// The list is DIVIDED first (ADR 0076 A8): the Runner takes the observe half, and the sync half —
-	// the advise and gate entries the loop runs — is latched onto the Firing's own spec below, which
-	// is the one route it takes into an unattended run.
-	reportReaction := func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) }
-	observeReactions, syncReactions := domain.SplitLanes(w.opts.Reactions)
-	hookRunner, err := firingHooks(observeReactions, roots.workspace,
-		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, reportReaction)
-	if err != nil {
-		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's reactions: %w", entry.Name, err)
-	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
-		defer cancel()
-		_ = hookRunner.Close(closeCtx)
-	}()
-
 	// The confinement posture THIS Firing runs under, said now that its mode and its workspace are
 	// both known — the two facts the launch path has at startup and a daemon does not, because a
 	// schedule entry carries its own mode and its own tree (ADR 0034).
@@ -337,19 +302,22 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		platform.PrewarmLabelWalk(w.confiner, roots.workspace, daemonLogWriter{log: w.log})
 	}
 
-	// This Firing's own record id, minted here because the runner is handed it beside the Config
-	// (run.Spec) and the composer creates the run's scratch dir under that name — so the saved
-	// record and the working files its model left behind are one thing to find and one thing to
-	// sweep. A daemon Firing had no scratch dir at all before: nothing here minted a session id, so
-	// its model was offered no writable scratch and put its working files wherever else it could
-	// reach. Minting per Firing rather than per daemon also keeps two schedules that fire on the
-	// same minute out of each other's files.
-	recordID := session.NewID(time.Now())
+	// A Reaction's trouble goes on the daemon log, which is this Driver's whole user interface (ADR
+	// 0034 decision 10), through daemonLogWriter rather than daemonLog.line — the writer is the
+	// sanitiser this journal's one-line-per-event shape needs, and it takes the report as DATA, so a
+	// `%` in some script's stderr is a percent sign rather than a format verb. The same function
+	// serves both lanes of the `reactions:` list (firingInputs.report).
+	reportReaction := func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) }
 
-	// The construction surface every unattended run shares (wire_firing.go), reached from this
-	// Driver's own facts: the bound entry, that entry's roots, the daemon's own key resolver — so an
+	// The one act every unattended run is (raise, wire_firing.go), reached from this Driver's own
+	// facts: the bound entry, that entry's roots, the daemon's own key resolver — so an
 	// `api-key-cmd:` runs once per entry rather than once per Firing — and the mode the Schedule
-	// fired, which is the FIRING's and never re-read off the entry (ADR 0033, decision 3).
+	// fired, which is the FIRING's and never re-read off the entry (ADR 0033, decision 3). The
+	// Schedule this run belongs to travels with it, so this Firing's own Reaction Runner stamps it
+	// onto every payload it hands out and a Reaction can tell "the 6am docs sweep finished" from
+	// "the nightly audit finished" without a single field of per-event plumbing; a daemon's
+	// workspace is the SCHEDULE ENTRY's, so two adopted schedules can be rooted in two different
+	// trees and raise compares the `workspace:` filter against the one this tick runs in.
 	//
 	// The `model:` overlay is handed over as the entry states it. It is legal here because
 	// validation already refused it where a model name would be a request to ACTUATE a load rather
@@ -360,8 +328,9 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	//
 	// No skills catalog and no width source: a daemon holds no longer-lived provider to share and
 	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults
-	// answer with.
-	cfg, routing, notices, err := firingConfig(ctx, firingInputs{
+	// answer with. No onID and no narrate either: a daemon stamps the id on no stream, and the
+	// record raise files under it is the account a supervisor opens.
+	res, notices, err := raise(ctx, firingInputs{
 		opts:     w.opts,
 		entry:    server,
 		keys:     w.keys,
@@ -369,20 +338,17 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		confiner: w.confiner,
 		model:    entry.Run.Model,
 		mode:     f.Mode,
-		recordID: recordID,
-		hooks:    hookRunner,
 		report:   reportReaction,
-	})
-	if err != nil {
-		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)
-	}
+	}, f.Prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
 	// What the composition had to say about this binding — a model the server never advertised, a
 	// rebind that had to degrade — reaches the daemon LOG, which is this Driver's whole user
 	// interface (ADR 0034 decision 10). The session record still carries the run; what it cannot
 	// carry is why the run was composed the way it was, and a Firing that quietly bound something
 	// other than what its entry names is exactly the fact a supervisor's journal has to hold.
 	// Printed in the composer's own voice, unstripped, as runHeadless prints the same lines
-	// (headless.go): these are apogee's sentences about apogee's own configuration.
+	// (headless.go): these are apogee's sentences about apogee's own configuration. Printed BEFORE
+	// the error is read, because raise returns them on every path: a refusal still had a
+	// composition behind it, and what that composition said stands whether or not the run went on.
 	//
 	// The ONE exception to per-Firing narration is the unknown-context-window line, latched to once
 	// per process: it reports a standing fact about this daemon's configuration rather than
@@ -397,50 +363,34 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		w.log.line("%s", n)
 	}
 
-	// A Firing whose bound server did not answer AT ALL does not run. The composition above already
-	// took its one beat of that server (wire_firing.go), and Beat.Answered is false only for a
-	// transport-level failure — a refused dial, a timeout, a DNS or TLS failure — never for a
-	// server that answered something this Driver has no standing to judge: a 401, a 500 and a 429
-	// all ANSWER, and all of them keep today's proceed-and-degrade, because a throttled probe is
-	// silence rather than a verdict about the box (internal/heartbeat).
+	// A Firing refused before it began — a composition that would not produce a Config, or a bound
+	// server that answered NOTHING — is this function's ERROR rather than an Outcome, which is what
+	// "a refused Firing is a failed Firing" means concretely: the library lands it as
+	// schedule.EventFailed and the daemon log renders it through the existing `failed <name> after
+	// <elapsed> — <err>` line (daemon.go). It is never Faulted — internal/schedule reserves that for
+	// a run that RETURNED with its Exchange at a boundary, and a run with no Turn at all has none —
+	// and it records no Outcome, because nothing was sent and there is nothing to report. The
+	// schedule's own retry and next-fire behaviour is untouched.
 	//
-	// The refusal is this function's ERROR rather than an Outcome, which is what "a refused Firing
-	// is a failed Firing" means concretely: the library lands it as schedule.EventFailed and the
-	// daemon log renders it through the existing `failed <name> after <elapsed> — <err>` line
-	// (daemon.go). It is never Faulted — internal/schedule reserves that for a run that RETURNED
-	// with its Exchange at a boundary, and a run with no Turn at all has none — and it records no
-	// Outcome, because nothing was sent and there is nothing to report. The schedule's own
-	// retry and next-fire behaviour is untouched.
-	//
-	// The sentence is the same refusal the TUI shows (internal/tui/heartbeat.go's
-	// upstreamBlockNote) and the headless pre-send gate returns (headless.go), because all three
-	// now read it from one composer, notice.ServerOffline. Each Driver keeps its own guard,
-	// endpoint source and delivery — this one's is a failed Firing — and takes only the words, so
-	// an edit to the wording belongs in internal/notice and nowhere else.
-	if !routing.Beat.Answered {
-		return schedule.Outcome{}, errors.New(notice.ServerOffline(server.Endpoint, routing.Beat.Failure))
+	// The two stages are told apart by raise's typed refusal (errNotStarted) rather than by the
+	// sentence. A composition refusal is wrapped under this Driver's own schedule-named line, `%w`
+	// keeping the composer's error reachable, so a supervisor reading the journal days later sees
+	// which entry would not compose. The gate's refusal passes bare: its sentence is the same one
+	// the TUI shows (internal/tui/heartbeat.go's upstreamBlockNote) and the headless pre-send gate
+	// returns (headless.go), because all three now read it from one composer, notice.ServerOffline —
+	// raise carries the gate's whole reasoning (Beat.Answered false only for a transport-level
+	// failure, never for a 401, a 500 or a 429). Each Driver keeps its own delivery — this one's is
+	// a failed Firing — and takes only the words, so an edit to the wording belongs in
+	// internal/notice and nowhere else.
+	var refused errNotStarted
+	if errors.As(err, &refused) {
+		if refused.Stage == stageCompose {
+			return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's reactions/bindings: %w",
+				entry.Name, refused.Err)
+		}
+		return schedule.Outcome{}, err
 	}
 
-	// Through the package's runner seam (headless.go) rather than run.Once directly: production
-	// never reassigns it, so this is the same call, and it is what lets a test read the Config a
-	// Firing composed without a live model.
-	res, err := runOnce(ctx, run.Spec{
-		Config:       cfg,
-		Prompt:       f.Prompt,
-		ScheduleID:   f.ScheduleID,
-		ScheduleName: f.ScheduleName,
-		Store:        w.store,
-		RecordID:     recordID,
-		// The sync half of the `reactions:` list this daemon resolved, armed on the Agent run.Once
-		// builds before its first Step, so a `gate:` answers a scheduled run's tool calls exactly as
-		// it answers a session's.
-		Sync: syncReactions,
-		// The routing the composer resolved off this daemon's own Options, latched through run.Spec's
-		// seam (internal/run): a scheduled Firing delegates to the `sub-agents-server:` entry exactly
-		// as a session does, and both fields are nil when no key named one.
-		DelegationTarget: routing.target,
-		DelegationSeat:   routing.seat,
-	})
 	// What the run found WRONG with the workspace's context files, and only that: a file present
 	// but unreadable, standing content that has outgrown its Budget share. The loaded-files line
 	// stays off this log by ratified call — a daemon's journal is read for trouble, and one line
@@ -461,21 +411,14 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		w.log.line("%s", sanitize.StripEscapesToLine(n.Text))
 	}
 
-	// Everything the run learned about itself, mapped onto the scheduler's report in one place so
-	// both ends of this function tell the daemon's log the same story. The library reads none of it
-	// — it is runner-agnostic (ADR 0033) — and the Notify line renders the Firing from these fields
-	// alone: the answer without decoding a record, the counts without a second seam onto the run.
-	out := schedule.Outcome{
-		RecordID:    res.SessionID,
-		Title:       res.Title,
-		FinalText:   res.FinalText,
-		Turns:       res.Turns,
-		Denied:      res.Denied,
-		Faulted:     res.Faulted,
-		Fault:       res.Fault,
-		TotalTokens: firingSpend(res),
-		SubAgents:   len(res.SubAgents),
-	}
+	// Everything the run learned about itself, mapped onto the scheduler's report by the one
+	// mapping every Driver's Firing shares (firingOutcome, wire_firing.go), so both ends of this
+	// function tell the daemon's log the same story. The library reads none of it — it is
+	// runner-agnostic (ADR 0033) — and the Notify line renders the Firing from these fields alone:
+	// the answer without decoding a record, the counts without a second seam onto the run. The
+	// anomalies it carries are the sentences logged just above; the daemon log never renders them
+	// off the Outcome, and it carries them because the Outcome is one shape for every Driver.
+	out := firingOutcome(res)
 	// What the Firing CHANGED on disk, after the Outcome is recorded and in the same block the
 	// headless Driver prints (writtenFilesLines, headless.go): a header naming the count, then one
 	// indented path per entry. This is the account an `auto:` schedule's deliverable IS — the state

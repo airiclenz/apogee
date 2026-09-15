@@ -267,8 +267,8 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 // (internal/tui/sessions.go:734, Meta.Usage + Meta.DelegateUsage), taken here because
 // schedule.Outcome is flat — the library is runner-agnostic (ADR 0033) and never imports the
 // runner's shapes to take it for itself. Both builders of an Outcome go through it, this
-// package's and the daemon's (daemonfire.go), so a Firing's cost reads the same whichever
-// Driver fired it.
+// package's and the one every raised Firing maps through (firingOutcome, wire_firing.go), so a
+// Firing's cost reads the same whichever Driver fired it.
 func firingSpend(res run.Result) int {
 	total := res.Usage.TotalTokens
 	for _, sub := range res.SubAgents {

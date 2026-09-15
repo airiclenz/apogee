@@ -228,7 +228,14 @@ NOTES (2026-09-15): docs/manual/headless.md gains one sentence on the owned Ctrl
 
 Commit: `refactor(cmd): raise composes and runs an unattended Firing; headless ports onto it`
 
-## 9. The daemon Firing raises through `raise`
+## 9. The daemon Firing raises through `raise` — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `firingOutcome(res run.Result) schedule.Outcome` was added to `cmd/apogee/wire_firing.go` (not on the item's Files list) — item 8's NOTES handed "the `Outcome()` fold" to this item and the literal had to go somewhere shared; `scheduleWiring.fire`'s own literal in `schedule.go` is left for item 10 (unexecuted), which ports the TUI onto `raise`.
+NOTES (2026-09-15): the two former compose-stage log prefixes ("resolve the %q schedule's reactions: %w" / "…bindings: %w") fold into one — `errNotStarted` carries a single "compose" Stage, so the daemon cannot tell a Reaction Runner it could not build from a Config that would not compose; the line reads "apogee: daemon: resolve the %q schedule's reactions/bindings: %w" (the plan's own phrasing), the inner sentence names which. No test pinned either wording.
+NOTES (2026-09-15): log-order nuance — the unconfined-Auto warning and the label-walk prewarm now precede the Reaction Runner build (inside `raise`), so on a Runner that cannot build they are said before the refusal rather than after; every success-path line keeps its order.
+NOTES (2026-09-15): `TestDaemonFireGivesEachFiringItsOwnScratchDir` keeps its two-ticks-differ assertion (a daemon-side fact: each tick raises afresh) and drops only the two `assertFiringScratchDir` swaps, which `TestRaiseMintsOneIDForRecordAndScratch` now pins for every Driver; no daemon test asserted `Sync`/`DelegationTarget`/`DelegationSeat`, so nothing else was deleted.
+NOTES (2026-09-15): consequential edit — cmd/apogee/schedule.go: made necessary by `firingOutcome` (the `firingSpend` comment named "the daemon's (daemonfire.go)" as its second builder).
+NOTES (2026-09-15): consequential edit — docs/adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md: made necessary by the port (decision 13 said the daemon composes "through `firingConfig` and `runOnce` directly"; dated in-place amendment).
 
 **What.** `cmd/apogee/daemonfire.go` replaces its hand-written sequence with `raise`; its `schedule.Outcome` literal goes (the daemon keeps logging `writtenFilesLines`/`undoVerbLine` from the returned Result). Behaviour preserved field for field. Depends on item 8.
 
