@@ -721,7 +721,7 @@ stack" for the record itself (the stack is how `/undo` walks it; the journal is 
 The autonomy level governing which tool calls need human approval — a **monotonic
 privilege ladder**. Four:
 - **Plan** — read-only — including the hardened git read tools (`git_status`, `git_log`,
-  `git_diff_range`), which are read-only by construction and so take the read-only row in every
+  `git_diff_range`, `git_show`), which are read-only by construction and so take the read-only row in every
   mode (the **RO-subproc** class, ADR 0012 amendment 2026-09-06) — **plus its own Scratch dir**:
   Apogee's own writers run there unprompted and every other target is refused with a reason
   naming the dir (ADR 0012's second loosen, 2026-09-14); no other writes, no other command
@@ -844,7 +844,7 @@ granularity on all three), **or** by Apogee's own
 is why that dir is the one target Apogee's own writers run on in every mode, Plan and Ask-Before
 included (ADR 0012's second loosen, 2026-09-14) — for its own in-process write tools, **url-safety
 for its own network tools**, **and the argv Apogee builds itself for its own read-side git tools** (`git_status`,
-`git_log`, `git_diff_range` — the **RO-subproc** class: hooks and fsmonitor off, a repository whose
+`git_log`, `git_diff_range`, `git_show` — the **RO-subproc** class: hooks and fsmonitor off, a repository whose
 config names a program git would run refused outright, a scrubbed child environment, nothing
 written, so the call is bounded without a box). A third-party tool of any of those kinds, whose
 scoping Apogee cannot vouch for, gates instead of running unsupervised. It is a **capability

@@ -608,8 +608,9 @@ computed in a fixed, load-bearing order:
 Tool-classes: **RO** = `IsReadOnly` **and no other marker** — the terminal floor (a tool that also
 carries a marker below takes that class's row, amendment 2026-07-26); **RO-subproc** =
 `readOnlySubprocess` (read-only by construction, a subprocess only by mechanism — the marker is
-obtainable only inside `internal/tools` and is minted for the hardened git read trio alone,
-amendment 2026-09-06); **WS-write** =
+obtainable only inside `internal/tools` and is minted for the hardened git read set alone —
+the 2026-09-06 trio `git_status`/`git_log`/`git_diff_range`, joined 2026-09-15 by `git_show` on the
+same minting conditions); **WS-write** =
 `workspaceScopedWriter` (§3); **subproc** =
 shell/exec subprocess tool (`terminal`/`python-exec`/`git`); **net** = `ExternalEffectTool` of kind
 `network` carrying the `urlFilteredNetworker` marker (Apogee's own — the marker is obtainable only by
@@ -626,7 +627,7 @@ target lies outside the session scratch dir, and the refusal names the dir — t
 | tool-class | Plan | Ask-Before | Allow-Edits | Auto · `confine=true` | Auto · `confine=false` |
 |---|---|---|---|---|---|
 | **RO** (and no other marker) | run | run | run | run | run |
-| **RO-subproc** (git read trio) | run | run | run | run | run |
+| **RO-subproc** (git read set) | run | run | run | run | run |
 | **WS-write**, target in the **session scratch dir** (2026-09-14) | **run** | **run** | **run** | **run** (path-safety-bounded) | run |
 | **WS-write**, target **in** workspace | refuse | gate | **run** | **run** (path-safety-bounded) | run |
 | **WS-write**, target **out** of workspace | refuse | gate | gate | **gate** | run |

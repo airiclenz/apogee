@@ -1428,8 +1428,8 @@ func (a *Agent) maxOutputTokens() int {
 // means the menu can never offer what the ladder refuses on every target (contract §4 fn 2).
 //
 // Two classes pass the filter unconditionally: classReadOnly, and classReadOnlySubprocess —
-// RO-subproc, i.e. read-only by construction, subprocess by mechanism (the git read trio:
-// git_status, git_log, git_diff_range), which Plan offers and runs (contract §4 amendment
+// RO-subproc, i.e. read-only by construction, subprocess by mechanism (the git read set:
+// git_status, git_log, git_diff_range, git_show), which Plan offers and runs (contract §4 amendment
 // 2026-09-06). A third passes iff a session scratch dir is set: classWorkspaceWrite — Apogee's
 // own writers, which Plan runs on that one target and refuses elsewhere with a reason naming
 // it (ADR 0012 second loosen, 2026-09-14).

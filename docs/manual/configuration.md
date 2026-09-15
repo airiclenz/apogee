@@ -145,7 +145,7 @@ nothing else. A name written under both lists is a notice too, and `disabled:` w
 The names this build knows are fixed. In menu order they are `read_file`, `write_file`, `list_dir`,
 `grep`, `find_files`, `single_find_and_replace`, `multi_find_and_replace`, `edit_existing_file`,
 `view_diff`, `copy_file`, `move_file`, `delete_file`, `terminal`, `python_exec`, `git_branch`,
-`git_commit`, `git_diff_range`, `git_status`, `git_log`, `diagnostics`, `run_tests`, `web_fetch`,
+`git_commit`, `git_diff_range`, `git_status`, `git_log`, `git_show`, `diagnostics`, `run_tests`, `web_fetch`,
 `http_request`, `web_search`, `sub_agent`, `task_list`, the default-off Console four `console_open`,
 `console_send`, `console_read` and `console_close`, `load_skill` — the model's own door onto the
 [skill catalogue](#skills-apogee-ships--use-shipped-skills), which every apogee run wires — and
@@ -1590,11 +1590,15 @@ can't"). That is not a fault, so Apogee says so at startup rather than letting A
 look broken.
 
 **The hardened git reads run free in every mode, and no fence applies to them.**
-`git_status`, `git_log` and `git_diff_range` build every argument themselves, run with
+`git_status`, `git_log`, `git_diff_range` and `git_show` build every argument themselves, run with
 hooks and fsmonitor off, refuse a repository whose own config names a program git would
 run, and write nothing to your tree, index or repository — so they are read-only by
 construction and behave like `read_file` on every rung: offered and run in Plan, no
-prompt in Ask-Before or Allow-Edits, and no box in Auto. What the prompts and the fence
+prompt in Ask-Before or Allow-Edits, and no box in Auto. `git_show` is the read-at-a-revision
+among them — a file as it was at a commit, branch or tag, rendered the way `read_file` renders
+it (the same header, line-range and `locate` arguments, and the same 400-line default cap); `git_log`
+takes an optional `path` to list only the commits that touched it, and `git_branch`'s list marks
+every remote-tracking branch ` (remote)`. What the prompts and the fence
 above are for is the rest — `terminal`, `python_exec`, `run_tests`, `diagnostics`, the
 Console four, and the writing git tools `git_branch` and `git_commit`.
 

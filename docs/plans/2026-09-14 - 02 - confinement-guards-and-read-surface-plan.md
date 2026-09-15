@@ -350,7 +350,13 @@ NOTES (2026-09-15): the Plan template carries its one `%s` as the writers clause
 
 **Commit:** `fix(agent): Plan mode announces the tool families it withholds; the default prompt qualifies "run the tests"`
 
-## 13. `git_show`, `git_log` with a path, `git_branch` marks remote refs
+## 13. `git_show`, `git_log` with a path, `git_branch` marks remote refs — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the "read trio" prose rule (the RO-subproc class definition and ladder row named the trio as the whole marked set).
+NOTES (2026-09-15): consequential edit — docs/adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md: made necessary by `git_show` joining the marked set (amendment (c) read "Exactly `git_status`, `git_log` and `git_diff_range`"; a dated parenthetical added, the decision text untouched).
+NOTES (2026-09-15): `registry_test.go`'s three host-delegate count pins (Asker 27→28, Presenter 27→28, both 28→29) reddened alongside the four the plan named and were extended the same way.
+NOTES (2026-09-15): `git_show` hands git `<ref>:./<workspace-relative path>` (cwd-relative, so a workspace that is a subdirectory of its repository reads the right file) and passes `gitDiffHardeningArgs` — `--no-textconv` is what keeps a repository's textconv driver off a blob named by path; a blob above the subprocess output cap (256 KiB) arrives with that buffer's own truncation marker.
+NOTES (2026-09-15): the plan's Acceptance `go test ./internal/agent/ -run 'PlanMenu'` matches no test (the pins are `TestPlanToolMenu*` / `TestClassifyTool`); ran those by name — green. `git_show` has no TUI presenter entry (`internal/tui/toolregistry.go` is outside Files); it renders through the raw-name fallback — improvement idea, not a defect.
 
 **What:** `internal/tools/git.go`: new `git_show` tool (`ref` validated by `validRef`, `path` resolved through the read fence like `read_file`, output = `git show <ref>:<relpath>` rendered through `renderFile`, so it inherits item 6's 400-line default cap and range arguments with the same `[File: … showing lines a-b]` header; a missing path at that ref ⇒ `IsError` naming both); `git_log` gains `path` (a pathspec placed after the existing `--`; `validRef` untouched, `TestGitLog_PathShapedRefIsNotAPathspecLog` stays green); `git_branch` suffixes remote refs ` (remote)`. Registered in `registry.go` under the read-only class (`readOnlySubprocess` marker, so Plan admits `git_show`); manual edits at the real sections — the `docs/manual/configuration.md` tool list around lines 145-148 and the delegation/tool paragraphs `grep -n 'read_file\|grep' docs/manual/*.md` finds.
 

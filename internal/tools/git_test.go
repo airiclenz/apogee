@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,6 +97,10 @@ func statusCall(id string) domain.ToolCall {
 
 func logCall(id, args string) domain.ToolCall {
 	return domain.ToolCall{ID: id, Tool: "git_log", Arguments: []byte(args)}
+}
+
+func showCall(id, args string) domain.ToolCall {
+	return domain.ToolCall{ID: id, Tool: "git_show", Arguments: []byte(args)}
 }
 
 // ----------------------------------------------------------------------------
@@ -190,6 +195,25 @@ func TestGit_Markers(t *testing.T) {
 	}
 	if !IsReadOnlySubprocess(lg) {
 		t.Error("git_log must carry the readOnlySubprocess marker (it is a hardened git read)")
+	}
+
+	// git_show (2026-09-15) carries the same three: reading an object at a revision writes
+	// nothing, the subprocess marker drives the mechanics, and readOnlySubprocess classifies it.
+	sh := NewGitShow(root)
+	if sh.Name() != "git_show" {
+		t.Errorf("show Name() = %q", sh.Name())
+	}
+	if !domain.IsReadOnly(sh) {
+		t.Error("git_show must be ReadOnly (reading a file at a revision changes nothing)")
+	}
+	if !domain.IsSubprocessTool(sh) {
+		t.Error("git_show must be a SubprocessTool (it launches the system git)")
+	}
+	if IsWorkspaceScopedWriter(sh) {
+		t.Error("git_show must NOT carry the workspaceScopedWriter marker (it writes nothing)")
+	}
+	if !IsReadOnlySubprocess(sh) {
+		t.Error("git_show must carry the readOnlySubprocess marker (it is a hardened git read)")
 	}
 
 	// diagnostics is the deliberate NON-member: it is a read-only SubprocessTool too, but the
@@ -2048,5 +2072,244 @@ func TestRunGitQuery_NonZeroExitIsAnError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exit 128") {
 		t.Errorf("err = %q, want the exit status named", err)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// git_show — a file at a revision, rendered as read_file renders it
+// ----------------------------------------------------------------------------
+
+// commitFileForTest writes name under root with content and commits it through the host git,
+// so a test can build a history with more than gitRepo's one commit.
+func commitFileForTest(t *testing.T, root, name, content, message string) {
+	t.Helper()
+	if err := writeFileForTest(root, name, content); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	gitPath, _ := exec.LookPath("git")
+	for _, args := range [][]string{{"add", name}, {"commit", "-m", message}} {
+		cmd := exec.Command(gitPath, args...)
+		cmd.Dir = root
+		cmd.Env = append(safeGitEnv(""),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// TestGitShow_ReadsTheEarlierContentAtARef is the tool's reason to exist: after a second commit
+// rewrites README.md, HEAD~1 still answers with the first version, under read_file's header
+// shape naming both the path and the ref.
+func TestGitShow_ReadsTheEarlierContentAtARef(t *testing.T) {
+	root := gitRepo(t)
+	commitFileForTest(t, root, "README.md", "rewritten\n", "second")
+
+	res, err := NewGitShow(root).Execute(context.Background(), showCall("c1", `{"ref":"HEAD~1","path":"README.md"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("git_show errored: %q", res.Content)
+	}
+	want := "[File: README.md @ HEAD~1, 2 lines total, showing lines 1-2]\nhello\n"
+	if res.Content != want {
+		t.Errorf("git_show = %q, want %q", res.Content, want)
+	}
+	span, ok := res.Summary.(domain.ReadSpan)
+	if !ok || span.Start != 1 || span.End != 2 {
+		t.Errorf("summary = %#v, want the ReadSpan read_file would carry (1-2)", res.Summary)
+	}
+}
+
+// TestGitShow_PathOutsideTheWorkspaceIsRefused pins the fence: the path goes through
+// resolveInRoot before git sees it, so a climb out of the root is the uniform ErrPathEscape
+// refusal and no git process runs.
+func TestGitShow_PathOutsideTheWorkspaceIsRefused(t *testing.T) {
+	root := gitRepo(t)
+
+	res, err := NewGitShow(root).Execute(context.Background(), showCall("c1", `{"ref":"HEAD","path":"../../etc/passwd"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, ErrPathEscape.Error()) {
+		t.Errorf("git_show outside the root = %q (isError=%v), want the ErrPathEscape refusal", res.Content, res.IsError)
+	}
+}
+
+// TestGitShow_MissingPathAtRefNamesBoth: a path that exists today but not at the ref is an
+// IsError naming the path and the ref, so the model learns WHICH half was wrong.
+func TestGitShow_MissingPathAtRefNamesBoth(t *testing.T) {
+	root := gitRepo(t)
+	commitFileForTest(t, root, "later.txt", "added later\n", "second")
+
+	res, err := NewGitShow(root).Execute(context.Background(), showCall("c1", `{"ref":"HEAD~1","path":"later.txt"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "later.txt") || !strings.Contains(res.Content, "HEAD~1") {
+		t.Errorf("git_show of a path absent at the ref = %q (isError=%v), want an error naming later.txt and HEAD~1", res.Content, res.IsError)
+	}
+}
+
+// TestGitShow_RefValidation: the same two-part ref guard as git_log, applied before the
+// subprocess; a ref carrying a second "<ref>:<path>" join is outside validRef's class too.
+func TestGitShow_RefValidation(t *testing.T) {
+	t.Parallel()
+	sh := NewGitShow(t.TempDir())
+
+	for _, ref := range []string{"-D", "--output=x", "HEAD:other.txt", "a b", "$(rm)"} {
+		res, err := sh.Execute(context.Background(), showCall("c1", `{"ref":`+strconv.Quote(ref)+`,"path":"README.md"}`))
+		if err != nil {
+			t.Fatalf("ref %q: Execute err = %v", ref, err)
+		}
+		if !res.IsError || !strings.Contains(res.Content, "invalid ref") {
+			t.Errorf("ref %q = %q (isError=%v), want the invalid-ref refusal", ref, res.Content, res.IsError)
+		}
+	}
+	for _, args := range []string{`{"path":"README.md"}`, `{"ref":"HEAD"}`} {
+		res, err := sh.Execute(context.Background(), showCall("c1", args))
+		if err != nil {
+			t.Fatalf("%s: Execute err = %v", args, err)
+		}
+		if !res.IsError || !strings.Contains(res.Content, "is required") {
+			t.Errorf("%s = %q (isError=%v), want the required-argument refusal", args, res.Content, res.IsError)
+		}
+	}
+}
+
+// TestGitShow_InheritsTheOpenEndedCap: a 1,000-line file at HEAD comes back through renderFile,
+// so an open-ended call gets read_file's 400-line default and its tail, and a range is honoured
+// as written — the tool never grows a cap of its own.
+func TestGitShow_InheritsTheOpenEndedCap(t *testing.T) {
+	root := gitRepo(t)
+	var b strings.Builder
+	for i := 1; i <= 1000; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	commitFileForTest(t, root, "big.txt", b.String(), "big")
+	sh := NewGitShow(root)
+
+	res, err := sh.Execute(context.Background(), showCall("c1", `{"ref":"HEAD","path":"big.txt"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("git_show errored: %q", res.Content)
+	}
+	if !strings.HasPrefix(res.Content, "[File: big.txt @ HEAD, 1001 lines total, showing lines 1-400]\n") {
+		t.Errorf("header = %q, want the capped 1-400 range", strings.SplitN(res.Content, "\n", 2)[0])
+	}
+	if !strings.HasSuffix(res.Content, "line 400\n[showing lines 1-400 of 1001 — pass start_line/end_line for the rest]") {
+		t.Errorf("tail = %q, want line 400 then read_file's own cap tail", res.Content[len(res.Content)-120:])
+	}
+
+	res, err = sh.Execute(context.Background(), showCall("c2", `{"ref":"HEAD","path":"big.txt","start_line":998,"end_line":1000}`))
+	if err != nil {
+		t.Fatalf("ranged Execute err = %v", err)
+	}
+	if want := "[File: big.txt @ HEAD, 1001 lines total, showing lines 998-1000]\nline 998\nline 999\nline 1000"; res.Content != want {
+		t.Errorf("ranged git_show = %q, want %q", res.Content, want)
+	}
+}
+
+// TestGitShow_ArgvIsHardenedAndCwdRelative pins what git is handed: --no-textconv --no-ext-diff
+// (a blob named by path would otherwise run the repository's textconv driver) and the object
+// spelled `<ref>:./<relative path>`, so git resolves it against the process's cwd.
+func TestGitShow_ArgvIsHardenedAndCwdRelative(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	argv := recordGitArgv(t, "show", func() (domain.ToolResult, error) {
+		return NewGitShow(root).Execute(context.Background(), showCall("c1", `{"ref":"v1.2","path":"docs/guide.md"}`))
+	})
+	if !hasHardeningPair(argv) {
+		t.Errorf("show argv = %q, want it to carry --no-textconv --no-ext-diff", argv)
+	}
+	if got := argv[len(argv)-1]; got != "v1.2:./docs/guide.md" {
+		t.Errorf("show argv last element = %q, want v1.2:./docs/guide.md", got)
+	}
+}
+
+// TestGitLog_PathNarrowsAfterTheDoubleDash: the optional path is a pathspec placed after the
+// existing "--", workspace-relative and with its trailing slash kept, so the ref position stays
+// terminated and TestGitLog_PathShapedRefIsNotAPathspecLog's guarantee is untouched.
+func TestGitLog_PathNarrowsAfterTheDoubleDash(t *testing.T) {
+	root := t.TempDir()
+
+	argv := recordGitArgv(t, "log", func() (domain.ToolResult, error) {
+		return NewGitLog(root).Execute(context.Background(), logCall("c1", `{"path":"internal/"}`))
+	})
+	if n := len(argv); n < 3 || argv[n-3] != "HEAD" || argv[n-2] != "--" || argv[n-1] != "internal/" {
+		t.Errorf("log argv = %q, want it to end HEAD -- internal/", argv)
+	}
+}
+
+// TestGitLog_PathFiltersTheHistory runs the live path: only the commits that touched the path
+// are listed, and a path outside the workspace is the fence's refusal.
+func TestGitLog_PathFiltersTheHistory(t *testing.T) {
+	root := gitRepo(t)
+	commitFileForTest(t, root, "other.txt", "other\n", "touch other")
+	lg := NewGitLog(root)
+
+	res, err := lg.Execute(context.Background(), logCall("c1", `{"path":"other.txt"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError || !strings.Contains(res.Content, "touch other") || strings.Contains(res.Content, "initial") {
+		t.Errorf("log of other.txt = %q (isError=%v), want only the commit that touched it", res.Content, res.IsError)
+	}
+
+	res, err = lg.Execute(context.Background(), logCall("c2", `{"path":"../../etc"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, ErrPathEscape.Error()) {
+		t.Errorf("log of a path outside the root = %q (isError=%v), want the ErrPathEscape refusal", res.Content, res.IsError)
+	}
+}
+
+// TestGitBranch_ListMarksRemoteRefs: with a remote-tracking branch present, list still runs ONE
+// branch process (the confine count stays at the two config probes plus one) and tags the
+// remote ref " (remote)" while the local names read as before.
+func TestGitBranch_ListMarksRemoteRefs(t *testing.T) {
+	root, _ := gitRepoWithBareRemote(t, "origin")
+	conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}
+	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: conf,
+		Box:      domain.ConfinementBox{WorkspaceRoot: root},
+	})
+
+	res, err := NewGitBranch(root).Execute(ctx, branchCall("c1", `{"action":"list"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("list errored: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "origin/main (remote)") {
+		t.Errorf("list = %q, want it to tag origin/main (remote)", res.Content)
+	}
+	if !strings.Contains(res.Content, "main *") || strings.Contains(res.Content, "refs/heads/") {
+		t.Errorf("list = %q, want the current local branch as \"main *\" with the refs/heads/ prefix stripped", res.Content)
+	}
+	if conf.confineCount() != 3 {
+		t.Errorf("Confine called %d times, want 3 (two config probes + the one branch process — remotes are marked from that same listing)", conf.confineCount())
+	}
+}
+
+// TestRenderBranchList pins the line rewrite on git's own format output, including the entries
+// that carry no refname (a detached HEAD) and the blank trailing line.
+func TestRenderBranchList(t *testing.T) {
+	t.Parallel()
+
+	in := "refs/heads/main *\nrefs/heads/feature  \nrefs/remotes/origin/main  \n(HEAD detached at 392a097) *\n"
+	want := "main *\nfeature  \norigin/main (remote)  \n(HEAD detached at 392a097) *\n"
+	if got := renderBranchList(in); got != want {
+		t.Errorf("renderBranchList = %q, want %q", got, want)
 	}
 }

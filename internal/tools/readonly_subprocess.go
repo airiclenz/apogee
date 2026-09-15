@@ -25,12 +25,15 @@ import "github.com/airiclenz/apogee/internal/domain"
 // internal/agent/treesnapshot.go), so refusing the model the identical read in Plan was a
 // rule outliving its reason.
 //
-// The marker may therefore be minted ONLY for a tool that, on EVERY reachable path:
+// The marker may therefore be minted ONLY for a tool that, on EVERY reachable path (the four
+// carriers today: git_status, git_log, git_diff_range and, since 2026-09-15, git_show):
 //
 //   - spawns git through runGit alone, so internal/gitexec's hardening options,
 //     GIT_CONFIG_NOSYSTEM, the repo-local command-config refusal and the argv[0] fence all
 //     apply;
-//   - passes gitDiffHardeningArgs on every diff-producing invocation;
+//   - passes gitDiffHardeningArgs on every diff-producing invocation — and on a blob read by
+//     path (git_show), where --no-textconv is what keeps the repository's textconv driver off
+//     the object;
 //   - validates each ref it accepts with validRef AND looksLikeOption;
 //   - writes nothing to the tree, the index or the repository.
 //

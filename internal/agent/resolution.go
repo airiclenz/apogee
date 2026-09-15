@@ -327,7 +327,7 @@ const (
 // that carries neither a marker nor a read-only declaration is a third-party in-process writer.
 //
 // classReadOnlySubprocess is read-only BY CONSTRUCTION and a subprocess only by MECHANISM: the
-// hardened git read trio (git_status, git_log, git_diff_range) builds every argv itself, runs
+// hardened git read set (git_status, git_log, git_diff_range, git_show) builds every argv itself, runs
 // with hooks/fsmonitor off, refuses repo-local program keys and passes no user string to a
 // shell, so the "a subprocess is unbounded" premise that puts classSubprocess behind a
 // confinement box does not hold for it (contract §4 amendment 2026-09-06). It is consulted
@@ -390,7 +390,7 @@ func classifyTool(tool domain.Tool) toolClass {
 // (contract §4 fn 2, resolved 2026-08-02; previously the menu read the declaration and offered
 // exactly that tool, which the ladder refused on the call).
 //
-// Two classes pass: classReadOnly, and classReadOnlySubprocess — the hardened git read trio,
+// Two classes pass: classReadOnly, and classReadOnlySubprocess — the hardened git read set,
 // read-only by construction and a subprocess only by mechanism, which Plan both offers and runs
 // (contract §4 amendment 2026-09-06).
 //

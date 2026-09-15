@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,27 +14,28 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitexec"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ----------------------------------------------------------------------------
-// The git tools (P3.9) — branch / commit / diff-range / status / log over the system git
+// The git tools (P3.9) — branch / commit / diff-range / status / log / show over the system git
 // ----------------------------------------------------------------------------
 //
-// Five one-shot tools shell out to the system `git` (§3a — a convenience dep, detected on
-// PATH and degrading gracefully when absent, never a hard dependency). All five are
+// Six one-shot tools shell out to the system `git` (§3a — a convenience dep, detected on
+// PATH and degrading gracefully when absent, never a hard dependency). All six are
 // SubprocessTools (domain.SubprocessTool): the dispatch disposition runs the write pair —
 // git_branch and git_commit — under Confiner.Confine in Auto and gates them when
 // fs-confinement is unavailable ("confine if you can, gate if you can't").
 //
-// git_diff_range, git_status and git_log also declare ReadOnly(), and since 2026-09-06 they
-// carry the unexported readOnlySubprocess marker (readonly_subprocess.go) — that marker is
-// what classifies them: RO-subproc, a class the ladder gives the READ-ONLY row in EVERY mode
-// (confinement-execution-contract §4, amended 2026-09-06). So Plan offers and runs the read
-// trio, and Auto runs it unconfined like read_file. Their Subprocess() declaration is
-// unchanged and still drives the execution mechanics — the scoped environment, the argv
-// fence, the §2.4 process-group teardown.
+// git_diff_range, git_status, git_log and (since 2026-09-15) git_show also declare ReadOnly(),
+// and since 2026-09-06 they carry the unexported readOnlySubprocess marker
+// (readonly_subprocess.go) — that marker is what classifies them: RO-subproc, a class the
+// ladder gives the READ-ONLY row in EVERY mode (confinement-execution-contract §4, amended
+// 2026-09-06). So Plan offers and runs the read set, and Auto runs it unconfined like
+// read_file. Their Subprocess() declaration is unchanged and still drives the execution
+// mechanics — the scoped environment, the argv fence, the §2.4 process-group teardown.
 //
-// All five are stateless across Turns (ADR 0008 — a fresh git process per call), path-scope
+// All six are stateless across Turns (ADR 0008 — a fresh git process per call), path-scope
 // their inputs to the workspace root, and run with a scrubbed, allowlisted environment so a
 // stray inherited variable cannot change git's behaviour.
 //
@@ -237,7 +239,46 @@ func (t *GitBranch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if res.exitCode != 0 {
 		return errorResult(call.ID, gitResultText(res, "git branch failed")), nil
 	}
+	if args.Action == "list" {
+		res.combinedOutput = renderBranchList(res.combinedOutput)
+	}
 	return okResult(call.ID, gitResultText(res, branchSuccessMessage(args))), nil
+}
+
+// branchListFormat is the --format `list` asks git for: the FULL refname rather than the short
+// one, so the one branch process says which entries are remote-tracking refs (refs/remotes/…)
+// and renderBranchList can mark them — `%(refname:short)` had already folded that away, and a
+// second `branch -r` process would break the "one list, one process" pin. `%(HEAD)` is the
+// current-branch "*" as before.
+const branchListFormat = "%(refname) %(HEAD)"
+
+// Where a full refname says a branch lives: under refs/heads/ it is local, under refs/remotes/
+// it is a remote-tracking ref.
+const (
+	localRefPrefix  = "refs/heads/"
+	remoteRefPrefix = "refs/remotes/"
+)
+
+// renderBranchList turns the branchListFormat lines back into the short names the model read
+// before — `main *`, `feature  ` — with every remote-tracking ref suffixed ` (remote)` after its
+// name (`origin/main (remote)  `), so a model choosing a branch to switch to or delete can tell
+// `origin/main` from `main` without a second call. A line git synthesises without a refname
+// (the detached-HEAD entry) passes through untouched.
+func renderBranchList(out string) string {
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		name, rest, _ := strings.Cut(line, " ")
+		switch {
+		case strings.HasPrefix(name, localRefPrefix):
+			name = strings.TrimPrefix(name, localRefPrefix)
+		case strings.HasPrefix(name, remoteRefPrefix):
+			name = strings.TrimPrefix(name, remoteRefPrefix) + " (remote)"
+		default:
+			continue
+		}
+		lines[i] = name + " " + rest
+	}
+	return strings.Join(lines, "\n")
 }
 
 // looksLikeOption reports whether a model-supplied ref/branch argument begins with "-", which
@@ -286,7 +327,7 @@ func buildBranchArgs(args gitBranchArgs) (gitArgs []string, errMsg string) {
 	case "switch":
 		return []string{"checkout", args.Name, "--"}, ""
 	case "list":
-		return []string{"branch", "-a", "--format=%(refname:short) %(HEAD)"}, ""
+		return []string{"branch", "-a", "--format=" + branchListFormat}, ""
 	case "delete":
 		if protectedBranches[strings.ToLower(args.Name)] {
 			return nil, "cannot delete protected branch '" + args.Name + "'"
@@ -869,12 +910,13 @@ func writeStatusSection(b *strings.Builder, title string, entries []string) {
 
 var gitLogSpec = toolSpec{
 	name:        "git_log",
-	description: "Show the recent commit history of a git ref (branch, tag, or commit) as one line per commit: short hash, ISO date, and subject. Read-only — it changes nothing. Defaults to HEAD and to the 20 most recent commits.",
+	description: "Show the recent commit history of a git ref (branch, tag, or commit) as one line per commit: short hash, ISO date, and subject, optionally narrowed to the commits that touched one path. Read-only — it changes nothing. Defaults to HEAD and to the 20 most recent commits.",
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "ref": {"type": "string", "description": "Ref to log (branch name, tag, or commit SHA). Defaults to HEAD."},
-    "max_count": {"type": "integer", "description": "How many commits to show, most recent first (default 20, clamped to 100)"}
+    "max_count": {"type": "integer", "description": "How many commits to show, most recent first (default 20, clamped to 100)"},
+    "path": {"type": "string", "description": "Optional file or directory, relative to the workspace root: only the commits that touched it are shown"}
   }
 }`),
 }
@@ -882,6 +924,7 @@ var gitLogSpec = toolSpec{
 type gitLogArgs struct {
 	Ref      string `json:"ref"`
 	MaxCount int    `json:"max_count"`
+	Path     string `json:"path"`
 }
 
 // defaultGitLogCount and maxGitLogCount bound how much history one git_log call returns. A
@@ -962,6 +1005,8 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 	// tracked path is a PATHSPEC log — it silently answers "which commits touched this file"
 	// with exit 0, so a model's typo'd branch name would return a plausible, wrong history
 	// reported as success. With "--" the same call fails loudly ("fatal: bad revision").
+	// A path the call DID ask for goes after that "--" — the one place git reads it as a
+	// pathspec and nothing else — workspace-relative, since the process runs in the root.
 	gitArgs := append([]string{"log"}, gitDiffHardeningArgs...)
 	gitArgs = append(gitArgs,
 		fmt.Sprintf("--max-count=%d", clampGitLogCount(args.MaxCount)),
@@ -970,6 +1015,13 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 		ref,
 		"--",
 	)
+	if strings.TrimSpace(args.Path) != "" {
+		pathspec, err := workspacePathspec(args.Path, t.root)
+		if err != nil {
+			return errorResult(call.ID, err.Error()), nil
+		}
+		gitArgs = append(gitArgs, pathspec)
+	}
 	res, err := runGit(ctx, gitPath, t.root, gitTimeout, gitArgs...)
 	if err != nil {
 		return domain.ToolResult{}, err
@@ -995,6 +1047,159 @@ func clampGitLogCount(n int) int {
 	}
 }
 
+// workspacePathspec resolves a model-supplied path through the workspace fence (resolveInRoot,
+// so a symlink out of the root or a ".." climb is ErrPathEscape) and hands back the
+// WORKSPACE-RELATIVE spelling git reads as a pathspec from a process running in the root —
+// `internal/cli`, never the absolute real path, which would name the wrong tree on a box whose
+// root is reached through a symlink. A trailing separator on the argument is kept, because
+// `internal/` and `internal` are different pathspecs to git (the first matches a directory
+// only) and the model wrote the one it meant.
+func workspacePathspec(input, root string) (string, error) {
+	abs, err := resolveInRoot(input, root)
+	if err != nil {
+		return "", err
+	}
+	rel := filepath.ToSlash(security.WorkspaceRelative(abs, root))
+	if rel != "." && strings.HasSuffix(input, "/") {
+		rel += "/"
+	}
+	return rel, nil
+}
+
+// ----------------------------------------------------------------------------
+// git_show — a file's content at a revision
+// ----------------------------------------------------------------------------
+
+var gitShowSpec = toolSpec{
+	name:        "git_show",
+	description: "Read a file as it was at a git revision (a commit, branch, or tag) without touching the working tree — the committed version, an older one, or a file that has since been deleted. Read-only — it changes nothing. Takes the same range arguments as read_file: without a range the first 400 lines (or 40 KiB) come back and the tail says how to get the rest.",
+	schema: json.RawMessage(`{
+  "type": "object",
+  "required": ["ref", "path"],
+  "properties": {
+    "ref": {"type": "string", "description": "Revision to read the file at (commit SHA, branch name, tag, or a form like HEAD~1)"},
+    "path": {"type": "string", "description": "File path, relative to the workspace root"},
+    "start_line": {"type": "integer", "description": "Optional 1-based start line"},
+    "end_line": {"type": "integer", "description": "Optional 1-based end line (inclusive)"},
+    "max_lines": {"type": "integer", "description": "Maximum number of lines to return"},
+    "locate": {"type": "string", "description": "Optional substring to locate; the result reports the absolute 1-based line numbers where it occurs, and without a range the content is a window of 10 lines around each hit."}
+  }
+}`),
+}
+
+// gitShowArgs is read_file's argument set plus the revision: the embedded readFileArgs carries
+// path and the range arguments under their read_file names, so the one decode serves both the
+// fence and renderFile, and a model that knows read_file knows git_show.
+type gitShowArgs struct {
+	Ref string `json:"ref"`
+	readFileArgs
+}
+
+// GitShow reads one file as it was at a revision — `git show <ref>:./<path>` — over the system
+// git, scoped to a workspace root. It is the read-at-a-revision the working tree cannot answer:
+// what a file looked like before the last commit, or a file a later commit deleted. Like
+// git_log it is read-only by construction and carries the readOnlySubprocess marker; what it
+// renders is read_file's own shape (renderFile), header, range arguments, locate and the
+// open-ended cap included.
+type GitShow struct {
+	toolSpec
+	root string
+}
+
+// NewGitShow returns a git-show tool operating in root.
+func NewGitShow(root string) *GitShow { return &GitShow{toolSpec: gitShowSpec, root: root} }
+
+// ReadOnly reports that git_show performs no writes (reading an object changes nothing) — an
+// honest statement about the tool, read by self-regulation's read/write tally. As with the other
+// git reads it does not classify the call on its own: the readOnlySubprocess marker below does,
+// and the ladder reads that as the read-only row in every mode (confinement-execution-contract
+// §4, amended 2026-09-06).
+func (t *GitShow) ReadOnly() bool { return true }
+
+// Subprocess reports that git_show launches an OS subprocess (the system git). The marker still
+// drives the execution mechanics — the scoped environment, the argv fence, the §2.4 teardown —
+// while the readOnlySubprocess marker below classifies the call RO-subproc.
+func (t *GitShow) Subprocess() bool { return true }
+
+// readOnlySubprocess mints the RO-subproc marker for git_show: its one invocation goes through
+// runGit, carries gitDiffHardeningArgs (--no-textconv matters here — `git show <ref>:<path>`
+// would otherwise run the repository's textconv driver on the blob), validates its ref with
+// validRef plus looksLikeOption, fences its path with resolveInRoot, and writes nothing
+// (readonly_subprocess.go).
+func (t *GitShow) readOnlySubprocess() {}
+
+// Execute reads the file at the revision and renders it exactly as read_file would render the
+// same bytes: the `[File: <path> @ <ref>, N lines total, showing lines a-b]` header, the range
+// arguments honoured as written, an open-ended read capped at defaultReadLines /
+// defaultReadBytes with the tail that says how to get the rest, and a locate report when a
+// term was asked for. The path is fenced to the workspace (resolveInRoot — an escape is refused
+// with the uniform ErrPathEscape message) and handed to git in its `./`-prefixed
+// workspace-relative form, which git resolves against the process's cwd rather than the
+// repository root, so a workspace that is a subdirectory of its repository reads the right
+// file. A missing git, an invalid ref, a path escape, a binary blob, or a git failure — a path
+// that does not exist at that ref, an unknown ref — is surfaced as a result naming the path and
+// the ref; only ctx cancellation or a confinement-unavailable demotion is a Go error.
+//
+// The blob comes back through the subprocess's capped output (subprocess.MaxSubprocessOutputBytes),
+// so a file larger than that arrives with the capped buffer's own truncation marker at its end
+// rather than silently short.
+func (t *GitShow) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ToolResult{}, err
+	}
+
+	args, fail, ok := decodeToolArgs[gitShowArgs](call)
+	if !ok {
+		return fail, nil
+	}
+	ref := strings.TrimSpace(args.Ref)
+	if ref == "" {
+		return errorResult(call.ID, "ref is required"), nil
+	}
+	// The same two-part ref guard as git_log: the conservative character class, plus an
+	// explicit leading-"-" rejection (SEC-06). The class has no ":" in it, so the ref can never
+	// carry a second path into the <ref>:<path> join below.
+	if !validRef.MatchString(ref) || looksLikeOption(ref) {
+		return errorResult(call.ID, "invalid ref: "+ref), nil
+	}
+	if strings.TrimSpace(args.Path) == "" {
+		return errorResult(call.ID, "path is required"), nil
+	}
+	rel, err := workspacePathspec(args.Path, t.root)
+	if err != nil {
+		return errorResult(call.ID, err.Error()), nil
+	}
+	if rel == "." {
+		return errorResult(call.ID, "git_show: path must name a file inside the workspace, not the workspace root"), nil
+	}
+
+	gitPath, refusal, ok := gitProgram(ctx, t.root)
+	if !ok {
+		return errorResult(call.ID, refusal), nil
+	}
+
+	gitArgs := append([]string{"show"}, gitDiffHardeningArgs...)
+	gitArgs = append(gitArgs, ref+":./"+rel)
+	res, err := runGit(ctx, gitPath, t.root, gitDiffTimeout, gitArgs...)
+	if err != nil {
+		return domain.ToolResult{}, err
+	}
+	if res.exitCode != 0 {
+		return errorResult(call.ID, fmt.Sprintf("git_show: cannot read %s at %s: %s",
+			rel, ref, gitResultText(res, "git show failed"))), nil
+	}
+	if looksBinary([]byte(res.combinedOutput)) {
+		return errorResult(call.ID, fmt.Sprintf("git_show: %s at %s is a binary file (%d bytes)",
+			rel, ref, len(res.combinedOutput))), nil
+	}
+
+	text, span, rangeFailure := renderFile(rel+" @ "+ref, res.combinedOutput, args.readFileArgs)
+	if rangeFailure != "" {
+		return errorResult(call.ID, rangeFailure), nil
+	}
+	return okSummary(call.ID, text, span), nil
+}
+
 var (
 	_ domain.Tool           = (*GitBranch)(nil)
 	_ domain.SubprocessTool = (*GitBranch)(nil)
@@ -1012,4 +1217,8 @@ var (
 	_ domain.ReadOnlyTool   = (*GitLog)(nil)
 	_ domain.SubprocessTool = (*GitLog)(nil)
 	_ readOnlySubprocess    = (*GitLog)(nil)
+	_ domain.Tool           = (*GitShow)(nil)
+	_ domain.ReadOnlyTool   = (*GitShow)(nil)
+	_ domain.SubprocessTool = (*GitShow)(nil)
+	_ readOnlySubprocess    = (*GitShow)(nil)
 )

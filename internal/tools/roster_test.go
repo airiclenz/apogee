@@ -292,14 +292,14 @@ func TestDefaultToolsLiftTheConsoleFamily(t *testing.T) {
 
 // TestReadOnlySubprocessNamesTheGitReadTrio walks the WHOLE shipped roster — every host hook set
 // and the default-off family lifted, so no tool can hide from it — and pins the marker's
-// membership by name. It is the guard against silent drift in both directions: a new subprocess
-// tool that quietly mints the marker without meeting readonly_subprocess.go's conditions, and a
-// refactor that drops it from one of the three git reads and puts that read back behind the
-// subprocess row in Plan.
+// membership by name: the original trio plus git_show (2026-09-15). It is the guard against
+// silent drift in both directions: a new subprocess tool that quietly mints the marker without
+// meeting readonly_subprocess.go's conditions, and a refactor that drops it from one of the
+// four git reads and puts that read back behind the subprocess row in Plan.
 func TestReadOnlySubprocessNamesTheGitReadTrio(t *testing.T) {
 	t.Parallel()
 
-	want := map[string]bool{"git_status": true, "git_log": true, "git_diff_range": true}
+	want := map[string]bool{"git_status": true, "git_log": true, "git_diff_range": true, "git_show": true}
 
 	lifted := HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}, Enabled: consoleFamilyNames}
 	seen := make(map[string]bool, len(want))

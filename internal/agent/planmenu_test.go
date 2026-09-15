@@ -40,7 +40,8 @@ func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.Pre
 // classes no built-in occupies — a third-party network tool, an MCP tool, a third-party
 // in-process writer — and the two RO-declaring-marker-carrying shapes a host could register.
 // Together they span all eight toolClass values — the RO-subproc one is occupied by the
-// shipped git read trio, whose marker is unexported and therefore unfakeable here.
+// shipped git read set (the trio plus git_show), whose marker is unexported and therefore
+// unfakeable here.
 func planMenuTools(ws string) []domain.Tool {
 	all := tools.DefaultToolsWithHost(ws, tools.HostTools{
 		Asker:     stubAsker{},
@@ -196,26 +197,26 @@ func TestPlanToolMenuDropsDiagnosticsAndTheUnmarkedFakes(t *testing.T) {
 	}
 }
 
-// TestPlanToolMenuOffersTheGitReadTrio is the other half of the same named assertion: the three
-// hardened git read tools ARE on the Plan menu, by exact name, because they carry the
-// readOnlySubprocess marker and the Plan ladder runs them (contract §4 amendment 2026-09-06).
-// The write-side git tools and the two other subprocess surfaces stay off it, so the assertion
-// pins the boundary rather than just the addition — a marker minted one tool too widely fails
-// here by name.
+// TestPlanToolMenuOffersTheGitReadTrio is the other half of the same named assertion: the four
+// hardened git read tools — the trio plus git_show (2026-09-15) — ARE on the Plan menu, by exact
+// name, because they carry the readOnlySubprocess marker and the Plan ladder runs them
+// (contract §4 amendment 2026-09-06). The write-side git tools and the two other subprocess
+// surfaces stay off it, so the assertion pins the boundary rather than just the addition — a
+// marker minted one tool too widely fails here by name.
 func TestPlanToolMenuOffersTheGitReadTrio(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	toolset := planMenuTools(ws)
 	offered := offeredNames(planMenuAgent(t, domain.ModePlan, toolset).toolMenu())
 
-	for _, name := range []string{"git_status", "git_log", "git_diff_range"} {
+	for _, name := range []string{"git_status", "git_log", "git_diff_range", "git_show"} {
 		if !offered[name] {
 			t.Errorf("Plan menu is missing %s; it is read-only by construction and Plan runs it", name)
 		}
 	}
 	for _, name := range []string{"diagnostics", "git_branch", "git_commit", "terminal"} {
 		if offered[name] {
-			t.Errorf("Plan menu offers %s; only the hardened git READ trio crosses into Plan", name)
+			t.Errorf("Plan menu offers %s; only the hardened git READ set crosses into Plan", name)
 		}
 	}
 }

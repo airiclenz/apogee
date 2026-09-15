@@ -20,7 +20,7 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
 		"view_diff", "copy_file", "move_file", "delete_file",
 		"terminal", "python_exec",
-		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log",
+		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log", "git_show",
 		"diagnostics", "run_tests",
 		"web_fetch", "http_request", "web_search",
 		"sub_agent", "task_list",
@@ -31,10 +31,10 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 	}
 
 	// ask_user (no Asker) and present_document (no Presenter) are omitted when NewDefaultRegistry
-	// uses a zero HostTools, so the default set is 26 (21 base/exec/git/diag/tests + 3 network +
+	// uses a zero HostTools, so the default set is 27 (22 base/exec/git/diag/tests + 3 network +
 	// sub_agent + task_list).
-	if got := len(registry.All()); got != 26 {
-		t.Errorf("default registry holds %d tools, want 26", got)
+	if got := len(registry.All()); got != 27 {
+		t.Errorf("default registry holds %d tools, want 27", got)
 	}
 	if _, ok := registry.Lookup("ask_user"); ok {
 		t.Error("ask_user must NOT be registered without an Asker")
@@ -54,7 +54,7 @@ func TestNewDefaultRegistry_MenuOrderIsDeterministic(t *testing.T) {
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
 		"view_diff", "copy_file", "move_file", "delete_file",
 		"terminal", "python_exec",
-		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log",
+		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log", "git_show",
 		"diagnostics", "run_tests",
 		"web_fetch", "http_request", "web_search",
 		"sub_agent", "task_list",
@@ -83,8 +83,8 @@ func TestNewDefaultRegistryWithHost_RegistersAskUserOnlyWithAsker(t *testing.T) 
 	if got := all[len(all)-1].Name(); got != "ask_user" {
 		t.Errorf("ask_user should be last in the menu, got last = %q", got)
 	}
-	if got := len(all); got != 27 {
-		t.Errorf("registry with Asker holds %d tools, want 27", got)
+	if got := len(all); got != 28 {
+		t.Errorf("registry with Asker holds %d tools, want 28", got)
 	}
 }
 
@@ -106,14 +106,14 @@ func TestNewDefaultRegistryWithHost_RegistersPresentDocumentOnlyWithPresenter(t 
 	if _, ok := reg.Lookup("ask_user"); ok {
 		t.Error("ask_user must stay absent when only a Presenter is configured")
 	}
-	if got := len(reg.All()); got != 27 {
-		t.Errorf("registry with a Presenter holds %d tools, want 27", got)
+	if got := len(reg.All()); got != 28 {
+		t.Errorf("registry with a Presenter holds %d tools, want 28", got)
 	}
 
 	// Both delegates ⇒ both tools, present_document last in the menu.
 	both := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}}).All()
-	if got := len(both); got != 28 {
-		t.Errorf("registry with both delegates holds %d tools, want 28", got)
+	if got := len(both); got != 29 {
+		t.Errorf("registry with both delegates holds %d tools, want 29", got)
 	}
 	if got := both[len(both)-1].Name(); got != "present_document" {
 		t.Errorf("present_document should be last in the menu, got last = %q", got)
@@ -248,6 +248,9 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		// nothing — the same declaration-vs-marker split as git_diff_range.
 		"git_status": true,
 		"git_log":    true,
+		// git_show (2026-09-15) reads one file at a revision and mutates nothing — the same
+		// declaration-vs-marker split again.
+		"git_show": true,
 		// Diagnostics (P3.10): inspects only — read-only, same declaration-vs-marker split as
 		// git_diff_range (the go vet half shells out, so the call takes the subprocess row).
 		"diagnostics": true,
@@ -429,8 +432,8 @@ func TestNewDefaultRegistry_OmitsTheConsoleFamily(t *testing.T) {
 			t.Errorf("%q ships default-off but a call could resolve it with nothing lifting it", name)
 		}
 	}
-	if got := len(registry.All()); got != 26 {
-		t.Errorf("default registry holds %d tools, want the 26 it held before the Console family — a default-off family must not grow the default menu", got)
+	if got := len(registry.All()); got != 27 {
+		t.Errorf("default registry holds %d tools, want the 27 it held before the Console family — a default-off family must not grow the default menu", got)
 	}
 }
 

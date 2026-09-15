@@ -179,11 +179,11 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // workspaceScopedWriter marker so the dispatch disposition path-bounds rather than confines
 // them (ADR 0012 D1).
 // The execution tools (P3.8 — terminal, python_exec) and the git tools (P3.9 —
-// git_branch, git_commit, git_diff_range, joined 2026-08-10 by git_status and git_log)
-// follow; they are SubprocessTools the
+// git_branch, git_commit, git_diff_range, joined 2026-08-10 by git_status and git_log and
+// 2026-09-15 by git_show) follow; they are SubprocessTools the
 // disposition confines in Auto (or gates when confinement is unavailable), not
-// workspace-scoped writers — except the read trio: git_diff_range, git_status and git_log
-// declare ReadOnly() and carry the readOnlySubprocess marker (readonly_subprocess.go), which
+// workspace-scoped writers — except the read set: git_diff_range, git_status, git_log and
+// git_show declare ReadOnly() and carry the readOnlySubprocess marker (readonly_subprocess.go), which
 // classifies them RO-subproc, so they take the read-only row in every mode — offered and run in
 // Plan, unconfined in Auto — while their subprocess marker still drives the execution
 // mechanics. The
@@ -265,6 +265,7 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		NewGitDiffRange(root),
 		NewGitStatus(root),
 		NewGitLog(root),
+		NewGitShow(root),
 		NewDiagnostics(root),
 		NewRunTests(root, host.SecretEnvVars),
 		NewWebFetch(host.URLGuard),

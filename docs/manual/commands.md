@@ -250,6 +250,15 @@ file whose leading bytes hold a NUL — an executable, an archive, an image — 
 walks past such a file on the same test. A PDF is the one exception: it is detected by its content
 and returned as extracted text.
 
+**A file at a revision reads the same way.** `git_show` reads one file as it was at a commit,
+branch or tag — the committed version beside your edits, an older one, or a file a later commit
+deleted — and renders it exactly as `read_file` would: the same header (`[File: README.md @ HEAD~1,
+…]`), the same `start_line`/`end_line`/`max_lines`/`locate` arguments, the same 400-line default
+bound and tail, and the same one-line refusal for a binary. A path that does not exist at that
+revision is refused naming both (`git_show: cannot read docs/old.md at HEAD~5: …`). Its companions
+in the read-only git set: `git_log` takes an optional `path` to list only the commits that touched
+it, and `git_branch`'s list marks every remote-tracking branch ` (remote)`.
+
 **A wide match row is clipped.** A `grep` hit on a minified bundle or a `.jsonl` record can sit on
 a line thousands of characters wide, and the match is worth its neighbourhood, not the whole row:
 a matched line wider than 512 characters comes back as the 512 characters around its first match,

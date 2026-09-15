@@ -102,6 +102,19 @@
 // answers a different question with exit 0 — a wrong history reported as success. Like
 // git_diff_range and git_status it declares ReadOnly() and carries the readOnlySubprocess marker
 // that classifies it RO-subproc, the class the ladder runs on the read-only row in every mode.
+// Since 2026-09-15 it takes an optional path, placed after that "--" so git reads it as a
+// pathspec and nothing else, and git_branch's list marks every remote-tracking ref " (remote)"
+// from the one branch process it already ran.
+//
+// git_show (2026-09-15) is the family's sixth member and the read the working tree cannot
+// answer: one file as it was at a revision (`git show <ref>:./<path>` — the committed version,
+// an older one, or a file a later commit deleted). Its ref takes git_log's two-part guard, its
+// path the workspace fence (resolveInRoot) before it is handed to git workspace-relative, and
+// what it renders is read_file's own shape through renderFile — the header, the range
+// arguments, locate, and the open-ended 400-line cap — so a model that knows read_file knows
+// git_show. It declares ReadOnly() and carries the readOnlySubprocess marker like the other
+// three reads; --no-textconv is the hardening that matters here, since git would otherwise run
+// the repository's textconv driver on a blob named by path.
 //
 // copy_file and move_file (2026-08-10) are the P3.7 family's move-bytes-that-already-exist half:
 // two write tools taking a source and a destination instead of a path and a payload. Both refuse
@@ -217,7 +230,7 @@
 // runner detection (go.mod / pytest config / package.json), the failure parsing per runner,
 // and the 8 KiB condensed verdict. diagnostics.go is diagnostics — go/parser in process, an
 // optional go vet, and the graceful "no provider" for every other language. git.go is the
-// whole git family: git_branch, git_commit, git_diff_range, git_status and git_log, with the
+// whole git family: git_branch, git_commit, git_diff_range, git_status, git_log and git_show, with the
 // ref guards and porcelain-v2 parsing they share — plus RunGitQuery, the package's one exported
 // non-tool entry, which lends the same hardened funnel to the ENGINE's own read-side git (the
 // tracked-file mutation floor, internal/agent/treesnapshot.go) so no bookkeeping git of

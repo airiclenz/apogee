@@ -354,7 +354,8 @@ program the child will run, the child's `PATH` and environment are scrubbed, not
 Confinement would add nothing a `read_file` does not already do without it. The 2026-07-26 rule is
 **not** withdrawn: it stands for every other marker carrier, and is superseded for this one class.
 
-**(c) Scope, and what an embedder gets.** Exactly `git_status`, `git_log` and `git_diff_range`.
+**(c) Scope, and what an embedder gets.** Exactly `git_status`, `git_log` and `git_diff_range`
+(2026-09-15: `git_show`, a file read at a revision, joined on the same minting conditions).
 `diagnostics` keeps the **subproc** row — it launches the Go toolchain, whose argv and plugins
 Apogee does not build or vouch for — so contract §4's footnote ² now covers `diagnostics` alone.
 `git_branch` and `git_commit` write and were never candidates; MCP, the network classes and

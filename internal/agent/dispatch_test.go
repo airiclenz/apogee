@@ -200,13 +200,15 @@ func TestClassifyTool(t *testing.T) {
 		// The shipped built-in that carries the pair, through the real tool: a read-only
 		// declaration plus an OS-subprocess launch Apogee cannot vouch for (the Go toolchain).
 		{"diagnostics (real)", tools.NewDiagnostics(ws), classSubprocess},
-		// Apogee's OWN hardened git read trio carries the unexported readOnlySubprocess marker
-		// (contract §4 amendment 2026-09-06), which is consulted BEFORE the bare subprocess
-		// marker and puts them on the read-only row of the ladder in every mode. The fake above
-		// cannot mint that marker, which is the whole point of leaving it unexported.
+		// Apogee's OWN hardened git read set — the trio plus git_show (2026-09-15) — carries the
+		// unexported readOnlySubprocess marker (contract §4 amendment 2026-09-06), which is
+		// consulted BEFORE the bare subprocess marker and puts them on the read-only row of the
+		// ladder in every mode. The fake above cannot mint that marker, which is the whole point
+		// of leaving it unexported.
 		{"git_status (real)", tools.NewGitStatus(ws), classReadOnlySubprocess},
 		{"git_log (real)", tools.NewGitLog(ws), classReadOnlySubprocess},
 		{"git_diff_range (real)", tools.NewGitDiffRange(ws), classReadOnlySubprocess},
+		{"git_show (real)", tools.NewGitShow(ws), classReadOnlySubprocess},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
