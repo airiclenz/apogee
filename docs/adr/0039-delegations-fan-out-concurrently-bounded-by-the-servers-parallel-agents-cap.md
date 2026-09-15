@@ -122,6 +122,16 @@ children **queue** through the wait-tolerant Approver (ADR 0031 invariant) one p
 time — the asking child blocks, siblings keep running — and the prompt names the asking
 child's task.
 
+> **Superseded in part 2026-09-15 (plan 2026-09-14 - 03, item 5; owner call 2026-09-14).** The
+> queue above was extended the same way to `ask_user` questions (decision 12's kind-blind prompt
+> slot, `AskRequest.SubAgentTask`/`SubAgentName`/`Depth` naming the asking child). No child asks
+> any more: `ask_user` and `present_document` are withheld from every sub-agent's roster, at every
+> depth and under any `tools` ask, because a delegation has no seat at the human's prompt — a
+> child reports the question, or its deliverable's path, in its result and the parent asks or
+> presents. Approvals from concurrent children still queue exactly as written; the prompt slot
+> stays kind-blind, now serialising children's approvals against the top-level agent's own
+> question. The identity carriers on the call context survive as the run's identity.
+
 ## Considered options
 
 - **Discovery overrides the config key ("fallback" shape)** — *rejected*: the repo's idiom

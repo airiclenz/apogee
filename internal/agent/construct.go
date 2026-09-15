@@ -74,7 +74,8 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	// up: concurrent children may reach an Approval gate at the same instant, and the host is
 	// promised one request at a time (domain.Approver). The seam queues on the PROMPT SLOT this
 	// Agent designates below — the surface an ask_user question queues on too, so the promise holds
-	// across both kinds and not merely within each.
+	// across both kinds and not merely within each (the question can only be the top-level agent's
+	// since 2026-09-15 — plan 2026-09-14 - 03, item 5 — no child holds ask_user).
 	cfg.Approver = queuedApprovals(cfg.Approver)
 
 	a := &Agent{
@@ -175,7 +176,9 @@ func serializedEvents(sink domain.EventSink) domain.EventSink {
 //
 // The slot it takes is the one the RUNNING AGENT designates on the call's context, not this
 // wrapper's own: a Driver draws one prompt, and an Approval shares that surface with an ask_user
-// question raised by a sibling through the tool seam in internal/tools. Queueing approvals only
+// question raised through the tool seam in internal/tools — by a sibling child until 2026-09-15,
+// by the top-level agent alone since (plan 2026-09-14 - 03, item 5 withholds ask_user from every
+// child). Queueing approvals only
 // against other approvals would leave exactly that pair colliding — one of the two reply channels
 // orphaned, its child blocked until the Turn is cancelled — so the queue is kind-blind. The
 // wrapper's own slot is the fallback for a seam used outside a running Agent (a unit test, a Driver
@@ -230,7 +233,10 @@ func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest
 // same mutex: newChildAgent copies the parent's Config, so a child re-uses the parent's seam instead
 // of stacking a private one at every depth. What actually keeps a whole tree in ONE queue is the
 // designated prompt slot, which rides the context a child inherits from its parent
-// (domain.WithPromptSlot) and therefore also holds for the ask_user questions the children raise.
+// (domain.WithPromptSlot) and therefore also held for the ask_user questions the children raised —
+// no longer reachable since 2026-09-15 (plan 2026-09-14 - 03, item 5): the tool is withheld from
+// every sub-agent, so the slot now serialises children's Approvals against the top-level agent's
+// own question.
 //
 // That same idempotence is what gives the tree ONE allow-for-session memory: the cache is created
 // here, with the wrapper, so re-using a parent's wrapper re-uses its memory — a child neither

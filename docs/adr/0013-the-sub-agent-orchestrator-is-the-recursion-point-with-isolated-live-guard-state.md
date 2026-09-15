@@ -59,6 +59,14 @@ stamps its own `Depth` in `base()`, the sub-agent's events nest at **`Depth = 1`
 per-call threading. The sub-agent starts **fresh** — only the delegated task, no parent
 conversation and no parent pending input (the ADR 0008 statelessness boundary).
 
+> **Amended 2026-09-15 (plan 2026-09-14 - 03, item 5).** The subset is no longer "the parent's
+> whole set by default": `defaultSubAgentTools` withholds `ask_user` and `present_document` from
+> every child unconditionally (the human's seat — owner call 2026-09-14), beside the recursion
+> point at the depth bound, and the `sub_agent` call's `tools` argument narrows the child further
+> (`"read-only"` = the inherited tools `planAdmits` plus `sub_agent` where offered; or a list of
+> names, refused whole when one is unknown). Both are name-lists into the same `Subset`, so the
+> structural "never an expansion" property is untouched.
+
 > **Amended 2026-08-10:** the allow-for-session approval cache used to be on that withheld list and
 > no longer is. It is now **session-scoped**, shared tree-wide through the approver queueing seam
 > (`queuedApprover`, whose idempotent wrapping already gives a parent and all its descendants ONE

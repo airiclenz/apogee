@@ -52,7 +52,9 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 
 	// Designate the prompt surface for everything this Turn reaches: the ONE slot an Approval and
 	// an ask_user question both queue on, so the human is never shown two prompts at once however
-	// many children are running (ADR 0039 decision 12). It is installed here — the single funnel
+	// many children are running (ADR 0039 decision 12; since 2026-09-15 — plan 2026-09-14 - 03,
+	// item 5 — no child holds ask_user, so the question side is the top-level agent's alone and
+	// the slot serialises children's Approvals against it). It is installed here — the single funnel
 	// every Step goes through, Run's and a Step-driving host's alike — because both gates hang off
 	// this context: the loop consults the Approver under it, and a tool's Execute receives it. A
 	// sub-agent's Steps run under a context derived from this one, and WithPromptSlot keeps the
@@ -1421,6 +1423,10 @@ func (a *Agent) maxOutputTokens() int {
 // toolMenu builds the model's tool menu from the resolved registry (nil ⇒ no tools). In
 // Plan mode it offers only the tools Plan can actually run — the model is never shown a call
 // it cannot make on any target (ADR 0012: Plan is read-only except for the session scratch dir).
+// A sub-agent's registry is already the narrowed one its spawn built — the parent's minus the
+// human-seat tools no child gets, minus whatever the call's `tools` argument took away
+// (defaultSubAgentTools, requestedChildTools) — so the child's menu reads that set and needs no
+// filter of its own.
 //
 // The filter keys on planOffers (resolution.go) — the SAME blast-radius classification the
 // ladder's Plan row keys on — not on the bare ReadOnly() self-declaration it read until

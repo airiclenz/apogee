@@ -716,6 +716,19 @@ hand-off further from you, so raise it only for work that genuinely needs a midd
 It must be at least `1`; a session that should not delegate at all disables the
 `sub_agent` tool instead (`tools.disabled`).
 
+**What a sub-agent may call** is your agent's own menu, narrowed. Two tools never reach a
+sub-agent at any depth: `ask_user` and `present_document` are the seat at *your* prompt — a
+question put to you, a document opened for you — and a delegation has no such seat, so a
+sub-agent that needs a decision reports the question in its result and lets the agent you are
+talking to ask it, and one that has a deliverable names its path and lets that agent present
+it. Beyond that, a `sub_agent` call may narrow its child further through its `tools`
+argument: the string `"read-only"` hands the child every tool of its menu that Plan mode
+could run on any target — the read tools, the git read set, `sub_agent` where the depth
+allows it — and an array of tool names hands it exactly those. Either spelling can only
+remove tools, never add one your agent lacks; a name that is not on its menu is refused with
+a result naming it, so the model learns the spelling instead of silently losing the tool,
+and an empty list is the same as no list at all.
+
 The context **window** these budgets are measured against is discovered from the
 server — live, not once: apogee asks every ten seconds, so switching the loaded model
 under a running session re-binds the window with it. Set `context-window:` (a file-only

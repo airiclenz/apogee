@@ -188,6 +188,15 @@ dangerous-action floor** (unloosenable one level down), and recursion is depth-b
 delegates and its delegates are never offered `sub_agent`; `2` lets a sub-agent delegate in turn
 (ADR 0013 decision 4, superseded 2026-09-15). A `max_steps` ask above `delegate-max-steps` is
 applied as the cap and the delegation's result says so in one appended line.
+The tool subset a child inherits is the parent's menu **minus the human's seat**: `ask_user`
+and `present_document` are withheld from every sub-agent at every depth (owner call,
+2026-09-14 — a delegation has no seat at the human's prompt; a child reports the question or
+the deliverable's path in its result and the parent asks or presents), which supersedes ADR 0039
+§6's queued child questions. The `sub_agent` call's **`tools`** argument narrows further —
+`"read-only"` for every inherited tool Plan mode admits on every target (`planAdmits`, the class
+rather than the bare `ReadOnly()` declaration) plus `sub_agent` where the depth rule offers it,
+or an array of tool names — always intersected with the parent's roster, never widened
+(ADR 0005); an unknown name is refused with a result naming it.
 When one reply carries several `sub_agent` calls, the **top-level** agent runs them
 **concurrently** up to the server's **Parallel agents** cap (depth-0 only — a sub-agent's
 own delegations run serially inline; a reply split across **Delegation seats** takes the

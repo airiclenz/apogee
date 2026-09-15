@@ -396,6 +396,10 @@ func classifyTool(tool domain.Tool) toolClass {
 // read-only by construction and a subprocess only by mechanism, which Plan both offers and runs
 // (contract §4 amendment 2026-09-06).
 //
+// It is also what a delegation's `tools: "read-only"` ask means (subagent.go's
+// requestedChildTools): the child's inherited tools this predicate admits, so "read-only" on a
+// sub_agent call and "read-only" in Plan mode are one definition rather than two.
+//
 // The sub_agent recursion point is NOT a leaf tool and never reaches this predicate: resolve()
 // Delegates it before the ladder (D3/ADR 0013), and toolMenu keeps it in the Plan menu for the
 // same reason — a Plan sub-agent inherits Plan, so its children are read-only too (each with the

@@ -24,7 +24,9 @@ import (
 // The queue spans BOTH kinds of prompt, not just this one: an Approval and an ask_user question
 // (Asker) contend for a single PromptSlot, so a host is never asked to approve something while it
 // still owes an answer to a question, or the reverse. A Driver therefore needs exactly one prompt
-// surface, and may implement Approver and Asker over the same one.
+// surface, and may implement Approver and Asker over the same one. Since 2026-09-15 (plan
+// 2026-09-14 - 03, item 5) the question can only be the top-level agent's — ask_user is withheld
+// from every sub-agent — so the two kinds still contend, but a child contributes only Approvals.
 type Approver interface {
 	Approve(ctx context.Context, req ApprovalRequest) (ApprovalDecision, error)
 }

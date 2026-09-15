@@ -68,6 +68,11 @@ type AskRequest struct {
 	// fact, and its question reads exactly as it always has. Unlike the Approval one — which the
 	// loop stamps on a request it builds itself — this field is filled from the ctx the tool call
 	// runs under (WithSubAgentTask), because the ask_user TOOL is what builds an AskRequest.
+	//
+	// No longer reachable (2026-09-15, plan 2026-09-14 - 03, item 5): ask_user is withheld from
+	// every sub-agent's roster, so every AskRequest is the top-level agent's and this field — with
+	// SubAgentName and Depth below — reads as its empty value. The fields stay: a Driver's prompt
+	// still renders them, and the carrier is the run's identity rather than the question's.
 	SubAgentTask string
 
 	// SubAgentName is the OPTIONAL short name that child is known by, the twin of
@@ -108,6 +113,8 @@ type subAgentTaskCtxKey struct{}
 //
 // The engine installs it per tool call, so a nested delegation overwrites its parent's value with
 // its own (a sub_agent task is non-empty by construction) and a top-level agent installs nothing.
+// No AskRequest is built under it any more (2026-09-15, plan 2026-09-14 - 03, item 5: ask_user is
+// withheld from every sub-agent); it stays installed as the child's identity on the ctx.
 func WithSubAgentTask(ctx context.Context, task string) context.Context {
 	return context.WithValue(ctx, subAgentTaskCtxKey{}, task)
 }
@@ -155,6 +162,8 @@ type subAgentDepthCtxKey struct{}
 // Unlike the task and the name it is installed unconditionally, for every tool call at every
 // level: 0 is an honest depth rather than "no agent", so gating it on delegation would make the
 // top-level agent's own requests indistinguishable from a request that simply lost the value.
+// A non-zero reading on an AskRequest or a PresentRequest is no longer reachable (2026-09-15, plan
+// 2026-09-14 - 03, item 5): both tools are withheld from every sub-agent.
 func WithSubAgentDepth(ctx context.Context, depth int) context.Context {
 	return context.WithValue(ctx, subAgentDepthCtxKey{}, depth)
 }

@@ -262,6 +262,8 @@ type Agent struct {
 	// of gate it is — an Approval the loop raises itself, or an ask_user question a tool raises one
 	// interface boundary away. A Driver draws one prompt, so serializing each kind against itself
 	// would still let an approval and a question collide once a fan-out is running (ADR 0039).
+	// Since 2026-09-15 (plan 2026-09-14 - 03, item 5) no child holds ask_user, so the question in
+	// that collision can only be the top-level agent's own; the slot is kept kind-blind regardless.
 	// Every Agent constructs one, but only the OUTERMOST one is designated: WithPromptSlot keeps
 	// whichever the context already carries, and a sub-agent runs under a context derived from its
 	// parent's, so a whole tree — however deep, however wide — queues on the top-level Agent's and

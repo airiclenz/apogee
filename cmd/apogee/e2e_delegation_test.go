@@ -473,6 +473,71 @@ func TestE2EDelegationChildCarriesTheReportBlock(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// The `tools` roster on the child's wire
+// ----------------------------------------------------------------------------
+
+// The prompt delegate-roster.yaml answers, the child's task, and the wording the run is waited on.
+const (
+	rosterPrompt    = "Delegate a read-only survey to a sub-agent."
+	rosterChildTask = "Survey the workspace without changing anything in it"
+	rosterWrapUp    = "The read-only delegate reported back."
+)
+
+// TestE2EDelegateReadOnlyRosterReachesTheChild pins the `tools: "read-only"` ask as an ANNOUNCED
+// surface: in a real run, through the real default registry, the tool menu a delegate asked for
+// under that keyword carries no writer, no terminal and neither human-seat tool — and it still
+// carries the read tools, so the narrowing is a roster and not an empty menu. The parent's own
+// requests keep the full menu: the ask narrows the child, never the session (plan 2026-09-14 - 03,
+// item 5).
+func TestE2EDelegateReadOnlyRosterReachesTheChild(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "delegate-roster"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+
+	submit(drv, rosterPrompt)
+	drv.WaitText(rosterWrapUp)
+	drv.WaitQuiet(settled)
+
+	// Every request the child made carried the menu; the working Turns all offered one, and none
+	// of them offered anything Plan mode could not run on every target.
+	if got := childRequests(stub, rosterChildTask); got != 2 {
+		t.Fatalf("the child made %d requests; want its read Turn and its report", got)
+	}
+	if got := childToolMenus(stub, rosterChildTask); !slices.Equal(got, []bool{true, true}) {
+		t.Fatalf("the child's requests offered tools %v; want a menu on both", got)
+	}
+	forbidden := []string{"write_file", "edit_existing_file", "single_find_and_replace", "multi_find_and_replace",
+		"copy_file", "move_file", "delete_file", "terminal", "python_exec", "ask_user", "present_document", "sub_agent"}
+	var parents int
+	for _, req := range stub.Requests() {
+		if !requestCarriesTask(req, rosterChildTask) {
+			parents++
+			continue
+		}
+		for _, name := range forbidden {
+			if slices.Contains(req.Tools, name) {
+				t.Errorf("the read-only child's request %d offered %s: %v", req.N, name, req.Tools)
+			}
+		}
+		for _, name := range []string{"read_file", "list_dir", "grep"} {
+			if !slices.Contains(req.Tools, name) {
+				t.Errorf("the read-only child's request %d lost %s; the roster is a floor, not an empty menu: %v",
+					req.N, name, req.Tools)
+			}
+		}
+	}
+	if parents == 0 {
+		t.Fatal("every request carried the delegate's task; there is no parent side left to compare")
+	}
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
 // requestCarriesTask reports whether req belongs to the conversation a delegate was handed the task
 // in. It is [childRequests]' discrimination asked of ONE request, for a case that needs the requests
 // themselves rather than a count of them.

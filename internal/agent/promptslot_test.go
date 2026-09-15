@@ -3,8 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"sort"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,118 +21,12 @@ import (
 // sibling's question raised at the same instant would replace one another and orphan a reply
 // channel — leaving that child blocked until the Turn was cancelled. These tests pin the surface
 // itself: one prompt in front of the human at a time, whatever kind each is.
-
-// promptSurfaceProbe is a host that implements BOTH prompt delegates over ONE surface — which is
-// what a Driver is: one pane, one keyboard. It ASSUMES it is never called concurrently through
-// either of them (the promise domain.Approver and domain.Asker both make) and measures the
-// assumption instead of guarding it: the counters are atomic so an overlap reads as a number rather
-// than a corrupt one, and seen is appended WITHOUT a lock, so `go test -race` fails outright the
-// instant two prompts of ANY kinds get in together. Each call holds the surface for hold, which is
-// the window a queued sibling would collide in.
-type promptSurfaceProbe struct {
-	inFlight atomic.Int32
-	overlaps atomic.Int32
-	seen     []string // unguarded on purpose: the race detector is the assertion
-	hold     time.Duration
-}
-
-// occupy is the one prompt surface both delegates below draw on.
-func (p *promptSurfaceProbe) occupy(kind, task string) {
-	if p.inFlight.Add(1) != 1 {
-		p.overlaps.Add(1)
-	}
-	p.seen = append(p.seen, kind+": "+task)
-	time.Sleep(p.hold)
-	p.inFlight.Add(-1)
-}
-
-func (p *promptSurfaceProbe) Approve(_ context.Context, req domain.ApprovalRequest) (domain.ApprovalDecision, error) {
-	p.occupy("approval", req.SubAgentTask)
-	return domain.ApprovalAllow, nil
-}
-
-func (p *promptSurfaceProbe) Ask(_ context.Context, req domain.AskRequest) (domain.AskAnswer, error) {
-	p.occupy("question", req.SubAgentTask)
-	return domain.AskAnswer{Text: "answer for " + req.SubAgentTask}, nil
-}
-
-// prompts returns what reached the human, sorted, so the assertion does not depend on which of two
-// genuinely concurrent children won the slot first.
-func (p *promptSurfaceProbe) prompts() []string {
-	out := append([]string(nil), p.seen...)
-	sort.Strings(out)
-	return out
-}
-
-// TestFanOut_ApprovalAndQuestionShareOnePrompt is the item in one run: two children run at once (the
-// concurrency probe's peak), one reaches an Approval gate while the other calls ask_user, and the
-// human's ONE prompt surface still fields them one at a time — each naming its own child, each
-// answered separately, and each answer reaching the child that asked for it.
-func TestFanOut_ApprovalAndQuestionShareOnePrompt(t *testing.T) {
-	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 3*time.Second)
-	// Long enough that an unserialized second prompt would still be on the surface while the first
-	// is: the two children are released from the probe at the same instant and reach their gates
-	// microseconds apart.
-	surface := &promptSurfaceProbe{hold: 100 * time.Millisecond}
-
-	ran := 0
-	cfg := subAgentConfig(sink, domain.ModeAskBefore,
-		fakeTool{name: "touch_thing", ran: &ran, result: "touched"},
-		tools.NewAskUser(surface))
-	cfg.Approver = surface
-	cfg.ParallelAgents = 2
-
-	up := newRoutedResponder().
-		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c2", "task two"})).
-		route("task one", probe.enter, toolCallScript("t1", "touch_thing", `{}`)).
-		route("task one", nil, contentScript("child one done")).
-		route("task two", probe.enter, askUserCallScript("q1", "which one?")).
-		route("task two", nil, contentScript("child two done")).
-		route("delegate two things", nil, contentScript("parent done"))
-
-	a, err := newAgent(cfg, up)
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
-	}
-	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	res, err := a.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if res.Status != domain.StatusExchangeComplete {
-		t.Fatalf("parent status = %q, want the Exchange to complete", res.Status)
-	}
-
-	if peak := probe.peakInFlight(); peak != 2 {
-		t.Fatalf("peak children in flight = %d, want 2 (nothing concurrent was exercised)", peak)
-	}
-	if n := surface.overlaps.Load(); n != 0 {
-		t.Errorf("%d prompts overlapped on the human's one surface; an approval and a question must queue against each other", n)
-	}
-
-	want := []string{"approval: task one", "question: task two"}
-	if got := surface.prompts(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("the human saw %v, want %v — one prompt per child, each naming its own task", got, want)
-	}
-
-	results := childToolResults(sink.events)
-	one, two := results["c1"], results["c2"]
-	if len(one) != 1 || len(two) != 1 {
-		t.Fatalf("child tool results = %d for c1 and %d for c2, want one each", len(one), len(two))
-	}
-	if one[0].IsError || !strings.Contains(one[0].Content, "touched") {
-		t.Errorf("the approved child's tool result = %+v, want the tool to have run", one[0])
-	}
-	if two[0].IsError || two[0].Content != "answer for task two" {
-		t.Errorf("the asking child's tool result = %+v, want its OWN answer", two[0])
-	}
-	if ran != 1 {
-		t.Errorf("the gated tool ran %d times, want 1", ran)
-	}
-}
+//
+// The fan-out row of that claim — TestFanOut_ApprovalAndQuestionShareOnePrompt, two children, one
+// approving and one asking — was retired on 2026-09-15 (plan 2026-09-14 - 03, item 5): ask_user is
+// withheld from every sub-agent, so no child can raise the question half of the pair, and a single
+// top-level agent cannot raise a question and an approval at the same instant. The slot stays
+// kind-blind and the two remaining tests still drive it with both kinds, one after the other.
 
 // blockingAsker parks inside Ask until it is released — a stand-in for a human who has not answered
 // yet, which is the only state a queue behind them can be observed in. It is the free-text twin of

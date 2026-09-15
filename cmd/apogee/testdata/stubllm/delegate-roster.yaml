@@ -1,0 +1,43 @@
+# The upstream TestE2EDelegateReadOnlyRosterReachesTheChild talks to: one delegation asking for the
+# read-only roster (`"tools":"read-only"` on the sub_agent call), and a child that does one read and
+# reports. What the test reads is not the child's words but the TOOL MENU its request carried — the
+# stub's request log keeps the names every request offered — so the fixture only has to get a child
+# onto the wire and back.
+#
+# Every turn repeats, as in delegate-cap.yaml, so a matcher consumed by the title call or a retry
+# cannot leave a later request unanswered.
+model: roster-model
+turns:
+    # The session title, matched before the prompt's own turn (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Read-only delegation
+    # The parent's wrap-up once the delegation has reported. Matched BEFORE the child turns below so a
+    # parent request can never be answered as a child's.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The read-only delegate reported back.
+    # The delegation itself, asking for the read-only roster.
+    - when:
+        last_message: ^Delegate a read-only survey
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey the workspace without changing anything in it","name":"survey","tools":"read-only"}'
+    # The child: one read, then its report. Turn 1 is picked by its task, turn 2 by the tool the
+    # first one ran.
+    - when:
+        last_message: Survey the workspace without changing anything
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    - when:
+        tool_result: read_file
+      repeat: true
+      text: The workspace holds a.txt and it says hello.
+    # Anything neither the parent nor the child claims.
+    - repeat: true
+      text: Nothing else to add.

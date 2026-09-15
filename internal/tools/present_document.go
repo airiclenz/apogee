@@ -8,8 +8,13 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
+// PresentDocumentToolName is the stable name the model calls to show a finished document to the
+// human. It is exported for the same reason AskUserToolName is: the engine withholds the tool from
+// every sub-agent by name (plan 2026-09-14 - 03, item 5).
+const PresentDocumentToolName = "present_document"
+
 var presentDocumentSpec = toolSpec{
-	name:        "present_document",
+	name:        PresentDocumentToolName,
 	description: "Show a finished document to the user. Call this after writing a report or other deliverable file the user should read; it opens or links the document for them.",
 	schema: json.RawMessage(`{
   "type": "object",
@@ -144,7 +149,11 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 		// own run, which is what keeps a child's presentation from surfacing as the top-level
 		// agent's. Both are stamped here, where the request is BUILT, for the same reason the
 		// asking agent's identity is stamped in ask_user — it is a fact about the presentation,
-		// and the Presenter is an interface boundary away from the Agent that knows it.
+		// and the Presenter is an interface boundary away from the Agent that knows it. A CHILD
+		// presentation is no longer reachable (2026-09-15, plan 2026-09-14 - 03, item 5: the tool
+		// is withheld from every sub-agent), so both read as the top-level run's honest zero
+		// values; they are still stamped from the ctx rather than hard-coded, because the carrier
+		// is the engine's and the tool has no business assuming its depth.
 		Depth:       domain.SubAgentDepthFromContext(ctx),
 		SpawnCallID: domain.SpawnCallIDFromContext(ctx),
 	})

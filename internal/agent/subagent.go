@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -262,9 +264,25 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 		seat = asked
 	}
 
+	// The roster this call asks for (ADR 0005's per-task narrowing, published as `tools`), resolved
+	// BEFORE the child is built for the same reason the seat is: an unknown name costs no child and
+	// is refused with a result naming it, which is the only correction the model can act on.
+	narrowed, err := a.requestedChildTools(args.Tools)
+	if err != nil {
+		return errorToolResult(call.ID, err.Error()), dispatchDone
+	}
+
 	sub, err := a.newChildAgentOn(seat, call.ID, args.Task, delegationName(args.Name))
 	if err != nil {
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
+	}
+	// Applied to the child's own registry rather than threaded through construction: the spawn
+	// signatures stay as they are, and a per-spawn field on the PARENT would race across the
+	// siblings a fan-out builds at once (ADR 0039). Subset over the set the child was built with is
+	// the intersection ADR 0005 promises — it can drop a name, never add one — and it keeps the
+	// tool values verbatim, so a plain sub_agent reaches the child unrebuilt exactly as before.
+	if narrowed != nil {
+		sub.tools = sub.tools.Subset(narrowed...)
 	}
 	// The call's optional max_steps can only ever LOWER the configured cap: a model may say "this
 	// one is small, stop it sooner", never "let me run longer than the host allows". Both values
@@ -489,7 +507,9 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 // live view of the parent's EFFECTIVE mode (child.liveMode) so a mid-delegation tightening
 // reaches the still-running child at ANY depth, a Guards bundle that isolates live state but shares the dangerous
 // floor read-only (Guards.ForSubAgent), a tool set that is a SUBSET of this Agent's tools
-// (defaultSubAgentTools — never an expansion, and withholding sub_agent at the depth bound),
+// (defaultSubAgentTools — never an expansion, withholding sub_agent at the depth bound and the
+// human's seat — ask_user, present_document — at every depth; the call's `tools` argument may
+// narrow it further, requestedChildTools),
 // the SAME EventSink, the parent session's context-file content
 // verbatim (copied, never re-read — a sub-agent is not a session boundary), and Depth =
 // parent+1 so its events nest. The
@@ -813,12 +833,21 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	return child, nil
 }
 
+// childWithheldTools are the two tools NO sub-agent is offered, at any depth and under any `tools`
+// ask: ask_user and present_document are the human's seat — a question put to the person and a
+// document shown to them — and a delegation has no such seat (ADR 0019 gates both on the host's
+// delegates; the owner's 2026-09-14 call withholds both from every child, superseding ADR 0039 §6's
+// queued child questions). A child that needs a decision reports the question in its result and
+// lets the parent ask; a child that has a deliverable names its path and lets the parent present it.
+var childWithheldTools = []string{tools.AskUserToolName, tools.PresentDocumentToolName}
+
 // defaultSubAgentTools returns the tool registry a sub-agent is constructed with: the parent's
-// full tool set by default (ADR 0005 — the caller may narrow per task; the default is the
-// parent's set), MINUS the sub_agent recursion point itself when spawning the child would put
-// it AT the depth bound (a depth-(max) sub-agent is never offered sub_agent, so it cannot
-// recurse further). A nil parent registry yields nil (a tool-less sub-agent — the parent had
-// no tools to delegate).
+// tool set (ADR 0005 — the caller may narrow further per task through the call's `tools`
+// argument, requestedChildTools), MINUS the two human-seat tools no child ever gets
+// (childWithheldTools) and MINUS the sub_agent recursion point itself when spawning the child
+// would put it AT the depth bound (a depth-(max) sub-agent is never offered sub_agent, so it
+// cannot recurse further). A nil parent registry yields nil (a tool-less sub-agent — the parent
+// had no tools to delegate).
 //
 // The result is always ≤ the parent's tools: it is built from the parent registry's own names
 // via Subset, so it can never name a tool the parent lacks (a privilege expansion is
@@ -838,9 +867,64 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 		if t.Name() == tools.SubAgentToolName && childDepth >= a.maxDepth() {
 			continue
 		}
+		// And the human's seat from every child, unconditionally: a sub-agent never puts a
+		// question to the person or a document in front of them.
+		if slices.Contains(childWithheldTools, t.Name()) {
+			continue
+		}
 		names = append(names, t.Name())
 	}
 	return withoutSeatChoice(a.tools.Subset(names...))
+}
+
+// requestedChildTools turns the `tools` argument of one sub_agent call into the name-list the
+// child's registry is narrowed to, or nil when the call named no roster and the child keeps the set
+// defaultSubAgentTools built. Both spellings are answered against the set the child would
+// otherwise INHERIT, so neither can widen it (ADR 0005):
+//
+//   - the read-only keyword yields every inherited tool Plan mode admits on every target
+//     (planAdmits — the class, never the bare ReadOnly() self-declaration, so a self-declared
+//     read-only tool that launches a subprocess is left out exactly as Plan leaves it out) plus
+//     sub_agent where the depth bound still offers it, because a read-only child may still
+//     delegate read-only work exactly as a Plan-mode parent may (toolMenu keeps it for the same
+//     reason);
+//   - a list of names is checked against the PARENT's registry and refused whole when any name is
+//     unknown — the refusal names every unknown one, in the order given, so the model reads the
+//     spellings it got wrong rather than finding the tool silently gone (the check runs BEFORE
+//     Subset, which would drop the name without a word). A name the parent holds but no child gets
+//     (childWithheldTools, sub_agent at the bound) passes the check and is dropped by the
+//     intersection: it is not a tool the model misspelled, it is one a child never has.
+//
+// An empty list is the zero value — "no narrowing" — rather than a tool-less child, because a model
+// that emits `"tools": []` out of habit should not lose its delegate's whole menu to the habit.
+func (a *Agent) requestedChildTools(asked tools.SubAgentRoster) ([]string, error) {
+	if !asked.IsSet() {
+		return nil, nil
+	}
+	inherited := a.defaultSubAgentTools()
+	if asked.ReadOnly {
+		if inherited == nil {
+			return nil, nil // a tool-less parent has nothing to narrow
+		}
+		names := make([]string, 0, len(inherited.All()))
+		for _, t := range inherited.All() {
+			if planAdmits(t) || t.Name() == tools.SubAgentToolName {
+				names = append(names, t.Name())
+			}
+		}
+		return names, nil
+	}
+	var unknown []string
+	for _, name := range asked.Names {
+		if _, ok := a.lookupTool(name); !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("sub_agent tools: unknown tool %s — name tools from your own menu",
+			strings.Join(unknown, ", "))
+	}
+	return asked.Names, nil
 }
 
 // withoutSeatChoice returns roster with its sub_agent tool swapped for the PLAIN variant when the

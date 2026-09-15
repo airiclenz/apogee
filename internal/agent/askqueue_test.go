@@ -13,15 +13,18 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// Queued ask_user questions (ADR 0039 decision 12 — one prompt at a time, named by its child)
+// ask_user is the top-level agent's alone (ADR 0039 decision 12, narrowed 2026-09-15)
 // ----------------------------------------------------------------------------
 //
-// The free-text twin of approvalqueue_test.go. ask_user is registered for sub-agents by default
-// (defaultSubAgentTools passes the parent's whole menu down), so once depth-0 delegations fan out,
-// two children can put a question to the human at the same instant — and a Driver with ONE prompt
-// surface would keep the second and orphan the first child's reply channel. These tests pin both
-// halves of the fix: the host Asker still sees one question at a time however many children are
-// running, and every question a sub-agent raises carries that sub-agent's delegated task.
+// The free-text twin of approvalqueue_test.go — with one half retired. Until 2026-09-15 ask_user
+// was registered for sub-agents (defaultSubAgentTools passed the parent's whole menu down), so a
+// depth-0 fan-out could put two children's questions to the human at once and these tests pinned
+// that they queued on the one prompt surface, each naming its child. Plan 2026-09-14 - 03, item 5
+// (owner call, 2026-09-14) withholds ask_user — and present_document — from EVERY child: a
+// delegation has no seat at the human's prompt, so the question a child would have asked is
+// reported in its result for the parent to put. What survives here is the floor that was always
+// true — a top-level question names no sub-agent — and its new counterpart: a child that emits the
+// call anyway meets an unknown tool, and the host Asker never hears from it.
 
 // askProbeAsker is a host Asker that ASSUMES it is never called concurrently — the promise
 // domain.Asker makes — and measures the assumption instead of guarding it: the counters are atomic
@@ -47,98 +50,23 @@ func (a *askProbeAsker) Ask(_ context.Context, req domain.AskRequest) (domain.As
 	return domain.AskAnswer{Text: a.answer(req)}, nil
 }
 
-// tasksSeen returns the delegated task each question named, in the order the human was asked.
-func (a *askProbeAsker) tasksSeen() []string {
-	out := make([]string, 0, len(a.seen))
-	for _, req := range a.seen {
-		out = append(out, req.SubAgentTask)
-	}
-	return out
-}
-
 // askUserCallScript emits one ask_user call putting question to the human.
 func askUserCallScript(id, question string) []provider.Delta {
 	return toolCallScript(id, "ask_user", `{"question":"`+question+`"}`)
 }
 
-// TestFanOut_ConcurrentChildQuestionsQueueAndNameTheirChild is the item in one run: two children run
-// at once (the probe's peak), both call ask_user, and the host Asker still fields their questions ONE
-// AT A TIME — each naming its own child's task, each answered separately, and each answer reaching
-// the child that asked for it rather than the sibling whose request replaced it.
-func TestFanOut_ConcurrentChildQuestionsQueueAndNameTheirChild(t *testing.T) {
-	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 3*time.Second)
-	asker := &askProbeAsker{
-		// Long enough that an unserialized second child would still be inside when the first is:
-		// the two are released from the probe at the same instant and reach ask_user microseconds
-		// apart.
-		hold: 100 * time.Millisecond,
-		// The answer is derived FROM the asking child, so an answer delivered to the wrong child
-		// shows up as the wrong text in that child's tool result rather than as a count mismatch.
-		answer: func(req domain.AskRequest) string { return "answer for " + req.SubAgentTask },
-	}
-
-	cfg := subAgentConfig(sink, domain.ModeAskBefore, tools.NewAskUser(asker))
-	cfg.ParallelAgents = 2
-
-	up := newRoutedResponder().
-		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c2", "task two"})).
-		route("task one", probe.enter, askUserCallScript("q1", "which one?")).
-		route("task one", nil, contentScript("child one done")).
-		route("task two", probe.enter, askUserCallScript("q2", "which one?")).
-		route("task two", nil, contentScript("child two done")).
-		route("delegate two things", nil, contentScript("parent done"))
-
-	a, err := newAgent(cfg, up)
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
-	}
-	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	res, err := a.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if res.Status != domain.StatusExchangeComplete {
-		t.Fatalf("parent status = %q, want the Exchange to complete", res.Status)
-	}
-
-	if peak := probe.peakInFlight(); peak != 2 {
-		t.Fatalf("peak children in flight = %d, want 2 (nothing concurrent was exercised)", peak)
-	}
-	if n := asker.overlaps.Load(); n != 0 {
-		t.Errorf("%d overlapping Ask calls reached the host; questions must queue one at a time", n)
-	}
-
-	tasks := asker.tasksSeen()
-	if len(tasks) != 2 {
-		t.Fatalf("the human was asked %d times (%v), want once per child", len(tasks), tasks)
-	}
-	if !(tasks[0] == "task one" && tasks[1] == "task two") && !(tasks[0] == "task two" && tasks[1] == "task one") {
-		t.Errorf("questions named %v, want one question per child naming its own task", tasks)
-	}
-
-	results := childToolResults(sink.events)
-	one, two := results["c1"], results["c2"]
-	if len(one) != 1 || len(two) != 1 {
-		t.Fatalf("child tool results = %d for c1 and %d for c2, want one each", len(one), len(two))
-	}
-	if one[0].IsError || one[0].Content != "answer for task one" {
-		t.Errorf("child one's ask_user result = %+v, want its OWN answer", one[0])
-	}
-	if two[0].IsError || two[0].Content != "answer for task two" {
-		t.Errorf("child two's ask_user result = %+v, want its OWN answer", two[0])
-	}
-}
-
-// TestSubAgent_SingleDelegatedQuestionIsUnchanged is the serial floor beside the fan-out above: one
-// child, one question, no queue to observe — it is answered exactly as it was before the seam
-// existed, and it names the one child that could have asked it.
-func TestSubAgent_SingleDelegatedQuestionIsUnchanged(t *testing.T) {
+// TestSubAgent_ChildQuestionIsRefusedAndNeverReachesTheHuman is the retired fan-out case turned
+// around: a child that calls ask_user anyway finds no such tool on its menu — the roster it was
+// spawned with withholds it — so the call resolves as an unknown tool inside the delegation and the
+// host Asker is never called. The parent's own conversation is untouched by the attempt: it still
+// gets the child's final words as the delegation's result.
+func TestSubAgent_ChildQuestionIsRefusedAndNeverReachesTheHuman(t *testing.T) {
 	sink := &recordingSink{}
 	asker := &askProbeAsker{answer: func(domain.AskRequest) string { return "the blue one" }}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, tools.NewAskUser(asker))
+	// The tool-call repair Floor guard would answer an off-menu call before the unknown-tool
+	// result this test is about; it is off here, as in TestSubAgent_SubsetCannotCallOmittedTool.
+	cfg.Floor.DisableToolCallRepair = true
 
 	up := newRoutedResponder().
 		route("delegate one thing", nil, fanOutScript([2]string{"c1", "the only task"})).
@@ -157,12 +85,15 @@ func TestSubAgent_SingleDelegatedQuestionIsUnchanged(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if got := asker.tasksSeen(); len(got) != 1 || got[0] != "the only task" {
-		t.Fatalf("the human was asked %v, want one question naming the delegated task", got)
+	if len(asker.seen) != 0 {
+		t.Fatalf("the human was asked %d questions by a child, want none — ask_user is withheld from every sub-agent", len(asker.seen))
 	}
 	results := childToolResults(sink.events)["c1"]
-	if len(results) != 1 || results[0].IsError || results[0].Content != "the blue one" {
-		t.Errorf("the child's ask_user result = %+v, want the human's answer", results)
+	if len(results) != 1 || !results[0].IsError || !strings.Contains(results[0].Content, "unknown tool") {
+		t.Errorf("the child's ask_user call resolved to %+v, want an unknown-tool error result", results)
+	}
+	if res, ok := lastSubAgentResult(sink.events); !ok || res.IsError || !strings.Contains(res.Content, "child done") {
+		t.Errorf("the delegation's result = %+v, want the child's own final words", res)
 	}
 }
 

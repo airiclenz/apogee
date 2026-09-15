@@ -44,15 +44,28 @@ const (
 // before composing a call, that a three-word task is not a delegation and that `max_steps: 0` was
 // never a way to ask for "unbounded" (a request above the configured cap is applied AS the cap and
 // the result says so — plan 2026-09-14 - 03, item 4).
+//
+// `tools` is the per-task roster ADR 0005 always allowed and never published: the string
+// SubAgentToolsReadOnly for the read-only set, or an array of tool names. It narrows and never
+// widens — the engine intersects it with the parent's own roster — and an unknown name is refused
+// with a result naming it, so a model learns the spelling instead of silently losing the tool (plan
+// 2026-09-14 - 03, item 5).
 const subAgentSchemaTemplate = `{
   "type": "object",
   "required": ["task"],
   "properties": {
     "task": {"type": "string", "minLength": 20, "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
-    "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."}%s
+    "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."},
+    "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."}%s
   }
 }`
+
+// SubAgentToolsReadOnly is the one keyword the `tools` argument accepts in place of a list: the
+// read-only set — every tool the child would hold whose class Plan mode admits on every target,
+// plus sub_agent where the depth bound still offers it. It is exported beside the seat spellings for
+// the same reason: the engine reads the argument against the word the schema publishes.
+const SubAgentToolsReadOnly = "read-only"
 
 // subAgentRunOnProperty is the one property the seat-choice variant adds. It is OPTIONAL like every
 // other argument but `task`: a model that never names a seat keeps making valid calls and gets the
@@ -106,11 +119,75 @@ var subAgentSpec = toolSpec{
 // It is only ever OFFERED where the host enables seat choice (NewSubAgentWith), so a call that
 // carries it against the plain variant, and every synthesised call in this repo, decodes to the
 // empty string — the value that means "the configured default decides".
+//
+// Tools is the roster this ONE delegation asks the child to be narrowed to (SubAgentRoster). It is
+// the third argument that can only ever tighten: the engine intersects it with the tools the child
+// would otherwise inherit, so it names a subset or it names nothing — the zero value, which leaves
+// the inherited roster alone.
 type SubAgentArgs struct {
-	Task     string `json:"task"`
-	Name     string `json:"name"`
-	MaxSteps int    `json:"max_steps"`
-	RunOn    string `json:"run_on"`
+	Task     string         `json:"task"`
+	Name     string         `json:"name"`
+	MaxSteps int            `json:"max_steps"`
+	RunOn    string         `json:"run_on"`
+	Tools    SubAgentRoster `json:"tools"`
+}
+
+// SubAgentRoster is the decoded `tools` argument of a sub_agent call — the one argument whose wire
+// shape is a union: the keyword SubAgentToolsReadOnly, or an array of tool names. Exactly one of
+// the two fields is set when the call named a roster; the zero value means the call named none
+// (absent, null, "" or an empty array all decode to it) and the child keeps its inherited set.
+type SubAgentRoster struct {
+	// ReadOnly asks for the read-only set (SubAgentToolsReadOnly).
+	ReadOnly bool
+	// Names lists the tools asked for, in the order the call named them.
+	Names []string
+}
+
+// IsSet reports whether the call named a roster at all — the zero value is "leave it alone".
+func (r SubAgentRoster) IsSet() bool { return r.ReadOnly || len(r.Names) > 0 }
+
+// MarshalJSON renders the roster in the wire shape UnmarshalJSON reads back — the keyword, the
+// array, or `null` for the zero value — so a SubAgentArgs round-trips and a synthesised call (the
+// engine's tests build them by marshalling the struct) never carries a shape the decoder refuses.
+func (r SubAgentRoster) MarshalJSON() ([]byte, error) {
+	switch {
+	case r.ReadOnly:
+		return json.Marshal(SubAgentToolsReadOnly)
+	case len(r.Names) > 0:
+		return json.Marshal(r.Names)
+	default:
+		return []byte("null"), nil
+	}
+}
+
+// UnmarshalJSON accepts the two wire shapes the schema publishes and refuses everything else with a
+// message that names them, so the refusal the recursion point returns tells the model what the
+// argument takes. A keyword other than SubAgentToolsReadOnly is refused too: the alternative —
+// treating "readonly" or "ro" as a list of one unknown tool — would answer with the wrong
+// correction.
+func (r *SubAgentRoster) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*r = SubAgentRoster{}
+		return nil
+	}
+	var keyword string
+	if err := json.Unmarshal(b, &keyword); err == nil {
+		switch keyword {
+		case "":
+			*r = SubAgentRoster{}
+		case SubAgentToolsReadOnly:
+			*r = SubAgentRoster{ReadOnly: true}
+		default:
+			return fmt.Errorf("tools: unknown keyword %q — use %q or an array of tool names", keyword, SubAgentToolsReadOnly)
+		}
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal(b, &names); err != nil {
+		return fmt.Errorf("tools: must be the string %q or an array of tool names", SubAgentToolsReadOnly)
+	}
+	*r = SubAgentRoster{Names: names}
+	return nil
 }
 
 // SubAgent is the model-facing descriptor for delegating a sub-task to a nested agent
@@ -167,8 +244,8 @@ func (t *SubAgent) OffersSeatChoice() bool { return t.seatChoice }
 // dangerous-action guard therefore matches no rule against their text — a task that merely
 // NAMES a guarded path ("report on the readable git surfaces — .git/config") is a
 // description, and every tool call the child makes off the back of it is inspected at its
-// own action site, one level down. `max_steps` and `run_on` are NOT declared: neither carries
-// prose, so neither needs an exemption from a guard that matches rules against text.
+// own action site, one level down. `max_steps`, `run_on` and `tools` are NOT declared: none of
+// them carries prose, so none needs an exemption from a guard that matches rules against text.
 func (t *SubAgent) PromptArgKeys() []string { return []string{"task", "name"} }
 
 // Execute is never reached on the real path: dispatch recognises SubAgentToolName as the

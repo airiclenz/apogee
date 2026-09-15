@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -401,6 +404,253 @@ func TestSubAgent_DepthBoundFollowsTheKey(t *testing.T) {
 				t.Error("the child's roster lost a leaf tool while sub_agent was decided")
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The child's roster: no human seat, and a `tools` argument that only narrows (plan 2026-09-14 - 03, item 5)
+// ----------------------------------------------------------------------------
+
+// menuRecorder wraps a responder and keeps the tool names every request offered, keyed by the
+// routing key routedResponder uses (the asking agent's last user message) — so a test reads the
+// menu a CHILD was actually sent rather than the registry it was built with.
+type menuRecorder struct {
+	inner provider.Responder
+	mu    sync.Mutex
+	menus map[string][][]string
+}
+
+func newMenuRecorder(inner provider.Responder) *menuRecorder {
+	return &menuRecorder{inner: inner, menus: map[string][][]string{}}
+}
+
+func (m *menuRecorder) Stream(ctx context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	names := make([]string, 0, len(req.Tools))
+	for _, spec := range req.Tools {
+		names = append(names, spec.Name)
+	}
+	asker := lastUserText(req)
+	m.mu.Lock()
+	m.menus[asker] = append(m.menus[asker], names)
+	m.mu.Unlock()
+	return m.inner.Stream(ctx, req)
+}
+
+// firstMenu returns the tool names the first request keyed by asker offered.
+func (m *menuRecorder) firstMenu(asker string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.menus[asker]) == 0 {
+		return nil
+	}
+	return m.menus[asker][0]
+}
+
+// humanSeatRegistry builds a parent registry holding the two human-seat tools beside sub_agent and
+// a leaf, with the host delegates stubbed so both tools register.
+func humanSeatRegistry(extra ...domain.Tool) *domain.ToolRegistry {
+	reg := domain.NewToolRegistry()
+	_ = reg.Register(tools.NewSubAgent())
+	_ = reg.Register(tools.NewAskUser(&askProbeAsker{answer: func(domain.AskRequest) string { return "" }}))
+	_ = reg.Register(tools.NewPresentDocument("", tools.ReadMounts{}, &recordingPresenter{}))
+	for _, t := range extra {
+		_ = reg.Register(t)
+	}
+	return reg
+}
+
+// TestSubAgent_ChildNeverHoldsTheHumanSeatTools pins the unconditional withholding at BOTH places
+// it is visible: the roster the orchestrator builds a child with, and the menu the child actually
+// sends upstream in a run. ask_user and present_document are the parent's whichever mode it runs
+// in and whatever the call asked for; the leaf tool beside them reaches the child untouched.
+func TestSubAgent_ChildNeverHoldsTheHumanSeatTools(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Tools = humanSeatRegistry(fakeTool{name: "read_thing", readOnly: true, result: "read"})
+	parent, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	roster := parent.defaultSubAgentTools()
+
+	for _, withheld := range []string{tools.AskUserToolName, tools.PresentDocumentToolName} {
+		if _, offered := roster.Lookup(withheld); offered {
+			t.Errorf("the child's roster holds %s; a sub-agent has no seat at the human's prompt", withheld)
+		}
+	}
+	if _, hasLeaf := roster.Lookup("read_thing"); !hasLeaf {
+		t.Error("the child's roster lost the leaf tool while the human seat was withheld")
+	}
+
+	// And on the wire: the menu the child's first request carried.
+	const parentInput, childTask = "delegate the reading", "read the thing over there"
+	up := newMenuRecorder(newRoutedResponder().
+		route(parentInput, nil, subAgentCallScript("c1", childTask)).
+		route(childTask, nil, contentScript("child done")).
+		route(parentInput, nil, contentScript("parent done")))
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: parentInput})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := up.firstMenu(childTask); !slices.Equal(got, []string{"read_thing"}) {
+		t.Errorf("the child's menu = %v, want [read_thing] — no human seat, no sub_agent at the default bound", got)
+	}
+	if got := up.firstMenu(parentInput); !slices.Contains(got, tools.AskUserToolName) || !slices.Contains(got, tools.PresentDocumentToolName) {
+		t.Errorf("the parent's menu = %v, want it to keep both human-seat tools", got)
+	}
+}
+
+// TestSubAgent_ReadOnlyRosterIsThePlanFloorMinusTheHumanSeat defines the read-only set the
+// `tools: "read-only"` keyword yields, against the real default registry: every parent tool
+// planAdmits — the class Plan mode runs on every target, never the bare ReadOnly() declaration —
+// minus the two withheld tools, with sub_agent following the depth rule (withheld under the default
+// bound, offered under 2). The menu the child sends is compared to that set, so the definition is
+// pinned where the model reads it.
+func TestSubAgent_ReadOnlyRosterIsThePlanFloorMinusTheHumanSeat(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		maxDepth     int
+		wantSubAgent bool
+	}{
+		{"under the default bound the child is not offered sub_agent", 0, false},
+		{"under delegate-max-depth 2 the child keeps sub_agent", 2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := baseConfig(&recordingSink{})
+			cfg.Tools = tools.NewDefaultRegistryWithHost(t.TempDir(), tools.HostTools{
+				Asker:     &askProbeAsker{answer: func(domain.AskRequest) string { return "" }},
+				Presenter: &recordingPresenter{},
+			})
+			cfg.Delegation.MaxDepth = tc.maxDepth
+
+			want := []string{}
+			for _, tool := range cfg.Tools.All() {
+				switch tool.Name() {
+				case tools.AskUserToolName, tools.PresentDocumentToolName:
+					continue
+				case tools.SubAgentToolName:
+					if tc.wantSubAgent {
+						want = append(want, tool.Name())
+					}
+					continue
+				}
+				if planAdmits(tool) {
+					want = append(want, tool.Name())
+				}
+			}
+			if len(want) < 3 || slices.Contains(want, "write_file") || slices.Contains(want, "terminal") {
+				t.Fatalf("the expected read-only set %v is not a credible floor", want)
+			}
+
+			const parentInput, childTask = "delegate a read-only survey", "survey the tree without touching it"
+			up := newMenuRecorder(newRoutedResponder().
+				route(parentInput, nil, toolCallScript("c1", tools.SubAgentToolName,
+					`{"task":"`+childTask+`","tools":"read-only"}`)).
+				route(childTask, nil, contentScript("child done")).
+				route(parentInput, nil, contentScript("parent done")))
+			a, err := newAgent(cfg, up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			_ = a.Submit(domain.UserInput{Text: parentInput})
+			if _, err := a.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			if got := up.firstMenu(childTask); !slices.Equal(got, want) {
+				t.Errorf("the read-only child's menu = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestSubAgent_ToolsListNarrowsToExactlyThoseTools drives the array spelling: the child's menu is
+// the named tools and nothing else, in the order named; a tool the parent holds but the list omits
+// resolves as unknown inside the delegation; and a name that is withheld from every child
+// (ask_user here) passes the unknown-name check — it is not a misspelling — and is dropped by the
+// intersection rather than smuggled back in.
+func TestSubAgent_ToolsListNarrowsToExactlyThoseTools(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := baseConfig(sink)
+	cfg.Tools = humanSeatRegistry(
+		fakeTool{name: "read_thing", readOnly: true, result: "read"},
+		fakeTool{name: "grep_thing", readOnly: true, result: "found"},
+		fakeTool{name: "write_thing", ran: &ran, result: "wrote"},
+	)
+	cfg.Mode = domain.ModeAllowEdits
+	// The tool-call repair Floor guard would answer the off-menu write before the unknown-tool
+	// result this test is about; off, as in TestSubAgent_SubsetCannotCallOmittedTool.
+	cfg.Floor.DisableToolCallRepair = true
+
+	const parentInput, childTask = "delegate a narrowed read", "read and grep, never write"
+	up := newMenuRecorder(newRoutedResponder().
+		route(parentInput, nil, toolCallScript("c1", tools.SubAgentToolName,
+			`{"task":"`+childTask+`","tools":["grep_thing","read_thing","ask_user"]}`)).
+		route(childTask, nil, toolCallScript("t1", "write_thing", `{}`)).
+		route(childTask, nil, contentScript("child done")).
+		route(parentInput, nil, contentScript("parent done")))
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: parentInput})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := up.firstMenu(childTask); !slices.Equal(got, []string{"grep_thing", "read_thing"}) {
+		t.Errorf("the narrowed child's menu = %v, want exactly [grep_thing read_thing]", got)
+	}
+	if ran != 0 {
+		t.Errorf("the omitted writer ran %d times; a narrowed child must not reach it", ran)
+	}
+	if !hasToolResultContaining(sink.events, 1, "unknown tool") {
+		t.Error("expected the omitted write_thing call to resolve as an unknown tool at Depth 1")
+	}
+	if res, ok := lastSubAgentResult(sink.events); !ok || res.IsError {
+		t.Errorf("the delegation's result = %+v, want the child's own completion", res)
+	}
+}
+
+// TestSubAgent_UnknownToolNameIsRefusedBeforeAnyChildRuns pins the refusal: a list naming a tool
+// the parent does not hold is answered with an error result naming every unknown name — before
+// ToolRegistry.Subset could drop it silently and before a child is built — so the parent spends
+// nothing on the delegation and reads the spelling it got wrong. Known names beside the unknown
+// ones are not enough to let the call through.
+func TestSubAgent_UnknownToolNameIsRefusedBeforeAnyChildRuns(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "read_thing", readOnly: true, result: "read"})
+	parent, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	res, outcome := parent.runSubAgent(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: tools.SubAgentToolName,
+		Arguments: json.RawMessage(`{"task":"do the narrowed thing","tools":["read_thing","frobnicate","zap"]}`),
+	})
+
+	if outcome != dispatchDone {
+		t.Fatalf("outcome = %v, want dispatchDone", outcome)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "unknown tool frobnicate, zap") {
+		t.Errorf("result = %+v, want an error naming the unknown tools in order", res)
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("%d events reached the sink; a refused roster must build no child", len(sink.events))
+	}
+	// The wrong SHAPE is refused the same way, by the argument decoder's own message.
+	res, _ = parent.runSubAgent(context.Background(), domain.ToolCall{
+		ID: "c2", Tool: tools.SubAgentToolName,
+		Arguments: json.RawMessage(`{"task":"do the narrowed thing","tools":"readonly"}`),
+	})
+	if !res.IsError || !strings.Contains(res.Content, `unknown keyword "readonly"`) {
+		t.Errorf("result = %+v, want the decoder's keyword correction", res)
 	}
 }
 

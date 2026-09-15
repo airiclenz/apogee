@@ -232,7 +232,8 @@ func TestSubAgentArgsParsesTheOptionalMaxSteps(t *testing.T) {
 // wantPlainSubAgentSchema is the sub_agent schema as the plain variant publishes it: the schema
 // shipped before seat choice existed (ADR 0069), plus the two schema floors — `minLength` on task,
 // `minimum` on max_steps — and the rewritten max_steps description that landed with them (plan
-// 2026-09-14 - 03, item 4). It is spelled out here rather than derived, because "byte-identical" is
+// 2026-09-14 - 03, item 4), plus the `tools` roster property (item 5 of the same plan — the two
+// items change the plain schema once, together). It is spelled out here rather than derived, because "byte-identical" is
 // the whole claim: the plain variant is prefill on every request of every session that never
 // enables the choice, so a stray comma or a reordered property in the shared template would be paid
 // for by every model that was never offered a seat — and would break the KV-cache prefix of a
@@ -243,9 +244,58 @@ const wantPlainSubAgentSchema = `{
   "properties": {
     "task": {"type": "string", "minLength": 20, "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
-    "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."}
+    "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."},
+    "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."}
   }
 }`
+
+// TestSubAgentArgsParsesTheOptionalTools proves the `tools` argument's two wire shapes reach the
+// orchestrator as one value — the read-only keyword and a list of names — and that every way of
+// naming NO roster (absent, null, "", []) decodes to the zero value the orchestrator reads as "keep
+// the inherited set". A keyword that is not the published one, and a value of any other shape, are
+// refused with a message naming what the argument takes: the recursion point returns that message
+// to the model verbatim, so it has to be the correction rather than a decoder's complaint.
+func TestSubAgentArgsParsesTheOptionalTools(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		payload string
+		want    SubAgentRoster
+		wantErr string
+	}{
+		{"read-only keyword", `{"task":"survey the repo","tools":"read-only"}`, SubAgentRoster{ReadOnly: true}, ""},
+		{"a list of names", `{"task":"survey the repo","tools":["read_file","grep"]}`, SubAgentRoster{Names: []string{"read_file", "grep"}}, ""},
+		{"absent", `{"task":"survey the repo"}`, SubAgentRoster{}, ""},
+		{"null", `{"task":"survey the repo","tools":null}`, SubAgentRoster{}, ""},
+		{"empty string", `{"task":"survey the repo","tools":""}`, SubAgentRoster{}, ""},
+		{"empty list", `{"task":"survey the repo","tools":[]}`, SubAgentRoster{}, ""},
+		{"an unknown keyword", `{"task":"survey the repo","tools":"readonly"}`, SubAgentRoster{}, `unknown keyword "readonly"`},
+		{"the wrong shape", `{"task":"survey the repo","tools":{"read_file":true}}`, SubAgentRoster{}, `must be the string "read-only" or an array`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var args SubAgentArgs
+			err := json.Unmarshal([]byte(tc.payload), &args)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("unmarshal %s: err = %v, want one containing %q", tc.payload, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unmarshal %s: %v", tc.payload, err)
+			}
+			if args.Tools.ReadOnly != tc.want.ReadOnly || !slices.Equal(args.Tools.Names, tc.want.Names) {
+				t.Errorf("Tools = %+v, want %+v", args.Tools, tc.want)
+			}
+			if got, want := args.Tools.IsSet(), tc.want.ReadOnly || len(tc.want.Names) > 0; got != want {
+				t.Errorf("Tools.IsSet() = %v, want %v", got, want)
+			}
+		})
+	}
+}
 
 // TestSubAgentPlainSchemaIsTheOneShippedBeforeSeatChoice pins the plain variant byte for byte.
 // Both variants are rendered from ONE template, so this is the guard on that sharing: the

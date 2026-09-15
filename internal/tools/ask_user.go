@@ -8,8 +8,13 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
+// AskUserToolName is the stable name the model calls to put a free-text question to the human. It
+// is exported because the engine withholds the tool from every sub-agent by name (a child has no
+// seat at the human's prompt — plan 2026-09-14 - 03, item 5), the way it keys on SubAgentToolName.
+const AskUserToolName = "ask_user"
+
 var askUserSpec = toolSpec{
-	name:        "ask_user",
+	name:        AskUserToolName,
 	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person. Optionally pass `choices` to offer a few answer options the human can pick from; they may still type a custom answer instead. When several choices could apply at once, set multi_select to true so the human can pick more than one. Never repeat the question or the choices in your own message before calling — the tool shows them to the human and the transcript keeps a record after they answer; restating them wastes tokens.",
 	schema: json.RawMessage(`{
   "type": "object",
@@ -75,6 +80,11 @@ func NewAskUser(asker domain.Asker) *AskUser {
 // queue of its own. Without it the second question simply replaces the first on the Driver's single
 // prompt surface and the first child's reply channel is orphaned — that child blocks until the Turn
 // is cancelled.
+//
+// No longer reachable from a child (2026-09-15, plan 2026-09-14 - 03, item 5): ask_user is withheld
+// from every sub-agent's roster, so the only caller is the top-level agent and the queue above is
+// exercised by one asker at a time. The seam stays — it is the kind-blind prompt slot an Approval
+// still shares with the question — but the concurrent-children case it was built for cannot occur.
 //
 // The slot it takes is the one the RUNNING AGENT designates on the call's context, not this
 // wrapper's own — the same slot the Approval seam takes. A Driver draws ONE prompt, and the pane an

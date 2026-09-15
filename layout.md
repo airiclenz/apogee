@@ -468,6 +468,13 @@ approvals do — one on the screen at a time, the asking child blocked and its s
 — and the question's own words say nothing about which of them wrote them. The line is absent at
 depth 0, so an undelegated session's box is the one it always drew.
 
+> **Superseded 2026-09-15 (plan 2026-09-14 - 03, item 5; owner call 2026-09-14).** A delegate
+> no longer holds `ask_user` (nor `present_document`): both are withheld from every sub-agent's
+> roster, so no question ever comes from a child and the `Sub-agent: …` line above the ask box is
+> no longer reachable. The approval pane's line stands — children still reach Approval gates —
+> and the ask box is always the top-level agent's own. The rendering rule is kept as written for
+> the day a child prompt returns; nothing draws it today.
+
 **One prompt is on the screen at a time, and "one" counts both kinds together.** The approval pane
 and the ask box are the same real estate and the same keyboard, so the queue behind them is a single
 queue rather than one per kind: an approval and a question raised by two different children at the
@@ -1248,7 +1255,10 @@ carried back up and sent there. While an `ask_user` question or an approval pane
 that pane's and says so: it wears the conversation's own legend again for as long as the question
 does, because `esc` there cancels the question rather than leaving the view — the child's invitation
 comes back the moment the question is away, whether it was answered or died with the Exchange a stop
-or a fault ended.
+or a fault ended. (Since 2026-09-15 — plan 2026-09-14 - 03, item 5 — the question in that sentence
+can only be the top-level agent's: `ask_user` is withheld from every child, so a child Run view
+sees the ask box take the input only when the session's own agent is asking; a child's approval
+pane still does.)
 
 **A staged row names the run it is going to.** A message waiting for a child shows in the
 staged-interjection band (below) as `⧖ queued for <name> — <the message>`, because with several

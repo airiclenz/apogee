@@ -16,22 +16,30 @@ import (
 // ----------------------------------------------------------------------------
 //
 // A delegated task is a sentence; the optional name is the few words a human recognises the child
-// by. Both prompt paths must carry it — the Approval the loop builds itself and the question the
-// ask_user tool builds one boundary away — and an UNNAMED delegation must carry nothing, because ""
-// is the signal every surface reads as "fall back to the task".
+// by. The Approval the loop builds itself must carry it, and an UNNAMED delegation must carry
+// nothing, because "" is the signal every surface reads as "fall back to the task". The question
+// path — the AskRequest the ask_user tool builds one boundary away — carried the same identity
+// until 2026-09-15; plan 2026-09-14 - 03, item 5 withholds ask_user (and present_document) from
+// every sub-agent, so no child can raise one and the ask half of these tests is retired. The
+// carriers the tool read (WithSubAgentTask/Name/Depth, WithSpawnCallID) still ride every child
+// call; only the two requests that used to be built under them are gone.
 
 // namedDelegationScript emits one sub_agent call delegating task under the optional short name.
 func namedDelegationScript(id, task, name string) []provider.Delta {
 	return toolCallScript(id, tools.SubAgentToolName, subAgentNamedArgs(task, name))
 }
 
-// TestDelegationName_RidesApprovalAndAsk drives one named child through BOTH prompt surfaces in a
-// single run: it makes a gated tool call and then puts a question to the human, and each request
-// must name it by the name its spawning call gave it — alongside, never instead of, the task. The
-// unnamed row is the floor: the same run with no name leaves both requests exactly as they were
-// before names existed. The third row is the same claim for a name the model did NOT supply: a
-// delegation named out of band (ADR 0068) is renamed mid-run, and every prompt raised after the
-// rename must name it by what it is called NOW rather than by the name it was spawned with.
+// TestDelegationName_RidesApprovalAndAsk drives one named child through the Approval prompt: it
+// makes a gated tool call, and the request must name it by the name its spawning call gave it —
+// alongside, never instead of, the task. The unnamed row is the floor: the same run with no name
+// leaves the request exactly as it was before names existed. The third row is the same claim for a
+// name the model did NOT supply: a delegation named out of band (ADR 0068) is renamed mid-run, and
+// every prompt raised after the rename must name it by what it is called NOW rather than by the
+// name it was spawned with (ADR 0068's rename-reaches-the-prompt row).
+//
+// The "AndAsk" half of its name is history (2026-09-15, plan 2026-09-14 - 03, item 5): the same
+// run used to put a question to the human as well and assert the AskRequest carried the same
+// identity, and a child can no longer ask. The name is kept so the test's history stays findable.
 func TestDelegationName_RidesApprovalAndAsk(t *testing.T) {
 	const (
 		parentInput = "delegate the audit"
@@ -52,10 +60,8 @@ func TestDelegationName_RidesApprovalAndAsk(t *testing.T) {
 		t.Run(tc.label, func(t *testing.T) {
 			sink := newLockedSink()
 			approver := &queueProbeApprover{allow: func(domain.ApprovalRequest) bool { return true }}
-			asker := &askProbeAsker{answer: func(domain.AskRequest) string { return "the blue one" }}
 			cfg := subAgentConfig(sink, domain.ModeAskBefore,
-				fakeTool{name: "touch_thing", result: "touched"},
-				tools.NewAskUser(asker))
+				fakeTool{name: "touch_thing", result: "touched"})
 			cfg.Approver = approver
 			// The rename has to have LANDED before the child's first gated call, or the prompt
 			// would be built from the name the spawn carried and the row would prove nothing.
@@ -69,7 +75,6 @@ func TestDelegationName_RidesApprovalAndAsk(t *testing.T) {
 			up := newRoutedResponder().
 				route(parentInput, nil, namedDelegationScript("c1", childTask, tc.given)).
 				route(childTask, gate, toolCallScript("t1", "touch_thing", `{}`)).
-				route(childTask, nil, askUserCallScript("q1", "which one?")).
 				route(childTask, nil, contentScript("child done")).
 				route(parentInput, nil, contentScript("parent done"))
 
@@ -98,22 +103,6 @@ func TestDelegationName_RidesApprovalAndAsk(t *testing.T) {
 				t.Errorf("ApprovalRequest.SubAgentTask = %q, want the delegated task %q — the name "+
 					"rides BESIDE the task, it does not replace it", got, childTask)
 			}
-
-			if len(asker.seen) != 1 {
-				t.Fatalf("the human was asked %d questions, want the child's one", len(asker.seen))
-			}
-			if got := asker.seen[0].SubAgentName; got != tc.want {
-				t.Errorf("AskRequest.SubAgentName = %q, want %q", got, tc.want)
-			}
-			if got := asker.seen[0].SubAgentTask; got != childTask {
-				t.Errorf("AskRequest.SubAgentTask = %q, want the delegated task %q", got, childTask)
-			}
-			// The number the two name fields cannot supply: a named grandchild reads like a named
-			// child until the request says how deep the asking run is. It rides the same ctx the
-			// task does, so the unnamed row must carry it too.
-			if got := asker.seen[0].Depth; got != 1 {
-				t.Errorf("AskRequest.Depth = %d, want 1 — the child asking runs one level down", got)
-			}
 		})
 	}
 }
@@ -131,63 +120,12 @@ func (p *recordingPresenter) Present(_ context.Context, req domain.PresentReques
 	return domain.PresentOutcome{Method: domain.PresentShown, Location: req.DisplayPath}, nil
 }
 
-// TestPresentIdentity_RidesTheDispatchCtxOntoTheRequest is the presenter half of the same seam: a
-// depth-1 child presents a document and the host Presenter must be told WHICH run showed it — the
-// nesting depth to draw it at, and the spawning call id that picks the right sibling run when a
-// fan-out has several going at once (ADR 0039). Without both, a child's deliverable surfaces as
-// though the top-level agent had presented it.
-func TestPresentIdentity_RidesTheDispatchCtxOntoTheRequest(t *testing.T) {
-	const (
-		parentInput = "delegate the write-up"
-		childTask   = "write the architecture review"
-		spawnCallID = "c1"
-	)
-
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "review.md"), []byte("# review"), 0o600); err != nil {
-		t.Fatalf("seed review: %v", err)
-	}
-
-	presenter := &recordingPresenter{}
-	sink := &recordingSink{}
-	cfg := subAgentConfig(sink, domain.ModeAskBefore, tools.NewPresentDocument(root, tools.ReadMounts{}, presenter))
-
-	up := newRoutedResponder().
-		route(parentInput, nil, subAgentCallScript(spawnCallID, childTask)).
-		route(childTask, nil, toolCallScript("p1", "present_document", `{"path":"review.md"}`)).
-		route(childTask, nil, contentScript("child done")).
-		route(parentInput, nil, contentScript("parent done"))
-
-	a, err := newAgent(cfg, up)
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
-	}
-	if err := a.Submit(domain.UserInput{Text: parentInput}); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if _, err := a.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if len(presenter.seen) != 1 {
-		t.Fatalf("the host presented %d documents, want the child's one", len(presenter.seen))
-	}
-	req := presenter.seen[0]
-	if req.DisplayPath != "review.md" {
-		t.Errorf("PresentRequest.DisplayPath = %q, want %q", req.DisplayPath, "review.md")
-	}
-	if req.Depth != 1 {
-		t.Errorf("PresentRequest.Depth = %d, want 1 — the presenting child runs one level down", req.Depth)
-	}
-	if req.SpawnCallID != spawnCallID {
-		t.Errorf("PresentRequest.SpawnCallID = %q, want the spawning call's id %q — depth alone "+
-			"cannot pick the run among concurrent siblings", req.SpawnCallID, spawnCallID)
-	}
-}
-
-// TestPresentIdentity_TopLevelRunPresentsAtDepthZero is the floor beneath it: the same tool called
-// by the top-level agent reports depth 0 and no spawning call — honest values for the outermost
-// run, so a Driver never has to tell "absent" from "outermost".
+// TestPresentIdentity_TopLevelRunPresentsAtDepthZero pins the presenter half of the identity seam
+// at the one depth it is still reached from: the tool called by the top-level agent reports depth 0
+// and no spawning call — honest values for the outermost run, so a Driver never has to tell
+// "absent" from "outermost". Its depth-1 twin (a child presenting, the request carrying Depth 1 and
+// the spawning call id) was retired on 2026-09-15 with plan 2026-09-14 - 03, item 5: present_document
+// is withheld from every sub-agent, so a child presentation is no longer reachable.
 func TestPresentIdentity_TopLevelRunPresentsAtDepthZero(t *testing.T) {
 	const userInput = "show me the review"
 

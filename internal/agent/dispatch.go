@@ -1214,7 +1214,10 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// are the honest identity of the outermost run, not a missing value, so a tool that builds its
 	// own host request (present_document, ask_user) reads a number it can trust rather than one it
 	// must guess at. Depth places such a request at the right level, the spawn id inside the right
-	// run when a depth-0 fan-out has siblings running at once (ADR 0039).
+	// run when a depth-0 fan-out has siblings running at once (ADR 0039). A non-zero pair on
+	// either request is no longer reachable (2026-09-15, plan 2026-09-14 - 03, item 5): neither
+	// tool is on any sub-agent's roster, so the two host requests are only ever built at depth 0;
+	// the carriers stay because the identity is the run's, not the two tools'.
 	ctx = domain.WithSubAgentDepth(ctx, a.depth)
 	ctx = domain.WithSpawnCallID(ctx, a.callID)
 	// And beside them the Console PRIVILEGE key, which the spawn call id must not double as: this
@@ -1230,7 +1233,9 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		// (approve) — but ask_user builds its own, one interface boundary away from the Agent that
 		// knows the task, so the identity rides the call's context (ADR 0039 decision 12).
 		// Nothing is installed at depth 0: there, the top-level agent is the only thing that could
-		// be asking.
+		// be asking. No AskRequest is built under this value any more (2026-09-15, plan
+		// 2026-09-14 - 03, item 5: ask_user is withheld from every sub-agent); it is still
+		// installed because it is the child's identity on the ctx, not the question's.
 		ctx = domain.WithSubAgentTask(ctx, a.task)
 		// The delegation's short name rides beside it, installed even when EMPTY: an unnamed child
 		// must report its own namelessness rather than let an outer value stand in for it, and ""
