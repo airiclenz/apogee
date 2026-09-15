@@ -49,7 +49,7 @@ var tuiScheduleClock schedule.Clock
 type scheduleWiring struct {
 	// live is this session's settings holder — the launch snapshot with every `/settings` commit and
 	// every config-watcher reload written back over it, plus the pins of the `servers:` entry the
-	// session is bound to. It is the whole configuration half of a Firing (firingSources), read at
+	// session is bound to. It is the whole configuration half of a Firing (firingBinding), read at
 	// FIRING time rather than captured, and safely so: the holder is goroutine-safe and this runs on
 	// the Scheduler's own goroutine. Composing from it is what carries ADR 0037's promise into the
 	// runs a session raises — a Firing budgets, fences and arms itself from the configuration the
@@ -116,10 +116,10 @@ type scheduleWiring struct {
 // rather than the session's MCP-augmented one, and reaches no external server at all.
 func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Outcome, error) {
 	binding := w.binding()
-	opts, entry := w.live.firingSources(binding)
+	opts, entry := w.live.firingBinding(binding)
 
 	// This Firing's own Reaction Runner (ADR 0073), built from the `reactions:` list the SESSION is
-	// running now — the one firingSources hands over, which the config-watcher's reload arm keeps
+	// running now — the one firingBinding hands over, which the config-watcher's reload arm keeps
 	// current (liveSettings.setObserve) — rather than the list the process launched with. A
 	// `reactions:` edit applied mid-session therefore reaches the Firings that session raises, which
 	// is the same promise every other live key already carries into them (ADR 0037).

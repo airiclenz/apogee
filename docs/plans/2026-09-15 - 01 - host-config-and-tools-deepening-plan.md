@@ -185,7 +185,13 @@ NOTES (2026-09-15): consequential edit — docs/adr/0028-…md: the follow-up pa
 
 Commit: `refactor(config): Options holds the startup ServerEntry once instead of fourteen flattened fields`
 
-## 7. `firingSources` is deleted; `firingConfig` reads the held entry
+## 7. `firingSources` is deleted; `firingConfig` reads the held entry — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the replacement accessor is named `firingBinding` (the plan names none); `TestFiringSourcesCarriesTheLiveSubAgentsServer` → `TestFiringBindingCarriesTheLiveSubAgentsServer`, and the new test is `TestFiringBindingHandsOverTheHeldEntry` in `wire_settings_test.go`.
+NOTES (2026-09-15): `cmd/apogee/wire_firing.go` and `cmd/apogee/wire_firing_test.go` are listed in Files but needed no edit — neither names `firingSources`, and `firingConfig`'s reads of the entry are untouched.
+NOTES (2026-09-15): consequential edit — cmd/apogee/schedule.go: made necessary by the rename (call site and two comments naming `firingSources`).
+NOTES (2026-09-15): consequential edit — cmd/apogee/schedule_test.go: made necessary by the rename (two comments naming `firingSources`).
+NOTES (2026-09-15): consequential edit — docs/adr/0037-every-settings-edit-applies-to-the-running-session.md: made necessary by the rename (the sentence naming `firingSources` gained a dated pointer; its already-stale "and the validated `mechanisms:` ids" clause — the accessor has returned two values since the retirement wave — was dropped in the same sentence rather than rewritten as true).
 
 **What.** Recast at the regression check (2026-09-15). `cmd/apogee/wire_settings.go`'s `firingSources` re-assembles a `ServerEntry` from `liveSettings.entry*`; after item 6 `liveSettings` holds the entry it was seeded with (updated on rebind) and `firingConfig` (`cmd/apogee/wire_firing.go`) takes it directly. Delete the re-assembler. `liveSettings.entry*` fields stay (they are the live-edited overrides). Depends on item 6.
 

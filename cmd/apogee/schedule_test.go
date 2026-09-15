@@ -216,7 +216,7 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 
 // A Firing fans out at the width the session's bound server resolves to (ADR 0039; ADR 0031 — every
 // Driver reaches the same engine behaviour). The number can only come from the wired width seam: the
-// entry firingSources builds pins no `parallel-agents:` of its own, so a Firing that reached past the
+// entry firingBinding hands over pins no `parallel-agents:` of its own, so a Firing that reached past the
 // seam would take the composer's own one-shot probe — a round trip, on the Scheduler's goroutine, for
 // a number this session is already holding.
 //
@@ -451,7 +451,7 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 // (ADR 0046). The ceiling is a property of the SLOT, like the width above it, and the launch
 // snapshot the settings holder is seeded from carries the LAUNCH entry's `max-output-tokens:`
 // (wire_boot.go) — so a Firing raised after a `/server` move would be bounded by a server this
-// session has left unless the entry firingSources builds restates the number, which is exactly the
+// session has left unless the entry firingBinding hands over restates the number, which is exactly the
 // case a runaway reply must not happen in.
 //
 // The unpinned case is the same invariant read from the other end: an entry that pins nothing

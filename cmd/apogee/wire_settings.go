@@ -142,6 +142,14 @@ type liveSettings struct {
 	// for its reason and with its posture: the ephemeral `--endpoint` entry is in no list, matches
 	// nothing, and keeps what it was bound with). Empty until something is bound.
 	entryName string
+	// entry is the BOUND `servers:` entry held WHOLE, as the file spelled it at the last arrival or
+	// re-read: the startup entry resolution held on options (config.Options.StartupEntry), replaced
+	// by the entry a move lands on (followEntry) and re-derived from a re-read list (setServers)
+	// under the same lock the pins above move under. It is what a Firing raised inside this session
+	// binds to (firingBinding), read as one value rather than re-assembled from the latches beside
+	// it — the latches stay because they are what the live-edited overrides are resolved through,
+	// and the whole entry is held because a Firing wants the server, not a resolution of it.
+	entry config.ServerEntry
 
 	// servers is the `servers:` list: the single upstream definition (ADR 0036), which the switch
 	// list, the `server:` recording check and the pane's picker all resolve names against.
@@ -272,6 +280,7 @@ func newLiveSettings(opts config.Options) *liveSettings {
 		pinnedReserve:      opts.ResponseReserve,
 		entryReserve:       opts.StartupEntry.ResponseReserve,
 		entryName:          opts.HostAlias,
+		entry:              opts.StartupEntry,
 		servers:            opts.Servers,
 		seatChoice:         opts.SubAgentsChoice,
 		subAgentsServer:    opts.SubAgentsServer,
@@ -359,6 +368,9 @@ func (s *liveSettings) followEntry(entry config.ServerEntry) {
 	// the top-level key answering — and it is assigned apart from them only because it is the one
 	// that is not a token count.
 	s.entryReserve = entry.ResponseReserve
+	// And the entry itself, whole, so a Firing raised after this move binds to the server the session
+	// arrived on rather than to the one it launched against.
+	s.entry = entry
 }
 
 // reservePin reports the top-level `response-reserve:` share — what a server move resolves an
@@ -619,6 +631,9 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 			// force the moment it commits, through the ride this return value drives, rather than
 			// waiting for whichever of those three comes first.
 			s.entryReserve = e.ResponseReserve
+			// The re-read entry itself travels with its three statements, so a Firing binds to the
+			// server as the file spells it NOW rather than as it stood at the last move.
+			s.entry = e
 			break
 		}
 	}
@@ -720,7 +735,7 @@ func (s *liveSettings) generationLocked() apogee.Generation {
 // setReactionLanes installs BOTH halves of the re-read `reactions:` list the session has just
 // accepted — the observe rows its Runner fires and the sync rows its Agent runs — so a Firing
 // raised inside this session composes from the Reactions the session is running rather than the
-// ones the process launched with (firingSources).
+// ones the process launched with (firingBinding).
 //
 // Both lanes move together because one file arms both: a mirror that carried only the observe half
 // would hand a Firing a `gate:` the session had already dropped, or drop one it had just armed.
@@ -952,7 +967,7 @@ func (s *liveSettings) options() config.Options {
 }
 
 // optionsLocked is options' body, split out for the one caller that must read the projection and
-// something else beside it at a SINGLE instant: firingSources below, which composes a whole run out
+// something else beside it at a SINGLE instant: firingBinding below, which composes a whole run out
 // of this holder. It requires the read lock to be held already — Go's RWMutex is not re-entrant for
 // a reader once a writer is queued behind it, so nesting the two would deadlock the Update
 // goroutine's next commit.
@@ -1005,7 +1020,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.ContextWindow = s.pinnedWindow
 	// The working room is the TOP-LEVEL key alone, for the window's reason above: that is the field's
 	// own meaning (config.Options.WorkingWindow), and it is what a caller resolves the bound entry's
-	// own bound over (firingSources hands that entry back beside this projection).
+	// own bound over (firingBinding hands that entry back beside this projection).
 	next.WorkingWindow = s.pinnedWorking
 	next.Servers = slices.Clone(s.servers)
 	next.SystemPrompt = s.systemPrompt
@@ -1026,35 +1041,34 @@ func (s *liveSettings) optionsLocked() config.Options {
 	return next
 }
 
-// firingSources hands out everything a Firing raised inside this session composes from that lives in
+// firingBinding hands out everything a Firing raised inside this session composes from that lives in
 // this holder: the live Options (options above) and the `servers:` entry the session is bound to as
-// the holder latches it. Both from one call under ONE read lock, for rebindInputs' reason — read
+// the holder holds it. Both from one call under ONE read lock, for rebindInputs' reason — read
 // separately they could describe two different instants of a configuration the human is editing as
 // the Scheduler reads it, and a run composed half from one instant and half from the next is a
 // configuration nobody ever had.
 //
-// The entry is BUILT rather than looked up. The wire is the Upstream binding's, which this holder
-// deliberately does not own (options above), and the four per-entry pins are the ones followEntry
-// latched when the session moved onto that server — so what comes back describes the server the
-// session is on NOW, pins and all, whether or not the `servers:` list still names it.
+// The entry is the held one (entry above) with ONE overlay. The wire is the Upstream binding's,
+// which this holder deliberately does not own (options above), so the endpoint and the model are
+// the binding's — a `/model` pick is honoured — and what comes back describes the server the session
+// is on NOW, pins and all, whether or not the `servers:` list still names it.
 //
-// `parallel-agents:` is deliberately left at 0. The cap is parallelAgentsCap's, which already
-// resolves that pin against what a beat observed, and a Firing takes it through the width seam
-// instead (schedule.go); repeating the pin here would give the composer two answers to one question.
-// The key SOURCE fields are left empty for the mirror-image reason: the session already resolved its
-// key, and a Firing is handed that value rather than asking the source a second time.
-func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, config.ServerEntry) {
+// `parallel-agents:` is deliberately zeroed. The cap is parallelAgentsCap's, which already resolves
+// that pin against what a beat observed, and a Firing takes it through the width seam instead
+// (schedule.go); repeating the pin here would give the composer two answers to one question. The
+// key SOURCE fields are cleared for the mirror-image reason: the session already resolved its key,
+// and a Firing is handed that value rather than asking the source a second time. The description
+// and the forced `effort-dialect:` are cleared too, so an in-session Firing keeps the orientation
+// Delegations line it has always had and the session's observed dialect keeps outranking the
+// entry's forced one; the Driver-parity alternative (ADR 0031) is a decision not taken here.
+func (s *liveSettings) firingBinding(bound upstreamBinding) (config.Options, config.ServerEntry) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	entry := config.ServerEntry{
-		Name:            s.entryName,
-		Endpoint:        bound.Endpoint,
-		Model:           bound.Model,
-		ContextWindow:   config.TokenCount(s.entryWindow),
-		WorkingWindow:   s.entryWorking,
-		MaxOutputTokens: s.entryCap,
-		ResponseReserve: s.entryReserve,
-	}
+	entry := s.entry
+	entry.Endpoint, entry.Model = bound.Endpoint, bound.Model
+	entry.ParallelAgents = 0
+	entry.APIKey, entry.APIKeyCmd, entry.APIKeyEnv, entry.PlaintextKeyOK = "", "", "", false
+	entry.Description, entry.EffortDialect = "", ""
 	return s.optionsLocked(), entry
 }
 

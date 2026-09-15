@@ -295,9 +295,10 @@ A Firing now composes from the session's **live-overlaid Options**. `liveSetting
 (`cmd/apogee/wire_settings.go`) is this record's decision-2 apply classes read back as one
 `config.Options`: the launch snapshot with every key an apply has since put into force written over
 it — recorded at the apply, never re-read from `config.yaml`, because this record makes the running
-session and not the file the authority on what the session is configured as. `firingSources` hands
-that projection out together with the `servers:` entry the session is bound to and the validated
-`mechanisms:` ids, under one read lock, so a run cannot be composed half from one instant and half
+session and not the file the authority on what the session is configured as. `firingBinding`
+(`firingSources` until 2026-09-15, when the holder began keeping the bound entry whole instead of
+re-assembling it from its pins) hands that projection out together with the `servers:` entry the
+session is bound to, under one read lock, so a run cannot be composed half from one instant and half
 from the next. `firingConfig` (`cmd/apogee/wire_firing.go`) — the one composer all three Drivers'
 unattended runs are built by — turns those inputs into the Config.
 

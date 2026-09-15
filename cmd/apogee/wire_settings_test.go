@@ -3124,7 +3124,7 @@ func TestSeededPromptPersistsThroughTheSettingsWrite(t *testing.T) {
 // name because the authoritative value lives behind the routing wiring's lock: without the mirror a
 // `/schedule` Firing would keep composing against the entry the process launched with, however often
 // the human re-pointed the key.
-func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
+func TestFiringBindingCarriesTheLiveSubAgentsServer(t *testing.T) {
 	t.Parallel()
 
 	entries := []config.ServerEntry{
@@ -3140,15 +3140,15 @@ func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
 	}
 	host := delegationHost{w: &rootWiring{live: live, delegation: wiring}}
 
-	if opts, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "grunt" {
-		t.Fatalf("firingSources at launch names %q; want the key the file carried", opts.SubAgentsServer)
+	if opts, _ := live.firingBinding(upstreamBinding{}); opts.SubAgentsServer != "grunt" {
+		t.Fatalf("firingBinding at launch names %q; want the key the file carried", opts.SubAgentsServer)
 	}
 
 	if err := host.Retarget("other-grunt"); err != nil {
 		t.Fatalf("Retarget: %v", err)
 	}
-	if opts, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "other-grunt" {
-		t.Errorf("firingSources after the retarget names %q; want the entry the pick moved to — a Firing "+
+	if opts, _ := live.firingBinding(upstreamBinding{}); opts.SubAgentsServer != "other-grunt" {
+		t.Errorf("firingBinding after the retarget names %q; want the entry the pick moved to — a Firing "+
 			"raised now would delegate to the box the human just moved off", opts.SubAgentsServer)
 	}
 
@@ -3157,8 +3157,68 @@ func TestFiringSourcesCarriesTheLiveSubAgentsServer(t *testing.T) {
 	if err := host.Retarget(""); err != nil {
 		t.Fatalf("Retarget to the opt-out: %v", err)
 	}
-	if opts, _ := live.firingSources(upstreamBinding{}); opts.SubAgentsServer != "" {
-		t.Errorf("firingSources after the opt-out names %q; want no Sub-agent server at all", opts.SubAgentsServer)
+	if opts, _ := live.firingBinding(upstreamBinding{}); opts.SubAgentsServer != "" {
+		t.Errorf("firingBinding after the opt-out names %q; want no Sub-agent server at all", opts.SubAgentsServer)
+	}
+}
+
+// The entry a Firing binds to is the one the holder HOLDS — the server a `/server` move landed on, as
+// a `servers:` re-read spells it now — never the launch entry re-assembled from the pins beside it.
+// One overlay rides on it: the wire is the Upstream binding's (a `/model` pick is honoured), the
+// width pin and the key sources are cleared for the composer's two-routes-to-one-value rule, and the
+// description and the forced dialect are cleared so an in-session Firing keeps the orientation line
+// and the observed dialect it has always had.
+func TestFiringBindingHandsOverTheHeldEntry(t *testing.T) {
+	t.Parallel()
+
+	launch := config.ServerEntry{Name: "launch", Endpoint: "http://127.0.0.1:1111", Model: "launch-model",
+		ContextWindow: 1_000, Description: "the launch box", EffortDialect: "reasoning_effort"}
+	moved := config.ServerEntry{Name: "moved", Endpoint: "http://127.0.0.1:2222", Model: "moved-model",
+		MaxOutputTokens: 512, ParallelAgents: 4, APIKeyEnv: "MOVED_KEY", Description: "the moved box",
+		EffortDialect: "reasoning_effort"}
+	live := newLiveSettings(config.Options{
+		Servers: []config.ServerEntry{launch, moved}, StartupEntry: launch, HostAlias: launch.Name,
+	})
+	bound := upstreamBinding{Endpoint: "http://127.0.0.1:2222", Model: "picked-model"}
+
+	if _, entry := live.firingBinding(bound); entry.Name != "launch" || entry.ContextWindow != 1_000 {
+		t.Fatalf("firingBinding at launch hands over %+v; want the startup entry", entry)
+	}
+
+	live.followEntry(moved)
+	_, entry := live.firingBinding(bound)
+	switch {
+	case entry.Name != "moved" || entry.MaxOutputTokens != 512 || entry.ContextWindow != 0:
+		t.Errorf("after the move firingBinding hands over %+v; want the entry the session moved onto", entry)
+	case entry.Endpoint != bound.Endpoint || entry.Model != bound.Model:
+		t.Errorf("after the move the wire is %s/%s; want the binding's %s/%s",
+			entry.Endpoint, entry.Model, bound.Endpoint, bound.Model)
+	case entry.ParallelAgents != 0 || entry.APIKeyEnv != "":
+		t.Errorf("after the move the width pin is %d and the key source %q; want both cleared",
+			entry.ParallelAgents, entry.APIKeyEnv)
+	case entry.Description != "" || entry.EffortDialect != "":
+		t.Errorf("after the move the description is %q and the dialect %q; want both cleared",
+			entry.Description, entry.EffortDialect)
+	}
+
+	// A `servers:` edit on the entry the session is on re-derives the whole entry, pins included, and
+	// the same overlay rides on the re-read one.
+	edited := moved
+	edited.ContextWindow, edited.MaxOutputTokens, edited.ParallelAgents = 4_096, 2_048, 8
+	edited.APIKeyCmd, edited.Description, edited.EffortDialect = "pass show moved", "re-read box", "reasoning"
+	live.setServers([]config.ServerEntry{launch, edited})
+	_, entry = live.firingBinding(bound)
+	switch {
+	case entry.Name != "moved" || entry.ContextWindow != 4_096 || entry.MaxOutputTokens != 2_048:
+		t.Errorf("after the re-read firingBinding hands over %+v; want the file's pins", entry)
+	case entry.Endpoint != bound.Endpoint || entry.Model != bound.Model:
+		t.Errorf("after the re-read the wire is %s/%s; want the binding's", entry.Endpoint, entry.Model)
+	case entry.ParallelAgents != 0 || entry.APIKeyCmd != "" || entry.APIKeyEnv != "":
+		t.Errorf("after the re-read the width pin is %d and the key sources %q/%q; want all cleared",
+			entry.ParallelAgents, entry.APIKeyCmd, entry.APIKeyEnv)
+	case entry.Description != "" || entry.EffortDialect != "":
+		t.Errorf("after the re-read the description is %q and the dialect %q; want both cleared",
+			entry.Description, entry.EffortDialect)
 	}
 }
 
