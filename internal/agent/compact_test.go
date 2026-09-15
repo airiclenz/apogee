@@ -752,6 +752,57 @@ func TestCompactCappedSummaryFaultNamesOnlyWhatTheRequestAsked(t *testing.T) {
 	}
 }
 
+// maxTokRecordingResponder is cappedSummaryResponder with one addition: it records the MaxTokens
+// the summariser request actually carried, so a test can hold the fault text against the number the
+// server was sent rather than against the constant the engine happens to set today.
+type maxTokRecordingResponder struct {
+	cappedSummaryResponder
+	sent *int
+}
+
+func (r maxTokRecordingResponder) Stream(ctx context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	if req.Sampling.MaxTokens != nil {
+		*r.sent = *req.Sampling.MaxTokens
+	}
+	return r.cappedSummaryResponder.Stream(ctx, req)
+}
+
+// TestCompactCappedSummaryFaultNamesTheAppliedCap pins that the capped-summary fault names the cap
+// the request was SENT with — the MaxTokens set on the summariser request — not the bare constant.
+// Today the two agree (compactMaxTokens), and the test pins that too; the point is that the number
+// the reader sees is read back from the request, so the fault cannot drift from what the server was
+// actually asked for should the applied cap ever differ from the constant.
+func TestCompactCappedSummaryFaultNamesTheAppliedCap(t *testing.T) {
+	t.Parallel()
+
+	sent := 0
+	up := maxTokRecordingResponder{
+		cappedSummaryResponder: cappedSummaryResponder{thinking: "plan the summary at length", finish: "length"},
+		sent:                   &sent,
+	}
+	a, err := newAgent(baseConfig(&recordingSink{}), up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedFoldable(a)
+
+	_, err = a.Compact(context.Background())
+
+	if err == nil {
+		t.Fatal("Compact err = nil, want the capped-summary fault")
+	}
+	if sent == 0 {
+		t.Fatal("the summariser request carried no MaxTokens; want the cap on the request")
+	}
+	if sent != compactMaxTokens {
+		t.Errorf("summariser request MaxTokens = %d, want compactMaxTokens (%d)", sent, compactMaxTokens)
+	}
+	wantHead := fmt.Sprintf("compaction summary hit its output cap (%d tokens)", sent)
+	if !strings.HasPrefix(err.Error(), wantHead) {
+		t.Errorf("Compact err = %q, want it to open with %q — the cap the request carried", err, wantHead)
+	}
+}
+
 // TestCompactStripsInlineThinkingFromTheSummary: on a delimited-thinking profile the summarizer's
 // reply carries its reasoning inline, and the fold runs it through the same stripper a Turn's reply
 // goes through — otherwise the <think> span is written into the summary message and the folded

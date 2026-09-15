@@ -520,10 +520,12 @@ const emptyReplyErrFmt = "upstream returned an empty reply (finish: %s)"
 // 2026-08-12 incident spent 20,653 reasoning tokens and would have reported nothing but "empty").
 // So the message names the ceiling and, when the model reasoned, roughly what it spent under it:
 // those are the two numbers the remedy turns on — a larger max-output-tokens: for this server, or a
-// task small enough to answer inside the current one. It deliberately does not invite a retry; the
-// same request meets the same ceiling.
+// task small enough to answer inside the current one. It runs no retry itself (ADR 0046 decision 4)
+// but no longer claims one would fail: a reasoning model's spend under the cap varies from pass to
+// pass, and the same request has been seen answering on its second run (30a3b2df, 2026-09-14) —
+// so the last clause says a retry MAY succeed there, and leaves the choice to the reader.
 const cappedReplyErrFmt = "reply hit the output cap apogee set (%d tokens) with no visible text to " +
-	"show for it%s — raise max-output-tokens: for this server or narrow the task; a retry meets the same ceiling"
+	"show for it%s — raise max-output-tokens: for this server or narrow the task; a retry may succeed on a reasoning model"
 
 // cappedDelegateReplyErrFmt is the fault text for a CHILD's reply that ran into the same ceiling
 // while carrying no tool call but visible text — the one case cappedReplyErrFmt above does not

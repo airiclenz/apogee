@@ -77,6 +77,15 @@ fails, from the same source, with the same outcome: a branch and a message, not 
 change. No partial-reply salvage (reasoning is not an answer, which is the existing guard's own
 reasoning) and no retry Mechanism (a retry re-runs the same request into the same ceiling).
 
+> **Superseded in part (2026-09-15, plan `2026-09-14 - 03` item 13).** The parenthetical's claim
+> that a retry "re-runs the same request into the same ceiling" — and the fault text's matching last
+> clause, "a retry meets the same ceiling" — is false for a reasoning model: its spend under the cap
+> varies from pass to pass, and the same request has been seen answering on its second run
+> (`30a3b2df`). The fault now ends "a retry may succeed on a reasoning model" and leaves the choice
+> to the reader. The decision itself stands: the engine still runs no retry Mechanism of its own (a
+> raised-cap retry is parked on `apogee-tfp`), and the capped-summary fault of `compact.go` keeps its
+> no-retry wording while naming the cap the summariser request was actually sent with.
+
 ## Considered and rejected
 
 - **A fixed constant default** (say 8192 everywhere): simpler to read, but it disagrees with the

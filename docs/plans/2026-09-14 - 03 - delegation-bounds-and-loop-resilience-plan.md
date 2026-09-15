@@ -319,7 +319,7 @@ NOTES (2026-09-15): the two re-pinned tests keep the parent's event (readCall / 
 
 **Commit:** `fix(tui): a child's streamed reply is committed once — displace parks on every cross-depth switch`
 
-## 13. The capped-reply fault stops promising a retry fails
+## 13. The capped-reply fault stops promising a retry fails — ✅ DONE (2026-09-15)
 
 **What:** Recast at the regression check (2026-09-14). Wording only — no cap moves and no effort fact crosses into the engine. (i) `internal/agent/loop.go` `cappedReplyErrFmt` no longer claims "a retry meets the same ceiling" (false for reasoning models — `30a3b2df` [322]): only its LAST CLAUSE changes. (ii) `internal/agent/compact.go`: `cappedSummaryErrFmt` is formatted with the cap the summariser request was actually sent with (the `maxTok` set on the request), not the bare constant, so the fault names the applied cap. The forced-reasoning compaction-cap allowance this item first carried (`compactMaxTokens × 2` when reasoning is mandatory) is REMOVED — parked on `apogee-tfp` (Out of scope). ADR 0046's no-retry decision stands (`apogee-tfp`).
 

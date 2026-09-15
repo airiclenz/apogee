@@ -25,6 +25,46 @@ func (s *cancelOnResetSink) Emit(e domain.Event) {
 	}
 }
 
+// TestCutOffReplyLeavesTheRetryToTheReader pins the last clause of the capped-reply fault. It used
+// to end "a retry meets the same ceiling", which is false for a reasoning model — the spend under
+// the cap varies pass to pass, and the same request has been seen answering on its second run
+// (30a3b2df) — so the clause now says a retry MAY succeed there. The loop still runs no retry of
+// its own (ADR 0046 decision 4; TestCutOffReplyNamesTheOutputCap pins the single provider call);
+// only what the fault promises changes, and the remedy key ahead of it stays where it was.
+func TestCutOffReplyLeavesTheRetryToTheReader(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Context.MaxContextTokens = 98304
+	responder := &captureAllResponder{scripts: [][]provider.Delta{cutOffScript()}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "audit the repository"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	errs := errorEvents(sink.events)
+	if len(errs) != 1 {
+		t.Fatalf("ErrorEvents = %d (%v), want exactly 1", len(errs), errs)
+	}
+	got := errs[0].Err
+	const wantTail = " — raise max-output-tokens: for this server or narrow the task; a retry may succeed on a reasoning model"
+	if !strings.HasSuffix(got, wantTail) {
+		t.Errorf("ErrorEvent.Err = %q, want it to end with %q", got, wantTail)
+	}
+	if strings.Contains(got, "meets the same ceiling") {
+		t.Errorf("ErrorEvent.Err = %q, still promises a retry fails", got)
+	}
+	if !strings.Contains(got, "tokens of reasoning") {
+		t.Errorf("ErrorEvent.Err = %q, want the reasoning spend kept ahead of the new clause", got)
+	}
+}
+
 // TestCancelInsideRestreamHoldOffStaysResumable pins the uniform cancel semantics of the
 // transient-fault re-stream: a cancel that arrives while the Turn waits out the hold-off is a
 // cancel, not the second fault. It used to fall through to the give-up path, degrading a Turn the

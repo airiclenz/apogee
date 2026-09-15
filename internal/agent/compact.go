@@ -438,9 +438,11 @@ func (a *Agent) compactTranscriptChars() int {
 // blank reply context.Compact's errEmptySummary would misdescribe: the model DID answer, at length,
 // and spent the entire cap on a reasoning pass. So the message names the cap, the reasoning spent
 // under it when the reply carried any, and then one of the two causes below, because those are what
-// an operator acts on: another server, or a profile whose template honours the off rung. Like
-// cappedReplyErrFmt (ADR 0046) it deliberately does not invite a retry; the same fold meets the same
-// cap.
+// an operator acts on: another server, or a profile whose template honours the off rung. It
+// deliberately does not invite a retry (ADR 0046); the same fold meets the same cap. The cap it
+// names is the one the summariser request actually carried — Complete formats it with the maxTok
+// it set on the request, never the bare constant, so the number the reader sees is the number the
+// server was sent.
 //
 // The cause is chosen on what THIS request actually asked for — its own ThinkingEffort — and never
 // on the dialect. compactCompleter's EffortOff override fires on two dialects only, but a session
@@ -575,7 +577,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 		if askedForNoReasoning {
 			cause = cappedSummaryAskedOffCause
 		}
-		return "", fmt.Errorf(cappedSummaryErrFmt, compactMaxTokens, spent, cause)
+		return "", fmt.Errorf(cappedSummaryErrFmt, maxTok, spent, cause)
 	}
 
 	// A summary that DID say something before the cap cut it off is kept and marked, not faulted:
