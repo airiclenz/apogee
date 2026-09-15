@@ -50,6 +50,8 @@ func (a *Agent) runSyncArgv(
 	if !ok {
 		return "", fmt.Errorf("apogee: reaction %q: the sync lane runs a command, not a %T", r.ID, r.Handler)
 	}
+	// Unreachable from config: domain.Reaction.Validate refuses an empty or blank-first-element
+	// argv at load. The branch stays for a Reaction built in code that skipped Validate.
 	if len(handler.Argv) == 0 {
 		return "", fmt.Errorf("apogee: reaction %q: run: is empty", r.ID)
 	}
