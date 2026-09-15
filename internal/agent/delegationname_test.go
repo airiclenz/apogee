@@ -150,7 +150,7 @@ func TestPresentIdentity_RidesTheDispatchCtxOntoTheRequest(t *testing.T) {
 
 	presenter := &recordingPresenter{}
 	sink := &recordingSink{}
-	cfg := subAgentConfig(sink, domain.ModeAskBefore, tools.NewPresentDocument(root, presenter))
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, tools.NewPresentDocument(root, tools.ReadMounts{}, presenter))
 
 	up := newRoutedResponder().
 		route(parentInput, nil, subAgentCallScript(spawnCallID, childTask)).
@@ -197,7 +197,7 @@ func TestPresentIdentity_TopLevelRunPresentsAtDepthZero(t *testing.T) {
 	}
 
 	presenter := &recordingPresenter{}
-	cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore, tools.NewPresentDocument(root, presenter))
+	cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore, tools.NewPresentDocument(root, tools.ReadMounts{}, presenter))
 
 	up := newRoutedResponder().
 		route(userInput, nil, toolCallScript("p1", "present_document", `{"path":"review.md"}`)).

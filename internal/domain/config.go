@@ -239,6 +239,25 @@ type Config struct {
 	// READ its source from a mount, and still writes only inside WorkspaceDir.
 	ExtraReadRoots func() []string
 
+	// ScratchReadRoot reports the session's LIVE scratch dir for the same READ-ONLY tools (and
+	// present_document), so the one dir the orientation announces writable is readable back
+	// through every read tool — a probe the model wrote where it was told to, and could not read
+	// back, was the 2026-09-14 regression this seam closes. It carries ExtraReadRoots' contract —
+	// read-only through these tools, absolute paths only, evaluated LIVE once per tool call,
+	// default-tool-set only — and differs in two things: it is ONE dir, and it is handed over in
+	// the spelling the host ANNOUNCES (a symlinked `~/.apogee` included); the tools resolve it to
+	// its real path themselves, so the announced spelling is accepted verbatim.
+	//
+	// It is a func rather than a copy of ScratchDir because the dir MOVES: ScratchDir is the
+	// construction seed and Agent.SetScratchDir moves the live value at every session boundary,
+	// while the tools are built once from this Config — so the host that moves it is the host
+	// that answers here (the TUI's engine holder; a Firing's fixed dir). It rides beside
+	// ExtraReadRoots rather than inside it because that func is ALSO what the orientation
+	// announces as the read-only LIBRARY roots, and the scratch dir has a bullet of its own there.
+	// nil, or a func answering "" ⇒ nothing added — a Driver that manages no sessions is
+	// byte-identical to the fence before this field existed.
+	ScratchReadRoot func() string
+
 	// VirtualReadRoots names read-only trees the same READ-ONLY tools may reach that have NO host
 	// path at all — served from an fs.FS and addressed by the prefix their contents are announced
 	// under (`shipped:<id>`), keyed by that prefix. It carries ExtraReadRoots' contract clause for

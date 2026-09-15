@@ -1,0 +1,39 @@
+# The upstream TestE2EAnnouncedSkillsRootIsPresentable talks to: a model that shows the user a
+# file under the library root apogee ANNOUNCED, verbatim.
+#
+# The one tool turn carries a capture whose pattern lifts the root out of the orientation block's
+# own `- Read-only library roots: %s — read them with …` line
+# (internal/agent/prompts/orientation.txt), so the path below is under the root apogee announced
+# on that very request rather than one this fixture guessed. present_document is the tool under
+# test because it was the one read tool that took no mounts at all: a skill's bundled reference
+# was readable, listable and greppable through the announced root and refused by the one tool that
+# shows it to the human.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced skill present
+    # The prompt, and the one turn that reads the orientation.
+    - when:
+        last_message: bundled prompt of the announced skill
+      captures:
+        # The FIRST root on the line is the home library (internal/skills sourceAnchors): the
+        # workspace's own `.apogee/skills` anchor follows it after a comma, so the capture stops at
+        # either a comma or the space before the dash.
+        - {name: library, from: system, pattern: 'Read-only library roots: ([^,\s]+)'}
+      tool_calls:
+        - id: library-present
+          name: present_document
+          arguments: '{"path":"{{library}}/announced/prompts/a.md","title":"The bundled prompt"}'
+    # The wrap-up, once the presentation has come back.
+    - when:
+        tool_result: present_document
+      text: The bundled prompt is presented.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

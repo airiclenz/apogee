@@ -117,6 +117,63 @@ func TestE2EAnnouncedSkillPathsUnderASymlinkedHome(t *testing.T) {
 	}
 }
 
+// announcedSkillPresentPrompt is what the skill-present fixture's model is asked, and the phrase
+// announced-skill-present.yaml keys its one capturing turn on.
+const announcedSkillPresentPrompt = "Show me the bundled prompt of the announced skill."
+
+// TestE2EAnnouncedSkillsRootIsPresentable is the invariant over the orientation's `Read-only
+// library roots:` line for the one read tool that took no mounts: present_document on a file under
+// the announced root shows it rather than refusing it as an escape. The path is under the root the
+// script captured off that request's own system prompt, so what is exercised is the announcement.
+func TestE2EAnnouncedSkillsRootIsPresentable(t *testing.T) {
+	// A local desktop with a fake opener, so the presentation climbs a rung this test can see
+	// rather than whatever the developer's own shell would make of it.
+	fakeOpener(t)
+	presentDesktop(t)
+
+	stub := stubllm.New(t, loadScript(t, "announced-skill-present"))
+	fx := announcedSkillFixture(t, stub)
+	appendHomeConfig(t, fx.home, announcedStandingPrompt)
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIOn(t, drv, stub, fx.home, fx.ws, "--mode", "auto")
+	panes := watchApprovalPanes(t, drv)
+
+	submit(drv, announcedSkillPresentPrompt)
+	drv.WaitText("The bundled prompt is presented.")
+	drv.WaitQuiet(settled)
+
+	// The call named a file under the announced root — the library's resolved real path, which is
+	// what the roots line states — and the capture matched at all.
+	assertEveryToolCallNames(t, stub, filepath.Join(fx.repo, "announced", "prompts", "a.md"))
+
+	results := toolResults(stub)
+	if len(results) != 1 {
+		t.Fatalf("the run produced %d tool results; want the fixture's one:\n%s",
+			len(results), strings.Join(results, "\n---\n"))
+	}
+	if strings.Contains(results[0], "outside the workspace root") {
+		t.Errorf("present_document refused the announced library root as an escape:\n%s", results[0])
+	}
+	if !strings.HasPrefix(results[0], "Presented ") || !strings.Contains(results[0], "opened on the user's machine") {
+		t.Errorf("the bundled prompt was not presented through the opener rung:\n%s", results[0])
+	}
+	if !strings.Contains(results[0], "a remote session shows the path only") {
+		t.Errorf("the result does not state the remote-session degradation a mount path carries:\n%s", results[0])
+	}
+
+	if n := panes(); n != 0 {
+		t.Errorf("the run raised %d approval pane(s); an announced path must cost nobody a look", n)
+	}
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+	stub.AssertConsumed(t)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
 // announcedUser is the account name the fixture's home hangs under, so the shape it builds is a
 // `/home/<user>/.apogee` and not merely an `.apogee` somewhere under a temp root. The difference is
 // load-bearing for the scratch fixture: the dangerous-action guard's control-plane rule is anchored
@@ -493,6 +550,91 @@ func assertAnnouncedScratchDirIsWritableIn(t *testing.T, mode string) {
 
 	if n := panes(); n != 0 {
 		t.Errorf("the run raised %d approval pane(s) in %s; a path apogee itself named must cost nobody a look", n, mode)
+	}
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+	stub.AssertConsumed(t)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// announcedScratchReadPrompt is what the scratch-read fixture's model is asked, and the phrase
+// announced-scratch-read.yaml keys its first capturing turn on.
+const announcedScratchReadPrompt = "Write the report to the scratch dir, then read it back through every read tool."
+
+// announcedScratchReadMarker is the line the report carries: what the read and the grep of the
+// announced dir have to come back with.
+const announcedScratchReadMarker = "APOGEE-ANNOUNCED-SCRATCH-READ-3c9a"
+
+// TestE2EAnnouncedScratchDirIsReadableByTheReadTools is the invariant over the orientation block
+// for apogee's OWN read tools: the dir apogee names on its `Scratch dir:` line is readable back —
+// by read_file, grep, list_dir, find_files and present_document — through the announced spelling,
+// a dotfiles-symlinked home included, with nobody asked.
+//
+// It is the read twin of TestE2EAnnouncedScratchDirIsWritableByTheNativeWriters. Every earlier
+// test in this file proves a path the model may WRITE; this one proves that what it wrote there
+// it can read back, because on 2026-09-14 it could not: the read scope mounted the skills library
+// and nothing else, so a model that drafted its report exactly where the orientation told it to
+// was answered `security: path resolves outside the workspace root` by every tool it reached for
+// next — and present_document, which took no mounts at all, refused the skills root too.
+func TestE2EAnnouncedScratchDirIsReadableByTheReadTools(t *testing.T) {
+	// A local desktop with a fake opener, so the presentation climbs a rung this test can see.
+	fakeOpener(t)
+	presentDesktop(t)
+
+	stub := stubllm.New(t, loadScript(t, "announced-scratch-read"))
+	fx := announcedSkillFixture(t, stub)
+	appendHomeConfig(t, fx.home, announcedStandingPrompt)
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIOn(t, drv, stub, fx.home, fx.ws, "--mode", "allow-edits")
+	panes := watchApprovalPanes(t, drv)
+
+	submit(drv, announcedScratchReadPrompt)
+	drv.WaitText("The scratch report is read back.")
+	drv.WaitQuiet(settled)
+
+	// Every call named the announced dir — the configured home's spelling, symlink and all — and
+	// the captures matched on both turns.
+	scratch := announcedScratchDirOnTheWire(t, stub)
+	if got, want := filepath.Dir(scratch), filepath.Join(fx.home, "scratch"); got != want {
+		t.Errorf("the orientation announced the scratch dir as %s; want this session's dir under "+
+			"the configured home %s", scratch, want)
+	}
+	assertEveryToolCallNames(t, stub, scratch)
+
+	results := toolResults(stub)
+	if len(results) != 6 {
+		t.Fatalf("the run produced %d tool results; want the fixture's six:\n%s",
+			len(results), strings.Join(results, "\n---\n"))
+	}
+	for i, got := range results {
+		if strings.Contains(got, "outside the workspace root") {
+			t.Errorf("tool result %d was refused as an escape:\n%s", i+1, got)
+		}
+	}
+	if !strings.Contains(results[0], "wrote ") {
+		t.Errorf("the write did not come back as a success receipt:\n%s", results[0])
+	}
+	// The read and the grep carry the report's own line back; the listing and the find name the file.
+	for _, i := range []int{1, 2} {
+		if !strings.Contains(results[i], announcedScratchReadMarker) {
+			t.Errorf("tool result %d does not carry the marker line:\n%s", i+1, results[i])
+		}
+	}
+	for _, i := range []int{3, 4} {
+		if !strings.Contains(results[i], "report.md") {
+			t.Errorf("tool result %d does not name the report:\n%s", i+1, results[i])
+		}
+	}
+	if !strings.HasPrefix(results[5], "Presented ") || !strings.Contains(results[5], "opened on the user's machine") {
+		t.Errorf("the report was not presented through the opener rung:\n%s", results[5])
+	}
+
+	if n := panes(); n != 0 {
+		t.Errorf("the run raised %d approval pane(s); a path apogee itself named must cost nobody a look", n)
 	}
 	if un := stub.Unmatched(); len(un) > 0 {
 		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)

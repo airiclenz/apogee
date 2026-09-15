@@ -415,6 +415,25 @@ func (e *lateEngine) SetScratchDir(dir string) {
 	}
 }
 
+// ScratchDir reports the session scratch dir the bound Agent currently carries — the one its
+// orientation announces — and, while unbound, the last one the session host pushed here ("" before
+// any was). It is the read half of SetScratchDir, and what the composition root wires as the read
+// tools' scratch root (apogee.Config.ScratchReadRoot): the tools are built once and the dir moves
+// at every session boundary, so the func they hold must read the live value, and this holder is
+// the one place that has it whether or not an Agent is installed yet.
+func (e *lateEngine) ScratchDir() string {
+	e.mu.Lock()
+	agent, pending := e.agent, e.pendingScratch
+	e.mu.Unlock()
+	if agent != nil {
+		return agent.ScratchDir()
+	}
+	if pending != nil {
+		return *pending
+	}
+	return ""
+}
+
 // SetJournal installs the undo journal this session records into, together with the note that says
 // why it is the journal it is — the composition root opens one per session id (snapshot.OpenJournal)
 // and pushes it here at every identity boundary. Remembered while unbound for SetScratchDir's

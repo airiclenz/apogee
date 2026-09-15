@@ -41,13 +41,18 @@ type Presenter interface {
 // surface.
 type PresentRequest struct {
 	// Path is the ABSOLUTE path of the document to present. The tool has already resolved it
-	// inside the workspace root and confirmed it is an existing regular file, so a Presenter
-	// receives a path it may hand straight to a mechanism.
+	// inside the workspace root — or, since 2026-09-15, inside one of the host's read mounts
+	// (the session scratch dir, a skills library) — and confirmed it is an existing regular
+	// file, so a Presenter receives a path it may hand straight to a mechanism. A mechanism
+	// fenced to the workspace (the doc server) refuses a mounted document and the Presenter
+	// degrades to the baseline rung, which the tool's result wording already states.
 	Path string
 
 	// DisplayPath is Path in its workspace-relative form — the text the transcript carries as
 	// plain text on its own line, for the terminal (Zed / VS Code / iTerm2 / WezTerm / kitty)
-	// to linkify. It is display-only: mechanisms use Path.
+	// to linkify. For a document under a read mount it is Path itself, absolute: a
+	// mount-relative name would read as a workspace file that does not exist. It is
+	// display-only: mechanisms use Path.
 	DisplayPath string
 
 	// Title is an optional human label for the document; it MAY be empty. The host renders it

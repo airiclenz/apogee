@@ -369,3 +369,15 @@ still ruled in explicitly (the third amendment's (b)).
 (`internal/tui/presenter.go`), so the crossing the fourth amendment's (c) describes is untouched
 and its test stays green unchanged; rung 3 stays unbounded (the first amendment's (c)); the Windows
 name bound (the second amendment) is untouched.
+
+## Note (2026-09-15) — a document under a read mount may be presented
+
+§5's bound — "the path is resolved inside the workspace root" — now reads **inside the workspace
+root or one of the host's read mounts**: the session scratch dir and the skills library roots, the
+same `ReadMounts` every read tool resolves over (plan `2026-09-14 - 02`, item 3). What may be
+presented is what may be read; a report the model drafted in the announced scratch dir was the
+one deliverable the tool refused, while the orientation named that dir as the place for drafts.
+Everything else stands: the extension allow-lists are untouched, the model still supplies no
+command, and the doc server keeps fencing its grants to the workspace root — so on a remote session
+a mounted document degrades to rung 0, which the tool's result states in words ("Outside the
+workspace it is served locally; a remote session shows the path only").

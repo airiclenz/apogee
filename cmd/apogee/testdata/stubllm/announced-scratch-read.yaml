@@ -1,0 +1,62 @@
+# The upstream TestE2EAnnouncedScratchDirIsReadableByTheReadTools talks to: a model that writes a
+# report where apogee told it to, and then reads it back through every read tool.
+#
+# Both tool turns carry a capture whose pattern lifts the path out of the orientation block's own
+# `- Scratch dir: %s — writable and outside the workspace; …` line
+# (internal/agent/prompts/orientation.txt), so every path below names the dir apogee ANNOUNCED on
+# that very request rather than one this fixture guessed. The orientation rides on every standing
+# system message, which is why the second turn can capture it afresh instead of re-reading the
+# path out of the write's own receipt — a capture that went unmatched fails here rather than
+# quietly testing a path nobody was told about.
+#
+# The write comes first, in a turn of its own, so the five reads that follow have something to
+# find; the five ride ONE turn because the claim is about the announcement, not about any one
+# tool's result format. present_document rides with them: a report drafted in the scratch dir is
+# the deliverable a model most wants to show, and it was the one tool that took no mounts at all.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced scratch read
+    # The prompt, and the write into the announced dir.
+    - when:
+        last_message: read it back through every read tool
+      captures:
+        - {name: scratch, from: system, pattern: 'Scratch dir: (\S+) — writable'}
+      tool_calls:
+        - id: scratch-write
+          name: write_file
+          arguments: '{"path":"{{scratch}}/report.md","content":"# Scratch report\n\nAPOGEE-ANNOUNCED-SCRATCH-READ-3c9a\n"}'
+    # The five reads, once the write has come back, each naming the announced dir afresh.
+    - when:
+        tool_result: write_file
+      captures:
+        - {name: scratch, from: system, pattern: 'Scratch dir: (\S+) — writable'}
+      tool_calls:
+        - id: scratch-read
+          name: read_file
+          arguments: '{"path":"{{scratch}}/report.md"}'
+        - id: scratch-grep
+          name: grep
+          arguments: '{"pattern":"APOGEE-ANNOUNCED-SCRATCH-READ-3c9a","path":"{{scratch}}"}'
+        - id: scratch-list
+          name: list_dir
+          arguments: '{"path":"{{scratch}}"}'
+        - id: scratch-find
+          name: find_files
+          arguments: '{"pattern":"report.md","path":"{{scratch}}"}'
+        - id: scratch-present
+          name: present_document
+          arguments: '{"path":"{{scratch}}/report.md","title":"Scratch report"}'
+    # The wrap-up, once the last of the five has come back.
+    - when:
+        tool_result: present_document
+      text: The scratch report is read back.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

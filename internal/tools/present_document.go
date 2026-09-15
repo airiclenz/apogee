@@ -45,26 +45,42 @@ type presentDocumentArgs struct {
 // hand-built registry that registers it with a nil Presenter from panicking. Stateless across
 // Turns (ADR 0008): a delegate reference and a root, no live handle — the doc server behind
 // the delegate is the HOST's, with a lifetime tied to the app rather than to a Turn.
+//
+// The path is resolved over the same read scope the read tools use — the workspace first, then
+// the host's read mounts (2026-09-15) — because a document is a thing the model READS back to the
+// user: a report it drafted in the announced scratch dir, or a skill's bundled reference, is as
+// presentable as one in the workspace, and a tool that refused the very dir the orientation named
+// as the place for drafts was the regression this closes. A document under a MOUNT degrades one
+// rung on a remote session: the doc server fences every grant to the workspace root (present
+// .DocServer.Serve), so rung 2 cannot serve it and the presenter reports the baseline — the
+// result wording says so, so the model relays a truthful claim on either kind of session.
 type PresentDocument struct {
 	toolSpec
 	root      string
+	scope     readScope
 	presenter domain.Presenter
 }
 
-// NewPresentDocument returns a present_document tool that resolves paths within root and
-// routes them to presenter. A nil presenter yields a tool whose Execute reports the delegate
-// is unavailable (the registry omits it in practice).
-func NewPresentDocument(root string, presenter domain.Presenter) *PresentDocument {
-	return &PresentDocument{toolSpec: presentDocumentSpec, root: root, presenter: presenter}
+// NewPresentDocument returns a present_document tool that resolves paths within root — and, for
+// an absolute path the workspace refuses, over mounts, exactly as the read tools do — and routes
+// them to presenter. A nil presenter yields a tool whose Execute reports the delegate is
+// unavailable (the registry omits it in practice).
+func NewPresentDocument(root string, mounts ReadMounts, presenter domain.Presenter) *PresentDocument {
+	return &PresentDocument{
+		toolSpec:  presentDocumentSpec,
+		root:      root,
+		scope:     mounts.scope(root),
+		presenter: presenter,
+	}
 }
 
 // ReadOnly reports that present_document performs no writes (showing a document mutates
 // nothing), so the disposition runs it freely in every mode — including Plan.
 func (t *PresentDocument) ReadOnly() bool { return true }
 
-// Execute resolves the named document inside the workspace, confirms it is an existing
-// regular file, and hands it to the Presenter, returning result text that names the rung the
-// host actually reached so the model can relay it truthfully.
+// Execute resolves the named document inside the workspace or a read mount, confirms it is an
+// existing regular file, and hands it to the Presenter, returning result text that names the rung
+// the host actually reached so the model can relay it truthfully.
 //
 // A cancelled ctx is a Go error so the loop rolls the Turn back (ADR 0007). Any OTHER
 // Presenter error is deliberately NOT an error result: rung 0 — the path in the transcript —
@@ -89,22 +105,34 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 		return errorResult(call.ID, "present_document is unavailable: no Presenter delegate is configured"), nil
 	}
 
-	path, err := resolveInRoot(args.Path, t.root)
+	// Resolved over the read scope: the workspace first, then the mounts, and a path no root
+	// accepts is the workspace's own uniform escape refusal (readScope.resolve). The matched root
+	// is what every fenced step below is pinned to — a document under a mount must not be
+	// measured against the workspace.
+	root, path, err := t.scope.resolve(args.Path)
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	// The existence-and-kind check runs on a descriptor opened THROUGH the fence, named by
-	// the workspace-relative form of the resolved path: a plain os.Stat on the resolved
-	// string re-walks it and would follow a component swapped to point outside the workspace
-	// after resolveInRoot checked it. Re-fencing what the PRESENTER later opens is the
-	// document server's own business (the per-request fence), not this tool's.
-	display := workspaceRelative(path, t.root)
-	info, err := statInRoot(display, t.root)
+	// The existence-and-kind check runs on a descriptor opened THROUGH the fence, named by the
+	// root-relative form of the resolved path: a plain os.Stat on the resolved string re-walks
+	// it and would follow a component swapped to point outside the root after resolve checked
+	// it. Re-fencing what the PRESENTER later opens is the document server's own business (the
+	// per-request fence), not this tool's.
+	relative := workspaceRelative(path, root)
+	info, err := statInRoot(relative, root)
 	if err != nil {
 		return errorResult(call.ID, escapeOrMessage(err, "file not found: "+args.Path)), nil
 	}
 	if !info.Mode().IsRegular() {
 		return errorResult(call.ID, "not a file: "+args.Path), nil
+	}
+	// The transcript's display name: workspace-relative for a workspace document (the short name
+	// the terminal linkifies against the project), the resolved ABSOLUTE path for one under a
+	// mount — a mount-relative name would read as a workspace file that does not exist.
+	display := relative
+	mounted := root != t.root
+	if mounted {
+		display = path
 	}
 
 	outcome, err := t.presenter.Present(ctx, domain.PresentRequest{
@@ -124,9 +152,9 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 		if ctx.Err() != nil {
 			return domain.ToolResult{}, ctx.Err()
 		}
-		return okResult(call.ID, renderPresented(display, domain.PresentOutcome{Method: domain.PresentShown})), nil
+		return okResult(call.ID, renderPresented(display, domain.PresentOutcome{Method: domain.PresentShown}, mounted)), nil
 	}
-	return okResult(call.ID, renderPresented(display, outcome)), nil
+	return okResult(call.ID, renderPresented(display, outcome, mounted)), nil
 }
 
 // renderPresented turns the outcome into the sentence the model relays. Each rung gets its
@@ -140,15 +168,31 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 // persisted with the session — so the link's whole reach is the transcript entry. Defence in
 // depth: the Presenter already hands back the display path, and a host that still returned a URL
 // could not leak it through here.
-func renderPresented(display string, outcome domain.PresentOutcome) string {
+//
+// mounted says the document lies under a read mount rather than the workspace, and appends the
+// one degradation that carries: the doc server serves the workspace alone, so on a remote session
+// such a document reaches the user as its path and nothing more. It is stated on every rung — the
+// tool cannot see which kind of session it runs in, and the model relays what it is told.
+func renderPresented(display string, outcome domain.PresentOutcome, mounted bool) string {
+	var rung string
 	switch outcome.Method {
 	case domain.PresentOpened:
-		return "Presented " + display + ": opened on the user's machine."
+		rung = "opened on the user's machine."
 	case domain.PresentServed:
-		return "Presented " + display + ": shown in the transcript with a link."
+		rung = "shown in the transcript with a link."
+	default:
+		rung = "the path is shown in the transcript for the user to open."
 	}
-	return "Presented " + display + ": the path is shown in the transcript for the user to open."
+	if mounted {
+		rung += " " + presentedMountNote
+	}
+	return "Presented " + display + ": " + rung
 }
+
+// presentedMountNote is the sentence a document under a read mount carries in its result: the
+// rung-2 degradation stated once, in the model's own result text, rather than left for a remote
+// user to discover.
+const presentedMountNote = "Outside the workspace it is served locally; a remote session shows the path only."
 
 var (
 	_ domain.Tool         = (*PresentDocument)(nil)

@@ -86,6 +86,18 @@ type HostTools struct {
 	// that does not exist yet is skipped rather than failing the call.
 	ExtraReadRoots func() []string
 
+	// ScratchReadRoot reports the session's live scratch dir — the one dir the host ANNOUNCES to
+	// the model as writable (the orientation's `Scratch dir:` bullet) and so the one dir the read
+	// tools must never refuse: a model that writes a probe where it was told to and cannot read it
+	// back was misled by its own host. It carries ExtraReadRoots' four clauses — read-only through
+	// these tools (the WRITE side is the confinement box's business, not this seam's), absolute
+	// paths only, live per call, nil or "" ⇒ nothing added — and differs in two things: it is ONE
+	// dir, and it is handed over in the spelling the host announces, which the read scope resolves
+	// to its real path itself (ReadMounts.Scratch). It is a seam of its own rather than an entry
+	// in ExtraReadRoots because that func is also what the host announces as its LIBRARY roots,
+	// and the scratch dir has a bullet of its own there.
+	ScratchReadRoot func() string
+
 	// VirtualReadRoots reports read-only trees the host mounts under a NAME rather than under a
 	// host path, keyed by the prefix their addresses are spelled with (`shipped:`). It carries
 	// ExtraReadRoots' four clauses unchanged — read-only, live per call, nil ⇒ none — and adds
@@ -201,12 +213,14 @@ func DefaultTools(root string) []domain.Tool {
 // appended only when host.SkillLookup is set, ReadOnly (fetching prompt text writes nothing) and
 // no ExternalEffectTool either — the catalog it searches is in this process.
 //
-// host.ExtraReadRoots and host.VirtualReadRoots are threaded, as ONE ReadMounts, into the four
-// read-only file tools (read_file, list_dir, grep, find_files) and — since 2026-08-12, for its
-// SOURCE alone — into copy_file, each of which resolves an ABSOLUTE path over those roots (or a
-// mount reference over those mounts) when the workspace refuses it; a zero ReadMounts leaves them
-// workspace-only. Nothing else receives it, and no WRITE widens: copy_file's destination, like
-// every other write and execution tool, stays workspace-fenced — see the field's contract.
+// host.ExtraReadRoots, host.ScratchReadRoot and host.VirtualReadRoots are threaded, as ONE
+// ReadMounts, into the four read-only file tools (read_file, list_dir, grep, find_files), into
+// present_document (a document under a read mount may be shown — 2026-09-15) and — since
+// 2026-08-12, for its SOURCE alone — into copy_file, each of which resolves an ABSOLUTE path over
+// those roots (or a mount reference over those mounts) when the workspace refuses it; a zero
+// ReadMounts leaves them workspace-only. Nothing else receives it, and no WRITE widens: copy_file's
+// destination, like every other write and execution tool, stays workspace-fenced — see the field's
+// contract.
 //
 // host.SecretEnvVars is threaded into the three EXECUTION tools (terminal, python_exec, run_tests)
 // — the only tools that hand a subprocess the operator's inherited environment — where it joins
@@ -275,15 +289,16 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		all = append(all, NewAskUser(host.Asker))
 	}
 	if host.Presenter != nil {
-		all = append(all, NewPresentDocument(root, host.Presenter))
+		all = append(all, NewPresentDocument(root, mounts, host.Presenter))
 	}
 	return all
 }
 
-// readMounts pairs the host's two read-only mount seams into the one value every read tool takes,
-// so a tool can never be wired with the disk roots and without the virtual mounts.
+// readMounts pairs the host's three read-only mount seams into the one value every read tool
+// takes, so a tool can never be wired with the disk roots and without the scratch root or the
+// virtual mounts.
 func (h HostTools) readMounts() ReadMounts {
-	return ReadMounts{Roots: h.ExtraReadRoots, Virtual: h.VirtualReadRoots}
+	return ReadMounts{Roots: h.ExtraReadRoots, Scratch: h.ScratchReadRoot, Virtual: h.VirtualReadRoots}
 }
 
 // rosterDeltas reads the two CONFIGURATION rungs of the ladder off HostTools: the global lists the
@@ -439,7 +454,7 @@ func trimmedNames(names []string) []string {
 // Driver's wiring. TestKnownToolNamesCoversTheComposedSet pins it to the assembly above.
 func KnownToolNames() []string {
 	all := builtinTools("", HostTools{})
-	all = append(all, NewLoadSkill(nil), NewAskUser(nil), NewPresentDocument("", nil))
+	all = append(all, NewLoadSkill(nil), NewAskUser(nil), NewPresentDocument("", ReadMounts{}, nil))
 	names := make([]string, 0, len(all))
 	for _, tool := range all {
 		names = append(names, tool.Name())

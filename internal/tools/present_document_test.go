@@ -115,7 +115,7 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 				file = "report.html"
 			}
 			presenter := &scriptedPresenter{outcome: tc.outcome}
-			tool := NewPresentDocument(presentWorkspace(t), presenter)
+			tool := NewPresentDocument(presentWorkspace(t), ReadMounts{}, presenter)
 
 			res, err := tool.Execute(context.Background(), presentCall(t, map[string]string{"path": file}))
 			if err != nil {
@@ -144,7 +144,7 @@ func TestPresentDocument_RequestCarriesAbsolutePathDisplayPathAndTitle(t *testin
 
 	root := presentWorkspace(t)
 	presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentShown}}
-	tool := NewPresentDocument(root, presenter)
+	tool := NewPresentDocument(root, ReadMounts{}, presenter)
 
 	// The presenting agent's run identity rides the call's ctx exactly as the asking agent's does
 	// (the engine installs it at the dispatch seam): the tool must copy both onto the request, or
@@ -185,7 +185,7 @@ func TestPresentDocument_TopLevelRequestCarriesTheHonestZeroIdentity(t *testing.
 	t.Parallel()
 
 	presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentShown}}
-	_, err := NewPresentDocument(presentWorkspace(t), presenter).
+	_, err := NewPresentDocument(presentWorkspace(t), ReadMounts{}, presenter).
 		Execute(context.Background(), presentCall(t, map[string]string{"path": "report.html"}))
 	if err != nil {
 		t.Fatalf("Execute returned a Go error: %v", err)
@@ -212,7 +212,7 @@ func TestPresentDocument_AbsolutePathInsideRootStillDisplaysRelative(t *testing.
 	}
 
 	presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentShown}}
-	_, err := NewPresentDocument(root, presenter).Execute(context.Background(),
+	_, err := NewPresentDocument(root, ReadMounts{}, presenter).Execute(context.Background(),
 		presentCall(t, map[string]string{"path": filepath.Join(nested, "review.md")}))
 	if err != nil {
 		t.Fatalf("Execute returned a Go error: %v", err)
@@ -226,14 +226,14 @@ func TestPresentDocument_AbsolutePathInsideRootStillDisplaysRelative(t *testing.
 
 func TestPresentDocument_IsReadOnly(t *testing.T) {
 	t.Parallel()
-	if !domain.IsReadOnly(NewPresentDocument(t.TempDir(), &scriptedPresenter{})) {
+	if !domain.IsReadOnly(NewPresentDocument(t.TempDir(), ReadMounts{}, &scriptedPresenter{})) {
 		t.Error("present_document must be read-only (runs in Plan, never gates)")
 	}
 }
 
 func TestPresentDocument_IsNotExternalEffect(t *testing.T) {
 	t.Parallel()
-	tool := domain.Tool(NewPresentDocument(t.TempDir(), &scriptedPresenter{}))
+	tool := domain.Tool(NewPresentDocument(t.TempDir(), ReadMounts{}, &scriptedPresenter{}))
 	if _, ok := tool.(domain.ExternalEffectTool); ok {
 		t.Error("present_document must NOT be an ExternalEffectTool (the user's own display is not a stubbable service)")
 	}
@@ -242,7 +242,7 @@ func TestPresentDocument_IsNotExternalEffect(t *testing.T) {
 func TestPresentDocument_NilPresenterIsGracefulResultError(t *testing.T) {
 	t.Parallel()
 
-	res, err := NewPresentDocument(presentWorkspace(t), nil).
+	res, err := NewPresentDocument(presentWorkspace(t), ReadMounts{}, nil).
 		Execute(context.Background(), presentCall(t, map[string]string{"path": "report.html"}))
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -256,7 +256,7 @@ func TestPresentDocument_EmptyPathIsResultError(t *testing.T) {
 	t.Parallel()
 
 	presenter := &scriptedPresenter{}
-	res, err := NewPresentDocument(presentWorkspace(t), presenter).
+	res, err := NewPresentDocument(presentWorkspace(t), ReadMounts{}, presenter).
 		Execute(context.Background(), presentCall(t, map[string]string{"path": "  "}))
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -273,7 +273,7 @@ func TestPresentDocument_MissingFileIsResultError(t *testing.T) {
 	t.Parallel()
 
 	presenter := &scriptedPresenter{}
-	res, err := NewPresentDocument(presentWorkspace(t), presenter).
+	res, err := NewPresentDocument(presentWorkspace(t), ReadMounts{}, presenter).
 		Execute(context.Background(), presentCall(t, map[string]string{"path": "nope.html"}))
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -295,7 +295,7 @@ func TestPresentDocument_DirectoryIsResultError(t *testing.T) {
 	}
 
 	presenter := &scriptedPresenter{}
-	res, err := NewPresentDocument(root, presenter).
+	res, err := NewPresentDocument(root, ReadMounts{}, presenter).
 		Execute(context.Background(), presentCall(t, map[string]string{"path": "docs"}))
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -312,7 +312,7 @@ func TestPresentDocument_PathEscapeIsResultError(t *testing.T) {
 	t.Parallel()
 
 	presenter := &scriptedPresenter{}
-	res, err := NewPresentDocument(presentWorkspace(t), presenter).
+	res, err := NewPresentDocument(presentWorkspace(t), ReadMounts{}, presenter).
 		Execute(context.Background(), presentCall(t, map[string]string{"path": "../outside.html"}))
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -322,6 +322,119 @@ func TestPresentDocument_PathEscapeIsResultError(t *testing.T) {
 	}
 	if presenter.calls != 0 {
 		t.Error("the Presenter must not be consulted for a path outside the workspace")
+	}
+}
+
+// TestPresentDocument_ShowsADocumentUnderAReadMount pins the mount half of the resolution
+// (2026-09-15): a document under a read mount — the announced scratch dir, a skill's bundled file —
+// is presented rather than refused as an escape, the Presenter is handed its resolved absolute path
+// under BOTH names (a mount-relative display name would read as a workspace file that does not
+// exist), and the result carries the remote-session degradation in words: the doc server fences its
+// grants to the workspace, so on a remote session such a document reaches the user as its path
+// only. The scripted presenter cannot see which session it is, which is exactly why the note is
+// stated on every rung.
+func TestPresentDocument_ShowsADocumentUnderAReadMount(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		mounts func(dir string) ReadMounts
+	}{
+		{"an extra read root", func(dir string) ReadMounts {
+			return ReadMounts{Roots: func() []string { return []string{dir} }}
+		}},
+		{"the session scratch dir", func(dir string) ReadMounts {
+			return ReadMounts{Scratch: func() string { return dir }}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			mount := realPath(t, t.TempDir())
+			doc := filepath.Join(mount, "draft.md")
+			if err := os.WriteFile(doc, []byte("# draft\n"), 0o600); err != nil {
+				t.Fatalf("seed the mounted document: %v", err)
+			}
+			presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentOpened}}
+			tool := NewPresentDocument(presentWorkspace(t), tc.mounts(mount), presenter)
+
+			res, err := tool.Execute(context.Background(), presentCall(t, map[string]string{"path": doc}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("a document under a read mount was refused: %q", res.Content)
+			}
+			want := "Presented " + doc + ": opened on the user's machine. " + presentedMountNote
+			if res.Content != want {
+				t.Errorf("result = %q\nwant     %q", res.Content, want)
+			}
+			if !strings.Contains(res.Content, "a remote session shows the path only") {
+				t.Errorf("result = %q does not state the remote-session degradation", res.Content)
+			}
+			if presenter.seen.Path != doc || presenter.seen.DisplayPath != doc {
+				t.Errorf("request carried Path %q, DisplayPath %q; want the resolved absolute path %q under both",
+					presenter.seen.Path, presenter.seen.DisplayPath, doc)
+			}
+		})
+	}
+}
+
+// TestPresentDocument_MountedDocumentsStayWorkspaceNamedInTheWorkspace pins that the mount seam
+// changes nothing for a workspace document: the display name stays workspace-relative and the
+// result carries no mount note, so the wording every existing row pins is byte-identical with a
+// mount wired.
+func TestPresentDocument_MountedDocumentsStayWorkspaceNamedInTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentShown}}
+	mounts := ReadMounts{Scratch: func() string { return t.TempDir() }}
+	tool := NewPresentDocument(presentWorkspace(t), mounts, presenter)
+
+	res, err := tool.Execute(context.Background(), presentCall(t, map[string]string{"path": "report.html"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if want := "Presented report.html: the path is shown in the transcript for the user to open."; res.Content != want {
+		t.Errorf("result = %q, want %q", res.Content, want)
+	}
+	if presenter.seen.DisplayPath != "report.html" {
+		t.Errorf("DisplayPath = %q, want the workspace-relative name", presenter.seen.DisplayPath)
+	}
+}
+
+// TestPresentDocument_OutsideEveryRootIsResultError pins the other side of the mount: an absolute
+// path under NO root — neither the workspace nor a mount — is the workspace's own uniform escape
+// refusal, ErrPathEscape's wording, never a "not found" that would invite a retry.
+func TestPresentDocument_OutsideEveryRootIsResultError(t *testing.T) {
+	t.Parallel()
+
+	elsewhere := filepath.Join(realPath(t, t.TempDir()), "elsewhere.md")
+	if err := os.WriteFile(elsewhere, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	presenter := &scriptedPresenter{}
+	mounts := ReadMounts{
+		Roots:   func() []string { return []string{realPath(t, t.TempDir())} },
+		Scratch: func() string { return realPath(t, t.TempDir()) },
+	}
+
+	res, err := NewPresentDocument(presentWorkspace(t), mounts, presenter).
+		Execute(context.Background(), presentCall(t, map[string]string{"path": elsewhere}))
+
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("a path under no root should be a result-level error; got %q", res.Content)
+	}
+	if !strings.Contains(res.Content, ErrPathEscape.Error()) {
+		t.Errorf("refusal = %q, want the uniform escape wording %q", res.Content, ErrPathEscape.Error())
+	}
+	if presenter.calls != 0 {
+		t.Error("the Presenter must not be consulted for a path under no root")
 	}
 }
 
@@ -355,7 +468,7 @@ func TestPresentDocument_RefusesEscapingSymlink(t *testing.T) {
 		t.Parallel()
 
 		presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentOpened}}
-		res, err := NewPresentDocument(root, presenter).
+		res, err := NewPresentDocument(root, ReadMounts{}, presenter).
 			Execute(context.Background(), presentCall(t, map[string]string{"path": "escape.html"}))
 		if err != nil {
 			t.Fatalf("unexpected Go error: %v", err)
@@ -375,7 +488,7 @@ func TestPresentDocument_RefusesEscapingSymlink(t *testing.T) {
 		t.Parallel()
 
 		presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentOpened}}
-		res, err := NewPresentDocument(root, presenter).
+		res, err := NewPresentDocument(root, ReadMounts{}, presenter).
 			Execute(context.Background(), presentCall(t, map[string]string{"path": "link.html"}))
 		if err != nil {
 			t.Fatalf("unexpected Go error: %v", err)
@@ -396,7 +509,7 @@ func TestPresentDocument_PresenterErrorDegradesToShownNotAnError(t *testing.T) {
 	t.Parallel()
 
 	presenter := &scriptedPresenter{err: errors.New("opener exploded")}
-	res, err := NewPresentDocument(presentWorkspace(t), presenter).
+	res, err := NewPresentDocument(presentWorkspace(t), ReadMounts{}, presenter).
 		Execute(context.Background(), presentCall(t, map[string]string{"path": "report.html"}))
 	if err != nil {
 		t.Fatalf("a mechanism failure must not be a Go error; got %v", err)
@@ -415,7 +528,7 @@ func TestPresentDocument_CancelledCtxIsGoError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := NewPresentDocument(presentWorkspace(t), &scriptedPresenter{}).
+	_, err := NewPresentDocument(presentWorkspace(t), ReadMounts{}, &scriptedPresenter{}).
 		Execute(ctx, presentCall(t, map[string]string{"path": "report.html"}))
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled ctx should be a Go error (context.Canceled); got %v", err)
@@ -430,7 +543,7 @@ func TestPresentDocument_PresenterErrorUnderCancellationIsGoError(t *testing.T) 
 
 	ctx, cancel := context.WithCancel(context.Background())
 	presenter := &cancellingPresenter{cancel: cancel}
-	_, err := NewPresentDocument(presentWorkspace(t), presenter).
+	_, err := NewPresentDocument(presentWorkspace(t), ReadMounts{}, presenter).
 		Execute(ctx, presentCall(t, map[string]string{"path": "report.html"}))
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("a Presenter error under a cancelled ctx should be a Go error; got %v", err)
@@ -448,7 +561,7 @@ func (p *cancellingPresenter) Present(ctx context.Context, _ domain.PresentReque
 func TestPresentDocument_SpecIsModelFacing(t *testing.T) {
 	t.Parallel()
 
-	tool := NewPresentDocument(t.TempDir(), &scriptedPresenter{})
+	tool := NewPresentDocument(t.TempDir(), ReadMounts{}, &scriptedPresenter{})
 	if tool.Name() != "present_document" {
 		t.Errorf("name = %q, want %q", tool.Name(), "present_document")
 	}

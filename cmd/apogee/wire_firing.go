@@ -270,6 +270,15 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		effortDialect = beat.EffortSupport.Dialect
 	}
 
+	// This run's own scratch dir, named after the record it will be saved under (wire.go): the
+	// model is offered writable scratch INSIDE the box rather than putting its working files
+	// wherever else it can reach, and the dir is reclaimed on the same 14-day schedule a
+	// session's own dir is. Per run rather than per Driver, so two Firings on the same minute
+	// stay out of each other's files. Minted once, here, because it is BOTH the construction
+	// seed the box fences writable and the read root the read tools reach it back through — a
+	// Firing never moves it, so the live func below answers the one dir the run announced.
+	scratchDir := ensureScratchDir(in.roots.scratch, in.recordID)
+
 	cfg := apogee.Config{
 		Endpoint: in.entry.Endpoint,
 		Model:    spec.Model,
@@ -284,12 +293,11 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		Bypass:            in.opts.Bypass,
 		ConfigDir:         in.roots.config,
 		WorkspaceDir:      in.roots.workspace,
-		// This run's own scratch dir, named after the record it will be saved under (wire.go): the
-		// model is offered writable scratch INSIDE the box rather than putting its working files
-		// wherever else it can reach, and the dir is reclaimed on the same 14-day schedule a
-		// session's own dir is. Per run rather than per Driver, so two Firings on the same minute
-		// stay out of each other's files.
-		ScratchDir: ensureScratchDir(in.roots.scratch, in.recordID),
+		ScratchDir:        scratchDir,
+		// And the same dir as the read root the read tools reach it back through: a Firing's model
+		// is told the dir is writable exactly as a session's is, and must be able to read what it
+		// wrote there (ADR 0031's Driver parity).
+		ScratchReadRoot: func() string { return scratchDir },
 		// Confiner and posture as the session's CONFIGURED one, so an Auto run here is fenced by the
 		// same box an Auto session on this configuration would be. The posture is the boot value and
 		// not a `/confine` toggled since: that command moves the blast radius on the live engine and

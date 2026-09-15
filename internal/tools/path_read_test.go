@@ -240,6 +240,101 @@ func TestReadScopeExtraRootsAreLive(t *testing.T) {
 	}
 }
 
+// TestReadScopeScratchRootIsLive pins the scratch fold: the func is consulted per call, so the
+// dir the host announces on a request is the dir a read on that request accepts — under the
+// ANNOUNCED spelling, a symlinked home included, because the fold resolves the spelling to its
+// real path before matchRoot's real-path-only contract can drop it — while another session's
+// scratch dir, a sibling under the same root, stays the workspace's own escape refusal, and a
+// func answering "" adds nothing at all.
+func TestReadScopeScratchRootIsLive(t *testing.T) {
+	t.Parallel()
+
+	workspace := tempRoot(t)
+	scratchRoot := tempRoot(t)
+	mine := filepath.Join(scratchRoot, "session-a")
+	theirs := filepath.Join(scratchRoot, "session-b")
+	writeFixtureFile(t, filepath.Join(mine, "probe.txt"), "probe bytes")
+	writeFixtureFile(t, filepath.Join(theirs, "probe.txt"), "other session's bytes")
+
+	// The home apogee is configured under, reached through a dotfiles link: the spelling the
+	// orientation announces the scratch dir in.
+	link := filepath.Join(tempRoot(t), "dotfiles-home")
+	if err := os.Symlink(scratchRoot, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	announced := filepath.Join(link, "session-a")
+
+	var scratch string
+	scope := readScope{root: workspace, scratch: func() string { return scratch }}
+	spelled := filepath.Join(announced, "probe.txt")
+
+	if _, _, err := scope.resolve(spelled); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("resolve before a scratch dir is announced: err = %v, want ErrPathEscape", err)
+	}
+
+	scratch = announced
+
+	root, resolved, err := scope.resolve(spelled)
+	if err != nil {
+		t.Fatalf("resolve(%q) under the announced scratch dir: %v", spelled, err)
+	}
+	if root != mine {
+		t.Errorf("root = %q, want the scratch dir's real path %q", root, mine)
+	}
+	if want := filepath.Join(mine, "probe.txt"); resolved != want {
+		t.Errorf("resolved = %q, want %q", resolved, want)
+	}
+	if data, failMessage := scope.readBounded(spelled); failMessage != "" || string(data) != "probe bytes" {
+		t.Errorf("readBounded(%q) = %q, %q; want the probe's bytes and no failure", spelled, data, failMessage)
+	}
+
+	// The sibling session's dir is a path no root accepts, and its refusal is the workspace's own.
+	other := filepath.Join(link, "session-b", "probe.txt")
+	if _, _, err := scope.resolve(other); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("resolve(%q) of another session's scratch dir: err = %v, want ErrPathEscape", other, err)
+	}
+
+	scratch = ""
+
+	if _, _, err := scope.resolve(spelled); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("resolve after the scratch dir is withdrawn: err = %v, want ErrPathEscape", err)
+	}
+}
+
+// TestReadScopeScratchRootLeavesTheHostSliceAlone pins the fold's one hazard: the scratch root is
+// appended to a COPY of the extra roots, never into the spare capacity of the slice the host's
+// func handed back — a host that returns its own backing array must not find a scratch dir
+// written into it by a read.
+func TestReadScopeScratchRootLeavesTheHostSliceAlone(t *testing.T) {
+	t.Parallel()
+
+	workspace, extra, _ := scopeFixture(t)
+	scratch := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(scratch, "probe.txt"), "probe bytes")
+	backing := make([]string, 1, 4)
+	backing[0] = extra
+	scope := readScope{
+		root:    workspace,
+		extra:   func() []string { return backing },
+		scratch: func() string { return scratch },
+	}
+
+	root, _, err := scope.resolve(filepath.Join(scratch, "probe.txt"))
+
+	if err != nil {
+		t.Fatalf("resolve under the scratch dir: %v", err)
+	}
+	if root != scratch {
+		t.Errorf("root = %q, want the scratch dir %q", root, scratch)
+	}
+	if got := backing[:cap(backing)]; got[1] != "" {
+		t.Errorf("the host's backing array now holds %q past its length; the fold wrote into it", got[1])
+	}
+	if root, _, err := scope.resolve(filepath.Join(extra, "skill.md")); err != nil || root != extra {
+		t.Errorf("the extra root still serves: root = %q, err = %v; want %q", root, err, extra)
+	}
+}
+
 // TestReadScopeSkipsUnusableExtraRoot pins the creation-deferred convention: a configured
 // root that does not exist (or is not a directory) is a per-root refusal that falls through
 // silently — never an error of its own — and a usable root listed after it still serves.

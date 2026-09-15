@@ -305,6 +305,10 @@ func hostToolsFor(cfg apogee.Config, seatChoice bool) tools.HostTools {
 		// read tool loses them, or the model could read a skill's bundled files in a session
 		// without MCP and not in one with it.
 		ExtraReadRoots: cfg.ExtraReadRoots,
+		// And the session's live scratch dir as a read root, off the same Config for the same
+		// reason: an MCP session must not be the one place the dir the orientation announces
+		// writable is a dir the read tools refuse.
+		ScratchReadRoot: cfg.ScratchReadRoot,
 		// And the pathless mounts beside them (the shipped skills' `shipped:<id>` tree), off the
 		// same Config for the same reason: an MCP session must not be the one place a shipped
 		// skill's announced files: line names a folder the read tools refuse.

@@ -227,6 +227,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		w.roots.scratch, w.engine.SetScratchDir,
 		w.roots.snapshots, func(id string) { w.openSessionJournal(ctx, id) })
 	w.cfg.ScratchDir = w.host.SessionScratchDir()
+	// And the same dir as the read root the read tools reach it back through — read LIVE off the
+	// engine holder rather than copied, because the dir moves at every session boundary while the
+	// tools are built once: whatever the orientation announces as the scratch dir on a request is
+	// what read_file, grep, list_dir, find_files and present_document accept on that request.
+	w.cfg.ScratchReadRoot = w.engine.ScratchDir
 	// And the boot session's own journal, opened now that its id is known and pushed onto the
 	// engine holder, so the very first Exchange is imaged — a bind that has not happened yet
 	// applies it the moment it does (lateEngine.pendingJournal).

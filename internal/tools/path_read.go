@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 
 	"github.com/airiclenz/apogee/internal/security"
 )
@@ -126,28 +127,37 @@ func escapeOrMessage(err error, absent string) string {
 }
 
 // ReadMounts are the read-only trees a read tool resolves a path over BESIDE its own workspace
-// root: Roots names extra DISK roots (host paths the operator opened up — a skills library), and
-// Virtual names trees that have no host path at all, keyed by the prefix their addresses are
-// spelled under (`shipped:` — path_virtual.go). Both are evaluated LIVE, once per tool call, so a
-// mid-session change on the host's side is honoured by the next read with no re-wiring.
+// root: Roots names extra DISK roots (host paths the operator opened up — a skills library),
+// Scratch names the session's own scratch dir (the one dir the host announces WRITABLE, which must
+// therefore be readable too), and Virtual names trees that have no host path at all, keyed by the
+// prefix their addresses are spelled under (`shipped:` — path_virtual.go). All three are evaluated
+// LIVE, once per tool call, so a mid-session change on the host's side is honoured by the next
+// read with no re-wiring.
 //
-// The ZERO value is workspace-only and is byte-identical to the fence before either seam existed,
+// The ZERO value is workspace-only and is byte-identical to the fence before any seam existed,
 // which is why it is the value every test and every tool-less host passes. It is one struct rather
-// than two parameters because the two answer ONE question — what else may this tool read — and a
-// tool that grows a third kind of mount should not grow a fourth constructor argument.
+// than three parameters because the three answer ONE question — what else may this tool read — and
+// a tool that grows a fourth kind of mount should not grow a fifth constructor argument.
 type ReadMounts struct {
 	// Roots reports extra read-only DISK roots, each the host's symlink-RESOLVED real path
 	// (readScope's contract). nil ⇒ the workspace root alone.
 	Roots func() []string
+	// Scratch reports the session's live scratch dir in the spelling the host ANNOUNCES it under
+	// (Config.ScratchReadRoot) — resolved to its real path here, on the way into the scope, because
+	// an announced spelling may run through a symlinked home and the disk-root contract is real
+	// paths only. It rides beside Roots rather than inside it so the host's own view of Roots (the
+	// LIBRARY roots it announces on the orientation's `Read-only library roots:` line) stays what it
+	// is. nil, or a func answering "" ⇒ no scratch root.
+	Scratch func() string
 	// Virtual reports the host's virtual mounts by prefix, colon included. nil ⇒ none.
 	Virtual func() map[string]fs.FS
 }
 
 // scope builds the resolver a read tool fences itself with: the workspace root, plus whatever
-// mounts the host named. It is the ONE place the two halves are paired, so no tool can be wired
-// with the disk roots and without the virtual ones.
+// mounts the host named. It is the ONE place the halves are paired, so no tool can be wired with
+// the disk roots and without the scratch root or the virtual ones.
 func (m ReadMounts) scope(root string) readScope {
-	return readScope{root: root, extra: m.Roots, virtual: m.Virtual}
+	return readScope{root: root, extra: m.Roots, scratch: m.Scratch, virtual: m.Virtual}
 }
 
 // readScope resolves the path argument of a READ-ONLY tool over the workspace root plus any
@@ -179,18 +189,41 @@ type readScope struct {
 	// extra reports the extra read-only roots, evaluated once per call. nil means
 	// workspace-only.
 	extra func() []string
+	// scratch reports the session scratch dir as announced, evaluated once per call and folded in
+	// as one more disk root — after extra's, resolved to its real path (extraRoots). nil, or a
+	// func answering "", means no scratch root.
+	scratch func() string
 	// virtual reports the host's virtual read mounts by prefix, evaluated once per call and
 	// consulted BEFORE any disk root (path_virtual.go). nil means disk-only.
 	virtual func() map[string]fs.FS
 }
 
-// extraRoots evaluates the live extra-root func for ONE call, answering nil when there is
-// nothing to fall back on: no func, or a relative input, which extra roots never serve.
+// extraRoots evaluates the live root funcs for ONE call, answering nil when there is nothing to
+// fall back on: no funcs, or a relative input, which extra roots never serve. The scratch dir is
+// folded in LAST, as the real path the announced spelling resolves to: matchRoot skips any root
+// that is not its own real path, and a scratch dir announced under a symlinked home (`~/.apogee`
+// as a dotfiles link) would otherwise be dropped from the very fence its announcement promises —
+// the same resolution a trusted skill anchor gets on the host's side (skills.readRoots), done
+// here because the scratch dir's announced spelling is the ONE the model is told to use verbatim.
+//
+// The host's slice is never appended to in place: a func that hands back its own backing array
+// must not find the scratch root written into its spare capacity.
 func (s readScope) extraRoots(input string) []string {
-	if s.extra == nil || !filepath.IsAbs(input) {
+	if !filepath.IsAbs(input) {
 		return nil
 	}
-	return s.extra()
+	var roots []string
+	if s.extra != nil {
+		roots = s.extra()
+	}
+	if s.scratch == nil {
+		return roots
+	}
+	dir := s.scratch()
+	if dir == "" {
+		return roots
+	}
+	return append(slices.Clip(roots), security.EvalRealPath(dir))
 }
 
 // resolve resolves input to a real path within the first root that contains it and returns

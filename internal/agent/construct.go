@@ -355,6 +355,11 @@ func hostTools(cfg domain.Config) tools.HostTools {
 		// carries the func without evaluating it, so WHICH dirs are mounted stays the host's
 		// question and stays live per call (Config.ExtraReadRoots). nil ⇒ workspace-only.
 		ExtraReadRoots: cfg.ExtraReadRoots,
+		// The session's live scratch dir as a read root — carried the same way, so the one dir the
+		// orientation announces writable is readable back through every read tool, and WHERE it
+		// currently is stays the host's question, live per call (Config.ScratchReadRoot). nil ⇒
+		// nothing added.
+		ScratchReadRoot: cfg.ScratchReadRoot,
 		// The read-only mounts that have no host path — the same seam, carried the same way: the
 		// engine holds the func without evaluating it, so WHICH trees are mounted stays the host's
 		// question and stays live per call (Config.VirtualReadRoots). nil ⇒ none.

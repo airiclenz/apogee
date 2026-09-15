@@ -888,6 +888,10 @@ and by the **Orientation block** that rides on every standing system message in 
 **Plan** included: since ADR 0012's second loosen (2026-09-14) the scratch dir is the one place Plan
 writes and the one native write Ask-Before does not gate, so the bullet is true on every rung (the
 terminal route into it stays refused in Plan and gated in Ask-Before).
+Writable, and readable by every read tool: the announced path is a live read root for
+`read_file`, `grep`, `list_dir`, `find_files`, `copy_file`'s source and `present_document`
+(`Config.ScratchReadRoot`, 2026-09-15 — a seam of its own beside `ExtraReadRoots`, which stays the
+announced **library** roots), so what the model drafts there it can read back and show.
 Created `0700` when the session id is minted, follows the **active** session across rotation,
 advertised writable only once it actually exists, and swept by a
 best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe. A **Firing**

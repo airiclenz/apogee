@@ -50,6 +50,7 @@ func TestHostToolsFillsEveryHostField(t *testing.T) {
 		Profile:           domain.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"console_open"}}},
 		SecretEnvVars:     []string{"SOME_PROVIDER_KEY"},
 		ExtraReadRoots:    func() []string { return []string{t.TempDir()} },
+		ScratchReadRoot:   func() string { return t.TempDir() },
 		VirtualReadRoots:  func() map[string]fs.FS { return nil },
 	}))
 	for i := range host.NumField() {

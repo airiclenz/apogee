@@ -102,7 +102,17 @@ NOTES (2026-09-15): `internal/subprocess/doc.go` gained the `scratchenv.go` file
 
 **Commit:** `feat(subprocess): confined runs get TMPDIR and the Go/XDG caches under the session scratch dir`
 
-## 3. The announced scratch dir and skills root are readable by every read tool
+## 3. The announced scratch dir and skills root are readable by every read tool — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the TUI's live scratch read root is wired in `cmd/apogee/wire_live.go` (beside the `Config.ScratchDir` seed, which lives there rather than in `wire_boot.go`) as a new `lateEngine.ScratchDir()` accessor in `cmd/apogee/wire_engine.go` — it reads the bound Agent's live value (the one the orientation announces) and needs no per-call mkdir, where `sessionHost.SessionScratchDir` would create the dir on every read; the Firing mints its dir once and answers it from a fixed func.
+NOTES (2026-09-15): the two e2e tests ride NEW fixtures (`announced-scratch-read.yaml`, `announced-skill-present.yaml`) rather than edits to `announced-scratch.yaml` / `announced-skill.yaml`, whose existing tests pin their exact call and result counts; the skills-root fixture captures the FIRST root on the `Read-only library roots:` line (the home library — the workspace anchor follows after a comma).
+NOTES (2026-09-15): consequential edit — internal/agent/construct_test.go: made necessary by the new `HostTools.ScratchReadRoot` field (the every-field pin `TestHostToolsFillsEveryHostField` sets `Config.ScratchReadRoot`).
+NOTES (2026-09-15): consequential edit — cmd/apogee/wire_tools_test.go: made necessary by the same field (`TestHostToolsForFillsEveryHostField`).
+NOTES (2026-09-15): consequential edit — internal/domain/present.go: made necessary by present_document resolving over read mounts (the `PresentRequest.Path` / `DisplayPath` docs said "inside the workspace root" / "workspace-relative"; a mounted document's display name is its absolute resolved path).
+NOTES (2026-09-15): consequential edit — docs/adr/0019-documents-are-presented-not-opened.md: made necessary by the same change (§5's "resolved inside the workspace root" bound; a dated note appended, the extension allow-lists and the doc server's workspace fence untouched).
+NOTES (2026-09-15): consequential edit — docs/manual/configuration.md: the scratch-directory paragraph gained the read-back sentence (user-facing behaviour changed).
+NOTES (2026-09-15): the mount degradation is stated on every rung of a mounted document's result as a trailing sentence ("Outside the workspace it is served locally; a remote session shows the path only.") — the tool cannot see which kind of session it runs in; workspace documents' wording is byte-identical.
+NOTES (2026-09-15): improvement idea, not acted on — a Driver that sets `Config.ScratchDir` but not `ScratchReadRoot` (bench, an embedder) still gets a writable-but-unreadable scratch dir; an engine-side default reading the Agent's live value would close that for every Driver at once, but the plan binds the seam to the Config func.
 
 **What:** Regression of the announced-path class (review headline 2c, live on 09-14): `read_file`, `grep`, `list_dir`, `find_files` refuse the `Scratch dir:` path with `security: path resolves outside the workspace root` (`security.ErrPathEscape`), and `present_document` refuses both it and the announced skills root because it takes no `ReadMounts` at all. Fix:
 - `HostTools` gains `ScratchReadRoot func() string` beside `ExtraReadRoots`; `internal/tools/path_read.go` `readScope` folds it as one more live read root. It is NOT merged into `ExtraReadRoots`, so the `Read-only library roots:` line stays skills-only (writer call).

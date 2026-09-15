@@ -335,6 +335,7 @@ func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	cfg.Profile.Tools = domain.ToolRosterDelta{Enabled: []string{"console_open"}}
 	cfg.SecretEnvVars = []string{"SOME_PROVIDER_KEY"}
 	cfg.ExtraReadRoots = func() []string { return []string{t.TempDir()} }
+	cfg.ScratchReadRoot = func() string { return t.TempDir() }
 	cfg.VirtualReadRoots = func() map[string]fs.FS { return nil }
 
 	host := reflect.ValueOf(hostToolsFor(cfg, true))
