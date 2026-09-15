@@ -457,6 +457,13 @@ var KeyRegistry = []Key{
 		Read: func(o Options) string { return boolValue(o.ContextFillNotice) },
 	},
 	{
+		Path: "step-budget-notice", Kind: KindBool, Default: "false",
+		Editable: true,
+		Desc: "Tell a sub-agent once, at three quarters of its delegate-max-steps, to write its output " +
+			"now. Not a Floor guard: off until bench evidence turns it on.",
+		Read: func(o Options) string { return boolValue(o.StepBudgetNotice) },
+	},
+	{
 		Path: "delegate-max-steps", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxSteps),
 		Editable: true,
 		Validate: validateDelegateMaxSteps,

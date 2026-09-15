@@ -563,6 +563,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"ToolCallSalvage": true,
 		"ToolLoopBreaker": true, "ToolResultCap": true, "ReadCache": true,
 		"ContextFillNotice": true,
+		"StepBudgetNotice":  true,
 		"UndoSnapshots":     true,
 		"DelegateMaxSteps":  true,
 		"DelegateMaxDepth":  true,
@@ -620,6 +621,7 @@ func everyKeyFileConfig() fileConfig {
 		ToolLoopBreaker: boolptr(false),
 		ToolResultCap:   boolptr(false), ReadCache: boolptr(false),
 		ContextFillNotice: boolptr(true),
+		StepBudgetNotice:  boolptr(true),
 		UndoSnapshots:     boolptr(false),
 		UseShippedSkills:  boolptr(false),
 		UseDefaultPrompt:  boolptr(false),
@@ -1806,6 +1808,39 @@ func TestApplyConfigContextFillNotice(t *testing.T) {
 			}
 			if opts.ContextFillNotice != tt.want {
 				t.Errorf("opts.ContextFillNotice = %v; want %v", opts.ContextFillNotice, tt.want)
+			}
+		})
+	}
+}
+
+// `step-budget-notice` is `context-fill-notice`'s twin in every row of the table above, for the
+// same reason: an engine notice that steers a sub-agent ships off until bench evidence turns it
+// on, and the seeded template carries the key as an ACTIVE `false` line.
+func TestApplyConfigStepBudgetNotice(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fileYAML string
+		want     bool
+	}{
+		{name: "absent key ⇒ off", want: false},
+		{name: "an explicit true opts in", fileYAML: "step-budget-notice: true\n", want: true},
+		{name: "an explicit false is the default, said out loud", fileYAML: "step-budget-notice: false\n", want: false},
+		{name: "the seeded template ships it off", fileYAML: string(defaultConfigYAML), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			if tt.fileYAML != "" {
+				writeConfigHome(t, home, tt.fileYAML)
+			}
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.StepBudgetNotice != tt.want {
+				t.Errorf("opts.StepBudgetNotice = %v; want %v", opts.StepBudgetNotice, tt.want)
 			}
 		})
 	}

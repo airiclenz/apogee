@@ -7,8 +7,8 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The context-fill notice (ADR 0077): the engine's first advise Reaction, and the one builtin
-// that is not a Floor guard. At post-tool-result it tells the model how far the conversation has
+// The context-fill notice (ADR 0077): the engine's first advise Reaction, and with the step-budget
+// notice (stepnotice.go) one of the two builtins that are not Floor guards. At post-tool-result it tells the model how far the conversation has
 // climbed toward the automatic Compaction line — the Budget's History allocation, read through
 // the same estimate the trigger compares (domain.Budget.HistoryFill), so notice and fold can
 // never disagree on where the line is — at three fixed rungs, as the advise trailer on the
@@ -16,7 +16,7 @@ import (
 // ships OFF (Config.ContextFillNotice) and why Bypass switches it off with the rest of its class.
 
 // contextFillNoticeID is the reaction's id — what its ReactionFiredEvent, its advice fence and
-// its `/settings` row are keyed by, and the one non-guard id armReactions reserves.
+// its `/settings` row are keyed by, and the first non-guard id armReactions reserves.
 const contextFillNoticeID = "context-fill-notice"
 
 // actionNotice is the action label every firing books under: the notice neither retries nor

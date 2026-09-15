@@ -76,8 +76,9 @@ why they are behaviour rather than catalogued rows.
 
 What runs *above* the floor is the **Reaction** core
 ([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)) — the
-[`reactions:`](#reactions--reactions) list, and one built-in reaction of the engine's own, the
-[context-fill notice](#context-fill-notice) below. The lab catalogue an earlier build let you switch
+[`reactions:`](#reactions--reactions) list, and two built-in reactions of the engine's own, the
+[context-fill notice](#context-fill-notice) and the [step-budget notice](#step-budget-notice)
+below. The lab catalogue an earlier build let you switch
 rows of is gone; a file that still carries its key is rewritten for you at start-up rather than
 refused — see [Keys apogee migrates for you](#keys-apogee-migrates-for-you) below.
 
@@ -115,6 +116,35 @@ file-only (no flag, no environment variable) but live: the `/settings` row switc
 running session. It is silent until a context window is known: with
 no window the percentage would be a guess, and apogee never fires on a guess. The line is dropped
 from a session record on resume, so a reopened session is not told it was at 90 percent an hour ago.
+
+### step-budget-notice
+
+```yaml
+# ~/.apogee/config.yaml
+step-budget-notice: false      # tell a sub-agent once when three quarters of its step cap are spent
+```
+
+With this on, a **sub-agent** is told when its step budget is running out. The tool result that
+closes the turn spending three quarters of the turns `delegate-max-steps:` (further down this page)
+allows it — the 60th at the default of 80 — carries one extra line —
+
+```
+steps: 60 of 80 used — 20 left before the wrap-up Turn; write your output now
+```
+
+— fenced as advice from the engine, exactly as the context-fill notice's line is. It fires **once**
+per delegation, on the result that closes the turn reaching the threshold, and never for the
+session you are talking to, which has no step cap. A sub-agent that hears it can write its output
+while it still holds the tools to write it with, instead of discovering the cap on the tool-less
+wrap-up turn; a `sub_agent` call that lowered its own cap through `max_steps` is warned at three
+quarters of that lower number.
+
+It is the context-fill notice's twin in every other respect
+([ADR 0077](../adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md), 2026-09-15
+addendum): **not a Floor guard**, so it ships **off** until a bench run shows a model does better
+with it; a top-level, file-only boolean that is live on the `/settings` screen; withdrawn by
+`--bypass` with every other advise reaction; and refused as a `reactions:` id. Silent for an
+unbounded delegation (`delegate-max-steps: 0`), where there is no cap to be three quarters of.
 
 Separately from all of this, every write tool appends its own in-process syntax verdict to the
 success result it hands the model: always on, not configurable, and neither a Floor guard nor a
@@ -477,9 +507,9 @@ reactions:
 scopes an entry to one workspace, leaving it inactive at every other; `enabled: false` parks an
 entry without deleting it. Header values are literal (`headers:`) or read at send time from the environment
 variable a `headers-env:` entry NAMES, so a token never has to sit in this file. Ids must be unique,
-and an id that is one of the seven Floor-guard keys is refused, as is `context-fill-notice`, the
-engine's own built-in advise reaction — each is switched with its own top-level key, never with an
-entry here. `hooks:` is this key's earlier name, with
+and an id that is one of the seven Floor-guard keys is refused, as are `context-fill-notice` and
+`step-budget-notice`, the engine's own built-in advise reactions — each is switched with its own
+top-level key, never with an entry here. `hooks:` is this key's earlier name, with
 `name:`/`events:`/`command:`/`webhook:` where this block writes `id:`/`on:`/`run:`; a file that
 still carries it is folded into `reactions:` at startup, once, and told so — the previous file is
 kept beside it as a `.bak-<timestamp>` sibling, and comments written inside the old block are only
@@ -705,7 +735,9 @@ The default is **80**; `0` lets a delegation run unbounded, which is what it did
 this key existed. It bounds sub-agents only, never the session you are talking to. A
 `sub_agent` call may ask for a lower ceiling of its own through its `max_steps` argument;
 it can never raise this one — a higher ask is applied as the ceiling, and the result your
-agent receives says so in one line, so it learns the number instead of asking again.
+agent receives says so in one line, so it learns the number instead of asking again. With
+[`step-budget-notice:`](#step-budget-notice) on, the sub-agent is told once when three
+quarters of the ceiling are spent, so it can write its output before the tools go.
 
 How **deep** delegation may nest is `delegate-max-depth:` (a file-only key). Your session
 is depth 0 and may hand work to a sub-agent; at the default of **1** the sub-agents it

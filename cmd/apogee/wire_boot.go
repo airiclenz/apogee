@@ -387,6 +387,9 @@ func (w *rootWiring) resolveConfig() error {
 		// which switches it off with the rest of the advise class. It rides here for the reply
 		// cap's reason too: this Config is what a scheduled Firing copies.
 		ContextFillNotice: w.opts.ContextFillNotice,
+		// And the `step-budget-notice` switch beside it, its twin in every respect (ADR 0077,
+		// 2026-09-15 addendum): carried as is, off by default, off under Bypass.
+		StepBudgetNotice: w.opts.StepBudgetNotice,
 	}
 	return nil
 }

@@ -359,6 +359,30 @@ func TestContextFillNoticeRowIsABoolDefaultingOff(t *testing.T) {
 	}
 }
 
+// The step-budget notice's row is the context-fill notice's twin (ADR 0077, 2026-09-15 addendum):
+// a bool defaulting OFF, reading back what the session resolved, and saying it is not a Floor
+// guard.
+func TestStepBudgetNoticeRowIsABoolDefaultingOff(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("step-budget-notice")
+	if !ok {
+		t.Fatal("no registry row for step-budget-notice; /settings could not show the key at all")
+	}
+	if row.Kind != KindBool || row.Default != "false" {
+		t.Errorf("kind/default = %q/%q, want bool defaulting \"false\" — a model-facing behaviour above the Floor ships off", row.Kind, row.Default)
+	}
+	if !strings.Contains(row.Desc, "Not a Floor guard") {
+		t.Errorf("desc = %q, want it to say the key is not a Floor guard (ADR 0077 D2)", row.Desc)
+	}
+	if got := row.Read(Options{StepBudgetNotice: true}); got != "true" {
+		t.Errorf("read of a session with the notice on = %q, want \"true\"", got)
+	}
+	if got := row.Read(Options{}); got != "false" {
+		t.Errorf("read of an unconfigured session = %q, want \"false\"", got)
+	}
+}
+
 // The `reactions` row summarises the human's FILE, and since ADR 0076 one entry in that file
 // resolves to one Reaction per action key it carries — all sharing the entry's own id. So the row
 // counts distinct ids: an entry that armed two classes is still one block the human wrote, and a

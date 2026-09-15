@@ -53,6 +53,7 @@ func fabricatedSettings() config.Options {
 		ToolResultCap:         true,
 		ReadCache:             false,
 		ContextFillNotice:     true,
+		StepBudgetNotice:      true,
 		UndoSnapshots:         true,
 		DelegateMaxSteps:      40,
 		DelegateMaxDepth:      2,
@@ -406,6 +407,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"tool-result-cap":         "true",
 		"read-cache":              "false", // opted out in the fixture: a guard row reports the value, never the floor
 		"context-fill-notice":     "true",  // opted IN in the fixture: a default-off row reports the value, never the default
+		"step-budget-notice":      "true",  // likewise its twin
 		"undo-snapshots":          "true",
 		"delegate-max-steps":      "40",
 		"delegate-max-depth":      "2",

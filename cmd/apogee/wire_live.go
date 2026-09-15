@@ -206,6 +206,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		Floor:             w.cfg.Floor,
 		Bypass:            w.cfg.Bypass,
 		ContextFillNotice: w.cfg.ContextFillNotice,
+		StepBudgetNotice:  w.cfg.StepBudgetNotice,
 		Observe:           observe,
 		Sync:              sync,
 	})

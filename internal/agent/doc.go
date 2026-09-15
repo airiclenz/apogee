@@ -39,9 +39,11 @@
 // builtins.go is the engine's own Reactions — the Floor guards the live generation leaves ON, as
 // domain.Reaction values calling the unchanged internal/floor policy (the enable set,
 // ADR 0076 A8), and behind its own switch the context-fill notice. fillnotice.go is that
-// notice (ADR 0077): the engine's one advise builtin, which tells the model at three rungs how
+// notice (ADR 0077): the engine's first advise builtin, which tells the model at three rungs how
 // far its history has climbed toward the compaction line, as the trailer on the closing tool
-// result (prompts/context-fill-notice.txt, prompts/context-fill-wrap-up.txt). syncexec.go is the SYNC lane's out-of-process executor — the one door a user's
+// result (prompts/context-fill-notice.txt, prompts/context-fill-wrap-up.txt); stepnotice.go is
+// its twin behind its own switch, the step-budget notice, which tells a child once at three
+// quarters of its step cap to write its output (prompts/step-budget-notice.txt). syncexec.go is the SYNC lane's out-of-process executor — the one door a user's
 // advise or gate command is spawned through while the loop waits on it, owning the permit, the
 // class default deadline, the payload document and the failure report so the seams that call it
 // see only (stdout, err). wire.go is the

@@ -752,7 +752,8 @@ func wrongHandler(m domain.Moment, h domain.Handler) error {
 // reaction never silently does nothing.
 //
 // The reserved set is guardIDs — ALL seven guard keys, not the enable set the ladder currently
-// holds (floorguards.go) — plus the context-fill notice's id (fillnotice.go), on the same terms.
+// holds (floorguards.go) — plus the two engine notices' ids (fillnotice.go, stepnotice.go), on
+// the same terms.
 // A builtin the user switched off still owns its name: arming an entry under it would be
 // answered by the builtin again the moment its switch moves back.
 func armReactions(reactions []domain.Reaction) ([]armedReaction, error) {
@@ -760,11 +761,12 @@ func armReactions(reactions []domain.Reaction) ([]armedReaction, error) {
 		return nil, nil
 	}
 
-	taken := make(map[string]bool, len(guardIDs)+1+len(reactions))
+	taken := make(map[string]bool, len(guardIDs)+2+len(reactions))
 	for _, id := range guardIDs {
 		taken[id] = true
 	}
 	taken[contextFillNoticeID] = true
+	taken[stepBudgetNoticeID] = true
 
 	armed := make([]armedReaction, 0, len(reactions))
 	for _, r := range reactions {

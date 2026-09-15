@@ -590,7 +590,7 @@ func builtinIDs(a *Agent) []string {
 // than in the loop.
 func TestBuiltinReactionsAreTheSevenFloorGuardsWhenEveryGuardIsOn(t *testing.T) {
 	a, _ := ladderAgent(t, nil, nil)
-	builtins := a.buildBuiltins(domain.FloorConfig{}, false)
+	builtins := a.buildBuiltins(domain.FloorConfig{}, false, false)
 
 	type want struct {
 		moment domain.Moment
@@ -643,7 +643,7 @@ func TestBuiltinReactionsAreTheSevenFloorGuardsWhenEveryGuardIsOn(t *testing.T) 
 // result as every guard ahead of it left it. The guards are untouched by the switch.
 func TestBuiltinReactionsAddTheContextFillNoticeLastWhenItsSwitchIsOn(t *testing.T) {
 	a, _ := ladderAgent(t, nil, nil)
-	builtins := a.buildBuiltins(domain.FloorConfig{}, true)
+	builtins := a.buildBuiltins(domain.FloorConfig{}, true, false)
 
 	if len(builtins) != len(guardIDs)+1 {
 		t.Fatalf("builtins = %d, want the seven guards and the notice", len(builtins))
@@ -680,11 +680,11 @@ func TestBuiltinReactionsAddTheContextFillNoticeLastWhenItsSwitchIsOn(t *testing
 func TestBuiltinEnableSetDropsAGuardWhoseBooleanIsOff(t *testing.T) {
 	a, _ := ladderAgent(t, nil, nil)
 
-	full := a.buildBuiltins(domain.FloorConfig{}, false)
+	full := a.buildBuiltins(domain.FloorConfig{}, false, false)
 	trimmed := a.buildBuiltins(domain.FloorConfig{
 		DisableToolLoopBreaker: true,
 		DisableToolResultCap:   true,
-	}, false)
+	}, false, false)
 
 	var got, want []string
 	for _, b := range trimmed {

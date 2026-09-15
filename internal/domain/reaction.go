@@ -520,7 +520,7 @@ func (r Reaction) Validate() error {
 }
 
 // Generation is the whole live shape of the engine at one moment: the Floor enable set, Bypass,
-// the user-origin observe and sync lists, and the context-fill notice switch. It is the ONE value
+// the user-origin observe and sync lists, and the two engine notice switches. It is the ONE value
 // a live swap carries (ADR 0076 A8), replacing the three separate swap idioms — each with its own
 // setter and its own lock — that preceded it, so nothing downstream can read a half-swapped state.
 type Generation struct {
@@ -542,10 +542,15 @@ type Generation struct {
 	// the agent rebuilds its builtin ladder when it moves, so the notice is absent from the ladder
 	// rather than self-skipping while it is off.
 	ContextFillNotice bool
+	// StepBudgetNotice switches the engine's step-budget notice on (ADR 0077, 2026-09-15 addendum):
+	// the second builtin of class advise, ContextFillNotice's twin in every respect — off by
+	// default, not a Floor guard, an enable-set input the ladder is rebuilt from — which tells a
+	// child agent once when it has spent three quarters of its step cap.
+	StepBudgetNotice bool
 }
 
 // Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what
-// is wrong. Floor, Bypass and ContextFillNotice are booleans and cannot be malformed, so every
+// is wrong. Floor, Bypass and the two notice switches are booleans and cannot be malformed, so every
 // check is about the two lanes: each entry validates on its own, each takes a class its lane
 // accepts — observe for the Runner's lane, advise or gate for the sync lane, which is the user's
 // alone — and no two entries WITHIN one lane share an ID, which is what a firing is reported

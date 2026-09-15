@@ -638,7 +638,7 @@ func TestGenerationValidateAcceptsAnObserveListAndRefusesTheRest(t *testing.T) {
 		{name: "the zero generation", gen: Generation{}},
 		{
 			name: "every boolean on and no lane",
-			gen:  Generation{Floor: FloorConfig{DisableReadCache: true}, Bypass: true, ContextFillNotice: true},
+			gen:  Generation{Floor: FloorConfig{DisableReadCache: true}, Bypass: true, ContextFillNotice: true, StepBudgetNotice: true},
 		},
 		{
 			name: "two distinct observe entries",

@@ -1262,9 +1262,9 @@ alone — a mapping is refused with a sentence naming the key — as is an `on:`
 take (a seam under `run:`, a notice under `gate:`, any Moment but the two under `advise:`), and
 `enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
-**`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice}` — which a **Driver** applies
+**`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice, StepBudgetNotice}` — which a **Driver** applies
 in one act to the agent (which takes Floor, Bypass, Sync and the
-**[Context-fill notice](#reactions-and-moments)** switch) and to the runner (which takes Observe), so
+**[Context-fill notice](#reactions-and-moments)** and step-budget notice switches) and to the runner (which takes Observe), so
 nothing downstream reads a half-swapped state; it is the single idiom that replaced `SetBypass` and `SetFloor`;
 the runner keeps `Replace` as the observe half's swap primitive, now
 called only from the Driver's `SetReactions`

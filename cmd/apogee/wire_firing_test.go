@@ -329,6 +329,43 @@ func TestFiringConfigCarriesTheContextFillNotice(t *testing.T) {
 	}
 }
 
+// And the `step-budget-notice` switch beside it (ADR 0077 addendum), carried the same way: a
+// Firing's delegates are warned at three quarters of their cap exactly when the session's would be.
+func TestFiringConfigCarriesTheStepBudgetNotice(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []bool{false, true} {
+		t.Run(fmt.Sprintf("step-budget-notice=%v", want), func(t *testing.T) {
+			t.Parallel()
+			roots := firingRoots(t)
+			opts := config.Options{
+				Servers: []config.ServerEntry{
+					{Name: "box", Endpoint: "http://box.example/v1"},
+				},
+				StepBudgetNotice: want,
+			}
+			provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+
+			cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+				opts:     opts,
+				entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+				roots:    roots,
+				confiner: fenceableHost,
+				mode:     domain.ModeAuto,
+				skills:   provider,
+				beat:     firingBeat,
+				recordID: "2026-09-03T09-00-00-firing",
+			})
+			if err != nil {
+				t.Fatalf("firingConfig: %v", err)
+			}
+			if cfg.StepBudgetNotice != want {
+				t.Errorf("Config.StepBudgetNotice = %v; want the session's %v", cfg.StepBudgetNotice, want)
+			}
+		})
+	}
+}
+
 // A workspace skill anchor that is a symlink OUT of the workspace is discovered as a source and
 // mounted nowhere (audit 2026-08-25 F-13; residual 2026-08-28). The provider answers two lists on
 // purpose and they are not interchangeable: SourceDirs is the DISPLAY view — where skills come

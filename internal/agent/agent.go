@@ -353,6 +353,7 @@ type Agent struct {
 	compactSat    bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
 	compactFailed bool                // stand-down latch: an automatic fold FAULTED, so the estimate-driven trigger stands down for the rest of THIS Exchange rather than re-running the identical failing summary call at every Turn boundary (turnLifecycle.openExchange clears it; the emergency fold and the on-demand /compact ignore it)
 	fillRung      int                 // context-fill notice (fillnotice.go): the highest rung fired on the current climb toward the compaction line, 0 = none; a fold, /clear, a restored snapshot, an aborted Exchange or a cancelled Turn's rollback re-arms the whole ladder (rearmFillNotice), so the next climb fires from its first reached rung (ADR 0077 D4)
+	stepNoticeAt  int                 // step-budget notice (stepnotice.go): the 1-based index of the Turn the notice rode, 0 = none; latches the notice against that Turn's further tool results, and a cancelled Turn's rollback re-arms it (rearmStepNotice)
 	depth         int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
 	callID        string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
 	consoleOwner  string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
@@ -1138,11 +1139,11 @@ func (a *Agent) closeUndoGroup() {
 // this would guard against cannot be configured, and refusing a swap at fire time has nowhere to
 // report the refusal to.
 //
-// The builtin ladder is REBUILT from gen.Floor and gen.ContextFillNotice, because a Floor guard
-// whose boolean is off — or the context-fill notice while its switch is off — is absent from the
-// ladder rather than self-skipping at fire time (the enable set, ADR 0076 A8): the firing
+// The builtin ladder is REBUILT from gen.Floor, gen.ContextFillNotice and gen.StepBudgetNotice,
+// because a Floor guard whose boolean is off — or a notice while its switch is off — is absent
+// from the ladder rather than self-skipping at fire time (the enable set, ADR 0076 A8): the firing
 // sequence is identical either way, a disabled guard having booked nothing before. It is rebuilt
-// only when one of the two actually MOVED — a Bypass-only swap leaves the slice exactly as it
+// only when one of the three actually MOVED — a Bypass-only swap leaves the slice exactly as it
 // was, so a ladder installed in place of the seven guards survives one.
 //
 // Bypass takes effect at the next fire, as it always has: the gate is consulted per armed
@@ -1156,16 +1157,16 @@ func (a *Agent) closeUndoGroup() {
 func (a *Agent) SetReactions(gen domain.Generation) {
 	a.genMu.Lock()
 	defer a.genMu.Unlock()
-	if gen.Floor != a.gen.Floor || gen.ContextFillNotice != a.gen.ContextFillNotice {
-		a.builtins = a.buildBuiltins(gen.Floor, gen.ContextFillNotice)
+	if gen.Floor != a.gen.Floor || gen.ContextFillNotice != a.gen.ContextFillNotice || gen.StepBudgetNotice != a.gen.StepBudgetNotice {
+		a.builtins = a.buildBuiltins(gen.Floor, gen.ContextFillNotice, gen.StepBudgetNotice)
 	}
 	a.gen.Floor, a.gen.Bypass, a.gen.Sync = gen.Floor, gen.Bypass, gen.Sync
-	a.gen.ContextFillNotice = gen.ContextFillNotice
+	a.gen.ContextFillNotice, a.gen.StepBudgetNotice = gen.ContextFillNotice, gen.StepBudgetNotice
 }
 
 // Generation reports the live Generation this Agent is running — the Floor enable set, Bypass,
-// the context-fill notice switch and the sync lane as SetReactions last installed them, seeded at
-// construction from cfg.Floor, cfg.Bypass and cfg.ContextFillNotice with an empty Sync
+// the two notice switches and the sync lane as SetReactions last installed them, seeded at
+// construction from cfg.Floor, cfg.Bypass, cfg.ContextFillNotice and cfg.StepBudgetNotice with an empty Sync
 // (Config.Reactions is the OTHER route and is not folded in here). Observe is always empty: the
 // agent never holds the observe lane.
 //

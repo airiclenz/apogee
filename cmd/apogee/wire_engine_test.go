@@ -189,6 +189,37 @@ func TestLateEngineReplaysTheContextFillNoticeAtTheBind(t *testing.T) {
 	}
 }
 
+// The step-budget notice's switch rides the replay the same way (ADR 0077 addendum): held for the
+// bind over the Agent's own construction seed, and moved by a bound edit.
+func TestLateEngineReplaysTheStepBudgetNoticeAtTheBind(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	if err := engine.SetReactions(apogee.Generation{StepBudgetNotice: true}); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
+	construct := func() (*apogee.Agent, error) {
+		cfg := validCfg(t)
+		cfg.StepBudgetNotice = true
+		return apogee.New(cfg)
+	}
+	if err := engine.Bind(construct); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if got := engine.bound().Generation(); !got.StepBudgetNotice {
+		t.Errorf("the bound Agent's generation = %+v; want the step switch held for the bind", got)
+	}
+
+	if err := engine.SetReactions(apogee.Generation{StepBudgetNotice: false}); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
+	if got := engine.bound().Generation(); got.StepBudgetNotice {
+		t.Errorf("the bound Agent's generation after a bound edit = %+v; want the switch off", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The one generation swap (ADR 0076 A8)
 // ---------------------------------------------------------------------------

@@ -1,0 +1,63 @@
+# The upstream the step-budget notice journeys talk to (ADR 0077 addendum): one `apogee headless`
+# run whose Exchange delegates ONCE to a child that would keep calling tools past its cap, so that a
+# `delegate-max-steps: 4` is a cap the child meets and the notice's threshold — ceil(0.75 × 4) = 3 —
+# is a Turn it reaches. The child's chain is picked by what its last Turn produced rather than by
+# order (delegate-cap.yaml's shape): three DISTINCT tools, because a `tool_result:` matcher names a
+# tool and a chain that used one twice would loop, and because the tool-loop breaker would answer
+# a verbatim repeat instead of spending a step.
+#
+# The child's requests are told from the parent's by the task text every child message carries
+# (e2e_stepnotice_test.go), so the test reads the child's third tool message off the stub's log
+# rather than counting requests.
+model: step-notice-model
+turns:
+    # The parent's wrap-up once the delegation has reported. Matched BEFORE the child turns below so
+    # a parent request can never be answered as a child's.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The delegate handed back what it had.
+    # The delegation.
+    - when:
+        last_message: ^Delegate the survey to a sub-agent
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey the workspace files one at a time and describe them","name":"survey"}'
+    # The child's closing report on the tool-less wrap-up Turn the cap spends (its system prompt
+    # carries the directive this matches), listed ABOVE the child's tool turns to win that request.
+    - when:
+        system: no further tool calls are possible
+      repeat: true
+      text: Stopped short — I read a.txt, listed the workspace and grepped it.
+    # The child, four Turns of tools and then a fifth it never reaches under a cap of 4.
+    - when:
+        last_message: Survey the workspace files one at a time
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    - when:
+        tool_result: read_file
+      repeat: true
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"."}'
+    - when:
+        tool_result: list_dir
+      repeat: true
+      tool_calls:
+        - name: grep
+          arguments: '{"pattern":"hello"}'
+    - when:
+        tool_result: grep
+      repeat: true
+      tool_calls:
+        - name: find_files
+          arguments: '{"pattern":"*.txt"}'
+    - when:
+        tool_result: find_files
+      repeat: true
+      text: The workspace holds a.txt and it says hello.
+    # Anything neither the parent nor the child claims.
+    - repeat: true
+      text: Nothing else to add.

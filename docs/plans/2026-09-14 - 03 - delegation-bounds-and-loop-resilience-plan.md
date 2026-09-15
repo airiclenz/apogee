@@ -184,7 +184,16 @@ NOTES (2026-09-15): `wrapUpDirectiveFormat` keeps its exact value and `%d`; its 
 
 **Commit:** `feat(agent): delegate-max-tokens and delegate-timeout end a child through the wrap-up path`
 
-## 7. `step-budget-notice`: a child hears it is at 75 % of its cap
+## 7. `step-budget-notice`: a child hears it is at 75 % of its cap — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the notice line lives in `internal/agent/prompts/step-budget-notice.txt` (loaded through `mustPrompt`, the fill notice's plumbing) rather than as a Go literal — a file the item's list did not name.
+NOTES (2026-09-15): the once-per-Turn latch (`Agent.stepNoticeAt`) is re-armed on a cancelled Turn's rollback through `rearmNotices`, which `construct.go` now hangs on `turnLifecycle.onRollback` in place of `rearmFillNotice` alone — the fill ladder's re-arm is unchanged.
+NOTES (2026-09-15): e2e `TestE2EStepNoticeReachesTheChild` asserts the notice on the child's THIRD tool message as the plan states; the stub sees only three child tool results as a request's last message (the fourth closes the Turn that trips the cap and the wrap-up request ends on the directive), so the positive control is three, not four.
+NOTES (2026-09-15): consequential edit — internal/agent/doc.go: made necessary by the new stepnotice.go (package-map structural test) and the fill notice no longer being "the one" advise builtin.
+NOTES (2026-09-15): consequential edit — internal/agent/fillnotice.go: made necessary by the second non-guard builtin ("the one builtin that is not a Floor guard" / "the one non-guard id" were made false).
+NOTES (2026-09-15): consequential edit — CONTEXT.md: made necessary by the Generation member (the `{Floor, Bypass, Observe, Sync, ContextFillNotice}` enumeration was made false).
+NOTES (2026-09-15): consequential edit — docs/manual/commands.md: made necessary by the new `/settings` row (the sentence naming `context-fill-notice` as the one default-off row beside the Floor rows was made false).
+NOTES (2026-09-15): sibling tests added beyond the plan's list — wire_boot_test, wire_engine_test, wire_firing_test, wire_settings_test, setlive_test, domain/reaction_test — under the item's "every site of the guard's grep gains the sibling" rule; the fill notice's own files (fillnotice.go/_test, e2e_fillnotice_test, the eventjson fixture) keep no sibling because stepnotice.go/_test and e2e_stepnotice_test ARE the sibling.
 
 **What:** Depends on item 1. The engine's second advise Reaction after `context-fill-notice` (ADR 0077 pattern, byte-for-byte the same plumbing): id `step-budget-notice`, fires at `post-tool-result` for depth > 0 only, once per Exchange, when the child's Turn count first reaches `ceil(0.75 × cap)`; text `steps: N of M used — K left before the wrap-up Turn; write your output now`, rendered as the fenced advise trailer (`RenderAdvice`). Off by default behind the top-level file-only key `step-budget-notice: false` (registry, template, `/settings` row beside `context-fill-notice`, `Config`/`Generation` switch, Bypass skips it, `reactions:` may not take the id). Books `ReactionFiredEvent{Action: "notice", Detail: "step 60 of 80"}`. ADR 0077 gains a dated addendum naming the second notice; manual `reactions.md`, `configuration.md`.
 

@@ -406,6 +406,9 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		// And the `context-fill-notice` switch beside it (ADR 0077), carried as is: a Firing's
 		// model is told how full its context is exactly when the session's would be.
 		ContextFillNotice: in.opts.ContextFillNotice,
+		// And the `step-budget-notice` switch, its twin: a Firing's delegates are warned at three
+		// quarters of their cap exactly when the session's would be.
+		StepBudgetNotice: in.opts.StepBudgetNotice,
 	}
 
 	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink
