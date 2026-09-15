@@ -98,7 +98,7 @@ NOTES (2026-09-15): the shared fence/cap/timeout table lives in `internal/userex
 
 Commit: `refactor(userexec): one fenced bounded runner behind reactions and api-key-cmd`
 
-## 2. Headless and daemon Firings sweep the snapshot dirs
+## 2. Headless and daemon Firings sweep the snapshot dirs — ✅ DONE (2026-09-15)
 
 **What.** Defect: `gcSnapshotDirs` (ADR 0074 sweep) runs only at TUI boot (`cmd/apogee/wire_live.go`); headless and daemon Firings open per-run snapshot stores (`internal/run/run.go`) and never sweep — unbounded growth on a headless/daemon-only host. Call `gcSnapshotDirs(roots.snapshots, sessions, time.Now())` after the session store opens in `cmd/apogee/headless.go` and in the daemon's per-Firing boot in `cmd/apogee/daemonfire.go`.
 

@@ -123,6 +123,15 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, error)
 	store := session.NewStore(roots.sessions)
 	gcSessions(store, opts.Sessions)
 
+	// The undo stores' own sweep, on the same beat and for the same reason (wire_live.go runs it
+	// beside the TUI's session sweep): every Firing opens a snapshot store of its own
+	// (internal/run) and a host that only ever runs daemons never passes the TUI's boot, so without
+	// this line those stores would accumulate forever. Once at startup rather than per Firing — a
+	// sweep costs a directory read and a full store listing, work no Firing pays today — and after
+	// the session sweep so a record that sweep just pruned is already gone when this one looks for
+	// it.
+	gcSnapshotDirs(roots.snapshots, store, time.Now())
+
 	return &daemonWiring{
 		opts: opts,
 		// The key resolver is built with an EMPTY workspace root, so its `api-key-cmd:` exec

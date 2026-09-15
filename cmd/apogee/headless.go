@@ -962,6 +962,15 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// headless run resumes nothing, and the record it is about to mint is not in the store yet.
 	gcSessions(sessions, opts.Sessions)
 
+	// The undo stores' own sweep, on the same beat and for the same reason (wire_live.go runs it
+	// beside the TUI's session sweep): a headless run opens a snapshot store per record
+	// (internal/run) and a host driven only headlessly never passes the TUI's boot, so without this
+	// line the stores its earlier runs left behind would accumulate forever. It runs after the
+	// session sweep so a record that sweep just pruned is already gone when this one looks for it,
+	// and it is handed the always-open store for the reason the session sweep is. No id is kept —
+	// this run's own store does not exist yet.
+	gcSnapshotDirs(roots.snapshots, sessions, time.Now())
+
 	// Ctrl-C and SIGTERM end the run rather than the process: the cancellation flows out of Once
 	// as a run failure carrying whatever the run had reached, so an interrupted run still prints
 	// its partial answer and still saves its record.

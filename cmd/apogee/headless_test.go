@@ -954,6 +954,27 @@ func TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes(t *testing.T) {
 	}
 }
 
+// TestHeadlessRunSweepsStaleSnapshotDirs is the scratch test's twin for the undo stores (ADR
+// 0074): a headless run opens a snapshot store per record and a host driven only headlessly never
+// passes the TUI's boot, so the sweep that reclaims the stores earlier runs left behind has to run
+// here — before this it ran nowhere on such a host, and the stores grew without bound. The stale
+// store is backdated past the age rule alone (its record never existed, so the orphan rule would
+// also fire); either is enough for the claim, which is that the sweep RUNS.
+func TestHeadlessRunSweepsStaleSnapshotDirs(t *testing.T) {
+	home := testConfigHome(t, "")
+	stale := snapshotDirAt(t, filepath.Join(home, "snapshots"), "stale", time.Now().Add(-scratchMaxAge-time.Hour))
+
+	stub := &stubRunner{}
+	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("a stale snapshot store survived a headless start (stat err = %v); a host driven only "+
+			"headlessly never passes the TUI's boot sweep", err)
+	}
+}
+
 // headlessSummarySession lifts the record id out of the summary line a headless run prints on
 // stderr (`session: <id> · turns: N · denied: M`): the name the run's scratch dir carries.
 var headlessSummarySession = regexp.MustCompile(`session: (\S+) · turns:`)

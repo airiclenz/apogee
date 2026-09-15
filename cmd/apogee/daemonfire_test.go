@@ -551,6 +551,28 @@ func TestDaemonStartupSweepsStaleScratchDirs(t *testing.T) {
 	}
 }
 
+// TestDaemonStartupSweepsStaleSnapshotDirs is the scratch test's twin for the undo stores (ADR
+// 0074): every Firing opens a snapshot store of its own and a host that only ever runs daemons
+// never passes the TUI's boot, so the sweep that reclaims the stores earlier Firings left behind
+// has to run at the daemon's startup — before this it ran nowhere on such a host. The stale store
+// is backdated past the age rule alone; that one firing is enough for the claim, which is that the
+// sweep RUNS.
+func TestDaemonStartupSweepsStaleSnapshotDirs(t *testing.T) {
+	configDir := t.TempDir()
+	roots, err := resolveRoots(configDir, "")
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stale := snapshotDirAt(t, roots.snapshots, "stale", time.Now().Add(-scratchMaxAge-time.Hour))
+
+	newDaemonFireHarness(t, config.Options{ConfigDir: configDir})
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("a stale snapshot store survived the daemon's startup (stat err = %v); a host driven "+
+			"only by a daemon never passes the TUI's boot sweep", err)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // What a Firing narrates
 // ----------------------------------------------------------------------------
