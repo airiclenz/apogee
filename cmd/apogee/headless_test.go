@@ -3418,10 +3418,11 @@ func TestNarrationSinkSummarisesTheFirstStringArgument(t *testing.T) {
 }
 
 // TestNarrationSinkWordsTheResult pins the result line's three shapes — ok, error with the failure's
-// first line, and the id alone when the sink never saw the call — and the depth gate on both tool
-// line families: a child's call and result print nothing, because the sub-agent lines stand in for
-// them. A failed terminal narrates the command's own first line, never the `cwd:` line the tool
-// opens its result with (tools.StripCwdLine).
+// first line, and the id alone when the result Event names no tool — and the depth gate on both
+// tool line families: a child's call and result print nothing, because the sub-agent lines stand in
+// for them. The tool is read off the ToolResultEvent itself (Tool), never remembered from the call,
+// so a result whose call never went by is still named. A failed terminal narrates the command's own
+// first line, never the `cwd:` line the tool opens its result with (tools.StripCwdLine).
 func TestNarrationSinkWordsTheResult(t *testing.T) {
 	t.Parallel()
 
@@ -3434,28 +3435,30 @@ func TestNarrationSinkWordsTheResult(t *testing.T) {
 	}
 
 	sink.Emit(call("call_1"))
-	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call_1", Content: "a.txt"}})
+	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call_1", Content: "a.txt"}, Tool: "shell"})
 	sink.Emit(call("call_2"))
 	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{
 		CallID: "call_2", IsError: true, Content: "ls: no such\x1b[0m file\nsecond line",
-	}})
+	}, Tool: "shell"})
 	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call_9", Content: "?"}})
+	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call_10", Content: "?"}, Tool: "read_file"})
 	sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "call_3", Tool: "terminal", Arguments: json.RawMessage(`{"command":"ls missing"}`),
 	}})
 	sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{
 		CallID: "call_3", IsError: true, Content: "cwd: /ws\nls: cannot access 'missing'\n[exit code 2]",
-	}})
+	}, Tool: "terminal"})
 	sink.Emit(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1, CallID: "call_2"},
 		Call: domain.ToolCall{ID: "child_1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"z"}`)}})
 	sink.Emit(domain.ToolResultEvent{EventBase: domain.EventBase{Depth: 1, CallID: "call_2"},
-		Result: domain.ToolResult{CallID: "child_1", Content: "z"}})
+		Result: domain.ToolResult{CallID: "child_1", Content: "z"}, Tool: "read_file"})
 
 	want := "→ shell ls\n" +
 		"← shell ok\n" +
 		"→ shell ls\n" +
 		"← shell error: ls: no such[0m file\n" +
 		"← call_9\n" +
+		"← read_file ok\n" +
 		"→ terminal ls missing\n" +
 		"← terminal error: ls: cannot access 'missing'\n"
 	if got := errOut.String(); got != want {
@@ -3608,21 +3611,27 @@ func TestHeadlessArmsTheSyncLaneOnTheFiringsSpec(t *testing.T) {
 }
 
 // The `file-changed` derivation at a root that holds no tool registry. firingConfig leaves
-// Config.Tools nil and the engine builds its own, so the Driver has nothing to ask where a write
-// landed — it builds a lookup-only roster instead (firingWriteTarget), and this is the proof that
-// roster answers for a real write the run announced.
+// Config.Tools nil and the engine builds its own, and the Driver never needs to ask it where a
+// write landed: the engine stamps the resolved path onto the ToolResultEvent (WriteTarget), and
+// this is the proof that a headless Firing's Runner fires the Reaction off that Event alone, with
+// the payload naming the tool and the path the Event carried.
 func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 	requireHookShell(t)
 
 	marker := filepath.Join(t.TempDir(), "changed.json")
-	stub := &stubRunner{emit: func(sink domain.EventSink) {
+	stub := &stubRunner{}
+	stub.emit = func(sink domain.EventSink) {
 		sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{
 			ID:        "call-1",
 			Tool:      "write_file",
 			Arguments: []byte(`{"path":"a.txt","content":"hi"}`),
 		}})
-		sink.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call-1"}})
-	}}
+		sink.Emit(domain.ToolResultEvent{
+			Result:      domain.ToolResult{CallID: "call-1"},
+			Tool:        "write_file",
+			WriteTarget: filepath.Join(stub.spec.Config.WorkspaceDir, "a.txt"),
+		})
+	}
 
 	if _, _, err := headlessRunOn(t, stub, fenceableHost,
 		hookHomeRecording(t, marker, "file-changed"), "write a file"); err != nil {
@@ -3638,8 +3647,8 @@ func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 			payload.Workspace, stub.spec.Config.WorkspaceDir)
 	}
 	if want := filepath.Join(payload.Workspace, "a.txt"); payload.Path != want {
-		t.Errorf("the write landed at %q, want %q — the roster resolved the argument against "+
-			"something other than the run's workspace", payload.Path, want)
+		t.Errorf("the write landed at %q, want %q — the path the Event carried, under the run's "+
+			"own workspace", payload.Path, want)
 	}
 }
 

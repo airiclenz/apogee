@@ -116,7 +116,12 @@ NOTES (2026-09-15): `cmd/apogee/e2e_eventlines_test.go` (named in Files) needed 
 
 Commit: `feat(events): tool_result carries the tool name and the classified write target`
 
-## 3. The Runner and every Driver read the write target off the Event
+## 3. The Runner and every Driver read the write target off the Event — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `TestNarrationSinkWordsTheResult` gained one row beyond the plan's "updated to the Event field" — a result whose call never went by but whose Event names a tool (`call_10`, `read_file`) is now worded `← read_file ok`, pinning that the tool is read off the Event and no longer remembered from the call; the `call_9` id-only row stays for an Event with `Tool == ""`.
+NOTES (2026-09-15): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by the closure's deletion — `TestRootWiringEmitsThroughTheHookRunner`'s comment "the registry the closure has not got" rewritten (the test itself is unchanged), beside the planned deletion of `TestRootHookWriteTargetIsRaceSafeAcrossARosterSwap`.
+NOTES (2026-09-15): the `tools` import was dropped from `cmd/apogee/wire_boot.go` and `cmd/apogee/wire_firing.go` (both closures were its only use there); `fmt` dropped from `internal/reactions/match_test.go` with `TestMatchPendingWritesAreBounded`.
+NOTES (2026-09-15): four dirty paths in the tree are not this item's and were left untouched — `cmd/apogee/e2e_subagent_view_test.go`, `cmd/apogee/testdata/frames/t17-run-view.txt`, `internal/doctext/pdf_test.go`, `scripts/test-shards.sh` (modified 19:01–19:03 by another agent, before this item's first edit).
 
 **What.** Recast at the regression check (2026-09-15). Delete `reactions.WriteTarget`, `Options.WriteTarget` and the matcher's bounded pending map (`internal/reactions/match.go` — `newMatcher` takes no write-target func; `file-changed` matches on `ToolResultEvent.WriteTarget != "" && !Result.IsError`). Delete the TUI closure in `cmd/apogee/wire_boot.go` and `firingWriteTarget` in `cmd/apogee/wire_firing.go` (the per-Firing throw-away registry goes with it). `headless.go`'s `narrationSink` names the tool from `ToolResultEvent.Tool`; its per-call map stays for the delegation display name and loses only its tool member (see the guard). Behaviour change accepted: `file-changed` no longer silently drops past 256 pending writes. Admitted change: the file-changed target moves from the pre-edit `ToolCallEvent` call (today `match.go` remembers it before the `pre-tool-exec` Moment reshapes the call) to the post-edit resolved one the Event now carries — an improvement. Depends on item 2.
 

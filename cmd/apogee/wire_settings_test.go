@@ -3580,53 +3580,6 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 	}
 }
 
-// The WriteTarget the root hands its Runner is a LAZY closure over the live tool set, because the
-// registry does not exist when the Runner is built and every roster edit and MCP reconnect swaps it
-// afterwards. That makes it a genuinely shared read: the closure runs on whatever goroutine emitted
-// the Event, while a `/settings` commit installs a new registry from the Update goroutine. Under
-// -race this is what fails if the closure ever reads liveTools.current unlocked.
-func TestRootHookWriteTargetIsRaceSafeAcrossARosterSwap(t *testing.T) {
-	t.Parallel()
-	workspace := t.TempDir()
-	w := newRootWiring(config.Options{
-		Workspace: workspace,
-		Reactions: []domain.Reaction{hookEntry("watcher", reactions.FileChanged)},
-	}, domain.ModeAskBefore, stateRoots{config: t.TempDir(), workspace: workspace})
-	if err := w.resolveConfig(); err != nil {
-		t.Fatalf("resolveConfig: %v", err)
-	}
-	t.Cleanup(func() { _ = w.hooks.Close(context.Background()) })
-
-	build := func(toolSetSpec) *apogee.ToolRegistry {
-		return tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{})
-	}
-	w.toolSet = newLiveTools(build(toolSetSpec{}), toolSetSpec{}, build)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 50; i++ {
-			if err := w.toolSet.rebuildWith(toolSetSpec{}, &applySettingSpy{}); err != nil {
-				t.Errorf("rebuildWith: %v", err)
-				return
-			}
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 50; i++ {
-			// read_file is not a workspace-scoped writer, so the closure resolves it out of
-			// whichever registry is current and answers "no target" — the lookup is the point,
-			// not the firing.
-			w.hooks.Emit(domain.ToolCallEvent{
-				Call: domain.ToolCall{ID: fmt.Sprintf("call-%d", i), Tool: "read_file"},
-			})
-		}
-	}()
-	wg.Wait()
-}
-
 // The Runner is installed as Config.Events, which is what makes the whole feature reachable at all:
 // a root that built one and left the engine emitting into the Bridge's bare sink would run every
 // Reaction never, and one that set Events to a Runner built later would box a nil pointer past
@@ -3646,7 +3599,7 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 		t.Fatalf("Config.Events = %T, want the root's own *reactions.Runner", w.cfg.Events)
 	}
 	// And an Event emitted before wireSession has installed a tool set at all — the first beat of a
-	// cold start — is forwarded rather than dereferencing the registry the closure has not got.
+	// cold start — is forwarded: the Runner holds no handle on the registry to dereference.
 	w.cfg.Events.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
 	_ = w.hooks.Close(context.Background())
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/skills"
-	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // firingInputs is everything a Driver decides about ONE unattended run. Every difference between
@@ -603,30 +602,9 @@ func firingHooks(observe []domain.Reaction, workspace string, sched *reactions.S
 		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself
 		// wraps THIS Runner rather than being wrapped by it (headless's prune notice), which keeps the
 		// renderer outermost and the Reactions invisible to it.
-		Workspace:   workspace,
-		Schedule:    sched,
-		Report:      report,
-		WriteTarget: firingWriteTarget(workspace),
-		Exec:        reactions.DefaultExecutor(workspace),
+		Workspace: workspace,
+		Schedule:  sched,
+		Report:    report,
+		Exec:      reactions.DefaultExecutor(workspace),
 	})
-}
-
-// firingWriteTarget answers whether one tool call wrote a file and where it landed — the seam the
-// `file-changed` derivation reads (reactions.WriteTarget).
-//
-// A Firing holds no live tool registry to ask: firingConfig leaves Config.Tools nil and the engine
-// builds its own, which no Driver has a handle on. So this builds a lookup-only roster of its own,
-// scoped to the same workspace, and asks it exactly what the session asks its live set. Only the
-// writer marker each tool carries is read (tools.WorkspaceWriteTarget), so a roster assembled with
-// no host delegates answers identically to the one the engine runs — and nothing here is offered to
-// a model, dispatched, or reachable in any other way.
-func firingWriteTarget(workspace string) reactions.WriteTarget {
-	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{})
-	return func(call domain.ToolCall) (string, bool) {
-		tool, ok := registry.Lookup(call.Tool)
-		if !ok {
-			return "", false
-		}
-		return tools.WorkspaceWriteTarget(tool, call)
-	}
 }

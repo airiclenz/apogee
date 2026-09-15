@@ -569,23 +569,15 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 
 // TestRunnerWithNoHooksTouchesNothing is the regression guard: with an empty active set the
-// Runner forwards and returns, so the injected WriteTarget — the one call that reaches outside
-// this package on the engine's own goroutine — is never made. Replacing a file-changed Reaction in
-// rebuilds the subscribed set, and the very next tool call asks for the target exactly once.
+// Runner forwards and returns — a stamped write result fires nothing and reaches no executor.
+// Replacing a file-changed Reaction in rebuilds the subscribed set, and the very next write result
+// fires exactly once, off the tool and path the Event itself carries.
 func TestRunnerWithNoHooksTouchesNothing(t *testing.T) {
 	t.Parallel()
 
-	var lookups int
-	writeTarget := func(call domain.ToolCall) (string, bool) {
-		lookups++
-		return "/work/repo/" + call.ID + ".txt", true
-	}
-
 	inner := &recordingSink{}
 	exec := newFakeExecutor()
-	runner, err := New(nil, Options{
-		Inner: inner, Workspace: t.TempDir(), Exec: exec, WriteTarget: writeTarget,
-	})
+	runner, err := New(nil, Options{Inner: inner, Workspace: t.TempDir(), Exec: exec})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -594,13 +586,15 @@ func TestRunnerWithNoHooksTouchesNothing(t *testing.T) {
 	quiet := []domain.Event{
 		turnEvent(1),
 		domain.ToolCallEvent{Call: call},
-		domain.ToolResultEvent{Result: domain.ToolResult{CallID: call.ID}},
+		domain.ToolResultEvent{
+			Result: domain.ToolResult{CallID: call.ID}, Tool: call.Tool, WriteTarget: "/work/repo/call-1.txt",
+		},
 	}
 	for _, e := range quiet {
 		runner.Emit(e)
 	}
-	if lookups != 0 {
-		t.Fatalf("the write target was looked up %d times with no reactions configured", lookups)
+	if runs := exec.recorded(); len(runs) != 0 {
+		t.Fatalf("ran %#v with no reactions configured, want nothing", runs)
 	}
 	if len(inner.events) != len(quiet) {
 		t.Fatalf("inner received %d events, want %d", len(inner.events), len(quiet))
@@ -611,15 +605,14 @@ func TestRunnerWithNoHooksTouchesNothing(t *testing.T) {
 	}
 	second := domain.ToolCall{ID: "call-2", Tool: "write_file"}
 	runner.Emit(domain.ToolCallEvent{Call: second})
-	runner.Emit(domain.ToolResultEvent{Result: domain.ToolResult{CallID: second.ID}})
+	runner.Emit(domain.ToolResultEvent{
+		Result: domain.ToolResult{CallID: second.ID}, Tool: second.Tool, WriteTarget: "/work/repo/call-2.txt",
+	})
 	closeRunner(t, runner)
 
-	if lookups != 1 {
-		t.Fatalf("the write target was looked up %d times after the replace, want exactly 1", lookups)
-	}
 	runs := exec.recorded()
-	if len(runs) != 1 || runs[0].Event != FileChanged || runs[0].Path != "/work/repo/call-2.txt" {
-		t.Fatalf("ran %#v, want one file-changed firing for the second call", runs)
+	if len(runs) != 1 || runs[0].Event != FileChanged || runs[0].Tool != "write_file" || runs[0].Path != "/work/repo/call-2.txt" {
+		t.Fatalf("ran %#v, want one file-changed firing for the second call, naming its tool and path", runs)
 	}
 }
 

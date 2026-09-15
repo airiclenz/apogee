@@ -2,19 +2,6 @@ package reactions
 
 import "github.com/airiclenz/apogee/internal/domain"
 
-// maxPendingWrites bounds the call-id map the file-changed derivation keeps between a write
-// tool's call and its result. A call whose result never arrives — a cancelled run, an abandoned
-// Turn — would otherwise leak an entry for the life of the session, so the map refuses to grow
-// past this and the surplus calls simply produce no file-changed event.
-const maxPendingWrites = 256
-
-// WriteTarget answers whether a tool call writes to a path, and which one — the single fact the
-// file-changed derivation needs and the one this package cannot compute, since the answer lives
-// in internal/tools and depends on the run's own registry. Every root injects the same closure:
-// tools.WorkspaceWriteTarget over its registry lookup. It returns ("", false) for a call that
-// writes nothing inspectable, and the absolute, symlink-resolved destination otherwise.
-type WriteTarget func(domain.ToolCall) (string, bool)
-
 // firing is one Reaction event a domain.Event produced, with the payload fields derivable from that
 // event. The runner stamps the rest — the Reaction's name, the time, the workspace and the Schedule
 // — as it fans the firing out to each subscribing Reaction.
@@ -24,18 +11,16 @@ type firing struct {
 }
 
 // matcher maps one domain.Event to the Reaction events it produces. It is pure in the sense that
-// matters: no clock, no filesystem, no network, no goroutine — the only state it keeps is the
-// bounded map correlating a write tool's call with its result.
+// matters: no clock, no filesystem, no network, no goroutine — and no state between events. Every
+// fact a firing needs rides the Event itself, the file-changed target included
+// (domain.ToolResultEvent.WriteTarget, stamped by the engine at the dispatch commit point).
 //
 // It is built over the SUBSCRIBED set — the union of every active Reaction's events — and an event
-// that can only produce an unsubscribed Reaction event costs nothing at all: no WriteTarget call,
-// no pending entry, no allocation. With no active Reaction the subscribed set is empty and the
-// matcher is a no-op for every engine event, which is the ordinary case for a user who configured
-// none.
+// that can only produce an unsubscribed Reaction event costs nothing at all: no allocation, no
+// projection. With no active Reaction the subscribed set is empty and the matcher is a no-op for
+// every engine event, which is the ordinary case for a user who configured none.
 type matcher struct {
-	subscribed  map[Event]bool
-	writeTarget WriteTarget
-	pending     map[string]pendingWrite
+	subscribed map[Event]bool
 
 	// project reduces a closed seam's working value to the payload's "value" document. It is a
 	// field rather than a direct call so a test can count the projections and prove an
@@ -43,21 +28,11 @@ type matcher struct {
 	project func(domain.Moment, any) any
 }
 
-// pendingWrite remembers the tool and destination of a write call whose result has not arrived.
-type pendingWrite struct {
-	tool string
-	path string
-}
-
-// newMatcher builds a matcher over the given subscribed set. writeTarget may be nil, in which
-// case no file-changed event is ever derived — a root that cannot resolve a write target is a
-// root whose file-changed Reactions simply never fire, rather than one that panics.
-func newMatcher(subscribed map[Event]bool, writeTarget WriteTarget) *matcher {
+// newMatcher builds a matcher over the given subscribed set.
+func newMatcher(subscribed map[Event]bool) *matcher {
 	return &matcher{
-		subscribed:  subscribed,
-		writeTarget: writeTarget,
-		pending:     make(map[string]pendingWrite),
-		project:     projectSeamValue,
+		subscribed: subscribed,
+		project:    projectSeamValue,
 	}
 }
 
@@ -78,9 +53,6 @@ func (m *matcher) match(ev domain.Event) []firing {
 		return m.matchApproval(e)
 	case domain.ErrorEvent:
 		return m.matchError(e)
-	case domain.ToolCallEvent:
-		m.rememberWrite(e)
-		return nil
 	case domain.ToolResultEvent:
 		return m.matchToolResult(e)
 	case domain.SeamClosedEvent:
@@ -187,37 +159,16 @@ func (m *matcher) matchError(ev domain.ErrorEvent) []firing {
 	return []firing{firingOf(Error, payload)}
 }
 
-// rememberWrite records a write call so its RESULT can be reported as a file-changed event —
-// the result alone carries no tool name and no arguments, and a call alone has not happened yet.
-// It is skipped entirely when no Reaction subscribes to file-changed, so an unsubscribed run never
-// calls WriteTarget and never grows the map.
-func (m *matcher) rememberWrite(ev domain.ToolCallEvent) {
-	if !m.wants(FileChanged) || m.writeTarget == nil || len(m.pending) >= maxPendingWrites {
-		return
-	}
-	path, ok := m.writeTarget(ev.Call)
-	if !ok {
-		return
-	}
-	m.pending[ev.Call.ID] = pendingWrite{tool: ev.Call.Tool, path: path}
-}
-
-// matchToolResult closes a remembered write. The entry is dropped whether or not the write
-// succeeded — the call is over either way — but only a SUCCESSFUL result fires the event: a
-// refused or failed write changed no file.
+// matchToolResult maps a finished tool call to file-changed when the call CHANGED A FILE: the
+// Event carries the resolved workspace path the engine judged the call by (WriteTarget — the same
+// answer the blast-radius ladder read, empty for a read or any other non-writing call), and only a
+// SUCCESSFUL result fires the event: a refused or failed write changed no file. Nothing is
+// remembered between the call and its result — the Event names the tool and the path itself.
 func (m *matcher) matchToolResult(ev domain.ToolResultEvent) []firing {
-	if !m.wants(FileChanged) || len(m.pending) == 0 {
+	if !m.wants(FileChanged) || ev.WriteTarget == "" || ev.Result.IsError {
 		return nil
 	}
-	write, ok := m.pending[ev.Result.CallID]
-	if !ok {
-		return nil
-	}
-	delete(m.pending, ev.Result.CallID)
-	if ev.Result.IsError {
-		return nil
-	}
-	payload := Payload{Tool: write.tool, Path: write.path}
+	payload := Payload{Tool: ev.Tool, Path: ev.WriteTarget}
 	payload.applyBase(ev.EventBase)
 	return []firing{firingOf(FileChanged, payload)}
 }

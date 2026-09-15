@@ -72,10 +72,6 @@ type Options struct {
 	// silent, which is the bench's case.
 	Report func(string)
 
-	// WriteTarget answers whether a tool call wrote a file, and where. nil ⇒ no file-changed
-	// event is ever derived (see newMatcher).
-	WriteTarget WriteTarget
-
 	// Exec runs a Reaction's action. Required whenever at least one Reaction is active at this root;
 	// a Runner with nothing to run needs none.
 	Exec Executor
@@ -96,13 +92,12 @@ type Options struct {
 // One worker per active Reaction is deliberate: each Reaction sees its events in order and cannot
 // be delayed by another Reaction's slow script, which a single shared worker could not promise.
 type Runner struct {
-	inner       domain.EventSink
-	workspace   string
-	schedule    *ScheduleRef
-	report      func(string)
-	writeTarget WriteTarget
-	exec        Executor
-	now         func() time.Time
+	inner     domain.EventSink
+	workspace string
+	schedule  *ScheduleRef
+	report    func(string)
+	exec      Executor
+	now       func() time.Time
 
 	// active is the live set of workers and the matcher built over their subscribed events.
 	// Emit loads it without a lock; Replace and Close swap it, so a reload never blocks the
@@ -165,12 +160,11 @@ func New(list []domain.Reaction, o Options) (*Runner, error) {
 		return nil, err
 	}
 	r := &Runner{
-		inner:       o.Inner,
-		workspace:   workspace,
-		report:      o.Report,
-		writeTarget: o.WriteTarget,
-		exec:        o.Exec,
-		now:         o.Now,
+		inner:     o.Inner,
+		workspace: workspace,
+		report:    o.Report,
+		exec:      o.Exec,
+		now:       o.Now,
 	}
 	if r.now == nil {
 		r.now = time.Now
@@ -325,7 +319,7 @@ func (r *Runner) buildSet(list []domain.Reaction) (*hookSet, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	set := &hookSet{
-		matcher: newMatcher(SubscribedEvents(active), r.writeTarget),
+		matcher: newMatcher(SubscribedEvents(active)),
 		workers: make([]*worker, 0, len(active)),
 		ctx:     ctx,
 		cancel:  cancel,

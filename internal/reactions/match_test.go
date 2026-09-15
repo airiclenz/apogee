@@ -1,7 +1,6 @@
 package reactions
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -11,20 +10,6 @@ import (
 // allSubscribed is the set a run with a Reaction on every event is built over.
 func allSubscribed() map[Event]bool {
 	return SubscribedEvents([]domain.Reaction{{On: Events()}})
-}
-
-// writeTargetFor answers like tools.WorkspaceWriteTarget over a registry holding only apogee's
-// own write tools: a write reports its destination, a reader reports nothing.
-func writeTargetFor(t *testing.T, calls *int) WriteTarget {
-	t.Helper()
-	writers := map[string]bool{"write_file": true, "edit_file": true, "delete_file": true, "move_file": true}
-	return func(call domain.ToolCall) (string, bool) {
-		*calls++
-		if !writers[call.Tool] {
-			return "", false
-		}
-		return "/work/repo/" + call.ID + ".txt", true
-	}
 }
 
 // TestMatchTurnBoundary — a Depth-0 boundary fires turn-finished, and a Depth-0 boundary that
@@ -66,7 +51,7 @@ func TestMatchTurnBoundary(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := newMatcher(allSubscribed(), nil).match(c.event)
+			got := newMatcher(allSubscribed()).match(c.event)
 
 			assertEvents(t, got, c.want)
 			for _, f := range got {
@@ -93,8 +78,8 @@ func TestMatchTurnBoundaryHonoursTheSubscribedSet(t *testing.T) {
 
 	closed := domain.TurnEvent{EventBase: domain.EventBase{Turn: 1}, Status: domain.StatusExchangeComplete}
 
-	onlyExchange := newMatcher(map[Event]bool{ExchangeFinished: true}, nil).match(closed)
-	onlyTurn := newMatcher(map[Event]bool{TurnFinished: true}, nil).match(closed)
+	onlyExchange := newMatcher(map[Event]bool{ExchangeFinished: true}).match(closed)
+	onlyTurn := newMatcher(map[Event]bool{TurnFinished: true}).match(closed)
 
 	assertEvents(t, onlyExchange, []Event{ExchangeFinished})
 	assertEvents(t, onlyTurn, []Event{TurnFinished})
@@ -110,11 +95,11 @@ func TestMatchApproval(t *testing.T) {
 		SubAgentName: "docs sweep", Scope: "reads the package directory",
 	}
 
-	requested := newMatcher(allSubscribed(), nil).match(domain.ApprovalEvent{
+	requested := newMatcher(allSubscribed()).match(domain.ApprovalEvent{
 		EventBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-2"},
 		Phase:     domain.ApprovalRequested, Request: request,
 	})
-	decided := newMatcher(allSubscribed(), nil).match(domain.ApprovalEvent{
+	decided := newMatcher(allSubscribed()).match(domain.ApprovalEvent{
 		EventBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-2"},
 		Phase:     domain.ApprovalDecided, Request: request, Decision: domain.ApprovalAllow,
 	})
@@ -141,7 +126,7 @@ func TestMatchApproval(t *testing.T) {
 func TestMatchError(t *testing.T) {
 	t.Parallel()
 
-	got := newMatcher(allSubscribed(), nil).match(domain.ErrorEvent{
+	got := newMatcher(allSubscribed()).match(domain.ErrorEvent{
 		EventBase: domain.EventBase{Depth: 2, Turn: 5, CallID: "call-9"},
 		Source:    "terminal", Err: "exit status 1",
 	})
@@ -155,20 +140,22 @@ func TestMatchError(t *testing.T) {
 	}
 }
 
-// TestMatchFileChanged walks a write from its call to its result, which is the only place the
-// tool name, the destination and the success are all known.
+// TestMatchFileChanged maps a finished call to file-changed off the two facts the Event carries —
+// the resolved tool name and the path the engine judged the call by — and off the result's success:
+// a write that wrote fires, an erroring write fires nothing, and a read carries no target at all.
 func TestMatchFileChanged(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name    string
-		tool    string
-		isError bool
-		want    []Event
+		name        string
+		tool        string
+		writeTarget string
+		isError     bool
+		want        []Event
 	}{
-		{name: "a successful write fires", tool: "write_file", want: []Event{FileChanged}},
-		{name: "a delete reports its destination", tool: "delete_file", want: []Event{FileChanged}},
-		{name: "an erroring write fires nothing", tool: "write_file", isError: true, want: nil},
+		{name: "a successful write fires", tool: "write_file", writeTarget: "/work/repo/call-7.txt", want: []Event{FileChanged}},
+		{name: "a delete reports its destination", tool: "delete_file", writeTarget: "/work/repo/call-7.txt", want: []Event{FileChanged}},
+		{name: "an erroring write fires nothing", tool: "write_file", writeTarget: "/work/repo/call-7.txt", isError: true, want: nil},
 		{name: "a read never fires", tool: "read_file", want: nil},
 	}
 
@@ -176,78 +163,49 @@ func TestMatchFileChanged(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 
-			calls := 0
-			m := newMatcher(allSubscribed(), writeTargetFor(t, &calls))
-			call := domain.ToolCall{ID: "call-7", Tool: c.tool}
-
-			assertEvents(t, m.match(domain.ToolCallEvent{Call: call}), nil)
+			m := newMatcher(allSubscribed())
 			got := m.match(domain.ToolResultEvent{
-				EventBase: domain.EventBase{Depth: 1, Turn: 2},
-				Result:    domain.ToolResult{CallID: call.ID, IsError: c.isError},
+				EventBase:   domain.EventBase{Depth: 1, Turn: 2},
+				Result:      domain.ToolResult{CallID: "call-7", IsError: c.isError},
+				Tool:        c.tool,
+				WriteTarget: c.writeTarget,
 			})
 
 			assertEvents(t, got, c.want)
 			if len(got) == 1 {
-				if got[0].Payload.Tool != c.tool || got[0].Payload.Path != "/work/repo/call-7.txt" {
+				if got[0].Payload.Tool != c.tool || got[0].Payload.Path != c.writeTarget {
 					t.Errorf("file-changed payload = %+v, want the tool and its destination", got[0].Payload)
 				}
-			}
-			if len(m.pending) != 0 {
-				t.Errorf("%d pending entries remain, want the entry dropped on its result", len(m.pending))
 			}
 		})
 	}
 }
 
-// TestMatchFileChangedIgnoresAnUnknownResult — a result whose call was never remembered (a read,
-// a call from before the Reaction set was replaced) closes nothing and fires nothing.
-func TestMatchFileChangedIgnoresAnUnknownResult(t *testing.T) {
+// TestMatchFileChangedReadsTheEventsWriteTarget — the matcher keeps nothing between a call and its
+// result: a result whose call Event never went by fires exactly as one whose call did, because the
+// tool and the path ride the result Event itself, and a result stamped with no target — a read,
+// or a call the engine never resolved — fires nothing however the call was named.
+func TestMatchFileChangedReadsTheEventsWriteTarget(t *testing.T) {
 	t.Parallel()
 
-	calls := 0
-	m := newMatcher(allSubscribed(), writeTargetFor(t, &calls))
+	m := newMatcher(allSubscribed())
 
-	got := m.match(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "never-seen"}})
-
-	assertEvents(t, got, nil)
-}
-
-// TestMatchPendingWritesAreBounded — a call whose result never arrives would otherwise leak an
-// entry for the life of the session, so the map refuses to grow past the cap.
-func TestMatchPendingWritesAreBounded(t *testing.T) {
-	t.Parallel()
-
-	calls := 0
-	m := newMatcher(allSubscribed(), writeTargetFor(t, &calls))
-
-	for i := 0; i < maxPendingWrites+50; i++ {
-		m.match(domain.ToolCallEvent{Call: domain.ToolCall{ID: fmt.Sprintf("call-%d", i), Tool: "write_file"}})
+	got := m.match(domain.ToolResultEvent{
+		EventBase:   domain.EventBase{Turn: 3},
+		Result:      domain.ToolResult{CallID: "never-announced"},
+		Tool:        "edit_file",
+		WriteTarget: "/work/repo/notes.md",
+	})
+	assertEvents(t, got, []Event{FileChanged})
+	if got[0].Payload.Tool != "edit_file" || got[0].Payload.Path != "/work/repo/notes.md" {
+		t.Errorf("file-changed payload = %+v, want the Event's tool and path", got[0].Payload)
 	}
 
-	if len(m.pending) != maxPendingWrites {
-		t.Errorf("pending = %d entries, want it capped at %d", len(m.pending), maxPendingWrites)
-	}
-}
-
-// TestMatchNeverAsksWriteTargetWhenFileChangedIsUnsubscribed is the item's regression guard: a
-// matcher built over a set that does not hold file-changed does no work at all for a write —
-// no WriteTarget call, no pending entry — so an unsubscribed run pays nothing for the feature.
-func TestMatchNeverAsksWriteTargetWhenFileChangedIsUnsubscribed(t *testing.T) {
-	t.Parallel()
-
-	calls := 0
-	m := newMatcher(map[Event]bool{TurnFinished: true, Error: true}, writeTargetFor(t, &calls))
-	call := domain.ToolCall{ID: "call-7", Tool: "write_file"}
-
-	assertEvents(t, m.match(domain.ToolCallEvent{Call: call}), nil)
-	assertEvents(t, m.match(domain.ToolResultEvent{Result: domain.ToolResult{CallID: call.ID}}), nil)
-
-	if calls != 0 {
-		t.Errorf("WriteTarget was invoked %d times, want 0 when no reaction subscribes to file-changed", calls)
-	}
-	if len(m.pending) != 0 {
-		t.Errorf("pending = %d entries, want none when no reaction subscribes to file-changed", len(m.pending))
-	}
+	untargeted := m.match(domain.ToolResultEvent{
+		Result: domain.ToolResult{CallID: "call-8"},
+		Tool:   "write_file",
+	})
+	assertEvents(t, untargeted, nil)
 }
 
 // TestMatchWithNoActiveHookIsANoOpForEveryEvent — the ordinary case for a user who configured no
@@ -255,14 +213,15 @@ func TestMatchNeverAsksWriteTargetWhenFileChangedIsUnsubscribed(t *testing.T) {
 func TestMatchWithNoActiveHookIsANoOpForEveryEvent(t *testing.T) {
 	t.Parallel()
 
-	calls := 0
-	m := newMatcher(SubscribedEvents(nil), writeTargetFor(t, &calls))
+	m := newMatcher(SubscribedEvents(nil))
 	events := []domain.Event{
 		domain.TurnEvent{Status: domain.StatusExchangeComplete},
 		domain.ApprovalEvent{Phase: domain.ApprovalRequested},
 		domain.ErrorEvent{Source: "loop", Err: "boom"},
 		domain.ToolCallEvent{Call: domain.ToolCall{ID: "call-7", Tool: "write_file"}},
-		domain.ToolResultEvent{Result: domain.ToolResult{CallID: "call-7"}},
+		domain.ToolResultEvent{
+			Result: domain.ToolResult{CallID: "call-7"}, Tool: "write_file", WriteTarget: "/work/repo/call-7.txt",
+		},
 		domain.MessageEvent{Text: "hello"},
 	}
 
@@ -271,10 +230,6 @@ func TestMatchWithNoActiveHookIsANoOpForEveryEvent(t *testing.T) {
 			t.Errorf("match(%T) = %v, want nothing with no active reaction", ev, got)
 		}
 	}
-
-	if calls != 0 || len(m.pending) != 0 {
-		t.Errorf("WriteTarget calls = %d, pending = %d, want 0/0", calls, len(m.pending))
-	}
 }
 
 // TestMatchIgnoresEveryOtherVariant — the vocabulary is closed; an event outside it produces
@@ -282,7 +237,7 @@ func TestMatchWithNoActiveHookIsANoOpForEveryEvent(t *testing.T) {
 func TestMatchIgnoresEveryOtherVariant(t *testing.T) {
 	t.Parallel()
 
-	m := newMatcher(allSubscribed(), nil)
+	m := newMatcher(allSubscribed())
 
 	for _, ev := range []domain.Event{
 		domain.MessageEvent{Text: "hello"},
@@ -344,7 +299,7 @@ func TestMatchSeamClosedMapsEverySeamToItsNotice(t *testing.T) {
 				Fired:     fired,
 			}
 
-			got := newMatcher(allSubscribed(), nil).match(ev)
+			got := newMatcher(allSubscribed()).match(ev)
 
 			assertEvents(t, got, []Event{seam.Closing()})
 			payload := got[0].Payload
@@ -371,7 +326,7 @@ func TestMatchSeamClosedFiresOnlyWhenSubscribed(t *testing.T) {
 	t.Parallel()
 
 	projections := 0
-	m := newMatcher(map[Event]bool{domain.MomentPreRequestFinished: true}, nil)
+	m := newMatcher(map[Event]bool{domain.MomentPreRequestFinished: true})
 	m.project = func(domain.Moment, any) any {
 		projections++
 		return "projected"
@@ -408,7 +363,7 @@ func TestMatchSeamClosedIsTopLevelOnly(t *testing.T) {
 	t.Parallel()
 
 	projections := 0
-	m := newMatcher(allSubscribed(), nil)
+	m := newMatcher(allSubscribed())
 	m.project = func(domain.Moment, any) any {
 		projections++
 		return nil
@@ -431,7 +386,7 @@ func TestMatchSeamClosedIsTopLevelOnly(t *testing.T) {
 func TestMatchSeamClosedIgnoresANoticeInTheSeamField(t *testing.T) {
 	t.Parallel()
 
-	m := newMatcher(allSubscribed(), nil)
+	m := newMatcher(allSubscribed())
 
 	for _, moment := range []domain.Moment{domain.MomentTurnFinished, domain.Moment("")} {
 		assertEvents(t, m.match(domain.SeamClosedEvent{Seam: moment}), nil)

@@ -11,9 +11,9 @@
 //
 // One direction: this package imports internal/domain for the events it reads and
 // internal/security for path resolution, and nothing else in the tree — never internal/agent,
-// never internal/tools, never internal/tui. The facts it cannot derive from domain alone
-// arrive injected: the write target of a tool call comes in as a WriteTarget func, which every
-// root supplies over its own registry lookup.
+// never internal/tools, never internal/tui. Every fact a firing needs rides the Event itself: the
+// file a tool call changed arrives on domain.ToolResultEvent.WriteTarget, stamped by the engine
+// from the one resolution its blast-radius ladder judged the call by, so no root injects anything.
 //
 // # The files, one line each
 //

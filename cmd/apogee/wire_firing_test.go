@@ -1264,36 +1264,6 @@ func TestNoWiringSiteWritesConfigReactions(t *testing.T) {
 	}
 }
 
-// The lookup-only roster the `file-changed` derivation asks. A Firing holds no live registry, so
-// this seam is the whole of what makes the event derivable at an unattended root: it must name a
-// write tool's target and stay silent about a read.
-func TestFiringWriteTargetNamesAWriteAndNothingElse(t *testing.T) {
-	t.Parallel()
-
-	workspace := readFenceRealDir(t)
-	writeTarget := firingWriteTarget(workspace)
-
-	path, ok := writeTarget(domain.ToolCall{
-		ID:        "call-1",
-		Tool:      "write_file",
-		Arguments: []byte(`{"path":"notes/a.txt","content":"hi"}`),
-	})
-	if !ok {
-		t.Fatal("the roster named no target for a write_file call; `file-changed` would never fire")
-	}
-	if want := filepath.Join(workspace, "notes", "a.txt"); path != want {
-		t.Errorf("write target = %q, want the workspace-resolved %q", path, want)
-	}
-
-	if _, ok := writeTarget(domain.ToolCall{
-		ID:        "call-2",
-		Tool:      "read_file",
-		Arguments: []byte(`{"path":"notes/a.txt"}`),
-	}); ok {
-		t.Error("the roster named a target for read_file; only a workspace-scoped WRITER changes a file")
-	}
-}
-
 // assertReadRootsCompose pins the shape of a composed read-roots func: the provider's own
 // resolved mounts are its leading prefix, in the provider's order, and the toolchain roots the host
 // probed (toolchain_roots.go) are exactly what follows — nothing else on the line, nothing

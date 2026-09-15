@@ -19,7 +19,6 @@ import (
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/skills"
-	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -188,11 +187,11 @@ func (w *rootWiring) resolveConfig() error {
 	// change what the transcript sees. A run whose `reactions:` list is empty gets a Runner with no
 	// workers, which costs one atomic load per Event and nothing else.
 	//
-	// The WriteTarget is a CLOSURE over the wiring rather than a value, because the tool registry it
-	// asks does not exist yet — wireSession installs it, and every `/settings` roster edit and MCP
-	// reconnect swaps it afterwards. Reading it through liveTools.lookup at call time is what makes
-	// the `file-changed` derivation follow the set the session is actually running, and what keeps
-	// the read off an unlocked pointer the Update goroutine writes.
+	// It needs no handle on the tool registry: the `file-changed` derivation reads the written path
+	// off the ToolResultEvent the engine stamps (domain.ToolResultEvent.WriteTarget), so the Runner
+	// can be built here, before wireSession installs a tool set, and follows every `/settings`
+	// roster edit and MCP reconnect for free — the engine resolves each call against the set it is
+	// actually running.
 	//
 	// It is handed the OBSERVE half alone (ADR 0076 A8). One `reactions:` file resolves to both
 	// lanes in one list, and the sync half — the advise and gate entries the AGENT runs inside the
@@ -203,17 +202,7 @@ func (w *rootWiring) resolveConfig() error {
 		Inner:     w.bridge.Sink(),
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
-		WriteTarget: func(call domain.ToolCall) (string, bool) {
-			if w.toolSet == nil {
-				return "", false
-			}
-			tool, ok := w.toolSet.lookup(call.Tool)
-			if !ok {
-				return "", false
-			}
-			return tools.WorkspaceWriteTarget(tool, call)
-		},
-		Exec: reactions.DefaultExecutor(w.roots.workspace),
+		Exec:      reactions.DefaultExecutor(w.roots.workspace),
 	})
 	if err != nil {
 		return err

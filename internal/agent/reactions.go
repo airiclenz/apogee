@@ -535,8 +535,9 @@ func (a *Agent) adviseArgv(
 // advise handler on file-changed is narrowed exactly as the user's command is.
 //
 // The path is tools.WorkspaceWriteTarget's — the same resolution the blast-radius ladder judged
-// the call by and the same one the observe lane's file-changed firing carries (internal/reactions'
-// WriteTarget), so a user watching one file through both lanes is told one name. It is
+// the call by and the same one the observe lane's file-changed firing carries (the
+// ToolResultEvent's WriteTarget, which internal/reactions reads off the Event), so a user watching
+// one file through both lanes is told one name. It is
 // deliberately neither a.resolvedPath, which is empty for an ordinary in-workspace write because
 // it is the DISCLOSURE twin and speaks only when the resolution differs from the argument, nor
 // classifyWriteTarget's escape target, which is empty inside the fence.

@@ -207,23 +207,23 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 // The sink is still WRAPPED under json rather than dropped, because dropping it would drop the
 // forward every observer behind it depends on — the Reaction Runner included.
 //
-// It is installed as a POINTER: the result and sub-agent lines name a tool and a delegation that
-// only the earlier call Event carried, so the sink remembers each Depth-0 call under its id
-// (calls) and a value receiver would forget it on the next Emit. Emit is never called
-// concurrently: the engine serializes emission on its side ([domain.EventSink]).
+// It is installed as a POINTER: the sub-agent lines name a delegation that only the earlier
+// sub_agent call Event carried, so the sink remembers each Depth-0 call under its id (calls) and a
+// value receiver would forget it on the next Emit. The result line needs no such memory — the
+// [domain.ToolResultEvent] names its tool itself. Emit is never called concurrently: the engine
+// serializes emission on its side ([domain.EventSink]).
 type narrationSink struct {
 	inner domain.EventSink
 	out   io.Writer
 	quiet bool
-	// calls remembers every Depth-0 call seen, by id: the tool name a result line needs, and — for
-	// a sub_agent call — the delegation's display name a phase line needs. Nil until the first
-	// call, so a zero value is usable.
+	// calls remembers every Depth-0 call seen, by id, for the one fact a later Event does not
+	// carry: a sub_agent call's delegation display name, which the phase line needs. Nil until the
+	// first call, so a zero value is usable.
 	calls map[string]narratedCall
 }
 
 // narratedCall is what the sink keeps of one Depth-0 tool call once its Event has gone by.
 type narratedCall struct {
-	tool string
 	// name is the delegation's display name, for a sub_agent call: the `name` argument the model
 	// gave, or the one a later [domain.SubAgentNamedEvent] handed it. Empty means neither has
 	// landed, and the phase line falls back to the call id.
@@ -264,7 +264,7 @@ func (s *narrationSink) narrate(e domain.Event) {
 		if ev.Depth != 0 {
 			return
 		}
-		_, _ = fmt.Fprintln(s.out, s.resultLine(ev.Result))
+		_, _ = fmt.Fprintln(s.out, s.resultLine(ev))
 	case domain.SubAgentPhaseEvent:
 		if ev.Depth != 1 {
 			return
@@ -292,7 +292,7 @@ func (s *narrationSink) remember(call domain.ToolCall) {
 	if s.calls == nil {
 		s.calls = make(map[string]narratedCall)
 	}
-	remembered := narratedCall{tool: call.Tool}
+	var remembered narratedCall
 	if call.Tool == tools.SubAgentToolName {
 		var args tools.SubAgentArgs
 		if err := json.Unmarshal(call.Arguments, &args); err == nil {
@@ -304,25 +304,27 @@ func (s *narrationSink) remember(call domain.ToolCall) {
 
 // resultLine words one Depth-0 result: `← <tool> ok`, or `← <tool> error: <first line>` for a
 // failed call — `← <tool> error` when the failure carried no text at all, rather than a colon with
-// nothing after it. The first line is the first line the COMMAND wrote: a terminal or python_exec
-// result opens with a `cwd:` line the tool writes for the model, and that comes off first
+// nothing after it. The tool is the one the Event names (ToolResultEvent.Tool — the resolved name
+// the engine dispatched, stamped at the commit point), so the line needs nothing from the call that
+// went by. The first line is the first line the COMMAND wrote: a terminal or python_exec result
+// opens with a `cwd:` line the tool writes for the model, and that comes off first
 // (tools.StripCwdLine — the one strip the TUI's card shares) so the narration never reads
-// `← terminal error: cwd: /ws`. A result whose call this sink never saw — a stub driving the sink
-// out of order, or a call at a depth the sink does not narrate — is named by its id alone, so the
-// line still says which result it is.
-func (s *narrationSink) resultLine(result domain.ToolResult) string {
-	call, ok := s.calls[result.CallID]
-	if !ok {
+// `← terminal error: cwd: /ws`. A result stamped with no tool name — a stub driving the sink with a
+// bare result, or a slot the engine never resolved — is named by its id alone, so the line still
+// says which result it is.
+func (s *narrationSink) resultLine(ev domain.ToolResultEvent) string {
+	result := ev.Result
+	if ev.Tool == "" {
 		return "← " + result.CallID
 	}
 	if !result.IsError {
-		return "← " + call.tool + " ok"
+		return "← " + ev.Tool + " ok"
 	}
 	first, _, _ := strings.Cut(tools.StripCwdLine(result.Content), "\n")
 	if first = narrationLine(first); first == "" {
-		return "← " + call.tool + " error"
+		return "← " + ev.Tool + " error"
 	}
-	return "← " + call.tool + " error: " + first
+	return "← " + ev.Tool + " error: " + first
 }
 
 // subAgentName is what a phase line calls the delegation the sub_agent call callID spawned: the
@@ -986,7 +988,8 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// carries — the Reaction Runner since ADR 0073 — rather than replacing it, exactly as run.Once's
 	// own tap wraps this one in turn (run.Spec). The order that leaves is narration → Reactions →
 	// nothing: the renderer sees every Event first, and installing Reactions cannot change what
-	// this command prints. It is a pointer because it remembers each call for its result line.
+	// this command prints. It is a pointer because it remembers each sub_agent call for its phase
+	// lines.
 	//
 	// Under `--format json` the encoder goes on TOP of that and never inside it, so the whole chain
 	// reads engine → serialEventSink → eventTap → encoder → narration → Reactions. Outermost is the
