@@ -821,6 +821,7 @@ func TestModelApprovalStripsBidiOverrideFromArguments(t *testing.T) {
 		Tool:      "terminal",
 		Reason:    "run a command",
 		Arguments: json.RawMessage(`{"command":"echo hello\u202edlrow"}`),
+		CacheKey:  ordinaryGateKey,
 	}
 	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
 

@@ -423,7 +423,7 @@ func TestE2EAnnouncedScratchDirRunsUnpromptedInAuto(t *testing.T) {
 	// conversation to have reached the control at all; and a guard that forced a look at the
 	// announced scratch dir would raise ITS pane first, which is what the command assertions here
 	// tell apart.
-	pane := paneText(awaitApprovalPane(drv))
+	pane := paneText(awaitForcedPane(drv))
 	if !strings.Contains(pane, forcedReason) {
 		t.Errorf("the pane does not read %q; the control plane no longer forces a look:\n%s", forcedReason, pane)
 	}
@@ -434,7 +434,7 @@ func TestE2EAnnouncedScratchDirRunsUnpromptedInAuto(t *testing.T) {
 		t.Errorf("the announced scratch dir raised an approval pane; a path apogee itself named "+
 			"must cost nobody a look:\n%s", pane)
 	}
-	decide(drv, "d")
+	decideForced(drv, "d")
 	drv.WaitText("Both commands answered.")
 	drv.WaitQuiet(settled)
 
@@ -1128,7 +1128,12 @@ func watchApprovalPanes(t *testing.T, drv *tuitest.Driver) func() int {
 				return
 			case <-tick.C:
 			}
-			_, _, showing := drv.Frame().Find(approvalMarker)
+			// Either pane counts: an ordinary gate paints the session row, a forced one the
+			// disclosure that stands in for it (e2e_approval_test.go's two markers).
+			frame := drv.Frame()
+			_, _, ordinary := frame.Find(approvalMarker)
+			_, _, forced := frame.Find(forcedMarker)
+			showing := ordinary || forced
 			mu.Lock()
 			if showing && !up {
 				count++

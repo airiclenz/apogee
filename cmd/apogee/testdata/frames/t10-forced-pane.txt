@@ -1,5 +1,4 @@
 ❯ Run ls in /tmp and nothing else.                         │
-                                                           │
 ❯ List the apogee home with the terminal tool.             │
                                                            │
 ✦ Terminal                                                 │
@@ -16,10 +15,11 @@
 │ command:                                                 │
 │   ls ~/.apogee                                           │
 │                                                          │
-│ ❯ Allow                      [a]                         │
-│ · Always allow this session  [s]                         │
-│ · Deny                       [d]                         │
-│ · Cancel                     [esc]                       │
+│ ❯ Allow   [a]                                            │
+│ · Deny    [d]                                            │
+│ · Cancel  [esc]                                          │
+│                                                          │
+│ a forced look is asked every time                        │
 ╰──────────────────────────────────────────────────────────╯
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Guarded commands ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
   approval needed

@@ -1665,7 +1665,7 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		next, cmd := acceptedModel(m.resolveApproval())
 		return next, cmd, true
 	}
-	m.approvalSel.seat(row, len(approvalMenu))
+	m.approvalSel.seat(row, len(approvalMenuFor(req)))
 	m.clickArmed = clickArm{pane: panePrompt, row: row, ok: true}
 	return m, nil, true
 }

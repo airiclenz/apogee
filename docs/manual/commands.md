@@ -151,9 +151,10 @@ phrase the row is holding; see [the terminal UI](configuration.md#the-terminal-u
 
 ## Approving a call — how far an approval reaches
 
-Every gated call offers the same four rows — `Allow`, `Always allow this session`, `Deny` and
+An ordinary gated call offers the same four rows — `Allow`, `Always allow this session`, `Deny` and
 `Cancel` — and the decision keys behind them arm a moment after the prompt appears, exactly as the
-keys above describe. What that second row actually remembers is worth knowing before you press `s`.
+keys above describe. What that second row actually remembers is worth knowing before you press `s`
+— and which prompts never offer it at all (the last paragraph of this section).
 
 **The mouse answers it too, in two clicks.** A click on one of the four rows moves the `❯` onto it,
 the way `↑`/`↓` do; a **second** click on that same row takes it, the way `⏎` does. It is always two,
@@ -189,6 +190,12 @@ it applies:
 ```
 Note: "Always allow" covers every tool of MCP server "github" for this session
 ```
+
+**A forced look offers no `Always allow`.** A prompt the [dangerous-action
+guard](configuration.md#the-dangerous-action-guard) forced, a runtime demote, or a gate a Reaction
+asked for is remembered nowhere — a yes authorises that one call — so the pane paints three rows,
+`Allow`, `Deny` and `Cancel`, with no `s` behind them, and closes on one faint line under the menu:
+`a forced look is asked every time`. The next call that trips the same rule asks again.
 
 ## Reading a tool's answer — diffs and near misses
 

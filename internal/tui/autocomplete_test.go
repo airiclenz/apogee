@@ -190,7 +190,7 @@ func TestModalPromptDismissesTheDropdown(t *testing.T) {
 		name string
 		msg  tea.Msg
 	}{
-		{"approval", approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites"}}},
+		{"approval", approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites", CacheKey: ordinaryGateKey}}},
 		{"ask", askReqMsg{Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}}}},
 	}
 	// Both regions the box opens while a worker runs, since both survive into the prompt the same way.

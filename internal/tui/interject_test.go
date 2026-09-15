@@ -798,7 +798,7 @@ func TestSuppressedBandKeepsItsCountOnTheStatusLine(t *testing.T) {
 		{"awaiting approval", func(t *testing.T, m Model) Model {
 			t.Helper()
 			m.state = stateRunning
-			return step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file"}})
+			return step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", CacheKey: ordinaryGateKey}})
 		}},
 		{"idle, held over a stop", func(t *testing.T, m Model) Model { return dropdown(m) }},
 	}
@@ -1159,7 +1159,7 @@ func TestApprovalAndAskKeysUnchanged(t *testing.T) {
 	t.Run("approval decides and stages nothing", func(t *testing.T) {
 		m := runningModel(t)
 		reply := make(chan domain.ApprovalDecision, 1)
-		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file"}, Reply: reply})
+		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", CacheKey: ordinaryGateKey}, Reply: reply})
 		m = armApproval(t, m) // the decision keys go live one arming tick after the pane opens
 		m = step(t, m, keyRune('a'))
 		select {

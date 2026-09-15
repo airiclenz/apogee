@@ -763,7 +763,7 @@ func TestRunViewDecisionPanesKeepEnter(t *testing.T) {
 		m := modelViewingChild(t, eng, childRunning)
 		reply := make(chan domain.ApprovalDecision, 1)
 
-		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: reply})
+		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey}, Reply: reply})
 		m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
 		m = step(t, m, keyEnter())
 
@@ -825,7 +825,7 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
 		reply := make(chan domain.ApprovalDecision, 1)
 
-		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: reply})
+		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey}, Reply: reply})
 
 		if got := m.input.Placeholder; got != runningPlaceholder {
 			t.Errorf("placeholder = %q; want %q — the pane's Cancel row owns esc, not the view", got, runningPlaceholder)
@@ -852,7 +852,7 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 		open tea.Msg
 	}{
 		{name: "an ask", open: askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: make(chan domain.AskAnswer, 1)}},
-		{name: "an approval", open: approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: make(chan domain.ApprovalDecision, 1)}},
+		{name: "an approval", open: approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey}, Reply: make(chan domain.ApprovalDecision, 1)}},
 	} {
 		t.Run("a stop under "+tc.name+" hands the box back to the view", func(t *testing.T) {
 			m := modelViewingChild(t, &fakeEngine{}, childRunning)
@@ -868,7 +868,7 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 
 	t.Run("a fault under a pane hands it back too", func(t *testing.T) {
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
-		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: make(chan domain.ApprovalDecision, 1)})
+		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey}, Reply: make(chan domain.ApprovalDecision, 1)})
 
 		m = step(t, m, errMsg{Err: errors.New("upstream fell over")})
 
@@ -908,7 +908,7 @@ func TestRunViewBreadcrumbHintFollowsTheKey(t *testing.T) {
 		},
 		{
 			name: "an approval",
-			open: approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: make(chan domain.ApprovalDecision, 1)},
+			open: approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey}, Reply: make(chan domain.ApprovalDecision, 1)},
 		},
 	} {
 		t.Run(tc.name+" takes the hint off the header", func(t *testing.T) {

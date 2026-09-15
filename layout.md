@@ -434,6 +434,12 @@ named degrades to the tool alone, and a dangerous-action speed-bump is remembere
 three the yes authorises what the body already shows. Like `Reason:` and `Scope:` it is disclosure:
 the grain was the engine's decision long before this pane started saying it out loud.
 
+**A forced prompt paints three rows and says why.** A speed-bump, a runtime demote or a gate a
+Reaction asked for is remembered nowhere, so the `Always allow this session` row is not drawn and `s`
+is not a key: the menu is `Allow`, `Deny`, `Cancel`, and the pane closes on one faint line under it —
+`a forced look is asked every time` — drawn as the popup module's hint row, one blank line below the
+last option as every hinted pane keeps. An ordinary prompt is unchanged to the byte.
+
 **When a sub-agent raised the call, the body says so first.** A request from a child leads with
 `Sub-agent: <its delegated task>`, above the reason, because that is the one fact the rest of the
 pane cannot supply: with several children running at once their prompts QUEUE — one on the screen at

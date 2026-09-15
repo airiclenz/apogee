@@ -27,8 +27,10 @@ type approvalOption struct {
 // approvalMenu is the approval prompt's decision menu in the order it is painted
 // (docs/layout/user-questions-layout.md). It is the ONE list the pane and the keys both read — the
 // rows renderPopup draws, the shortcut cells beside them, the order ↑/↓ walk, and (through
-// approvalKeys) the letters that take a row without walking to it — so a row can never be paintable
-// and unreachable, or reachable and unpainted.
+// approvalKeysFor) the letters that take a row without walking to it — so a row can never be
+// paintable and unreachable, or reachable and unpainted. No site reads it whole: every reader takes
+// the menu ONE REQUEST offers (approvalMenuFor), which is this list on an ordinary gate and this list
+// without its session row on a forced one.
 var approvalMenu = []approvalOption{
 	{label: "Allow", key: "a", decision: domain.ApprovalAllow},
 	{label: "Always allow this session", key: "s", decision: domain.ApprovalAllowForSession},
@@ -36,12 +38,50 @@ var approvalMenu = []approvalOption{
 	{label: "Cancel", key: "esc", cancels: true},
 }
 
-// approvalKeys maps a decision keypress to the ApprovalDecision it sends: the menu's own rows,
-// indexed by the letter each one advertises in its shortcut cell, so the two can never drift. The
-// Cancel row is absent by construction — it sends no decision, and Esc is claimed before the
-// approval routing is reached (handleKey's "esc" case), so the pane inherits the double-tap the key
-// carries everywhere a worker runs rather than growing a cancel path of its own.
-var approvalKeys = approvalMenuKeys()
+// forcedApprovalDisclosure is the faint line a FORCED pane closes on, under its menu, in place of
+// the session row it does not paint: the one sentence saying why the row is missing and what that
+// costs — the same rule will ask again next time. It is a hint row in the popup module's sense
+// (popupSpec.hint), which is the faint footer every other pane spends on its key legend.
+const forcedApprovalDisclosure = "a forced look is asked every time"
+
+// isForcedApproval reports whether req's answer can never be remembered — a forced gate (a Tier-2
+// speed-bump, a runtime demote) or a call whose arguments did not decode. The engine's own signal
+// for it is an EMPTY CacheKey (domain.ApprovalRequest.CacheKey; dispatch.go empties it on force),
+// and the pane reads that field rather than a second flag: an "Always allow this session" the
+// engine would honour as a plain Allow is an affordance the pane must not offer, so the menu is
+// derived from the one fact that decides whether the row means anything.
+func isForcedApproval(req domain.ApprovalRequest) bool {
+	return req.CacheKey == ""
+}
+
+// approvalMenuFor is the menu ONE request offers: approvalMenu whole on an ordinary gate, and
+// approvalMenu without its session row on a forced one. Every reader of the menu — the rows the
+// pane paints, the ↑/↓ and wheel bounds, the row ⏎ and a second click resolve, the letters
+// approvalKeysFor answers — goes through here, so the highlight can never index a four-row menu
+// over three painted rows.
+func approvalMenuFor(req domain.ApprovalRequest) []approvalOption {
+	if !isForcedApproval(req) {
+		return approvalMenu
+	}
+	menu := make([]approvalOption, 0, len(approvalMenu)-1)
+	for _, opt := range approvalMenu {
+		if opt.cancels || opt.decision != domain.ApprovalAllowForSession {
+			menu = append(menu, opt)
+		}
+	}
+	return menu
+}
+
+// approvalKeysFor maps a decision keypress to the ApprovalDecision it sends for ONE request: the
+// request's own menu rows (approvalMenuFor), indexed by the letter each one advertises in its
+// shortcut cell, so the two can never drift — on a forced pane `s` is not in the map because the
+// row is not on the pane. The Cancel row is absent by construction — it sends no decision, and Esc
+// is claimed before the approval routing is reached (handleKey's "esc" case), so the pane inherits
+// the double-tap the key carries everywhere a worker runs rather than growing a cancel path of its
+// own.
+func approvalKeysFor(req domain.ApprovalRequest) map[string]domain.ApprovalDecision {
+	return approvalMenuKeys(approvalMenuFor(req))
+}
 
 // approvalArmDelay is how long after the approval pane is folded in that its DECISION keys start
 // answering it. It is longer than one painted frame at any sane refresh rate — the Bubble Tea
@@ -51,9 +91,9 @@ var approvalKeys = approvalMenuKeys()
 // already in the input buffer when the pane appeared can no longer answer it.
 const approvalArmDelay = 100 * time.Millisecond
 
-func approvalMenuKeys() map[string]domain.ApprovalDecision {
-	keys := make(map[string]domain.ApprovalDecision, len(approvalMenu))
-	for _, opt := range approvalMenu {
+func approvalMenuKeys(menu []approvalOption) map[string]domain.ApprovalDecision {
+	keys := make(map[string]domain.ApprovalDecision, len(menu))
+	for _, opt := range menu {
 		if !opt.cancels {
 			keys[opt.key] = opt.decision
 		}
@@ -138,18 +178,24 @@ func (m Model) foldApprovalArmed(msg approvalArmedMsg) (tea.Model, tea.Cmd) {
 // it is the safe direction, and the operator's stop path is never the one made harder to reach.
 // ↑/↓ and the wheel move a highlight rather than answer, so they are outside the latch too.
 func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if decision, ok := approvalKeys[msg.String()]; ok && m.pending != nil {
+	if m.pending == nil {
+		// Unreachable under the state↔payload invariant (model.go); with no request there is no
+		// menu to read, and the key goes where every unclaimed key goes.
+		return m.scrollViewport(msg)
+	}
+	if decision, ok := approvalKeysFor(m.pending.Request)[msg.String()]; ok {
 		if !m.approvalArmed {
 			return m, nil
 		}
 		return m.sendApproval(decision)
 	}
+	menu := approvalMenuFor(m.pending.Request)
 	switch msg.String() {
 	case "up":
-		m.approvalSel.move(-1, len(approvalMenu), listStopsAtEnds)
+		m.approvalSel.move(-1, len(menu), listStopsAtEnds)
 		return m, nil
 	case "down":
-		m.approvalSel.move(1, len(approvalMenu), listStopsAtEnds)
+		m.approvalSel.move(1, len(menu), listStopsAtEnds)
 		return m, nil
 	}
 	return m.scrollViewport(msg)
@@ -195,7 +241,7 @@ func (m Model) promptWheel(msg tea.MouseWheelMsg) (Model, bool) {
 	// (model.go), and a rectangle up with neither state live swallows the notch and moves nothing.
 	switch {
 	case m.state == stateAwaitingApproval && m.pending != nil:
-		m.approvalSel.wheel(msg, len(approvalMenu))
+		m.approvalSel.wheel(msg, len(approvalMenuFor(m.pending.Request)))
 	case m.state == stateAwaitingAsk && m.pendingAsk != nil:
 		m.askSel.wheel(msg, len(m.pendingAsk.Request.Choices))
 	}
@@ -211,7 +257,8 @@ func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 	if m.pending == nil {
 		return m, nil
 	}
-	opt := approvalMenu[m.approvalSel.highlight(len(approvalMenu))]
+	menu := approvalMenuFor(m.pending.Request)
+	opt := menu[m.approvalSel.highlight(len(menu))]
 	if opt.cancels {
 		m.stopWorker()
 		return m, nil
@@ -248,12 +295,21 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // undelegated session's pane is unchanged to the byte.
 //
 // It is a MENU rather than a legend (docs/layout/user-questions-layout.md): the title rides the top
-// border, the four options of approvalMenu are menu-style rows with their shortcut letters aligned
+// border, the options of approvalMenu are menu-style rows with their shortcut letters aligned
 // in a second column, and the hint row that used to spell "a allow · d deny · …" is gone — the
 // letters are now written beside the options they take, where the eye already is. That is what pays
 // for the rows: the title row and the hint row the pane no longer draws are two rows back, so its
 // chrome is its two borders and nothing else (popupBorderChrome) and the menu costs the frame no
 // more than the legend did.
+//
+// A FORCED gate paints three of those options rather than four (approvalMenuFor): its answer is
+// remembered nowhere (domain.ApprovalRequest.CacheKey is empty), so an "Always allow this session"
+// row would offer a memory the engine does not keep, and the `s` behind it would rule as a plain
+// Allow the human did not choose. In the row's place the pane closes on one faint disclosure —
+// forcedApprovalDisclosure, `a forced look is asked every time` — drawn as the module's hint row
+// under the menu (popupSpec.hint, one blank line above it as every hinted pane keeps), so the
+// forced pane spends the chrome of a hinted pane (popupTitleBorderChrome) and says why the row is
+// not there instead of silently drawing one fewer.
 //
 // The vertical spacing is the same argument in blank lines, and every PART of the body is a
 // paragraph: the Sub-agent line, the Reason:, the Fix:, the Scope:, the labelled arguments, the
@@ -381,25 +437,33 @@ func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPl
 		parts = append(parts, note)
 	}
 
-	rows := make([]popupRow, len(approvalMenu))
-	for i, opt := range approvalMenu {
+	menu := approvalMenuFor(req)
+	rows := make([]popupRow, len(menu))
+	for i, opt := range menu {
 		// Two cells, so the module's column layout stacks the shortcuts into their own right-hand
 		// column whatever the labels measure — the mockup's alignment, derived rather than hand-padded.
 		rows[i] = popupRow{opt.label, "[" + opt.key + "]"}
 	}
 
-	// The whole menu or as much of it as the window can seat; no cap of our own, because four rows is
+	// The whole menu or as much of it as the window can seat; no cap of our own, because the menu is
 	// the whole offering rather than a window onto a longer list. The demand is in LINES, which for
 	// this pane is one per option — the labels are ours and they do not wrap — plus the blank line the
-	// menu is set off by (popupSpec.rowPadAbove): a pane that asked for four and painted five would
-	// overflow by exactly the room it did not book.
+	// menu is set off by (popupSpec.rowPadAbove), plus on a forced pane the blank that closes the
+	// menu above its disclosure (popupRowStyle.padBelow): a pane that asked for four and painted five
+	// would overflow by exactly the room it did not book. The disclosure itself is chrome, not a row
+	// — the hint row a hinted pane's chrome already counts.
 	//
 	// The ZERO floor (popupFloor) is right here and not an oversight beside the ask prompt's: this
-	// menu's demand is its own four options and nothing longer, so the rows can never eat a window the
+	// menu's demand is its own few options and nothing longer, so the rows can never eat a window the
 	// body had room in — past five lines every further row of the grant is the reason's. The pane the
 	// floor exists for is the one whose offering scales with what the model wrote.
-	menuLines := popupRowBlockLines(popupFlatRowHeights(len(rows)), 0, popupRowPadLines(true, false))
-	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome, popupFloor{})
+	forced := isForcedApproval(req)
+	hint, chrome := "", popupBorderChrome
+	if forced {
+		hint, chrome = forcedApprovalDisclosure, popupTitleBorderChrome
+	}
+	menuLines := popupRowBlockLines(popupFlatRowHeights(len(rows)), 0, popupRowPadLines(true, forced))
+	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, menuLines, menuLines, chrome, popupFloor{})
 	if !seated {
 		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
@@ -418,9 +482,13 @@ func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPl
 		rows:        rows,
 		menuRows:    true,
 		rowPadAbove: true, // the one blank line between the body and the menu; the mockup closes on the border
-		selected:    m.approvalSel.highlight(len(rows)),
-		maxRows:     rowsShown,
-		scrollbar:   m.popupScrollbarOn(),
+		// A forced pane alone closes its menu above a hint, one blank line apart as every hinted
+		// pane does (popupRowPads); the ordinary pane keeps ending on its last decision.
+		rowStyle:  popupRowStyle{padBelow: forced},
+		hint:      hint,
+		selected:  m.approvalSel.highlight(len(rows)),
+		maxRows:   rowsShown,
+		scrollbar: m.popupScrollbarOn(),
 	}
 	return renderPopupPlaced(m.th, spec, m.width)
 }

@@ -4359,7 +4359,7 @@ func approvalPaneModel(t *testing.T) Model {
 	t.Helper()
 	m := streamOneScreen(t, newTestModel(t))
 	return step(t, m, approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file"},
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file", CacheKey: ordinaryGateKey},
 		Reply:   make(chan domain.ApprovalDecision, 1),
 	})
 }
@@ -4812,7 +4812,7 @@ func approvalClickModel(t *testing.T) (Model, chan domain.ApprovalDecision) {
 	t.Helper()
 	reply := make(chan domain.ApprovalDecision, 1)
 	m := step(t, streamOneScreen(t, newTestModel(t)), approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file"},
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file", CacheKey: ordinaryGateKey},
 		Reply:   reply,
 	})
 	if m.state != stateAwaitingApproval {
@@ -5163,7 +5163,7 @@ func TestDropdownWheelLeavesTheMenuAndTheDraftAlone(t *testing.T) {
 func TestDropdownWheelYieldsToAModalPrompt(t *testing.T) {
 	open := dropdownPaneModel(t, testOpts, "/")
 	m := step(t, open, approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file"},
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file", CacheKey: ordinaryGateKey},
 		Reply:   make(chan domain.ApprovalDecision, 1),
 	})
 	m.autocomplete = open.autocomplete // the frozen menu the fold cleared

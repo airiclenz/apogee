@@ -1614,6 +1614,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 					Tool:      "write_file",
 					Reason:    longProse,
 					Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
+					CacheKey:  ordinaryGateKey,
 				}}
 				m.layout() // the prompt is up: the box gives back the rows the pane needs (draftRowsCeiling)
 				return m
@@ -1868,6 +1869,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 				Tool:      "write_file",
 				Reason:    longProse,
 				Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
+				CacheKey:  ordinaryGateKey,
 			}})
 		}},
 		// The ask prompt has no title any more (askPrompt): the QUESTION is its identity, so the probe

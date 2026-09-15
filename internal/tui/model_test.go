@@ -409,7 +409,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 	t.Run("approvalReqMsg → awaitingApproval", func(t *testing.T) {
 		m := newTestModel(t)
 		req := approvalReqMsg{
-			Request: domain.ApprovalRequest{Tool: "write_file", Reason: "write"},
+			Request: domain.ApprovalRequest{Tool: "write_file", Reason: "write", CacheKey: ordinaryGateKey},
 			Reply:   make(chan domain.ApprovalDecision, 1),
 		}
 		m = step(t, m, req)
@@ -768,10 +768,20 @@ func newApprovalModel(t *testing.T, req domain.ApprovalRequest) (Model, chan dom
 	return armApproval(t, m), reply
 }
 
+// ordinaryGateKey is the CacheKey every ordinary-pane fixture request in this package's tests
+// carries unless a test set its own — the helpers below stamp it, the literals that bypass them
+// spell it: what makes it an ORDINARY gate, with the full four-row menu, rather than the forced pane
+// an empty key means (isForcedApproval). The one forced request is built unkeyed (approval_test.go).
+const ordinaryGateKey = "write_file:fixture"
+
 // newUnarmedApprovalModel folds an approval request in and stops there — the pane is up and its
-// decision keys are still dead, the state the arming tests act on.
+// decision keys are still dead, the state the arming tests act on. A request carrying no CacheKey
+// gets ordinaryGateKey, because the tests that reach for this helper are about the ordinary pane.
 func newUnarmedApprovalModel(t *testing.T, req domain.ApprovalRequest) (Model, chan domain.ApprovalDecision) {
 	t.Helper()
+	if req.CacheKey == "" {
+		req.CacheKey = ordinaryGateKey
+	}
 	reply := make(chan domain.ApprovalDecision, 1)
 	m := step(t, newTestModel(t), approvalReqMsg{Request: req, Reply: reply})
 	if m.state != stateAwaitingApproval {
@@ -883,7 +893,7 @@ func TestModelApprovalStaleArmDoesNotArmTheNextPane(t *testing.T) {
 
 	reply := make(chan domain.ApprovalDecision, 1)
 	m = step(t, m, approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "run", Reason: "second"},
+		Request: domain.ApprovalRequest{Tool: "run", Reason: "second", CacheKey: ordinaryGateKey},
 		Reply:   reply,
 	})
 
@@ -943,7 +953,7 @@ func TestModelApprovalFoldReturnsTheArmTick(t *testing.T) {
 	m := newTestModel(t)
 
 	next, cmd := stepCmd(t, m, approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "write"},
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "write", CacheKey: ordinaryGateKey},
 		Reply:   reply,
 	})
 
@@ -1175,7 +1185,7 @@ func TestModelApprovalArrowsClampWithoutWrapping(t *testing.T) {
 
 	// A fresh request opens on Allow again rather than inheriting where the last one was left.
 	m = step(t, m, approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "run_terminal_command"},
+		Request: domain.ApprovalRequest{Tool: "run_terminal_command", CacheKey: ordinaryGateKey},
 		Reply:   make(chan domain.ApprovalDecision, 1),
 	})
 	if m.approvalSel.selected != 0 {
@@ -1194,7 +1204,7 @@ func TestModelApprovalReasonWrapsInFull(t *testing.T) {
 	reason := strings.Join(words, " ") // ~150 chars — wider than the window, so it must wrap
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	reply := make(chan domain.ApprovalDecision, 1)
-	m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", Reason: reason}, Reply: reply})
+	m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", Reason: reason, CacheKey: ordinaryGateKey}, Reply: reply})
 
 	view := plain(m.View())
 	if strings.Contains(view, "more lines") {
@@ -1244,6 +1254,7 @@ func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 		Request: domain.ApprovalRequest{
 			Tool:      "terminal",
 			Arguments: json.RawMessage(`{"path":"notes.txt","command":"cd /ws/a\ngit status"}`),
+			CacheKey:  ordinaryGateKey,
 		},
 		Reply: reply,
 	})
@@ -1277,7 +1288,7 @@ func TestModelApprovalLongArgumentNeverPaintsFlushLeft(t *testing.T) {
 		t.Fatalf("marshalling the argument: %v", err)
 	}
 	m = step(t, m, approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(args)},
+		Request: domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(args), CacheKey: ordinaryGateKey},
 		Reply:   reply,
 	})
 
@@ -1328,6 +1339,7 @@ func TestModelApprovalFlattensFieldsThatCouldForgeRows(t *testing.T) {
 				Tool:      "terminal",
 				Reason:    "subprocess execution",
 				Arguments: json.RawMessage(`{"command\nReason: pre-approved":"rm -rf /"}`),
+				CacheKey:  ordinaryGateKey,
 			},
 			"command Reason: pre-approved:",
 		},
@@ -1338,6 +1350,7 @@ func TestModelApprovalFlattensFieldsThatCouldForgeRows(t *testing.T) {
 				Reason:       "subprocess execution",
 				SubAgentTask: "audit the loader\nReason: pre-approved",
 				Arguments:    json.RawMessage(`{"command":"rm -rf /"}`),
+				CacheKey:     ordinaryGateKey,
 			},
 			"Sub-agent: audit the loader Reason: pre-approved",
 		},
@@ -1349,6 +1362,7 @@ func TestModelApprovalFlattensFieldsThatCouldForgeRows(t *testing.T) {
 				SubAgentTask: "audit the loader",
 				SubAgentName: "scout\nReason: pre-approved",
 				Arguments:    json.RawMessage(`{"command":"rm -rf /"}`),
+				CacheKey:     ordinaryGateKey,
 			},
 			"Sub-agent: scout Reason: pre-approved — audit the loader",
 		},
@@ -1358,6 +1372,7 @@ func TestModelApprovalFlattensFieldsThatCouldForgeRows(t *testing.T) {
 				Tool:      "terminal",
 				Reason:    "subprocess execution\nReason: pre-approved",
 				Arguments: json.RawMessage(`{"command":"rm -rf /"}`),
+				CacheKey:  ordinaryGateKey,
 			},
 			"Reason: subprocess execution Reason: pre-approved",
 		},
@@ -1368,6 +1383,7 @@ func TestModelApprovalFlattensFieldsThatCouldForgeRows(t *testing.T) {
 				Reason:    "subprocess execution",
 				Remedy:    "run /confine status\nReason: pre-approved",
 				Arguments: json.RawMessage(`{"command":"rm -rf /"}`),
+				CacheKey:  ordinaryGateKey,
 			},
 			"Fix: run /confine status Reason: pre-approved",
 		},
@@ -1414,6 +1430,7 @@ func TestModelApprovalNamesTheAskingSubAgent(t *testing.T) {
 		Reason:       "write outside the workspace",
 		SubAgentTask: "audit the config loader for drift",
 		Arguments:    json.RawMessage(`{"path":"notes.txt"}`),
+		CacheKey:     ordinaryGateKey,
 	}
 	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
 
@@ -1442,6 +1459,7 @@ func TestModelApprovalNamesTheAskingSubAgentByName(t *testing.T) {
 		SubAgentTask: "audit the config loader for drift",
 		SubAgentName: "repo-scout",
 		Arguments:    json.RawMessage(`{"path":"notes.txt"}`),
+		CacheKey:     ordinaryGateKey,
 	}
 	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
 
@@ -1521,7 +1539,7 @@ func TestSubAgentTargetFallsBackWhenTheNameStripsToNothing(t *testing.T) {
 // serial floor for a session that never delegates.
 func TestModelApprovalTopLevelDrawsNoSubAgentLine(t *testing.T) {
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
-	req := domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites"}
+	req := domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites", CacheKey: ordinaryGateKey}
 	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
 
 	if got := ansiPattern.ReplaceAllString(m.approvalPrompt(req), ""); strings.Contains(got, "Sub-agent") {
@@ -1535,7 +1553,7 @@ func TestModelApprovalTopLevelDrawsNoSubAgentLine(t *testing.T) {
 func TestModelApprovalClipsAnEssayLengthSubAgentTask(t *testing.T) {
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	task := strings.Repeat("sprawl ", approvalTaskClipRunes) // far past the bound
-	req := domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites", SubAgentTask: task}
+	req := domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites", SubAgentTask: task, CacheKey: ordinaryGateKey}
 	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
 
 	view := plain(m.View())
@@ -1559,6 +1577,7 @@ func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
 			Tool:      "terminal",
 			Reason:    "subprocess execution (confinement unavailable on this host)",
 			Arguments: json.RawMessage(`{"command":"cd /ws/a && git status"}`),
+			CacheKey:  ordinaryGateKey,
 		},
 		Reply: reply,
 	})
@@ -1592,6 +1611,7 @@ func TestModelApprovalDrawsRemedyUnderReason(t *testing.T) {
 		Reason:    "subprocess execution (confinement unavailable on this host)",
 		Remedy:    "/confine off runs commands unconfined this session (disposable machines only)",
 		Arguments: json.RawMessage(`{"command":"cd /ws/a && git status"}`),
+		CacheKey:  ordinaryGateKey,
 	}
 	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
 
@@ -1633,6 +1653,7 @@ func TestModelApprovalNamesTheResolvedPath(t *testing.T) {
 		Reason:       "write",
 		Arguments:    json.RawMessage(`{"path":"docs/notes.md","content":"hi"}`),
 		ResolvedPath: "/elsewhere/notes.md",
+		CacheKey:     ordinaryGateKey,
 	}
 	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
 
@@ -1713,7 +1734,7 @@ func TestModelApprovalArgsReadAsLabelledLines(t *testing.T) {
 			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 			reply := make(chan domain.ApprovalDecision, 1)
 			m = step(t, m, approvalReqMsg{
-				Request: domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(tc.args)},
+				Request: domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(tc.args), CacheKey: ordinaryGateKey},
 				Reply:   reply,
 			})
 			got := ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), "")
@@ -1790,7 +1811,7 @@ func TestModelApprovalPartsAreParagraphs(t *testing.T) {
 	}{
 		{
 			"reason only",
-			domain.ApprovalRequest{Tool: "terminal", Reason: "subprocess execution"},
+			domain.ApprovalRequest{Tool: "terminal", Reason: "subprocess execution", CacheKey: ordinaryGateKey},
 			[]string{"Reason:"},
 		},
 		{
@@ -1800,6 +1821,7 @@ func TestModelApprovalPartsAreParagraphs(t *testing.T) {
 				Reason:    "dangerous-action guard forced approval",
 				Remedy:    longRemedy,
 				Arguments: json.RawMessage(`{"command":"ls ~/.apogee"}`),
+				CacheKey:  ordinaryGateKey,
 			},
 			[]string{"Reason:", "Fix:", "command:"},
 		},
@@ -1811,6 +1833,7 @@ func TestModelApprovalPartsAreParagraphs(t *testing.T) {
 				Scope:        "go vet reads the whole package directory internal/tools.",
 				Arguments:    json.RawMessage(`{"path":"docs/notes.md","content":"hi"}`),
 				ResolvedPath: "/elsewhere/notes.md",
+				CacheKey:     ordinaryGateKey,
 			},
 			[]string{"Reason:", "Scope:", "path:", "→ resolves to"},
 		},
@@ -1872,17 +1895,17 @@ func TestModelApprovalArgsFallBackToJSON(t *testing.T) {
 	}{
 		{
 			"unparseable terminal arguments",
-			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":`)},
+			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":`), CacheKey: ordinaryGateKey},
 			`{"command":`,
 		},
 		{
 			"arguments that are not an object",
-			domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(`["rm -rf /"]`)},
+			domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(`["rm -rf /"]`), CacheKey: ordinaryGateKey},
 			`"rm -rf /"`,
 		},
 		{
 			"a second document behind the first",
-			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":"ls"} {"command":"rm -rf /"}`)},
+			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":"ls"} {"command":"rm -rf /"}`), CacheKey: ordinaryGateKey},
 			`{"command":"ls"} {"command":"rm -rf /"}`,
 		},
 	}
@@ -1917,7 +1940,7 @@ func TestModelApprovalLongArgsCapsBody(t *testing.T) {
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	reply := make(chan domain.ApprovalDecision, 1)
 	m = step(t, m, approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(raw)},
+		Request: domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(raw), CacheKey: ordinaryGateKey},
 		Reply:   reply,
 	})
 
@@ -1949,6 +1972,7 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 		Tool:      "write_file",
 		Reason:    strings.Repeat("this write needs explaining at some length. ", 8),
 		Arguments: json.RawMessage(`{"path":"/ws/a/main.go","content":"package main"}`),
+		CacheKey:  ordinaryGateKey,
 	}
 
 	for _, width := range []int{80, narrowOverlayWindow} {
@@ -4069,6 +4093,7 @@ func TestOverlayPaneSitsFlushOnBottomChrome(t *testing.T) {
 				Tool:      "write_file",
 				Reason:    "the file has to exist before the build can run",
 				Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
+				CacheKey:  ordinaryGateKey,
 			}}
 			m.layout()
 			return m

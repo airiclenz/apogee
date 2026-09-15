@@ -855,7 +855,9 @@ func TestE2EGateAsksInTheTUI(t *testing.T) {
 	submit(drv, gatePrompt)
 	drv.WaitText(gateQuestion)
 
-	if _, _, ok := drv.Frame().Find("Always allow this session"); !ok {
+	// A gate's ask is a FORCED look (gate.go: force = true), so its pane closes on the forced
+	// disclosure rather than offering the session row (e2e_approval_test.go's two markers).
+	if _, _, ok := drv.Frame().Find(forcedMarker); !ok {
 		t.Fatalf("the gate's words are on screen but the approval menu is not, so the frame "+
 			"carrying them is not the approval pane:\n%s", drv.Frame().String())
 	}
@@ -896,7 +898,7 @@ func TestE2EGateFailureIsReportedInTheTUI(t *testing.T) {
 	const failureLine = "reaction " + gateWardenName + " (" + string(domain.MomentPreToolExec) + ")"
 	drv.WaitText(failureLine)
 	drv.WaitText(gateQuestionPrefix)
-	if _, _, ok := drv.Frame().Find("Always allow this session"); !ok {
+	if _, _, ok := drv.Frame().Find(forcedMarker); !ok {
 		t.Fatalf("the failed gate's report is on screen but the approval menu is not, so the "+
 			"gate did not escalate to ask:\n%s", drv.Frame().String())
 	}

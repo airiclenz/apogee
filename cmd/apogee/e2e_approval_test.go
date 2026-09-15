@@ -40,7 +40,11 @@ const (
 	forcedFix = "Fix: a terminal command naming ~/.apogee needs approval, even for a read; " +
 		"list, read or copy from there with the dedicated tools instead (list_dir, " +
 		"read_file, grep, find_files, or copy_file's source argument)"
+	// approvalMarker is the row only an ORDINARY pane paints: a gate the engine can remember. A
+	// forced pane hides it (internal/tui approvalMenuFor) and closes on forcedMarker instead, so a
+	// wait on the wrong one of the two never returns.
 	approvalMarker = "Always allow this session"
+	forcedMarker   = "a forced look is asked every time"
 )
 
 // narrowSize is the terminal T-10 is read at: 60 columns is where the `Fix:` line has to wrap, and
@@ -77,20 +81,24 @@ func TestE2EApprovalForcesALookAtTheControlPlane(t *testing.T) {
 	drv.WaitText("That is what the command had to say.")
 
 	// Step 4 — a READ under the control plane raises the forced pane, with the sanctioned route on
-	// the line under the reason it answers.
+	// the line under the reason it answers — and without the session row, because the engine
+	// remembers a forced answer nowhere; the disclosure under the menu says so.
 	submit(drv, guardReadPrompt)
-	pane := awaitApprovalPane(drv)
+	pane := awaitForcedPane(drv)
 	assertFixFollowsReason(t, pane)
 	if !strings.Contains(paneText(pane), flatten(forcedFix)) {
 		t.Errorf("the forced pane does not carry the sanctioned-route hint:\n%s", pane)
 	}
 	assertFixWrapsAsOneBlock(t, pane)
+	if _, _, ok := pane.Find(approvalMarker); ok {
+		t.Errorf("the forced pane offers %q, a row the engine would not honour:\n%s", approvalMarker, pane)
+	}
 	tuitest.Golden(t, "t10-forced-pane", pane, goldenRedactions(sess)...)
 
 	// Step 7 — deny it, and the same hint reaches the MODEL, appended to the denial. The claim is
 	// about what the model was TOLD, so it is made against the request the stub received rather than
 	// against the transcript, where the same sentence is clipped inside a collapsed block.
-	decide(drv, "d")
+	decideForced(drv, "d")
 	want := "tool call denied by approver — " + strings.TrimPrefix(forcedFix, "Fix: ")
 	drv.WaitFor(func() bool { return stubSawMessage(stub, want) },
 		tuitest.Awaiting("the denial, with its hint, to reach the model"))
@@ -98,11 +106,11 @@ func TestE2EApprovalForcesALookAtTheControlPlane(t *testing.T) {
 	// Steps 8–9 — a WRITE under the control plane is a look, not a refusal: the same pane, and an
 	// informed yes RUNS the command.
 	submit(drv, guardWritePrompt)
-	write := awaitApprovalPane(drv)
+	write := awaitForcedPane(drv)
 	if flat := flatten(write.String()); !strings.Contains(flat, forcedReason) {
 		t.Errorf("the write pane does not read %q:\n%s", forcedReason, write)
 	}
-	decide(drv, "a")
+	decideForced(drv, "a")
 	probe := filepath.Join(home, ".apogee", "guard-probe.txt")
 	drv.WaitFor(func() bool { _, err := os.Stat(probe); return err == nil },
 		tuitest.Awaiting("the approved write to run"))
@@ -133,7 +141,7 @@ func TestE2EApprovalForcedLookSurvivesAutoMode(t *testing.T) {
 	}
 
 	submit(drv, guardReadPrompt)
-	pane := awaitApprovalPane(drv)
+	pane := awaitForcedPane(drv)
 	if flat := paneText(pane); !strings.Contains(flat, forcedReason) {
 		t.Errorf("auto did not raise the forced pane:\n%s", pane)
 	}
@@ -142,7 +150,7 @@ func TestE2EApprovalForcedLookSurvivesAutoMode(t *testing.T) {
 	// the stop gesture arms on the first press and confirms on the second.
 	drv.Press(tuitest.Esc)
 	drv.Press(tuitest.Esc)
-	drv.WaitGone(approvalMarker)
+	drv.WaitGone(forcedMarker)
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
@@ -298,21 +306,35 @@ func guardHome(t *testing.T) string {
 	return home
 }
 
-// awaitApprovalPane waits for the approval pane and returns the settled frame it painted. The
-// settle is not tidiness here: the decision keys arm one latch after the pane opens, so a frame read
-// before the screen went quiet is a frame a caller could not yet answer.
+// awaitApprovalPane waits for an ORDINARY approval pane and returns the settled frame it painted.
+// The settle is not tidiness here: the decision keys arm one latch after the pane opens, so a frame
+// read before the screen went quiet is a frame a caller could not yet answer.
 func awaitApprovalPane(drv *tuitest.Driver) tuitest.Frame {
-	drv.WaitText(approvalMarker)
+	return awaitPaneMarked(drv, approvalMarker)
+}
+
+// awaitForcedPane is awaitApprovalPane for a FORCED gate, which paints no session row: it waits on
+// the disclosure the forced pane closes on instead.
+func awaitForcedPane(drv *tuitest.Driver) tuitest.Frame { return awaitPaneMarked(drv, forcedMarker) }
+
+func awaitPaneMarked(drv *tuitest.Driver, marker string) tuitest.Frame {
+	drv.WaitText(marker)
 	drv.WaitQuiet(settled)
 	return drv.Frame()
 }
 
-// decide answers an armed approval pane and waits for it to go. The caller must have settled the
-// frame first (awaitApprovalPane) — an unarmed letter is SWALLOWED, not queued, so a test that
-// typed one too early would wait out its whole timeout on a pane nobody answered.
-func decide(drv *tuitest.Driver, key string) {
+// decide answers an armed ORDINARY approval pane and waits for it to go. The caller must have
+// settled the frame first (awaitApprovalPane) — an unarmed letter is SWALLOWED, not queued, so a
+// test that typed one too early would wait out its whole timeout on a pane nobody answered.
+func decide(drv *tuitest.Driver, key string) { decideOn(drv, key, approvalMarker) }
+
+// decideForced is decide for a FORCED pane, told gone by its disclosure rather than the session row
+// it does not paint.
+func decideForced(drv *tuitest.Driver, key string) { decideOn(drv, key, forcedMarker) }
+
+func decideOn(drv *tuitest.Driver, key, marker string) {
 	drv.Type(key)
-	drv.WaitGone(approvalMarker)
+	drv.WaitGone(marker)
 }
 
 // promptPlaceholder is what the input box shows in exactly one state: empty, with nothing in

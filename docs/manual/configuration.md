@@ -1710,8 +1710,9 @@ mere read trips the rule as readily as a write, because the terminal declares no
 the guard to spare (the hint it carries names `list_dir`, `read_file`, `grep`, `find_files` and
 `copy_file` as the route that does not ask).
 A forced prompt is a speed-bump, not a block — you can say yes to it. But it carries no
-cache key, so **"Always allow this session" cannot remember it**: the yes authorises that
-one call, and the next call that trips the same rule asks again.
+cache key, so **it offers no "Always allow this session" row** — the pane closes on
+`a forced look is asked every time` in its place: the yes authorises that one call, and
+the next call that trips the same rule asks again.
 
 Read the guard for what it is. In ADR 0012's own words it is a **footgun-guard, not a
 security boundary**: it catches a small model's obvious catastrophic *mistakes*, it is
