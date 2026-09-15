@@ -82,6 +82,15 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, fmt.Sprintf("content too large: %d bytes (max %d)", len(args.Content), maxFileContentBytes)), nil
 	}
 
+	// A directory at the target is refused in words before the write can fail in the fence's:
+	// safeWriteFile renames a staged file over the name, and the *os.LinkError that answers a
+	// directory there says nothing a model can act on. The stat looks where the write itself will
+	// look (statWriteTarget: the workspace fence, or an approved escape's permitted target), as
+	// checkFileOpsDestination does; every other stat outcome is left to the write to decide.
+	if info, err := statWriteTarget(ctx, args.Path, t.root); err == nil && info.IsDir() {
+		return errorResult(call.ID, "write_file: target is a directory: "+args.Path), nil
+	}
+
 	// The file as it stands, read through the fence the write itself uses, so the result can
 	// carry the Edit regions of what this call actually changed (ADR 0052) rather than only the
 	// content the request already stated. A read that fails for ANY reason degrades to an EMPTY

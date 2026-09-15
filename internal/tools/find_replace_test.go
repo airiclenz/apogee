@@ -625,7 +625,7 @@ func TestSingleFindReplace_NotFoundReportsTheClosestRegion(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("IsError = false, want true")
 	}
-	if want := closestRegion(original, "func main() {\n  println(\"hi\")\n}"); result.Content != want {
+	if want := nothingWritten + closestRegion(original, "func main() {\n  println(\"hi\")\n}"); result.Content != want {
 		t.Errorf("Content = %q, want %q", result.Content, want)
 	}
 	if !strings.Contains(result.Content, "with different whitespace") {
@@ -652,8 +652,8 @@ func TestSingleFindReplace_NotFoundReportsTheClosestWindow(t *testing.T) {
 		t.Fatalf("Execute returned a Go error: %v", err)
 	}
 
-	if !strings.Contains(result.Content, "closest match at lines 2–3 (1 of 2 lines match)") {
-		t.Errorf("Content = %q, want the scored closest window", result.Content)
+	if !strings.HasPrefix(result.Content, "no changes were written — old text not found in file — closest match at lines 2–3 (1 of 2 lines match)") {
+		t.Errorf("Content = %q, want the nothing-written prefix and the scored closest window", result.Content)
 	}
 	if !strings.Contains(result.Content, "  2 | beta") {
 		t.Errorf("Content = %q, want the numbered excerpt", result.Content)
@@ -677,7 +677,7 @@ func TestSingleFindReplace_FoundTwiceNamesItsLines(t *testing.T) {
 		t.Fatalf("Execute returned a Go error: %v", err)
 	}
 
-	if want := "old text found 2 times (must appear exactly once) — at lines 1, 3"; result.Content != want {
+	if want := "no changes were written — old text found 2 times (must appear exactly once) — at lines 1, 3"; result.Content != want {
 		t.Errorf("Content = %q, want %q", result.Content, want)
 	}
 	if got, _ := os.ReadFile(path); string(got) != original {
@@ -705,8 +705,39 @@ func TestMultiFindReplace_NotFoundKeepsThePrefix(t *testing.T) {
 		t.Fatalf("Execute returned a Go error: %v", err)
 	}
 
-	if !strings.HasPrefix(result.Content, "replacement #2: old text not found in file — closest match") {
+	if !strings.HasPrefix(result.Content, "no changes were written — replacement #2: old text not found in file — closest match") {
 		t.Errorf("Content = %q, want the prefixed closest-region report", result.Content)
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file changed despite the failure: %q", string(got))
+	}
+}
+
+// A multi-edit that would push the file past the content cap is refused with the nothing-written
+// prefix too, and the file is byte-identical: the size refusal is the third atomic-edit failure
+// and must read like the other two.
+func TestMultiFindReplace_OverCapRefusalSaysNothingWasWritten(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	original := "seed\n"
+	path := writeTempFile(t, root, "notes.txt", original)
+	half := strings.Repeat("a", maxFileContentBytes/2+1)
+
+	result, err := NewMultiFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{
+			"path": "notes.txt", "replacements": []map[string]any{
+				{"oldText": "seed", "newText": half + "seed"},
+				{"oldText": "seed", "newText": half},
+			},
+		}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+
+	want := "no changes were written — after replacement #2, file would exceed maximum size (524288 bytes)"
+	if result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
 	}
 	if got, _ := os.ReadFile(path); string(got) != original {
 		t.Errorf("file changed despite the failure: %q", string(got))
@@ -728,7 +759,7 @@ func TestMultiFindReplace_FoundTwiceNamesItsLines(t *testing.T) {
 		t.Fatalf("Execute returned a Go error: %v", err)
 	}
 
-	want := "replacement #1: old text found 2 times (must appear exactly once) — at lines 1, 3"
+	want := "no changes were written — replacement #1: old text found 2 times (must appear exactly once) — at lines 1, 3"
 	if result.Content != want {
 		t.Errorf("Content = %q, want %q", result.Content, want)
 	}

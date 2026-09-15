@@ -296,7 +296,7 @@ func (t *RunTests) subtree(input string) (rel, errMsg string) {
 	}
 	rel = filepath.ToSlash(workspaceRelative(abs, t.root))
 	if _, err := statInRoot(rel, t.root); err != nil {
-		return "", escapeOrMessage(err, "path not found: "+input)
+		return "", notFoundOrRefusal(err, "path not found: ", t.root, filepath.FromSlash(rel), input)
 	}
 	if rel == "." {
 		return "", ""

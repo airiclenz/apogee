@@ -121,7 +121,7 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 	relative := workspaceRelative(path, root)
 	info, err := statInRoot(relative, root)
 	if err != nil {
-		return errorResult(call.ID, escapeOrMessage(err, "file not found: "+args.Path)), nil
+		return errorResult(call.ID, notFoundOrRefusal(err, "file not found: ", root, relative, args.Path)), nil
 	}
 	if !info.Mode().IsRegular() {
 		return errorResult(call.ID, "not a file: "+args.Path), nil

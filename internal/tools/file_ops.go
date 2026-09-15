@@ -221,7 +221,7 @@ func (t *CopyFile) copyDirectory(
 
 	files, err := directoryFiles(source, sourceRoot)
 	if err != nil {
-		return errorResult(call.ID, escapeOrMessage(err, "directory not found: "+args.Source)), nil
+		return errorResult(call.ID, notFoundOrRefusal(err, "directory not found: ", sourceRoot, workspaceRelative(source, sourceRoot), args.Source)), nil
 	}
 	if len(files) == 0 {
 		return errorResult(call.ID, "nothing to copy: "+args.Source+" holds no regular files"), nil
@@ -526,7 +526,7 @@ func checkFileOpsPathsFrom(
 
 	source, err := statInRoot(sourcePath, sourceRoot)
 	if err != nil {
-		return escapeOrMessage(err, "file not found: "+args.Source)
+		return notFoundOrRefusal(err, "file not found: ", sourceRoot, workspaceRelative(sourcePath, sourceRoot), args.Source)
 	}
 	if source.IsDir() {
 		return "not a file: " + args.Source + " (directories are not supported)"

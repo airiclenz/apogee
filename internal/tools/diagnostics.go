@@ -178,7 +178,7 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 	// legitimate source file from being diagnosable at all.
 	src, err := safeReadFile(workspaceRelative(abs, t.root), t.root)
 	if err != nil {
-		return errorResult(callID, escapeOrMessage(err, "file not found: "+name)), nil
+		return errorResult(callID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(abs, t.root), name)), nil
 	}
 
 	// In-process syntax check — never needs an external program, so a Go syntax

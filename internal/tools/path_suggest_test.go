@@ -1,12 +1,15 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // rowBreakSibling is the fixture entry whose NAME carries a line break — a filename POSIX allows
@@ -232,6 +235,114 @@ func TestNotFoundMessage(t *testing.T) {
 			// that forges a second row, however the names inside it are spelled.
 			if strings.ContainsAny(got, "\r\n") {
 				t.Errorf("notFoundMessage(%q, %q, %q) = %q, want no raw row break", tc.prefix, tc.given, tc.suggestions, got)
+			}
+		})
+	}
+}
+
+// TestNotFoundRefusalsRouteThroughSuggestions pins the sweep of notFoundOrRefusal over the
+// disk-rooted refusals outside the read trio: every tool that stats or reads a path through the
+// fence and finds nothing offers the same `did you mean` clause read_file does, spelled from the
+// model's own argument; a miss under a virtual mount keeps its bare wording (no host parent to
+// list); and a fence refusal stays the uniform refusal with nothing appended.
+func TestNotFoundRefusalsRouteThroughSuggestions(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(root, "docs", "adr", "0025-interjections.md"), "adr body")
+	writeFixtureFile(t, filepath.Join(root, "pkg", "main.go.bak"), "package pkg\n")
+	writeFixtureFile(t, filepath.Join(root, "go.mod"), "module example.com/fixture\n")
+	sibling := filepath.Join("docs", "adr", "0025-interjections.md")
+	suggested := "file not found: docs/adr/0025 — did you mean: " + sibling
+
+	cases := []struct {
+		name string
+		tool domain.Tool
+		args map[string]any
+		want string
+	}{
+		{
+			name: "edit_existing_file",
+			tool: NewEditExistingFile(root),
+			args: map[string]any{"path": "docs/adr/0025", "content": "x"},
+			want: suggested,
+		},
+		{
+			name: "single_find_and_replace",
+			tool: NewSingleFindReplace(root),
+			args: map[string]any{"path": "docs/adr/0025", "oldText": "a", "newText": "b"},
+			want: suggested,
+		},
+		{
+			name: "multi_find_and_replace",
+			tool: NewMultiFindReplace(root),
+			args: map[string]any{"path": "docs/adr/0025", "replacements": []map[string]any{{"oldText": "a", "newText": "b"}}},
+			want: suggested,
+		},
+		{
+			name: "copy_file source",
+			tool: NewCopyFile(root, ReadMounts{}),
+			args: map[string]any{"source": "docs/adr/0025", "destination": "copy.md"},
+			want: suggested,
+		},
+		{
+			name: "move_file source",
+			tool: NewMoveFile(root),
+			args: map[string]any{"source": "docs/adr/0025", "destination": "moved.md"},
+			want: suggested,
+		},
+		{
+			name: "delete_file",
+			tool: NewDeleteFile(root),
+			args: map[string]any{"path": "docs/adr/0025"},
+			want: suggested,
+		},
+		{
+			name: "diagnostics",
+			tool: NewDiagnostics(root),
+			args: map[string]any{"path": "pkg/main.go", "vet": false},
+			want: "file not found: pkg/main.go — did you mean: " + filepath.Join("pkg", "main.go.bak"),
+		},
+		{
+			name: "present_document",
+			tool: NewPresentDocument(root, ReadMounts{}, &scriptedPresenter{}),
+			args: map[string]any{"path": "docs/adr/0025"},
+			want: suggested,
+		},
+		{
+			name: "run_tests path",
+			tool: NewRunTests(root, nil),
+			args: map[string]any{"path": "docs/ad"},
+			want: "path not found: docs/ad — did you mean: " + filepath.Join("docs", "adr") + "/",
+		},
+		{
+			name: "a virtual-mount miss keeps its wording",
+			tool: NewCopyFile(root, demoMount()),
+			args: map[string]any{"source": "demo:notes/SKIL", "destination": "copy.md"},
+			want: "file not found: demo:notes/SKIL",
+		},
+		{
+			name: "a fence refusal carries no suggestions",
+			tool: NewDeleteFile(root),
+			args: map[string]any{"path": "../escape.txt"},
+			want: `security: path resolves outside the workspace root: "../escape.txt"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tc.tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatalf("IsError = false, want a refusal (content: %q)", result.Content)
+			}
+			if result.Content != tc.want {
+				t.Errorf("Content = %q, want %q", result.Content, tc.want)
 			}
 		})
 	}

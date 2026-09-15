@@ -88,7 +88,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 	// followed and the write is about to replace.
 	original, err := readWriteTarget(ctx, args.Path, t.root)
 	if err != nil {
-		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
+		return errorResult(call.ID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(args.Path, t.root), args.Path)), nil
 	}
 
 	// Which file those bytes actually came from, read BEFORE the write: the write replaces a

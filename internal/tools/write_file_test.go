@@ -376,6 +376,34 @@ func TestWriteFile_Execute_ToolErrors(t *testing.T) {
 	}
 }
 
+// A directory at the target is refused in the tool's own words, exactly, and the directory and
+// what it holds are left as they were — not the *os.LinkError the staged rename would have raised.
+func TestWriteFile_Execute_RefusesADirectoryTarget(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	if err := os.MkdirAll(filepath.Join(root, "pkg"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	writeFixtureFile(t, filepath.Join(root, "pkg", "kept.go"), "package pkg\n")
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "pkg", "content": "x"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true (content: %q)", result.Content)
+	}
+	if want := "write_file: target is a directory: pkg"; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "pkg", "kept.go")); err != nil {
+		t.Errorf("the directory's file must survive the refusal: %v", err)
+	}
+}
+
 // A write that breaks the file it writes still LANDS: the result stays a success, keeps its
 // summary, and the file holds exactly the bytes asked for. What changes is that the model is told,
 // on the same result, that what it just wrote does not parse — structural feedback where it acted,

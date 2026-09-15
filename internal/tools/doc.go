@@ -325,7 +325,9 @@
 // lines — quoted back as numbered, escaped, capped rows, and occurrenceLines, which names the
 // line of every occurrence a "found N times" refusal counted. Report only: no near match is ever
 // applied, the file is never written, and with nothing to point at the message is the former
-// bare sentence to the byte.
+// bare sentence to the byte. nearname.go is the courtesy on a tool NAME the model mis-spelled:
+// ClosestToolName, the prefix-then-edit-distance match dispatch appends to its unknown-tool
+// refusal when the repair guard is off.
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
 // argument a given writer lands on. readonly_subprocess.go is its sibling on the READ side: the

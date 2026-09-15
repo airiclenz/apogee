@@ -135,7 +135,7 @@ func checkDeletePath(ctx context.Context, path, root string) string {
 
 	info, err := statWriteTarget(ctx, path, root)
 	if err != nil {
-		return escapeOrMessage(err, "file not found: "+path)
+		return notFoundOrRefusal(err, "file not found: ", root, workspaceRelative(path, root), path)
 	}
 	if info.IsDir() {
 		return "not a file: " + path + " (directories are not supported)"

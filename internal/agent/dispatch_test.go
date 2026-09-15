@@ -2314,3 +2314,41 @@ func TestDispatchReportsAPreToolExecReactionFailure(t *testing.T) {
 		t.Errorf("result = %+v, want an IsError result whose content is exactly %q", res, want)
 	}
 }
+
+// TestDispatch_UnknownToolNamesItsNearMatch proves the registry miss dispatch answers with the
+// tool-call repair Floor guard OFF — the only path an unknown name reaches dispatch on — carries
+// the nearest registered name (`read_fil` → `read_file`), and that a name unlike every registered
+// one keeps the bare sentence: the clause is a pointer back to the menu, never a re-route.
+func TestDispatch_UnknownToolNamesItsNearMatch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a truncated name is pointed at its tool", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		ran := 0
+		cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, ran: &ran})
+
+		driveToolCall(t, cfg, sink, "c1", "read_fil", `{}`)
+
+		res, ok := lastToolResult(sink.events)
+		if want := `unknown tool "read_fil" — did you mean: read_file`; !ok || !res.IsError || res.Content != want {
+			t.Errorf("result = %+v, want an IsError result whose content is exactly %q", res, want)
+		}
+		if ran != 0 {
+			t.Errorf("read_file ran %d times; a near match is a pointer, never a re-route", ran)
+		}
+	})
+
+	t.Run("a name unlike every tool keeps the bare sentence", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true})
+
+		driveToolCall(t, cfg, sink, "c1", "bash", `{}`)
+
+		res, ok := lastToolResult(sink.events)
+		if want := `unknown tool "bash"`; !ok || !res.IsError || res.Content != want {
+			t.Errorf("result = %+v, want an IsError result whose content is exactly %q", res, want)
+		}
+	})
+}

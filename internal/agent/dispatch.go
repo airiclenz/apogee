@@ -386,7 +386,7 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 	if !ok {
 		// The recursion point is not in this Agent's registry (e.g. withheld): the registry miss
 		// is a dispatch fact answered before resolve(), exactly as resolveAndExecute answers it.
-		return fanOutSlot{call: call, result: errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool))}
+		return fanOutSlot{call: call, result: a.unknownToolResult(call)}
 	}
 
 	if result, refused := collidingArgumentKeysResult(call); refused {
@@ -630,7 +630,7 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
-		return errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool)), dispatchDone
+		return a.unknownToolResult(call), dispatchDone
 	}
 	if result, refused := collidingArgumentKeysResult(call); refused {
 		return result, dispatchDone
@@ -1046,6 +1046,28 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 		return nil, false
 	}
 	return a.tools.Lookup(name)
+}
+
+// unknownToolResult renders the registry miss both dispatch paths answer with — the fanned-out
+// prepareDelegation and the serial resolveAndExecute — so the two can never word it differently:
+// the former `unknown tool "<name>"` sentence, plus a ` — did you mean: <name>` clause when a
+// registered name is a near miss of the one the model wrote (tools.ClosestToolName). The clause is
+// data for the model's next call, never a re-route: nothing runs here. It matters only with the
+// tool-call repair Floor guard off (the guard answers an unknown name before dispatch sees it),
+// which is exactly when a model gets no other pointer back to the menu.
+func (a *Agent) unknownToolResult(call domain.ToolCall) domain.ToolResult {
+	message := fmt.Sprintf("unknown tool %q", call.Tool)
+	if a.tools != nil {
+		registered := a.tools.All()
+		names := make([]string, 0, len(registered))
+		for _, tool := range registered {
+			names = append(names, tool.Name())
+		}
+		if closest := tools.ClosestToolName(names, call.Tool); closest != "" {
+			message += " — did you mean: " + closest
+		}
+	}
+	return errorToolResult(call.ID, message)
 }
 
 // approve consults the Approver for a Gate verdict, returning whether the call may run. It

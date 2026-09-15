@@ -9,6 +9,14 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
+// nothingWritten leads every refusal a find-replace tool gives AFTER it has read the file and
+// BEFORE it writes: old text not found, found more than once, a multi-edit that would overrun
+// the size cap. The edit is atomic — the bytes land together or not at all — and the sentence
+// says so where the model reads it, so a failure at replacement #2 is never taken for a file
+// that carries #1. The not-found sentence it prefixes stays closestRegion's own (nearmatch.go:
+// the report only ever grows on the wording), which is why the prefix lives at the call sites.
+const nothingWritten = "no changes were written — "
+
 // countOccurrences returns the number of non-overlapping occurrences of needle in
 // haystack. It mirrors the oracle's count helper (string-utils.ts): an empty needle
 // yields 0 so a find-replace with no search text reports "not found" rather than
@@ -101,7 +109,7 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	// and the write by a confined subprocess) is refused rather than followed (H1).
 	content, err := readWriteTarget(ctx, args.Path, t.root)
 	if err != nil {
-		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
+		return errorResult(call.ID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(args.Path, t.root), args.Path)), nil
 	}
 
 	// Which file those bytes came from, read BEFORE the write replaces a symlinked name with
@@ -110,12 +118,14 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	// this call disclose and overwrite somewhere else under the name the operator approved.
 	resolved := resolvedTargetNote(args.Path, t.root)
 
+	// Every refusal from here on is prefixed nothingWritten: the edit is atomic, and a model
+	// reading "old text not found" without it has to guess whether anything landed.
 	count := countOccurrences(string(content), args.OldText)
 	if count == 0 {
-		return errorResult(call.ID, closestRegion(string(content), args.OldText)), nil
+		return errorResult(call.ID, nothingWritten+closestRegion(string(content), args.OldText)), nil
 	}
 	if count > 1 {
-		return errorResult(call.ID, fmt.Sprintf("old text found %d times (must appear exactly once)%s",
+		return errorResult(call.ID, fmt.Sprintf(nothingWritten+"old text found %d times (must appear exactly once)%s",
 			count, occurrenceNote(string(content), args.OldText))), nil
 	}
 
@@ -230,7 +240,7 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	// TOCTOU-safe read+write through an os.Root pinned at t.root (H1).
 	raw, err := readWriteTarget(ctx, args.Path, t.root)
 	if err != nil {
-		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
+		return errorResult(call.ID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(args.Path, t.root), args.Path)), nil
 	}
 
 	// Read before the write, for the reason single_find_and_replace states above: the
@@ -239,21 +249,23 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	// arriving as a one-element array.
 	resolved := resolvedTargetNote(args.Path, t.root)
 
+	// Every refusal inside the loop is prefixed nothingWritten: the replacements land together or
+	// not at all, and a failure at #2 must not read as though #1 had been applied.
 	content := string(raw)
 	for i, r := range args.Replacements {
 		count := countOccurrences(content, r.OldText)
 		if count == 0 {
-			return errorResult(call.ID, fmt.Sprintf("replacement #%d: %s", i+1, closestRegion(content, r.OldText))), nil
+			return errorResult(call.ID, fmt.Sprintf(nothingWritten+"replacement #%d: %s", i+1, closestRegion(content, r.OldText))), nil
 		}
 		if count > 1 {
-			return errorResult(call.ID, fmt.Sprintf("replacement #%d: old text found %d times (must appear exactly once)%s",
+			return errorResult(call.ID, fmt.Sprintf(nothingWritten+"replacement #%d: old text found %d times (must appear exactly once)%s",
 				i+1, count, occurrenceNote(content, r.OldText))), nil
 		}
 
 		content = strings.Replace(content, r.OldText, r.NewText, 1)
 
 		if len(content) > maxFileContentBytes {
-			return errorResult(call.ID, fmt.Sprintf("after replacement #%d, file would exceed maximum size (%d bytes)", i+1, maxFileContentBytes)), nil
+			return errorResult(call.ID, fmt.Sprintf(nothingWritten+"after replacement #%d, file would exceed maximum size (%d bytes)", i+1, maxFileContentBytes)), nil
 		}
 	}
 

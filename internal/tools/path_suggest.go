@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -94,4 +96,30 @@ func notFoundMessage(prefix, given string, suggestions []string) string {
 		return message
 	}
 	return message + " — did you mean: " + strings.Join(suggestions, "; ")
+}
+
+// notFoundOrRefusal renders a fenced-I/O failure the way escapeOrMessage does — a fence refusal
+// or an inaccessible root in its own uniform words — with the ABSENT case carrying the near misses
+// suggestSiblings finds. It is the one routing every disk-rooted not-found refusal takes
+// (find-replace, edit_existing_file, copy_file and move_file sources, delete_file, diagnostics,
+// present_document, run_tests), so a model that mis-spelled a name gets the same "did you mean"
+// from a write tool as from read_file.
+//
+// prefix is the caller's own not-found wording up to and including its separator ("file not
+// found: ", "directory not found: ", "path not found: "), root the root the path was accepted
+// under, rel the path relative to that root in native separator form, and given the model's own
+// spelling — notFoundMessage's and suggestSiblings' contracts, in one call. A refusal NEVER gains
+// suggestions: a "did you mean" on a refusal would read as absence and hide it, which is
+// escapeOrMessage's rule, asked here with an empty absent string so the sentinel checks stay in
+// one place. Only an absence the error itself confirms (fs.ErrNotExist) is worth a listing of the
+// parent; any other read failure keeps the caller's bare wording, because a permission fault or a
+// bad handle is not a spelling the model can fix.
+func notFoundOrRefusal(err error, prefix, root, rel, given string) string {
+	if refusal := escapeOrMessage(err, ""); refusal != "" {
+		return refusal
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return prefix + given
+	}
+	return notFoundMessage(prefix, given, suggestSiblings(root, rel, given))
 }

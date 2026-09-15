@@ -290,11 +290,14 @@ becomes a space. The status line and `Content-Type` header still come first. To 
 itself — to find a link's `href`, a form's fields, a meta tag — pass `raw: true`; a non-HTML body
 (plain text, JSON, a raw file) is never touched either way.
 
-**A near miss gets a suggestion.** When `read_file`, `list_dir`, `grep` or `find_files` is handed a
-path that is not there, the refusal does not stop at saying so: it adds a `did you mean:` clause
-naming up to five entries of the named parent directory whose names begin with the name that is
-missing. Matching ignores case, the suggestions come back sorted, and each is spelled the way the
-call spelled the path, so one can be handed straight back as the next call:
+**A near miss gets a suggestion.** When a tool is handed a path that is not there — the read tools
+(`read_file`, `list_dir`, `grep`, `find_files`), the editing tools (`edit_existing_file`,
+`single_find_and_replace`, `multi_find_and_replace`), a `copy_file` or `move_file` source,
+`delete_file`, `diagnostics`, `present_document` or a `run_tests` path — the refusal does not stop
+at saying so: it adds a `did you mean:` clause naming up to five entries of the named parent
+directory whose names begin with the name that is missing. Matching ignores case, the suggestions
+come back sorted, and each is spelled the way the call spelled the path, so one can be handed
+straight back as the next call:
 
 ```
 file not found: docs/adr/0025 — did you mean: docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md
@@ -302,7 +305,20 @@ file not found: docs/adr/0025 — did you mean: docs/adr/0025-interjections-comm
 
 A refusal from the workspace fence — a path outside the roots apogee may read — never gains that
 clause. A suggestion there would read as absence, as though the file were simply not present, and
-hide the fact that the answer was *not allowed* rather than *not found*.
+hide the fact that the answer was *not allowed* rather than *not found*. A path under a shipped
+mount (`shipped:…`) has no host directory to list, so a miss there keeps the bare refusal.
+
+The same courtesy reaches a tool *name*: with the tool-call repair guard switched off, a call to
+a tool that is not on the menu is answered `unknown tool "read_fil" — did you mean: read_file`
+when a registered name begins with what was written or sits within three edits of it. Nothing is
+re-routed; the model re-issues the call.
+
+**A failed edit says nothing landed.** `single_find_and_replace` and `multi_find_and_replace` apply
+their replacements atomically, and every refusal they give after reading the file — old text not
+found, found more than once, a multi-edit that would push the file past the size cap — is prefixed
+`no changes were written — `, so a failure at replacement #2 is never taken for a file that already
+carries #1. `write_file` handed a directory answers `write_file: target is a directory: <path>`
+rather than the filesystem's own rename error.
 
 **What the read tools may read.** The roots those tools accept are the workspace, the session's
 scratch directory, the skill libraries, and — when `go` is on your PATH — the Go toolchain's own two
