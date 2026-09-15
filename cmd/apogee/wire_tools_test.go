@@ -13,6 +13,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // registryWithMCP is the one place the composition root assembles HostTools by hand, so it must
@@ -308,18 +309,18 @@ func (stubHostAsker) Ask(context.Context, domain.AskRequest) (domain.AskAnswer, 
 	return domain.AskAnswer{}, nil
 }
 
-// registryWithMCP is one of TWO hand-assemblies of tools.HostTools — the engine's own hostTools
-// (internal/agent) is the other, and the two are field-identical bar SubAgentSeatChoice, which the
-// engine has no Config field for (ADR 0031). Nothing structural holds them that way, and a tool-NAMES
-// equivalence between the two registries cannot: a name depends only on the roster rungs and the
+// registryWithMCP composes its HostTools through tools.HostToolsOf — the ONE translation from Config
+// the engine's own default roster shares — with the seat-choice gate the engine has no Config field
+// for (ADR 0031) passed as the configured value. A tool-NAMES equivalence between the two registries
+// could not have caught a composer that drifted: a name depends only on the roster rungs and the
 // three nil-gated delegates, so dropping the URLGuard, the SecretEnvVars scrub, the ExtraReadRoots
 // mounts or the VirtualReadRoots ones — the very hazards this file's other tests each name one of —
 // leaves every tool name identical while the user's policy quietly stops applying.
 //
-// So the pin is field-by-field rather than by name: with every Config field this composer reads set
-// to something non-zero, EVERY field of the struct it returns must come back non-zero. A field added
-// to tools.HostTools and missed by this composer fails here;
-// TestHostToolsFillsEveryHostField (internal/agent) is the same pin on the engine's side.
+// So the pin is field-by-field rather than by name, on the Config THIS composition root builds
+// (validCfg) with seat choice on: with every field the composer reads set to something non-zero,
+// EVERY field of the struct it returns must come back non-zero. TestHostToolsOfFillsEveryHostField
+// (internal/tools) is the same pin on the composer's own side.
 func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	t.Parallel()
 
@@ -338,10 +339,10 @@ func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	cfg.ScratchReadRoot = func() string { return t.TempDir() }
 	cfg.VirtualReadRoots = func() map[string]fs.FS { return nil }
 
-	host := reflect.ValueOf(hostToolsFor(cfg, true))
+	host := reflect.ValueOf(tools.HostToolsOf(cfg, true))
 	for i := range host.NumField() {
 		if host.Field(i).IsZero() {
-			t.Errorf("hostToolsFor left tools.HostTools.%s zero for a Config that sets every field "+
+			t.Errorf("HostToolsOf left tools.HostTools.%s zero for a Config that sets every field "+
 				"it reads — the MCP-aware assembly must carry every host policy the engine's own "+
 				"build would have", host.Type().Field(i).Name)
 		}

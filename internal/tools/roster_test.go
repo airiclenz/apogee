@@ -189,16 +189,19 @@ func TestEffectiveRoster_LeavesTheGivenSetUntouched(t *testing.T) {
 }
 
 // TestDefaultToolsHonourTheRoster pins the assembly's own use of the ladder against the shipped
-// menu: with no deltas the default set is the whole build MINUS the tools registered default-off
-// (the Console family, ADR 0059 — the build rung's first users), and the global lists still
-// subtract exactly what they name.
+// menu: with no deltas and every delegate backed, the default set is the whole build MINUS the tools
+// registered default-off (the Console family, ADR 0059 — the build rung's first users), and the
+// global lists still subtract exactly what they name. The delegates are backed so that the build's
+// three delegate tools — constructed whoever the host is, dropped only when unbacked — sit on both
+// sides of the comparison.
 func TestDefaultToolsHonourTheRoster(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	full := DefaultTools(root)
+	backed := HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}, SkillLookup: &stubLookup{}}
+	full := DefaultToolsWithHost(root, backed)
 
-	build := builtinTools(root, HostTools{})
+	build := builtinTools(root, backed)
 	onMenu := make([]domain.Tool, 0, len(build))
 	var offMenu []string
 	for _, tool := range build {
@@ -219,6 +222,7 @@ func TestDefaultToolsHonourTheRoster(t *testing.T) {
 	}
 
 	pruned := DefaultToolsWithHost(root, HostTools{
+		Asker: stubAsker{}, Presenter: stubPresenter{}, SkillLookup: &stubLookup{},
 		Disabled:      []string{"view_diff"},
 		Enabled:       []string{"grep"},
 		ProfileRoster: domain.ToolRosterDelta{Disabled: []string{"python_exec"}},

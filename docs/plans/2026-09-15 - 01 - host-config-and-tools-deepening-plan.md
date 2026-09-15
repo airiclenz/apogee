@@ -292,7 +292,13 @@ NOTES (2026-09-15): `internal/agent/builtins_test.go` is new (the plan's Files l
 
 Commit: `refactor(agent): one Floor-guard table drives ids, builtins and the settings switch`
 
-## 12. `KnownToolNames` is derived; one `HostToolsOf` composer
+## 12. `KnownToolNames` is derived; one `HostToolsOf` composer — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `cmd/apogee/wire_firing.go` is untouched — `firingWriteTarget` and its zero `HostTools{}` literal were already deleted by an earlier commit (a0e8bb1f), so the item's "zero-value third" no longer exists; the acceptance grep shows the one `registry.go` site.
+NOTES (2026-09-15): `internal/tools/roster_test.go` added to FILES — `TestDefaultToolsHonourTheRoster` pinned "default menu = build minus default-off" over a zero host, which the unconditional delegate construction the Regression guard mandates makes false by exactly the three delegate tools; the test now backs the three delegates on both sides of its comparison (same assertion, same lengths).
+NOTES (2026-09-15): consequential edit — internal/tools/load_skill.go: made necessary by builtinTools no longer omitting a nil-lookup load_skill (its comment now names DefaultToolsWithHost as the dropping step).
+NOTES (2026-09-15): consequential edit — internal/tools/doc.go: made necessary by HostToolsOf reading domain.Config (the "no dependency on domain.Config" sentence and registry.go's map entry).
+NOTES (2026-09-15): the unbacked-delegate drop is a type switch on `*LoadSkill`/`*AskUser`/`*PresentDocument` (`HostTools.backedTools`) rather than a name list, so it cannot drift from the constructors; `TestHostToolsOfLeavesSeatChoiceToTheCaller` added beside the three moved tests to pin the composer's one non-Config parameter.
 
 **What.** `internal/tools/registry.go`: `KnownToolNames` is computed from `builtinTools` with nil delegates — the three hand-appended names go. Add `tools.HostToolsOf(cfg domain.Config, seat *SubAgentSeatChoice) HostTools` and delete the two composers (`internal/agent/construct.go`, `cmd/apogee/wire_tools.go`) and the zero-value third in `cmd/apogee/wire_firing.go`. Depends on item 4.
 

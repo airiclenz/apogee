@@ -5,8 +5,9 @@
 //
 // Phase 1 (P1.4) lands the minimal local set — read_file, write_file, list_dir, and
 // a pure-Go grep (no external programs, §3a) — each scoped to a sandbox root at
-// construction (tools.NewReadFile(root), …) so the package carries no dependency on
-// domain.Config and a test can point it at a t.TempDir(). Every path argument is
+// construction (tools.NewReadFile(root), …) so no TOOL depends on domain.Config — only the
+// composer HostToolsOf reads it, once, into HostTools — and a test can point any tool at a
+// t.TempDir(). Every path argument is
 // resolved through path-safety, which rejects traversal escapes outside the root.
 //
 // A tool reports an expected failure (bad arguments, missing file, path escape) as a
@@ -290,8 +291,9 @@
 //
 // Thirteen files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
-// including okSummary, which attaches the structured half. registry.go is HostTools, the
-// two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
+// including okSummary, which attaches the structured half. registry.go is HostTools and its
+// one composer from domain.Config (HostToolsOf, shared by the engine and the composition root),
+// the two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
 // into a domain.ToolRegistry, and the roster ladder they apply on the way — EffectiveRoster
 // over the build's default-off declarations, the global lists and the profile axis (ADR 0057).
 // path_safety.go is the thin alias layer onto internal/security's

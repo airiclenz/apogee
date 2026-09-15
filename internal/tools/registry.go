@@ -169,6 +169,53 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 	return registry
 }
 
+// HostToolsOf composes the HostTools a Config implies — the ONE translation from what the host put
+// on domain.Config into the tool assembly's own configuration, shared by the engine's default roster
+// (internal/agent, seatChoice false) and the composition root's MCP-aware assembly (cmd/apogee).
+// It is one function rather than a literal in each of those places because a field added to
+// HostTools that only one composer filled is how a configured URL deny, credential scrub or read
+// root silently stopped applying on the other path (TestHostToolsOfFillsEveryHostField pins every
+// field non-zero for a Config that sets everything it reads).
+//
+// Field by field: the url-safety guard the network tools filter through is built from
+// Config.URLAllowHosts / URLDenyHosts (`url-safety:`) through security.NewURLGuard, so its
+// default-on SSRF floor applies in ALL modes — an app-level guard independent of OS confinement that
+// configuration can only tighten; empty lists ⇒ the zero guard. It is deliberately NOT seeded from
+// ConfineNetworkAllow: that is the confinement box's CIDR list for a confined SUBPROCESS, a different
+// concept from the in-process tools' host allow/deny, and conflating them would silently restrict the
+// network tools to the confinement list. The web-search endpoint (empty ⇒ web_search's built-in
+// DuckDuckGo default; "off" disables it), the Asker, Presenter and SkillLookup delegates (each nil
+// ⇒ its tool is not offered — ADR 0019, ADR 0065) and the read-only mounts (ExtraReadRoots,
+// ScratchReadRoot, VirtualReadRoots — carried as funcs, never evaluated here, so WHICH dirs are
+// mounted stays the host's live question) are handed through verbatim. The roster ladder's two
+// configuration rungs ride Config too: the GLOBAL `tools.disabled:` / `tools.enabled:` lists and,
+// most specific, the bound model's profile axis — the third axis of the one Model profile the
+// composition root already resolved, on Config.Profile so it cannot drift from the other two (ADR
+// 0057); reporting an unknown name or a same-scope conflict is the host's job (KnownToolNames,
+// RosterConflicts), never a refusal to build. SecretEnvVars is the caller-named half of the
+// execution tools' credential scrub (`api-key-env:`, ADR 0047); empty ⇒ apogee's own alone.
+//
+// seatChoice is the one policy Config does NOT carry: `sub-agents-choice:` shapes the sub_agent
+// schema this build publishes (ADR 0069), and the engine reads no config of its own (ADR 0031), so
+// the engine passes false and the composition root passes the configured value.
+func HostToolsOf(cfg domain.Config, seatChoice bool) HostTools {
+	return HostTools{
+		URLGuard:           security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
+		WebSearchEndpoint:  cfg.WebSearchEndpoint,
+		Asker:              cfg.Asker,
+		Presenter:          cfg.Presenter,
+		SkillLookup:        cfg.SkillLookup,
+		Disabled:           cfg.DisabledTools,
+		Enabled:            cfg.EnabledTools,
+		ProfileRoster:      cfg.Profile.Tools,
+		ExtraReadRoots:     cfg.ExtraReadRoots,
+		ScratchReadRoot:    cfg.ScratchReadRoot,
+		VirtualReadRoots:   cfg.VirtualReadRoots,
+		SecretEnvVars:      cfg.SecretEnvVars,
+		SubAgentSeatChoice: seatChoice,
+	}
+}
+
 // DefaultTools returns the built-in tools scoped to root, in menu order. It is exposed
 // so a caller can register a subset, or add them to a registry that already holds
 // host-supplied tools. find_files sits beside grep in the base set — the two halves of
@@ -235,17 +282,19 @@ func DefaultTools(root string) []domain.Tool {
 // in the user's config. A same-scope conflict is dropped here for the same reason an unknown name
 // is: an assembly has nowhere to put a warning (RosterConflicts is the host's query).
 func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
-	kept, _ := EffectiveRoster(builtinTools(root, host), host.rosterDeltas())
+	kept, _ := EffectiveRoster(host.backedTools(builtinTools(root, host)), host.rosterDeltas())
 	return kept
 }
 
 // builtinTools returns every tool this BUILD carries, scoped to root and configured from host, in
-// menu order and before any roster delta — a tool registered default-off included. It is the rung
-// the ladder starts from: DefaultToolsWithHost applies the deltas to it, and KnownToolNames reads
-// its names off it, so a default-off tool is still a name apogee knows while nothing offers it.
+// menu order and before any roster delta — a tool registered default-off included, and the three
+// host-delegate tools included whether or not host backs them. It is the rung the ladder starts
+// from: DefaultToolsWithHost drops the unbacked delegates and applies the deltas to it, and
+// KnownToolNames reads its names off it, so a default-off or unbacked tool is still a name apogee
+// knows while nothing offers it.
 func builtinTools(root string, host HostTools) []domain.Tool {
 	mounts := host.readMounts()
-	all := []domain.Tool{
+	return []domain.Tool{
 		NewReadFile(root, mounts),
 		NewWriteFile(root),
 		NewListDir(root, mounts),
@@ -282,17 +331,42 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		NewConsoleSend(),
 		NewConsoleRead(),
 		NewConsoleClose(),
+		// The three host-delegate tools close the build whether or not this host backs them: a nil
+		// delegate is a legal constructor input, and leaving an unbacked tool OUT is the composed
+		// menu's business (backedTools), not the build's — so this rung is the whole build and
+		// KnownToolNames reads it unfiltered.
+		NewLoadSkill(host.SkillLookup),
+		NewAskUser(host.Asker),
+		NewPresentDocument(root, mounts, host.Presenter),
 	}
-	if host.SkillLookup != nil {
-		all = append(all, NewLoadSkill(host.SkillLookup))
+}
+
+// backedTools drops from all the host-delegate tools this host leaves without a delegate — the
+// graceful-degradation half of HostTools' contract: no Asker ⇒ no ask_user, no Presenter ⇒ no
+// present_document (ADR 0019), no SkillLookup ⇒ no load_skill (ADR 0065) — so the model is never
+// offered a door nothing behind it can answer for. It is a step of its own, between the build and
+// the roster ladder, rather than a condition inside builtinTools, so that the build rung stays the
+// whole build (KnownToolNames must list these three names whoever the host is). Menu order is kept.
+func (h HostTools) backedTools(all []domain.Tool) []domain.Tool {
+	kept := make([]domain.Tool, 0, len(all))
+	for _, tool := range all {
+		switch tool.(type) {
+		case *LoadSkill:
+			if h.SkillLookup == nil {
+				continue
+			}
+		case *AskUser:
+			if h.Asker == nil {
+				continue
+			}
+		case *PresentDocument:
+			if h.Presenter == nil {
+				continue
+			}
+		}
+		kept = append(kept, tool)
 	}
-	if host.Asker != nil {
-		all = append(all, NewAskUser(host.Asker))
-	}
-	if host.Presenter != nil {
-		all = append(all, NewPresentDocument(root, mounts, host.Presenter))
-	}
-	return all
+	return kept
 }
 
 // readMounts pairs the host's three read-only mount seams into the one value every read tool
@@ -450,12 +524,13 @@ func trimmedNames(names []string) []string {
 // only valid entry is a typo.
 //
 // The three host-delegate tools are included by CONSTRUCTION rather than by composition: a nil
-// Asker, Presenter or SkillLookup leaves them out of a registry (graceful degradation), but their
-// names are still names apogee knows — so the answer is a fact about the build, not about one
-// Driver's wiring. TestKnownToolNamesCoversTheComposedSet pins it to the assembly above.
+// Asker, Presenter or SkillLookup leaves them out of a registry (graceful degradation, backedTools),
+// but builtinTools constructs them regardless, so their names are still names apogee knows — the
+// answer is a fact about the build, not about one Driver's wiring, and it is derived from the one
+// list rather than appended by hand. TestKnownToolNamesCoversTheComposedSet pins it to the assembly
+// above.
 func KnownToolNames() []string {
 	all := builtinTools("", HostTools{})
-	all = append(all, NewLoadSkill(nil), NewAskUser(nil), NewPresentDocument("", ReadMounts{}, nil))
 	names := make([]string, 0, len(all))
 	for _, tool := range all {
 		names = append(names, tool.Name())

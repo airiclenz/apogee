@@ -14,7 +14,6 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -216,7 +215,7 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the
 // workspace (with the same host configuration the Agent would derive from Config — the
 // url-safety guard, the web-search endpoint, the Asker, the Presenter, the skill catalog, the
-// credential scrub) PLUS
+// credential scrub — through the one composer the engine uses, tools.HostToolsOf) PLUS
 // the dynamically discovered MCP tools registered on top. MCP tools are DYNAMIC (discovered from a
 // server at runtime), so they are NOT in DefaultTools — they ride the registry as classMCP
 // ExternalEffectTools the dispatch disposition gates in Auto. A duplicate name (an MCP server's
@@ -236,68 +235,11 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // else entirely — a reconnect, a model switch — carries the gate this session is actually on.
 func registryWithMCP(workspace string, cfg apogee.Config, seatChoice bool,
 	mcpTools []apogee.Tool) *apogee.ToolRegistry {
-	registry := tools.NewDefaultRegistryWithHost(workspace, hostToolsFor(cfg, seatChoice))
+	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostToolsOf(cfg, seatChoice))
 	for _, t := range mcpTools {
 		if err := registry.Register(t); err != nil {
 			fmt.Fprintf(os.Stderr, "apogee: skipping MCP tool %q: %v\n", t.Name(), err)
 		}
 	}
 	return registry
-}
-
-// hostToolsFor is the host layer registryWithMCP hands the built-in tool set — every policy the
-// ENGINE would have derived from the same Config (internal/agent's hostTools), plus the seat-choice
-// gate the engine has no field for.
-//
-// It is a function of its own rather than a literal inside the assembly above so a test can read the
-// composition back: the two composers are field-identical bar SubAgentSeatChoice, and a field added
-// to tools.HostTools that only one of them fills is how a configured URL deny, credential scrub or
-// read root silently stops applying on the MCP path (TestHostToolsForFillsEveryHostField).
-func hostToolsFor(cfg apogee.Config, seatChoice bool) tools.HostTools {
-	return tools.HostTools{
-		// The `url-safety:` host layer, off the same Config the engine would have read it from and
-		// through the same constructor — this hand-assembly must not be the one path on which a
-		// configured deny quietly stops applying, or connecting an MCP server would re-open a host
-		// the operator closed in every session without MCP.
-		URLGuard:          security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
-		WebSearchEndpoint: cfg.WebSearchEndpoint,
-		Asker:             cfg.Asker,
-		Presenter:         cfg.Presenter,
-		// The catalog load_skill searches (ADR 0065), off the same Config the engine would have
-		// read it from — this hand-assembly must not be the one path on which connecting an MCP
-		// server takes the skill door away from the model.
-		SkillLookup: cfg.SkillLookup,
-		Disabled:    cfg.DisabledTools,
-		// The two rungs above the global disable — the `tools.enabled:` lift and the bound model's
-		// `tools:` axis (ADR 0057) — off the same Config the engine would have read them from. This
-		// hand-assembly must not be the one path on which a configured roster quietly stops
-		// applying, or connecting an MCP server would silently re-broaden the menu in every
-		// session without MCP.
-		Enabled:       cfg.EnabledTools,
-		ProfileRoster: cfg.Profile.Tools,
-		// The credential variables the execution tools must drop, off the same Config the engine
-		// would have read them from — this hand-assembly must not be the one place a subprocess
-		// inherits the operator's `api-key-env:` key, or connecting an MCP server would quietly
-		// re-open the exposure a session without MCP is closed against.
-		SecretEnvVars: cfg.SecretEnvVars,
-		// The read-only mounts the session opened up (the skill source dirs and the probed
-		// toolchain roots), off the same Config
-		// the engine would have read them from — this hand-assembly must not be the one place a
-		// read tool loses them, or the model could read a skill's bundled files in a session
-		// without MCP and not in one with it.
-		ExtraReadRoots: cfg.ExtraReadRoots,
-		// And the session's live scratch dir as a read root, off the same Config for the same
-		// reason: an MCP session must not be the one place the dir the orientation announces
-		// writable is a dir the read tools refuse.
-		ScratchReadRoot: cfg.ScratchReadRoot,
-		// And the pathless mounts beside them (the shipped skills' `shipped:<id>` tree), off the
-		// same Config for the same reason: an MCP session must not be the one place a shipped
-		// skill's announced files: line names a folder the read tools refuse.
-		VirtualReadRoots: cfg.VirtualReadRoots,
-		// And whether sub_agent publishes the `run_on` Delegation seat (ADR 0069) — the
-		// `sub-agents-choice:` gate, which reaches the engine's own build through nothing at all, so
-		// this hand-assembly must not be the one path on which connecting an MCP server takes the
-		// seat choice away from the model.
-		SubAgentSeatChoice: seatChoice,
-	}
 }

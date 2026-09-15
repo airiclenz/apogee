@@ -2,7 +2,11 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"net"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -519,6 +523,145 @@ func TestHostToolsSubAgentSeatChoice_ShapesTheRegisteredSubAgent(t *testing.T) {
 			}
 		})
 	}
+}
+
+// HostToolsOf is the ONE translation from domain.Config into HostTools, shared by the engine's own
+// default roster (internal/agent) and cmd/apogee's MCP-aware registryWithMCP. Before it existed the
+// two composed the struct by hand, field-identical bar SubAgentSeatChoice, and nothing structural
+// held them that way: a tool-NAMES equivalence between the two registries cannot, because a name
+// depends only on the roster rungs and the three nil-gated delegates, so a dropped URLGuard,
+// SecretEnvVars scrub or read-root mount leaves every tool name identical while the user's policy
+// quietly stops applying on one of the two paths.
+//
+// So the pin is field-by-field: with every Config field this composer reads set to something
+// non-zero and seat choice on, every field of the struct it returns must come back non-zero. A field
+// added to HostTools and missed by the composer fails here.
+func TestHostToolsOfFillsEveryHostField(t *testing.T) {
+	t.Parallel()
+
+	host := reflect.ValueOf(HostToolsOf(domain.Config{
+		URLAllowHosts:     []string{"allowed.example"},
+		URLDenyHosts:      []string{"denied.example"},
+		WebSearchEndpoint: "https://search.example/v1",
+		Asker:             stubAsker{},
+		Presenter:         stubPresenter{},
+		SkillLookup:       &stubLookup{},
+		DisabledTools:     []string{"run_terminal_cmd"},
+		EnabledTools:      []string{"web_search"},
+		Profile:           domain.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"console_open"}}},
+		SecretEnvVars:     []string{"SOME_PROVIDER_KEY"},
+		ExtraReadRoots:    func() []string { return []string{t.TempDir()} },
+		ScratchReadRoot:   func() string { return t.TempDir() },
+		VirtualReadRoots:  func() map[string]fs.FS { return nil },
+	}, true))
+	for i := range host.NumField() {
+		if host.Field(i).IsZero() {
+			t.Errorf("HostToolsOf left HostTools.%s zero for a Config that sets every field it "+
+				"reads — a host policy that stops here is one the operator configured and never got",
+				host.Type().Field(i).Name)
+		}
+	}
+}
+
+// TestHostToolsOfLeavesSeatChoiceToTheCaller pins the one field Config does not carry: the engine
+// passes false and the composition root the configured value, and nothing on Config can flip it.
+func TestHostToolsOfLeavesSeatChoiceToTheCaller(t *testing.T) {
+	t.Parallel()
+
+	for _, seatChoice := range []bool{false, true} {
+		if got := HostToolsOf(domain.Config{}, seatChoice).SubAgentSeatChoice; got != seatChoice {
+			t.Errorf("HostToolsOf(cfg, %v).SubAgentSeatChoice = %v", seatChoice, got)
+		}
+	}
+}
+
+// TestHostToolsCarriesSecretEnvVars covers the credential half of that translation: the variables a
+// host resolved out of its configured `api-key-env:` entries (two servers naming distinct ones) have
+// to reach HostTools, because that is the only route by which the execution tools learn to drop them
+// from a subprocess environment.
+func TestHostToolsCarriesSecretEnvVars(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  domain.Config
+		want []string
+	}{
+		{
+			name: "two configured key variables both reach the tools",
+			cfg:  domain.Config{SecretEnvVars: []string{"FIRST_KEY", "SECOND_KEY"}},
+			want: []string{"FIRST_KEY", "SECOND_KEY"},
+		},
+		{
+			name: "a config naming none leaves the scrub at apogee's own",
+			cfg:  domain.Config{},
+			want: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := HostToolsOf(tc.cfg, false).SecretEnvVars; !slices.Equal(got, tc.want) {
+				t.Errorf("HostToolsOf().SecretEnvVars = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts covers the network half of that
+// translation. Until this key existed the composer handed the tools a zero URLGuard, so the whole
+// question was whether the SSRF floor was on; now the operator's own `url-safety:` hosts ride
+// Config, and they reach the network tools through this one field or not at all. The deny is
+// spelled the way a human writes one into config.yaml (mixed case, a trailing root dot) because
+// the entry has to be normalised on the way in — an un-normalised list assembles a guard that
+// looks configured and matches nothing.
+func TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts(t *testing.T) {
+	t.Parallel()
+
+	// Every name resolves to a public address, so the string-level allow/deny decisions under
+	// test are reached without touching DNS.
+	publicResolver := func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+
+	t.Run("a configured deny reaches the guard", func(t *testing.T) {
+		t.Parallel()
+
+		guard := HostToolsOf(domain.Config{URLDenyHosts: []string{"Blocked.EXAMPLE."}}, false).
+			URLGuard.WithResolver(publicResolver)
+
+		if err := guard.Check("https://blocked.example/x"); !errors.Is(err, security.ErrURLBlocked) {
+			t.Errorf("the configured deny never reached the tools' guard: %v", err)
+		}
+		if err := guard.Check("https://elsewhere.example/x"); err != nil {
+			t.Errorf("the deny entry blocked a host it does not name: %v", err)
+		}
+	})
+
+	t.Run("a configured allow list reaches the guard", func(t *testing.T) {
+		t.Parallel()
+
+		guard := HostToolsOf(domain.Config{URLAllowHosts: []string{"docs.example.com"}}, false).
+			URLGuard.WithResolver(publicResolver)
+
+		if err := guard.Check("https://docs.example.com/x"); err != nil {
+			t.Errorf("the allowed host was refused: %v", err)
+		}
+		if err := guard.Check("https://elsewhere.example/x"); !errors.Is(err, security.ErrURLBlocked) {
+			t.Errorf("a host outside the configured allow list was permitted: %v", err)
+		}
+	})
+
+	t.Run("a config naming no hosts leaves the reach as it was", func(t *testing.T) {
+		t.Parallel()
+
+		guard := HostToolsOf(domain.Config{}, false).URLGuard
+		if guard.AllowHosts != nil || guard.DenyHosts != nil {
+			t.Errorf("an unconfigured Config produced host lists: allow=%q deny=%q", guard.AllowHosts, guard.DenyHosts)
+		}
+	})
 }
 
 // stubAsker is a no-op Asker for the registry tests (it is never called — the tests only

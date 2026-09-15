@@ -366,8 +366,13 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 // assembly answers "which tools does this Agent start with" and "which tools does it have now that
 // another model is bound", exactly as processing.ParserFor answers the parse seam's version of both
 // (applyProfile). Startup and switch therefore cannot disagree about what a roster means.
+//
+// The Config → HostTools translation is tools.HostToolsOf — the one composer the composition root's
+// MCP-aware assembly shares, so no host policy can apply on one path and not the other. The engine
+// passes seatChoice false: `sub-agents-choice:` shapes the sub_agent schema a Driver publishes, and
+// Config carries no field for it because the engine reads no config of its own (ADR 0031).
 func defaultRoster(cfg domain.Config) *domain.ToolRegistry {
-	return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, hostTools(cfg))
+	return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, tools.HostToolsOf(cfg, false))
 }
 
 // composesDefaultRoster reports whether the tool set an Agent built from cfg is the engine's OWN
@@ -385,75 +390,6 @@ func defaultRoster(cfg domain.Config) *domain.ToolRegistry {
 // the assembly needs.
 func composesDefaultRoster(cfg domain.Config) bool {
 	return cfg.Tools == nil && cfg.WorkspaceDir != ""
-}
-
-// hostTools builds the host-supplied tool configuration (P3.11) from Config: the url-safety
-// guard the network tools filter through (built from the configured host lists — its default-on
-// SSRF floor always applies in ALL modes, an app-level guard independent of OS confinement,
-// and configuration can only tighten it), the configured
-// web-search endpoint (empty ⇒ web_search's built-in DuckDuckGo default; "off" disables it),
-// the Asker delegate (nil ⇒ ask_user is not registered), the Presenter delegate (nil ⇒
-// present_document is not registered — ADR 0019), the skill catalog the model may search (nil ⇒
-// load_skill is not registered — ADR 0065), the three rungs of the roster ladder — the
-// global `tools.disabled:`/`tools.enabled:` lists and the bound model's profile axis, over the
-// build's own default-off declarations (ADR 0057; all empty ⇒ the whole built-in set) —, the
-// credential variable names the execution tools scrub from a
-// subprocess environment (empty ⇒ apogee's own alone), and the extra read-only roots the read
-// tools may reach (nil ⇒ workspace-only).
-//
-// The url-safety policy comes from Config.URLAllowHosts / URLDenyHosts (`url-safety:`) and is
-// still deliberately NOT seeded from ConfineNetworkAllow: that field is the OS confinement box's
-// network allow-list (CIDRs the confined SUBPROCESS may reach), a different concept from the
-// in-process tools' host allow/deny — conflating them would silently restrict the network tools to
-// the confinement list. Empty lists ⇒ the zero guard; the SSRF floor is the security-relevant
-// default and is on regardless, because the config layer can only tighten (security.NewURLGuard).
-func hostTools(cfg domain.Config) tools.HostTools {
-	return tools.HostTools{
-		// Built through the shared constructor rather than filled here, because HostTools is
-		// composed by hand in a second place too (cmd/apogee's MCP-aware assembly) and a
-		// hand-copied fill is how one of the two paths silently stops applying the user's policy.
-		URLGuard:          security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
-		WebSearchEndpoint: cfg.WebSearchEndpoint,
-		Asker:             cfg.Asker,
-		Presenter:         cfg.Presenter,
-		// The catalog load_skill searches on the model's behalf (ADR 0065). Like the two delegates
-		// above it is carried, never consulted here: nil ⇒ the tool is simply not in the roster.
-		SkillLookup: cfg.SkillLookup,
-		// The GLOBAL rung of the roster ladder (`tools.disabled:` / `tools.enabled:`, ADR 0057):
-		// the disabled names are left out of the set this builds, which is the whole of that key —
-		// an Agent cannot offer or dispatch a tool its registry does not hold — and the enabled
-		// names put back what the BUILD leaves off the default menu (a tool registered
-		// domain.DefaultOffTool). Both are overridden per tool by the profile axis below, and a
-		// name in both is a conflict disabled wins; reporting that, and an unknown name, is the
-		// host's job (tools.RosterConflicts / tools.KnownToolNames), never a refusal to build.
-		Disabled: cfg.DisabledTools,
-		Enabled:  cfg.EnabledTools,
-		// The MOST SPECIFIC rung: the bound model's own roster axis, the third axis of the Model
-		// profile the composition root already resolved for this model (ADR 0057). It travels on
-		// Config.Profile rather than in a field of its own precisely so it cannot drift from the
-		// other two axes — one resolved profile, three axes, one binding — and it is what makes a
-		// tool off for the small class and on for a big model. A zero delta says nothing, which
-		// keeps a zero profile the byte-identical anchor here too.
-		ProfileRoster: cfg.Profile.Tools,
-		// The caller-named half of the execution tools' credential scrub (`api-key-env:`, ADR 0047):
-		// the variables the host's configured key sources read, dropped from every subprocess
-		// environment beside apogee's own APOGEE_API_KEY. Empty ⇒ apogee's own alone, the scrub as
-		// it was before the host could name any.
-		SecretEnvVars: cfg.SecretEnvVars,
-		// The read-only mounts beside the workspace fence, handed through verbatim: the engine
-		// carries the func without evaluating it, so WHICH dirs are mounted stays the host's
-		// question and stays live per call (Config.ExtraReadRoots). nil ⇒ workspace-only.
-		ExtraReadRoots: cfg.ExtraReadRoots,
-		// The session's live scratch dir as a read root — carried the same way, so the one dir the
-		// orientation announces writable is readable back through every read tool, and WHERE it
-		// currently is stays the host's question, live per call (Config.ScratchReadRoot). nil ⇒
-		// nothing added.
-		ScratchReadRoot: cfg.ScratchReadRoot,
-		// The read-only mounts that have no host path — the same seam, carried the same way: the
-		// engine holds the func without evaluating it, so WHICH trees are mounted stays the host's
-		// question and stays live per call (Config.VirtualReadRoots). nil ⇒ none.
-		VirtualReadRoots: cfg.VirtualReadRoots,
-	}
 }
 
 // resumeAgent rebuilds an Agent from snap, then restores its loop state through the shared

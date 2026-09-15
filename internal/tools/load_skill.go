@@ -46,7 +46,7 @@ type loadSkillArgs struct {
 // It is default-ON and rides the ordinary roster lever (`tools.disabled:` / `tools.enabled:` and a
 // profile's `tools:` axis, ADR 0057); it is not a Reaction, and Bypass does not touch it.
 //
-// A nil SkillLookup means the tool is never registered (builtinTools omits it), so by construction
+// A nil SkillLookup means the tool is never registered (DefaultToolsWithHost drops it), so by construction
 // Execute always has a non-nil lookup; the defensive nil-check keeps a hand-built registry that
 // registers it anyway from panicking. Stateless across Turns (ADR 0008): one query, one answer, and
 // nothing about a call survives into the next.
