@@ -185,7 +185,8 @@ type Agent struct {
 	// the one field held by POINTER rather than by value: newChildAgent hands the child the
 	// PARENT's holder, so one latch serves the whole tree and a host pushing to the top-level
 	// Agent reaches a depth-2 spawn too. It carries its own lock for the same reason the five
-	// above carry theirs, and is never nil on a constructed Agent (newAgent allocates it).
+	// above carry theirs, and is never nil on a constructed Agent (construction seeds it: a fresh
+	// one at the top level, the parent's for a delegate — construct.go).
 	delegation *delegationLatch
 
 	// seatMu guards seat — what the orientation block tells the model about the Sub-agent server as
@@ -252,7 +253,7 @@ type Agent struct {
 	// usage is THIS Agent's cumulative token accounting — the running sum every UsageEvent it
 	// emits is stamped with, so a Driver reads session totals off the latest event per agent
 	// instead of summing a stream (domain.UsageEvent). It counts this Agent's own calls only:
-	// newChildAgent builds a child through newAgent, which gives it a fresh zero tally, so a
+	// newChildAgent builds a child through newDelegateAgent, which gives it a fresh zero tally, so a
 	// sub-agent's events carry CHILD-LOCAL totals and per-agent grouping stays with the observer,
 	// which already has the Depth and CallID stamps to group by. Like tokens it is per-Session
 	// and NOT serialized — a resumed Agent counts from zero.

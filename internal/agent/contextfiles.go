@@ -143,8 +143,15 @@ func validateContextFileNames(names []string) error {
 // It reads the LIVE name list (contextFileList), so a mid-session SetContextFiles is picked up
 // here — at the next boundary — and nowhere earlier: the names move when the session does.
 func (a *Agent) reloadContextFiles() {
-	a.contextFiles = loadContextFiles(a.cfg.WorkspaceDir, a.contextFileList())
+	a.contextFiles = contextFileLoader(a.cfg.WorkspaceDir, a.contextFileList())
 }
+
+// contextFileLoader is the one seam reloadContextFiles reads the workspace through. It is a var
+// solely so a test can prove a code path performs NO read of the workspace context files — a
+// delegate's construction, which is handed its parent's cache instead (newDelegateAgent) — by
+// counting through it; nothing outside a test writes it, and the test that does runs serially
+// (never t.Parallel) and restores it.
+var contextFileLoader = loadContextFiles
 
 // contextFileHeader introduces each file's content in the standing system message, so a model
 // reading one merged block can tell whose conventions it is being handed — and where one file's

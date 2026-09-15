@@ -10,14 +10,17 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/provider"
-	"github.com/airiclenz/apogee/internal/tasklist"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // ----------------------------------------------------------------------------
@@ -870,6 +873,44 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	return result, dispatchDone
 }
 
+// delegation is everything a delegate IS that its Config cannot say — the constructor input
+// newDelegateAgent builds a child from (construct.go). newChildAgentOn composes one value per spawn
+// and hands it over whole; the constructor copies each fact into the Agent's runtime fields ONCE, so
+// a child is never built as a top-level Agent and then overwritten into a delegate. The three kinds
+// of fact it carries: the child's IDENTITY and BOUNDS (depth, the spawning call, its task and name,
+// the three delegate caps), its SEAT facts (the fallback note, the dialect and client it speaks
+// over), and the HANDLES it shares with the parent by reference — where a fresh instance would strand
+// state the parent's session owns (the undo journal, ADR 0051; the Console registry, ADR 0059 §6;
+// the Delegation-target latch, ADR 0045; the context-file cache, ADR 0026) or lose a chain (the
+// guards' shared dangerous floor, the tighten-only mode view). It deliberately carries NO task-list
+// handle: the child gets its own fresh one from construction (ADR 0072, ratified call), because a
+// delegation is its own run with its own decomposition, and a child ticking rows off the parent's
+// checklist would rewrite a list the parent is still working from.
+type delegation struct {
+	depth       int    // parent+1, so the child's events nest (ADR 0013)
+	spawnCallID string // the sub_agent call being served — the child's run identity, stamped on every Event it emits (domain.EventBase.CallID)
+	task        string // that call's delegated task — the child's identity in words, on every Approval it raises
+	name        string // the call's optional short name, already normalised by delegationName; "" = unnamed
+
+	stepCap  int              // the delegate step cap at spawn (Config.Delegation.MaxSteps); 0 = unbounded
+	tokenCap int              // and its two siblings, read at spawn for the same reason
+	timeCap  time.Duration    //
+	now      func() time.Time // the clock the time bound reads — the parent's, so a pinned parent pins the child
+
+	seatFallback  bool                   // asked for the Sub-agent server and got the session one (ADR 0069 decision 9)
+	effortDialect provider.EffortDialect // the wire shape of an effort intent on the server this child speaks to (ADR 0060 §3)
+	upstreamOwned bool                   // a routed spawn dialled its own client and the child closes it; an unrouted one borrows the session's
+	tap           *wireTap               // the Inspector seam of a client this spawn BUILT, bound once the child's identity is stamped; nil when unrouted
+
+	consoleOwner   string             // the engine-minted Console privilege key (console.Registry.MintOwner), never the model-chosen call id
+	guards         security.Guards    // Guards.ForSubAgent: fresh live state over the parent's shared dangerous floor
+	contextFiles   []contextFile      // the PARENT's cache, verbatim — a sub-agent is not a session boundary, so the child never re-reads the workspace
+	parentLiveMode func() domain.Mode // the parent's effectiveMode accessor — the tighten-only view that composes down the chain (ADR 0013)
+	latch          *delegationLatch   // the parent's holder, shared — or an empty one for a session-seated child (ADR 0069 decision 3)
+	journal        *undo.Journal      // the parent's undo journal, shared: delegated writes belong to the current Exchange's undo step (ADR 0051)
+	consoles       *console.Registry  // the engine's one Console registry, shared: the cap of four is per engine, not per delegation (ADR 0059 §6)
+}
+
 // newChildAgent constructs the nested Agent for a sub-agent, threading this Agent's privileges
 // bounded (ADR 0005/0013): the parent's LIVE Mode, LIVE confine-to-workspace flag, LIVE Bypass and
 // LIVE auto-Compaction gate at spawn (Shift+Tab, /confine and the settings surface can move any of
@@ -1016,10 +1057,9 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// ownsUpstream travels with the client below: a routed spawn DIALS one and hands the child the
 	// right to tear it down, an unrouted spawn borrows the session's and hands over nothing.
 	ownsUpstream := false
-	// The routed server's effort dialect, kept out of the block below because the field it settles
-	// is written after construction (see the assignment past newAgent). The zero is the honest
-	// "this spawn is not routed, or its target names no dialect" — both leave the parent's shape
-	// standing.
+	// The routed server's effort dialect, kept out of the block below because the value it settles
+	// is composed after it (delegation.effortDialect). The zero is the honest "this spawn is not
+	// routed, or its target names no dialect" — both leave the parent's shape standing.
 	routedDialect := provider.EffortDialectNone
 	// The latch is read for every seat but the session one. seatSession is the model naming the
 	// parent's own Upstream, so a target latched a moment before this spawn must not overrule it —
@@ -1084,98 +1124,80 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 		ownsUpstream = true
 	}
 
-	child, err := newAgent(childCfg, upstream)
-	if err != nil {
-		return nil, err
+	// Everything the child is that its Config cannot say is composed HERE, once, as the one value
+	// its constructor reads (delegation): its identity, its bounds, its seat facts, and every handle
+	// it shares with the parent by reference rather than owning afresh. Nothing is written to the
+	// child after it is built.
+	d := &delegation{
+		depth:        a.depth + 1,
+		spawnCallID:  spawnCallID,
+		task:         task,
+		name:         name,
+		seatFallback: seatFallback,
+		// The delegate step cap, seeded HERE and only here: a top-level Agent stays at 0 (uncapped)
+		// however the key is set, because the bound is on delegates alone. It rides childCfg, which is
+		// the parent's whole Config, so a ROUTED spawn takes the same cap as an unrouted one — the key
+		// is top-level, not per-server (ADR 0045 replaces the dial facts, the two posture keys and the
+		// server's effort dialect — no bound on spend) — and a grandchild inherits it the same way.
+		// runSubAgent may lower it for this one delegation from the spawning call's max_steps. Its two
+		// siblings ride the same Config for the same reasons and are read here at SPAWN, so a value
+		// the settings surface moved bounds the children spawned after the move and never one already
+		// running.
+		stepCap:  childCfg.Delegation.MaxSteps,
+		tokenCap: childCfg.Delegation.MaxTokens,
+		timeCap:  childCfg.Delegation.Timeout,
+		// The clock the time bound reads is the parent's, so a test that pins the parent's now has
+		// pinned the child's.
+		now: a.now,
+		// The wire shape an effort intent is expressed in. The FLOOR is the parent's LIVE field rather
+		// than the childCfg copy the child's Config carries. The field is the authority the way it is
+		// everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two
+		// together — so reading the field is what makes the child speak the shape the parent's own
+		// next request will speak, whatever a rebind arriving around this spawn leaves on the copy.
+		// Read the copy instead and every effort-gated decision downstream (the compaction
+		// summarizer's EffortOff, compact.go) could be taken against the wrong server.
+		//
+		// Routing DOES change the answer: a dialect is a property of the SERVER (ADR 0060 §3) and a
+		// routed child is on another one, so the target names its own and the spawn takes it — the
+		// flagged entry's `effort-dialect:` pin, else the tell that server's own heartbeat saw.
+		// Handing a routed child the ORCHESTRATOR's shape is what made its summarizer ask for no
+		// reasoning in a field the grunt server ignores: the fold then spent the whole compaction cap
+		// thinking and faulted at every Turn boundary. A target that names NO dialect (the zero)
+		// leaves the parent's standing, which is exactly what a routed child spoke before the spawn
+		// could tell the difference.
+		effortDialect: a.effortDialect,
+		upstreamOwned: ownsUpstream,
+		tap:           tap,
+		// The Console privilege key, minted by the registry that compares it rather than taken from
+		// the spawning call's id: that id is the model's to choose, and a text-format parser numbering
+		// calls per Turn can hand two siblings the same one — a collision that would let one sibling's
+		// end reap the other's shells (ADR 0059 §6). A nil registry mints "", which is the top-level
+		// key; that is harmless on a child, because an engine with no registry holds no Console.
+		consoleOwner: a.consoles.MintOwner(),
+		guards:       a.guards.ForSubAgent(),
+		contextFiles: a.contextFiles,
+		// A tighten-only view of the parent's EFFECTIVE mode (ADR 0013): the child's disposition takes
+		// TighterMode(parentEffective, spawnMode), so a parent tightening mid-delegation reaches the
+		// child while a parent loosening cannot loosen it. It is the parent's effectiveMode accessor —
+		// not its own Mode — so the view COMPOSES down the chain: a depth-2 grandchild reads its
+		// parent's effective mode, which already folds in the top-level agent's live mode, and a
+		// top-level tightening therefore reaches every descendant rather than stopping at depth 1.
+		// Capturing an accessor (not the raw field/mutex) keeps every read modeMu-guarded at the agent
+		// that owns the field, so the child reads race-free but has no seam to mutate anything.
+		parentLiveMode: a.effectiveMode,
+		// The Delegation-target latch is shared by HANDLE, not copied (ADR 0045): the child holds the
+		// parent's holder, so a target the host pushes after this spawn is the one the child's OWN
+		// delegations read, and routing reaches every depth from the one place a host pushes to. A
+		// snapshot instead would freeze depth≥1 spawns on whatever was current when their parent was
+		// built — and "identity once there" (a routed child's delegations go to the same server) is
+		// exactly what one shared latch gives for free.
+		latch:    a.delegation,
+		journal:  a.journal,
+		consoles: a.consoles,
 	}
-	// A routed child closes the client it dialled; an unrouted one must never close the session's
-	// out from under the parent that is still speaking over it (Agent.Close).
-	child.ownsUpstream = ownsUpstream
-	// And whether the seat it got is the seat it was asked for — the child's own fact, because the
-	// child's run is what the note qualifies and delegationResult reads it off the child.
-	child.seatFallback = seatFallback
-	// The wire shape an effort intent is expressed in. The FLOOR is the parent's LIVE field rather
-	// than the childCfg copy newAgent just seeded it from. The field is the authority the way it is
-	// everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two
-	// together — so reading the field is what makes the child speak the shape the parent's own next
-	// request will speak, whatever a rebind arriving around this spawn leaves on the copy. Read the
-	// copy instead and every effort-gated decision downstream (the compaction summarizer's
-	// EffortOff, compact.go) could be taken against the wrong server.
-	//
-	// Routing DOES change the answer, and that is what this line was wrong about before: a dialect
-	// is a property of the SERVER (ADR 0060 §3) and a routed child is on another one, so the target
-	// names its own and the spawn takes it — the flagged entry's `effort-dialect:` pin, else the
-	// tell that server's own heartbeat saw. Handing a routed child the ORCHESTRATOR's shape is what
-	// made its summarizer ask for no reasoning in a field the grunt server ignores: the fold then
-	// spent the whole compaction cap thinking and faulted at every Turn boundary. A target that
-	// names NO dialect (the zero) leaves the parent's standing, which is exactly what a routed child
-	// spoke before this line could tell the difference; an unrouted spawn never reaches the second
-	// line at all.
-	child.effortDialect = a.effortDialect
 	if routedDialect != provider.EffortDialectNone {
-		child.effortDialect = routedDialect
+		d.effortDialect = routedDialect
 	}
-	// The child's token estimator needs no reset for a routed spawn — the reason SwitchUpstream and
-	// Rebind reset theirs (a chars→token calibration that described the departed model) cannot
-	// arise here: newAgent seeds every child with a fresh apogeectx.NewTokenEstimator, and
-	// newChildAgent never copies the parent's, so a routed child starts uncalibrated by
-	// construction.
-	child.depth = a.depth + 1
-	// The delegate step cap, seeded HERE and only here: a top-level Agent stays at 0 (uncapped)
-	// however the key is set, because the bound is on delegates alone. It rides childCfg, which is
-	// the parent's whole Config, so a ROUTED spawn takes the same cap as an unrouted one — the key
-	// is top-level, not per-server (ADR 0045 replaces the dial facts, the two posture keys and the
-	// server's effort dialect — no bound on spend) — and a grandchild inherits it the same way. runSubAgent may lower it for this one
-	// delegation from the spawning call's max_steps.
-	child.stepCap = childCfg.Delegation.MaxSteps
-	// Its two siblings ride the same Config for the same reasons — top-level keys, not per-server,
-	// inherited by a grandchild the same way — and are read here at SPAWN, so a value the settings
-	// surface moved bounds the children spawned after the move and never one already running.
-	child.tokenCap = childCfg.Delegation.MaxTokens
-	child.timeCap = childCfg.Delegation.Timeout
-	// The clock the time bound reads is the parent's, so a test that pins the parent's now has
-	// pinned the child's — newAgent seeded time.Now, which no test can move.
-	child.now = a.now
-	// And the child's other structural bound on runaway context: it folds under budget pressure at
-	// quiescent TURN boundaries, not only at Exchange boundaries (shouldAutoCompact's S2 guard). A
-	// delegation is ONE Exchange from its first Turn to its report, so the boundary the main loop's
-	// trigger waits for never arrives for a child — without this its history simply grows until the
-	// window is blown. Set on EVERY child, routed or not: it is the child's contract, not a
-	// Reaction and not a per-server posture, so there is no key to disagree about.
-	child.midExchangeCompaction = true
-	child.callID = spawnCallID
-	// The Console privilege key, minted by the registry that compares it rather than taken from
-	// the spawning call's id: that id is the model's to choose, and a text-format parser numbering
-	// calls per Turn can hand two siblings the same one — a collision that would let one sibling's
-	// end reap the other's shells (ADR 0059 §6). A nil registry mints "", which is the top-level
-	// key; that is harmless on a child, because an engine with no registry holds no Console.
-	child.consoleOwner = a.consoles.MintOwner()
-	child.task = task
-	child.setName(name)
-	// Bind the routed spawn's own capture seam AFTER its identity is stamped, so its WireEvents
-	// carry the child's depth and spawning call id rather than the zero values newAgent left.
-	tap.bind(child)
-	child.guards = a.guards.ForSubAgent()
-	// The child belongs to the PARENT's session, so it speaks from the parent's context-file
-	// bytes: copy the cache over the one its own construction just read. A sub-agent is not a
-	// session boundary, so an AGENTS.md edited (or deleted) mid-delegation must not reach it.
-	child.contextFiles = a.contextFiles
-	// A tighten-only view of the parent's EFFECTIVE mode (ADR 0013): the child's disposition takes
-	// TighterMode(parentEffective, spawnMode), so a parent tightening mid-delegation reaches the
-	// child while a parent loosening cannot loosen it. It is the parent's effectiveMode accessor —
-	// not its own Mode — so the view COMPOSES down the chain: a depth-2 grandchild reads its
-	// parent's effective mode, which already folds in the top-level agent's live mode, and a
-	// top-level tightening therefore reaches every descendant rather than stopping at depth 1.
-	// Capturing an accessor (not the raw field/mutex) keeps every read modeMu-guarded at the agent
-	// that owns the field, so the child reads race-free but has no seam to mutate anything.
-	child.liveMode = a.effectiveMode
-	// The Delegation-target latch is shared by HANDLE, not copied (ADR 0045): the child holds the
-	// parent's holder, so a target the host pushes after this spawn is the one the child's OWN
-	// delegations read, and routing reaches every depth from the one place a host pushes to. A
-	// snapshot instead would freeze depth≥1 spawns on whatever was current when their parent was
-	// built — and "identity once there" (a routed child's delegations go to the same server) is
-	// exactly what one shared latch gives for free.
-	child.delegation = a.delegation
 	// — except for a child the model put on the SESSION seat, which is handed an EMPTY latch of its
 	// own (ADR 0069 decision 3 + ADR 0045 decision 1). The seat is offered at depth 0 only, so this
 	// child's own tool carries no `run_on` and it can neither confirm nor undo the placement; the
@@ -1184,35 +1206,9 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// send its grandchildren to the very server the model just steered this branch away from. The
 	// latch is empty and nothing ever writes it: the host pushes to the top-level Agent it built.
 	if seat == seatSession {
-		child.delegation = &delegationLatch{}
+		d.latch = &delegationLatch{}
 	}
-	// The undo journal is shared by HANDLE too, and for a reason of its own (ADR 0051, ratified
-	// call 8): a delegation is work the human asked for in the CURRENT Exchange, so the files a
-	// child writes are files that Exchange changed and belong in its undo step. Handing the child
-	// its own journal — which newAgent just built — would strand its writes in a journal nothing
-	// can reach, and `/undo` would silently leave delegated work in place. The journal is
-	// mutex-guarded, which is what makes one instance safe for a fan-out of siblings writing at
-	// once (ADR 0039); the child never opens a GROUP of its own (loop.go), so its records join
-	// the parent's current one however deep the delegation nests.
-	child.journal = a.journal
-	// The console registry is shared by HANDLE for the same structural reason and one of its own
-	// (ADR 0059 §6): the Consoles are the ENGINE's live processes, not a per-Agent resource, so
-	// one registry per engine is what makes the cap of four mean four across the whole tree rather
-	// than four per delegation. Ownership is not lost by the sharing — a Console records the
-	// engine-minted owner key of the run that opened it (dispatch stamps it from the ctx), so the
-	// child's Close reaps exactly the Consoles this delegation opened and leaves the parent's
-	// untouched.
-	child.consoles = a.consoles
-	// The task list, alone among the three, is NOT shared: the child gets its OWN fresh empty one
-	// (ADR 0072, ratified call). A delegation is its own run with its own decomposition, and a
-	// child ticking rows off — or replacing — the parent's checklist would rewrite a list the
-	// parent is still working from, with no id or ownership in the whole-list-replace shape to
-	// tell the two runs' rows apart. THIS LINE is the guarantee, not the absence of a tasks field
-	// from Config: newAgent already built the child one, so a future spawn path that forgets this
-	// assignment still gets a private list, and the assignment is here to say the privacy is
-	// intended rather than incidental.
-	child.tasks = tasklist.New()
-	return child, nil
+	return newDelegateAgent(childCfg, upstream, d)
 }
 
 // childWithheldTools are the two tools NO sub-agent is offered, at any depth and under any `tools`

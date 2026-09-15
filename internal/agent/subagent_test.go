@@ -2004,6 +2004,111 @@ func TestNewChildAgent_CompactsMidExchange(t *testing.T) {
 	}
 }
 
+// TestNewChildAgent_IsBuiltFromOneDelegationValue pins the construction contract behind every
+// spawn: newChildAgentOn composes ONE delegation value and newDelegateAgent copies it into the child
+// once — the child leaves construction complete, with its identity and bounds stamped, the parent's
+// handles shared by reference where the parent's session owns the state (journal, Console registry,
+// Delegation-target latch, context-file cache, clock) and fresh instances where the run is its own
+// (task list, isolated guards). The LIVE parent facts are read at spawn: the effort dialect is the
+// parent's field, not the Config copy, and the mode view is the parent's tighten-only accessor.
+func TestNewChildAgent_IsBuiltFromOneDelegationValue(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.Delegation.MaxSteps = 7
+	cfg.Delegation.MaxTokens = 9000
+	cfg.Delegation.Timeout = 3 * time.Minute
+	parent, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	pinned := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	parent.now = func() time.Time { return pinned }
+	parent.effortDialect = provider.EffortDialectReasoning // the LIVE field, deliberately apart from the Config copy
+	parent.contextFiles = []contextFile{{name: "AGENTS.md", content: "parent bytes", size: 12}}
+
+	child, err := parent.newChildAgent("c1", "summarise the repo", "summariser")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	defer func() { _ = child.Close() }()
+
+	// Identity and bounds, stamped once.
+	if child.depth != parent.depth+1 {
+		t.Errorf("child.depth = %d, want %d", child.depth, parent.depth+1)
+	}
+	if child.callID != "c1" || child.task != "summarise the repo" || child.displayName() != "summariser" {
+		t.Errorf("child identity = (%q, %q, %q), want (c1, summarise the repo, summariser)", child.callID, child.task, child.displayName())
+	}
+	if child.stepCap != 7 || child.tokenCap != 9000 || child.timeCap != 3*time.Minute {
+		t.Errorf("child bounds = (%d, %d, %v), want (7, 9000, 3m)", child.stepCap, child.tokenCap, child.timeCap)
+	}
+	if !child.midExchangeCompaction {
+		t.Error("a delegate folds mid-Exchange; the contract is set at construction")
+	}
+	if child.ownsUpstream || child.seatFallback {
+		t.Errorf("unrouted default-seat child: ownsUpstream = %v, seatFallback = %v, want both false", child.ownsUpstream, child.seatFallback)
+	}
+	if child.consoleOwner == "" {
+		t.Error("child.consoleOwner is empty; a delegate carries the engine-minted Console privilege key")
+	}
+	// Live parent facts, read at spawn.
+	if child.effortDialect != provider.EffortDialectReasoning {
+		t.Errorf("child.effortDialect = %q, want the parent's LIVE %q", child.effortDialect, provider.EffortDialectReasoning)
+	}
+	if child.liveMode == nil {
+		t.Error("child.liveMode is nil; a delegate reads its parent's effective mode through the tighten-only view")
+	}
+	if got := child.now(); !got.Equal(pinned) {
+		t.Errorf("child.now() = %v, want the parent's pinned clock %v", got, pinned)
+	}
+	// Handles shared by reference…
+	if child.journal != parent.journal {
+		t.Error("child.journal is not the parent's; delegated writes belong to the current Exchange's undo step (ADR 0051)")
+	}
+	if child.consoles != parent.consoles {
+		t.Error("child.consoles is not the parent's; one engine has one Console registry (ADR 0059 §6)")
+	}
+	if child.delegation != parent.delegation {
+		t.Error("child.delegation latch is not the parent's; routing reaches every depth from the one place a host pushes to (ADR 0045)")
+	}
+	if got := cachedContent(child.contextFiles, "AGENTS.md"); got != "parent bytes" {
+		t.Errorf("child context-file cache = %q, want the parent's %q", got, "parent bytes")
+	}
+	// …and the ones each run owns for itself.
+	if child.tasks == parent.tasks || child.tasks == nil {
+		t.Error("child.tasks must be a fresh list of its own (ADR 0072)")
+	}
+	if child.guards.Breaker == parent.guards.Breaker {
+		t.Error("child.guards shares the parent's live breaker; ForSubAgent isolates live state")
+	}
+}
+
+// TestNewChildAgentOn_SessionSeatGetsAnEmptyLatch: the one place the composed value departs from
+// sharing — a session-seated child holds an empty Delegation-target latch of its own, never the
+// parent's, so its grandchildren stay on the session server (ADR 0069 decision 3).
+func TestNewChildAgentOn_SessionSeatGetsAnEmptyLatch(t *testing.T) {
+	t.Parallel()
+
+	parent, err := newAgent(subAgentConfig(&recordingSink{}, domain.ModeAskBefore), &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	child, err := parent.newChildAgentOn(seatSession, "c1", "stay here", "")
+	if err != nil {
+		t.Fatalf("newChildAgentOn: %v", err)
+	}
+	defer func() { _ = child.Close() }()
+
+	if child.delegation == parent.delegation {
+		t.Error("a session-seated child shares the parent's latch; it must hold an empty one of its own")
+	}
+	if child.delegation == nil || child.delegation.snapshot() != nil {
+		t.Error("a session-seated child's latch must be present and empty")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // A child's output-capped reply is a fault, and the parent is told why
 // ---------------------------------------------------------------------------

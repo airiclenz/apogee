@@ -99,7 +99,11 @@ parent's cache, so a child is in the same session as its parent and reads the sa
 even if the file changed or was deleted on disk after the parent's session began. This is ADR 0023
 §7's inheritance posture ("a sub-agent is the same assistant on a smaller task",
 [ADR 0005](0005-sub-agent-privileges-are-bounded-by-the-parent.md)) with the extra property that
-§5's session scoping cannot be defeated by fanning out.
+§5's session scoping cannot be defeated by fanning out. *Amended 2026-09-15:* "copied rather than
+re-read" is now literal — until then the child's construction read the workspace once and threw the
+result away before the copy; a delegate is built from a `delegation` value that carries the parent's
+cache, its constructor never touches the loader, and a test counts the reads (plan `2026-09-15 - 00`,
+item 8).
 
 **7. Skips are silent, LOUD, or fatal, by whose mistake it is.** A **missing** file and an
 **empty/whitespace-only** file are skipped with no trace: absence is the common case, and there is no

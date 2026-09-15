@@ -219,7 +219,15 @@ NOTES (2026-09-15): `internal/agent/dispatch_test.go` is named in Files but hold
 
 Commit: `refactor(agent): drop the post-response subprocess permit row`
 
-## 8. A delegate is built from a `delegation` value
+## 8. A delegate is built from a `delegation` value — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the `delegation` value carries more fields than the plan's list names (`tokenCap`, `timeCap`, `now`, `effortDialect`, `upstreamOwned`, `tap`; `guards`, `contextFiles`, `journal`, `consoles`, `latch` spell out its `sharedHandles`; `seat` itself is not stored — it is consumed while composing the latch) — every one of the 20 writes `newChildAgentOn` made after `newAgent` moved into the value; the one deleted outright is `child.tasks = tasklist.New()` (the constructor's fresh list is the guarantee, stated on the type and on the literal).
+NOTES (2026-09-15): constructor shape — `newAgent(cfg, up)` keeps its signature and `newDelegateAgent(cfg, up, d)` is added beside it, both over one `buildAgent(cfg, up, d)`; the fields the two kinds hold differently are seeded (`seedTopLevel` / `delegation.seed`) rather than built-then-replaced; `reloadContextFiles` runs only for `d == nil`.
+NOTES (2026-09-15): no-read test taken through a loader seam (`contextFileLoader` package var in contextfiles.go, house pattern of `restreamHoldoff`), serial test with Cleanup restore — a directory-swap assertion alone cannot tell a read-then-overwrite from no read; verified the test fails on an unconditional reload (both assertions bite).
+NOTES (2026-09-15): `hookpermit_test.go` (named in Files) needed no edit — it fakes a child through `a.liveMode`, a runtime field the item leaves in place, and compiles and passes unchanged.
+NOTES (2026-09-15): consequential edit — internal/agent/agent.go: made necessary by the constructor split (two field comments: the latch is seeded by construction, a child is built through `newDelegateAgent`).
+NOTES (2026-09-15): consequential edit — internal/agent/doc.go: made necessary by the constructor split (package map rows for construct.go and subagent.go).
+NOTES (2026-09-15): consequential edit — docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md: made necessary by closing the discarded read (dated amendment under §6, "copied rather than re-read" is now literal).
 
 **What.** Add `delegation{depth, spawnCallID, task, name, stepCap, parentLiveMode, seat, seatFallback, consoleOwner, sharedHandles}` in `internal/agent/subagent.go`; `newAgent(cfg, upstream, d *delegation)` (`internal/agent/construct.go`) builds a child directly from it — no post-construction writes, `effortDialect` set once, context files taken from the parent (the child never re-reads them from disk — the discarded read is the in-passing defect), journal/consoles/tasks/guards handed in rather than replaced. `newChildAgentOn` shrinks to composing the value. Every field assignment `newChildAgentOn` makes today is enumerated at write time and either moves into the value or is deleted. Depends on item 1.
 

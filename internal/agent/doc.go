@@ -21,9 +21,11 @@
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
 // Submit, Step, Run, AbortExchange, Snapshot, the one live-generation swap (SetReactions) the
 // Bypass and Floor setters wrap, and the setters for mode, compaction,
-// context files and the parallel-agent cap. construct.go is newAgent: the validation order
-// every construction path shares — required fields, then the ordering-cycle, incompatibility
-// and requirements gates, then the Auto/Confinement gate (ADR 0012). state.go is agentState,
+// context files and the parallel-agent cap. construct.go is newAgent and newDelegateAgent over
+// one buildAgent: the validation order every construction path shares — required fields, then
+// the ordering-cycle, incompatibility and requirements gates, then the Auto/Confinement gate
+// (ADR 0012) — and the two seeders that tell a session root from a delegate built from a
+// delegation value. state.go is agentState,
 // the v1 payload inside domain's Session envelope, with the encode and the restore that
 // rebuilds a quiescent loop from it.
 //
@@ -68,7 +70,8 @@
 // and after each run and the warning line naming what changed (always on, ADR 0006 class).
 // subagent.go is the sub-agent
 // orchestrator — a nested Agent whose privileges are the parent's verbatim or stricter, with a
-// tool set that is a subset and never an expansion (ADR 0013). approvalcache.go is the Session's
+// tool set that is a subset and never an expansion (ADR 0013), composed per spawn as one
+// delegation value the constructor copies once. approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.
 //

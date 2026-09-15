@@ -23,12 +23,32 @@ var (
 	errMissingEndpoint = errors.New("apogee: Config.Endpoint is required")
 )
 
-// newAgent validates cfg and constructs a ready-to-Step Agent bound to up. The public
+// newAgent validates cfg and constructs a ready-to-Step TOP-LEVEL Agent bound to up. The public
 // New delegates here with the real provider client; white-box tests inject a deterministic
-// fake. Validation order is deliberate: required fields first, then the Auto/Confinement gate
-// (ADR 0012 — FSWrite-only AutoEligible), and finally the armed Reactions, which are validated
-// against the engine's own builtins once those exist (ADR 0076 D1).
+// fake. A delegate is built by newDelegateAgent beside it; both are the one construction path
+// (buildAgent) told which of the two it is building.
 func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
+	return buildAgent(cfg, up, nil)
+}
+
+// newDelegateAgent constructs a DELEGATE — a sub-agent one nesting level below the parent that
+// composed d (newChildAgentOn, subagent.go) — bound to up, which is the parent's own Upstream or
+// the client a routed spawn dialled. cfg is the parent's Config with the spawn's posture and dial
+// facts already applied; d is everything else the child is: its identity, its bounds and the
+// handles it shares with the parent. The constructor copies each of those facts into the Agent
+// once, so a child leaves here complete and nothing is written to it afterwards.
+func newDelegateAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent, error) {
+	return buildAgent(cfg, up, d)
+}
+
+// buildAgent is the one construction path behind newAgent (d == nil) and newDelegateAgent (d set).
+// Validation order is deliberate: required fields first, then the Auto/Confinement gate
+// (ADR 0012 — FSWrite-only AutoEligible), and finally the armed Reactions, which are validated
+// against the engine's own builtins once those exist (ADR 0076 D1). The two kinds of Agent differ
+// in exactly two places, both marked below: the fields a top-level Agent owns afresh and a delegate
+// takes from d (seedTopLevel / delegation.seed), and the context-file cache, which only a session
+// boundary fills from disk — a delegate is handed its parent's.
+func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -82,8 +102,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		cfg:                cfg,
 		upstream:           up,
 		tools:              resolveTools(cfg),
-		ownsToolSet:        composesDefaultRoster(cfg), // …and whether the engine may RE-compose it when the model's roster axis changes (ADR 0057)
-		guards:             security.NewDefaultGuards(),
+		ownsToolSet:        composesDefaultRoster(cfg),                                                                                                                // …and whether the engine may RE-compose it when the model's roster axis changes (ADR 0057)
 		mode:               cfg.Mode,                                                                                                                                  // seed the live, swappable mode from the construction config
 		confineToWorkspace: cfg.ConfineToWorkspace,                                                                                                                    // likewise the live, swappable blast-radius flag (/confine)
 		scratchDir:         cfg.ScratchDir,                                                                                                                            // and the live, session-following scratch root (SetScratchDir)
@@ -91,18 +110,23 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		compaction:         cfg.Context.CompactionEnabled,
 		prune:              cfg.Context.PruneToolResults,
 		contextFileNames:   cfg.ContextFiles,
-		parallelAgents:     cfg.ParallelAgents,                   // and the fan-out width the host resolved per bound server
-		effortDialect:      toProviderDialect(cfg.EffortDialect), // and the wire shape this server reads an effort intent in, so a Driver that never rebinds still speaks it (ADR 0060, ADR 0031)
-		delegation:         &delegationLatch{},                   // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045); newChildAgent replaces it with the parent's
+		parallelAgents:     cfg.ParallelAgents, // and the fan-out width the host resolved per bound server
 		textParser:         textParser,
 		stripper:           stripper,
-		tokens:             apogeectx.NewTokenEstimator(),
+		tokens:             apogeectx.NewTokenEstimator(),        // fresh for a delegate too: a routed child starts uncalibrated by construction, so it never needs the reset SwitchUpstream and Rebind perform
 		prompts:            domain.NewPromptSlot(),               // the one prompt surface this Agent tree queues on
-		journal:            undo.New(),                           // the per-Exchange undo record, empty and per-process (ADR 0051)
-		consoles:           console.New(),                        // the engine's live Consoles, empty and per-process (ADR 0059)
-		tasks:              tasklist.New(),                       // the model's checklist, empty and ENGINE-held: the tool may not hold it, because SwapTools rebuilds tool instances mid-session (ADR 0072, ADR 0008)
+		tasks:              tasklist.New(),                       // the model's checklist, empty and ENGINE-held: the tool may not hold it, because SwapTools rebuilds tool instances mid-session (ADR 0072, ADR 0008). A delegate's is fresh too — the delegation value carries no task-list handle by design (ADR 0072)
 		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
-		now:                time.Now,                             // the request-render clock for the system prompt's {{datetime}}
+	}
+	// The fields the two kinds of Agent hold differently: a top-level Agent OWNS each afresh — its
+	// guards, its undo journal, its Console registry, its Delegation-target latch, its clock and the
+	// dialect its own server reads — where a delegate takes the parent's by handle, plus the identity
+	// and bounds only a spawn can know. Seeded rather than written in the literal so neither kind
+	// builds an instance the other would throw away.
+	if d == nil {
+		a.seedTopLevel(cfg)
+	} else {
+		d.seed(a)
 	}
 	// The engine's own Reactions — the Floor guards cfg.Floor leaves ON, and the context-fill and
 	// step-budget notices when cfg.ContextFillNotice / cfg.StepBudgetNotice switch them on — are
@@ -120,8 +144,12 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	a.armed = armed
 
 	// Fill the context-file cache for this session's first boundary: construction. Every later
-	// refill goes through the same seam at a session boundary (contextfiles.go).
-	a.reloadContextFiles()
+	// refill goes through the same seam at a session boundary (contextfiles.go). A delegate is NOT
+	// a session boundary: it speaks from its parent's bytes (seeded above from d.contextFiles), so an
+	// AGENTS.md edited or deleted mid-delegation never reaches it — and the workspace is not read.
+	if d == nil {
+		a.reloadContextFiles()
+	}
 	// Wire the Turn lifecycle owner AFTER the literal so conv points at the Agent's field: a later
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
 	// onClose rides here for the same reason: the lifecycle owns the moment an Exchange ends, the
@@ -136,6 +164,51 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		onRollback:    a.rearmNotices,
 	}
 	return a, nil
+}
+
+// seedTopLevel gives a top-level Agent the fields it owns afresh — the ones a delegate takes from
+// its parent instead (delegation.seed). Empty and per-process, every one of them, because this
+// Agent IS the session's root: nothing above it holds an instance to share.
+func (a *Agent) seedTopLevel(cfg domain.Config) {
+	a.guards = security.NewDefaultGuards()
+	a.effortDialect = toProviderDialect(cfg.EffortDialect) // the wire shape this server reads an effort intent in, so a Driver that never rebinds still speaks it (ADR 0060, ADR 0031)
+	a.delegation = &delegationLatch{}                      // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045)
+	a.journal = undo.New()                                 // the per-Exchange undo record (ADR 0051)
+	a.consoles = console.New()                             // the engine's live Consoles (ADR 0059)
+	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
+}
+
+// seed copies the delegation into the Agent under construction — every fact once, before anything
+// can observe the child. The order matters in one place: the routed spawn's capture seam is bound
+// LAST, after the identity it stamps on WireEvents (depth, spawning call id) is in place, so a
+// routed child's events never carry the zero values a top-level Agent would.
+func (d *delegation) seed(a *Agent) {
+	a.depth = d.depth
+	a.callID = d.spawnCallID
+	a.task = d.task
+	a.name = d.name // written bare: the child is unpublished until it is returned, so no reader can race the lock setName takes later
+	a.consoleOwner = d.consoleOwner
+	a.seatFallback = d.seatFallback
+	a.stepCap = d.stepCap
+	a.tokenCap = d.tokenCap
+	a.timeCap = d.timeCap
+	a.now = d.now
+	a.effortDialect = d.effortDialect
+	a.ownsUpstream = d.upstreamOwned // a routed child closes the client it dialled; an unrouted one must never close the session's out from under the parent still speaking over it (Agent.Close)
+	a.guards = d.guards
+	a.contextFiles = d.contextFiles
+	a.liveMode = d.parentLiveMode
+	a.delegation = d.latch
+	a.journal = d.journal
+	a.consoles = d.consoles
+	// The child's other structural bound on runaway context: it folds under budget pressure at
+	// quiescent TURN boundaries, not only at Exchange boundaries (shouldAutoCompact's S2 guard). A
+	// delegation is ONE Exchange from its first Turn to its report, so the boundary the main loop's
+	// trigger waits for never arrives for a child — without this its history simply grows until the
+	// window is blown. Set on EVERY child, routed or not: it is the child's contract, not a Reaction
+	// and not a per-server posture, so there is no key to disagree about.
+	a.midExchangeCompaction = true
+	d.tap.bind(a)
 }
 
 // serialEventSink serializes concurrent Emit calls onto one host EventSink. It is the engine's

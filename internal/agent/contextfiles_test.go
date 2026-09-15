@@ -411,6 +411,54 @@ func TestSubAgentInheritsParentContextFiles(t *testing.T) {
 	}
 }
 
+// TestDelegateConstructionReadsNoContextFile pins the stronger half of the rule above: the child
+// is not merely handed the parent's bytes, it never touches the workspace at all. Counted through
+// the loader seam (contextFileLoader), because from the outside a read-then-overwrite is
+// indistinguishable from no read — and the discarded read is exactly what this closes. The file is
+// replaced by a directory before the spawn so a read that did slip through would also surface as
+// an error entry in the child's cache. Serial by design: it swaps a package var.
+func TestDelegateConstructionReadsNoContextFile(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
+	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	path := filepath.Join(dir, "AGENTS.md")
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
+	reads := 0
+	previous := contextFileLoader
+	contextFileLoader = func(workspaceDir string, names []string) []contextFile {
+		reads++
+		return previous(workspaceDir, names)
+	}
+	t.Cleanup(func() { contextFileLoader = previous })
+
+	child, err := a.newChildAgent("call_sub", "the delegated task", "")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	defer func() { _ = child.Close() }()
+
+	if reads != 0 {
+		t.Errorf("spawning a child read the workspace context files %d time(s); a delegate takes its parent's cache and reads nothing", reads)
+	}
+	if got := cachedContent(child.contextFiles, "AGENTS.md"); got != "first" {
+		t.Errorf("sub-agent cached content = %q, want the parent session's %q", got, "first")
+	}
+	for _, f := range child.contextFiles {
+		if f.err != nil {
+			t.Errorf("sub-agent cache entry %q carries error %v; a delegate's cache is the parent's, which read a healthy file", f.name, f.err)
+		}
+	}
+}
+
 // TestContextFilesReportMirrorsTheCache: the report the host renders is exactly what the session
 // is holding — a note per cache entry in list order, sizes for what loaded and the reason for
 // what could not be read, and nothing at all for a name that was simply absent.

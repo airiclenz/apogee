@@ -23,6 +23,41 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
+// TestNewAgentBuildsATopLevelAgent pins the other side of the split construction path: newAgent
+// builds the session's ROOT, which owns every shared handle afresh and carries none of a delegate's
+// facts — depth 0, no run identity, no delegate bound, no mode view above it, no mid-Exchange fold.
+// It reads its effort dialect from its own Config, the seed a delegate never takes from cfg.
+func TestNewAgentBuildsATopLevelAgent(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.EffortDialect = domain.EffortDialectKwargs
+	cfg.Delegation.MaxSteps = 5
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if a.depth != 0 || a.callID != "" || a.task != "" || a.consoleOwner != "" {
+		t.Errorf("top-level identity = (%d, %q, %q, %q), want all zero", a.depth, a.callID, a.task, a.consoleOwner)
+	}
+	if a.stepCap != 0 || a.tokenCap != 0 || a.timeCap != 0 {
+		t.Errorf("top-level bounds = (%d, %d, %v), want all zero: the delegate caps never bind the main loop", a.stepCap, a.tokenCap, a.timeCap)
+	}
+	if a.liveMode != nil || a.midExchangeCompaction || a.seatFallback {
+		t.Error("a top-level Agent carries no parent mode view, no mid-Exchange fold and no seat note")
+	}
+	if a.guards.Breaker == nil || a.journal == nil || a.consoles == nil || a.tasks == nil || a.now == nil {
+		t.Error("a top-level Agent owns fresh guards, journal, Console registry, task list and clock")
+	}
+	if a.delegation == nil || a.delegation.snapshot() != nil {
+		t.Error("a top-level Agent holds an empty Delegation-target latch of its own")
+	}
+	if a.effortDialect != toProviderDialect(domain.EffortDialectKwargs) {
+		t.Errorf("effortDialect = %q, want the Config's %q", a.effortDialect, domain.EffortDialectKwargs)
+	}
+}
+
 // hostTools is one of TWO hand-assemblies of tools.HostTools — cmd/apogee's MCP-aware
 // registryWithMCP (hostToolsFor) is the other, and the two are field-identical bar
 // SubAgentSeatChoice. Nothing structural holds them that way, and a tool-NAMES equivalence between
