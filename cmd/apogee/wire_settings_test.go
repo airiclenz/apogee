@@ -3162,7 +3162,7 @@ func newRecordingHookExec() *recordingHookExec {
 	return &recordingHookExec{done: make(chan string, 8)}
 }
 
-func (r *recordingHookExec) Run(ctx context.Context, h domain.Reaction, p reactions.Payload) error {
+func (r *recordingHookExec) Run(ctx context.Context, h domain.Reaction, p domain.SeamPayload) error {
 	r.mu.Lock()
 	r.fired = append(r.fired, h.ID)
 	r.mu.Unlock()
@@ -3190,7 +3190,7 @@ func newGatingHookExec() *gatingHookExec {
 	return &gatingHookExec{gate: make(chan struct{})}
 }
 
-func (g *gatingHookExec) Run(ctx context.Context, h domain.Reaction, p reactions.Payload) error {
+func (g *gatingHookExec) Run(ctx context.Context, h domain.Reaction, p domain.SeamPayload) error {
 	select {
 	case <-g.gate:
 	case <-ctx.Done():

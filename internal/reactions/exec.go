@@ -35,7 +35,7 @@ type defaultExecutor struct {
 }
 
 // Run hands the firing to whichever half the entry's handler names.
-func (e defaultExecutor) Run(ctx context.Context, r domain.Reaction, p Payload) error {
+func (e defaultExecutor) Run(ctx context.Context, r domain.Reaction, p domain.SeamPayload) error {
 	switch r.Handler.(type) {
 	case domain.ArgvHandler:
 		return e.command.Run(ctx, r, p)
@@ -48,7 +48,7 @@ func (e defaultExecutor) Run(ctx context.Context, r domain.Reaction, p Payload) 
 // encodePayload renders the firing as the JSON document both halves send — on stdin for a command,
 // as the POST body for a webhook. It is one function so the two can never drift: a script that
 // learns to read the document from a command Reaction reads the identical document from a webhook.
-func encodePayload(p Payload) ([]byte, error) {
+func encodePayload(p domain.SeamPayload) ([]byte, error) {
 	body, err := json.Marshal(p)
 	if err != nil {
 		return nil, fmt.Errorf("could not encode the payload: %w", err)

@@ -9,9 +9,9 @@
 // Moment's kebab-case: `turn-finished` is a Depth-0 moment, `turn` is every depth, and spelling
 // them apart is what stops a reader assuming the two streams are one.
 //
-// It shares no shape with internal/reactions. reactions.Payload is a flat document for five events and
-// `jq -r .path`; across eighteen variants a flat union becomes some sixty optional keys whose
-// names genuinely collide, so this package nests instead and reactions.Payload is untouched.
+// It shares no shape with the Reaction payload. domain.SeamPayload is a flat document for a handful
+// of Moments and `jq -r .path`; across eighteen variants a flat union becomes some sixty optional
+// keys whose names genuinely collide, so this package nests instead and the payload is untouched.
 //
 // One direction: it imports internal/domain for the events it reads and nothing else in the tree.
 // It composes bytes for a file descriptor its caller owns — the engine stays wire-silent

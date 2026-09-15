@@ -2,7 +2,6 @@ package reactions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -49,7 +48,7 @@ func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t 
 	t.Setenv("APOGEE_TEST_STDIN_OUT", stdinFile)
 	t.Setenv("APOGEE_TEST_ENV_OUT", envFile)
 
-	payload := Payload{
+	payload := domain.SeamPayload{
 		Event:     FileChanged,
 		Reaction:  "notify",
 		Time:      "2026-09-06T12:00:00Z",
@@ -66,23 +65,24 @@ func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t 
 		t.Fatalf("Run: %v", err)
 	}
 
-	wantBody, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal the payload: %v", err)
-	}
+	// The literal bytes, not a re-marshal of the same value: this is the observe document a user's
+	// script was written against before the two lanes shared one type, and it must not move.
+	wantBody := `{"event":"file-changed","reaction":"notify","time":"2026-09-06T12:00:00Z",` +
+		`"workspace":"/work/space","depth":0,"turn":0,"schedule":{"id":"sched-1","name":"docs sweep"},` +
+		`"tool":"write_file","path":"/work/space/main.go"}`
 	gotBody := readFile(t, stdinFile)
-	if gotBody != string(wantBody) {
+	if gotBody != wantBody {
 		t.Errorf("stdin =\n%s\nwant\n%s", gotBody, wantBody)
 	}
 
 	environment := readFile(t, envFile)
 	for _, want := range []string{
-		EnvEvent + "=file-changed",
-		EnvName + "=notify",
-		EnvWorkspace + "=/work/space",
-		EnvPath + "=/work/space/main.go",
-		EnvScheduleID + "=sched-1",
-		EnvScheduleName + "=docs sweep",
+		domain.EnvReactionEvent + "=file-changed",
+		domain.EnvReactionName + "=notify",
+		domain.EnvReactionWorkspace + "=/work/space",
+		domain.EnvReactionPath + "=/work/space/main.go",
+		domain.EnvReactionScheduleID + "=sched-1",
+		domain.EnvReactionScheduleName + "=docs sweep",
 	} {
 		if !strings.Contains(environment, want) {
 			t.Errorf("the command's environment is missing %q; it held:\n%s", want, environment)
@@ -98,7 +98,7 @@ func TestCommandExecutorReportsTheExitStatusAndWhatTheCommandSaid(t *testing.T) 
 
 	hook := shellHook("notify", `echo "no such recipient" >&2; exit 3`)
 
-	err := commandExecutor{workspaceRoot: t.TempDir()}.Run(context.Background(), hook, Payload{Event: TurnFinished})
+	err := commandExecutor{workspaceRoot: t.TempDir()}.Run(context.Background(), hook, domain.SeamPayload{Event: TurnFinished})
 	if err == nil {
 		t.Fatal("Run on a command that exited 3 returned no error")
 	}
@@ -134,7 +134,7 @@ func TestCommandExecutorReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T
 			defer cancel()
 
 			started := time.Now()
-			err := commandExecutor{workspaceRoot: t.TempDir()}.Run(ctx, hook, Payload{Event: TurnFinished})
+			err := commandExecutor{workspaceRoot: t.TempDir()}.Run(ctx, hook, domain.SeamPayload{Event: TurnFinished})
 			elapsed := time.Since(started)
 
 			if err == nil {
@@ -171,7 +171,7 @@ func TestCommandExecutorRefusesAProgramInsideTheWorkspace(t *testing.T) {
 		Timeout: 10 * time.Second,
 	}
 
-	err := commandExecutor{workspaceRoot: workspace}.Run(context.Background(), hook, Payload{Event: TurnFinished})
+	err := commandExecutor{workspaceRoot: workspace}.Run(context.Background(), hook, domain.SeamPayload{Event: TurnFinished})
 	if err == nil {
 		t.Fatal("Run of a program inside the workspace returned no error")
 	}
@@ -190,7 +190,7 @@ func TestCommandExecutorCutsAnOverlongComplaintDownToATail(t *testing.T) {
 
 	hook := shellHook("notify", `i=0; while [ $i -lt 600 ]; do echo "0123456789abcdefghij" >&2; i=$((i+1)); done; exit 1`)
 
-	err := commandExecutor{workspaceRoot: t.TempDir()}.Run(context.Background(), hook, Payload{Event: TurnFinished})
+	err := commandExecutor{workspaceRoot: t.TempDir()}.Run(context.Background(), hook, domain.SeamPayload{Event: TurnFinished})
 	if err == nil {
 		t.Fatal("Run on a command that exited 1 returned no error")
 	}

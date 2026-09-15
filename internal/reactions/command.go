@@ -73,7 +73,7 @@ type commandExecutor struct {
 // The context is already bounded by the entry's Timeout by the time it arrives, and is cancelled
 // when the Runner is closing; both end the child, and only the deadline is reported — a
 // cancellation is apogee's own shutdown and the Runner drops it.
-func (c commandExecutor) Run(ctx context.Context, r domain.Reaction, p Payload) error {
+func (c commandExecutor) Run(ctx context.Context, r domain.Reaction, p domain.SeamPayload) error {
 	handler, ok := r.Handler.(domain.ArgvHandler)
 	if !ok || len(handler.Argv) == 0 {
 		return errors.New("no command to run")

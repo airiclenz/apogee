@@ -43,7 +43,7 @@ func TestWebhookSenderPostsTheJSONWithBothKindsOfHeader(t *testing.T) {
 	}))
 	defer server.Close()
 
-	payload := Payload{
+	payload := domain.SeamPayload{
 		Event:     ExchangeFinished,
 		Reaction:  "ping",
 		Time:      "2026-09-06T12:00:00Z",
@@ -104,7 +104,7 @@ func TestWebhookSenderReportsANonSuccessStatus(t *testing.T) {
 		Timeout: 10 * time.Second,
 	}
 
-	err := webhookSender{}.Run(context.Background(), hook, Payload{Event: ExchangeFinished})
+	err := webhookSender{}.Run(context.Background(), hook, domain.SeamPayload{Event: ExchangeFinished})
 	if err == nil {
 		t.Fatal("Run against a 503 returned no error")
 	}
@@ -137,7 +137,7 @@ func TestWebhookSenderRefusesToSendWhenTheHeaderVariableIsUnset(t *testing.T) {
 		Timeout: 10 * time.Second,
 	}
 
-	err := webhookSender{}.Run(context.Background(), hook, Payload{Event: ExchangeFinished})
+	err := webhookSender{}.Run(context.Background(), hook, domain.SeamPayload{Event: ExchangeFinished})
 	if err == nil {
 		t.Fatal("Run with an unset header variable returned no error")
 	}
@@ -177,7 +177,7 @@ func TestWebhookSenderReportsTheDeadlineOnAStalledEndpoint(t *testing.T) {
 	}
 
 	started := time.Now()
-	err := webhookSender{}.Run(context.Background(), hook, Payload{Event: ExchangeFinished})
+	err := webhookSender{}.Run(context.Background(), hook, domain.SeamPayload{Event: ExchangeFinished})
 	elapsed := time.Since(started)
 
 	if err == nil {

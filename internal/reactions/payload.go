@@ -6,102 +6,14 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// ScheduleRef names the daemon or `/schedule` Schedule a Firing ran for. It is present only on a
-// Firing's payload — a TUI session and a plain headless run belong to no Schedule — so a reaction
-// can tell "the 6am docs sweep finished" from "the session I am sitting in finished".
-type ScheduleRef struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
-}
-
-// Payload is the JSON document a fired reaction receives — on stdin for a command, as the POST body
-// for a webhook. Its field names are a DOCUMENTED CONTRACT: a user's script reads them by name, so
-// they are renamed only by a deliberate, documented break.
-//
-// The first block is present on every event and identifies the firing: which reaction fired, on
-// what, when, and in which run. Depth and Turn are the emitting agent's, so a Reaction fired by a
-// sub-agent reports the child's nesting level rather than the top-level agent's, and CallID is that
-// child's run identity — the id of the sub_agent call that spawned it, empty at Depth 0. Every
-// field after that block is per-event and omitted when it does not apply, so a script can branch on
-// "event" and read only what that event carries.
-//
-// The payload is NOT secret-scrubbed: it goes to the user's own command or URL, which is the same
-// trust as the screen (ADR 0073 §6).
-//
-// The matcher fills the event-derived fields; the runner stamps the identity ones it alone knows —
-// Reaction, Time, Workspace and Schedule — as it hands the payload to each subscribing reaction.
-type Payload struct {
-	// Event is the notice that fired, spelled exactly as the `on:` list spells it.
-	Event Event `json:"event"`
-	// Reaction is the id of the entry that fired, the `id:` from its config row.
-	Reaction string `json:"reaction"`
-	// Time is when the firing was matched, RFC 3339 with seconds resolution or finer.
-	Time string `json:"time"`
-	// Workspace is the absolute, symlink-resolved workspace the run is rooted in.
-	Workspace string `json:"workspace"`
-	// Depth is the emitting agent's sub-agent nesting level; 0 is the top-level agent.
-	Depth int `json:"depth"`
-	// Turn is the Turn index the event belongs to.
-	Turn int `json:"turn"`
-	// CallID is the run identity of the emitting agent — the id of the sub_agent call that
-	// spawned it — and is empty at Depth 0.
-	CallID string `json:"call_id,omitempty"`
-	// Schedule names the Schedule this Firing ran for; absent outside a Firing.
-	Schedule *ScheduleRef `json:"schedule,omitempty"`
-
-	// Status is the Turn's StepStatus. turn-finished, exchange-finished.
-	Status string `json:"status,omitempty"`
-	// Faulted marks a Turn the loop ABANDONED rather than completed. turn-finished,
-	// exchange-finished.
-	Faulted bool `json:"faulted,omitempty"`
-	// StepCapped marks an Exchange the delegate step cap ended rather than the model.
-	// turn-finished, exchange-finished.
-	StepCapped bool `json:"step_capped,omitempty"`
-
-	// Tool is the tool that wrote the file, or the tool whose call is waiting on an Approval.
-	// file-changed, approval-requested, approval-decided.
-	Tool string `json:"tool,omitempty"`
-	// Path is the absolute, symlink-resolved path the write landed on. file-changed.
-	Path string `json:"path,omitempty"`
-
-	// Reason is why the Approval was required, in the engine's own words. approval-requested,
-	// approval-decided.
-	Reason string `json:"reason,omitempty"`
-	// Remedy is the optional one-line route out of the condition that forced the Approval.
-	// approval-requested, approval-decided.
-	Remedy string `json:"remedy,omitempty"`
-	// SubAgentName is the display name of the child whose call is waiting, when it has one.
-	// approval-requested, approval-decided.
-	SubAgentName string `json:"sub_agent_name,omitempty"`
-	// Scope is the optional statement of what the call reaches beyond what its arguments name.
-	// approval-requested, approval-decided.
-	Scope string `json:"scope,omitempty"`
-	// Decision is the verdict the Approver returned, in the domain.ApprovalDecision spelling —
-	// `allow`, `deny` or `allow-for-session`. approval-decided.
-	Decision string `json:"decision,omitempty"`
-
-	// Source is what faulted — a tool name, a Reaction id, or "loop". error.
-	Source string `json:"source,omitempty"`
-	// Error is the fault's message. error.
-	Error string `json:"error,omitempty"`
-
-	// Seam is the seam whose pass closed, in the Moment's own spelling — the notice is that
-	// name plus `-finished`, so a script branching on "event" already knows it and one
-	// branching on "seam" reads the in-loop point directly. The five seam-closing notices.
-	Seam domain.Moment `json:"seam,omitempty"`
-	// Reactions are the ids of the reactions booked as firings during the pass, in the order
-	// they fired; absent when nothing acted, which is the ordinary pass. The five
-	// seam-closing notices.
-	Reactions []string `json:"reactions,omitempty"`
-	// Value is the JSON projection of the seam's working value as the pass left it — the
-	// request at pre-request, the response at post-response, the pending call at
-	// pre-tool-exec, the call and its result at post-tool-result, the conversation at
-	// history-rewrite. It is built while the engine's Emit is still running, because the
-	// reference the event carries is valid only for that call (domain.SeamClosedEvent), and
-	// it is a copy: nothing here points back into the loop's own state. The five
-	// seam-closing notices.
-	Value any `json:"value,omitempty"`
-}
+// ScheduleRef is the Schedule reference a Firing's payload carries, under the name this package's
+// callers (Options.Schedule, the daemon and `/schedule` roots) have always used. The type itself is
+// domain.ScheduleRef, because the payload it rides on is domain.SeamPayload — the ONE document
+// every fired out-of-process Reaction reads, on either lane. This package fills that document for
+// observe firings (match.go, runner.go) and owns only what the observe lane alone needs: the
+// per-seam projections below, which cut a seam-closing notice's "value" out of the engine's live
+// working value.
+type ScheduleRef = domain.ScheduleRef
 
 // requestValue projects the pre-request seam's working value: the outgoing request as the
 // reactions left it, reduced to the two things a watcher reads — what the model is being sent
@@ -251,38 +163,4 @@ func projectToolNames(tools []domain.ToolDef) []string {
 		names = append(names, tool.Name)
 	}
 	return names
-}
-
-// Environment variable names a fired command finds the payload's headline facts under. They are a
-// convenience for a one-line script that would otherwise pipe stdin through a JSON parser; the
-// full document is always on stdin as well.
-const (
-	EnvEvent        = "APOGEE_REACTION_EVENT"
-	EnvName         = "APOGEE_REACTION_NAME"
-	EnvWorkspace    = "APOGEE_REACTION_WORKSPACE"
-	EnvPath         = "APOGEE_REACTION_PATH"
-	EnvScheduleID   = "APOGEE_REACTION_SCHEDULE_ID"
-	EnvScheduleName = "APOGEE_REACTION_SCHEDULE_NAME"
-)
-
-// Env renders the payload's headline facts as `NAME=value` entries for a fired command's
-// environment, in a fixed order. A fact the payload does not carry is OMITTED rather than set
-// empty, so a script can test with `[ -n "$APOGEE_REACTION_PATH" ]` and a variable inherited from
-// the user's own environment is not silently blanked by a reaction that has nothing to put there.
-func (p Payload) Env() []string {
-	env := make([]string, 0, 6)
-	add := func(name, value string) {
-		if value != "" {
-			env = append(env, name+"="+value)
-		}
-	}
-	add(EnvEvent, string(p.Event))
-	add(EnvName, p.Reaction)
-	add(EnvWorkspace, p.Workspace)
-	add(EnvPath, p.Path)
-	if p.Schedule != nil {
-		add(EnvScheduleID, p.Schedule.ID)
-		add(EnvScheduleName, p.Schedule.Name)
-	}
-	return env
 }

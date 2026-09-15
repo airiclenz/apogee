@@ -8,20 +8,21 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// TestPayloadJSONGolden pins the wire shape of every event's document. These field names are the
-// documented contract a user's script reads by name, so this test is what makes a rename a
-// deliberate break rather than a silent one.
+// TestPayloadJSONGolden pins the wire shape of every observe event's document — the one
+// domain.SeamPayload, as this package fills it. These field names are the documented contract a
+// user's script reads by name, so this test is what makes a rename a deliberate break rather than a
+// silent one; the bytes here are the pre-merge observe payload's, unchanged.
 func TestPayloadJSONGolden(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name    string
-		payload Payload
+		payload domain.SeamPayload
 		want    string
 	}{
 		{
 			name: "turn-finished",
-			payload: Payload{
+			payload: domain.SeamPayload{
 				Event: TurnFinished, Reaction: "notify", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 0, Turn: 3,
 				Status: "turn-complete",
@@ -31,7 +32,7 @@ func TestPayloadJSONGolden(t *testing.T) {
 		},
 		{
 			name: "exchange-finished",
-			payload: Payload{
+			payload: domain.SeamPayload{
 				Event: ExchangeFinished, Reaction: "notify", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 0, Turn: 7,
 				Status: "exchange-complete", Faulted: true, StepCapped: true,
@@ -42,7 +43,7 @@ func TestPayloadJSONGolden(t *testing.T) {
 		},
 		{
 			name: "file-changed",
-			payload: Payload{
+			payload: domain.SeamPayload{
 				Event: FileChanged, Reaction: "fmt", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 1, Turn: 2, CallID: "call-7",
 				Tool: "write_file", Path: "/work/repo/main.go",
@@ -53,7 +54,7 @@ func TestPayloadJSONGolden(t *testing.T) {
 		},
 		{
 			name: "approval-requested",
-			payload: Payload{
+			payload: domain.SeamPayload{
 				Event: ApprovalRequested, Reaction: "bell", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 1, Turn: 4, CallID: "call-2",
 				Tool: "terminal", Reason: "write", Remedy: "run `apogee doctor`",
@@ -66,7 +67,7 @@ func TestPayloadJSONGolden(t *testing.T) {
 		},
 		{
 			name: "approval-decided",
-			payload: Payload{
+			payload: domain.SeamPayload{
 				Event: ApprovalDecided, Reaction: "bell", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 1, Turn: 4, CallID: "call-2",
 				Tool: "terminal", Reason: "write", Decision: "allow",
@@ -77,7 +78,7 @@ func TestPayloadJSONGolden(t *testing.T) {
 		},
 		{
 			name: "error",
-			payload: Payload{
+			payload: domain.SeamPayload{
 				Event: Error, Reaction: "page", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 0, Turn: 1,
 				Schedule: &ScheduleRef{ID: "nightly", Name: "Nightly docs sweep"},
@@ -112,12 +113,12 @@ func TestPayloadEnv(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		payload Payload
+		payload domain.SeamPayload
 		want    []string
 	}{
 		{
 			name: "a session firing carries no schedule",
-			payload: Payload{
+			payload: domain.SeamPayload{
 				Event: FileChanged, Reaction: "fmt", Workspace: "/work/repo", Path: "/work/repo/main.go",
 			},
 			want: []string{
@@ -129,7 +130,7 @@ func TestPayloadEnv(t *testing.T) {
 		},
 		{
 			name: "a Firing carries the Schedule id and name",
-			payload: Payload{
+			payload: domain.SeamPayload{
 				Event: TurnFinished, Reaction: "notify", Workspace: "/work/repo",
 				Schedule: &ScheduleRef{ID: "nightly", Name: "Nightly docs sweep"},
 			},
@@ -143,7 +144,7 @@ func TestPayloadEnv(t *testing.T) {
 		},
 		{
 			name:    "an unset fact is omitted rather than blanked",
-			payload: Payload{Event: Error, Reaction: "page"},
+			payload: domain.SeamPayload{Event: Error, Reaction: "page"},
 			want: []string{
 				"APOGEE_REACTION_EVENT=error",
 				"APOGEE_REACTION_NAME=page",
@@ -245,7 +246,7 @@ func TestSeamClosedPayloadJSONGolden(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 
-			payload := Payload{
+			payload := domain.SeamPayload{
 				Event: c.seam.Closing(), Reaction: "watch", Time: "2026-09-08T09:41:00Z",
 				Workspace: "/work/repo", Turn: 4,
 				Seam: c.seam, Reactions: c.fired, Value: projectSeamValue(c.seam, c.value),

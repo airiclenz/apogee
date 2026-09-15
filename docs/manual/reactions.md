@@ -179,8 +179,8 @@ working on.
 
 ### The seam document
 
-An `advise:` or `gate:` command reads a **different** document, because it is handed the call
-itself rather than a notice about it. It opens with the shared block above — `event`, `reaction`,
+An `advise:` or `gate:` command reads the **same** document cut to the call itself rather than
+to a notice about it. It opens with the shared block above — `event`, `reaction`,
 `time`, `workspace`, `depth`, `turn` and `call_id`, spelled the same — and then carries:
 
 | Field | On | Meaning |

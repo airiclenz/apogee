@@ -3536,13 +3536,13 @@ func hookHomeRecording(t *testing.T, marker string, events ...string) string {
 // readHookPayload decodes the payload one fired Reaction recorded. The Runner is drained before the
 // command returns (runHeadless's deferred Close), so the file is there by the time a test looks —
 // no polling, and a missing file is a real failure rather than a race.
-func readHookPayload(t *testing.T, marker string) reactions.Payload {
+func readHookPayload(t *testing.T, marker string) domain.SeamPayload {
 	t.Helper()
 	raw, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatalf("the Reaction wrote no payload: %v", err)
 	}
-	var payload reactions.Payload
+	var payload domain.SeamPayload
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("decode the Reaction's payload %q: %v", raw, err)
 	}

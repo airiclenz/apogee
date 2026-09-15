@@ -1287,7 +1287,7 @@ func soleConfigBackup(t *testing.T, home string) string {
 // seamValue is a seam-closing payload's `value` as it comes back off the wire: the projection is
 // built as `any` and read here through a JSON decode, so it arrives as the object a script's own
 // `jq` would see rather than as the Go type that produced it.
-func seamValue(t *testing.T, payload reactions.Payload) map[string]any {
+func seamValue(t *testing.T, payload domain.SeamPayload) map[string]any {
 	t.Helper()
 
 	value, ok := payload.Value.(map[string]any)
@@ -1427,7 +1427,7 @@ func rewriteHomeHooks(t *testing.T, home, entries string) {
 // concatenated JSON documents with no separator, so they are streamed rather than split; a trailing
 // document that is still being written stops the read, which is the ordinary state of a file a
 // worker may be appending to at this very moment.
-func readHookPayloads(t *testing.T, path string) []reactions.Payload {
+func readHookPayloads(t *testing.T, path string) []domain.SeamPayload {
 	t.Helper()
 
 	body, err := os.ReadFile(path)
@@ -1437,10 +1437,10 @@ func readHookPayloads(t *testing.T, path string) []reactions.Payload {
 		}
 		t.Fatalf("read the reaction sink: %v", err)
 	}
-	var fired []reactions.Payload
+	var fired []domain.SeamPayload
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	for {
-		var payload reactions.Payload
+		var payload domain.SeamPayload
 		if err := decoder.Decode(&payload); err != nil {
 			return fired
 		}
@@ -1449,19 +1449,19 @@ func readHookPayloads(t *testing.T, path string) []reactions.Payload {
 }
 
 // hookPayloadFor answers the first payload carrying event, and whether there was one.
-func hookPayloadFor(fired []reactions.Payload, event reactions.Event) (reactions.Payload, bool) {
+func hookPayloadFor(fired []domain.SeamPayload, event reactions.Event) (domain.SeamPayload, bool) {
 	for _, payload := range fired {
 		if payload.Event == event {
 			return payload, true
 		}
 	}
-	return reactions.Payload{}, false
+	return domain.SeamPayload{}, false
 }
 
 // hookRequest is one POST a webhook Reaction made: the payload it carried and the header whose
 // value came from the environment rather than the config file.
 type hookRequest struct {
-	payload reactions.Payload
+	payload domain.SeamPayload
 	token   string
 }
 
@@ -1484,7 +1484,7 @@ func newHookWebhook(t *testing.T) (*hookWebhook, *httptest.Server) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		var payload reactions.Payload
+		var payload domain.SeamPayload
 		if err := json.Unmarshal(body, &payload); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

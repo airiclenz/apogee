@@ -136,7 +136,16 @@ NOTES (2026-09-15): four dirty paths in the tree are not this item's and were le
 
 Commit: `refactor(reactions): file-changed reads the write target off the Event; drop Options.WriteTarget and both Driver closures`
 
-## 4. One Reaction payload document
+## 4. One Reaction payload document — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the four `reactions.EnvEvent/EnvName/EnvWorkspace/EnvPath` constants (and the two Schedule ones) were deleted rather than aliased — the plan offered either; `command_test.go` reads `domain.EnvReaction*`, and `TestSeamPayloadEnvNamesMatchTheObserveLane` was deleted with the keys-parity test as one set of names leaves nothing to compare.
+NOTES (2026-09-15): `match.go`'s `applyBase` became a package function `applyBase(*domain.SeamPayload, domain.EventBase)` — a method cannot be declared on a type from another package.
+NOTES (2026-09-15): the plan's "observe payload stdin golden" is the literal-bytes assertion added to `TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment` (captured from the pre-item type) plus `TestPayloadJSONGolden`'s unchanged expected strings; `TestSeamPayloadEnv` gained the Schedule-pair case.
+NOTES (2026-09-15): `example_test.go` and `internal/reactions/match_test.go` are listed in the plan's Files but needed no edit — both compile unchanged against the alias and the `firing.Payload` field.
+NOTES (2026-09-15): consequential edit — internal/eventjson/doc.go: made necessary by deleting `reactions.Payload` (its package comment named the type)
+NOTES (2026-09-15): consequential edit — internal/tools/exec_common.go: made necessary by deleting `reactions.Payload.Env` (a comment named it beside `domain.SeamPayload.Env`)
+NOTES (2026-09-15): consequential edit — internal/domain/doc.go, internal/reactions/doc.go: made necessary by the payload document moving whole into `seampayload.go` (both file maps described the old split)
+NOTES (2026-09-15): consequential edit — docs/manual/reactions.md: made necessary by the merge (§The seam document opened "reads a **different** document"; now "the **same** document cut to the call" — the field tables and examples are untouched)
 
 **What.** `domain.SeamPayload` (`internal/domain/seampayload.go`) becomes the only payload document: fold the observe-only fields of `reactions.Payload` (`internal/reactions/payload.go`) into it as `omitempty` members and keep one `Env()`; `internal/reactions` builds a `domain.SeamPayload` for observe firings and deletes its own type. Stdin JSON keys and field order for every existing member stay byte-identical (the two documents already share their keys). Delete the tag-pinning test `TestSeamPayloadSharesTheObservePayloadsKeys`. Fix `CONTEXT.md` §Reaction: an observe firing is delivered by the Runner and never books a `ReactionFiredEvent`; only advise/gate firings do. Depends on item 1.
 

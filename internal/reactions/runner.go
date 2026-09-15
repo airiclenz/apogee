@@ -35,7 +35,7 @@ const (
 // error is REPORTED to the Driver and otherwise discarded — nothing an executor produces
 // reaches the model, the conversation or the Session record.
 type Executor interface {
-	Run(ctx context.Context, r domain.Reaction, p Payload) error
+	Run(ctx context.Context, r domain.Reaction, p domain.SeamPayload) error
 }
 
 // Options are the facts a Runner cannot derive: what it decorates, where it is rooted, who it
@@ -133,7 +133,7 @@ type hookSet struct {
 type worker struct {
 	hook   domain.Reaction
 	events map[Event]bool
-	queue  chan Payload
+	queue  chan domain.SeamPayload
 	done   chan struct{}
 
 	dropped      atomic.Int64
@@ -328,7 +328,7 @@ func (r *Runner) buildSet(list []domain.Reaction) (*hookSet, error) {
 		w := &worker{
 			hook:   entry,
 			events: eventSet(entry.On),
-			queue:  make(chan Payload, queueDepth),
+			queue:  make(chan domain.SeamPayload, queueDepth),
 			done:   make(chan struct{}),
 		}
 		set.workers = append(set.workers, w)
@@ -348,7 +348,7 @@ func (r *Runner) serve(set *hookSet, w *worker) {
 
 // runOne runs one firing under the Reaction's own timeout and reports a failure the Driver has not
 // already been told about.
-func (r *Runner) runOne(set *hookSet, w *worker, payload Payload) {
+func (r *Runner) runOne(set *hookSet, w *worker, payload domain.SeamPayload) {
 	ctx, cancel := context.WithTimeout(set.ctx, w.hook.Timeout)
 	defer cancel()
 

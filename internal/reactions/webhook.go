@@ -38,7 +38,7 @@ type webhookSender struct{}
 // The headers are resolved BEFORE the request is sent, so a `headers-env:` entry naming a variable
 // that is not set fails without the endpoint ever hearing from us — the alternative is a POST that
 // arrives unauthenticated and is refused for a reason the user cannot see from here.
-func (webhookSender) Run(ctx context.Context, r domain.Reaction, p Payload) error {
+func (webhookSender) Run(ctx context.Context, r domain.Reaction, p domain.SeamPayload) error {
 	handler, ok := r.Handler.(domain.WebhookHandler)
 	if !ok {
 		return errors.New("no webhook to POST to")

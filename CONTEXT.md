@@ -1272,7 +1272,13 @@ value's revision, or `fired` when an armed reaction acted at pre-request, pre-to
 history-rewrite; two Floor guards book their own labels (`cap`, `salvage`) and the context-fill
 notice books `notice`; the sync lane books `advise` for a landed trailer, a gate's own verdict
 (`deny`, `ask`, `allow`) and `failed` when a command could not run. The seven Floor-guard booleans stay the
-canonical switches for the builtins.
+canonical switches for the builtins. An **observe** firing stands outside this cascade: the async
+lane's Runner (`internal/reactions`) matches it off the Event the engine already emitted and
+delivers it on the reaction's own worker, so it never books a `ReactionFiredEvent` — only advise
+and gate firings (and the engine's own) do — and its handler's failure reaches the Driver by the
+Runner's report line alone. Whichever lane fires it, an out-of-process handler reads the **one**
+payload document, `domain.SeamPayload`: the identity block, the per-Moment members its Moment
+carries, and — on the sync lane alone — the call's `arguments` and `result`.
 A **user**-origin Reaction is one entry of the global `reactions:` list —
 `{id, on: [moments], run: <argv | {url, headers, headers-env}>, advise: <argv>, gate: <argv>, workspace?, timeout?, enabled?}` —
 resolved into one `domain.Reaction` per action key it spells, sharing its id: `run:` at **observe**

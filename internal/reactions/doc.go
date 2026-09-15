@@ -20,9 +20,11 @@
 // hooks.go is the vocabulary and the entry shape — the five Event constants, which are the notice
 // Moments of the Reaction core under an alias (ADR 0076), Events/ParseEvent, and the
 // Validate/ValidateAll rules that refuse a malformed domain.Reaction with a sentence naming it.
-// payload.go is the JSON document a firing Reaction receives on stdin or in a POST body — the
-// documented field contract, the per-seam projections a seam-closing notice carries under "value",
-// plus the small APOGEE_REACTION_* environment set Env derives from it. match.go is the pure
+// payload.go is the observe lane's share of the payload: the document itself is domain.SeamPayload —
+// the ONE JSON document every fired out-of-process Reaction reads, on either lane, with the
+// APOGEE_REACTION_* environment set its Env derives — and this file holds the ScheduleRef alias the
+// roots hand Options and the per-seam projections a seam-closing notice carries under "value".
+// match.go is the pure
 // mapping from one domain.Event to the Reaction events it produces, built over the SUBSCRIBED set
 // so an unsubscribed event costs nothing; it is also where a closed seam's working value is
 // projected, while the engine's Emit is still running. workspace.go is the one path resolution the

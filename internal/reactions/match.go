@@ -7,7 +7,7 @@ import "github.com/airiclenz/apogee/internal/domain"
 // — as it fans the firing out to each subscribing Reaction.
 type firing struct {
 	Event   Event
-	Payload Payload
+	Payload domain.SeamPayload
 }
 
 // matcher maps one domain.Event to the Reaction events it produces. It is pure in the sense that
@@ -73,12 +73,12 @@ func (m *matcher) matchTurn(ev domain.TurnEvent) []firing {
 		return nil
 	}
 
-	payload := Payload{
+	payload := domain.SeamPayload{
 		Status:     string(ev.Status),
 		Faulted:    ev.Faulted,
 		StepCapped: ev.StepCapped,
 	}
-	payload.applyBase(ev.EventBase)
+	applyBase(&payload, ev.EventBase)
 
 	var out []firing
 	if m.wants(TurnFinished) {
@@ -109,7 +109,7 @@ func (m *matcher) matchApproval(ev domain.ApprovalEvent) []firing {
 	if !m.wants(event) {
 		return nil
 	}
-	payload := Payload{
+	payload := domain.SeamPayload{
 		Tool:         ev.Request.Tool,
 		Reason:       ev.Request.Reason,
 		Remedy:       ev.Request.Remedy,
@@ -119,7 +119,7 @@ func (m *matcher) matchApproval(ev domain.ApprovalEvent) []firing {
 	if event == ApprovalDecided {
 		payload.Decision = string(ev.Decision)
 	}
-	payload.applyBase(ev.EventBase)
+	applyBase(&payload, ev.EventBase)
 	return []firing{firingOf(event, payload)}
 }
 
@@ -140,12 +140,12 @@ func (m *matcher) matchSeamClosed(ev domain.SeamClosedEvent) []firing {
 	if notice == "" || !m.wants(notice) {
 		return nil
 	}
-	payload := Payload{
+	payload := domain.SeamPayload{
 		Seam:      ev.Seam,
 		Reactions: append([]string(nil), ev.Fired...),
 		Value:     m.project(ev.Seam, ev.Value),
 	}
-	payload.applyBase(ev.EventBase)
+	applyBase(&payload, ev.EventBase)
 	return []firing{firingOf(notice, payload)}
 }
 
@@ -154,8 +154,8 @@ func (m *matcher) matchError(ev domain.ErrorEvent) []firing {
 	if !m.wants(Error) {
 		return nil
 	}
-	payload := Payload{Source: ev.Source, Error: ev.Err}
-	payload.applyBase(ev.EventBase)
+	payload := domain.SeamPayload{Source: ev.Source, Error: ev.Err}
+	applyBase(&payload, ev.EventBase)
 	return []firing{firingOf(Error, payload)}
 }
 
@@ -168,20 +168,20 @@ func (m *matcher) matchToolResult(ev domain.ToolResultEvent) []firing {
 	if !m.wants(FileChanged) || ev.WriteTarget == "" || ev.Result.IsError {
 		return nil
 	}
-	payload := Payload{Tool: ev.Tool, Path: ev.WriteTarget}
-	payload.applyBase(ev.EventBase)
+	payload := domain.SeamPayload{Tool: ev.Tool, Path: ev.WriteTarget}
+	applyBase(&payload, ev.EventBase)
 	return []firing{firingOf(FileChanged, payload)}
 }
 
 // applyBase copies the emitting agent's identity onto a payload.
-func (p *Payload) applyBase(base domain.EventBase) {
+func applyBase(p *domain.SeamPayload, base domain.EventBase) {
 	p.Depth = base.Depth
 	p.Turn = base.Turn
 	p.CallID = base.CallID
 }
 
 // firingOf stamps the event name onto a copy of the payload.
-func firingOf(e Event, payload Payload) firing {
+func firingOf(e Event, payload domain.SeamPayload) firing {
 	payload.Event = e
 	return firing{Event: e, Payload: payload}
 }

@@ -369,7 +369,7 @@ const maxSubprocessErrorExcerptBytes = 256
 //
 // extraEnv is the caller's own "KEY=value" additions, appended AFTER the scrub so they win over an
 // inherited spelling of the same key — the headline facts a fired reaction finds its Moment under
-// (domain.SeamPayload.Env, reactions.Payload.Env), which is why the door takes them at all: the
+// (domain.SeamPayload.Env), which is why the door takes them at all: the
 // full document is on stdin, and these are the convenience a one-line script reads instead of
 // parsing it. They are appended, never substituted, so a variable the caller does not name is
 // exactly what the scrub left. nil adds nothing.

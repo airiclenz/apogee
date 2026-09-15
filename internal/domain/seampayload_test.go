@@ -1,8 +1,8 @@
 package domain_test
 
-// The sync lane's stdin document (seampayload.go). The test package is EXTERNAL because the tag
-// parity below reads internal/reactions' own payload, and that package imports internal/domain —
-// an in-package test would be an import cycle.
+// The one payload document every fired out-of-process Reaction reads (seampayload.go), pinned at
+// its two sync Moments; the observe lane's goldens live with the code that fills them, in
+// internal/reactions' payload_test.go.
 
 import (
 	"encoding/json"
@@ -11,40 +11,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/reactions"
 )
-
-// TestSeamPayloadSharesTheObservePayloadsKeys pins the promise that makes the two lanes one
-// vocabulary: every field the sync document shares with the observe payload carries the same JSON
-// key and the same Go type, so a user's script reads `event`, `turn` or `path` off a gate firing
-// exactly as it reads them off an observe firing. Renaming one side alone fails here.
-func TestSeamPayloadSharesTheObservePayloadsKeys(t *testing.T) {
-	t.Parallel()
-
-	shared := []string{"Event", "Reaction", "Time", "Workspace", "Depth", "Turn", "CallID", "Tool", "Path"}
-
-	seam := reflect.TypeOf(domain.SeamPayload{})
-	observe := reflect.TypeOf(reactions.Payload{})
-
-	for _, name := range shared {
-		seamField, ok := seam.FieldByName(name)
-		if !ok {
-			t.Errorf("domain.SeamPayload has no field %s", name)
-			continue
-		}
-		observeField, ok := observe.FieldByName(name)
-		if !ok {
-			t.Errorf("reactions.Payload has no field %s", name)
-			continue
-		}
-		if got, want := seamField.Tag.Get("json"), observeField.Tag.Get("json"); got != want {
-			t.Errorf("%s json tag = %q on the sync document, %q on the observe payload", name, got, want)
-		}
-		if got, want := seamField.Type, observeField.Type; got != want {
-			t.Errorf("%s type = %v on the sync document, %v on the observe payload", name, got, want)
-		}
-	}
-}
 
 // TestSeamPayloadJSONOmitsWhatTheMomentDoesNotCarry pins the document's shape at each of the two
 // sync Moments: a gate at pre-tool-exec carries the pending call's arguments and no result, while a
@@ -82,9 +49,9 @@ func TestSeamPayloadJSONOmitsWhatTheMomentDoesNotCarry(t *testing.T) {
 	}
 }
 
-// TestSeamPayloadEnv pins the four headline variables a one-line script reads instead of parsing
-// stdin: their names, their fixed order, and the rule that a fact the payload does not carry is
-// OMITTED rather than set empty — a variable inherited from the user's own environment must not be
+// TestSeamPayloadEnv pins the headline variables a one-line script reads instead of parsing
+// stdin: their names, their fixed order, the Schedule pair a Firing adds, and the rule that a fact
+// the payload does not carry is OMITTED rather than set empty — a variable inherited from the user's own environment must not be
 // blanked by a reaction with nothing to put there.
 func TestSeamPayloadEnv(t *testing.T) {
 	t.Parallel()
@@ -112,23 +79,18 @@ func TestSeamPayloadEnv(t *testing.T) {
 	}) {
 		t.Errorf("Env() = %q, want the two facts it carries and nothing blanked", got)
 	}
-}
 
-// TestSeamPayloadEnvNamesMatchTheObserveLane pins that the two lanes export the SAME four variable
-// names. They are declared twice — internal/reactions imports internal/domain, so the dependency
-// cannot point back — and this is what keeps the copies honest.
-func TestSeamPayloadEnvNamesMatchTheObserveLane(t *testing.T) {
-	t.Parallel()
-
-	pairs := [][2]string{
-		{domain.EnvReactionEvent, reactions.EnvEvent},
-		{domain.EnvReactionName, reactions.EnvName},
-		{domain.EnvReactionWorkspace, reactions.EnvWorkspace},
-		{domain.EnvReactionPath, reactions.EnvPath},
+	scheduled := domain.SeamPayload{
+		Event:    domain.MomentTurnFinished,
+		Reaction: "notify",
+		Schedule: &domain.ScheduleRef{ID: "nightly", Name: "Nightly docs sweep"},
 	}
-	for _, pair := range pairs {
-		if pair[0] != pair[1] {
-			t.Errorf("sync lane exports %q where the observe lane exports %q", pair[0], pair[1])
-		}
+	if got := scheduled.Env(); !reflect.DeepEqual(got, []string{
+		"APOGEE_REACTION_EVENT=turn-finished",
+		"APOGEE_REACTION_NAME=notify",
+		"APOGEE_REACTION_SCHEDULE_ID=nightly",
+		"APOGEE_REACTION_SCHEDULE_NAME=Nightly docs sweep",
+	}) {
+		t.Errorf("Env() = %q, want the Schedule id and name after the four headline facts", got)
 	}
 }

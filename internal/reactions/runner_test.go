@@ -25,11 +25,11 @@ const awaitDeadline = 5 * time.Second
 // on its context — the three behaviours the Runner's queueing, reporting and shutdown are about.
 type fakeExecutor struct {
 	mu   sync.Mutex
-	runs []Payload
+	runs []domain.SeamPayload
 
 	// started announces each Run as it begins, before any blocking, so a test can prove a worker
 	// dequeued a firing without waiting for the firing to finish.
-	started chan Payload
+	started chan domain.SeamPayload
 
 	// gate, when non-nil, holds every Run until it is closed (or the run's context is done).
 	gate chan struct{}
@@ -44,10 +44,10 @@ type fakeExecutor struct {
 }
 
 func newFakeExecutor() *fakeExecutor {
-	return &fakeExecutor{started: make(chan Payload, 512), cancelled: make(chan struct{})}
+	return &fakeExecutor{started: make(chan domain.SeamPayload, 512), cancelled: make(chan struct{})}
 }
 
-func (f *fakeExecutor) Run(ctx context.Context, _ domain.Reaction, p Payload) error {
+func (f *fakeExecutor) Run(ctx context.Context, _ domain.Reaction, p domain.SeamPayload) error {
 	f.mu.Lock()
 	f.runs = append(f.runs, p)
 	index := len(f.runs) - 1
@@ -74,10 +74,10 @@ func (f *fakeExecutor) Run(ctx context.Context, _ domain.Reaction, p Payload) er
 }
 
 // recorded returns a copy of every firing the executor has run so far.
-func (f *fakeExecutor) recorded() []Payload {
+func (f *fakeExecutor) recorded() []domain.SeamPayload {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]Payload(nil), f.runs...)
+	return append([]domain.SeamPayload(nil), f.runs...)
 }
 
 // recordingSink is the decorated sink: it is only ever emitted to from the test's own goroutine,
@@ -130,14 +130,14 @@ func turnEvent(turn int) domain.TurnEvent {
 }
 
 // awaitStart waits for one Run to begin, failing the test rather than hanging forever.
-func awaitStart(t *testing.T, f *fakeExecutor) Payload {
+func awaitStart(t *testing.T, f *fakeExecutor) domain.SeamPayload {
 	t.Helper()
 	select {
 	case p := <-f.started:
 		return p
 	case <-time.After(awaitDeadline):
 		t.Fatal("no reaction run started within the deadline")
-		return Payload{}
+		return domain.SeamPayload{}
 	}
 }
 

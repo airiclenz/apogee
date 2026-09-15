@@ -659,10 +659,10 @@ func DecodeSession(data []byte) (Session, error) { return domain.DecodeSession(d
 // Moments, run out of process by a Driver (ADR 0073, ADR 0076)
 // ----------------------------------------------------------------------------
 
-// ReactionPayload is the JSON document a fired observe Reaction receives — on stdin for a
-// command, as the POST body for a webhook. Its field names are a documented contract for the
-// user's script.
-type ReactionPayload = reactions.Payload
+// ReactionPayload is the JSON document a fired out-of-process Reaction receives, on either lane —
+// on stdin for an observe command or a sync-lane advise/gate handler, as the POST body for a
+// webhook. Its field names are a documented contract for the user's script.
+type ReactionPayload = domain.SeamPayload
 
 // RunnerOptions are the facts a ReactionRunner cannot derive: the sink it decorates, the
 // workspace it is rooted in, the Schedule a Firing runs for, where failures are reported, and
