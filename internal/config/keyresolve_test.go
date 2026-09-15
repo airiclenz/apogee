@@ -125,22 +125,27 @@ func fixtureCommandAt(program string, args ...string) string {
 	return strings.Join(words, " ")
 }
 
-// plantKeyCommand copies THIS test binary to dir/name and returns its absolute path — a real,
-// runnable `api-key-cmd:` program sitting wherever the caller puts it. A copy rather than a symlink
-// because the fence resolves symlinks before judging (security.EvalRealPath), so a link inside the
-// workspace pointing at a binary outside it is not the collision the refusal exists for. Being this
-// binary, the copy answers the fixture sentinel like every other command here, which is what lets a
-// refusal test prove the program never ran.
+// plantKeyCommand plants THIS test binary at dir/name and returns its absolute path — a real,
+// runnable `api-key-cmd:` program sitting wherever the caller puts it. Not a symlink, because the
+// fence resolves symlinks before judging (security.EvalRealPath), so a link inside the workspace
+// pointing at a binary outside it is not the collision the refusal exists for. Being this binary,
+// the planted command answers the fixture sentinel like every other command here, which is what
+// lets a refusal test prove the program never ran.
+//
+// It is a hard link first and a copy only where the link fails (a temp dir on another volume than
+// the build cache). A hard link is the file itself under the new path — EvalRealPath resolves
+// nothing — and, unlike a copy, it opens nothing for writing. That matters because the tests here
+// run in parallel and fork: a copy holds the new file open for writing while it streams several
+// megabytes of race-enabled binary, and a neighbour that forks in that window hands the fd to its
+// child, which keeps it until it execs (CLOEXEC closes at exec, not at fork). Exec'ing the copy
+// before that child gets there fails with ETXTBSY — Go issue 22315 — and did, as "text file busy"
+// on a planted getkey under `make test`.
 func plantKeyCommand(t *testing.T, dir, name string) string {
 	t.Helper()
 
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
-	}
-	data, err := os.ReadFile(exe)
-	if err != nil {
-		t.Fatalf("reading this test binary: %v", err)
 	}
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -149,6 +154,13 @@ func plantKeyCommand(t *testing.T, dir, name string) string {
 		t.Fatalf("making the planted command's directory: %v", err)
 	}
 	path := filepath.Join(dir, name)
+	if err := os.Link(exe, path); err == nil {
+		return path
+	}
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatalf("reading this test binary: %v", err)
+	}
 	if err := os.WriteFile(path, data, 0o755); err != nil {
 		t.Fatalf("planting the key command: %v", err)
 	}

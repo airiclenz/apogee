@@ -3,6 +3,7 @@ package tuitest
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -160,18 +161,28 @@ func TestCheckLeaksIgnoresWhatWasRunningBefore(t *testing.T) {
 }
 
 // TestCheckLeaksBlamesOnlyTheLeakingSubtest is the attribution the labels buy: two checked
-// subtests run in parallel, one leaks, and the report lands on that one alone — the clean
-// neighbour's cleanup looks at the same profile and sees nothing of its own.
+// tests run at once, one leaks, and the report lands on that one alone — the clean neighbour's
+// cleanup looks at the same profile and sees nothing of its own.
+//
+// The two are goroutines of this test's own rather than parallel subtests. A subtest that waits
+// on its sibling deadlocks under `-parallel 1` — the bound scripts/test-shards.sh sets on every
+// process it launches — because the sibling never gets the one slot the waiter is holding; it
+// stalled the sharded suite for the full test timeout. A goroutine wears its labels exactly as a
+// subtest's goroutine does (CheckLeaks labels the goroutine it is called on, and what that
+// goroutine starts inherits them), so the attribution under test is the same.
 func TestCheckLeaksBlamesOnlyTheLeakingSubtest(t *testing.T) {
-	stop, leaking := make(chan struct{}), make(chan struct{})
-	// A Cleanup, not a defer: the parallel subtests run after this function returns, and the
-	// leaked goroutines must stay parked until both have looked.
-	t.Cleanup(func() { close(stop) })
+	t.Parallel()
 
-	t.Run("leaks two goroutines", func(t *testing.T) {
-		t.Parallel()
-		rec := &recordingTB{TB: t}
-		CheckLeaks(rec)
+	stop, leaking := make(chan struct{}), make(chan struct{})
+	defer close(stop)
+
+	leaker, clean := &recordingTB{TB: t}, &recordingTB{TB: t}
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() { // leaks two goroutines
+		defer wg.Done()
+		CheckLeaks(leaker)
 
 		started := make(chan struct{})
 		go parkedForTest(started, stop)
@@ -180,28 +191,30 @@ func TestCheckLeaksBlamesOnlyTheLeakingSubtest(t *testing.T) {
 		<-started
 		close(leaking)
 
-		rec.runCleanups()
-		if len(rec.reports) != 1 {
-			t.Fatalf("CheckLeaks reported %d time(s), want 1:\n%s", len(rec.reports), strings.Join(rec.reports, "\n"))
-		}
-		report := rec.reports[0]
-		if !strings.HasPrefix(report, "2 goroutine(s) outlived the test by "+leakGrace.String()) {
-			t.Errorf("the report does not open with the count of what leaked:\n%s", report)
-		}
-		if !strings.Contains(report, "tuitest.parkedForTest+0x") {
-			t.Errorf("the report does not name the parked frame:\n%s", report)
-		}
-	})
+		leaker.runCleanups()
+	}()
 
-	t.Run("leaks nothing", func(t *testing.T) {
-		t.Parallel()
-		rec := &recordingTB{TB: t}
-		CheckLeaks(rec)
+	go func() { // leaks nothing
+		defer wg.Done()
+		CheckLeaks(clean)
 		// Look only once the neighbour's goroutines are parked, or there is nothing to misattribute.
 		<-leaking
-		rec.runCleanups()
-		if len(rec.reports) != 0 {
-			t.Errorf("the clean subtest was blamed for its neighbour's leak:\n%s", strings.Join(rec.reports, "\n"))
-		}
-	})
+		clean.runCleanups()
+	}()
+
+	wg.Wait()
+
+	if len(leaker.reports) != 1 {
+		t.Fatalf("CheckLeaks reported %d time(s), want 1:\n%s", len(leaker.reports), strings.Join(leaker.reports, "\n"))
+	}
+	report := leaker.reports[0]
+	if !strings.HasPrefix(report, "2 goroutine(s) outlived the test by "+leakGrace.String()) {
+		t.Errorf("the report does not open with the count of what leaked:\n%s", report)
+	}
+	if !strings.Contains(report, "tuitest.parkedForTest+0x") {
+		t.Errorf("the report does not name the parked frame:\n%s", report)
+	}
+	if len(clean.reports) != 0 {
+		t.Errorf("the clean test was blamed for its neighbour's leak:\n%s", strings.Join(clean.reports, "\n"))
+	}
 }

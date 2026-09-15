@@ -13,7 +13,7 @@
 # A shard is a `go test` process of its own, so every test runs exactly as it does today: none
 # is skipped, weakened, reordered within its shard, or run with different flags — with ONE
 # flag this script sets itself, `-parallel` (see "the parallel bound" below), which changes how
-# many of a shard's parallel tests run at once and nothing about any test. Measured on a
+# many of a process's parallel tests run at once and nothing about any test. Measured on a
 # 9-core box before the cmd/apogee sweep: `go test -race ./...` 212s, sharded 82s cold (no
 # timing cache) and around 55s warm.
 #
@@ -60,13 +60,26 @@ budget=$((ncpu - 1))
 # arriving late: load, not logic. So the budget is divided among the processes it launches,
 # and each shard runs that many tests at once — 1 whenever the plan already fills the budget
 # with processes, more only when APOGEE_TEST_SHARDS leaves slots over.
-# The same bound holds under CI's APOGEE_TEST_SHARDS=2 on a 4-vCPU runner. It is set only on
-# the heavy shards: the remaining packages run as one process whose per-package tests are
-# small, and `go test` already limits how many of those packages run at once by GOMAXPROCS.
-# The isolated `go test -race ./cmd/apogee/` keeps `go test`'s default and the whole box.
-parallel_bound() { # jobs -> the -parallel value for each heavy shard
+# The same bound holds under CI's APOGEE_TEST_SHARDS=2 on a 4-vCPU runner. The remaining
+# packages' process takes it too, with a floor of 2. `go test` already limits how many of those
+# packages run at once (GOMAXPROCS), but each of them fanned its own tests out GOMAXPROCS-wide
+# on top of that — on the 4-vCPU runner up to sixteen tests beside four shards, which is the
+# load that stretched a 2 s CPU-bound walk in internal/doctext to 14 s and timed out the
+# shards' 5 s waits. The floor is there because those packages' tests mostly sleep rather than
+# compute: one at a time put the rest on the critical path (99 s against 69 s shards on the
+# 9-core box), two at a time cost nothing measurable, and either is a fraction of the old
+# fan-out. Its package-level concurrency (-p) is left alone: the process is dominated by
+# linking fifty race binaries, and -p throttles the build too. The isolated
+# `go test -race ./cmd/apogee/` keeps `go test`'s default and the whole box.
+parallel_bound() { # jobs -> the -parallel value for each shard
 	local p=$((budget / $1))
 	[ "$p" -ge 1 ] || p=1
+	echo "$p"
+}
+rest_parallel_bound() { # jobs -> the -parallel value for the remaining packages' process
+	local p
+	p=$(parallel_bound "$1")
+	[ "$p" -ge 2 ] || p=2
 	echo "$p"
 }
 
@@ -252,9 +265,10 @@ launch() { # log label -- go test args...
 }
 
 parallel=$(parallel_bound $(( ${#shard_run[@]} + 1 )))
-echo "    each shard runs $parallel test(s) at a time (-parallel $parallel: budget $budget over $(( ${#shard_run[@]} + 1 )) processes)"
+rest_parallel=$(rest_parallel_bound $(( ${#shard_run[@]} + 1 )))
+echo "    each shard runs $parallel test(s) at a time, the rest $rest_parallel (-parallel: budget $budget over $(( ${#shard_run[@]} + 1 )) processes)"
 
-launch "$work/rest.log" "the remaining ${#rest[@]} packages" -- "$@" "${rest[@]}"
+launch "$work/rest.log" "the remaining ${#rest[@]} packages" -- "$@" -parallel "$rest_parallel" "${rest[@]}"
 
 for s in "${!shard_run[@]}"; do
 	launch "$work/shard.$s.log" "${shard_pkg[$s]} shard $s" -- "$@" -parallel "$parallel" -run "${shard_run[$s]}" "${shard_pkg[$s]}"

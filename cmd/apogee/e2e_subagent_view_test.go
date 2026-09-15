@@ -250,16 +250,29 @@ func runViewHome(t *testing.T, stub *stubllm.Server) string {
 	return home
 }
 
-// runViewRedactions are [goldenRedactions] with the status line's elapsed clock swallowed as well.
+// runViewRedactions are [goldenRedactions] with the two facts about WHEN the frame was taken
+// swallowed as well: the status line's elapsed clock and the live block's blinking star.
 //
 // A run view of a WORKING child is a frame with a second counter on it, and the golden is of a
 // moment rather than of a settled screen. The clock redacts PADDED, for the build version's reason
 // (frameRedactions): it sits at the left of a row whose right slot is flush to the edge, so a
 // two-digit second would eat one of the spaces between them and red the golden on a diff that
-// carries nothing.
+// carries nothing. The star is the same kind of fact: the child's Read is still waiting for its
+// result, and a waiting block leads with ✦ or a bare cell by the frame's blink phase
+// (blockstate.star), which flips twice a second — so which of the two the frame caught says
+// nothing about the view. Recorded at ✦, it went red on a loaded CI runner whenever the wait
+// landed in the other phase.
 func runViewRedactions(sess *e2eSession) []tuitest.Redaction {
-	return append(goldenRedactions(sess), tuitest.RedactPadded(runningSlot, "<working>"))
+	return append(goldenRedactions(sess),
+		tuitest.RedactPadded(runningSlot, "<working>"),
+		tuitest.Redact(liveStarRow, "<star> Read"),
+	)
 }
+
+// liveStarRow matches the header row of the child's first Read at either blink phase: the star's
+// cell — ✦ or the space that holds its column — and the label. Only that block is live in the
+// recorded frame; every other row that leads with ✦ is settled and paints the same at both phases.
+const liveStarRow = `(?m)^[✦ ] Read$`
 
 // runningSlot matches the status line's whole live left slot — the spinner's braille phase, the run
 // and phrase it is spinning for, and the seconds it has counted. All three are facts about WHEN the

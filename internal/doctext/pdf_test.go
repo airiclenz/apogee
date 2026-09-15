@@ -488,22 +488,22 @@ func TestExtractPDF_RefusesAnAbsurdSizeInAnXrefStreamDictionary(t *testing.T) {
 // page-tree descent follows it forever and never returns a page at all, so no page-level bound
 // can catch it — only the read budget can, because the parser keeps no value cache and each turn
 // of the loop resolves the node again.
+//
+// The bound is on READS, not on time, and the test asserts it the same way: the budget's own
+// cause in failMessage is written only once pdfMaxReads has been spent, so a call that returns
+// with it has proven the walk finite. There is deliberately no wall-clock ceiling. The walk is
+// ~2 s of pure CPU under the race detector on an idle box and stretched to 10-14 s on a 4-vCPU
+// CI runner sharing the box with four other race-enabled shards — a ceiling only ever measured
+// the machine, and a walk that did NOT terminate would be caught by go test's own timeout.
 func TestExtractPDF_BoundsAReferenceCycle(t *testing.T) {
 	t.Parallel()
-
-	// Ten seconds, not the ~2 s this measures: the bound is on READS, so the wall time it buys
-	// scales with the machine and roughly triples under the race detector make check runs. What
-	// the assertion is for is that the walk terminates at all.
-	const bounded = 10 * time.Second
 
 	data := hostilePDF(t,
 		"<< /Type /Catalog /Pages 2 0 R >>",
 		"<< /Type /Pages /Kids [2 0 R] /Count 1 >>",
 	)
 
-	start := time.Now()
 	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
-	elapsed := time.Since(start)
 
 	if !strings.Contains(failMessage, "does not terminate") {
 		t.Fatalf("failMessage = %q, want the budget's own cause", failMessage)
@@ -513,9 +513,6 @@ func TestExtractPDF_BoundsAReferenceCycle(t *testing.T) {
 	}
 	if text != "" || pages != 0 {
 		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
-	}
-	if elapsed > bounded {
-		t.Errorf("extraction took %s on a cyclic page tree, want it bounded", elapsed)
 	}
 }
 
