@@ -325,10 +325,13 @@ const apogeeHomeSegment = "/.apogee/"
 // Two spellings are masked per path. The literal one is the path itself, normalized, with any
 // trailing separator dropped. A path under `~/.apogee/` masks additionally in every home
 // spelling homeAnchor knows — `~/…`, `$HOME/…`, `/root/…`, `/home/<user>/…`, `/Users/<user>/…` —
-// so the guard need not know which home an absolute path was built from. Both patterns end at a
-// word boundary, so a deeper path or a trailing separator masks WITH the dir
-// (`<dir>/gocache` → `<exempt>/gocache`) while a sibling whose name merely extends it (`<dir>x`)
-// does not mask at all and stays fully judged.
+// so the guard need not know which home an absolute path was built from. Both patterns mask
+// the WHOLE path token that starts at the dir: a deeper path or a trailing separator collapses
+// with it (`<dir>/gocache` → `<exempt>`, `<dir>/repo/.git/config` → `<exempt>`), so a rule
+// keyed on a segment deeper down — `write-git-control-plane` on a repo cloned under the scratch
+// dir — never sees that segment. The token ends at whitespace or a shell metacharacter, so what
+// follows a `;`, `&&` or `|` stays fully judged (`cat <dir>/x;rm -rf /` → `cat <exempt>;rm -rf /`),
+// and a sibling whose name merely extends the dir (`<dir>x`) does not mask at all.
 //
 // The patterns are compiled per call: an exemption list is a handful of paths and the guard is
 // not a hot path. Cache by path string only if a benchmark says otherwise.
@@ -349,11 +352,17 @@ func maskExempt(text string, exempt []string) string {
 	return text
 }
 
-// maskSpelling replaces every occurrence of one path pattern — word-boundary-terminated, so a
-// longer sibling name is left alone — with exemptPlaceholder. A pattern that fails to compile
+// exemptTokenTail extends a masked path pattern to the end of its shell token: a `/` and
+// everything up to the next whitespace or shell metacharacter (`;`, `|`, `&`, redirects,
+// parentheses, quotes, backticks), or — when no `/` follows — a word boundary, which is what
+// leaves a longer sibling name (`<dir>x`) unmasked.
+const exemptTokenTail = `(?:/[^\s;|&<>()'"\x60]*|\b)`
+
+// maskSpelling replaces every occurrence of one path pattern, extended over the rest of its
+// shell token (exemptTokenTail), with exemptPlaceholder. A pattern that fails to compile
 // leaves the text untouched, which is the stricter answer: the rules still see the path.
 func maskSpelling(text, pattern string) string {
-	re, err := regexp.Compile(pattern + `\b`)
+	re, err := regexp.Compile(pattern + exemptTokenTail)
 	if err != nil {
 		return text
 	}

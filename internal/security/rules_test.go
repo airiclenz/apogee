@@ -380,6 +380,56 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome(t *testing.T) 
 	}
 }
 
+// TestDefaultDangerousRules_AbsoluteDeleteNamesTheBoundaryAndTheWayOut pins the model-facing
+// text of the two recursive-delete mirror rules. The pattern refuses every ABSOLUTE target,
+// the project's own directory included, so the Reason has to say "absolute" — a wording
+// around roots and homes sent small models re-issuing the same absolute workspace path
+// (session-mining review, 2026-09-14) — and the Hint has to name the two ways past it: the
+// relative spelling and the native tools. Both mirror rules carry the same text, and a
+// relative target stays a normal coding step.
+func TestDefaultDangerousRules_AbsoluteDeleteNamesTheBoundaryAndTheWayOut(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	const (
+		wantReason = "recursive force-delete of an absolute path"
+		wantHint   = "re-issue the path relative to the workspace, or delete through the native tools"
+	)
+
+	cases := []struct {
+		name     string
+		command  string
+		wantRule string
+	}{
+		{"an absolute workspace path", "rm -rf /workspace/repos/x", "rm-rf-root-home-system"},
+		{"a system path, flag order", "rm -fr /etc", "rm-fr-root-home-system"},
+		{"a relative target is allowed", "rm -rf ./build", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(terminalCall(tc.command), nil, nil)
+
+			if tc.wantRule == "" {
+				if d.Triggered() {
+					t.Fatalf("Inspect(%q) wrongly triggered: tier=%d rule=%q reason=%q", tc.command, d.Tier, d.RuleID, d.Reason)
+				}
+				return
+			}
+			if d.Tier != TierHardRefuse || d.RuleID != tc.wantRule {
+				t.Fatalf("Inspect(%q) = tier %d rule %q, want TierHardRefuse %q", tc.command, d.Tier, d.RuleID, tc.wantRule)
+			}
+			if d.Reason != wantReason {
+				t.Errorf("Inspect(%q) reason = %q, want %q", tc.command, d.Reason, wantReason)
+			}
+			if d.Hint != wantHint {
+				t.Errorf("Inspect(%q) hint = %q, want %q", tc.command, d.Hint, wantHint)
+			}
+		})
+	}
+}
+
 func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheWindowsHome(t *testing.T) {
 	t.Parallel()
 	// The Windows home reaches the same rules by two routes: `normalize` (dangerous.go)

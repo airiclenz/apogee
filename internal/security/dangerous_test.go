@@ -681,6 +681,36 @@ func TestInspectMasksTheSessionScratchDir(t *testing.T) {
 			wantTier: TierForceApproval,
 			wantRule: "write-apogee-control-plane",
 		},
+		// A repo cloned under the scratch dir: its `.git/config` rides the masked token, so
+		// the git control-plane rule never sees the segment it keys on — while the same
+		// segment spelled relative to the workspace, or in another repo, still hard-refuses.
+		{
+			name:     "a git config under the exempt dir is the exempt dir's own",
+			command:  "git config -f /root/.apogee/scratch/20260828T052713Z-55b6dbc4/repo/.git/config user.name x",
+			exempt:   exempt,
+			wantTier: TierNone,
+		},
+		{
+			name:     "the workspace's own git config still hard-refuses",
+			command:  "git config -f .git/config user.name x",
+			exempt:   exempt,
+			wantTier: TierHardRefuse,
+			wantRule: "write-git-control-plane",
+		},
+		{
+			name:     "a redirect into the workspace's git config still hard-refuses",
+			command:  "echo x >> .git/config",
+			exempt:   exempt,
+			wantTier: TierHardRefuse,
+			wantRule: "write-git-control-plane",
+		},
+		{
+			name:     "a hard refuse after the exempt token still fires",
+			command:  "cat /root/.apogee/scratch/20260828T052713Z-55b6dbc4/x/.git/config;rm -rf /",
+			exempt:   exempt,
+			wantTier: TierHardRefuse,
+			wantRule: "rm-rf-root-home-system",
+		},
 	}
 
 	for _, tc := range cases {
@@ -734,19 +764,19 @@ func TestMaskExempt(t *testing.T) {
 			name:   "a deeper path masks with the dir",
 			text:   "cat /root/.apogee/scratch/sess-1/gocache/x",
 			exempt: []string{scratch},
-			want:   "cat <exempt>/gocache/x",
+			want:   "cat <exempt>",
 		},
 		{
 			name:   "a trailing separator in the text masks with the dir",
 			text:   "cd /root/.apogee/scratch/sess-1/",
 			exempt: []string{scratch},
-			want:   "cd <exempt>/",
+			want:   "cd <exempt>",
 		},
 		{
 			name:   "a trailing separator on the exempt path is ignored",
 			text:   "cd /root/.apogee/scratch/sess-1/x",
 			exempt: []string{scratch + "/"},
-			want:   "cd <exempt>/x",
+			want:   "cd <exempt>",
 		},
 		{
 			name:   "the tilde spelling masks",
@@ -782,19 +812,43 @@ func TestMaskExempt(t *testing.T) {
 			name:   "a neighbouring control-plane path survives",
 			text:   "cp /root/.apogee/config.yaml /root/.apogee/scratch/sess-1/b",
 			exempt: []string{scratch},
-			want:   "cp /root/.apogee/config.yaml <exempt>/b",
+			want:   "cp /root/.apogee/config.yaml <exempt>",
 		},
 		{
 			name:   "every occurrence masks",
 			text:   "cp /root/.apogee/scratch/sess-1/a ~/.apogee/scratch/sess-1/b",
 			exempt: []string{scratch},
-			want:   "cp <exempt>/a <exempt>/b",
+			want:   "cp <exempt> <exempt>",
 		},
 		{
 			name:   "a path outside the control plane masks literally only",
 			text:   "cd /srv/box && cat /srv/box/x",
 			exempt: []string{"/srv/box"},
-			want:   "cd <exempt> && cat <exempt>/x",
+			want:   "cd <exempt> && cat <exempt>",
+		},
+		{
+			name:   "a repo cloned under the dir masks its .git segment with the token",
+			text:   "git config -f /root/.apogee/scratch/sess-1/repo/.git/config user.name x",
+			exempt: []string{scratch},
+			want:   "git config -f <exempt> user.name x",
+		},
+		{
+			name:   "the token ends at a shell metacharacter, what follows stays judged",
+			text:   "cat /root/.apogee/scratch/sess-1/x/.git/config;rm -rf /",
+			exempt: []string{scratch},
+			want:   "cat <exempt>;rm -rf /",
+		},
+		{
+			name:   "the token ends at a pipe",
+			text:   "cat /root/.apogee/scratch/sess-1/x|sh",
+			exempt: []string{scratch},
+			want:   "cat <exempt>|sh",
+		},
+		{
+			name:   "the token ends at a closing quote",
+			text:   "cat \"/root/.apogee/scratch/sess-1/x y\"",
+			exempt: []string{scratch},
+			want:   "cat \"<exempt> y\"",
 		},
 	}
 

@@ -66,6 +66,11 @@ const (
 	// OPENING quote is matched: deleteTargetAnchor's branches end wherever the path ends, and
 	// requiring a matching close would buy nothing a footgun-guard needs.
 	quoteOpen = `["']?`
+	// rmAbsoluteReason and rmAbsoluteHint are the two mirror rules' shared model-facing
+	// text: the Reason names the precision boundary the pattern actually draws (absolute
+	// versus relative), the Hint the two sanctioned ways past it.
+	rmAbsoluteReason = "recursive force-delete of an absolute path"
+	rmAbsoluteHint   = "re-issue the path relative to the workspace, or delete through the native tools"
 )
 
 func DefaultDangerousRules() []Rule {
@@ -82,10 +87,15 @@ func DefaultDangerousRules() []Rule {
 		// deliberate choice — an absolute recursive force-delete is a small model's mistake
 		// often enough, and cheap enough to re-issue relatively, that the hard refuse is
 		// the right answer.
+		// The Reason says what the rule actually judges — the ABSOLUTE spelling, not which
+		// path — and the Hint names the way out, because a refusal worded around roots and
+		// homes sent small models re-issuing the same absolute workspace path up to eight
+		// times in a row (session-mining review, 2026-09-14).
 		{
 			ID:     "rm-rf-root-home-system",
 			Tier:   TierHardRefuse,
-			Reason: "recursive force-delete of a root, home, or system path",
+			Reason: rmAbsoluteReason,
+			Hint:   rmAbsoluteHint,
 			Pattern: `\brm\s+(?:` + rmFlag + `\s+)*(?:-[a-z]*r[a-z]*f[a-z]*|` +
 				rmRecursive + `\s+(?:` + rmFlag + `\s+)*` + rmForce + `)\s+(?:` +
 				rmFlag + `\s+)*` + rmEndOfOptions + quoteOpen + deleteTargetAnchor,
@@ -95,7 +105,8 @@ func DefaultDangerousRules() []Rule {
 		{
 			ID:     "rm-fr-root-home-system",
 			Tier:   TierHardRefuse,
-			Reason: "recursive force-delete of a root, home, or system path",
+			Reason: rmAbsoluteReason,
+			Hint:   rmAbsoluteHint,
 			Pattern: `\brm\s+(?:` + rmFlag + `\s+)*(?:-[a-z]*f[a-z]*r[a-z]*|` +
 				rmForce + `\s+(?:` + rmFlag + `\s+)*` + rmRecursive + `)\s+(?:` +
 				rmFlag + `\s+)*` + rmEndOfOptions + quoteOpen + deleteTargetAnchor,

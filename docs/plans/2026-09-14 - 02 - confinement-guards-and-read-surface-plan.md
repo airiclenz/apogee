@@ -257,7 +257,12 @@ NOTES (2026-09-15): `contentLooksHTML` (Content-Type or doctype sniff) stays in 
 
 **Commit:** `feat(tools): web_fetch renders HTML as text; grep clips wide rows and nudges at the match cap`
 
-## 9. The `rm -rf` refusal says "absolute target" with a hint; the scratch exemption masks the whole token
+## 9. The `rm -rf` refusal says "absolute target" with a hint; the scratch exemption masks the whole token — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): six `TestMaskExempt` rows read `<exempt>` rather than the three the plan names — every deeper-path / trailing-separator expectation changes under whole-token masking (the enumeration is a floor).
+NOTES (2026-09-15): the masked span is `dir(?:/[^\s;|&<>()'"\x60]*|\b)` (constant `exemptTokenTail`) rather than the plan's `dir(?:/…)?` + `\b`: a bare `\b` after an optional group lets a trailing `/` survive (`<exempt>/`), while the alternation masks it with the token; the sibling guard (`<dir>x` unmasked) is the `\b` branch.
+NOTES (2026-09-15): `internal/agent/floorguards_test.go` pins no rm Reason text, so it is unchanged (nothing to update).
+NOTES (2026-09-15): consequential edit — docs/adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md: made necessary by whole-token masking (the amendment's "no hard-refuse rule targets it" sentence is now qualified by a dated note).
 
 **What:** `internal/security/rules.go` `DefaultDangerousRules` `rm-rf-root-home-system`: Reason becomes `recursive force-delete of an absolute path` and the rule gains Hint `re-issue the path relative to the workspace, or delete through the native tools` (the Hint infrastructure from `6323ea92` renders it). `maskExempt` (ADR 0049 2026-08-28 amendment) replaces the whole path token starting at an exempt dir (`<scratch>/repo/.git/config` ⇒ `<exempt>`), not only the prefix, so `write-git-control-plane` no longer trips on a repo cloned under the scratch dir. Every test pinning the old Reason text is updated; `TestMaskExempt` extended.
 

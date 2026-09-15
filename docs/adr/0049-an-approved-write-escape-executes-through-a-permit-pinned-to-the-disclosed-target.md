@@ -169,3 +169,10 @@ Masking before every rule means a Tier-1 rule sees the placeholder too. That is 
 exactly this width: the masked dir is the session's own writable box, and no hard-refuse rule
 targets it. Widening the exemption beyond the session's own scratch dir would not be — it would
 start hiding text a Tier-1 rule exists to see.
+
+*Amended 2026-09-15:* the mask covers the WHOLE shell token that starts at the exempt dir, not
+only the dir's prefix — `<scratch>/repo/.git/config` collapses to the placeholder entirely, so a
+repo cloned under the scratch dir no longer trips `write-git-control-plane` on its own metadata.
+The token ends at whitespace or a shell metacharacter, so `cat <scratch>/x;rm -rf /` still
+hard-refuses on its second half. The width is unchanged: everything under the token is inside
+the session's own writable box.

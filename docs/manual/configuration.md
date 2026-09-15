@@ -1693,10 +1693,12 @@ Ask-Before, Allow-Edits and Auto alike — and it is tighten-only: it can make a
 stricter than the mode would have made it, never looser. It has two tiers.
 
 **Tier 1 refuses the call outright**, in every mode, with no per-call override and no
-prompt to say yes on: an `rm -rf` aimed at a root, home or system path, a fork bomb, a
-write to `~/.ssh`, to a credential or persistence file, or to a repository's `.git/hooks`.
-The model gets back an error naming why, and — where the matched rule knows a sanctioned
-route — where to go instead.
+prompt to say yes on: an `rm -rf` aimed at an absolute path — any absolute path, the
+workspace's own directory included; a relative target such as `./build` is allowed — a
+fork bomb, a write to `~/.ssh`, to a credential or persistence file, or to a repository's
+`.git/hooks`. The model gets back an error naming why, and — where the matched rule knows a
+sanctioned route — where to go instead: the `rm -rf` refusal, for one, says to re-issue the
+path relative to the workspace or delete through the native tools.
 
 **Tier 2 forces the approval prompt**, even on the auto rung where nothing else would ask.
 These are the idioms that are usually legitimate and occasionally catastrophic: `curl … |
