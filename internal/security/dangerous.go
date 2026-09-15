@@ -253,15 +253,19 @@ var payloadKeys = map[string]bool{
 // keyPunctuation strips the separators that distinguish spellings of one argument name.
 var keyPunctuation = strings.NewReplacer("_", "", "-", "")
 
-// foldKey normalizes an argument key for set membership: lower case, separators removed,
-// so `newContent`, `new_content` and `new-content` all resolve to the same entry.
-func foldKey(key string) string {
-	return keyPunctuation.Replace(strings.ToLower(key))
+// keySpelling reduces an argument key to the spelling payloadKeys, dropKeys and shellKeys are
+// matched under: domain.FoldArgumentKey — the fold the dispatcher decodes the same bytes with,
+// so a key the executor reads as `message` (`meſſage`, U+017F folding to `s`) is `message` here
+// too — and then the separators removed, so `newContent`, `new_content` and `new-content` all
+// resolve to the same entry. The guard owns no case fold of its own: lower-casing here would
+// disagree with dispatch on exactly the runes a substitution hides behind.
+func keySpelling(key string) string {
+	return keyPunctuation.Replace(domain.FoldArgumentKey(key))
 }
 
 // isPayloadKey reports whether an argument key carries payload text rather than an action.
 func isPayloadKey(key string) bool {
-	return payloadKeys[foldKey(key)]
+	return payloadKeys[keySpelling(key)]
 }
 
 // inspectableText pulls the strings the guard matches against out of a tool call: the
@@ -277,9 +281,9 @@ func inspectableText(call domain.ToolCall, dropKeys []string) string {
 	if len(dropKeys) > 0 {
 		dropped := make(map[string]bool, len(dropKeys))
 		for _, k := range dropKeys {
-			dropped[foldKey(k)] = true
+			dropped[keySpelling(k)] = true
 		}
-		skip = func(key string) bool { return isPayloadKey(key) || dropped[foldKey(key)] }
+		skip = func(key string) bool { return isPayloadKey(key) || dropped[keySpelling(key)] }
 	}
 
 	var b strings.Builder
@@ -308,14 +312,14 @@ func shellWriteText(call domain.ToolCall, shellKeys, dropKeys []string) (text st
 	}
 	shell := make(map[string]bool, len(shellKeys))
 	for _, k := range shellKeys {
-		shell[foldKey(k)] = true
+		shell[keySpelling(k)] = true
 	}
 	dropped := make(map[string]bool, len(dropKeys))
 	for _, k := range dropKeys {
-		dropped[foldKey(k)] = true
+		dropped[keySpelling(k)] = true
 	}
 	skip := func(key string) bool {
-		return isPayloadKey(key) || dropped[foldKey(key)] || shell[foldKey(key)]
+		return isPayloadKey(key) || dropped[keySpelling(key)] || shell[keySpelling(key)]
 	}
 
 	var b strings.Builder
@@ -324,7 +328,7 @@ func shellWriteText(call domain.ToolCall, shellKeys, dropKeys []string) (text st
 	collectStrings(args, &b, skip)
 	for key, value := range args {
 		line, isString := value.(string)
-		if !shell[foldKey(key)] || !isString {
+		if !shell[keySpelling(key)] || !isString {
 			continue
 		}
 		b.WriteByte(' ')

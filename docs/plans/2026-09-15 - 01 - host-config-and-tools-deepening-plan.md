@@ -343,7 +343,10 @@ NOTES (2026-09-15): `internal/agent/resolution_test.go` changed only in one comm
 
 Commit: `refactor(tools): Classify sits beside the markers; the ladder consumes the class`
 
-## 14. One argument-key fold
+## 14. One argument-key fold — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `func foldKey` is deleted as the item says; the two-step fold (domain fold, then separator strip) is kept behind one thin helper `keySpelling` rather than repeated at the nine membership sites (payloadKeys, dropKeys, shellKeys) — the item's "one fold" is the domain's, the helper adds only the separator strip.
+NOTES (2026-09-15): the separator-variant cases already sat in TestDangerousActionGuard_PayloadKeySpellingVariants; it gained the Unicode-fold case (`meſſage` → `message`, fails on the old fold) and an unlisted-key control.
 
 **What.** `internal/security/dangerous.go`'s `foldKey` (strips `_`/`-`) is deleted; `payloadKeys` matching uses `domain.FoldArgumentKey` followed by the separator strip, so the guard and the dispatcher agree on what a key spells. `payloadKeys` itself stays where it is (its home is a deferred bead). Depends on item 4.
 

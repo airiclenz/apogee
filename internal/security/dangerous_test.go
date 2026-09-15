@@ -259,8 +259,11 @@ func TestDangerousActionGuard_PayloadKeySpellingVariants(t *testing.T) {
 	g := DefaultDangerousActionGuard()
 
 	// One argument, several spellings: the key fold means a model writing new_content or
-	// NewContent gets the same exclusion as the declared newContent.
-	for _, key := range []string{"newContent", "new_content", "new-content", "NEWCONTENT"} {
+	// NewContent gets the same exclusion as the declared newContent. The fold is the
+	// dispatcher's own (domain.FoldArgumentKey) with the separators stripped on top, so a
+	// key the executor reads as `message` — `meſſage`, U+017F LONG S folding to `s` — is the
+	// payload key here too, never a spelling the guard inspects while dispatch stores it.
+	for _, key := range []string{"newContent", "new_content", "new-content", "NEWCONTENT", "me\u017f\u017fage"} {
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()
 
@@ -270,6 +273,13 @@ func TestDangerousActionGuard_PayloadKeySpellingVariants(t *testing.T) {
 				t.Fatalf("key %q was inspected as an action: tier=%d rule=%q", key, d.Tier, d.RuleID)
 			}
 		})
+	}
+
+	// The control: a key that folds to nothing on the payload list stays inspected — the
+	// exclusion is earned by the fold landing on a listed key, not by the fold itself.
+	d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", "target": "mentions ~/.ssh"}), nil, nil)
+	if !d.Triggered() {
+		t.Fatalf("an unlisted key was excluded from inspection: tier=%d rule=%q", d.Tier, d.RuleID)
 	}
 }
 
