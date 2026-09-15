@@ -268,7 +268,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	w.binder = serverBinder{cfg: w.cfg, resumed: w.resumed, engine: w.engine, holder: w.holder,
 		caps: w.caps, keys: w.keys}
 	if w.opts.Prebound.Reason == "" {
-		if err := w.binder.bind(startupEntry(w.opts)); err != nil {
+		if err := w.binder.bind(w.opts.StartupEntry); err != nil {
 			return err
 		}
 	}
@@ -347,7 +347,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// name: ApplyConfig writes the SELECTED entry's own into it, and the one start that carries a
 	// host-derived label instead — the ephemeral `--endpoint` override — carries no launcher key
 	// either, so the two are empty together exactly as launcherPath.follow keeps them.
-	startPath, startOn := entryLauncherPath(w.opts.StartupLauncher)
+	startPath, startOn := entryLauncherPath(w.opts.StartupEntry.LlamaLauncher)
 	startEntry := ""
 	if startOn {
 		startEntry = w.opts.HostAlias

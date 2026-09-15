@@ -301,11 +301,12 @@ func TestRunRootWiresTheDelegationNamer(t *testing.T) {
 	t.Parallel()
 
 	opts := config.Options{
-		Endpoint:  "http://127.0.0.1:1111",
-		Model:     "model-a",
-		Mode:      "ask-before",
-		Workspace: t.TempDir(),
-		ConfigDir: t.TempDir(),
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "model-a",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "model-a"},
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
+		ConfigDir:    t.TempDir(),
 	}
 	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 	if err != nil {
@@ -349,12 +350,13 @@ func TestRunRootWiresTheAutoTitleHookToTheNamer(t *testing.T) {
 	t.Parallel()
 
 	opts := config.Options{
-		Endpoint:  "http://127.0.0.1:1111",
-		Model:     "fake",
-		Mode:      "ask-before",
-		Workspace: t.TempDir(),
-		ConfigDir: t.TempDir(),
-		AutoTitle: true,
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
+		ConfigDir:    t.TempDir(),
+		AutoTitle:    true,
 	}
 	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 	if err != nil {

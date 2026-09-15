@@ -158,7 +158,7 @@ func (w *rootWiring) resolveConfig() error {
 	// all, and sending no header instead would put the user's prompts on that server as anonymous
 	// requests they would learn about from a 401 (design call 4). A pre-bound start resolves the
 	// zero entry, which names no source and answers "" without running anything.
-	apiKey, err := w.keys.Resolve(startupEntry(w.opts))
+	apiKey, err := w.keys.Resolve(w.opts.StartupEntry)
 	if err != nil {
 		return err
 	}
@@ -344,7 +344,7 @@ func (w *rootWiring) resolveConfig() error {
 			MaxContextTokens:        w.opts.ContextWindow,
 			WorkingWindow:           w.opts.WorkingWindow,
 			ResponseReserveFraction: w.opts.ResponseReserve,
-			MaxOutputTokens:         w.opts.StartupMaxOutputTokens,
+			MaxOutputTokens:         w.opts.StartupEntry.MaxOutputTokens,
 			CompactionEnabled:       w.opts.AutoCompact,
 			PruneToolResults:        w.opts.PruneToolResults,
 		},

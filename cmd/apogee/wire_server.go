@@ -2,9 +2,10 @@ package main
 
 // The server-bind seam of the composition root, lifted out of wire.go by concern (ADR 0043).
 //
-// Which server this session runs on and when the wiring hears that something changed: the entry a
-// startup selection collapses to, the single step that turns any entry — startup or human-picked —
-// into a bound session, and the wait the renderer's config-reload chain parks on.
+// Which server this session runs on and when the wiring hears that something changed: the single
+// step that turns any entry — the startup one resolution holds on options
+// (config.Options.StartupEntry) or the one a human picked — into a bound session, and the wait the
+// renderer's config-reload chain parks on.
 //
 // At the end of the file, the same seam as the renderer sees it: serverHost, this binary's
 // [tui.ServerHost] — the six Upstream acts the projection hands over as one named capability
@@ -21,35 +22,6 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
-
-// startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
-// left on options: the endpoint, the key SOURCE — all three spellings of it, since which one the
-// entry named is exactly what the resolver has to be told — the discovery hint, the fan-out pin, the
-// reply cap, the window pin, the alias — which for a configured entry IS its `servers:` name and for
-// the ephemeral override entry is the endpoint's host — and the human's own `description:` of that
-// box, which the bind hands the engine as the session Delegation seat's words (ADR 0069), so an
-// entry the user described describes its seat from the first Turn rather than from the first
-// `/server` switch. It exists so the bind step below has ONE input shape, the ServerEntry, whether
-// it is binding the startup server or the one a human picked out of the list — and, since the key is
-// resolved from the entry rather than carried on it, so that every command in the composition root
-// that needs the startup server's key asks for it the same way a switch does.
-func startupEntry(opts config.Options) config.ServerEntry {
-	return config.ServerEntry{
-		Name:            opts.HostAlias,
-		Endpoint:        opts.Endpoint,
-		Description:     opts.StartupDescription,
-		APIKey:          opts.APIKey,
-		APIKeyCmd:       opts.APIKeyCmd,
-		APIKeyEnv:       opts.APIKeyEnv,
-		Model:           opts.Model,
-		ParallelAgents:  opts.StartupParallelAgents,
-		MaxOutputTokens: opts.StartupMaxOutputTokens,
-		ContextWindow:   config.TokenCount(opts.StartupContextWindow),
-		WorkingWindow:   opts.StartupWorkingWindow,
-		ResponseReserve: opts.StartupResponseReserve,
-		EffortDialect:   opts.StartupEffortDialect,
-	}
-}
 
 // serverBinder is the one step that turns a ServerEntry into a running session: the Agent
 // constructed against that server, the Monitor that observes it, and the binding the out-of-band

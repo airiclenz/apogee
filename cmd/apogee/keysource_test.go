@@ -234,8 +234,8 @@ func TestStartupOverlayBeatsACommandKeySource(t *testing.T) {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
-	// Without the override, the entry's command is what answers — the flattening carried the source
-	// onto the options at all, which is what the startup seams re-assemble the entry from.
+	// Without the override, the entry's command is what answers — resolution carried the source
+	// onto the options at all, on the held entry the startup seams resolve the key from.
 	plain := config.Options{ConfigDir: home}
 	if err := config.ApplyConfig(&plain, func(string) bool { return false },
 		func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
@@ -244,7 +244,7 @@ func TestStartupOverlayBeatsACommandKeySource(t *testing.T) {
 	if plain.APIKeyCmd != command {
 		t.Fatalf("opts.APIKeyCmd = %q; want the startup entry's own api-key-cmd", plain.APIKeyCmd)
 	}
-	key, err := config.NewKeyResolver("").Resolve(startupEntry(plain))
+	key, err := config.NewKeyResolver("").Resolve(plain.StartupEntry)
 	if err != nil {
 		t.Fatalf("resolve the startup entry: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestStartupOverlayBeatsACommandKeySource(t *testing.T) {
 		t.Errorf("the overlay erased api-key-cmd (%q); it must overlay the value, not the file",
 			overlaid.APIKeyCmd)
 	}
-	overlaidKey, err := config.NewKeyResolver("").Resolve(startupEntry(overlaid))
+	overlaidKey, err := config.NewKeyResolver("").Resolve(overlaid.StartupEntry)
 	if err != nil {
 		t.Fatalf("resolve the overlaid startup entry: %v", err)
 	}

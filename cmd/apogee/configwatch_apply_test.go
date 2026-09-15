@@ -156,11 +156,12 @@ func TestRunRootWiresTheConfigWatch(t *testing.T) {
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"),
 		"editor: "+self+"\nmode: ask-before\nauto-title: true\n")
 	opts := config.Options{
-		Endpoint:  "http://127.0.0.1:1111",
-		Model:     "fake",
-		Mode:      "ask-before",
-		Workspace: t.TempDir(),
-		ConfigDir: home,
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
+		ConfigDir:    home,
 	}
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)

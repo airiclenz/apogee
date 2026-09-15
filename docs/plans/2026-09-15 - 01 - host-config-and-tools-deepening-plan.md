@@ -166,7 +166,11 @@ NOTES (2026-09-15): folding startup onto the rebind's resolution means a pre-bou
 
 Commit: `feat(facade): export the default prompt and shipped profile so any Driver dials the product's agent`
 
-## 6. `Options.StartupEntry` replaces the fourteen flattened fields
+## 6. `Options.StartupEntry` replaces the fourteen flattened fields — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the plan's Files list names `cmd/apogee/configmigrate_test.go`, `wire_firing.go`, `upstream.go` and `delegation.go`; the first does not exist in the tree and the other three contain no reader the acceptance grep finds, so none was edited.
+NOTES (2026-09-15): consequential edit — 14 further `_test.go` files under `cmd/apogee/` (wire_boot, wire_live, wire_server, wire_settings, root, title, naming, readfence, settingsedit, keymigrate, configwatch_apply, confinement_e2e, daemonfire, schedule): hand-built `config.Options` literals that reached the bind through `runRoot`/`wireSession`/the daemon harness relied on the deleted re-assembler to build the entry from `Endpoint`/`Model`/`HostAlias`, so each now also sets `StartupEntry` to the same values (as `ApplyConfig` would hold it); no assertion changed.
+NOTES (2026-09-15): consequential edit — docs/adr/0028-…md: the follow-up paragraph naming `StartupContextWindow` gained a dated parenthetical pointing at `config.Options.StartupEntry`.
 
 **What.** Recast at the regression check (2026-09-15). `config.Options` (`internal/config/options.go`) gains `StartupEntry ServerEntry`; `ApplyConfig` (`internal/config/config.go`) stores the resolved entry once and the fourteen `Startup*` fields plus `StartupEphemeral` are deleted. Producers: `ApplyConfig`. Consumers enumerated at write time and re-pointed: `cmd/apogee/wire_server.go` (`startupEntry` deleted — `bind` reads `opts.StartupEntry`), `cmd/apogee/wire_settings.go` (`rebindInputs`, `liveSettings` seeding), `cmd/apogee/wire_firing.go`, `cmd/apogee/upstream.go`, `cmd/apogee/delegation.go`, plus every `_test.go` that sets a `Startup*` field (`grep -rln "Startup[A-Z]" --include=*_test.go .`). The three `Resolve{ContextWindow,WorkingWindow,ResponseReserve}` ladders are NOT changed. Depends on item 4.
 

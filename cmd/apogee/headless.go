@@ -895,7 +895,7 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// What comes back beside the Config is the per-model rebind's narration: a built-in Model
 	// profile announcing itself, and the roster delta such a profile carries. It goes to stderr,
 	// where it cannot contaminate the answer.
-	entry := startupEntry(*opts)
+	entry := opts.StartupEntry
 	cfg, routing, notices, err := firingConfig(cmd.Context(), firingInputs{
 		opts:     *opts,
 		entry:    entry,

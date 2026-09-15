@@ -3151,55 +3151,6 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// An undetermined startup is neither: nothing was selected, so there is nothing to synthesize a
 	// switch row for either.
 	opts.StartupEphemeral = startupErr == nil && startup.Name == ""
-	// And which launcher config — if any — that entry fronts its server with. The key belongs to the
-	// entry (this plan, 2026-08-07: ADR 0029 decision 4's global key moved onto the `servers:` list),
-	// so what the session starts with is the SELECTED entry's own value, carried as written for the
-	// composition root to resolve. The ephemeral override entry carries none, which is the honest
-	// answer for an endpoint no entry names: `/server` onto a launcher-fronted entry turns it on.
-	opts.StartupLauncher = startup.LlamaLauncher
-	// And how wide a fan-out that entry's server will take (ADR 0039 decision 2). Same reasoning as
-	// the launcher key above: it belongs to the entry, so what the session starts with is the
-	// SELECTED entry's own value, carried as written for the composition root to resolve against
-	// what the server itself advertises. The ephemeral override entry pins nothing, which leaves an
-	// override run discovering — and falling back to one agent at a time.
-	opts.StartupParallelAgents = startup.ParallelAgents
-	// And how long a single reply from that entry's server may run (ADR 0046). Same reasoning again:
-	// the ceiling belongs to the entry, so what the session starts with is the SELECTED entry's own
-	// value, carried as written for the composition root to hand the engine. The ephemeral override
-	// entry pins nothing, which leaves an override run deriving the cap from its reply budget.
-	opts.StartupMaxOutputTokens = startup.MaxOutputTokens
-	// And what that entry's server BOUNDS a session to (ADR 0045 decision 3). It is flattened for the
-	// reply ceiling's reason and travels the same way — the SELECTED entry's own value, carried as
-	// written for the composition root to resolve over the top-level `context-window:` key
-	// (ResolveContextWindow) at the bind. The ephemeral override entry pins nothing, which leaves an
-	// override run on that top-level key and, unpinned there too, on what the first beat observes.
-	opts.StartupContextWindow = int(startup.ContextWindow)
-	// And how much of that window a session on it actually works in. Flattened for the pin's reason
-	// and travelling the same way — the SELECTED entry's own value, carried as written for the
-	// composition root to resolve over the top-level `working-window:` key (ResolveWorkingWindow) at
-	// the bind. The ephemeral override entry bounds nothing, which leaves an override run on that
-	// top-level key and, unbounded there too, working in the whole advertised window.
-	opts.StartupWorkingWindow = startup.WorkingWindow
-	// And how that entry's server divides it (item 13). Flattened for the window's reason and
-	// travelling the same way — the SELECTED entry's own value, carried as written for the
-	// composition root to resolve over the top-level `response-reserve:` key
-	// (ResolveResponseReserve) at the bind. The ephemeral override entry states no share, which
-	// leaves an override run on that top-level key and, unset there too, on apogee's own.
-	opts.StartupResponseReserve = startup.ResponseReserve
-	// And which wire shape that entry's server reads a thinking-effort intent in, when the user
-	// stated one rather than leaving detection to answer (ADR 0060 decision 3). Flattened for the
-	// share's reason and travelling the same way — the SELECTED entry's own value, carried as written
-	// for the composition root to hand the beat and every unattended run's construction seed. The
-	// ephemeral override entry forces nothing, which leaves an override run on what discovery sees.
-	opts.StartupEffortDialect = startup.EffortDialect
-	// And what that entry IS, in the human's own words — the SELECTED entry's free-text
-	// `description:`, carried verbatim for the composition root to hand the engine at the bind,
-	// where it becomes the session Delegation seat's description in the orientation block's
-	// Delegations line (ADR 0069). Flattened for the dialect's reason and travelling the same way:
-	// it is a fact about the entry this session starts ON, and a model offered a seat to choose must
-	// read it from the FIRST Turn rather than from the first `/server` switch. The ephemeral
-	// override entry describes nothing, which leaves an override run naming that seat undescribed.
-	opts.StartupDescription = startup.Description
 	// A roster name that matches no tool — in either half of the global `tools:` block or of any
 	// `model-profiles:` entry's axis — is a NOTICE, never a refusal, and so is a name written under
 	// both halves of one block: the lists are how a roster is tuned on evidence, and a typo in one
@@ -3232,6 +3183,17 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	if opts.HostAlias == "" {
 		opts.HostAlias = aliasFromEndpoint(opts.Endpoint, opts.Servers)
 	}
+	// And the entry itself, held ONCE for everything the composition root reads off it beyond the
+	// flag-bound trio above — the launcher key, the fan-out pin, the reply cap, the window pin and
+	// bound, the reply share, the forced dialect, the human's `description:` — each the SELECTED
+	// entry's own value, carried as written for the root to resolve where it is needed (ADR 0029
+	// decision 4, 0039, 0045 decision 3, 0046, 0060 decision 3, 0069). It is written AFTER the alias
+	// fallback so its Name is what HostAlias is: the configured entry's own name, or the host-derived
+	// label the ephemeral override entry is called by, which is what the bind names the session's
+	// server and what an unattended run's seat line states. The ephemeral entry carries none of the
+	// per-entry facts, which leaves an override run discovering, deriving and on the top-level keys.
+	opts.StartupEntry = startup
+	opts.StartupEntry.Name = opts.HostAlias
 	// Held from the selection step above: everything is resolved, so the caller that can ask a
 	// human has what it needs to ask, and the caller that cannot refuses with the same message it
 	// has always printed.

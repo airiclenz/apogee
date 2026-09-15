@@ -598,8 +598,8 @@ func TestDaemonGraceExpiryCancelsTheFiringInFlight(t *testing.T) {
 func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 	h := newDaemonHarness(t)
 	opts := config.Options{
-		ConfigDir:       h.home,
-		StartupLauncher: "auto",
+		ConfigDir:    h.home,
+		StartupEntry: config.ServerEntry{LlamaLauncher: "auto"},
 		Servers: []config.ServerEntry{
 			{Name: "plain", Endpoint: testServerEndpoint},
 			{Name: "fronted", Endpoint: testServerEndpoint, LlamaLauncher: "auto"},
@@ -644,7 +644,7 @@ func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 // the rule the empty-name lookup above exists to reach, asserted through Load itself.
 func TestDaemonHostRefusesAModelOnTheLauncherFrontedDefault(t *testing.T) {
 	h := newDaemonHarness(t)
-	opts := config.Options{ConfigDir: h.home, StartupLauncher: "auto"}
+	opts := config.Options{ConfigDir: h.home, StartupEntry: config.ServerEntry{LlamaLauncher: "auto"}}
 	wiring, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now})
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)

@@ -38,6 +38,9 @@ func urlGuardWiring(t *testing.T, opts config.Options) *rootWiring {
 	t.Helper()
 	opts.Endpoint = "http://127.0.0.1:1111"
 	opts.Model = "fake"
+	// The entry as ApplyConfig holds it: what the bind step takes, and the flag-bound pair above
+	// says the same thing.
+	opts.StartupEntry = config.ServerEntry{Endpoint: opts.Endpoint, Model: opts.Model}
 	opts.Mode = "ask-before"
 	opts.Workspace = t.TempDir()
 	opts.ConfigDir = t.TempDir()

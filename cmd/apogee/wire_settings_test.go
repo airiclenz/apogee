@@ -761,10 +761,11 @@ func TestRunRootThreadsTheTaskListFoldInverted(t *testing.T) {
 			t.Parallel()
 			rec := &recordingLauncher{}
 			opts := config.Options{
-				Endpoint:  "http://127.0.0.1:1111",
-				Model:     "fake",
-				Mode:      "ask-before",
-				Workspace: t.TempDir(),
+				Endpoint:     "http://127.0.0.1:1111",
+				Model:        "fake",
+				StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+				Mode:         "ask-before",
+				Workspace:    t.TempDir(),
 				UI: config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
 					ColorScheme: "dark", TaskListOpen: open},
 			}
@@ -2188,6 +2189,7 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	opts := config.Options{
 		Endpoint:     "http://127.0.0.1:1111",
 		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
 		Mode:         "ask-before",
 		Workspace:    t.TempDir(),
 		ConfigDir:    t.TempDir(),
@@ -2386,7 +2388,8 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	// The holder as a startup bind onto `here` leaves it: the entry's own 32,768 latched over the
 	// top-level 16,384.
 	live := newLiveSettings(config.Options{
-		ContextWindow: 16384, HostAlias: "here", StartupContextWindow: 32768,
+		ContextWindow: 16384, HostAlias: "here",
+		StartupEntry: config.ServerEntry{Name: "here", ContextWindow: 32768},
 	})
 	if got := live.window(); got != 32768 {
 		t.Fatalf("the bound window = %d; want the startup entry's 32768", got)
@@ -2448,7 +2451,10 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) 
 
 	// The holder as a startup bind onto `here` leaves it: the entry's own 32,768 over the top-level
 	// 16,384, and a beat that has since reported what the server itself advertises.
-	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupContextWindow: 32768}
+	launchOpts := config.Options{
+		ContextWindow: 16384, HostAlias: "here",
+		StartupEntry: config.ServerEntry{Name: "here", ContextWindow: 32768},
+	}
 	live := newLiveSettings(launchOpts)
 	live.observe(131072, provider.EffortDialectNone)
 
@@ -2546,7 +2552,8 @@ func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T
 				t.Fatalf("write config: %v", err)
 			}
 			live := newLiveSettings(config.Options{
-				ContextWindow: 16384, HostAlias: "here", StartupContextWindow: tt.entryPin,
+				ContextWindow: 16384, HostAlias: "here",
+				StartupEntry: config.ServerEntry{Name: "here", ContextWindow: config.TokenCount(tt.entryPin)},
 			})
 			probe := &rebindProbe{}
 			apply := applySettingFor(settingsApplier{
@@ -2605,7 +2612,10 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysReplyCap(t *testing.T
 
 	// The holder as a startup bind onto `here` leaves it: that entry's own 2,048-token ceiling, the
 	// top-level window key, and a beat that has since reported what the server advertises.
-	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupMaxOutputTokens: 2048}
+	launchOpts := config.Options{
+		ContextWindow: 16384, HostAlias: "here",
+		StartupEntry: config.ServerEntry{Name: "here", MaxOutputTokens: 2048},
+	}
 	live := newLiveSettings(launchOpts)
 	live.observe(131072, provider.EffortDialectNone)
 
@@ -2708,7 +2718,8 @@ func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.
 				t.Fatalf("write config: %v", err)
 			}
 			live := newLiveSettings(config.Options{
-				HostAlias: "here", StartupMaxOutputTokens: tt.entryCap,
+				HostAlias:    "here",
+				StartupEntry: config.ServerEntry{Name: "here", MaxOutputTokens: tt.entryCap},
 			})
 			probe := &rebindProbe{}
 			apply := applySettingFor(settingsApplier{
@@ -2762,7 +2773,10 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysResponseReserve(t *te
 
 	// The holder as a startup bind onto `here` leaves it: that entry's own quarter-window share, the
 	// top-level window key, and a beat that has since reported what the server advertises.
-	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupResponseReserve: 0.25}
+	launchOpts := config.Options{
+		ContextWindow: 16384, HostAlias: "here",
+		StartupEntry: config.ServerEntry{Name: "here", ResponseReserve: 0.25},
+	}
 	live := newLiveSettings(launchOpts)
 	live.observe(131072, provider.EffortDialectNone)
 
@@ -2867,7 +2881,8 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 				t.Fatalf("write config: %v", err)
 			}
 			live := newLiveSettings(config.Options{
-				HostAlias: "here", StartupResponseReserve: tt.entryReserve,
+				HostAlias:    "here",
+				StartupEntry: config.ServerEntry{Name: "here", ResponseReserve: tt.entryReserve},
 			})
 			probe := &rebindProbe{}
 			apply := applySettingFor(settingsApplier{
@@ -2911,7 +2926,10 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *testing.T) {
 	t.Parallel()
 
-	live := newLiveSettings(config.Options{HostAlias: "here", StartupResponseReserve: 0.25})
+	live := newLiveSettings(config.Options{
+		HostAlias:    "here",
+		StartupEntry: config.ServerEntry{Name: "here", ResponseReserve: 0.25},
+	})
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
 	apply := applySettingFor(settingsApplier{

@@ -497,7 +497,10 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 
 			// The session as it LAUNCHED: bound to an entry pinning launchCap, which is what the
 			// settings holder's own latch was seeded with.
-			launchOpts := config.Options{HostAlias: "launch", StartupMaxOutputTokens: launchCap}
+			launchOpts := config.Options{
+				HostAlias:    "launch",
+				StartupEntry: config.ServerEntry{Name: "launch", MaxOutputTokens: launchCap},
+			}
 			live := newLiveSettings(launchOpts)
 			// ...and the move: the one call `/server` makes once the engine's own switch committed
 			// (sessionMover.move), which is what makes the moved-onto entry's pins this session's.
@@ -577,7 +580,10 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 			// The session as it LAUNCHED: bound to an entry stating launchShare, which is what the
 			// settings holder's own latch was seeded with. The top-level key states nothing, so the
 			// entry the session moves onto is the only thing that can answer.
-			launchOpts := config.Options{HostAlias: "launch", StartupResponseReserve: launchShare}
+			launchOpts := config.Options{
+				HostAlias:    "launch",
+				StartupEntry: config.ServerEntry{Name: "launch", ResponseReserve: launchShare},
+			}
 			live := newLiveSettings(launchOpts)
 			// ...and the move `/server` makes once the engine's own switch committed (sessionMover.move).
 			live.followEntry(tt.moved)
@@ -1108,6 +1114,7 @@ func TestRunRootWiresTheSchedulerAndClosesItWithTheTUI(t *testing.T) {
 	err := runRoot(context.Background(), config.Options{
 		Endpoint:           "http://127.0.0.1:1111",
 		Model:              "fake",
+		StartupEntry:       config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
 		Mode:               "ask-before",
 		Workspace:          t.TempDir(),
 		ConfigDir:          t.TempDir(),

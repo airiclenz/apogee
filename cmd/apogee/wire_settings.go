@@ -262,15 +262,15 @@ func newLiveSettings(opts config.Options) *liveSettings {
 		pinnedWindow:  opts.ContextWindow,
 		pinnedWorking: opts.WorkingWindow,
 		// The latch a determined startup binds with, seeded rather than pushed: the entry this
-		// session STARTS on is the one the composition root already flattened onto options
-		// (startupEntry), and its bind runs before this holder exists. A pre-bound start flattened
-		// nothing, so both fields are the honest zero until the human's first pick latches one
-		// through followEntry.
-		entryWindow:        opts.StartupContextWindow,
-		entryWorking:       opts.StartupWorkingWindow,
-		entryCap:           opts.StartupMaxOutputTokens,
+		// session STARTS on is the one resolution holds on options (config.Options.StartupEntry),
+		// and its bind runs before this holder exists. A pre-bound start holds the zero entry, so
+		// both fields are the honest zero until the human's first pick latches one through
+		// followEntry.
+		entryWindow:        int(opts.StartupEntry.ContextWindow),
+		entryWorking:       opts.StartupEntry.WorkingWindow,
+		entryCap:           opts.StartupEntry.MaxOutputTokens,
 		pinnedReserve:      opts.ResponseReserve,
-		entryReserve:       opts.StartupResponseReserve,
+		entryReserve:       opts.StartupEntry.ResponseReserve,
 		entryName:          opts.HostAlias,
 		servers:            opts.Servers,
 		seatChoice:         opts.SubAgentsChoice,
@@ -345,7 +345,7 @@ func (s *liveSettings) setPin(tokens int) {
 // `/server` move, and the first pick that ends a pre-bound start — and AFTER that arrival committed,
 // so a refused one leaves the session budgeting against the server it is still on. The determined
 // startup's own bind is the one arrival it is NOT called at: it runs before the holder exists, and
-// newLiveSettings seeds both fields from the flattened startup entry instead.
+// newLiveSettings seeds both fields from the held startup entry instead.
 func (s *liveSettings) followEntry(entry config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -39,10 +39,11 @@ func TestRunRootConstructsAndLaunches(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
 	opts := config.Options{
-		Endpoint:  "http://127.0.0.1:1111",
-		Model:     "fake",
-		Mode:      "ask-before",
-		Workspace: t.TempDir(),
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -80,6 +81,7 @@ func TestRunRootAutoConstructs(t *testing.T) {
 	opts := config.Options{
 		Endpoint:           "http://127.0.0.1:1111",
 		Model:              "fake",
+		StartupEntry:       config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
 		Mode:               "auto",
 		ConfineToWorkspace: true,
 	}
@@ -448,12 +450,13 @@ func TestRunRootWiresTheTUIDiagnosticFlags(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
 	opts := config.Options{
-		Endpoint:  "http://127.0.0.1:1111",
-		Model:     "fake",
-		Mode:      "ask-before",
-		Workspace: t.TempDir(),
-		TUITrace:  filepath.Join(t.TempDir(), "trace.txt"),
-		TUIDiag:   filepath.Join(t.TempDir(), "diag.txt"),
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
+		TUITrace:     filepath.Join(t.TempDir(), "trace.txt"),
+		TUIDiag:      filepath.Join(t.TempDir(), "diag.txt"),
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -474,10 +477,11 @@ func TestRunRootLeavesTheTUIDiagnosticFlagsOffByDefault(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
 	opts := config.Options{
-		Endpoint:  "http://127.0.0.1:1111",
-		Model:     "fake",
-		Mode:      "ask-before",
-		Workspace: t.TempDir(),
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {

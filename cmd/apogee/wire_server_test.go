@@ -31,6 +31,7 @@ func rosterSwitchWiring(t *testing.T) *rootWiring {
 	opts := config.Options{
 		Endpoint:      "http://127.0.0.1:1111",
 		Model:         "model-a",
+		StartupEntry:  config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "model-a"},
 		Mode:          "ask-before",
 		Workspace:     t.TempDir(),
 		ConfigDir:     t.TempDir(),
@@ -279,12 +280,13 @@ func TestRunRootBindsADeterminedStartupBeforeLaunch(t *testing.T) {
 	srv := upstreamServer(t, "model-a", 4096)
 	rec := &recordingLauncher{}
 	opts := config.Options{
-		Endpoint:  srv.URL,
-		Model:     "model-a",
-		Mode:      "ask-before",
-		HostAlias: "workstation",
-		Workspace: t.TempDir(),
-		ConfigDir: t.TempDir(),
+		Endpoint:     srv.URL,
+		Model:        "model-a",
+		Mode:         "ask-before",
+		HostAlias:    "workstation",
+		StartupEntry: config.ServerEntry{Name: "workstation", Endpoint: srv.URL, Model: "model-a"},
+		Workspace:    t.TempDir(),
+		ConfigDir:    t.TempDir(),
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -1169,12 +1171,12 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 			upstream := upstreamServer(t, "model-a", 4096)
 			rec := &recordingLauncher{}
 			opts := config.Options{
-				Endpoint:        upstream.URL,
-				Mode:            "ask-before",
-				Workspace:       t.TempDir(),
-				ConfigDir:       t.TempDir(),
-				AutoCompact:     true,
-				StartupLauncher: tt.key,
+				Endpoint:     upstream.URL,
+				Mode:         "ask-before",
+				Workspace:    t.TempDir(),
+				ConfigDir:    t.TempDir(),
+				AutoCompact:  true,
+				StartupEntry: config.ServerEntry{Endpoint: upstream.URL, LlamaLauncher: tt.key},
 			}
 			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 				t.Fatalf("runRoot: %v", err)
@@ -1226,6 +1228,7 @@ func TestSwitchServerFollowsTheEntrysLauncher(t *testing.T) {
 		// The session starts on the plain entry, so it starts with the integration off.
 		Endpoint:      remote.URL,
 		HostAlias:     "remote",
+		StartupEntry:  config.ServerEntry{Name: "remote", Endpoint: remote.URL},
 		StartupServer: "remote",
 		Mode:          "ask-before",
 		Workspace:     t.TempDir(),
@@ -1525,9 +1528,12 @@ func TestStartupBindHonoursTheEntrysContextWindow(t *testing.T) {
 				Workspace: t.TempDir(),
 				ConfigDir: t.TempDir(),
 				// The two scopes, as ApplyConfig leaves them: the top-level key the whole run
-				// carries, and the SELECTED entry's own pin flattened off the `servers:` list.
-				ContextWindow:        16384,
-				StartupContextWindow: tt.entryPin,
+				// carries, and the SELECTED entry held off the `servers:` list with its own pin.
+				ContextWindow: 16384,
+				StartupEntry: config.ServerEntry{
+					Name: "workstation", Endpoint: "http://127.0.0.1:1111", Model: "fake",
+					ContextWindow: config.TokenCount(tt.entryPin),
+				},
 				Servers: []config.ServerEntry{
 					{Name: "workstation", Endpoint: "http://127.0.0.1:1111", ContextWindow: config.TokenCount(tt.entryPin)},
 				},
@@ -1824,12 +1830,12 @@ func TestBindServerCarriesTheEntrysOwnWords(t *testing.T) {
 }
 
 // The same two words at STARTUP, over the whole path a fresh session actually takes: the entry as
-// the human wrote it, resolution's flattening onto the options, the startup ServerEntry
-// re-assembled out of them (startupEntry) and the bind.
+// the human wrote it, resolution holding it on the options (config.Options.StartupEntry) and the
+// bind.
 //
 // The test above binds an entry a `/server` switch already holds. This one holds none: between the
-// file and the bind the entry is only its flattened fields, and a `description:` that is not among
-// them is gone by the time the Config is written. That is a session whose Delegations line names
+// file and the bind the entry is only what resolution held, and a `description:` dropped on the
+// way is gone by the time the Config is written. That is a session whose Delegations line names
 // the box it runs on but never says what it is FOR — the half of the choice ADR 0069 decision 5
 // exists to give the model — and only heals itself on the first `/server` switch, which is the one
 // moment the human was not asking for a delegation.
@@ -1863,7 +1869,7 @@ func TestStartupBindCarriesTheEntrysOwnWords(t *testing.T) {
 			return buildAgent(cfg, resumed)
 		},
 	}
-	if err := binder.bind(startupEntry(opts)); err != nil {
+	if err := binder.bind(opts.StartupEntry); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 

@@ -939,6 +939,70 @@ func TestApplyConfigSelectsTheNamedServer(t *testing.T) {
 	}
 }
 
+// The entry a session STARTS on is held on the options ONCE, whole, rather than flattened field by
+// field: the SELECTED entry with the invocation's overlays applied — endpoint, key, model hint —
+// and every per-entry fact carried exactly as written, so the composition root's bind and every
+// command that resolves the startup key read one shape without re-assembling it. Its Name is what
+// HostAlias is: the configured entry's own name, or — for the ephemeral entry a raw
+// `--endpoint`/`APOGEE_ENDPOINT` override builds — the endpoint-derived label the alias fallback
+// writes, because the held entry is stored AFTER that fallback.
+func TestApplyConfigHoldsTheStartupEntry(t *testing.T) {
+	t.Parallel()
+	const servers = "servers:\n" +
+		"  - name: laptop\n    endpoint: http://127.0.0.1:1111\n" +
+		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n    api-key: sk-work\n" +
+		"    model: qwen\n    description: the big box upstairs\n    llama-launcher: auto\n" +
+		"    parallel-agents: 4\n    max-output-tokens: 2048\n    context-window: 32768\n" +
+		"    working-window: 16384\n    response-reserve: 0.25\n    effort-dialect: openai\n"
+
+	t.Run("a configured entry, whole", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{ConfigDir: testConfigHome(t, servers+"server: workstation\n")}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+		want := ServerEntry{
+			Name: "workstation", Endpoint: "http://192.168.1.9:1111", APIKey: "sk-work", Model: "qwen",
+			Description: "the big box upstairs", LlamaLauncher: "auto", ParallelAgents: 4,
+			MaxOutputTokens: 2048, ContextWindow: 32768, WorkingWindow: 16384, ResponseReserve: 0.25,
+			EffortDialect: "openai",
+		}
+		if opts.StartupEntry != want {
+			t.Errorf("StartupEntry = %+v; want the SELECTED entry as written %+v", opts.StartupEntry, want)
+		}
+		// And the flag-bound trio says the same thing the entry does — one selection, two readers.
+		if opts.Endpoint != want.Endpoint || opts.APIKey != want.APIKey || opts.Model != want.Model ||
+			opts.HostAlias != want.Name {
+			t.Errorf("flag-bound fields (%q, %q, %q, %q) disagree with the held entry",
+				opts.Endpoint, opts.APIKey, opts.Model, opts.HostAlias)
+		}
+	})
+
+	t.Run("an endpoint override holds the ephemeral entry under its alias", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{ConfigDir: testConfigHome(t, servers+"server: workstation\n")}
+		getenv := func(name string) string {
+			if name == EnvEndpoint {
+				return "http://rented.example:8080/v1"
+			}
+			return ""
+		}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+		// The ephemeral entry carries nothing but the endpoint — no key, no pins, no words — and its
+		// Name is the label the footer calls it by, not the empty name that marks it ephemeral.
+		want := ServerEntry{Name: "rented.example", Endpoint: "http://rented.example:8080/v1"}
+		if opts.StartupEntry != want {
+			t.Errorf("StartupEntry = %+v; want the ephemeral entry under its alias %+v", opts.StartupEntry, want)
+		}
+		if !opts.StartupEphemeral {
+			t.Error("startupEphemeral = false; want true — the held entry's Name is the alias, not the marker")
+		}
+	})
+}
+
 // The launcher a session STARTS with is the selected entry's own key, carried as written for the
 // composition root to resolve: the key belongs to the entry the launcher fronts, so a session that
 // starts on any other entry starts with the integration off and reaches it by switching. The
@@ -973,9 +1037,9 @@ func TestApplyConfigStartupLauncherComesFromTheSelectedEntry(t *testing.T) {
 			if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
 				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.StartupLauncher != tt.want {
-				t.Errorf("startupLauncher = %q; want %q — the key travels from the SELECTED entry, unresolved",
-					opts.StartupLauncher, tt.want)
+			if opts.StartupEntry.LlamaLauncher != tt.want {
+				t.Errorf("StartupEntry.LlamaLauncher = %q; want %q — the key travels from the SELECTED entry, unresolved",
+					opts.StartupEntry.LlamaLauncher, tt.want)
 			}
 		})
 	}
@@ -1018,15 +1082,15 @@ func TestApplyConfigStartupContextWindowComesFromTheSelectedEntry(t *testing.T) 
 			if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
 				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.StartupContextWindow != tt.want {
-				t.Errorf("startupContextWindow = %d; want %d — the pin travels from the SELECTED entry, unresolved",
-					opts.StartupContextWindow, tt.want)
+			if int(opts.StartupEntry.ContextWindow) != tt.want {
+				t.Errorf("StartupEntry.ContextWindow = %d; want %d — the pin travels from the SELECTED entry, unresolved",
+					opts.StartupEntry.ContextWindow, tt.want)
 			}
-			// And the room INSIDE it, flattened off the same entry and for the same reason: a session
+			// And the room INSIDE it, carried on the same entry and for the same reason: a session
 			// that starts on a bounded entry must work in that room from its first Turn.
-			if opts.StartupWorkingWindow != tt.wantWorking {
-				t.Errorf("startupWorkingWindow = %d; want %d — the bound travels from the SELECTED entry, unresolved",
-					opts.StartupWorkingWindow, tt.wantWorking)
+			if opts.StartupEntry.WorkingWindow != tt.wantWorking {
+				t.Errorf("StartupEntry.WorkingWindow = %d; want %d — the bound travels from the SELECTED entry, unresolved",
+					opts.StartupEntry.WorkingWindow, tt.wantWorking)
 			}
 		})
 	}
@@ -2409,9 +2473,9 @@ func TestApplyConfigStartupResponseReserveComesFromTheSelectedEntry(t *testing.T
 			if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
 				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.StartupResponseReserve != tt.want {
-				t.Errorf("startupResponseReserve = %v; want %v — the share travels from the SELECTED "+
-					"entry, unresolved", opts.StartupResponseReserve, tt.want)
+			if opts.StartupEntry.ResponseReserve != tt.want {
+				t.Errorf("StartupEntry.ResponseReserve = %v; want %v — the share travels from the SELECTED "+
+					"entry, unresolved", opts.StartupEntry.ResponseReserve, tt.want)
 			}
 		})
 	}

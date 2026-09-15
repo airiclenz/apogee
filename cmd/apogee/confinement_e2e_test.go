@@ -140,6 +140,7 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	launched := config.Options{
 		Endpoint:           srv.URL,
 		Model:              "fake",
+		StartupEntry:       config.ServerEntry{Endpoint: srv.URL, Model: "fake"},
 		Mode:               "auto",
 		Workspace:          workspace,
 		ConfigDir:          configHome,

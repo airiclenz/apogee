@@ -52,7 +52,7 @@ import (
 // one gate that shapes the sub_agent schema rather than a Config field, where firingConfig hands
 // over a roster of its own. A Firing reaches no external MCP server either way (ADR 0034).
 type daemonWiring struct {
-	// opts is the host's resolved configuration: the startup server selection flattened onto it,
+	// opts is the host's resolved configuration: the startup server selection held on it (StartupEntry),
 	// the `servers:` list a schedule binds into by name, and every file-only key an unattended run
 	// must honour for the one-configuration reason headless honours them (ADR 0031).
 	opts config.Options
@@ -516,7 +516,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 func (w *daemonWiring) serverFor(entry daemon.Entry) (config.ServerEntry, error) {
 	named := strings.TrimSpace(entry.Run.Server)
 	if named == "" {
-		return startupEntry(w.opts), nil
+		return w.opts.StartupEntry, nil
 	}
 	for _, server := range w.opts.Servers {
 		if server.Name == named {

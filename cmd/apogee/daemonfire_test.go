@@ -152,14 +152,17 @@ func TestDaemonFireBindsTheServerTheEntryNames(t *testing.T) {
 }
 
 // A schedule that names NO server binds to the same startup default a fresh session or a headless
-// run on this host gets (ADR 0055 decision 1) — the flattened selection, reassembled by
-// startupEntry, so one configuration means one default whichever Driver reads it.
+// run on this host gets (ADR 0055 decision 1) — the selection resolution holds on options
+// (config.Options.StartupEntry), so one configuration means one default whichever Driver reads it.
 func TestDaemonFireFallsBackToTheStartupServer(t *testing.T) {
 	harness := newDaemonFireHarness(t, config.Options{
 		HostAlias: "startup",
 		Endpoint:  "http://startup.invalid",
 		APIKey:    "startup-key",
 		Model:     "startup-model",
+		StartupEntry: config.ServerEntry{
+			Name: "startup", Endpoint: "http://startup.invalid", APIKey: "startup-key", Model: "startup-model",
+		},
 		Servers: []config.ServerEntry{
 			{Name: "startup", Endpoint: "http://startup.invalid", APIKey: "startup-key", Model: "startup-model"},
 			{Name: "other", Endpoint: "http://other.invalid", APIKey: "other-key", Model: "other-model"},

@@ -626,11 +626,12 @@ func TestRunRootCarriesBothMigrationOffers(t *testing.T) {
 
 	rec := &recordingLauncher{}
 	opts := config.Options{
-		Endpoint:  "http://127.0.0.1:1111",
-		Model:     "fake",
-		Mode:      "ask-before",
-		Workspace: t.TempDir(),
-		ConfigDir: home,
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
+		ConfigDir:    home,
 		Servers: []config.ServerEntry{
 			{Name: "workstation", Endpoint: "http://127.0.0.1:1111", APIKey: "sk-plain-as-day"},
 			{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},

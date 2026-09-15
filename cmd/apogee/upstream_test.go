@@ -255,6 +255,7 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 		Model:         "model-a",
 		Mode:          "ask-before",
 		HostAlias:     "workstation",
+		StartupEntry:  config.ServerEntry{Name: "workstation", Endpoint: first.URL, Model: "model-a"},
 		Workspace:     t.TempDir(),
 		ConfigDir:     configHome,
 		ContextWindow: 16384, // the global pin, which a switch must not drop
@@ -343,6 +344,7 @@ func TestRunRootRecordServerChoiceWritesOnlyConfiguredNames(t *testing.T) {
 		Model:            "model-a",
 		Mode:             "ask-before",
 		HostAlias:        "workstation",
+		StartupEntry:     config.ServerEntry{Name: "workstation", Endpoint: first.URL, Model: "model-a"},
 		Workspace:        t.TempDir(),
 		ConfigDir:        configHome,
 		AutoCompact:      true,
@@ -420,6 +422,7 @@ func TestRunRootRecordModelChoiceWritesOnlyWritablePicks(t *testing.T) {
 			Model:         "model-a",
 			Mode:          "ask-before",
 			HostAlias:     alias,
+			StartupEntry:  config.ServerEntry{Name: alias, Endpoint: entry.Endpoint, Model: "model-a"},
 			Workspace:     t.TempDir(),
 			ConfigDir:     configHome,
 			AutoCompact:   true,
@@ -530,6 +533,10 @@ func TestRunRootRecordLaunchProfileWritesOntoTheActuatingEntry(t *testing.T) {
 			t.Fatalf("stage the config: %v", err)
 		}
 		rec := &recordingLauncher{}
+		// The SELECTED entry as ApplyConfig holds it — the model hint overlaid — which carries the
+		// launcher this session starts actuating through, and so names the entry the pointer lands on.
+		startup := entry
+		startup.Model = "model-a"
 		opts := config.Options{
 			Endpoint:      entry.Endpoint,
 			Model:         "model-a",
@@ -540,9 +547,7 @@ func TestRunRootRecordLaunchProfileWritesOntoTheActuatingEntry(t *testing.T) {
 			AutoCompact:   true,
 			RememberModel: remember,
 			Servers:       []config.ServerEntry{entry},
-			// What ApplyConfig flattens off the SELECTED entry: the launcher this session starts
-			// actuating through, which is also what names the entry the pointer lands on.
-			StartupLauncher: entry.LlamaLauncher,
+			StartupEntry:  startup,
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -644,17 +649,19 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 			t.Fatalf("stage the config: %v", err)
 		}
 		rec := &recordingLauncher{}
+		startup := entry
+		startup.Model = "model-a"
 		opts := config.Options{
-			Endpoint:        entry.Endpoint,
-			Model:           "model-a",
-			Mode:            "ask-before",
-			HostAlias:       entry.Name,
-			Workspace:       t.TempDir(),
-			ConfigDir:       configHome,
-			AutoCompact:     true,
-			RememberModel:   false, // the default, and what the flip below has to be able to overrule
-			Servers:         []config.ServerEntry{entry},
-			StartupLauncher: entry.LlamaLauncher,
+			Endpoint:      entry.Endpoint,
+			Model:         "model-a",
+			Mode:          "ask-before",
+			HostAlias:     entry.Name,
+			Workspace:     t.TempDir(),
+			ConfigDir:     configHome,
+			AutoCompact:   true,
+			RememberModel: false, // the default, and what the flip below has to be able to overrule
+			Servers:       []config.ServerEntry{entry},
+			StartupEntry:  startup,
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -750,6 +757,7 @@ func TestRunRootSwitchServerUnknownNameTouchesNothing(t *testing.T) {
 		Model:            "model-a",
 		Mode:             "ask-before",
 		HostAlias:        "workstation",
+		StartupEntry:     config.ServerEntry{Name: "workstation", Endpoint: first.URL, Model: "model-a"},
 		Workspace:        t.TempDir(),
 		ConfigDir:        t.TempDir(),
 		AutoCompact:      true,
@@ -925,17 +933,26 @@ func TestMoveReFollowsTheParallelAgentsCap(t *testing.T) {
 
 // The startup half of the same fact: the entry a session was launched on carries its own pin, so a
 // session that starts on a pinned server is capped from its first Turn rather than from its first
-// beat.
+// beat — the entry ApplyConfig holds on the options is the one the bind takes, pin and all.
 func TestStartupEntryCarriesTheParallelAgentsPin(t *testing.T) {
 	t.Parallel()
 
-	entry := startupEntry(config.Options{
-		HostAlias:             "here",
-		Endpoint:              "http://127.0.0.1:1111",
-		StartupParallelAgents: 4,
-	})
-	if entry.ParallelAgents != 4 {
-		t.Errorf("startupEntry().ParallelAgents = %d, want the resolved startup entry's 4", entry.ParallelAgents)
+	opts := config.Options{
+		ConfigDir: testConfigHome(t, "servers:\n"+
+			"  - name: here\n"+
+			"    endpoint: http://127.0.0.1:1111\n"+
+			"    parallel-agents: 4\n"+
+			"server: here\n"),
+	}
+	if err := config.ApplyConfig(&opts, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	if opts.StartupEntry.ParallelAgents != 4 {
+		t.Errorf("StartupEntry.ParallelAgents = %d, want the resolved startup entry's 4", opts.StartupEntry.ParallelAgents)
+	}
+	if opts.StartupEntry.Name != "here" {
+		t.Errorf("StartupEntry.Name = %q, want the entry's own name here", opts.StartupEntry.Name)
 	}
 }
 

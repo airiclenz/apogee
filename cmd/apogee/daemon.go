@@ -545,10 +545,10 @@ func daemonHost(opts config.Options, home string, wiring *daemonWiring) daemon.H
 		Home: home,
 		LookupServer: func(name string) (daemon.ServerFacts, bool) {
 			if strings.TrimSpace(name) == "" {
-				// The startup entry's own `llama-launcher:` value, flattened onto options by
-				// resolution (config.Options.StartupLauncher). An ephemeral --endpoint run carries
-				// none, which is the honest answer for an endpoint no entry names.
-				return daemon.ServerFacts{IsLauncherFronted: opts.StartupLauncher != ""}, true
+				// The startup entry's own `llama-launcher:` value, read off the entry resolution
+				// holds on options (config.Options.StartupEntry). An ephemeral --endpoint run
+				// carries none, which is the honest answer for an endpoint no entry names.
+				return daemon.ServerFacts{IsLauncherFronted: opts.StartupEntry.LlamaLauncher != ""}, true
 			}
 			for _, server := range opts.Servers {
 				if server.Name == name {

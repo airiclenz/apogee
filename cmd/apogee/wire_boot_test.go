@@ -113,6 +113,7 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 			opts := config.Options{
 				Endpoint:      "http://127.0.0.1:1111",
 				Model:         "fake",
+				StartupEntry:  config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
 				Mode:          "ask-before",
 				Workspace:     t.TempDir(),
 				ContextWindow: tt.contextWindow,
@@ -217,6 +218,7 @@ func TestRunRootThreadsContextFiles(t *testing.T) {
 		opts := config.Options{
 			Endpoint:     "http://127.0.0.1:1111",
 			Model:        "fake",
+			StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
 			Mode:         "ask-before",
 			Workspace:    workspace,
 			ConfigDir:    t.TempDir(),
@@ -236,6 +238,7 @@ func TestRunRootThreadsContextFiles(t *testing.T) {
 		opts := config.Options{
 			Endpoint:     "http://127.0.0.1:1111",
 			Model:        "fake",
+			StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
 			Mode:         "ask-before",
 			Workspace:    t.TempDir(),
 			ConfigDir:    t.TempDir(),
@@ -277,11 +280,12 @@ func TestRunRootThreadsSpinnerOptions(t *testing.T) {
 			t.Parallel()
 			rec := &recordingLauncher{}
 			opts := config.Options{
-				Endpoint:  "http://127.0.0.1:1111",
-				Model:     "fake",
-				Mode:      "ask-before",
-				Workspace: t.TempDir(),
-				UI:        tt.ui,
+				Endpoint:     "http://127.0.0.1:1111",
+				Model:        "fake",
+				StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+				Mode:         "ask-before",
+				Workspace:    t.TempDir(),
+				UI:           tt.ui,
 			}
 			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 				t.Fatalf("runRoot: %v", err)
@@ -320,12 +324,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 
 		rec := &recordingLauncher{}
 		opts := config.Options{
-			Endpoint:  "http://127.0.0.1:1111",
-			Model:     "fake",
-			Mode:      "ask-before",
-			ConfigDir: home,
-			Workspace: t.TempDir(),
-			UI:        config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
+			Endpoint:     "http://127.0.0.1:1111",
+			Model:        "fake",
+			StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+			Mode:         "ask-before",
+			ConfigDir:    home,
+			Workspace:    t.TempDir(),
+			UI:           config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -350,12 +355,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		t.Parallel()
 		rec := &recordingLauncher{}
 		opts := config.Options{
-			Endpoint:  "http://127.0.0.1:1111",
-			Model:     "fake",
-			Mode:      "ask-before",
-			ConfigDir: t.TempDir(),
-			Workspace: t.TempDir(),
-			UI:        config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "no-such-scheme"},
+			Endpoint:     "http://127.0.0.1:1111",
+			Model:        "fake",
+			StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+			Mode:         "ask-before",
+			ConfigDir:    t.TempDir(),
+			Workspace:    t.TempDir(),
+			UI:           config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "no-such-scheme"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot refused an unknown colour scheme: %v", err)
@@ -380,12 +386,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		home := t.TempDir()
 		rec := &recordingLauncher{}
 		opts := config.Options{
-			Endpoint:  "http://127.0.0.1:1111",
-			Model:     "fake",
-			Mode:      "ask-before",
-			ConfigDir: home,
-			Workspace: t.TempDir(),
-			UI:        config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
+			Endpoint:     "http://127.0.0.1:1111",
+			Model:        "fake",
+			StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+			Mode:         "ask-before",
+			ConfigDir:    home,
+			Workspace:    t.TempDir(),
+			UI:           config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -432,12 +439,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		home := t.TempDir()
 		rec := &recordingLauncher{}
 		opts := config.Options{
-			Endpoint:  "http://127.0.0.1:1111",
-			Model:     "fake",
-			Mode:      "ask-before",
-			ConfigDir: home,
-			Workspace: t.TempDir(),
-			UI:        config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
+			Endpoint:     "http://127.0.0.1:1111",
+			Model:        "fake",
+			StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+			Mode:         "ask-before",
+			ConfigDir:    home,
+			Workspace:    t.TempDir(),
+			UI:           config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -519,6 +527,7 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 			opts := config.Options{
 				Endpoint:           "http://127.0.0.1:1111",
 				Model:              "fake",
+				StartupEntry:       config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
 				Mode:               tt.mode,
 				Workspace:          t.TempDir(),
 				ConfineToWorkspace: tt.confine,
@@ -658,11 +667,12 @@ func TestRunRootInstallsPresenter(t *testing.T) {
 	rec := &recordingLauncher{}
 	workspace := t.TempDir()
 	opts := config.Options{
-		Endpoint:  "http://127.0.0.1:1111",
-		Model:     "fake",
-		Mode:      "ask-before",
-		Workspace: workspace,
-		Present:   config.PresentSettings{AutoOpen: true},
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    workspace,
+		Present:      config.PresentSettings{AutoOpen: true},
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {

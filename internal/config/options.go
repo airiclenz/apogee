@@ -68,9 +68,9 @@ type Options struct {
 
 	// apiKeyCmd and apiKeyEnv are the startup entry's other two KEY SOURCES, carried exactly as the
 	// entry wrote them: the command whose output IS the key, and the NAME of the variable holding
-	// it. They are flattened beside apiKey above for the reason every other per-entry fact is —
-	// the composition root re-assembles the startup ServerEntry out of these fields (startupEntry)
-	// — and they stay UNRESOLVED here on purpose: a source runs at the seam that needs the key,
+	// it. They are flattened beside apiKey above because the invocation overlays them (the
+	// flag-bound fields ApplyConfig writes back are what StartupEntry below then carries) — and they
+	// stay UNRESOLVED here on purpose: a source runs at the seam that needs the key,
 	// never at load, so a config listing six servers runs no command for the five this session
 	// never talks to (KeyResolver). At most one of the three is ever set, which ValidateServers has
 	// already refused a file for breaking; `APOGEE_API_KEY` overlays apiKey over whichever of them
@@ -119,94 +119,28 @@ type Options struct {
 	// nowhere. Resolved-not-flag-bound; ApplyConfig sets it.
 	StartupEphemeral bool
 
-	// startupLauncher is the SELECTED startup entry's own `llama-launcher:` value, exactly as the
-	// user wrote it: empty (the key absent) ⇒ the launcher integration is off for this server,
-	// `auto` ⇒ the launcher's own default config, anything else ⇒ the config file to read. It is a
-	// fact about the entry this session starts ON rather than a global one, which is the whole
-	// point of the per-entry key: only the server the launcher actually fronts offers `/model`'s
-	// Launch profiles, and every other entry keeps its advertised-model discovery. The ephemeral
-	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, so an override run starts with
-	// the integration off. Resolved-not-flag-bound like the two fields above; ApplyConfig sets it
-	// from the startup entry. The composition root resolves the value — including where the
-	// launcher's own default config lives — because only it knows the launcher.
-	StartupLauncher string
-
-	// startupParallelAgents is the SELECTED startup entry's own `parallel-agents:` value, exactly as
-	// the user wrote it: 0 (the key absent) ⇒ nothing is pinned for this server, so the cap is
-	// discovered from what it advertises and falls back to 1. It is a fact about the entry this
-	// session starts ON for the same reason startupLauncher is — the width belongs to the server,
-	// not to the run — and the ephemeral `--endpoint`/`APOGEE_ENDPOINT` override entry carries none,
-	// which leaves an override run discovering. Resolved-not-flag-bound; ApplyConfig sets it from
-	// the startup entry, and the composition root resolves it into the engine's cap (ADR 0039).
-	StartupParallelAgents int
-
-	// startupMaxOutputTokens is the SELECTED startup entry's own `max-output-tokens:` value, exactly
-	// as the user wrote it: 0 (the key absent) ⇒ nothing is pinned for this server, so the engine
-	// derives the reply cap from the room its Budget already reserves (ADR 0046). It is a fact about
-	// the entry this session starts ON for the reason startupParallelAgents beside it is — the
-	// ceiling belongs to the slot, not to the run — and the ephemeral
-	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, which leaves an override run
-	// deriving. Resolved-not-flag-bound; ApplyConfig sets it from the startup entry, and the
-	// composition root carries it into the engine's ContextConfig.
-	StartupMaxOutputTokens int
-
-	// startupContextWindow is the SELECTED startup entry's own `context-window:` value, exactly as
-	// the user wrote it: 0 (the key absent) ⇒ that entry pins nothing, so the top-level
-	// `context-window:` key answers and, unpinned there too, the first beat's observation binds the
-	// window (ADR 0045 decision 3). It is a fact about the entry this session starts ON for the
-	// reason the two fields above are — the window bounds the SLOT, not the run — and the ephemeral
-	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, which leaves an override run on
-	// the top-level key. Resolved-not-flag-bound; ApplyConfig sets it from the startup entry, and the
-	// composition root resolves it over that key (ResolveContextWindow) at the bind, so a session
-	// that STARTS on a pinned entry budgets against the pin from its first Turn rather than from its
-	// first beat.
-	StartupContextWindow int
-
-	// startupWorkingWindow is the SELECTED startup entry's own `working-window:` value, exactly as
-	// the user wrote it: 0 (the key absent) ⇒ that entry bounds nothing, so the top-level
-	// `working-window:` key answers and, unbounded there too, the session works in the whole
-	// advertised window. It is a fact about the entry this session starts ON for the reason the field
-	// above is — the room is a property of the SLOT, not of the run — and the ephemeral
-	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, which leaves an override run on the
-	// top-level key. Resolved-not-flag-bound; ApplyConfig sets it from the startup entry, and the
-	// composition root resolves it over that key (ResolveWorkingWindow) at the bind, so a session
-	// that STARTS on a bounded entry works in that room from its first Turn.
-	StartupWorkingWindow int
-
-	// startupResponseReserve is the SELECTED startup entry's own `response-reserve:` value, exactly
-	// as the user wrote it: 0 (the key absent) ⇒ that entry states no share, so the top-level
-	// `response-reserve:` key answers and, unset there too, apogee's built-in 0.20 stands. It is a
-	// fact about the entry this session starts ON for the reason the three fields above are — how a
-	// window is divided is a statement about the SLOT the reply must fit in — and the ephemeral
-	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, which leaves an override run on
-	// the top-level key. Resolved-not-flag-bound; ApplyConfig sets it from the startup entry, and the
-	// composition root resolves it over that key (ResolveResponseReserve) at the bind, so a session
-	// that STARTS on an entry stating its own share budgets by it from its first Turn.
-	StartupResponseReserve float64
-
-	// StartupEffortDialect is the SELECTED startup entry's own `effort-dialect:` value, exactly as
-	// the user wrote it: "" (the key absent, or the explicit `auto`) ⇒ that entry forces nothing, so
-	// passive detection answers for the shape (ADR 0060 decision 3). It is a fact about the entry
-	// this session starts ON for the reason the four fields above are — the dialect is a property of
-	// the SERVER, not of the run — and the ephemeral `--endpoint`/`APOGEE_ENDPOINT` override entry
-	// forces none, which leaves an override run on what discovery sees. Resolved-not-flag-bound;
-	// ApplyConfig sets it from the startup entry, and the composition root hands it to the beat that
-	// answers the dial (provider.WithEffortDialect) and to every unattended run's construction seed,
-	// so a session that STARTS on a dialled entry speaks that dialect from its first request.
-	StartupEffortDialect string
-
-	// StartupDescription is the SELECTED startup entry's own free-text `description:`, verbatim —
-	// the human's words for what the box this session starts on is FOR. It is flattened for the
-	// reason the five fields above it are: the composition root re-assembles the startup ServerEntry
-	// out of these fields (startupEntry), and the bind hands this one to the engine as the SESSION
-	// Delegation seat's description, which the orientation block's Delegations line states when the
-	// model is offered a seat to choose (ADR 0069). Without it a fresh session would name that seat
-	// but not describe it until the first `/server` switch rebuilt it from a real entry — the model
-	// asked to choose between two boxes on the first Turn is exactly the one that needs the words.
-	// The ephemeral `--endpoint`/`APOGEE_ENDPOINT` override entry describes nothing, which leaves an
-	// override run naming the seat undescribed. Resolved-not-flag-bound; ApplyConfig sets it from
-	// the startup entry.
-	StartupDescription string
+	// StartupEntry is the SELECTED startup entry itself, held ONCE rather than flattened field by
+	// field: the `servers:` entry this session starts on — or the ephemeral entry a raw
+	// `--endpoint`/`APOGEE_ENDPOINT` override builds (ADR 0036 decision 6) — with every per-entry
+	// fact the composition root reads off it exactly as the user wrote it: the launcher key
+	// (`llama-launcher:`, ADR 0029 decision 4), the fan-out pin (`parallel-agents:`, ADR 0039), the
+	// reply cap (`max-output-tokens:`, ADR 0046), the window pin and the working bound
+	// (`context-window:`, `working-window:`, ADR 0045 decision 3), the reply share
+	// (`response-reserve:`), the forced wire shape (`effort-dialect:`, ADR 0060 decision 3) and the
+	// human's own `description:` of the box (ADR 0069). Each of those is a fact about the entry this
+	// session starts ON rather than about the run — the width, the ceiling and the window belong to
+	// the SLOT — so they travel together as the one shape the bind step takes (serverBinder.bind),
+	// whether it binds the startup server or the one a human picked out of the list, and every
+	// command in the composition root that needs the startup server's key resolves it from the
+	// entry the same way a switch does (KeyResolver). The ephemeral override entry carries none of
+	// them, which leaves an override run discovering, deriving and on the top-level keys.
+	//
+	// Resolved-not-flag-bound; ApplyConfig writes it LAST, after the alias fallback, so its Name is
+	// what HostAlias is — the configured entry's own `name:`, or the endpoint-derived label the
+	// ephemeral entry is called in the footer — and the endpoint, key source and model hint the
+	// invocation overlays (the flag-bound fields above) are the entry's, not the file's. A pre-bound
+	// start holds the zero entry, which names no source and answers "" without running anything.
+	StartupEntry ServerEntry
 
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that

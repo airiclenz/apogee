@@ -280,8 +280,9 @@ closed with said a first bind was unchanged and still read only the top-level ke
 other half of the same defect: a session that STARTS on a pinned entry — the determined startup, a
 pre-bound session's first pick, a headless run — budgeted against the top-level window until its
 first beat, because the entry's `context-window:` was never flattened onto `config.Options` the way
-`max-output-tokens:` already was. So it is (`StartupContextWindow`), it rides the `ServerEntry` the
-bind step takes, and `serverBinder.bind` resolves it over the top-level key through the same
+`max-output-tokens:` already was. So it is (`StartupContextWindow` then; since 2026-09-15 the
+whole selected entry is held once as `config.Options.StartupEntry` and the flattened `Startup*`
+fields are gone), it rides the `ServerEntry` the bind step takes, and `serverBinder.bind` resolves it over the top-level key through the same
 `config.ResolveContextWindow` the move calls — into the `Config` the Agent is CONSTRUCTED from,
 because a bind has no engine to push at yet and the pin has to bound the session's first Turn. The
 latch the move writes is seeded from the same flattened field, so the first beat's rebind re-resolves

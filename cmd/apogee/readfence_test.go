@@ -44,12 +44,13 @@ func readFenceRealDir(t *testing.T) string {
 func readFenceWiring(t *testing.T, workspace, configDir string) *rootWiring {
 	t.Helper()
 	opts := config.Options{
-		Endpoint:    "http://127.0.0.1:1111",
-		Model:       "fake",
-		Mode:        "ask-before",
-		Workspace:   workspace,
-		ConfigDir:   configDir,
-		AutoCompact: true,
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    workspace,
+		ConfigDir:    configDir,
+		AutoCompact:  true,
 	}
 	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 	if err != nil {

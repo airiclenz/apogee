@@ -104,7 +104,7 @@ func probeModelCommand() *cobra.Command {
 			// nothing: this command reads no workspace (see the roots above), and an
 			// `api-key-cmd:` here resolves exactly as it did before the fence existed. Inventing
 			// a root to measure it against would be the --workspace flag this command refuses.
-			apiKey, err := config.NewKeyResolver("").Resolve(startupEntry(opts))
+			apiKey, err := config.NewKeyResolver("").Resolve(opts.StartupEntry)
 			if err != nil {
 				return err
 			}
