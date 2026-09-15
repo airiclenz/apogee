@@ -58,8 +58,9 @@
 // The tool path. resolution.go computes the per-call Resolution — the complete verdict before
 // anything executes: the guardrail floor, the ladder-by-blast-radius table, the confinement
 // capability check, and the precomputed fallback for what only run time can reveal.
-// dispatch.go executes it: the serial and depth-0 fan-out paths, the run/gate/confine/delegate/
-// refuse arms, Approval, result clamping, and the audit records. gate.go is the user's stage of
+// dispatch.go executes it: the per-call prepare/run/commit pipeline with width as its one parameter
+// (1 for leaves and inline delegations, the Parallel agents cap for a depth-0 group), the
+// run/gate/confine/delegate/refuse arms, Approval, result clamping, and the audit records. gate.go is the user's stage of
 // that Approver — the gate reactions asked after resolve() and before anything runs, their
 // allow/deny/ask protocol, and the fold that lets them tighten the ladder's verdict and never
 // loosen it (ADR 0076 D2). treesnapshot.go is the

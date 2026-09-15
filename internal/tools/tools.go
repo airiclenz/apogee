@@ -96,7 +96,7 @@ func decodeArgs(raw json.RawMessage, dst any) error {
 // the same call), insignificant whitespace dropped, and empty arguments canonicalised to the
 // empty object exactly as decodeArgs decodes them. The last-wins collapse describes what actually
 // reaches this function: dispatch refuses a repeat whose two values DIFFER before the call is
-// resolved (agent.resolveAndExecute, domain.RepeatedArgumentKeys), so the repeats digested here
+// resolved (agent.prepareCall, domain.RepeatedArgumentKeys), so the repeats digested here
 // are the byte-identical ones, for which last-wins is the pinned contract.
 //
 // It exists so a decision made ABOUT a call — today the allow-for-session key a Gate carries
@@ -113,7 +113,7 @@ func decodeArgs(raw json.RawMessage, dst any) error {
 // answers both. Arguments whose keys COLLIDE under that fold — two distinct spellings of one
 // parameter — have no honest canonical form at all (the object names one parameter twice while
 // the executor runs a single value), so they are an error; dispatch refuses such a call outright
-// (agent.resolveAndExecute) and this is the second line of that defence, leaving a caller keying
+// (agent.prepareCall) and this is the second line of that defence, leaving a caller keying
 // on the result with nothing to remember.
 //
 // Arguments the executor itself would reject are reported as an error rather than canonicalised,
@@ -165,7 +165,7 @@ func canonicalJSON(raw json.RawMessage) ([]byte, error) {
 // canonical form describes the call that will actually run. Both collapses are total by
 // construction rather than by what dispatch admits, though dispatch refuses the case that would
 // make either of them lossy — one name spelled two ways, and one spelling given two different
-// values — before a digest is ever taken (agent.resolveAndExecute).
+// values — before a digest is ever taken (agent.prepareCall).
 //
 // Two DISTINCT spellings of one folded name are refused here rather than folded: this function
 // could only emit them as one object key twice over, in an order a map range does not fix, and a

@@ -2,8 +2,8 @@ package agent
 
 // The GATE stage of the Approver (ADR 0076 D2): a user's `gate:` entry answers allow / deny / ask
 // about a pending tool call, and its answer folds into the verdict the mode ladder already
-// reached. These tests drive it where a Driver drives it — through resolveAndExecute and
-// prepareDelegation, the two sites dispatch calls it from — because what is under test is the
+// reached. These tests drive it where a Driver drives it — through prepareCall, the one site
+// dispatch calls it from at every width, and runCall behind it — because what is under test is the
 // FOLD: what a deny does to the call, what an ask does to the Approval, what an allow deliberately
 // does not do, and what an unreadable answer costs.
 
@@ -103,6 +103,15 @@ func readCallOnly() domain.ToolCall {
 	return domain.ToolCall{ID: "c1", Tool: "list_dir", Arguments: []byte(`{"path":"."}`)}
 }
 
+// prepareAndRun drives one call through the prepare and run phases of the dispatch pipeline without
+// committing it — the seam these tests observe the gate fold at — and returns the result the call
+// reached and how it ended.
+func prepareAndRun(a *Agent, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
+	slot := a.prepareCall(context.Background(), 0, call, true)
+	a.runCall(context.Background(), 0, &slot)
+	return slot.result, slot.outcome
+}
+
 // gateFirings is the firings booked for one reaction id, which is how "booked once" is asserted.
 func gateFirings(sink *recordingSink, id string) []domain.ReactionFiredEvent {
 	var out []domain.ReactionFiredEvent
@@ -125,7 +134,7 @@ func TestGateDenyRefusesTheCallAndBooksOneFiring(t *testing.T) {
 	a := gateAgent(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran,
 		goGate("no-force-push", domain.GateDecision{Verdict: domain.GateDeny, Reason: "never force-push"}))
 
-	result, _, outcome := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, outcome := prepareAndRun(a, readCallOnly())
 
 	if outcome != dispatchDone {
 		t.Fatalf("outcome = %v, want dispatchDone", outcome)
@@ -164,7 +173,7 @@ func TestGateArgvAskForcesTheApprover(t *testing.T) {
 	a := gateAgent(t, sink, approver, &ran,
 		userGate("warden", "/bin/sh", "-c", `printf 'ask\nlooks risky\n'`))
 
-	result, _, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _ := prepareAndRun(a, readCallOnly())
 
 	if len(approver.requests) != 1 {
 		t.Fatalf("the Approver was consulted %d times, want 1", len(approver.requests))
@@ -270,7 +279,7 @@ func TestGateArgvFailureEscalatesToAsk(t *testing.T) {
 			var reported []string
 			a.cfg.Report = func(msg string) { reported = append(reported, msg) }
 
-			a.resolveAndExecute(context.Background(), 0, readCallOnly())
+			prepareAndRun(a, readCallOnly())
 
 			if len(approver.requests) != 1 {
 				t.Fatalf("the Approver was consulted %d times, want 1", len(approver.requests))
@@ -313,7 +322,7 @@ func TestGateAllowLeavesTheLadderVerdictStanding(t *testing.T) {
 	approver := &gateApprover{decision: domain.ApprovalAllow}
 	a := gateAgent(t, sink, approver, nil, userGate("warden", "/bin/sh", "-c", "echo allow"))
 
-	a.resolveAndExecute(context.Background(), 0, domain.ToolCall{ID: "c1", Tool: "shell", Arguments: []byte(`{}`)})
+	prepareAndRun(a, domain.ToolCall{ID: "c1", Tool: "shell", Arguments: []byte(`{}`)})
 
 	if len(approver.requests) != 1 {
 		t.Fatalf("the Approver was consulted %d times, want 1 — Ask-Before still prompts", len(approver.requests))
@@ -345,7 +354,7 @@ func TestGateDenyStillDeniesUnderBypass(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	result, _, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _ := prepareAndRun(a, readCallOnly())
 
 	if want := "tool call denied by reaction warden"; result.Content != want {
 		t.Errorf("tool result = %q, want %q", result.Content, want)
@@ -396,7 +405,7 @@ func TestGateOnADelegation(t *testing.T) {
 		a := gateAgent(t, sink, &gateApprover{decision: domain.ApprovalAllow}, nil,
 			userGate("warden", "/bin/sh", "-c", `printf 'ask\nlooks risky\n'`))
 
-		slot := a.prepareDelegation(context.Background(), 0, delegation)
+		slot := a.prepareCall(context.Background(), 0, delegation, true)
 
 		if !slot.run || slot.verdict.kind != resolveDelegate {
 			t.Fatalf("slot = run:%v kind:%v, want the delegation to proceed", slot.run, slot.verdict.kind)
@@ -417,7 +426,7 @@ func TestGateOnADelegation(t *testing.T) {
 		a := gateAgent(t, sink, &gateApprover{decision: domain.ApprovalAllow}, nil,
 			userGate("warden", "/bin/sh", "-c", "echo deny"))
 
-		slot := a.prepareDelegation(context.Background(), 0, delegation)
+		slot := a.prepareCall(context.Background(), 0, delegation, true)
 
 		if slot.run {
 			t.Fatal("the delegation ran despite a denying gate")
@@ -457,7 +466,7 @@ func TestGateAskWithNoApproverRefuses(t *testing.T) {
 	ran := 0
 	a := gateAgent(t, sink, nil, &ran, goGate("warden", domain.GateDecision{Verdict: domain.GateAsk}))
 
-	result, _, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _ := prepareAndRun(a, readCallOnly())
 
 	if result.Content != noApproverReason {
 		t.Errorf("tool result = %q, want %q", result.Content, noApproverReason)

@@ -755,7 +755,7 @@ func gateCacheKey(tool domain.Tool, call domain.ToolCall) string {
 // to the tool name so no two tools can share a digest. A repeat only ever gets this far when its
 // occurrences are byte-identical, where that collapse loses nothing: dispatch refuses a key
 // answered twice with DIFFERING values before resolve(), so no key is ever minted for one
-// (resolveAndExecute, domain.RepeatedArgumentKeys).
+// (prepareCall, domain.RepeatedArgumentKeys).
 //
 // It reports ok=false when the arguments do not decode, and the caller then emits the EMPTY key.
 // That is the conservative direction and it needs no further handling: the memory refuses an

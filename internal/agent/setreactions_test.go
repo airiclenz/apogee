@@ -69,14 +69,14 @@ func TestSetReactionsRemovingAGateStopsTheDenial(t *testing.T) {
 	a := gateAgent(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran)
 	a.SetReactions(syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"})))
 
-	result, _, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _ := prepareAndRun(a, readCallOnly())
 	if !result.IsError || ran != 0 {
 		t.Fatalf("armed gate: result %+v after %d runs, want a refusal and no run", result, ran)
 	}
 
 	a.SetReactions(syncGen(a))
 
-	result, _, _ = a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _ = prepareAndRun(a, readCallOnly())
 	if result.IsError || ran != 1 {
 		t.Fatalf("disarmed gate: result %+v after %d runs, want the call executed once", result, ran)
 	}
@@ -104,7 +104,7 @@ func TestSetReactionsFloorOnlySwapLeavesTheSyncLaneArmed(t *testing.T) {
 	if live := a.Generation(); len(live.Sync) != 1 || live.Sync[0].ID != "warden" || !live.Floor.DisableToolCallRepair {
 		t.Fatalf("live generation = %+v, want the guard off and the sync lane intact", live)
 	}
-	result, _, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _ := prepareAndRun(a, readCallOnly())
 	if !result.IsError || ran != 0 {
 		t.Fatalf("result %+v after %d runs, want the gate still denying", result, ran)
 	}
@@ -127,7 +127,7 @@ func TestSetReactionsReachesAChildSpawnedAfterTheSwap(t *testing.T) {
 		t.Fatalf("newChildAgent: %v", err)
 	}
 
-	result, _, _ := child.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _ := prepareAndRun(child, readCallOnly())
 	if !result.IsError || ran != 0 {
 		t.Fatalf("child result %+v after %d runs, want the inherited gate to deny", result, ran)
 	}
@@ -137,7 +137,7 @@ func TestSetReactionsReachesAChildSpawnedAfterTheSwap(t *testing.T) {
 
 	// The swap that empties the parent's lane does not disarm a child already running.
 	a.SetReactions(syncGen(a))
-	result, _, _ = child.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _ = prepareAndRun(child, readCallOnly())
 	if !result.IsError {
 		t.Errorf("child result after the parent's later swap = %+v, want the spawn-time gate still denying", result)
 	}
@@ -158,7 +158,7 @@ func TestSetReactionsArgvGateNeverReachesTheSeamCascade(t *testing.T) {
 
 	call := readCallOnly()
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{call}})
-	if out := a.dispatchSerially(context.Background(), 0, []domain.ToolCall{call}); out != dispatchDone {
+	if out := a.dispatchGroup(context.Background(), 0, 1, []domain.ToolCall{call}); out != dispatchDone {
 		t.Fatalf("dispatch outcome = %v, want dispatchDone", out)
 	}
 

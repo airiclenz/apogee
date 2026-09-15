@@ -123,21 +123,21 @@ const argumentValueIndent = "  "
 // other survivors, and the note says the earlier ones existed rather than hiding them.
 //
 // On the dispatched path that pair no longer reaches the pane: dispatch refuses a repeat whose two
-// values DIFFER before the Approver is consulted (agent.resolveAndExecute,
+// values DIFFER before the Approver is consulted (agent.prepareCall,
 // domain.RepeatedArgumentKeys), so what survives to be approved is the byte-identical repeat, where
 // last-wins is the pinned contract and the note only says the earlier spelling existed. The
 // rendering keeps the last-wins collapse for the differing case regardless, for the same reason the
-// fold below is kept — a Driver that skips resolveAndExecute still gets a pane reading the call the
+// fold below is kept — a Driver that skips that check still gets a pane reading the call the
 // executor would run.
 //
 // That decode folds key CASE as well — it matches an object key to a struct field
 // case-insensitively (domain.FoldArgumentKey) — so `command` and `Command` are ONE parameter to
 // the tool that runs. Dispatch refuses a call spelling one name two ways before the Approver is
-// ever consulted (agent.resolveAndExecute), and the collapse here folds the same way regardless
+// ever consulted (agent.prepareCall), and the collapse here folds the same way regardless
 // (lastWins keys its survivors by domain.FoldArgumentKey): the pane reads the call the executor
 // would run by CONSTRUCTION, not because something upstream happened to reject it first. What that
 // buys is every path the upstream check does not stand on — a second Driver, a replayed record, a
-// future dispatch that skips resolveAndExecute — where a pane keyed on the spelling would go back
+// future dispatch that skips prepareCall's checks — where a pane keyed on the spelling would go back
 // to painting `command: npm test` above the `Command:` value that runs.
 //
 // The NAME is flattened (flattenField) and the value is not, which is the same line drawn twice. A

@@ -161,7 +161,7 @@ type SubAgentPhase string
 
 const (
 	// SubAgentStarted reports that the delegation's child agent has BEGUN RUNNING — the instant a
-	// pool worker dequeued it, or, on the serial path, the instant the recursion point was entered.
+	// pool worker dequeued it, or, at width 1, the instant the dispatch loop reached it.
 	// A delegation whose ToolCallEvent has arrived but whose start has not is queued behind the
 	// Parallel agents cap: it holds no slot yet and has produced nothing.
 	SubAgentStarted SubAgentPhase = "started"

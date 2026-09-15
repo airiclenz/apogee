@@ -897,8 +897,9 @@ func TestSubAgent_TransientChildBlipStaysInsideTheDelegation(t *testing.T) {
 
 // TestSubAgent_CancelledChildRollsTheParentTurnBack pins the neighbouring row the fault marker
 // must not disturb: a CANCELLED child still unwinds the parent Turn wholesale (D2) — no tool
-// result is surfaced at all, and the cancel is not reported as a fault. The serial path closes the
-// cancelled delegation's bracket exactly as the pool does (ADR 0075 decision 12).
+// result is surfaced at all, and the cancel is not reported as a fault. runDelegation closes the
+// cancelled delegation's bracket at width 1 exactly as it does on a pool worker (ADR 0075
+// decision 12).
 func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
 	sink := &recordingSink{}
 	ctx, cancel := context.WithCancel(context.Background())

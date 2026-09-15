@@ -47,7 +47,7 @@ func adviseAgent(t *testing.T, sink *recordingSink, bypass bool, reactions ...do
 }
 
 // adviseOneCall runs one finished tool call through the post-tool-result cascade and commits it,
-// exactly as dispatchSerially does, and returns the committed tool message.
+// exactly as commitCall does, and returns the committed tool message.
 func adviseOneCall(t *testing.T, a *Agent, body string) domain.Message {
 	t.Helper()
 
@@ -221,18 +221,17 @@ func TestAdviseGoHandlerAtFileChangedIsNarrowed(t *testing.T) {
 	}
 }
 
-// A delegation's result closes the same way a leaf call's does — commitDelegation runs the same
-// cascade and the same commit — so a child's result carries the trailer too. The fan-out is the one
-// path that could have grown a second commit point; it must not have.
+// A delegation's result closes the same way a leaf call's does — commitCall is the one commit
+// point every slot crosses, at every width — so a child's result carries the trailer too.
 func TestAdviseFencesADelegationResult(t *testing.T) {
 	sink := &recordingSink{}
 	a := adviseAgent(t, sink, false, adviseReaction("advisor", "check the child's claim"))
 
-	slot := &fanOutSlot{
+	slot := &dispatchSlot{
 		call:   domain.ToolCall{ID: "c1", Tool: "delegate"},
 		result: domain.ToolResult{CallID: "c1", Content: "the child reported back"},
 	}
-	a.commitDelegation(context.Background(), 0, slot)
+	a.commitCall(context.Background(), 0, slot)
 
 	msg := a.conv.At(a.conv.Len() - 1)
 	if len(msg.Advice) != 1 || msg.Advice[0].Reaction != "advisor" {

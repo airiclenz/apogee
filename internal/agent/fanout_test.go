@@ -865,9 +865,9 @@ func TestRoutedWidthReachesTheHookView(t *testing.T) {
 // A pending queued message pre-empts the delegations not yet started
 // ----------------------------------------------------------------------------
 //
-// The host answers Config.InterjectionPending; the pool reads it once per slot at dequeue and
-// dispatchSerially once per delegation before it resolves. Nothing here drains a message: the
-// tests flip a flag and read what the group committed.
+// The host answers Config.InterjectionPending; the pool reads it once per slot at dequeue and the
+// width-1 loop once per delegation before it resolves (preemptDelegation). Nothing here drains a
+// message: the tests flip a flag and read what the group committed.
 
 // phasesFor returns the lifecycle phases the sink saw for one delegation, in emission order.
 func phasesFor(events []domain.Event, callID string) []domain.SubAgentPhaseEvent {
@@ -1016,7 +1016,7 @@ func TestFanOut_NilSeamRunsEverySlot(t *testing.T) {
 	}
 }
 
-// TestDispatchSerially_PendingInterjectionSkipsTheNextDelegation covers the serial path, which a
+// TestDispatchSerially_PendingInterjectionSkipsTheNextDelegation covers the width-1 loop, which a
 // cap of 1 keeps every group on: the message arrives while the first child runs, the second is
 // skipped with the same result and phase the pool gives, and a leaf tool the parent asks for next —
 // with the seam still true — runs regardless: only delegations are ever pre-empted.

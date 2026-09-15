@@ -474,8 +474,8 @@ func withBodyNote(content, note string) string {
 	return body + "\n" + note + trailer
 }
 
-// isSubAgentCall reports whether call targets the sub_agent recursion point — the signal
-// resolveAndExecute drives a nested Agent for the call rather than executing a leaf tool.
+// isSubAgentCall reports whether call targets the sub_agent recursion point — the signal the
+// dispatch pipeline drives a nested Agent for the call rather than executing a leaf tool.
 func isSubAgentCall(call domain.ToolCall) bool {
 	return call.Tool == tools.SubAgentToolName
 }
@@ -561,10 +561,10 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // summarised back into the parent conversation).
 //
 // This frame is the ONE recover boundary of every delegation (ADR 0039 decision 4: each child
-// keeps panic recovery at its own boundary). Both paths enter here — the serial executeDelegate
-// and the pool's runDelegation worker — so a panic raised anywhere in the child's life becomes
-// this call's error result on either path, and the parent Step carries on with it exactly as it
-// carries on with a recovered leaf-tool panic (executeTool). The defer is registered FIRST so it
+// keeps panic recovery at its own boundary). Every delegation enters here through runDelegation —
+// on the dispatching goroutine at width 1, on a pool worker above it — so a panic raised anywhere
+// in the child's life becomes this call's error result at every width, and the parent Step
+// carries on with it exactly as it carries on with a recovered leaf-tool panic (executeTool). The defer is registered FIRST so it
 // runs LAST: after the reaping defer below has unregistered the child, closed its mailbox and
 // released its resources, and still around it, so a panic raised inside that teardown is caught
 // here too. The ErrorEvent is stamped with this Agent's current Turn — the same value dispatchTools

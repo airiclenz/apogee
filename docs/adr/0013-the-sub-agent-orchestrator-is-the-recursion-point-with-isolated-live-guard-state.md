@@ -41,7 +41,7 @@ ISOLATED live guard state over a SHARED, read-only dangerous-action floor.** Con
 carrying the model-facing name/description/schema, registered in the default set
 (`internal/tools/sub_agent.go`). It carries **no disposition marker** — not `ReadOnlyTool`, not
 `workspaceScopedWriter`, not `ExternalEffectTool`, not `SubprocessTool` — because the sub-agent
-is **never confined or gated as a unit**. Dispatch (`resolveAndExecute`) recognises
+is **never confined or gated as a unit**. Dispatch (`resolveAndExecute`; since 2026-09-15 `prepareCall`, the one prepare phase of the per-call pipeline) recognises
 `SubAgentToolName` *after* the always-on guardrails run but *before* the mode disposition, and
 drives a nested `Agent` instead of executing a leaf. Each **child** tool call inside the nested
 loop then gets the full per-call disposition one level down (a child subprocess confines, a

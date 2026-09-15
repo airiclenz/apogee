@@ -51,8 +51,8 @@ const (
 
 // applyGates folds the armed gate reactions' answers into one resolved tool call's verdict, and
 // is the only place a gate reaction fires (the seam cascade skips class gate — reactions.go).
-// Dispatch calls it immediately after resolve() at both of its sites, so the serial path and the
-// fan-out's prepare phase gate identically.
+// Dispatch calls it immediately after resolve(), from prepareCall — the one site every call
+// crosses at every width — so a pooled delegation and a lone call gate identically.
 //
 // The fold, in ladder order: the FIRST deny wins and the call is refused; otherwise the FIRST ask
 // upgrades the verdict to a forced Gate, so the approval cache is skipped and the human reads

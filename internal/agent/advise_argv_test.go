@@ -76,7 +76,7 @@ func adviseArgvAgent(
 }
 
 // adviseArgvCall runs one finished tool call through the post-tool-result cascade and commits it,
-// exactly as dispatchSerially does, and returns the committed tool message.
+// exactly as commitCall does, and returns the committed tool message.
 func adviseArgvCall(t *testing.T, a *Agent, call domain.ToolCall, result domain.ToolResult) domain.Message {
 	t.Helper()
 
