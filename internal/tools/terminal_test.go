@@ -577,25 +577,49 @@ func TestTerminal_DescriptionDisclosesFailFast(t *testing.T) {
 }
 
 // TestSubprocessToolResultFailFastNote pins the second half as a pure table over
-// subprocessToolResult: a failed run launched under the preamble says so INSIDE its exit-code
-// line, a run without the preamble keeps the plain line, a clean exit gets no line at all, and a
-// timeout keeps the plain line — a run its own clock cut short did not stop at a failed command.
+// subprocessToolResult: a failed run `set -e` stopped says so INSIDE its exit-code line, a run
+// without the preamble keeps the plain line, a clean exit gets no line at all, and a timeout, a
+// signalled exit or a run the kill-on-denial watch stopped keeps the plain line — none of those
+// stopped at a failed command, and a denial kill carries the confinement label alone. Where the
+// preamble's bash trap named the command as the output's last line, that line is rendered ABOVE
+// the marker and taken out of the output; anywhere else it is output like any other.
 func TestSubprocessToolResultFailFastNote(t *testing.T) {
 	t.Parallel()
+	box := domain.ConfinementBox{WorkspaceRoot: "/ws"}
 	cases := []struct {
-		name     string
-		res      subprocessResult
-		wantLine string
-		wantNote bool
+		name        string
+		res         subprocessResult
+		wantLine    string
+		wantNote    bool
+		wantStopped string
+		wantContent string
 	}{
-		{"fail-fast failure names the mode", subprocessResult{exitCode: 1, failFast: true},
-			"[exit code 1", true},
-		{"failure without the preamble keeps the plain line", subprocessResult{exitCode: 1},
-			"[exit code 1]", false},
-		{"clean exit under the preamble has no exit-code line", subprocessResult{
-			combinedOutput: "hello\n", exitCode: 0, failFast: true}, "", false},
-		{"a timeout is not a fail-fast stop", subprocessResult{
-			exitCode: -1, failFast: true, timedOut: true}, "[exit code -1]", false},
+		{name: "fail-fast failure names the mode", res: subprocessResult{exitCode: 1, failFast: true},
+			wantLine: "[exit code 1", wantNote: true},
+		{name: "failure without the preamble keeps the plain line", res: subprocessResult{exitCode: 1},
+			wantLine: "[exit code 1]"},
+		{name: "clean exit under the preamble has no exit-code line", res: subprocessResult{
+			combinedOutput: "hello\n", exitCode: 0, failFast: true}},
+		{name: "a timeout is not a fail-fast stop", res: subprocessResult{
+			exitCode: -1, failFast: true, timedOut: true}, wantLine: "[exit code -1]"},
+		{name: "a signalled exit is not a fail-fast stop", res: subprocessResult{
+			exitCode: -1, failFast: true}, wantLine: "[exit code -1]"},
+		{name: "a denial kill is not a fail-fast stop, whatever its code", res: subprocessResult{
+			combinedOutput: "mkdir: /etc/x: Operation not permitted\n", exitCode: 1, failFast: true,
+			confined: true, denialStopped: true, box: box}, wantLine: "[exit code 1]\n" + confinementDenialStopLabel(box)},
+		{name: "the trap's last line names the stopped command above the marker", res: subprocessResult{
+			combinedOutput: "ls: cannot access 'x[1]'\n" + platform.FailFastStopPrefix + "ls x[1]\n",
+			exitCode:       2, failFast: true},
+			wantLine: "[exit code 2", wantNote: true, wantStopped: "ls x[1]",
+			wantContent: "ls: cannot access 'x[1]'\n\nfail-fast: the line stopped at `ls x[1]`\n[exit code 2" + failFastExitNote + "]"},
+		{name: "a trap line that is not last stays in the output", res: subprocessResult{
+			combinedOutput: platform.FailFastStopPrefix + "false\nstill writing\n", exitCode: 1, failFast: true},
+			wantLine: "[exit code 1", wantNote: true,
+			wantContent: platform.FailFastStopPrefix + "false\nstill writing\n\n[exit code 1" + failFastExitNote + "]"},
+		{name: "a denial kill never names a stopped command", res: subprocessResult{
+			combinedOutput: platform.FailFastStopPrefix + "mkdir /etc/x\n", exitCode: 1, failFast: true,
+			confined: true, denialStopped: true, box: box},
+			wantLine: "[exit code 1]\n" + confinementDenialStopLabel(box)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -605,6 +629,12 @@ func TestSubprocessToolResultFailFastNote(t *testing.T) {
 			if got := strings.Contains(res.Content, failFastExitNote); got != tc.wantNote {
 				t.Errorf("fail-fast note present = %v, want %v (content = %q)", got, tc.wantNote, res.Content)
 			}
+			stopped := fmt.Sprintf(failFastStoppedLine, tc.wantStopped)
+			if got := strings.Contains(res.Content, "fail-fast: the line stopped at `"); got != (tc.wantStopped != "") {
+				t.Errorf("stopped-command line present = %v, want %v (content = %q)", got, tc.wantStopped != "", res.Content)
+			} else if tc.wantStopped != "" && !strings.Contains(res.Content, stopped+"\n[exit code") {
+				t.Errorf("content = %q, want %q on its own line right above the marker", res.Content, stopped)
+			}
 			if tc.wantLine == "" {
 				if strings.Contains(res.Content, "[exit code") {
 					t.Errorf("content = %q, want no exit-code line", res.Content)
@@ -612,8 +642,60 @@ func TestSubprocessToolResultFailFastNote(t *testing.T) {
 			} else if !strings.Contains(res.Content, tc.wantLine) {
 				t.Errorf("content = %q, want it to contain %q", res.Content, tc.wantLine)
 			}
+			if tc.wantContent != "" && res.Content != tc.wantContent {
+				t.Errorf("content = %q, want exactly %q", res.Content, tc.wantContent)
+			}
 			if tc.res.timedOut && !strings.Contains(res.Content, "command timed out") {
 				t.Errorf("content = %q, want the timeout line", res.Content)
+			}
+		})
+	}
+}
+
+// TestSubprocessToolResultNamesTheStoppedCommandPerShell drives the preamble through bash and
+// dash DIRECTLY (the terminal always runs the platform `sh`, whichever that is on this host) and
+// feeds what each shell printed into subprocessToolResult: under bash the note names the
+// failing command on its own line above the marker, so the marker stays the last line and a
+// `]` in the command never lands inside its brackets; under dash the generic note stands alone.
+// Each row skips when its shell is not installed.
+func TestSubprocessToolResultNamesTheStoppedCommandPerShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fail-fast preamble; cmd.exe has no set -e analogue")
+	}
+	t.Parallel()
+	const command = "[ -f missing ]; echo after"
+	for _, tc := range []struct {
+		shell       string
+		wantStopped bool
+	}{{"bash", true}, {"dash", false}} {
+		t.Run(tc.shell, func(t *testing.T) {
+			t.Parallel()
+			path, err := exec.LookPath(tc.shell)
+			if err != nil {
+				t.Skipf("%s not installed on this host", tc.shell)
+			}
+			out, runErr := exec.Command(path, "-c", platform.FailFastPreamble()+command).CombinedOutput()
+			if runErr == nil {
+				t.Fatalf("%s: `%s` exited 0, want `set -e` to stop it", tc.shell, command)
+			}
+
+			res := subprocessToolResult("c1", subprocessResult{combinedOutput: string(out), exitCode: 1, failFast: true})
+
+			lines := strings.Split(res.Content, "\n")
+			last := lines[len(lines)-1]
+			if last != "[exit code 1"+failFastExitNote+"]" {
+				t.Errorf("%s: last line = %q, want the bracketed marker alone", tc.shell, last)
+			}
+			stopped := fmt.Sprintf(failFastStoppedLine, "[ -f missing ]")
+			if got := lines[len(lines)-2] == stopped; got != tc.wantStopped {
+				t.Errorf("%s: line above the marker = %q, want it to be %q = %v (content = %q)",
+					tc.shell, lines[len(lines)-2], stopped, tc.wantStopped, res.Content)
+			}
+			if strings.Contains(res.Content, platform.FailFastStopPrefix) {
+				t.Errorf("%s: content = %q, want the raw trap line rendered away", tc.shell, res.Content)
+			}
+			if strings.Contains(res.Content, "after") {
+				t.Errorf("%s: content = %q, want the line after the failure never to have run", tc.shell, res.Content)
 			}
 		})
 	}

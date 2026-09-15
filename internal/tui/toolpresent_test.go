@@ -680,6 +680,15 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		content:     "\n[exit code 1 — fail-fast: the line stopped at the first command that failed; guard expected non-zero exits with `|| true`]",
 		wantSummary: "error: exit 1",
 	}, {
+		// Under bash the terminal also names the command that stopped the line, on its own line
+		// ABOVE the marker — never inside the brackets, where a `]` from the quoted command would
+		// end the marker early and leave the slot reading a bare "error". That line is body.
+		name:        "the stopped-command line above the marker still reads as the code",
+		call:        domain.ToolCall{ID: "9", Tool: "terminal", Arguments: []byte(`{"command":"[ -f missing ]; echo after"}`)},
+		content:     "\nfail-fast: the line stopped at `[ -f missing ]`\n[exit code 1 — fail-fast: the line stopped at the first command that failed; guard expected non-zero exits with `|| true`]",
+		wantSummary: "error: exit 1",
+		wantBody:    []string{"fail-fast: the line stopped at `[ -f missing ]`"},
+	}, {
 		name:        "a subprocess result with no marker says the word and keeps its whole message",
 		call:        domain.ToolCall{ID: "6", Tool: "terminal", Arguments: []byte(`{"command":"sleep 90"}`)},
 		content:     "command timed out\npartial output",

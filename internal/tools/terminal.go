@@ -51,7 +51,8 @@ type terminalArgs struct {
 // later line run against a half-done state. The preamble is DISCLOSED rather than silent:
 // the tool description says the POSIX line runs fail-fast and how to guard an expected
 // non-zero exit, and a failed run's exit-code line repeats it at the point of failure
-// (failFastExitNote) — a script that aborted early prints nothing about having done so, and
+// (failFastExitNote; under bash the note also names the command that stopped the line,
+// failFastStoppedLine) — a script that aborted early prints nothing about having done so, and
 // the reviewed 2026-08-25 session shows a model spending six calls re-running one. `set -e` does NOT cover a failure inside an
 // AND-OR list other than its last command (POSIX exempts them), so a denied
 // `mkdir d && cd d && …` chain still falls through to the lines after it — the 2026-08-22
@@ -188,11 +189,48 @@ func preflightCommandLine(command string, posix bool) error {
 const failFastExitNote = " — fail-fast: the line stopped at the first command that failed;" +
 	" guard expected non-zero exits with `|| true`"
 
+// failFastStoppedLine is the line that names the command `set -e` stopped at, rendered above
+// the exit-code line from the `failed at: <cmd>` line bash's ERR trap in the preamble left as
+// the LAST line of the output (platform.FailFastStopPrefix; only bash installs that trap, so
+// under dash the generic note stands alone). It goes on its own line BEFORE the bracketed
+// marker, never inside it: a `]` in the quoted command (`[ -f missing ]`, `ls x[1]`) would
+// otherwise break the marker the TUI reads the exit code from (internal/tui exitCodeMarker).
+const failFastStoppedLine = "fail-fast: the line stopped at `%s`"
+
+// isFailFastStop reports whether a failed run's exit was `set -e` stopping the line at a failed
+// command, which is when the fail-fast note applies. A timeout, a signalled exit (-1) and a run
+// the kill-on-denial watch stopped were not stopped by `set -e`, whatever the preamble said:
+// blaming fail-fast for a confinement kill would send the model guarding a command that was
+// refused, not failed.
+func isFailFastStop(res subprocessResult) bool {
+	return res.failFast && !res.timedOut && !res.denialStopped && res.exitCode > 0
+}
+
+// splitFailFastStop takes the preamble's `failed at: <cmd>` line off the end of output. It
+// returns the command it named and the output without that line, or ok=false — leaving output
+// untouched — when the last line is not the trap's: the trap prints at the moment the script
+// stops, so its line is the last one written, and anything after it (a background child still
+// writing, a cap notice) means the run did not end the way the trap describes.
+func splitFailFastStop(output string) (command, rest string, ok bool) {
+	trimmed := strings.TrimSuffix(output, "\n")
+	start := strings.LastIndexByte(trimmed, '\n') + 1
+	last := trimmed[start:]
+	if !strings.HasPrefix(last, platform.FailFastStopPrefix) {
+		return "", output, false
+	}
+	command = strings.TrimPrefix(last, platform.FailFastStopPrefix)
+	if command == "" {
+		return "", output, false
+	}
+	return command, trimmed[:start], true
+}
+
 // subprocessToolResult renders a captured subprocess outcome as a ToolResult. A non-zero
 // exit is an error result (so the model sees the command failed) carrying the captured
 // output and exit code; a clean exit is a success result with the output. A failed run that
-// carried the fail-fast preamble says so inside the exit-code line (failFastExitNote), except
-// on a timeout — a run cut short by its own clock did not stop at a failed command. An error
+// `set -e` stopped (isFailFastStop) says so inside the exit-code line (failFastExitNote) and,
+// where the preamble's bash-only trap named the command, on the line above it
+// (failFastStoppedLine) — a timeout, a signalled exit or a denial kill gets neither. An error
 // result the kill-on-denial watch stopped carries confinementDenialStopLabel; any other error
 // result from a CONFINED run whose output looks like an OS denial carries
 // confinementDenialLabel — both best-effort, never forced onto a clean exit, and both still
@@ -209,11 +247,17 @@ func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult
 		// success. Name the reason so the reader is not left guessing at the code.
 		b.WriteString("output was cut short: something the command left running still held the pipe and was killed\n")
 	}
-	b.WriteString(res.combinedOutput)
+	output, note, stoppedAt := res.combinedOutput, "", ""
+	if isFailFastStop(res) {
+		note = failFastExitNote
+		if command, rest, ok := splitFailFastStop(output); ok {
+			output, stoppedAt = rest, command
+		}
+	}
+	b.WriteString(output)
 	if res.exitCode != 0 {
-		note := ""
-		if res.failFast && !res.timedOut {
-			note = failFastExitNote
+		if stoppedAt != "" {
+			fmt.Fprintf(&b, "\n"+failFastStoppedLine, stoppedAt)
 		}
 		fmt.Fprintf(&b, "\n[exit code %d%s]", res.exitCode, note)
 		switch {

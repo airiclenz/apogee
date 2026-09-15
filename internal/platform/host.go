@@ -532,7 +532,23 @@ func caretEscape(line string) string {
 // carries on with pipefail simply absent. On bash, zsh, ksh and newer dash the subshell succeeds
 // and the option is then set for the script itself. Either way the line is silent and the script
 // survives it, so no host probe is needed and apogee spawns nothing to learn the answer.
-const failFastPreamble = "set -e\n(set -o pipefail) 2>/dev/null && set -o pipefail\n"
+//
+// The last line self-detects the same way: only bash sets BASH_VERSION, so only bash installs
+// the ERR trap, which prints the failing command (bash's BASH_COMMAND) to stderr as
+// `failed at: <cmd>` at the moment `set -e` stops the script — the terminal tool reads that
+// line back to name the command in its fail-fast note (FailFastStopPrefix). Every other sh
+// takes the `[ -z … ]` branch, prints nothing and installs nothing; either way the list's
+// status is 0, so the preamble leaves `$?` clean for the script's first line. Under pipefail
+// bash reports the pipeline's LAST command, not the stage that failed.
+const failFastPreamble = "set -e\n" +
+	"(set -o pipefail) 2>/dev/null && set -o pipefail\n" +
+	"[ -z \"$BASH_VERSION\" ] || trap 'echo \"" + FailFastStopPrefix + "$BASH_COMMAND\" >&2' ERR\n"
+
+// FailFastStopPrefix is the prefix of the stderr line the preamble's bash-only ERR trap prints
+// before `set -e` stops the script; what follows it is the failing command verbatim. It is
+// exported so the terminal tool can recognise that line in the captured output and quote the
+// command in its fail-fast note instead of the generic "first command that failed".
+const FailFastStopPrefix = "failed at: "
 
 // FailFastPreamble returns that prefix. With `set -e` in force, a failed plain command aborts
 // the whole script instead of letting an unguarded later line run — but NOT a failure inside an

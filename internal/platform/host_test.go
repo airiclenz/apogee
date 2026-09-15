@@ -499,11 +499,13 @@ func countPrefix(entries []string, prefix string) int {
 }
 
 // TestFailFastPreambleIsTheSelfDetectingConstant pins the exact bytes: one constant, identical on
-// every host, whose middle line asks the shell itself for pipefail instead of a probe subprocess.
+// every host, whose middle line asks the shell itself for pipefail instead of a probe subprocess
+// and whose last line asks the shell itself whether it is bash before installing the ERR trap.
 func TestFailFastPreambleIsTheSelfDetectingConstant(t *testing.T) {
 	t.Parallel()
 
-	want := "set -e\n(set -o pipefail) 2>/dev/null && set -o pipefail\n"
+	want := "set -e\n(set -o pipefail) 2>/dev/null && set -o pipefail\n" +
+		"[ -z \"$BASH_VERSION\" ] || trap 'echo \"failed at: $BASH_COMMAND\" >&2' ERR\n"
 	if got := FailFastPreamble(); got != want {
 		t.Errorf("FailFastPreamble() = %q, want %q", got, want)
 	}
@@ -558,6 +560,19 @@ func TestFailFastPreambleRunsUnderEveryHostShell(t *testing.T) {
 			}
 			if got := string(out); got != "" {
 				t.Errorf("%s: stdout = %q, want nothing — the script must stop at the failure", shell, got)
+			}
+
+			// (d) The ERR trap is bash's alone: bash names the failing command on stderr at the
+			// stop, every other shell prints nothing — and the preamble leaves `$?` at 0 on all
+			// of them, so a script's first line never reads the preamble's own status.
+			combined, _ := exec.Command(path, "-c", preamble+"false; echo reached").CombinedOutput()
+			isBash := exec.Command(path, "-c", `[ -n "$BASH_VERSION" ]`).Run() == nil
+			if got := string(combined); isBash != (got == FailFastStopPrefix+"false\n") {
+				t.Errorf("%s: combined output = %q, want the trap line exactly when the shell is bash (%v)", shell, got, isBash)
+			}
+			out, err = exec.Command(path, "-c", preamble+"echo $?").Output()
+			if err != nil || string(out) != "0\n" {
+				t.Errorf("%s: `echo $?` after the preamble = %q, %v; want %q and nil", shell, out, err, "0\n")
 			}
 		})
 	}

@@ -163,7 +163,10 @@ NOTES (2026-09-15): the tree also carries `D docs/reviews/session-mining-2026-09
 
 **Commit:** `feat(host): GOROOT and GOMODCACHE are probed read-only roots for the read tools`
 
-## 5. The fail-fast note names the command that stopped the line and never blames `set -e` for a confinement kill
+## 5. The fail-fast note names the command that stopped the line and never blames `set -e` for a confinement kill — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the trap line is spelled `[ -z "$BASH_VERSION" ] || trap … ERR` rather than the plan's `[ -n "$BASH_VERSION" ] && trap … ERR` — the `||` form leaves `$?` at 0 under every shell (the `&&` form leaves 1 under dash for the script's first line to read); the pin test asserts `echo $?` prints 0 on each installed shell.
+NOTES (2026-09-15): the note's gate keeps `!timedOut` beside the plan's `!denialStopped && exitCode > 0` (a strictly narrower condition; the existing timeout row still passes); under pipefail bash's `$BASH_COMMAND` names the pipeline's LAST stage, recorded in the preamble's doc comment. ADR 0056 D1 still says pipefail comes from a "one-time cached probe" — pre-existing stale wording (the constant predates this item), left untouched.
 
 **What:** `internal/tools/terminal.go` `subprocessToolResult` appends `failFastExitNote` whenever `res.failFast && !res.timedOut` — including when `res.denialStopped` or the exit is −1/signalled. Fix: the note is appended only when `!res.denialStopped && res.exitCode > 0`; a denial-stopped line carries the confinement label alone. The preamble (`internal/platform/host.go` `failFastPreamble`, a constant per ADR 0056 D1) gains a bash-only, self-detecting `trap` that prints `failed at: $BASH_COMMAND` to stderr (`[ -n "$BASH_VERSION" ] && trap … ERR`; silent under dash), and the note quotes that line when present: `fail-fast: the line stopped at \`<cmd>\` (exit N)`. Exit 1 with stdout stays `IsError` (writer call). The escape-probe harness stays green.
 
