@@ -221,9 +221,9 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 // delegated run's. It is the SAME sum /sessions shows as a session's spend
 // (internal/tui/sessions.go:734, Meta.Usage + Meta.DelegateUsage), taken here because
 // schedule.Outcome is flat — the library is runner-agnostic (ADR 0033) and never imports the
-// runner's shapes to take it for itself. Both builders of an Outcome go through it, this
-// package's and the one every raised Firing maps through (firingOutcome, wire_firing.go), so a
-// Firing's cost reads the same whichever Driver fired it.
+// runner's shapes to take it for itself. The one builder of an Outcome, the mapping every raised
+// Firing goes through (firingOutcome, wire_firing.go), takes it from here, so a Firing's cost
+// reads the same whichever Driver fired it.
 func firingSpend(res run.Result) int {
 	total := res.Usage.TotalTokens
 	for _, sub := range res.SubAgents {
