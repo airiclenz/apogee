@@ -438,7 +438,11 @@ the grain was the engine's decision long before this pane started saying it out 
 Reaction asked for is remembered nowhere, so the `Always allow this session` row is not drawn and `s`
 is not a key: the menu is `Allow`, `Deny`, `Cancel`, and the pane closes on one faint line under it —
 `a forced look is asked every time` — drawn as the popup module's hint row, one blank line below the
-last option as every hinted pane keeps. An ordinary prompt is unchanged to the byte.
+last option as every hinted pane keeps. That disclosure is the first thing the forced pane gives up:
+at a height where the hint's chrome and its closing blank would cost the menu a row, the pane
+re-budgets as an ordinary prompt does — border chrome, no hint — and the disclosure yields before
+any decision does, so `Allow` is painted at every window the pane is drawn in at all. An ordinary
+prompt is unchanged to the byte.
 
 **When a sub-agent raised the call, the body says so first.** A request from a child leads with
 `Sub-agent: <its delegated task>`, above the reason, because that is the one fact the rest of the

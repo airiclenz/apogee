@@ -466,7 +466,9 @@ NOTES (2026-09-15): added from the run's ledger — a FOLLOW-UP the verifier of 
 
 **Commit:** `fix(host): the toolchain probe runs in the temp root, not the first booter's home`
 
-## 18. REGRESSION: forced approval pane keeps a decision row at the smallest overlay window
+## 18. REGRESSION: forced approval pane keeps a decision row at the smallest overlay window — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the hinted/ordinary budget and the menu's line demand were lifted into two small helpers (`approvalMenuLines`, `approvalMenuBudget`) so the first budget and the re-budget share one arithmetic; the ZERO-floor paragraph moved from the inline comment onto `approvalMenuBudget`'s doc — no behaviour beyond the item's yield.
 
 NOTES (2026-09-15): added from the run's ledger — a REGRESSION the verifier of item 11 (commit `cebb9115`) raised; depends on nothing; this item has NOT been through the plan's regression-check block. Under the house rule a regression is never deferred: this item is fixed in this run or blocks its closeout. Finding, verbatim: at the smallest overlay window (80×14) a forced pane now paints NO decision row — title reads `… (+3 more lines)`, body `… (+4 more lines)` then only the disclosure — where before the item (and on an ordinary pane still) `❯ Allow` is painted; keys a/d/esc still answer it. Dropping `padBelow` alone does NOT restore the row — the hint chrome (`popupTitleBorderChrome`) costs it; the budget must seat at least one menu row ahead of the hint (or the disclosure must yield at that height).
 

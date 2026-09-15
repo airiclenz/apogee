@@ -2,10 +2,12 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -315,5 +317,66 @@ func TestModelApprovalKeepsTheSessionRowOnAnOrdinaryGate(t *testing.T) {
 	}
 	if m.state != stateRunning {
 		t.Errorf("state = %v after `s`, want running", m.state)
+	}
+}
+
+// The disclosure yields before a decision does. At a window whose grant is the frame's four-row
+// floor — every height from smallestOverlayWindow to 15 at 80 columns — the hinted chrome and its
+// closing blank cost exactly the rows the menu would have seated in: budgeted with the disclosure,
+// the body's irreducible line took the one row left and the forced pane painted NO decision row
+// (title `… (+3 more lines)`, then only the disclosure) where the ordinary pane at the same grant
+// seats `❯ Allow`. The pane now keeps the disclosure only where the whole menu block seats beside
+// it, and re-budgets as the ordinary pane does anywhere short of that — so the decision row is on
+// the screen at every window the pane is drawn in, and the disclosure is back once the window can
+// pay for it, below `Cancel` as the golden (t10-forced-pane.txt) draws it.
+func TestModelApprovalForcedPaneKeepsADecisionRowAtTheFloor(t *testing.T) {
+	req := domain.ApprovalRequest{
+		Tool:      "terminal",
+		Reason:    "dangerous-action guard forced approval",
+		Arguments: json.RawMessage(`{"command":"ls ~/.apogee"}`),
+	}
+	if !isForcedApproval(req) {
+		t.Fatal("an unkeyed request is not read as a forced gate")
+	}
+
+	for _, tc := range []struct {
+		height    int
+		disclosed bool
+	}{
+		{smallestOverlayWindow, false},
+		{14, false},
+		{30, true},
+	} {
+		t.Run(fmt.Sprintf("80×%d", tc.height), func(t *testing.T) {
+			m := modelWithOverlayRoomAt(t, 80, tc.height, Options{Workspace: "/ws/a"})
+			pane := m.approvalPrompt(req)
+			rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
+			flat := strings.Join(rows, "\n")
+
+			if got := lipgloss.Height(pane); got > m.viewport.Height() {
+				t.Errorf("approval pane is %d rows on a %d-row viewport (+%d): the input box goes off the frame\n%s",
+					got, m.viewport.Height(), got-m.viewport.Height(), flat)
+			}
+			if !strings.Contains(rows[0], "Approve terminal?") {
+				t.Errorf("top border does not carry the tool name the decision turns on:\n%s", flat)
+			}
+			if !strings.Contains(flat, glyphUser+" Allow") {
+				t.Errorf("no decision row is painted — the pane cannot be answered from the screen:\n%s", flat)
+			}
+			if got := strings.Contains(flat, forcedApprovalDisclosure); got != tc.disclosed {
+				t.Errorf("disclosure painted = %v, want %v:\n%s", got, tc.disclosed, flat)
+			}
+			if !tc.disclosed {
+				return
+			}
+			for _, label := range []string{"Deny", "Cancel"} {
+				if !strings.Contains(flat, label) {
+					t.Errorf("the roomy pane does not paint %q:\n%s", label, flat)
+				}
+			}
+			if note, cancel := paneRowIndex(t, rows, forcedApprovalDisclosure), paneRowIndex(t, rows, "Cancel"); note <= cancel {
+				t.Errorf("the disclosure sits on row %d, above the menu's last row %d it closes:\n%s", note, cancel, flat)
+			}
+		})
 	}
 }

@@ -309,7 +309,10 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // forcedApprovalDisclosure, `a forced look is asked every time` — drawn as the module's hint row
 // under the menu (popupSpec.hint, one blank line above it as every hinted pane keeps), so the
 // forced pane spends the chrome of a hinted pane (popupTitleBorderChrome) and says why the row is
-// not there instead of silently drawing one fewer.
+// not there instead of silently drawing one fewer. That disclosure is also the first thing the
+// forced pane gives up: at a height where the hinted chrome cannot seat the whole menu beside it,
+// the pane re-budgets as the ordinary pane does and the disclosure yields before any decision row
+// does (approvalMenuBudget), so `❯ Allow` is on the screen at every window the pane is drawn in.
 //
 // The vertical spacing is the same argument in blank lines, and every PART of the body is a
 // paragraph: the Sub-agent line, the Reason:, the Fix:, the Scope:, the labelled arguments, the
@@ -446,26 +449,37 @@ func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPl
 	}
 
 	// The whole menu or as much of it as the window can seat; no cap of our own, because the menu is
-	// the whole offering rather than a window onto a longer list. The demand is in LINES, which for
-	// this pane is one per option — the labels are ours and they do not wrap — plus the blank line the
-	// menu is set off by (popupSpec.rowPadAbove), plus on a forced pane the blank that closes the
-	// menu above its disclosure (popupRowStyle.padBelow): a pane that asked for four and painted five
-	// would overflow by exactly the room it did not book. The disclosure itself is chrome, not a row
-	// — the hint row a hinted pane's chrome already counts.
+	// the whole offering rather than a window onto a longer list. The demand is in LINES
+	// (approvalMenuLines) and the room is asked with the chrome this composition spends
+	// (approvalMenuBudget): a pane that asked for four and painted five would overflow by exactly the
+	// room it did not book. The disclosure itself is chrome, not a row — the hint row a hinted pane's
+	// chrome already counts.
 	//
-	// The ZERO floor (popupFloor) is right here and not an oversight beside the ask prompt's: this
-	// menu's demand is its own few options and nothing longer, so the rows can never eat a window the
-	// body had room in — past five lines every further row of the grant is the reason's. The pane the
-	// floor exists for is the one whose offering scales with what the model wrote.
-	forced := isForcedApproval(req)
-	hint, chrome := "", popupBorderChrome
-	if forced {
-		hint, chrome = forcedApprovalDisclosure, popupTitleBorderChrome
-	}
-	menuLines := popupRowBlockLines(popupFlatRowHeights(len(rows)), 0, popupRowPadLines(true, forced))
-	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, menuLines, menuLines, chrome, popupFloor{})
+	// The disclosure is the FIRST thing a forced pane gives up. Its hint row costs the chrome one line
+	// (popupTitleBorderChrome against popupBorderChrome) and its closing blank costs the block
+	// another, and at a grant on the frame's four-row floor those two are exactly the rows the menu
+	// would have seated in: budgeted with the hint, the body's irreducible line takes the one row
+	// left and no decision is painted at all — a pane that names the call and cannot be answered
+	// from the screen. So the hinted budget is asked first, and kept only where it seats the WHOLE
+	// block; anywhere short of that the pane re-budgets exactly as the ordinary pane does — border
+	// chrome, no hint, no closing blank — and the disclosure is gone at that height while the
+	// decisions stay. Booking and painting move together: popupRowPads paints padBelow only under a
+	// hint, so the pad follows the hint it exists for. The keys are untouched either way — a/d/esc
+	// answer a forced pane whether or not its rows are on the screen; what this keeps is the row.
+	disclosed := isForcedApproval(req) // a forced pane opens on its disclosure and may yield it below
+	maxBodyRows, rowsShown, seated := m.approvalMenuBudget(len(rows), disclosed)
 	if !seated {
 		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
+	if disclosed && rowsShown < approvalMenuLines(len(rows), disclosed) {
+		disclosed = false
+		// popupBudget is a pure function of the grant, and the ordinary chrome is the smaller: a pane
+		// seated with the hint is seated without it, with never fewer rows than the first budget gave.
+		maxBodyRows, rowsShown, _ = m.approvalMenuBudget(len(rows), disclosed)
+	}
+	hint := ""
+	if disclosed {
+		hint = forcedApprovalDisclosure
 	}
 	spec := popupSpec{
 		// The tool NAME is a field like any other on this pane, and apogee does not author it — an MCP
@@ -483,14 +497,40 @@ func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPl
 		menuRows:    true,
 		rowPadAbove: true, // the one blank line between the body and the menu; the mockup closes on the border
 		// A forced pane alone closes its menu above a hint, one blank line apart as every hinted
-		// pane does (popupRowPads); the ordinary pane keeps ending on its last decision.
-		rowStyle:  popupRowStyle{padBelow: forced},
+		// pane does (popupRowPads); the ordinary pane — and a forced pane whose disclosure yielded —
+		// keeps ending on its last decision.
+		rowStyle:  popupRowStyle{padBelow: disclosed},
 		hint:      hint,
 		selected:  m.approvalSel.highlight(len(rows)),
 		maxRows:   rowsShown,
 		scrollbar: m.popupScrollbarOn(),
 	}
 	return renderPopupPlaced(m.th, spec, m.width)
+}
+
+// approvalMenuLines is what the approval menu demands of the frame, in LINES: one per option — the
+// labels are ours and never wrap (popupFlatRowHeights) — plus the blank the menu is set off by
+// (popupSpec.rowPadAbove), plus, while the disclosure is painted, the blank that closes the menu
+// above it (popupRowStyle.padBelow). It is the one figure the budget books and the painter spends,
+// so a pane can never ask for four lines and paint five.
+func approvalMenuLines(options int, disclosed bool) int {
+	return popupRowBlockLines(popupFlatRowHeights(options), 0, popupRowPadLines(true, disclosed))
+}
+
+// approvalMenuBudget asks the frame for the approval pane's room with the chrome ONE composition
+// spends: border chrome for a pane that ends on its last decision, title-border chrome for the one
+// that closes on the disclosure (popupTitleBorderChrome counts the hint row). The demand is the
+// whole menu and nothing longer (approvalMenuLines), which is why the ZERO floor (popupFloor) is
+// right and not an oversight beside the ask prompt's: the rows can never eat a window the body had
+// room in — past the menu every further row of the grant is the reason's. The pane the floor exists
+// for is the one whose offering scales with what the model wrote.
+func (m Model) approvalMenuBudget(options int, disclosed bool) (maxBody, rowsShown int, seated bool) {
+	chrome := popupBorderChrome
+	if disclosed {
+		chrome = popupTitleBorderChrome
+	}
+	menuLines := approvalMenuLines(options, disclosed)
+	return m.popupBudget(panePrompt, menuLines, menuLines, chrome, popupFloor{})
 }
 
 // approvalTaskClipRunes bounds the delegated task the Sub-agent line spends body rows on. It is the
