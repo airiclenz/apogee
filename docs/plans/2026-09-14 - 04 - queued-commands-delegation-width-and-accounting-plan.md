@@ -42,7 +42,10 @@
 - A headless / Firing record written through `internal/run` carries no `served_models`, `at` or `chars` — items 6 and 7 are written by the TUI fold only; `internal/run/transcript.go` is untouched.
 - Any orientation-block change for the delegation width (the `Delegations:` bullet, beat-driven text) — dropped from item 4 by owner call 2026-09-14.
 
-## 1. Gate: plan 2026-09-14 - 01 is archived
+## 1. Gate: plan 2026-09-14 - 01 is archived — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): gate verified — `docs/plans/2026-09-14 - 01 - queued-message-preemption-and-scratch-in-lower-modes-plan.md` is absent from `docs/plans/`, present under `docs/plans/archived/`, all seven items marked ✅ DONE (2026-09-14), archived at commit 0d64c233; the acceptance command passes.
+NOTES (2026-09-15): the archived plan's header still reads `**Status:** unexecuted` while every item is ✅ DONE and it sits in archived/ — stale header line only, no gate impact, not touched (no Files on this item).
 
 **What:** Verify `docs/plans/2026-09-14 - 01 - queued-message-preemption-and-scratch-in-lower-modes-plan.md` is gone from `docs/plans/` and archived under `docs/plans/archived/` as executed. Items 2–4 edit `internal/tui/interject.go`, `commandrun.go`, ADR 0025, `docs/manual/commands.md`, `internal/agent/orientation.go` and `dispatch.go`, which that plan rewrites. No code change.
 
