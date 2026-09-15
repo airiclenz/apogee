@@ -1612,8 +1612,8 @@ already. What stays exactly as before: every other write is refused in Plan and 
 Ask-Before, and a *command* that writes into the scratch directory — `terminal`,
 `python_exec` — is still command execution, refused in Plan and gated in Ask-Before, so the
 loosen adds nothing a shell could run. It is readable back through every read tool —
-`read_file`, `grep`, `list_dir`, `find_files`, `copy_file`'s source and `present_document` all
-accept the announced path, a symlinked `~/.apogee` included — so a report the model drafts
+`read_file`, `grep` (as its `path` or one of its `paths`), `list_dir`, `find_files`, `copy_file`'s
+source and `present_document` all accept the announced path, a symlinked `~/.apogee` included — so a report the model drafts
 there is one it can read and show you (a document outside the workspace is opened locally; on
 a remote session the transcript shows its path only, because the doc server serves the
 workspace alone). Nothing under `~/.apogee` reads or loads what lands

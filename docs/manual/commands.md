@@ -265,7 +265,22 @@ a matched line wider than 512 characters comes back as the 512 characters around
 with `…` marking each cut end, and the header counts what it clipped —
 `[2 total matches in the workspace, showing 1-2 (1 rows clipped at 512 chars)]`. A line within the
 bound is untouched, and `read_file` still serves the whole row. A search that hits the 1000-match
-cap says how to get under it: its header ends `— narrow with include or path`.
+cap says how to get under it: its header ends `— narrow with include, exclude or path`.
+
+**A search can name several paths, skip names and count instead of listing.** `grep` takes a
+`paths` list beside the single `path` — `paths: ["src", "docs"]`, or an absolute path under a
+read-only root alongside a workspace one — and searches them together: the header names each
+(`[5 total matches in src, docs, showing 1-5]`), every row is prefixed with the path it came from
+as it was spelled, and a path that is refused refuses the call with the same wording the single
+form gives. `exclude` is a comma-separated list of file-name or directory-name globs to skip
+(`exclude: "*_test.go,vendor"`) on top of the directories a search never enters (`node_modules`,
+`.git`, `dist`, `build`, `.next`, `coverage`, `__pycache__`); it narrows that one call and nothing
+else. `include` stays a file-name filter, and a glob with a slash in it is refused rather than
+silently matching nothing (`grep: include matches file names only — use paths or exclude for
+directories`). `count_only: true` returns one `file:count` row per matching file and
+`files_only: true` one path per matching file, both under a header that carries the match total
+and the file count (`[12 total matches in src across 3 files, showing 1-3]`) — the page is counted
+in files then, and `count_only` wins when both are set.
 
 **A fetched page arrives as text.** `web_fetch` renders an HTML response — by its `Content-Type`,
 or by its own doctype when the server sends none — as the page's readable text: `<script>`,

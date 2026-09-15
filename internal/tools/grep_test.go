@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -1004,11 +1005,254 @@ func TestGrep_Execute_CapNudge(t *testing.T) {
 		t.Fatalf("unexpected tool error: %q", result.Content)
 	}
 	header := strings.SplitN(result.Content, "\n", 2)[0]
-	want := "[1000 total matches (capped at 1000) in the workspace, showing 1-1] — narrow with include or path"
+	want := "[1000 total matches (capped at 1000) in the workspace, showing 1-1] — narrow with include, exclude or path"
 	if header != want {
 		t.Errorf("header = %q, want %q", header, want)
 	}
-	if !strings.HasSuffix(header, "— narrow with include or path") {
+	if !strings.HasSuffix(header, "— narrow with include, exclude or path") {
 		t.Errorf("header does not end with the nudge: %q", header)
 	}
+}
+
+// TestGrep_Execute_IncludeWithASlashIsRefused pins the exact refusal: include globs match a file's
+// base name, so a directory-shaped glob would silently match nothing — the hint names the
+// arguments that do scope a search to a directory.
+func TestGrep_Execute_IncludeWithASlashIsRefused(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	seedTree(t, root)
+
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"pattern": "func", "include": "internal/**/*.go"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true (content: %q)", result.Content)
+	}
+	if want := "grep: include matches file names only — use paths or exclude for directories"; result.Content != want {
+		t.Errorf("content = %q, want %q", result.Content, want)
+	}
+}
+
+// TestGrep_Execute_ExcludeIsPerCall pins that `exclude` narrows the call that named it and
+// nothing else: two concurrent excluding calls (grep is fanned out under ADR 0039 — run under
+// -race) leave the package-level grepExcludeDirs as it was, and a find_files that follows still
+// walks the excluded files and directories.
+func TestGrep_Execute_ExcludeIsPerCall(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	seedTree(t, root)
+	writeGrepLines(t, root, "src/a_test.go", "package a", "func TestAlpha() {}")
+	if err := os.MkdirAll(filepath.Join(root, "vendor"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	writeGrepLines(t, root, "vendor/dep.go", "package dep", "func Dep() {}")
+	tool := NewGrep(root, ReadMounts{})
+	before := len(grepExcludeDirs)
+
+	results := make([]domain.ToolResult, 2)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			result, err := tool.Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"pattern": "func", "exclude": "*_test.go,vendor"}))
+			if err != nil {
+				t.Errorf("Execute returned a Go error: %v", err)
+			}
+			results[i] = result
+		}(i)
+	}
+	wg.Wait()
+
+	for _, result := range results {
+		if result.IsError {
+			t.Fatalf("unexpected tool error: %q", result.Content)
+		}
+		if !strings.Contains(result.Content, "src/a.go:2:func Alpha") {
+			t.Errorf("exclude dropped a file it did not name: %q", result.Content)
+		}
+		if strings.Contains(result.Content, "a_test.go") || strings.Contains(result.Content, "vendor") {
+			t.Errorf("exclude did not drop the test file or the vendor directory: %q", result.Content)
+		}
+	}
+	if len(grepExcludeDirs) != before || grepExcludeDirs["vendor"] {
+		t.Errorf("grepExcludeDirs was written by an excluding call: %v", grepExcludeDirs)
+	}
+
+	found, err := NewFindFiles(root, ReadMounts{}).Execute(context.Background(),
+		callWith(t, "c2", map[string]any{"pattern": "*.go"}))
+
+	if err != nil {
+		t.Fatalf("find_files returned a Go error: %v", err)
+	}
+	for _, want := range []string{"src/a_test.go", "vendor/dep.go"} {
+		if !strings.Contains(found.Content, want) {
+			t.Errorf("a grep exclude leaked into find_files — %q missing from %q", want, found.Content)
+		}
+	}
+}
+
+// TestGrep_Execute_PathsUnionEachThroughItsOwnFence pins the multi-path contract: `paths` are
+// searched together and the header names each, every row is prefixed with the path it came from,
+// and a path accepted under an extra read root has its context_lines reopened through THAT
+// root's fence — the workspace holds a decoy of the same relative name whose lines must never
+// appear.
+func TestGrep_Execute_PathsUnionEachThroughItsOwnFence(t *testing.T) {
+	t.Parallel()
+
+	root, extra := tempRoot(t), tempRoot(t)
+	writeGrepLines(t, root, "w.txt", "NEEDLE w")
+	writeGrepLines(t, root, "e.txt", "WRONG", "WRONG", "WRONG")
+	writeGrepLines(t, extra, "e.txt", "before", "NEEDLE e", "after")
+	extraFile := filepath.Join(extra, "e.txt")
+	tool := NewGrep(root, ReadMounts{Roots: func() []string { return []string{extra} }})
+
+	result, err := tool.Execute(context.Background(), callWith(t, "c1", map[string]any{
+		"pattern": "NEEDLE", "paths": []string{"w.txt", extraFile}, "context_lines": 1,
+	}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	want := "[2 total matches in w.txt, " + extraFile + ", showing 1-2]\n" +
+		"w.txt:1:NEEDLE w\n" +
+		extraFile + ":1-before\n" + extraFile + ":2:NEEDLE e\n" + extraFile + ":3-after"
+	if result.Content != want {
+		t.Errorf("content = %q, want %q", result.Content, want)
+	}
+}
+
+// TestGrep_Execute_PathAndPathsAreSearchedTogether pins that the single `path` form keeps working
+// beside `paths`: both are searched, and a directory's rows are prefixed with the spelled path.
+func TestGrep_Execute_PathAndPathsAreSearchedTogether(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	seedTree(t, root)
+
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", map[string]any{
+		"pattern": "^package |^alpha", "path": "src/inner", "paths": []string{"top.txt"},
+	}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	want := "[2 total matches in src/inner, top.txt, showing 1-2]\n" +
+		"src/inner/b.go:1:package b\n" +
+		"top.txt:1:alpha"
+	if result.Content != want {
+		t.Errorf("content = %q, want %q", result.Content, want)
+	}
+}
+
+// TestGrep_Execute_PathsRefusalNamesThePath pins that one refused entry of `paths` fails the call
+// with the same refusal the single form gives, quoting the path as spelled.
+func TestGrep_Execute_PathsRefusalNamesThePath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	seedTree(t, root)
+
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", map[string]any{
+		"pattern": "package", "paths": []string{"src", "absent-dir"},
+	}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true (content: %q)", result.Content)
+	}
+	if !strings.Contains(result.Content, "path not found: absent-dir") {
+		t.Errorf("content %q does not name the refused path", result.Content)
+	}
+}
+
+// TestGrep_Execute_CountOnlyAndFilesOnlyShapes pins the two file-shaped outputs: a header that
+// carries the match total and the file count, then one row per matching file — with its count
+// for count_only, bare for files_only — and count_only winning when both are asked for.
+func TestGrep_Execute_CountOnlyAndFilesOnlyShapes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "count_only lists one file:count row per file",
+			args: map[string]any{"pattern": "Alpha|package", "path": "src", "count_only": true},
+			want: "[3 total matches in src across 2 files, showing 1-2]\na.go:2\ninner/b.go:1",
+		},
+		{
+			name: "files_only lists one path per file",
+			args: map[string]any{"pattern": "Alpha|package", "path": "src", "files_only": true},
+			want: "[3 total matches in src across 2 files, showing 1-2]\na.go\ninner/b.go",
+		},
+		{
+			name: "count_only wins over files_only",
+			args: map[string]any{"pattern": "Alpha|package", "path": "src", "count_only": true, "files_only": true},
+			want: "[3 total matches in src across 2 files, showing 1-2]\na.go:2\ninner/b.go:1",
+		},
+		{
+			name: "a single file says so",
+			args: map[string]any{"pattern": "Beta", "files_only": true},
+			want: "[1 total matches in the workspace across 1 file, showing 1-1]\nsrc/inner/b.go",
+		},
+		{
+			name: "pagination counts files",
+			args: map[string]any{"pattern": "Alpha|package", "path": "src", "count_only": true, "max_results": 1, "offset": 1},
+			want: "[3 total matches in src across 2 files, showing 2-2]\ninner/b.go:1",
+		},
+		{
+			name: "no match keeps the sentinel sentence",
+			args: map[string]any{"pattern": "zzz-nothing", "files_only": true},
+			want: "No matches found in the workspace",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			seedTree(t, root)
+
+			result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("unexpected tool error: %q", result.Content)
+			}
+			if result.Content != tc.want {
+				t.Errorf("content = %q, want %q", result.Content, tc.want)
+			}
+			if summary, ok := result.Summary.(domain.MatchedLines); !ok || summary.Total != matchTotal(tc.want) {
+				t.Errorf("summary = %#v, want MatchedLines with the header's total", result.Summary)
+			}
+		})
+	}
+}
+
+// matchTotal reads the total a grep header or sentinel sentence states, for the summary check.
+func matchTotal(content string) int {
+	var total int
+	if _, err := fmt.Sscanf(content, "[%d total matches", &total); err != nil {
+		return 0
+	}
+	return total
 }

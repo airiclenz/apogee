@@ -78,6 +78,15 @@ bounded `replace_all` with a replacement cap and shown context); `workspace_summ
 **Engine-level notes (not tools):** context-window introspection for the model (Mechanism
 territory); streaming/progress for long-running tools; structured JSON tool outputs.
 
+**`grep` arguments added 2026-09-15 (session-mining round, plan `2026-09-14 - 02` item 14):**
+`exclude` (file- or directory-name globs skipped for that call alone), `paths` (several paths
+searched in one call, each fenced by the root that accepted it), `count_only` and `files_only`
+(one row per matching file), plus a refusal for an `include` glob carrying a slash — the round
+saw models spell `include: internal/**/*.go` and get nothing back. These are PARAMETERS on an
+existing tool, not roster slots, so method lesson 2 applies (a model that does not find them loses
+nothing it had); they are toggleable surface under the standing directive — `grep` itself sits
+behind `tools.disabled` — and are pruned on bench evidence like every other addition.
+
 **Denied, with reasons** (do not re-file as gaps):
 
 - `database_query` — [ADR 0031](../adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md):

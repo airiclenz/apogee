@@ -374,7 +374,13 @@ NOTES (2026-09-15): the plan's Acceptance `go test ./internal/agent/ -run 'PlanM
 
 **Commit:** `feat(tools): git_show reads a file at a revision; git_log takes a path; git_branch marks remote refs`
 
-## 14. `grep` gains `exclude`, `paths`, `count_only`, `files_only`; `include` refuses a slash with a hint
+## 14. `grep` gains `exclude`, `paths`, `count_only`, `files_only`; `include` refuses a slash with a hint — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `internal/tools/path_read.go` (listed in Files) needed no change — the target rides on `grepMatch` (`target *searchTarget`) and `renderContextMatches` groups by (target, openPath), which is the plan's first-named option; `searchTarget` itself is untouched.
+NOTES (2026-09-15): multi-path display — with one path a row keeps its walk-relative name (byte-identical to before); with several, each row is prefixed with the path as the model spelled it (`path.Join(given, rel)`, the spelled path itself for a file target) so the model can tell which path a row came from and hand the name back; the header joins the spelled paths with `, `.
+NOTES (2026-09-15): `count_only` / `files_only` share the header `[N total matches in <scope> across M files, showing a-b]` and page by FILES (`max_results`/`offset` count files there); `count_only` wins when both are set; the `MatchedLines` summary still carries the match total so the TUI slot is unchanged.
+NOTES (2026-09-15): `docs/manual/configuration.md`'s tool-name list (lines 145-148) already names `grep` and gained no edit; its scratch-dir paragraph now says `grep` accepts the announced path as `path` or one of `paths`; the new-argument prose lives in `docs/manual/commands.md` beside the wide-row paragraph.
+NOTES (2026-09-15): idea, not a gap — `internal/tui/toolregistry.go` `grepTarget`/`searchScopeArg` read `path` only, so a `paths`-only call shows no scope qualifier in the transcript slot (its hit count is still right); extending the slot to `paths` is a TUI wording choice outside this item's Files.
 
 **What:** `internal/tools/grep.go`: `include` containing `/` ⇒ `IsError` `grep: include matches file names only — use paths or exclude for directories`; new `exclude` (basename or dir glob, joined to a per-call skip set copied from `grepExcludeDirs` — the package map is never written), `paths []string` (each resolved through the read fence; `path` kept as the single form), `count_only` (per-file counts, header total) and `files_only` (one path per line). The cap nudge item 8 wrote becomes `— narrow with include, exclude or path`. Description updated; manual edits at the real sections (the `docs/manual/configuration.md` tool list around lines 145-148 and the delegation/tool paragraphs `grep -n 'read_file\|grep' docs/manual/*.md` finds); `docs/design/tool-surface-findings.md` records the additions as toggleable surface (standing directive: prune on bench evidence).
 
