@@ -228,7 +228,13 @@ else can drive a child's Steps. Every queued message earns one
 whether it arrived, and a child that received such messages returns its result with the trailer
 `(the user sent N message(s) to this sub-agent while it ran)` on every outcome but a cancelled
 dispatch — a parent reading a result shaped by instructions it never issued must be able to see
-that from the result alone. Addressing a child buys no privilege (ADR 0005 stands), and all of
+that from the result alone. Every `sub_agent` result — report or fault — is **capped at 64 KiB**
+(`delegateResultMaxBytes`, a constant): a larger body keeps its first 48 KiB and its tail around
+the one elision marker every reducer renders, and the body notes and that trailer are appended
+after the cut, so they always follow the capped tail intact; and a finished child's closing text
+whose most frequent line occurs 50 times or more is **degenerate narration**, answered as an error
+result naming the repeat count with the first 20 lines only, never handed over as a report.
+Addressing a child buys no privilege (ADR 0005 stands), and all of
 it exists at **depth > 0 only**
 ([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md)); the TUI's surface for it
 is the **Run view**.

@@ -277,7 +277,12 @@ NOTES (2026-09-15): floorguards_test.go gains an engine-level A-B-A-B case (`Tes
 
 **Commit:** `fix(floor): the tool-loop breaker fires on an exact A-B-A-B repeat`
 
-## 11. Degenerate child narration is a fault; `sub_agent` results have an absolute cap
+## 11. Degenerate child narration is a fault; `sub_agent` results have an absolute cap — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the elision is rendered by a new `apogeectx.ElideMiddle(content, maxBytes, headBytes)` in `internal/context/toolresult.go` (plus `toolresult_test.go`), a file the item did not list — the shared marker is unexported there and the package's own contract says the rendering lives in the package that owns the working context, never duplicated in a caller; the one-elision-idiom rule the item yields to made this the only place to put it.
+NOTES (2026-09-15): the cap is exact — the marker is paid for out of the 64 KiB, so the tail keeps 16 KiB less the marker's length (and whatever the head gives up backing off to a line break) rather than a literal 16 KiB; "capped at 64 KiB" was read as the invariant.
+NOTES (2026-09-15): the item's cap test drives `delegationResult` directly (`completedChild`) rather than the committed event: the harness has no window, so the structural clamp (3072-token floor) fires after the cap on the committed path and would hide the cap's own shape; `TestSubAgent_ParentNoticeSurvivesTheStructuralClamp` stays on the committed path as the item asked.
+NOTES (2026-09-15): consequential edit — internal/context/toolresult.go: the file-top "two reducers" contract comment now names the third (the sub_agent cap), made necessary by ElideMiddle.
 
 **What:** Depends on item 9. In `delegationResult`, before the validations of item 9: a final text whose most frequent non-blank line occurs ≥ 50 times ⇒ `IsError` `sub-agent reply is degenerate (one line repeated N times)` with the first 20 lines only; every `sub_agent` result (report or fault) is capped at `delegateResultMaxBytes = 64 KiB` (constant), head 48 KiB + `[… N bytes elided …]` + tail 16 KiB, applied before the structural clamp in `dispatch.go` `appendToolResult`. CONTEXT.md **Sub-agent** states the cap.
 

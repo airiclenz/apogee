@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -172,6 +173,78 @@ const acknowledgementPunctuation = ".!,;:"
 func isAcknowledgement(text string) bool {
 	word := strings.ToLower(strings.TrimRight(strings.TrimSpace(text), acknowledgementPunctuation))
 	return slices.Contains(acknowledgements, word)
+}
+
+// A fourth shape a finished child's closing text is checked against, ahead of the three above:
+// DEGENERATE narration — one line repeated over and over ("Emit. / write_file. / GO." two thousand
+// times was the session-mining case, 2026-09-14, headline 13), the output of a model stuck in a
+// loop with no tool to break it. Handed over whole it is thousands of tokens of nothing the parent
+// then reads as a report; so it is an error result whose head names the fault and the repeat
+// count, and whose body keeps only the first degenerateResultHeadLines lines — enough to see what
+// the child was saying, not the whole recital.
+const (
+	// degenerateRepeatThreshold is how many times the most frequent non-blank line must occur for
+	// the text to be degenerate. Real reports repeat a line — a table rule, a fence — a handful of
+	// times; fifty of one line is a loop.
+	degenerateRepeatThreshold = 50
+	// degenerateResultHeadLines is how many leading lines of a degenerate text the fault carries.
+	degenerateResultHeadLines = 20
+	// degenerateResultFormat heads the error result of a degenerate closing text; %d is the
+	// repeat count of its most frequent line.
+	degenerateResultFormat = "sub-agent reply is degenerate (one line repeated %d times)"
+)
+
+// The absolute cap on the body of EVERY sub_agent result, report or fault: delegationResult
+// applies it after the outcome switch and before the body notes and the steered trailer, so those
+// always follow the capped tail intact. It is an absolute size, not a share of the window, because
+// a delegation's result is the parent's to read on its next Turn and a 200 KB report is a context
+// spent on one call whichever window it lands in; the structural clamp in appendToolResult
+// (dispatch.go) runs after it, against the window, and is the floor beneath this ceiling. The
+// elision is rendered by apogeectx.ElideMiddle so the parent reads the one "the middle was
+// dropped" marker every seam renders, never a second idiom.
+const (
+	// delegateResultMaxBytes is the cap: a body at or under it is untouched, and an elided body
+	// — head, marker and tail together — never exceeds it.
+	delegateResultMaxBytes = 64 * 1024
+	// delegateResultHeadBytes is what an elided body keeps of its start — where a report states
+	// its finding; the rest of the cap, less the marker, keeps its end — where it closes.
+	delegateResultHeadBytes = 48 * 1024
+)
+
+// degenerateRepeat reports whether text is degenerate narration — its most frequent non-blank line
+// (compared trimmed of surrounding space) occurs at least degenerateRepeatThreshold times — and
+// that line's count.
+func degenerateRepeat(text string) (int, bool) {
+	counts := map[string]int{}
+	most := 0
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		counts[line]++
+		most = max(most, counts[line])
+	}
+	return most, most >= degenerateRepeatThreshold
+}
+
+// headLines returns the first n lines of text, joined as they were.
+func headLines(text string, n int) string {
+	lines := strings.SplitN(text, "\n", n+1)
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// capDelegateResult applies delegateResultMaxBytes to a result body: a body within the cap is
+// returned byte for byte; a larger one keeps its first delegateResultHeadBytes and as much of its
+// tail as the cap leaves, around the shared elision marker.
+func capDelegateResult(body string) string {
+	if len(body) <= delegateResultMaxBytes {
+		return body
+	}
+	return apogeectx.ElideMiddle(body, delegateResultMaxBytes, delegateResultHeadBytes)
 }
 
 // outputMissing reports whether the delegation was spawned to write a file (Agent.outputPath)
@@ -667,6 +740,13 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		result = a.completedResult(callID)
 	}
 
+	// The absolute cap, on every outcome's body before any note is appended to it: the notes and
+	// the trailer below are the lines the parent must read whichever way the delegation ended, and
+	// appending them after the cut is what keeps them whole — a cap over the finished result
+	// would elide them with the middle. The head lines the TUI's recognisers read (stepCapResultFormat,
+	// subAgentFaultPrefix) are inside the kept head, so the cut never re-classifies a result.
+	result.Content = capDelegateResult(result.Content)
+
 	// The routing note, for a child whose call ASKED for the Sub-agent server and was built on the
 	// session server instead (ADR 0069 decision 9). It rides every outcome that produces a result,
 	// for the same reason the trailer below does: a parent whose routing decision was overruled
@@ -700,10 +780,11 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// The parent notice, appended once for EVERY outcome that produces a result (ADR 0063 D3) —
 	// the success above, the step cap, the fault and the Run error alike, because a human who
 	// steered a delegate must be told they did whichever way it ended. It is deliberately the
-	// result's FINAL line: the only clamp a delegation result meets is the structural floor in
-	// appendToolResult (dispatch.go), which runs after this returns and elides the MIDDLE of an
-	// oversized body while keeping its head and tail lines — so the trailer survives a clamped
-	// result by shape rather than by being re-appended anywhere later.
+	// result's FINAL line: the absolute cap above ran before it was appended, and the only clamp a
+	// delegation result meets after this returns is the structural floor in appendToolResult
+	// (dispatch.go), which elides the MIDDLE of an oversized body while keeping its head and tail
+	// lines — so the trailer survives a clamped result by shape rather than by being re-appended
+	// anywhere later.
 	if a.steered > 0 {
 		result.Content += "\n\n" + userSteeredTrailer(a.steered)
 	}
@@ -1198,15 +1279,21 @@ func publishesSeatChoice(roster *domain.ToolRegistry) bool {
 }
 
 // completedResult renders the result of a child that ran to COMPLETION — the default outcome of
-// delegationResult — after checking its closing text against the three shapes that are not a
-// report, in this order: (a) a spawn-named `output_path` the child never wrote, an error result
-// heading the text with missingOutputResultFormat; (b) a closing text that is unparsed tool-call
-// markup (floor.HasToolCallMarkup), an error result heading it with markupResultHead; (c) a bare
+// delegationResult — after checking its closing text against the four shapes that are not a
+// report, in this order: degenerate narration (degenerateRepeat), an error result heading the
+// text's first degenerateResultHeadLines lines with degenerateResultFormat; (a) a spawn-named
+// `output_path` the child never wrote, an error result heading the text with
+// missingOutputResultFormat; (b) a closing text that is unparsed tool-call markup
+// (floor.HasToolCallMarkup), an error result heading it with markupResultHead; (c) a bare
 // acknowledgement (isAcknowledgement), the non-error noReportMarker alone. Every other text is
-// the child's report, byte for byte, as it always was. The capped outcome runs check (a) only —
-// as a body note, never an error — because its text is a partial report by contract.
+// the child's report, byte for byte, as it always was — up to the absolute cap delegationResult
+// applies to every outcome. The capped outcome runs check (a) only — as a body note, never an
+// error — because its text is a partial report by contract.
 func (a *Agent) completedResult(callID string) domain.ToolResult {
 	text := a.finalMessageText()
+	if repeats, degenerate := degenerateRepeat(text); degenerate {
+		return errorToolResult(callID, fmt.Sprintf(degenerateResultFormat, repeats)+"\n"+headLines(text, degenerateResultHeadLines))
+	}
 	switch {
 	case a.outputMissing():
 		return errorToolResult(callID, fmt.Sprintf(missingOutputResultFormat, a.outputPath)+"\n"+text)

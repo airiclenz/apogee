@@ -2218,23 +2218,124 @@ func TestSubAgent_UnsteeredChildResultIsUnchanged(t *testing.T) {
 }
 
 // TestSubAgent_ParentNoticeSurvivesTheStructuralClamp proves the notice reaches the parent MODEL,
-// not just runSubAgent's return value: an oversized child answer is elided by the structural clamp
-// (appendToolResult) on its way into the conversation, and because that elision is head/tail LINE
-// based with the tail kept, the notice — the result's final line — comes through it.
+// not just runSubAgent's return value: an oversized child answer is cut twice on its way into the
+// conversation — by the absolute cap in delegationResult and then by the structural clamp
+// (appendToolResult) — and because both keep the tail, the notice comes through as the result's
+// final line, directly after the answer's own last line. The lines are distinct and numbered:
+// one line repeated is degenerate narration and would be faulted before either cut.
 func TestSubAgent_ParentNoticeSurvivesTheStructuralClamp(t *testing.T) {
-	// Far past the structural floor at any window this harness can have, and many-lined, so the
-	// clamp's head/tail rendering really does shrink it.
-	answer := strings.TrimSuffix(strings.Repeat("the child has a great deal to say about the repo\n", 4000), "\n")
+	// Past the absolute cap, and far past the structural floor at any window this harness can
+	// have, so both cuts really do fire.
+	answer := numberedReport(4000)
 
 	res := runSteeredDelegation(t, answer, "focus on the tests")
 
 	if len(res.Content) >= len(answer) {
-		t.Fatalf("committed result is %d bytes for a %d-byte answer: the structural clamp never fired, so this proves nothing", len(res.Content), len(answer))
+		t.Fatalf("committed result is %d bytes for a %d-byte answer: neither cut fired, so this proves nothing", len(res.Content), len(answer))
 	}
-	want := "\n\n" + userSteeredTrailerSingular
+	want := "the child has a great deal to say about the repo, line 4000\n\n" + userSteeredTrailerSingular
 	if !strings.HasSuffix(res.Content, want) {
-		t.Errorf("clamped result ends %q, want it to end with the parent notice %q", res.Content[max(0, len(res.Content)-120):], want)
+		t.Errorf("clamped result ends %q, want it to end with the answer's last line then the parent notice %q", res.Content[max(0, len(res.Content)-160):], want)
 	}
+}
+
+// numberedReport is a child answer of n distinct, numbered lines — the fixture for the two cuts,
+// shaped so no line repeats and the degenerate check stays out of the way.
+func numberedReport(n int) string {
+	lines := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		lines = append(lines, fmt.Sprintf("the child has a great deal to say about the repo, line %d", i))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// completedChild is a child Agent whose conversation closes on answer, for driving
+// delegationResult's completed outcome directly — the committed ToolResultEvent runs through the
+// structural clamp as well, which would hide the absolute cap's own shape.
+func completedChild(answer string, steered int) *Agent {
+	return &Agent{
+		conv:    *domain.NewConversation([]domain.Message{{Role: domain.RoleAssistant, Content: answer}}),
+		steered: steered,
+	}
+}
+
+// TestSubAgent_DegenerateNarrationIsAFault pins the fourth shape: a closing text whose most
+// frequent line occurs fifty times or more is an error result naming the count and carrying the
+// first twenty lines only, while a long report of distinct lines is the report it always was.
+func TestSubAgent_DegenerateNarrationIsAFault(t *testing.T) {
+	t.Parallel()
+
+	recital := strings.TrimSuffix(strings.Repeat("Emit.\nwrite_file.\nGO.\n", 2000), "\n")
+
+	got, _ := completedChild(recital, 0).delegationResult("c1", domain.StepResult{}, nil)
+
+	want := fmt.Sprintf(degenerateResultFormat, 2000) + "\n" + strings.Join(strings.Split(recital, "\n")[:degenerateResultHeadLines], "\n")
+	if !got.IsError || got.Content != want {
+		t.Errorf("sub_agent result = %+v, want the error %q", got, want)
+	}
+
+	t.Run("a distinct-lined report is not degenerate", func(t *testing.T) {
+		t.Parallel()
+		report := numberedReport(200)
+
+		got, _ := completedChild(report, 0).delegationResult("c1", domain.StepResult{}, nil)
+
+		if got.IsError || got.Content != report {
+			t.Errorf("sub_agent result = %+v, want the report byte for byte", got)
+		}
+	})
+}
+
+// TestSubAgent_ResultIsCappedAtSixtyFourKiB pins the absolute cap on a completed report: a 200 KB
+// report of distinct lines comes back within delegateResultMaxBytes, its first and last lines
+// intact around the shared elision marker, with the steered trailer after the capped tail — and a
+// 30 KB report comes back byte for byte.
+func TestSubAgent_ResultIsCappedAtSixtyFourKiB(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a 200 KB report is elided to the cap", func(t *testing.T) {
+		t.Parallel()
+		report := numberedReport(3500)
+		if len(report) < 200*1000 {
+			t.Fatalf("fixture is %d bytes, want at least 200 KB", len(report))
+		}
+
+		got, _ := completedChild(report, 1).delegationResult("c1", domain.StepResult{}, nil)
+
+		body := strings.TrimSuffix(got.Content, "\n\n"+userSteeredTrailerSingular)
+		if body == got.Content {
+			t.Fatalf("result = %q, want the steered trailer after the capped tail", got.Content[max(0, len(got.Content)-160):])
+		}
+		if got.IsError || len(body) > delegateResultMaxBytes {
+			t.Errorf("capped body is %d bytes (IsError %v), want at most %d", len(body), got.IsError, delegateResultMaxBytes)
+		}
+		if !strings.HasPrefix(body, "the child has a great deal to say about the repo, line 1\n") {
+			t.Errorf("capped body opens %q, want the report's first line", body[:min(len(body), 80)])
+		}
+		if !strings.HasSuffix(body, "\nthe child has a great deal to say about the repo, line 3500") {
+			t.Errorf("capped body ends %q, want the report's last line", body[max(0, len(body)-80):])
+		}
+		if !strings.Contains(body, "[truncated to fit the context budget") {
+			t.Errorf("capped body carries no elision marker")
+		}
+		if strings.Contains(body, "line 1750\n") {
+			t.Errorf("capped body still carries the report's middle")
+		}
+	})
+
+	t.Run("a 30 KB report is untouched", func(t *testing.T) {
+		t.Parallel()
+		report := numberedReport(520)
+		if len(report) < 30*1000 || len(report) > delegateResultMaxBytes {
+			t.Fatalf("fixture is %d bytes, want about 30 KB under the cap", len(report))
+		}
+
+		got, _ := completedChild(report, 0).delegationResult("c1", domain.StepResult{}, nil)
+
+		if got.IsError || got.Content != report {
+			t.Errorf("sub_agent result = %+v, want the report byte for byte", got)
+		}
+	})
 }
 
 // TestSubAgent_ParentNoticeOnEveryOutcomeButCancelled pins the ONE-site rule where it lives: every

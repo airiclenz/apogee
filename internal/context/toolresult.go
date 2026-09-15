@@ -1,19 +1,24 @@
 package context
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // ----------------------------------------------------------------------------
 // Tool-result truncation — the rendering both result-capping reducers share
 // ----------------------------------------------------------------------------
 //
-// Two reducers may shrink a single oversized tool result, at different moments and against
+// Three reducers may shrink a single oversized tool result, at different moments and against
 // different ceilings: the loop's STRUCTURAL floor clamps a pathologically large result as it
-// enters the conversation (internal/agent appendToolResult), and the config-gated
+// enters the conversation (internal/agent appendToolResult), the config-gated
 // tool-result-cap Floor guard trims older results in the projected request
-// (internal/floor). They must render the elision IDENTICALLY — one head/tail shape and
+// (internal/floor), and the absolute cap on a sub_agent result cuts a delegation's report
+// to a fixed byte size before its notes are appended (internal/agent delegationResult,
+// ElideMiddle). They must render the elision IDENTICALLY — a head/tail shape and
 // one marker — so the model learns a single "the middle was dropped, re-read the range" idiom
 // no matter which reducer produced it. The rendering therefore lives here, in the package that
-// owns the working context, rather than being duplicated in either caller.
+// owns the working context, rather than being duplicated in any caller.
 
 // toolResultHeadLines and toolResultTailLines are how many leading and trailing lines a
 // truncated result keeps — apogee-sim's headLines/tailLines (`compress.go:492-495` @pin,
@@ -67,4 +72,58 @@ func TruncateToolResult(content string, maxChars int) string {
 		}
 	}
 	return b.String()
+}
+
+// ElideMiddle renders content within maxBytes as its first headBytes bytes, the elision marker,
+// and as much of its tail as the remaining budget holds — the BYTE-sized form of
+// TruncateToolResult, for a caller whose ceiling is an absolute size rather than a line count
+// (the sub_agent result cap in internal/agent delegationResult). It renders the same marker so
+// the model reads one "the middle was dropped" idiom whichever seam produced it, and the marker
+// is paid for out of maxBytes, so the rendering never exceeds it. Each cut backs off to the
+// nearest line break inside its budget so neither end tears a line in half — the head ends on a
+// full line and the tail starts on one — and a budget with no line break in it is cut at the last
+// whole UTF-8 sequence. The caller decides WHETHER to elide: it calls this only for content it
+// knows exceeds maxBytes, and headBytes plus the marker must fit inside maxBytes.
+func ElideMiddle(content string, maxBytes, headBytes int) string {
+	head := content[:min(headBytes, len(content))]
+	if i := strings.LastIndexByte(head, '\n'); i >= 0 {
+		head = head[:i+1]
+	} else {
+		head = trimPartialRune(head)
+	}
+	tailBytes := max(maxBytes-len(head)-len(toolResultElisionMarker), 0)
+	tail := content[len(content)-min(tailBytes, len(content)):]
+	if i := strings.IndexByte(tail, '\n'); i >= 0 {
+		tail = tail[i+1:]
+	} else {
+		tail = skipPartialRune(tail)
+	}
+
+	var b strings.Builder
+	b.Grow(len(head) + len(toolResultElisionMarker) + len(tail))
+	b.WriteString(head)
+	b.WriteString(toolResultElisionMarker)
+	b.WriteString(tail)
+	return b.String()
+}
+
+// trimPartialRune drops an incomplete trailing UTF-8 sequence from s, so a byte-offset cut never
+// ends on the first bytes of a multi-byte rune.
+func trimPartialRune(s string) string {
+	for n := 0; n < utf8.UTFMax-1 && len(s) > 0; n++ {
+		if r, size := utf8.DecodeLastRuneInString(s); r != utf8.RuneError || size > 1 {
+			return s
+		}
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// skipPartialRune drops an incomplete leading UTF-8 sequence from s — the mirror of
+// trimPartialRune for a cut made from the end.
+func skipPartialRune(s string) string {
+	for n := 0; n < utf8.UTFMax-1 && len(s) > 0 && !utf8.RuneStart(s[0]); n++ {
+		s = s[1:]
+	}
+	return s
 }
