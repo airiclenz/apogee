@@ -1,10 +1,12 @@
 package agent
 
 // The reaction-time subprocess permit (confinement-execution-contract §10). A Reaction runs
-// outside the per-call Resolution, so the ladder's answer to "may this fire spawn a process?"
-// reaches it as a domain.SubprocessPermit on the context. These tests drive a real Turn and read
-// the permit back through a post-response Reaction, which is the only Moment the engine installs
-// one for.
+// outside the per-call Resolution, so the only authorisation a fire can spawn under is a
+// domain.SubprocessPermit on its context — and absence means refusal (§10.2). These tests drive a
+// real Turn and read the permit back through a post-response Reaction to pin the row the engine
+// no longer has: since 2026-09-15 no cascade installs a permit at any Moment, in any mode, so the
+// post-response ctx carries none even under Auto. The one permit the engine mints is the sync
+// lane's (syncPermitCtx, exercised by TestSyncArgv* in syncexec_test.go).
 
 import (
 	"context"
@@ -13,8 +15,8 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// permitProbe records the SubprocessPermit its fire ctx carried — the observable end of
-// hookExecutionCtx. A pointer so the capture survives the fire.
+// permitProbe records the SubprocessPermit its fire ctx carried — the observable end of whatever
+// the cascade installed ahead of its handlers. A pointer so the capture survives the fire.
 type permitProbe struct {
 	fired   bool
 	granted bool
@@ -37,7 +39,7 @@ func (p *permitProbe) reaction() domain.Reaction {
 }
 
 // permitConfig builds a Config in mode with the given fake Confiner and confine-to-workspace flag,
-// plus the three box fields resolutionInput reads, so a granted permit's box is assertable.
+// plus the three box fields resolutionInput reads, so a granted permit's box would be assertable.
 func permitConfig(mode domain.Mode, conf domain.Confiner, confine bool) domain.Config {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Mode = mode
@@ -76,99 +78,44 @@ func runTurnWithPermitProbe(t *testing.T, cfg domain.Config, tighten func() doma
 	return probe
 }
 
-// TestHookSubprocessPermitLadder walks every row of hookExecutionCtx's table: only Auto grants a
-// permit at all, confine-to-workspace decides whether it carries a box, and a Confiner that cannot
-// enforce filesystem confinement gates the hook-time subprocess surface exactly as it gates a
-// subprocess tool's.
+// TestHookSubprocessPermitLadder walks every row the retired post-response permit table had —
+// every mode, confine-to-workspace on and off, a Confiner with and without filesystem caps, and a
+// sub-agent whose parent sits in Plan — and asserts the same thing on each: the ctx a post-response
+// handler receives carries NO SubprocessPermit. Auto is the row that used to grant one; it grants
+// nothing now, because no shipped Reaction spawns at that Moment and the refusal default is the
+// only posture a permit-less seam can have (§10.2).
 func TestHookSubprocessPermitLadder(t *testing.T) {
 	t.Parallel()
 
 	capable := func() *fakeConfiner { return &fakeConfiner{caps: capsBoth()} }
 	incapable := func() *fakeConfiner { return &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: false}} }
+	parentInPlan := func() domain.Mode { return domain.ModePlan }
 
 	tests := []struct {
-		name        string
-		mode        domain.Mode
-		conf        *fakeConfiner
-		confine     bool
-		wantGranted bool
-		wantBox     bool
+		name    string
+		mode    domain.Mode
+		conf    *fakeConfiner
+		confine bool
+		tighten func() domain.Mode
 	}{
-		{name: "plan grants nothing", mode: domain.ModePlan, conf: capable(), confine: true},
-		{name: "ask-before grants nothing", mode: domain.ModeAskBefore, conf: capable(), confine: true},
-		{name: "allow-edits grants nothing", mode: domain.ModeAllowEdits, conf: capable(), confine: true},
-		{
-			name: "auto with confine off grants an unfenced permit", mode: domain.ModeAuto,
-			conf: capable(), confine: false, wantGranted: true,
-		},
-		{
-			name: "auto with confine on grants a confined permit", mode: domain.ModeAuto,
-			conf: capable(), confine: true, wantGranted: true, wantBox: true,
-		},
-		{
-			name: "auto with confine on and no fs caps grants nothing", mode: domain.ModeAuto,
-			conf: incapable(), confine: true,
-		},
+		{name: "plan", mode: domain.ModePlan, conf: capable(), confine: true},
+		{name: "ask-before", mode: domain.ModeAskBefore, conf: capable(), confine: true},
+		{name: "allow-edits", mode: domain.ModeAllowEdits, conf: capable(), confine: true},
+		{name: "auto with confine off", mode: domain.ModeAuto, conf: capable(), confine: false},
+		{name: "auto with confine on", mode: domain.ModeAuto, conf: capable(), confine: true},
+		{name: "auto with confine on and no fs caps", mode: domain.ModeAuto, conf: incapable(), confine: true},
+		{name: "auto under a plan-mode parent", mode: domain.ModeAuto, conf: capable(), confine: true, tighten: parentInPlan},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			probe := runTurnWithPermitProbe(t, permitConfig(tc.mode, tc.conf, tc.confine), nil)
+			probe := runTurnWithPermitProbe(t, permitConfig(tc.mode, tc.conf, tc.confine), tc.tighten)
 
-			if probe.granted != tc.wantGranted {
-				t.Fatalf("permit granted = %v, want %v", probe.granted, tc.wantGranted)
+			if probe.granted {
+				t.Fatalf("post-response handler was granted %+v, want no permit in any mode", probe.permit)
 			}
-			if !tc.wantGranted {
-				return
-			}
-			if !tc.wantBox {
-				if probe.permit.Confinement != nil {
-					t.Fatalf("permit carried Confinement %+v, want nil (unfenced)", probe.permit.Confinement)
-				}
-				return
-			}
-			assertPermitBox(t, probe.permit, tc.conf)
 		})
-	}
-}
-
-// assertPermitBox checks a granted permit carries the injected Confiner and the box built from the
-// Config's three confinement fields.
-func assertPermitBox(t *testing.T, permit domain.SubprocessPermit, conf domain.Confiner) {
-	t.Helper()
-
-	if permit.Confinement == nil {
-		t.Fatal("permit carried no Confinement, want the workspace box")
-	}
-	if permit.Confinement.Confiner != conf {
-		t.Errorf("permit Confiner = %v, want the injected fake", permit.Confinement.Confiner)
-	}
-	box := permit.Confinement.Box
-	if box.WorkspaceRoot != "/work/space" {
-		t.Errorf("box.WorkspaceRoot = %q, want %q", box.WorkspaceRoot, "/work/space")
-	}
-	if len(box.WritablePaths) != 1 || box.WritablePaths[0] != "/work/space/out" {
-		t.Errorf("box.WritablePaths = %v, want [/work/space/out]", box.WritablePaths)
-	}
-	if len(box.NetworkAllow) != 1 || box.NetworkAllow[0] != "example.test" {
-		t.Errorf("box.NetworkAllow = %v, want [example.test]", box.NetworkAllow)
-	}
-}
-
-// TestHookSubprocessPermitReadsEffectiveMode proves the gate composes with the parent's mode
-// (ADR 0013): a sub-agent spawned into Auto whose parent has since tightened to Plan gets NO
-// permit, so a hook cannot outlive the tightening the tool ladder already honours.
-func TestHookSubprocessPermitReadsEffectiveMode(t *testing.T) {
-	t.Parallel()
-
-	cfg := permitConfig(domain.ModeAuto, &fakeConfiner{caps: capsBoth()}, true)
-	parentInPlan := func() domain.Mode { return domain.ModePlan }
-
-	probe := runTurnWithPermitProbe(t, cfg, parentInPlan)
-
-	if probe.granted {
-		t.Errorf("a sub-agent under a Plan-mode parent was granted %+v, want no permit", probe.permit)
 	}
 }

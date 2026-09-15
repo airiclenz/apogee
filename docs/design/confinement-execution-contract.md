@@ -1123,36 +1123,47 @@ default posture (may not spawn) with no further code.
 
 ### 10.3 The ladder row the engine installs
 
-`(*Agent).hookExecutionCtx` (`internal/agent/dispatch.go`) is the hook-time analogue of
-`resolveLadderAuto`'s `classSubprocess` row. The table is the **post-response permit's** row and
-nothing wider — a user-origin sync reaction mints its own permit under §10.4's row, which has no
-mode term at all:
+> **Amendment (2026-09-15, plan `2026-09-15 - 00` item 7).** The post-response row this section
+> described is **retired**: `(*Agent).hookExecutionCtx` is deleted, and `fireCascade`
+> (`internal/agent/reactions.go`) installs no permit ahead of any cascade, at any Moment, in any
+> mode — Auto included. No shipped Reaction spawns at post-response (the row was a leftover of the
+> retired lab mechanisms, ADR 0071), so under §10.2 the ctx a post-response handler receives now
+> carries no permit and the seam keeps the "may not spawn" default with no further code. The
+> engine's one minting site is the sync lane's `syncPermitCtx`, §10.4's row. The table below is
+> kept as the record of the row that was retired; `TestHookSubprocessPermitLadder`
+> (`internal/agent/hookpermit_test.go`) now walks the same rows and asserts *nothing* on each.
+> Re-opening a post-response permit is a deliberate act: install it in `fireCascade` and restore
+> the row here.
 
-| effective mode | `confine-to-workspace` | fs confinement caps | installed |
+The retired row was the hook-time analogue of `resolveLadderAuto`'s `classSubprocess` row, the
+**post-response permit's** row and nothing wider — a user-origin sync reaction mints its own permit
+under §10.4's row, which has no mode term at all:
+
+| effective mode | `confine-to-workspace` | fs confinement caps | installed (retired 2026-09-15) |
 |---|---|---|---|
 | not Auto | — | — | **nothing** (Plan forbids command execution; Ask-Before / Allow-Edits gate a command behind an Approval a hook cannot open) |
 | Auto | off | — | permit, **nil** `Confinement` |
 | Auto | on | available | permit carrying `&Confinement{Confiner, Box}` |
 | Auto | on | unavailable | **nothing** — "confine if you can, gate if you can't" has no gate to fall back to here, so the surface closes |
 
-The mode is read through `effectiveMode()`, never `Mode()`, so a sub-agent whose parent tightened
-mid-delegation loses the permit exactly as it loses the matching tool verdict (ADR 0013). The box is
-built from the same three `Config` fields `resolutionInput` uses — `WorkspaceDir`,
-`ConfineWritablePaths`, `ConfineNetworkAllow` — so a hook-spawned process is fenced identically to a
-subprocess tool's.
+The mode was read through `effectiveMode()`, never `Mode()`, so a sub-agent whose parent tightened
+mid-delegation lost the permit exactly as it loses the matching tool verdict (ADR 0013); the box came
+from the same live fold `resolutionInput` uses (`confinementBox()`), so a hook-spawned process was
+fenced identically to a subprocess tool's. Both properties survive on the sync lane's site.
 
 ### 10.4 Scope
 
-Two minting sites install a permit, and no other Moment carries one:
+One minting site installs a permit, and no other Moment carries one (the post-response cascade's
+row, the first of what were two rows here, was retired 2026-09-15 — §10.3's amendment):
 
 | who spawns | Moment | minted by |
 |---|---|---|
-| an engine-origin reaction of the post-response cascade — the builtins, the armed Reactions and the registry bridge alike (`fire`, `internal/agent/reactions.go`) | `post-response`, once per cascade | `hookExecutionCtx`, §10.3's row |
 | a **user-origin sync reaction** — class advise or gate, a `reactions:` entry's `advise:` or `gate:` argv (ADR 0076 D2, D8; stage 3, 2026-09-12) | `pre-tool-exec` (the gate stage of the Approver) and `post-tool-result` (the advise slot; `file-changed` is that seam narrowed to a successful write) | `syncPermitCtx`, the row below |
 
-Pre-request and history-rewrite carry no permit, and pre-tool-exec and post-tool-result carry one
-for the sync lane alone, which under §10.2 keeps every other spawn at those Moments on the "may not
-spawn" posture — the intended one. Widening to another Moment is a deliberate act: install the
+Pre-request, post-response and history-rewrite carry no permit, and pre-tool-exec and
+post-tool-result carry one for the sync lane alone, which under §10.2 keeps every other spawn at
+those Moments — an engine-origin reaction of the post-response cascade included — on the "may not
+spawn" posture, the intended one. Widening to another Moment is a deliberate act: install the
 permit there and record the row here.
 
 The sync lane's row is the ratified permit row (plan `2026-09-09 - 01`, header design call, from
@@ -1167,13 +1178,14 @@ Confiner has caps, nil when it is off; on but no caps ⇒ no permit, the handler
 | on | available | permit carrying `&Confinement{Confiner, Box}`, and the matching `domain.WithConfinement` handle for the funnel |
 | on | unavailable | **nothing** — `errConfinementUnavailable`; the command is never spawned, the reaction fails, and the class reads the failure (a gate escalates to `ask`, an advise reaction contributes nothing) |
 
-The **mode is not a term** of this row, where it is the first term of §10.3's: a user's sync
-reaction is the user's own configuration rather than anything the model chose, so the ladder —
+The **mode is not a term** of this row, where it was the first term of §10.3's retired one: a user's
+sync reaction is the user's own configuration rather than anything the model chose, so the ladder —
 which exists to bound what the *model* may reach — has no verdict to give about it, and the reaction
 fires in Plan exactly as it fires in Auto. What survives of the ladder's row is the fence itself:
 with `confine-to-workspace` on the command runs inside the same box a subprocess tool would have
 been confined to, and a host that cannot build that box gets no unfenced fallback. The row
-supersedes §10.3 for sync reactions; §10.3 keeps governing the post-response permit.
+supersedes §10.3 for sync reactions; since 2026-09-15 it is the only permit row the engine has,
+§10.3's post-response row being retired.
 
 ### 10.5 The hook spawns through the tools funnel (amendment, 2026-08-20)
 

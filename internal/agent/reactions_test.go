@@ -434,9 +434,10 @@ func TestFireQueuesADeferredCorrection(t *testing.T) {
 	}
 }
 
-// Post-response is the one Moment whose reactions may spawn a subprocess, so the ladder's answer
-// is installed once ahead of the whole cascade; no other Moment installs one.
-func TestFirePostResponseInstallsTheSubprocessPermit(t *testing.T) {
+// No cascade installs a subprocess permit ahead of its handlers — post-response under Auto with
+// confine off, the one row that used to mint an unfenced permit, included. Absence is the refusal
+// default (confinement-execution-contract §10.2); the sync lane mints its own per spawn.
+func TestFirePostResponseInstallsNoSubprocessPermit(t *testing.T) {
 	var granted bool
 	seen := false
 	reaction := domain.Reaction{
@@ -467,8 +468,8 @@ func TestFirePostResponseInstallsTheSubprocessPermit(t *testing.T) {
 	if !seen {
 		t.Fatalf("the probe never fired")
 	}
-	if !granted {
-		t.Errorf("permit granted = false, want Auto to install one at post-response")
+	if granted {
+		t.Errorf("permit granted = true, want no permit at post-response, Auto included")
 	}
 }
 

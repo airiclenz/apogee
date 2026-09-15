@@ -825,46 +825,6 @@ func (a *Agent) confinementBox() domain.ConfinementBox {
 	return cfg.ConfinementBox()
 }
 
-// hookExecutionCtx returns ctx wrapped with the domain.SubprocessPermit a hook may spawn a
-// subprocess under, or ctx unchanged when it may not (confinement-execution-contract §10). It is
-// the hook-time analogue of resolveLadderAuto's subprocess row — a hook runs outside the per-call
-// Resolution, so the ladder's answer reaches it as a context token instead of a verdict:
-//
-//	| effective mode | confine-to-workspace | fs caps    | installed                          |
-//	|----------------|----------------------|------------|------------------------------------|
-//	| not Auto       | —                    | —          | nothing (Plan refuses; Ask-Before / |
-//	|                |                      |            | Allow-Edits need an Approval a hook |
-//	|                |                      |            | cannot open)                        |
-//	| Auto           | off                  | —          | permit, nil Confinement (unfenced)  |
-//	| Auto           | on                   | available   | permit carrying the workspace box   |
-//	| Auto           | on                   | unavailable | nothing (the ladder gates the       |
-//	|                |                      |            | subprocess surface here)            |
-//
-// The mode is read through effectiveMode(), never Mode(), so a sub-agent whose parent has
-// tightened mid-delegation loses the permit exactly as it loses the matching tool verdict
-// (ADR 0013). The box comes from confinementBox(), the same live-scratch fold resolutionInput
-// uses, so a hook-spawned process is fenced identically to a subprocess tool's.
-//
-// The table above is the POST-RESPONSE row and nothing wider: a user-origin sync reaction has its
-// own minting site (syncPermitCtx below), whose row has no mode term at all.
-func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
-	if a.effectiveMode() != domain.ModeAuto {
-		return ctx
-	}
-	if !a.ConfineToWorkspace() {
-		return domain.WithSubprocessPermit(ctx, domain.SubprocessPermit{})
-	}
-	if !a.fsConfinementAvailable() {
-		return ctx
-	}
-	return domain.WithSubprocessPermit(ctx, domain.SubprocessPermit{
-		Confinement: &domain.Confinement{
-			Confiner: a.cfg.Confiner,
-			Box:      a.confinementBox(),
-		},
-	})
-}
-
 // errConfinementUnavailable is what syncPermitCtx answers when the operator asked for workspace
 // confinement and the host cannot provide it: there is no permit to mint, so the reaction's
 // command is never spawned. It is the sync lane's one refusal, and it is deliberately a plain
@@ -874,8 +834,10 @@ var errConfinementUnavailable = errors.New("workspace confinement is unavailable
 
 // syncPermitCtx returns ctx wrapped with the domain.SubprocessPermit a USER-ORIGIN SYNC reaction —
 // class advise or gate — spawns its command under, or the refusal that stops the spawn
-// (docs/design/confinement-execution-contract.md §10.4). It is the sync-lane sibling of
-// hookExecutionCtx above, and their rows differ on purpose:
+// (docs/design/confinement-execution-contract.md §10.4). It is the engine's ONE minting site: no
+// other Moment's reactions carry a permit, so every other spawn stays on the contract's refusal
+// default (the post-response cascade's Auto-only row was retired 2026-09-15 — no shipped Reaction
+// spawns there). Its row:
 //
 //	| confine-to-workspace | fs caps     | installed                                    |
 //	|----------------------|-------------|----------------------------------------------|
@@ -908,7 +870,7 @@ func (a *Agent) syncPermitCtx(ctx context.Context) (context.Context, error) {
 }
 
 // writeEscapeCtx returns ctx carrying the domain.WriteEscapePermit this verdict authorises, or ctx
-// unchanged when it authorises none (ADR 0049). It is the write-time analogue of hookExecutionCtx:
+// unchanged when it authorises none (ADR 0049). It is the write-time analogue of syncPermitCtx:
 // the ladder's answer for a write that lands outside the workspace reaches the shared write funnel
 // as a context token, because the funnel is one os.Root-pinned rule that cannot otherwise tell an
 // approved escape from an unapproved one.

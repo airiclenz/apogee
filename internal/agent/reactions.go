@@ -145,14 +145,10 @@ func (a *Agent) fireCascade(ctx context.Context, m domain.Moment, payload any) (
 		return domain.Outcome{}, nil, err
 	}
 
-	// Post-response is the ONE seam whose reactions may spawn a subprocess, so the ladder's
-	// answer is installed once, here, ahead of the whole cascade — every reaction at this Moment
-	// sees the same authorisation, and outside Auto no permit is installed at all, which is the
-	// refusal default (confinement-execution-contract §10).
-	if m == domain.MomentPostResponse {
-		ctx = a.hookExecutionCtx(ctx)
-	}
-
+	// No Moment's cascade installs a domain.SubprocessPermit: the ctx handed to every handler here
+	// carries none, which is the refusal default (confinement-execution-contract §10.2). The one
+	// permit the engine mints is the sync lane's, minted per spawn inside runSyncArgv rather than
+	// ahead of a cascade (§10.4).
 	var result domain.Outcome
 	var collected []advice
 

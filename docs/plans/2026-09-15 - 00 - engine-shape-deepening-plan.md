@@ -200,7 +200,11 @@ NOTES (2026-09-15): internal/agent/delegationphase_test.go (in Files) needed no 
 
 Commit: `refactor(agent): one per-call pipeline with width as a parameter`
 
-## 7. `hookExecutionCtx` stops installing an Auto subprocess permit for post-response reactions
+## 7. `hookExecutionCtx` stops installing an Auto subprocess permit for post-response reactions — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — internal/agent/syncexec_test.go: made necessary by deleting `hookExecutionCtx` (its `syncAgent` comment named the symbol and the Acceptance grep over `*.go` would have matched it); one comment sentence rewritten.
+NOTES (2026-09-15): `TestFirePostResponseInstallsTheSubprocessPermit` renamed `TestFirePostResponseInstallsNoSubprocessPermit` on inversion — the old name asserted the opposite of the new assertion; still matched by the Acceptance `FirePostResponse` pattern. `TestHookSubprocessPermitLadder` keeps its name (it still walks the rows) and gains an "auto under a plan-mode parent" row via `runTurnWithPermitProbe`'s `tighten`, so the deleted `TestHookSubprocessPermitReadsEffectiveMode` case survives as a no-permit row and the helper's parameter stays in use; `assertPermitBox` deleted as dead (no granted permit remains to assert on).
+NOTES (2026-09-15): `internal/agent/dispatch_test.go` is named in Files but holds no post-response permit reference (its permit tests are the ADR 0049 write-escape ones) — untouched.
 
 **What.** In `internal/agent/dispatch.go`, `hookExecutionCtx` installs a `SubprocessPermit` for every post-response reaction in Auto; no shipped Reaction spawns at that Moment (retired lab-row leftover). Remove the post-response permit row; keep the `pre-tool-exec` one the gate stage uses (ADR 0076 D8). Depends on item 6.
 

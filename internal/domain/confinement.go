@@ -151,15 +151,15 @@ func ConfinementFromContext(ctx context.Context) (Confinement, bool) {
 // the permit carries the ladder's answer to it instead, in three states:
 //
 //   - ABSENT (the default, and what a bare context yields): the holder may NOT spawn a subprocess.
-//     Which contexts carry one is the MINTING SITE's row rather than this type's: the
-//     post-response cascade's permit is minted under Auto ALONE (hookExecutionCtx), because Plan
-//     forbids command execution outright and Ask-Before / Allow-Edits gate a command behind an
-//     Approval that a post-response hook has no way to open; a USER-ORIGIN SYNC reaction's permit
-//     is minted in EVERY mode (syncPermitCtx), because its command is the user's own configuration
-//     rather than anything the model chose, and it is withheld only where the box it would have to
-//     run inside cannot be built at all.
-//   - PRESENT with a nil Confinement: run UNFENCED — the Auto + confine-to-workspace:false
-//     "I am the sandbox" opt-in, mirroring resolveLadderAuto's unfenced row.
+//     Which contexts carry one is the MINTING SITE's row rather than this type's, and the engine
+//     has ONE such site: a USER-ORIGIN SYNC reaction's permit is minted in EVERY mode
+//     (syncPermitCtx), because its command is the user's own configuration rather than anything
+//     the model chose, and it is withheld only where the box it would have to run inside cannot be
+//     built at all. No cascade installs one — the post-response cascade's Auto-only row was
+//     retired 2026-09-15 (no shipped Reaction spawns at that Moment), so every handler a cascade
+//     runs reads absent.
+//   - PRESENT with a nil Confinement: run UNFENCED — the confine-to-workspace:false "I am the
+//     sandbox" opt-in, mirroring resolveLadderAuto's unfenced row.
 //   - PRESENT carrying a Confinement: confine the cmd to that box first (Confiner.Confine), and
 //     skip the spawn entirely if the box cannot be established. Never fall back to unfenced.
 //
@@ -178,9 +178,9 @@ type SubprocessPermit struct {
 type subprocessPermitCtxKey struct{}
 
 // WithSubprocessPermit returns a context carrying p, authorising the hooks that run under it to
-// spawn a subprocess on the terms p describes. Only the engine installs it, and only at a site
-// whose own row permits execution: the post-response cascade under Auto (hookExecutionCtx) and a
-// user-origin sync reaction in every mode (syncPermitCtx), both in internal/agent/dispatch.go.
+// spawn a subprocess on the terms p describes. Only the engine installs it, and only at the one
+// site whose own row permits execution: a user-origin sync reaction in every mode (syncPermitCtx,
+// internal/agent/dispatch.go).
 func WithSubprocessPermit(ctx context.Context, p SubprocessPermit) context.Context {
 	return context.WithValue(ctx, subprocessPermitCtxKey{}, p)
 }

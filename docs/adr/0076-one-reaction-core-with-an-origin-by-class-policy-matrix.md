@@ -137,6 +137,12 @@ notifier beside it.
 > advise ⇒ nothing. The mode is not a term because the reaction is the user's own configuration, not
 > anything the model chose; §10.3's post-response row keeps its mode term. The sync lane's handlers are
 > argv only — a sync-lane webhook is bead `apogee-1d8`.
+>
+> *Amendment (2026-09-15, plan `2026-09-15 - 00` item 7):* the contract's §10.3 post-response row is
+> **retired** — `hookExecutionCtx` is deleted and no cascade installs a `SubprocessPermit` at any
+> Moment, in any mode. No shipped Reaction spawns at post-response (the row was a leftover of the
+> retired lab mechanisms, ADR 0071), so a post-response handler reads absent and the seam keeps the
+> refusal default of §10.2. `syncPermitCtx`'s §10.4 row is now the engine's only permit row.
 
 **9. Bypass switches off the model-shaping classes.** `--bypass` turns off every `advise` and
 `shape` reaction of user or bench-armed origin; `observe`, `gate` and the seven Floor guards stay.

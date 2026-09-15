@@ -20,7 +20,7 @@ import (
 
 // syncAgent builds an Agent whose confinement posture is the one under test. The MODE is
 // deliberately Plan on every row: a user's sync reaction fires in every mode, so a test that only
-// ever ran in Auto would pass against a copy of hookExecutionCtx's ladder.
+// ever ran in Auto would pass against a mode-gated permit row too.
 func syncAgent(t *testing.T, sink domain.EventSink, conf domain.Confiner, confine bool) *Agent {
 	t.Helper()
 
