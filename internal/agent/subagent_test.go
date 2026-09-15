@@ -2419,7 +2419,9 @@ func TestSubAgent_OutputPathKeepsWriteFileInTheWrapUp(t *testing.T) {
 }
 
 // TestSubAgent_WrapUpRefusesAWriteElsewhere pins the refusal: a wrap-up write_file aimed anywhere
-// but the output path gets exactly the wrap-up refusal naming that path, and writes nothing.
+// but the output path gets exactly the wrap-up refusal naming that path, and writes nothing — so
+// the output path is still absent when the run ends, and the capped result says so in its body
+// note (item 9) beneath the closing report the same reply carried.
 func TestSubAgent_WrapUpRefusesAWriteElsewhere(t *testing.T) {
 	a, _, sink, ws := outputPathAgent(t, domain.ModeAllowEdits, "out/report.md",
 		narratedToolCallScript("w0", tools.WriteFileToolName,
@@ -2438,8 +2440,9 @@ func TestSubAgent_WrapUpRefusesAWriteElsewhere(t *testing.T) {
 		t.Errorf("elsewhere.md exists (stat err = %v); a refused wrap-up write must not land", err)
 	}
 	sub, ok := lastSubAgentResult(sink.events)
-	if !ok || sub.IsError || !strings.HasSuffix(sub.Content, childClosingReport) {
-		t.Errorf("sub_agent result = %+v, want the non-error capped result with the closing report", sub)
+	want := childClosingReport + "\n" + fmt.Sprintf(missingOutputNoteFormat, "out/report.md")
+	if !ok || sub.IsError || !strings.HasSuffix(sub.Content, want) {
+		t.Errorf("sub_agent result = %+v, want the non-error capped result with the closing report and the missing-output note", sub)
 	}
 }
 
@@ -2474,7 +2477,8 @@ func TestSubAgent_WrapUpStaysToolLessWithoutAnOutputPath(t *testing.T) {
 
 // TestSubAgent_PlanModeWrapUpOffersNoWriter pins the announced-then-refused guard: a Plan-mode
 // child inherits Plan, whose ladder refuses a workspace write, so its wrap-up keeps no writer and
-// says nothing about one even though the spawn named an output path.
+// says nothing about one even though the spawn named an output path — and its result carries no
+// missing-output note either (item 9): a file the ladder forbade is not the child's to have written.
 func TestSubAgent_PlanModeWrapUpOffersNoWriter(t *testing.T) {
 	a, responder, sink, ws := outputPathAgent(t, domain.ModePlan, "out/report.md",
 		narratedToolCallScript("w0", tools.WriteFileToolName,
@@ -2495,6 +2499,165 @@ func TestSubAgent_PlanModeWrapUpOffersNoWriter(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(ws, "out", "report.md")); !os.IsNotExist(err) {
 		t.Errorf("out/report.md exists (stat err = %v); Plan mode writes nothing", err)
 	}
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok || sub.IsError || strings.Contains(sub.Content, "without writing") {
+		t.Errorf("sub_agent result = %+v, want the plain non-error capped result — a withheld writer earns no missing-output note", sub)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// A child's result is validated: missing output, vendor markup, acknowledgements
+// (plan 2026-09-14 - 03, item 9)
+// ----------------------------------------------------------------------------
+
+// TestSubAgent_AcknowledgementIsNoReport pins rule (c) on both sides of its closed set: each
+// acknowledgement, case-insensitive with trailing punctuation, is answered with the no-report
+// marker alone, while every other reply — "Yes." included — reaches the parent byte for byte.
+func TestSubAgent_AcknowledgementIsNoReport(t *testing.T) {
+	cases := []struct {
+		answer string
+		want   string
+	}{
+		{"Done.", noReportMarker},
+		{"Understood", noReportMarker},
+		{"ok", noReportMarker},
+		{"Noted!", noReportMarker},
+		{"  Acknowledged.  ", noReportMarker},
+		{"Yes.", "Yes."},
+		{"child done", "child done"},
+		{"child one done", "child one done"},
+		{"Done, I read the file.", "Done, I read the file."},
+		{"OK — the repo has four packages.", "OK — the repo has four packages."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.answer, func(t *testing.T) {
+			res := runSteeredDelegation(t, tc.answer)
+
+			if res.IsError || res.Content != tc.want {
+				t.Errorf("sub_agent result = %+v, want the non-error %q", res, tc.want)
+			}
+		})
+	}
+}
+
+// TestSubAgent_MarkupReplyIsAFault pins rule (b): a closing text that is a tool call written in a
+// vendor container — a <tool_call> pair with a JSON body, or a reply that begins with the DSML
+// container — is an error result heading the text, while a report that merely quotes a tag pair
+// in prose is the report it always was. The written call names a tool the child was never offered
+// so the tool-call salvage Floor guard cannot read it back as a call first.
+func TestSubAgent_MarkupReplyIsAFault(t *testing.T) {
+	const jsonPair = `<tool_call>{"name": "shell", "arguments": {"cmd": "ls"}}</tool_call>`
+	const dsml = "<｜DSML｜tool_calls><｜DSML｜invoke name=\"shell\"></｜DSML｜invoke></｜DSML｜tool_calls>"
+	const quoted = "The child wrote `<tool_call>list the files</tool_call>` and then stopped."
+
+	cases := []struct {
+		name      string
+		answer    string
+		wantError bool
+	}{
+		{"a JSON-bodied tool_call pair", jsonPair, true},
+		{"a JSON-bodied pair inside prose", "Next I would run " + jsonPair + " to list them.", true},
+		{"a reply that begins with the DSML container", dsml, true},
+		{"a report that quotes a tag pair in prose", quoted, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := runSteeredDelegation(t, tc.answer)
+
+			want := tc.answer
+			if tc.wantError {
+				want = markupResultHead + "\n" + tc.answer
+			}
+			if res.IsError != tc.wantError || res.Content != want {
+				t.Errorf("sub_agent result = %+v, want IsError %v with content %q", res, tc.wantError, want)
+			}
+		})
+	}
+}
+
+// TestSubAgent_CappedChildWithoutItsOutputCarriesTheNote pins rule (a) on the capped path: a
+// delegation spawned with an `output_path` whose wrap-up reply writes nothing keeps the partial
+// marker first and its non-error shape, and the missing-output note is the body's last line —
+// the SeatFallbackNote slot — beneath the closing report.
+func TestSubAgent_CappedChildWithoutItsOutputCarriesTheNote(t *testing.T) {
+	a, _, sink, ws := outputPathAgent(t, domain.ModeAllowEdits, "out/report.md", contentScript(childClosingReport))
+
+	runExchange(t, a, "please research")
+
+	if _, err := os.Stat(filepath.Join(ws, "out", "report.md")); !os.IsNotExist(err) {
+		t.Fatalf("out/report.md exists (stat err = %v); the wrap-up reply wrote nothing", err)
+	}
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	want := fmt.Sprintf(stepCapResultFormat, 2) + "\n" + childClosingReport + "\n" + fmt.Sprintf(missingOutputNoteFormat, "out/report.md")
+	if sub.IsError || sub.Content != want {
+		t.Errorf("sub_agent result = %+v, want the non-error capped result %q", sub, want)
+	}
+}
+
+// completedOutputPathAgent builds a parent in Allow-Edits over a real workspace with a real
+// write_file tool, whose one delegation names out/report.md and whose child runs to COMPLETION
+// (no cap) through the given scripts before the parent closes. It returns the parent, the sink
+// and the workspace root.
+func completedOutputPathAgent(t *testing.T, child ...[]provider.Delta) (*Agent, *recordingSink, string) {
+	t.Helper()
+
+	ws := t.TempDir()
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAllowEdits, tools.NewWriteFile(ws))
+	cfg.WorkspaceDir = ws
+
+	call, err := json.Marshal(tools.SubAgentArgs{Task: "trawl the repo", OutputPath: "out/report.md"})
+	if err != nil {
+		t.Fatalf("marshal sub_agent args: %v", err)
+	}
+	scripts := [][]provider.Delta{toolCallScript("c1", tools.SubAgentToolName, string(call))}
+	scripts = append(scripts, child...)
+	scripts = append(scripts, contentScript("parent done"))
+
+	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	return a, sink, ws
+}
+
+// TestSubAgent_CompletedChildWithoutItsOutputIsAFault pins rule (a) on the completed path: a child
+// that answers without ever writing the file its spawn named gets an error result heading its
+// text with the missing-output line, and the control — the same child writing the file first —
+// reports byte for byte.
+func TestSubAgent_CompletedChildWithoutItsOutputIsAFault(t *testing.T) {
+	const answer = "I surveyed the repo; the findings are in the report."
+
+	t.Run("the output is absent", func(t *testing.T) {
+		a, sink, _ := completedOutputPathAgent(t, contentScript(answer))
+
+		runExchange(t, a, "please research")
+
+		sub, ok := lastSubAgentResult(sink.events)
+		want := fmt.Sprintf(missingOutputResultFormat, "out/report.md") + "\n" + answer
+		if !ok || !sub.IsError || sub.Content != want {
+			t.Errorf("sub_agent result = %+v, want the error result %q", sub, want)
+		}
+	})
+
+	t.Run("the output was written", func(t *testing.T) {
+		a, sink, ws := completedOutputPathAgent(t,
+			narratedToolCallScript("w0", tools.WriteFileToolName, `{"path":"out/report.md","content":"the survey"}`, "writing"),
+			contentScript(answer))
+
+		runExchange(t, a, "please research")
+
+		if _, err := os.Stat(filepath.Join(ws, "out", "report.md")); err != nil {
+			t.Fatalf("the child's write did not land: %v", err)
+		}
+		sub, ok := lastSubAgentResult(sink.events)
+		if !ok || sub.IsError || sub.Content != answer {
+			t.Errorf("sub_agent result = %+v, want the child's answer %q alone", sub, answer)
+		}
+	})
 }
 
 // ----------------------------------------------------------------------------

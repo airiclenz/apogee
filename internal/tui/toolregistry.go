@@ -881,8 +881,12 @@ func delegationStat(res domain.ToolResult) (statValue, bool) {
 }
 
 // delegationFailure carries the steering half of that envelope onto a FAILED delegation's red line —
-// a faulted child, or one whose loop-level error the engine reported (internal/agent's
-// subAgentFaultPrefix and its "sub-agent failed: " sibling). The notice rides every outcome that
+// a faulted child, one whose loop-level error the engine reported (internal/agent's
+// subAgentFaultPrefix and its "sub-agent failed: " sibling), or one whose closing text the engine
+// refused as a report — a spawn-named `output_path` never written, or unparsed tool-call markup
+// (its missingOutputResultFormat and markupResultHead): those are error results whose first line
+// names the fault and whose body carries the text, so they read here like any other failure, with
+// nothing of their own to recognise. The notice rides every outcome that
 // produces a result (ADR 0063 D3), and the failure layer words its summary from the result's FIRST
 // line, so without this the one outcome a reader most wants the fact on would be the one that drops
 // it. A result with no notice on it declines, which leaves that first line exactly as it reads today.

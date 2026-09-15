@@ -233,7 +233,11 @@ NOTES (2026-09-15): the e2e OUT variant runs under `mode: allow-edits` (the plan
 
 **Commit:** `feat(agent): sub_agent output_path keeps write_file in the step-cap wrap-up Turn`
 
-## 9. A child's result is validated: missing output, vendor markup and sub-sentence replies are faults
+## 9. A child's result is validated: missing output, vendor markup and sub-sentence replies are faults — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): rule (a) is one predicate (`Agent.outputMissing`) on both the completed and the capped branch, so the "wrap-up writer withheld" skip (Plan-mode child, or no write_file in the roster) also spares a child that ran to completion — a file the ladder forbade is not the child's to have written; the plan named the skip for the StepCapped branch only.
+NOTES (2026-09-15): item 8's `TestSubAgent_WrapUpRefusesAWriteElsewhere` re-pinned to expect the missing-output note as the body's last line — a refused wrap-up write leaves the output absent, which is exactly rule (a); its Plan-mode sibling re-pinned to carry no note, as the plan asks.
+NOTES (2026-09-15): only a certainly-absent file (`fs.ErrNotExist`) counts as missing; any other stat failure leaves the result unfaulted.
 
 **What:** Recast at the regression check (2026-09-14). Depends on item 8. `internal/agent/subagent.go` `delegationResult` `default:` branch returns `finalMessageText()` whatever it says. Add, in order: (a) `output_path` set and the file absent after the child's last Turn ⇒ `IsError` result `sub-agent ended without writing <path>; its last text follows:` + the text; (b) final text matching a vendor tool-call container (reuse `internal/floor/salvage.go`'s container detection — export `HasToolCallMarkup(text string) bool`) ⇒ `IsError` `sub-agent reply is unparsed tool-call markup, not a report` + the text; (c) final text that is a bare acknowledgement (`Done.`, `Understood`) ⇒ treated as no text (`stepCapNoTextMarker` shape, non-error, marker `[delegate returned no report]`). `dispatch.go`'s bare `unknown tool %q` sites are untouched here (plan 02 item 16). The TUI verdict for (a)/(b) is the existing error slot.
 

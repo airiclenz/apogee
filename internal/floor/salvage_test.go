@@ -213,3 +213,68 @@ func assertCalls(t *testing.T, got []domain.ToolCall, want []wantCall) {
 		}
 	}
 }
+
+// TestHasToolCallMarkupNamesAWrittenCall pins the two guards the recogniser fires on — a reply that
+// BEGINS with a vendor container, or a container whose body is a JSON object — and the shapes it
+// must leave alone: a report that quotes a tag pair in prose, and a code fence, which is how a
+// report shows a snippet and never a container here.
+func TestHasToolCallMarkupNamesAWrittenCall(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{
+			name: "a tool_call pair holding a JSON object",
+			text: "<tool_call>{\"name\": \"read_file\", \"arguments\": {\"path\": \"a.go\"}}</tool_call>",
+			want: true,
+		},
+		{
+			name: "a JSON-bodied tool_call pair quoted mid-report",
+			text: "I meant to run <tool_call>{\"name\": \"read_file\"}</tool_call> next.",
+			want: true,
+		},
+		{
+			name: "a reply that begins with a DSML tool_calls container",
+			text: "<｜DSML｜tool_calls><｜DSML｜invoke name=\"read_file\"><｜DSML｜parameter name=\"path\">a.go</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>",
+			want: true,
+		},
+		{
+			name: "a reply that begins with a prose-bodied tool_call pair",
+			text: "  <tool_call>read the file</tool_call>\nthen stop",
+			want: true,
+		},
+		{
+			name: "a report that quotes a prose-bodied tag pair",
+			text: "The model wrote `<tool_call>read the file</tool_call>` and stopped there.",
+			want: false,
+		},
+		{
+			name: "a report that quotes a DSML container after its first line",
+			text: "The child's reply was:\n<｜DSML｜tool_calls>invoke read_file</｜DSML｜tool_calls>",
+			want: false,
+		},
+		{
+			name: "a report showing a code fence",
+			text: "Add this:\n```json\n{\"name\": \"read_file\", \"arguments\": {}}\n```",
+			want: false,
+		},
+		{
+			name: "plain prose",
+			text: "The repo has four packages and no tests for two of them.",
+			want: false,
+		},
+		{name: "an empty reply", text: "", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := HasToolCallMarkup(tc.text); got != tc.want {
+				t.Errorf("HasToolCallMarkup(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}

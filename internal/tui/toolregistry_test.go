@@ -189,6 +189,49 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 	})
 }
 
+// The two result shapes item 9 of plan 2026-09-14 - 03 turns into ERROR results — a spawn-named
+// `output_path` the child never wrote, and a closing text that is unparsed tool-call markup — are
+// worded by the existing failure layer from their first line, exactly as a faulted child's is: the
+// engine's line is the summary, the child's text is the body beneath it, and the steering cell
+// still rides the line. Its third shape, the no-report marker, is a non-error result the verdict
+// recogniser does not know, so the slot reads the ordinary `done`.
+func TestDelegationValidationFaultsReadThroughTheErrorSlot(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		head string
+	}{
+		{"a missing output", "sub-agent ended without writing out/report.md; its last text follows:"},
+		{"an unparsed markup reply", "sub-agent reply is unparsed tool-call markup, not a report"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			word, output, ok := delegationFailure(tc.head + "\nI read two files so far" + envelopeSteeredOne)
+
+			if !ok {
+				t.Fatal("delegationFailure declined a steered validation fault")
+			}
+			if want := tc.head + " · steered by 1 message"; word != want {
+				t.Errorf("failure line = %q, want %q", word, want)
+			}
+			if output != "I read two files so far" {
+				t.Errorf("failure output = %q, want the child's text beneath the summary", output)
+			}
+		})
+	}
+
+	t.Run("the no-report marker reads done", func(t *testing.T) {
+		t.Parallel()
+
+		if got := delegationVerdict("[delegate returned no report]"); got != delegationDoneVerdict {
+			t.Errorf("verdict = %q, want %q", got, delegationDoneVerdict)
+		}
+	})
+}
+
 // taskListRendered is the block internal/tasklist renders for the three-task fixture every task_list
 // test here shares — 2 open, 1 done — spelled from the package's own header format rather than
 // respelled, so a reworded header cannot leave these tests pinning a sentence the tool no longer

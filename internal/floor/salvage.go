@@ -25,6 +25,44 @@ var fencedBlockPattern = regexp.MustCompile("(?s)```[a-zA-Z0-9_+-]*[ \t]*\r?\n?(
 // emit when their native channel is unavailable, and captures its body.
 var toolCallTagPattern = regexp.MustCompile(`(?is)<tool_call>(.*?)</tool_call>`)
 
+// dsmlToolCallsPattern matches the <｜DSML｜tool_calls>…</｜DSML｜tool_calls> container the DeepSeek
+// family writes its native calls in, and captures its body. It is read by HasToolCallMarkup ONLY:
+// the body is invoke markup rather than a JSON object, so salvage has nothing to parse there — the
+// container is recognised so a reply made of it is named as markup instead of being read as prose.
+var dsmlToolCallsPattern = regexp.MustCompile(`(?is)<｜DSML｜tool_calls>(.*?)</｜DSML｜tool_calls>`)
+
+// toolCallContainerPatterns are the vendor containers HasToolCallMarkup recognises. The fenced
+// block is deliberately NOT among them: a fence is how a report quotes code, so keying on it would
+// fault every report that shows a snippet.
+var toolCallContainerPatterns = []*regexp.Regexp{toolCallTagPattern, dsmlToolCallsPattern}
+
+// HasToolCallMarkup reports whether text is a tool call written out in a vendor container rather
+// than a report: a <tool_call>…</tool_call> pair or a DSML tool_calls container, where either the
+// trimmed text BEGINS with the container or the container's captured body is a JSON object. Both
+// guards exist so that prose which merely QUOTES a tag pair — a report explaining what a model
+// wrote — is not named as markup; a quoted pair holding a JSON object is one the reader would
+// dispatch, and that is markup wherever it sits. It is read by the delegation result
+// (internal/agent's delegationResult) to fault a child whose closing text is its unparsed call, and
+// it is pure: text in, verdict out.
+func HasToolCallMarkup(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	for _, pattern := range toolCallContainerPatterns {
+		for _, span := range pattern.FindAllStringSubmatchIndex(trimmed, -1) {
+			if span[0] == 0 || isJSONObject(trimmed[span[2]:span[3]]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isJSONObject reports whether body, trimmed, is one valid JSON object — the shape a written call
+// takes, as opposed to the prose or invoke markup a container may otherwise hold.
+func isJSONObject(body string) bool {
+	body = strings.TrimSpace(body)
+	return strings.HasPrefix(body, "{") && json.Valid([]byte(body))
+}
+
 // SalvageToolCall is the tool-call salvage guard (the `tool-call-salvage` key, ADR 0071): when a
 // model that was given tools answers with NO tool call on the wire but writes one out as JSON in
 // its text, the guard reads that text back as the call the model meant and hands it to the engine,

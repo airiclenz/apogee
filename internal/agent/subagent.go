@@ -3,12 +3,16 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/title"
@@ -125,6 +129,65 @@ const subAgentFaultNoCause = "its exchange was abandoned (see the preceding erro
 // intelligible: the parent is told the delegation was stopped AND that it has nothing to show,
 // rather than being handed a bare marker line with an empty body.
 const stepCapNoTextMarker = "(no visible text)"
+
+// The three shapes a FINISHED child's closing text is checked against before it is handed to the
+// parent as its report (delegationResult's default branch, in this order): a spawn-named
+// `output_path` the child never wrote, a reply that is a tool call written out in a vendor
+// container, and a reply that is a bare acknowledgement. Each was a session-mining finding
+// (2026-09-14, headline 12): a parent that reads "Done." or `<tool_call>…</tool_call>` as the
+// finding of a delegation goes on as if the work were done. The first two are ERROR results whose
+// first line names the fault and whose body still carries the text, so the parent loses nothing
+// it could have read; the third is a non-error marker in stepCapNoTextMarker's shape, because an
+// acknowledgement IS no text. They are structural markers on the delegation path, on under Bypass
+// like the step-cap marker (ADR 0076, ratified exceptions of plan 2026-09-14 - 03).
+const (
+	// missingOutputResultFormat heads the error result of a child that ran to completion without
+	// writing the file its spawning call named; %s is Agent.outputPath, in the call's spelling.
+	missingOutputResultFormat = "sub-agent ended without writing %s; its last text follows:"
+	// missingOutputNoteFormat is the same fault on a CAPPED child, where the result keeps its
+	// non-error shape and the partial marker first (the TUI reads the head): the note is appended
+	// in the SeatFallbackNote slot, a body note like the clamp line. %s is Agent.outputPath.
+	missingOutputNoteFormat = "[delegate ended without writing %s]"
+	// markupResultHead heads the error result of a child whose closing text is an unparsed
+	// tool call (floor.HasToolCallMarkup) — a call the wire never carried, not a report.
+	markupResultHead = "sub-agent reply is unparsed tool-call markup, not a report"
+	// noReportMarker stands in for a closing text that was a bare acknowledgement
+	// (isAcknowledgement): the parent is told the delegation produced no report, rather than
+	// being handed "Done." as one.
+	noReportMarker = "[delegate returned no report]"
+)
+
+// acknowledgements is the fixed, case-insensitive set of one-word replies isAcknowledgement
+// treats as no report (owner call, 2026-09-14). It is a closed list on purpose: a heuristic over
+// length or wording would fault real one-line findings, and "Yes." is an answer.
+var acknowledgements = []string{"done", "understood", "ok", "okay", "acknowledged", "noted", "sure"}
+
+// acknowledgementPunctuation is the trailing punctuation an acknowledgement may carry and still be
+// one: "Done.", "Noted!", "ok," all read as the bare word.
+const acknowledgementPunctuation = ".!,;:"
+
+// isAcknowledgement reports whether text is one of acknowledgements, case-insensitively, with any
+// surrounding space and trailing punctuation removed — and nothing else: "child done" and
+// "Done, I read the file" are reports.
+func isAcknowledgement(text string) bool {
+	word := strings.ToLower(strings.TrimRight(strings.TrimSpace(text), acknowledgementPunctuation))
+	return slices.Contains(acknowledgements, word)
+}
+
+// outputMissing reports whether the delegation was spawned to write a file (Agent.outputPath)
+// that is absent once its run has ended. It answers false whenever the child was never in a
+// position to write it — no `output_path`, no write_file in its registry, or a Plan-mode child
+// whose ladder refuses every workspace write (the same three conditions wrapUpWriter reads) —
+// because a file the ladder forbade is not a fault of the child's; and false when the path exists
+// in any form. Only a certainly-absent file (fs.ErrNotExist) counts: a stat that fails some other
+// way is not evidence the child skipped its write.
+func (a *Agent) outputMissing() bool {
+	if _, ok := a.wrapUpWriter(); !ok {
+		return false
+	}
+	_, err := os.Stat(a.outputTarget)
+	return errors.Is(err, fs.ErrNotExist)
+}
 
 // wrapUpMarker and wrapUpDirectiveFormat are the one-request system directive a delegate stopped
 // at its step cap is handed for its closing report (Agent.wrapUp, loop.go): the request that
@@ -541,9 +604,9 @@ func (a *Agent) startDelegationNaming(ctx context.Context, callID string, sub *A
 
 // delegationResult renders a child's FINISHED run as the ToolResult the parent model reads on its
 // next Turn. It holds the whole outcome switch — a loop-level Run error, a cancel, a fault, the
-// step cap, or the child's final answer — and, after it, the ONE site the user-steered trailer is
-// appended at, so no outcome can grow a result that forgets to tell the parent the human spoke to
-// its delegate.
+// step cap, or the child's final answer, validated before it is handed over as a report
+// (completedResult) — and, after it, the ONE site the user-steered trailer is appended at, so no
+// outcome can grow a result that forgets to tell the parent the human spoke to its delegate.
 //
 // The receiver is the CHILD, not the spawning parent: the run being reported on is the child's and
 // so is every value the report is made of (steered, lastFault, lastVisibleText, finalMessageText).
@@ -601,7 +664,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 			IsError: false,
 		}
 	default:
-		result = domain.ToolResult{CallID: callID, Content: a.finalMessageText(), IsError: false}
+		result = a.completedResult(callID)
 	}
 
 	// The routing note, for a child whose call ASKED for the Sub-agent server and was built on the
@@ -615,6 +678,15 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// re-classified the result. And it is the last line of the BODY rather than of the result:
 	// ADR 0063 D3's trailer below is the final line on every outcome and stays there, so where both
 	// apply the note sits immediately above it.
+	//
+	// The missing-output note comes first in that slot, for a CAPPED child whose spawn-named
+	// `output_path` is still absent after its wrap-up Turn: the capped result keeps its non-error
+	// shape and its partial marker first, so the parent learns the file is not there from a body
+	// note rather than from a re-classified head. A child that ran to completion without the
+	// write was answered with an error result above instead (completedResult).
+	if res.StepCapped && a.outputMissing() {
+		result.Content += "\n" + fmt.Sprintf(missingOutputNoteFormat, a.outputPath)
+	}
 	if a.seatFallback {
 		result.Content += "\n" + SeatFallbackNote
 	}
@@ -1123,6 +1195,27 @@ func publishesSeatChoice(roster *domain.ToolRegistry) bool {
 	}
 	spawner, ok := t.(*tools.SubAgent)
 	return ok && spawner.OffersSeatChoice()
+}
+
+// completedResult renders the result of a child that ran to COMPLETION — the default outcome of
+// delegationResult — after checking its closing text against the three shapes that are not a
+// report, in this order: (a) a spawn-named `output_path` the child never wrote, an error result
+// heading the text with missingOutputResultFormat; (b) a closing text that is unparsed tool-call
+// markup (floor.HasToolCallMarkup), an error result heading it with markupResultHead; (c) a bare
+// acknowledgement (isAcknowledgement), the non-error noReportMarker alone. Every other text is
+// the child's report, byte for byte, as it always was. The capped outcome runs check (a) only —
+// as a body note, never an error — because its text is a partial report by contract.
+func (a *Agent) completedResult(callID string) domain.ToolResult {
+	text := a.finalMessageText()
+	switch {
+	case a.outputMissing():
+		return errorToolResult(callID, fmt.Sprintf(missingOutputResultFormat, a.outputPath)+"\n"+text)
+	case floor.HasToolCallMarkup(text):
+		return errorToolResult(callID, markupResultHead+"\n"+text)
+	case isAcknowledgement(text):
+		return domain.ToolResult{CallID: callID, Content: noReportMarker, IsError: false}
+	}
+	return domain.ToolResult{CallID: callID, Content: text, IsError: false}
 }
 
 // finalMessageText returns the text of the last assistant message in the sub-agent's
