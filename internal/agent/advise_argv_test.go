@@ -82,7 +82,7 @@ func adviseArgvCall(t *testing.T, a *Agent, call domain.ToolCall, result domain.
 
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{call}})
 	advised := a.firePostToolResult(context.Background(), call, &result)
-	a.appendToolResult(0, result, advised)
+	a.appendToolResult(0, domain.ToolCall{}, result, "", advised)
 	return a.conv.At(a.conv.Len() - 1)
 }
 

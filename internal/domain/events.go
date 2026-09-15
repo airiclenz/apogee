@@ -135,9 +135,25 @@ type ToolCallEvent struct {
 
 // ToolResultEvent reports a tool's result after execution (and after any
 // post-tool-result Reactions have acted on it).
+//
+// Tool is the resolved tool name: the call's name as the pre-tool-exec Moment left it, which is
+// the name the executor ran. It rides the result so a reader holding this event alone knows which
+// tool it belongs to, without walking back to the ToolCallEvent that shares its CallID.
+//
+// WriteTarget is the path the call wrote — the resolved absolute path of a workspace-scoped
+// writer's inspectable target (the answer tools.WorkspaceWriteTarget gives), and "" for every other
+// call: a reader, a shell command, a delegation, a writer whose arguments name no target. It is
+// taken from the ONE on-disk resolution dispatch already performs for the ladder, never resolved
+// again, and it is stamped whatever the call's fate — a refused or failed write still names the
+// target it was aimed at — so "a file changed" is WriteTarget != "" read together with
+// !Result.IsError. A call that never reached the ladder (an unknown tool, a refused argument
+// object, a pre-tool-exec fault, a delegation skipped for a pending interjection) resolved no
+// target and carries "".
 type ToolResultEvent struct {
 	EventBase
-	Result ToolResult
+	Result      ToolResult
+	Tool        string
+	WriteTarget string
 }
 
 // SubAgentPhase names the point in a delegation's life that a SubAgentPhaseEvent reports.

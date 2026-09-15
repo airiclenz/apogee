@@ -176,7 +176,7 @@ moment, and the case difference is the signal.
 | `stream_reset` | the text streamed so far was discarded — an accumulator starts again here |
 | `message` | a completed assistant message |
 | `tool_call` | a tool call the model requested, with its arguments and any resolved path |
-| `tool_result` | that call's outcome after execution |
+| `tool_result` | that call's outcome after execution, with `data.tool` — the tool it ran under, as the pre-tool-exec Reactions left the call — and `data.write_target`, the resolved path the call wrote (the same resolution `tool_call`'s `resolved_path` comes from; `""` for a call that is not a write, and a value that is a *changed* file only together with `is_error: false`) |
 | `sub_agent_phase` | one delegation crossing a lifecycle boundary; `data.cancelled` marks a `finished` that closes a rolled-back bracket rather than reporting a result |
 | `sub_agent_named` | the name a delegated run was given |
 | `child_interjection` | input steered into a running delegation, and whether it landed |

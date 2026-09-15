@@ -125,7 +125,7 @@ func TestGateDenyRefusesTheCallAndBooksOneFiring(t *testing.T) {
 	a := gateAgent(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran,
 		goGate("no-force-push", domain.GateDecision{Verdict: domain.GateDeny, Reason: "never force-push"}))
 
-	result, outcome := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _, outcome := a.resolveAndExecute(context.Background(), 0, readCallOnly())
 
 	if outcome != dispatchDone {
 		t.Fatalf("outcome = %v, want dispatchDone", outcome)
@@ -164,7 +164,7 @@ func TestGateArgvAskForcesTheApprover(t *testing.T) {
 	a := gateAgent(t, sink, approver, &ran,
 		userGate("warden", "/bin/sh", "-c", `printf 'ask\nlooks risky\n'`))
 
-	result, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
 
 	if len(approver.requests) != 1 {
 		t.Fatalf("the Approver was consulted %d times, want 1", len(approver.requests))
@@ -345,7 +345,7 @@ func TestGateDenyStillDeniesUnderBypass(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	result, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
 
 	if want := "tool call denied by reaction warden"; result.Content != want {
 		t.Errorf("tool result = %q, want %q", result.Content, want)
@@ -457,7 +457,7 @@ func TestGateAskWithNoApproverRefuses(t *testing.T) {
 	ran := 0
 	a := gateAgent(t, sink, nil, &ran, goGate("warden", domain.GateDecision{Verdict: domain.GateAsk}))
 
-	result, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
+	result, _, _ := a.resolveAndExecute(context.Background(), 0, readCallOnly())
 
 	if result.Content != noApproverReason {
 		t.Errorf("tool result = %q, want %q", result.Content, noApproverReason)

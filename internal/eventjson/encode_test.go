@@ -86,10 +86,25 @@ func TestEncodeJSONGolden(t *testing.T) {
 					IsError: false,
 					Summary: domain.MatchedLines{Total: 4},
 				},
+				Tool: "grep",
 			},
 			wantKind: "tool_result",
 			wantBase: domain.EventBase{Turn: 2},
-			wantData: `{"result":{"call_id":"call-3","content":"4 matches","is_error":false}}`,
+			wantData: `{"result":{"call_id":"call-3","content":"4 matches","is_error":false},` +
+				`"tool":"grep","write_target":""}`,
+		},
+		{
+			name: "tool_result of a write names its target",
+			event: domain.ToolResultEvent{
+				EventBase:   domain.EventBase{Turn: 2},
+				Result:      domain.ToolResult{CallID: "call-4", Content: "wrote docs/notes.md"},
+				Tool:        "write_file",
+				WriteTarget: "/work/docs/notes.md",
+			},
+			wantKind: "tool_result",
+			wantBase: domain.EventBase{Turn: 2},
+			wantData: `{"result":{"call_id":"call-4","content":"wrote docs/notes.md","is_error":false},` +
+				`"tool":"write_file","write_target":"/work/docs/notes.md"}`,
 		},
 		{
 			name: "sub_agent_phase started",

@@ -92,7 +92,16 @@ NOTES (2026-09-15): gate PASSED — `docs/plans/archived/` holds all three `2026
 
 Commit: none (gate item).
 
-## 2. `ToolResultEvent` carries the tool name and the classified write target
+## 2. `ToolResultEvent` carries the tool name and the classified write target — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the regression guard's `path string` on `writeTargetClass` already exists as its `real` member (the abs `WorkspaceWriteTarget`), so no member was added there; the path rides `resolutionInput.writeTarget` (a field `resolve()` does not read) and `resolveAndExecute` returns it as a middle value, which `appendToolResult` — now taking the post-edit call and the write target — stamps onto the event.
+NOTES (2026-09-15): consequential edit — internal/agent/gate_test.go: made necessary by the `resolveAndExecute` third return (callers take `_`).
+NOTES (2026-09-15): consequential edit — internal/agent/setreactions_test.go: made necessary by the `resolveAndExecute` third return (callers take `_`).
+NOTES (2026-09-15): consequential edit — internal/agent/advise_test.go: made necessary by the `appendToolResult` signature (call + write target parameters).
+NOTES (2026-09-15): consequential edit — internal/agent/advise_argv_test.go: made necessary by the `appendToolResult` signature (call + write target parameters).
+NOTES (2026-09-15): consequential edit — internal/agent/toolresultfloor_test.go: made necessary by the `appendToolResult` signature (call + write target parameters).
+NOTES (2026-09-15): consequential edit — internal/agent/toolresultmarker_test.go: made necessary by the `appendToolResult` signature (call + write target parameters).
+NOTES (2026-09-15): `cmd/apogee/e2e_eventlines_test.go` (named in Files) needed no edit — the golden regenerated under the existing `-update` flag; a pooled delegation slot stamps `WriteTarget ""` without resolving, since `sub_agent` is not a workspace-scoped writer and the classification would be `""` regardless.
 
 **What.** Add two additive members to `domain.ToolResultEvent` (`internal/domain/events.go`): `Tool string` (the resolved tool name) and `WriteTarget string` (the workspace path the call wrote, `""` when the call is not a write — the same answer `tools.WorkspaceWriteTarget` gives today). Stamp both at the single emit site in `internal/agent/dispatch.go` (the result emit after `executeTool`; the write target is the one `classifyWriteTarget` already resolved for the ladder — thread its resolved path, never re-resolve). Encode both in `internal/eventjson/encode.go` (`tool_result` line gains `tool` and `write_target`; version stays 2, additive per ADR 0075 D10); regenerate `TestEncodeJSONGolden` and `cmd/apogee/testdata/eventlines/run.jsonl`. Producers: the dispatch emit. Consumers touched here: none yet (item 3 moves them). Depends on item 1.
 

@@ -260,13 +260,14 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 		if _, err := a.fire(ctx, domain.MomentPreToolExec, domain.NewToolCallEdit(&call)); err != nil {
 			// A pre-tool-exec reaction faulted: skip the call with an error result rather than
 			// running it against a half-applied decision.
-			a.appendToolResult(turn, errorToolResult(call.ID, "pre-tool-exec reaction failed"), nil)
+			a.appendToolResult(turn, call, errorToolResult(call.ID, "pre-tool-exec reaction failed"), "", nil)
 			continue
 		}
 
 		var (
-			result  domain.ToolResult
-			outcome dispatchOutcome
+			result      domain.ToolResult
+			writeTarget string
+			outcome     dispatchOutcome
 		)
 		if isSubAgentCall(call) && a.interjectionPending() {
 			// A queued user message pre-empts a delegation that has not started: the same skip,
@@ -274,14 +275,14 @@ func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.T
 			// leaf tool — a leaf runs to its result whatever is waiting at the boundary.
 			result = a.skipDelegation(turn, call)
 		} else {
-			result, outcome = a.resolveAndExecute(ctx, turn, call)
+			result, writeTarget, outcome = a.resolveAndExecute(ctx, turn, call)
 		}
 		if outcome == dispatchCancelled {
 			return dispatchCancelled
 		}
 
 		advised := a.firePostToolResult(ctx, call, &result)
-		a.appendToolResult(turn, result, advised)
+		a.appendToolResult(turn, call, result, writeTarget, advised)
 	}
 	return dispatchDone
 }
@@ -635,7 +636,7 @@ func (a *Agent) emitSubAgentNamed(turn int, callID, name string) {
 // completion order.
 func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot) {
 	if slot.hookFailed {
-		a.appendToolResult(turn, slot.result, nil)
+		a.appendToolResult(turn, slot.call, slot.result, "", nil)
 		return
 	}
 	if slot.run {
@@ -651,7 +652,9 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 		slot.result.Content = withBodyNote(slot.result.Content, slot.widthNote)
 	}
 	advised := a.firePostToolResult(ctx, slot.call, &slot.result)
-	a.appendToolResult(turn, slot.result, advised)
+	// A delegation writes nothing itself — sub_agent is not a workspace-scoped writer, so the
+	// classification it would get is "" — which is what the pool's slots stamp without resolving.
+	a.appendToolResult(turn, slot.call, slot.result, "", advised)
 }
 
 // resolveAndExecute gathers the facts one tool call is decided from — the registry lookup, the
@@ -666,6 +669,11 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 // short-circuiting it keeps a withheld tool (e.g. sub_agent at the depth bound) resolving as an
 // unknown tool exactly as before, un-audited (Resolution D8). resolve() has a matching
 // unknown-tool row for its own test, but dispatch never reaches it.
+//
+// The middle return is the call's classified write target — the resolved absolute path of a
+// workspace-scoped writer's target, "" for every other call — handed back so the commit point
+// (appendToolResult) stamps it onto the ToolResultEvent from the same resolution the ladder
+// decided on. The three routes that return before resolve() runs resolved nothing and answer "".
 //
 // Its neighbour row is arguments that name one parameter twice under different key cases
 // (domain.CollidingArgumentKeys): the executor's decode folds them and runs ONE value, so every
@@ -683,36 +691,42 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 // colliding check (repeatedArgumentKeysResult), so the colliding refusal keeps precedence and its
 // wording; a byte-identical repeat is not refused at all, since last-wins for an exact duplicate is
 // the pinned contract every reader of the raw bytes already shares.
-func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
+func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, string, dispatchOutcome) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
-		return a.unknownToolResult(call), dispatchDone
+		return a.unknownToolResult(call), "", dispatchDone
 	}
 	if result, refused := collidingArgumentKeysResult(call); refused {
-		return result, dispatchDone
+		return result, "", dispatchDone
 	}
 	if result, refused := repeatedArgumentKeysResult(call); refused {
-		return result, dispatchDone
+		return result, "", dispatchDone
 	}
 
-	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call, tool, a.guardExemptions())))
+	input := a.resolutionInput(tool, call, a.guards.PreExecute(call, tool, a.guardExemptions()))
+	verdict := resolve(input)
 	// The gate stage, on the same seam and in the same order as the fan-out's prepare phase runs
 	// it: the user's gate reactions fold their answer into the ladder's verdict — a deny refuses
 	// the call, an ask forces the Approver — before anything executes (gate.go).
 	verdict = a.applyGates(ctx, turn, call, verdict)
 
+	var (
+		result  domain.ToolResult
+		outcome dispatchOutcome
+	)
 	switch verdict.kind {
 	case resolveRefuse:
-		return a.executeRefuse(turn, call, verdict), dispatchDone
+		result, outcome = a.executeRefuse(turn, call, verdict), dispatchDone
 	case resolveDelegate:
-		return a.executeDelegate(ctx, turn, call, verdict)
+		result, outcome = a.executeDelegate(ctx, turn, call, verdict)
 	case resolveGate:
-		return a.executeGate(ctx, turn, tool, call, verdict)
+		result, outcome = a.executeGate(ctx, turn, tool, call, verdict)
 	case resolveConfine:
-		return a.executeConfine(ctx, turn, tool, call, verdict)
+		result, outcome = a.executeConfine(ctx, turn, tool, call, verdict)
 	default: // resolveRun
-		return a.executeRun(ctx, turn, tool, call, verdict)
+		result, outcome = a.executeRun(ctx, turn, tool, call, verdict)
 	}
+	return result, input.writeTarget, outcome
 }
 
 // collidingArgumentKeysPrefix and collidingArgumentKeysAdvice are the two halves of the ONE
@@ -807,6 +821,7 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		writeTargetInWorkspace: target.inFence,
 		writeTargetInScratch:   target.inScratch,
 		writeEscapeTarget:      target.escape,
+		writeTarget:            target.real,
 		scratchDir:             a.ScratchDir(),
 		atDepthBound:           a.depth >= a.maxDepth(),
 		maxDepth:               a.maxDepth(),
@@ -1594,10 +1609,22 @@ func pathWithin(abs, root string) bool {
 // which for a successful read IS a file body, error strings and all. Every route committing a
 // result gets the marker, so the guess is now only ever a legacy-record fallback.
 //
+// call is the call the result answers, as the pre-tool-exec Moment left it: its Tool is the
+// resolved name the ToolResultEvent carries. writeTarget is the call's classified write target —
+// the resolved path resolveAndExecute hands back from the ladder's one resolution, "" for a call
+// that is not a write or never resolved one — stamped onto the event as it is, whatever the
+// result's fate (domain.ToolResultEvent).
+//
 // advised is the post-tool-result cascade's advise slot (reactions.go) — the spans this result's
 // message carries as a fenced trailer, nil for the two routes that commit a result no cascade ran
 // on (a pre-tool-exec fault, a hook-failed delegation slot).
-func (a *Agent) appendToolResult(turn int, result domain.ToolResult, advised []advice) {
+func (a *Agent) appendToolResult(
+	turn int,
+	call domain.ToolCall,
+	result domain.ToolResult,
+	writeTarget string,
+	advised []advice,
+) {
 	result.Content = a.clampToolResult(result.Content)
 	msg := domain.Message{
 		Role:        domain.RoleTool,
@@ -1617,7 +1644,12 @@ func (a *Agent) appendToolResult(turn int, result domain.ToolResult, advised []a
 	// The event carries the tool's own result, never the trailer: advice is a model-facing
 	// injection, so what an observer records, the transcript shows and the session record keeps is
 	// the output the tool actually produced.
-	a.cfg.Events.Emit(domain.ToolResultEvent{EventBase: a.base(turn), Result: result})
+	a.cfg.Events.Emit(domain.ToolResultEvent{
+		EventBase:   a.base(turn),
+		Result:      result,
+		Tool:        call.Tool,
+		WriteTarget: writeTarget,
+	})
 }
 
 // structuralFloor is the BOUND behind both structural clamps: the whole History allocation — the

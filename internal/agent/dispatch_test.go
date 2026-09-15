@@ -520,6 +520,82 @@ func TestDisposition_WorkspaceWriteChildGetsTheBox(t *testing.T) {
 	})
 }
 
+// TestToolResultEventCarriesToolAndWriteTarget proves the commit point stamps the two engine facts
+// the ToolResultEvent carries beside the result: the resolved tool name, and the path the call
+// wrote — classified from the ladder's ONE on-disk resolution, so it is the real path of the file
+// the writer landed on — or "" for a call that is not a write. A Driver reading the event alone
+// can therefore say which tool answered and which file changed without re-resolving anything.
+func TestToolResultEventCarriesToolAndWriteTarget(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a write_file call names the written path", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		sink := &recordingSink{}
+		cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws, tools.NewWriteFile(ws))
+
+		args := fmt.Sprintf(`{"path":%q,"content":"hi"}`, "in.txt")
+		driveToolCall(t, cfg, sink, "c1", "write_file", args)
+
+		ev := lastToolResultEventOf(t, sink.events)
+		if ev.Result.IsError {
+			t.Fatalf("the in-workspace write failed: %q", ev.Result.Content)
+		}
+		if ev.Tool != "write_file" {
+			t.Errorf("Tool = %q; want the resolved tool name write_file", ev.Tool)
+		}
+		// The classification is EvalRealPath's answer, so the expectation walks the same symlinks
+		// (a TempDir under a symlinked /tmp would otherwise disagree on spelling alone).
+		want, err := filepath.EvalSymlinks(filepath.Join(ws, "in.txt"))
+		if err != nil {
+			t.Fatalf("resolving the written file: %v", err)
+		}
+		if ev.WriteTarget != want {
+			t.Errorf("WriteTarget = %q; want the written path %q", ev.WriteTarget, want)
+		}
+	})
+
+	t.Run("a read_file call carries no write target", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		if err := os.WriteFile(filepath.Join(ws, "in.txt"), []byte("hello\n"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		sink := &recordingSink{}
+		cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws,
+			tools.NewReadFile(ws, tools.ReadMounts{}))
+
+		driveToolCall(t, cfg, sink, "c1", "read_file", `{"path":"in.txt"}`)
+
+		ev := lastToolResultEventOf(t, sink.events)
+		if ev.Result.IsError {
+			t.Fatalf("the read failed: %q", ev.Result.Content)
+		}
+		if ev.Tool != "read_file" {
+			t.Errorf("Tool = %q; want the resolved tool name read_file", ev.Tool)
+		}
+		if ev.WriteTarget != "" {
+			t.Errorf("WriteTarget = %q; a read is not a write and carries none", ev.WriteTarget)
+		}
+	})
+}
+
+// lastToolResultEventOf returns the last ToolResultEvent the sink recorded, whole — the sibling
+// helpers project its result or content, and this test is about the members beside them.
+func lastToolResultEventOf(t *testing.T, events []domain.Event) domain.ToolResultEvent {
+	t.Helper()
+	out, ok := domain.ToolResultEvent{}, false
+	for _, e := range events {
+		if tre, isResult := e.(domain.ToolResultEvent); isResult {
+			out, ok = tre, true
+		}
+	}
+	if !ok {
+		t.Fatal("no ToolResultEvent was emitted")
+	}
+	return out
+}
+
 // TestDisposition_AutoConfineTrue_SubprocCapsInsufficient proves "confine if you can, gate
 // if you can't": when fs-confinement is unavailable, a subprocess tool GATES rather than
 // running unconfined.

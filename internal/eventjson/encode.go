@@ -97,7 +97,11 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			ResolvedPath: e.ResolvedPath,
 		}, true
 	case domain.ToolResultEvent:
-		return kindToolResult, e.EventBase, toolResultData{Result: toolResultOf(e.Result)}, true
+		return kindToolResult, e.EventBase, toolResultData{
+			Result:      toolResultOf(e.Result),
+			Tool:        e.Tool,
+			WriteTarget: e.WriteTarget,
+		}, true
 	case domain.SubAgentPhaseEvent:
 		return kindSubAgentPhase, e.EventBase, subAgentPhaseData{
 			Phase:     string(e.Phase),
@@ -202,9 +206,13 @@ type toolCallData struct {
 	ResolvedPath string   `json:"resolved_path"`
 }
 
-// toolResultData is the tool_result line: one tool's outcome after execution.
+// toolResultData is the tool_result line: one tool's outcome after execution, the tool it ran
+// under, and the path it wrote — "" when the call wrote none. The two trailing members joined the
+// line additively (ADR 0075 decision 10), so they sit after the result rather than before it.
 type toolResultData struct {
-	Result toolResult `json:"result"`
+	Result      toolResult `json:"result"`
+	Tool        string     `json:"tool"`
+	WriteTarget string     `json:"write_target"`
 }
 
 // subAgentPhaseData is the sub_agent_phase line: one delegation crossing a lifecycle boundary.

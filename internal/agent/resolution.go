@@ -228,6 +228,12 @@ type resolutionInput struct {
 	// disclosure the pane rendered and the permit the executor mints can never name three
 	// different paths.
 	writeEscapeTarget string
+	// writeTarget is the resolved absolute path itself, wherever it lands — the classified
+	// writeTargetClass.real — and "" for a call with no inspectable target. resolve() does not
+	// read it: the ladder decides from the three derived facts around it. It rides the input so
+	// the ONE resolution those facts came from also answers the ToolResultEvent's WriteTarget
+	// (dispatch's commit point), instead of the path being resolved a second time to be reported.
+	writeTarget string
 	// writeTargetInScratch is precomputed by dispatch from the SAME resolution as the two facts
 	// above: whether a workspace-scoped writer's target resolves inside the LIVE session scratch
 	// dir. It is the one target Plan writes and the one write Ask-Before does not gate (ADR 0012
