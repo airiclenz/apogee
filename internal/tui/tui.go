@@ -1270,6 +1270,26 @@ type Options struct {
 	// nil ⇒ nobody is listening, which is the whole of the degrade.
 	ReportActivity func(busy bool)
 
+	// ReportUpstream publishes the footer's OWN liveness verdict on the server this session is
+	// bound to, as a fact and never as a request: offline true with the monitor's failure text when
+	// the debounced offline crossing lands ([Model.foldBeatFailure] — offlineFailureThreshold
+	// consecutive failed IDLE beats, a failed beat during a busy Exchange or an actuation ignored,
+	// one failure on a cold start), false with no text when a beat lands after an offline stretch
+	// ([Model.foldBeat]) and when a `/server` switch resets the heartbeat to cold
+	// ([Model.foldServerSwitch]). It is called from the Update loop at exactly those crossings, so
+	// a listener sees each one once and nothing between them.
+	//
+	// It exists for the binary's `/schedule` Firings, the way ReportActivity exists for their Gate:
+	// a Firing raised while the footer says offline is refused up front with the same sentence a
+	// send earns (notice.ServerOffline) rather than failing at its first request, and the verdict
+	// it is refused on is THIS one — the renderer's, with every fold rule above — never a probe the
+	// binary re-derives from raw beats, which would latch offline through a `/load` restart or a
+	// retired server's late beat while the footer says online. The renderer publishes and decides
+	// nothing: what the value means for a Firing is the binary's.
+	//
+	// nil ⇒ nobody is listening, which is the whole of the degrade.
+	ReportUpstream func(offline bool, failure string)
+
 	// Resumed is the startup-replay payload when this run resumes a stored session (--resume or
 	// --continue); nil on a fresh start. newModel seeds the start-up box as usual, then repaints
 	// the resumed scrollback beneath it and relights the context gauge from the stored fill — or,

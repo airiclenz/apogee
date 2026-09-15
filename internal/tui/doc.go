@@ -832,9 +832,11 @@
 // ([session.Entry] and its views, versioned in internal/session); sessions.go the /sessions history browser;
 // schedule.go the /schedule surface — the status note, the cycle/mode/stop pickers and the notices
 // the scheduler's own Events become, with every when-and-how decision left to internal/schedule,
-// plus the one thing this package publishes rather than renders: [Options.ReportActivity], the
-// busy/idle fact the binary's Gate holds a due Firing on, computed by [Model.quiescent] and sent
-// from a defer in [Model.Update] so no fold can forget a transition (ADR 0033);
+// plus one of the two things this package publishes rather than renders: [Options.ReportActivity],
+// the busy/idle fact the binary's Gate holds a due Firing on, computed by [Model.quiescent] and sent
+// from a defer in [Model.Update] so no fold can forget a transition (ADR 0033) — the other being
+// [Options.ReportUpstream], the footer's offline verdict the binary refuses a due Firing on, sent
+// from heartbeat.go's three crossings;
 // autotitle.go the state machine behind a session's NAME — one cosmetic out-of-band completion
 // ([Options.GenerateTitle]) fired at the first prompt's submit, in parallel with the Exchange it
 // starts, which never reaches the Engine (ADR 0011), is not a Turn, enters no transcript, applies

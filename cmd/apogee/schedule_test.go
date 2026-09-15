@@ -402,11 +402,13 @@ func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 	})
 }
 
-// A Firing writes into a scratch dir of its OWN, named after the record it will be saved under
-// (residuals sweep item 6, 2026-08-24). The seed below is the dir minted when this SESSION booted
-// (wire_live.go), and a Firing that took it would put its working files in a dir a /clear or a
-// /sessions resume has since moved the session off — or, once the 14-day sweep has been past it, in
-// one that no longer exists at all.
+// A Firing writes into a scratch dir of its OWN (residuals sweep item 6, 2026-08-24). The seed below
+// is the dir minted when this SESSION booted (wire_live.go), and a Firing that took it would put its
+// working files in a dir a /clear or a /sessions resume has since moved the session off — or, once
+// the 14-day sweep has been past it, in one that no longer exists at all. That the dir is named
+// after the record it will be saved under is raise's own guarantee, pinned once for every Driver
+// (TestRaiseMintsOneIDForRecordAndScratch, wire_firing_test.go); what this Driver owes is that a
+// Firing never runs in the session's.
 //
 // Composed against the package's runner seam rather than a live model, which is why this test does
 // not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
@@ -441,7 +443,9 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 	if !stub.called {
 		t.Fatal("the firing composed no run at all")
 	}
-	assertFiringScratchDir(t, stub.spec.RecordID, stub.spec.Config.ScratchDir, roots.scratch)
+	if stub.spec.Config.ScratchDir == "" {
+		t.Fatal("the firing was fenced no scratch dir at all")
+	}
 	if stub.spec.Config.ScratchDir == seed {
 		t.Error("the firing ran in the session's boot-time scratch dir; want one of its own, named after its record")
 	}
@@ -1295,6 +1299,90 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 	if got := stub.spec.Config.EffortDialect; got != domain.EffortDialectOpenAI {
 		t.Errorf("the firing speaks EffortDialect %q, want the %q this session's own beat observed",
 			got, domain.EffortDialectOpenAI)
+	}
+}
+
+// A Firing raised while the footer says the server is OFFLINE is refused up front, with the sentence
+// a send earns at the prompt and `apogee headless` prints (notice.ServerOffline) — never run against
+// a dead endpoint to fail at its first request. The verdict is the TUI's own, latched host-side
+// through the same seam tui.Options.ReportUpstream is wired to (upstreamLatch.report): this Driver
+// re-derives nothing from raw beats. The error fire RETURNS is asserted, as headless's test does —
+// how the transcript renders it is the scheduler's, not this seam's. A latch nothing has reported
+// to, and the back-online report, both let the Firing run: no observation is no refusal.
+//
+// Composed against the package's runner seam rather than a live model, which is why this test does
+// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+func TestScheduleFiringRefusesWhenOffline(t *testing.T) {
+	const endpoint = "http://bound.invalid"
+	tests := []struct {
+		name    string
+		report  func(latch *upstreamLatch)
+		wantErr string
+	}{
+		{
+			name:    "offline, with the monitor's words",
+			report:  func(latch *upstreamLatch) { latch.report(true, "connection refused") },
+			wantErr: notice.ServerOffline(endpoint, "connection refused"),
+		},
+		{
+			name:    "offline, with nothing to say about it",
+			report:  func(latch *upstreamLatch) { latch.report(true, "") },
+			wantErr: notice.ServerOffline(endpoint, ""),
+		},
+		{
+			name:   "no verdict published yet runs",
+			report: func(*upstreamLatch) {},
+		},
+		{
+			name: "back online runs",
+			report: func(latch *upstreamLatch) {
+				latch.report(true, "timeout")
+				latch.report(false, "")
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			roots, err := resolveRoots(t.TempDir(), t.TempDir())
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			stub := &stubRunner{res: run.Result{Turns: 1, FinalText: "the answer"}}
+			prevRunner := runOnce
+			runOnce = stub.once
+			t.Cleanup(func() { runOnce = prevRunner })
+
+			latch := newUpstreamLatch()
+			tc.report(latch)
+			w := scheduleWiring{
+				roots:    roots,
+				live:     newLiveSettings(config.Options{}),
+				binding:  func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },
+				width:    func() int { return 1 },
+				upstream: latch,
+			}
+
+			out, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan})
+
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("fire: %v", err)
+				}
+				if !stub.called || out.FinalText != "the answer" {
+					t.Errorf("called = %v, Outcome = %+v; want the run to have gone ahead", stub.called, out)
+				}
+				return
+			}
+			if stub.called {
+				t.Fatal("the firing ran against a server the footer says is offline; want it refused up front")
+			}
+			if err == nil || err.Error() != tc.wantErr {
+				t.Errorf("err = %v; want %q verbatim — the sentence a send earns and headless prints", err, tc.wantErr)
+			}
+			if out.RecordID != "" {
+				t.Errorf("Outcome.RecordID = %q on a refusal; nothing was sent, so nothing was saved", out.RecordID)
+			}
+		})
 	}
 }
 

@@ -230,6 +230,7 @@ type rootWiring struct {
 	launcherSeams launcherWiring
 	titles        titleWiring
 	gate          *idleGate
+	upstream      *upstreamLatch
 	schedules     *schedule.Scheduler
 
 	// The resolved `ui.color-scheme:` palette and whatever the resolve complained about.

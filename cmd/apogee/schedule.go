@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -95,18 +95,29 @@ type scheduleWiring struct {
 	// direct call for the Bridge's reason: it is invoked from the Runner's worker goroutines, never
 	// from Update. nil leaves a Reaction's failure silent, which is what a composition test wants.
 	notifyHook func(string)
+
+	// upstream is the footer's liveness verdict on the bound server, as the TUI last published it
+	// through [tui.Options.ReportUpstream] (upstreamLatch, below) — the pair a Firing's beat carries
+	// so raise can refuse one up front while the server is offline. It is the renderer's OWN
+	// debounced verdict and never a probe of this side's: the fold rules that decide it (a failed
+	// beat during a busy Exchange ignored, a `/server` switch resetting to cold) live in
+	// internal/tui/heartbeat.go, and a re-derivation from raw beats here would latch offline
+	// through a `/load` restart while the footer says online. nil, or a latch nothing has reported
+	// to yet, is "no observation" — the Firing proceeds, exactly as every Firing did before the gate.
+	upstream *upstreamLatch
 }
 
 // fire performs one Firing and reports the record it left behind. It is the value wired into
 // schedule.Config.Fire, and it runs on the scheduler's goroutine — never the Update loop's — which
 // is why everything it touches is either immutable, its own copy, or explicitly goroutine-safe (the
-// settings holder, the store, the skills Provider, the Confiner).
+// settings holder, the store, the skills Provider, the Confiner, the upstream latch).
 //
-// The Config it runs against is composed by [firingConfig] (wire_firing.go), the one composer every
-// Driver's unattended run is built by — an unattended run is an unattended run whichever Driver
-// raised it (ADR 0031). What THIS Driver decides is what a live session, rather than a file or a
-// daemon's entry, decides: the settings the human has moved since launch, the server the session has
-// switched to, the width its heartbeat already resolved, and the skill catalogue it is sharing.
+// The Firing is raised by [raise] (wire_firing.go), the one act every Driver's unattended run is —
+// an unattended run is an unattended run whichever Driver raised it (ADR 0031). What THIS Driver
+// decides is what a live session, rather than a file or a daemon's entry, decides: the settings the
+// human has moved since launch, the server the session has switched to, the width its heartbeat
+// already resolved, the skill catalogue it is sharing, and the footer's own verdict on whether that
+// server is there at all.
 //
 // The delegates that assume a human are never handed over: run.Once pins its own fail-safe denier and
 // leaves ask_user and present_document unregistered (ADR 0033, decision 2), and handing it the
@@ -118,53 +129,20 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	binding := w.binding()
 	opts, entry := w.live.firingBinding(binding)
 
-	// This Firing's own Reaction Runner (ADR 0073), built from the `reactions:` list the SESSION is
-	// running now — the one firingBinding hands over, which the config-watcher's reload arm keeps
-	// current (liveSettings.setObserve) — rather than the list the process launched with. A
-	// `reactions:` edit applied mid-session therefore reaches the Firings that session raises, which
-	// is the same promise every other live key already carries into them (ADR 0037).
+	// The one act every unattended run is (raise, wire_firing.go), reached from this Driver's own
+	// facts. No `model:` overlay is handed over: the model this session is bound to is already the
+	// entry's own above, and naming it twice would be two routes to one value. The mode is the
+	// Schedule's, chosen explicitly at creation and never inherited from the session's own (ADR
+	// 0033, decision 3): Auto's eligibility was ruled on there, at the surface that offered it,
+	// exactly as agent.New trusts a Config that says Auto. The Schedule this run belongs to travels
+	// with it, so the Firing's own Reaction Runner stamps it onto every payload (ADR 0073) and its
+	// record is filed as the Schedule's. No onID and no narrate: this Driver stamps the id on no
+	// stream, and a Firing's narration is the session record it leaves behind — which is also why
+	// the rebind notices are dropped: they are a launch's narration.
 	//
-	// Per Firing rather than per session, even though a session already holds a Runner of its own:
-	// this one stamps the Schedule the run belongs to onto every payload, so a Reaction can tell a
-	// scheduled run from the conversation it was raised beneath. The session's Runner keeps
-	// observing the session; the two never see each other's events.
-	//
-	// The list is DIVIDED first (ADR 0076 A8): the Runner takes the observe half, and the sync half —
-	// the advise and gate entries the loop runs — is latched onto the Firing's own spec below, which
-	// is the one route it takes into an unattended run.
-	observeReactions, syncReactions := domain.SplitLanes(opts.Reactions)
-	hookRunner, err := firingHooks(observeReactions, w.roots.workspace,
-		&reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.notifyHook)
-	if err != nil {
-		return schedule.Outcome{}, fmt.Errorf("apogee: build the firing's reactions: %w", err)
-	}
-	// Drained when the Firing ends, on the same five-second grace every root gives (ADR 0073 §7) and
-	// deferred here so a composition that failed below takes its workers down with it. The session
-	// outlives this run, so a Runner left behind per Firing would accumulate for as long as the
-	// Schedule keeps firing.
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
-		defer cancel()
-		_ = hookRunner.Close(closeCtx)
-	}()
-
-	// This Firing's own record id, minted here because the runner is handed it beside the Config
-	// (run.Spec) and the composer creates the run's scratch dir under that name. Minted per FIRING
-	// rather than inherited: the session's own dir was named when this session booted, so a Firing
-	// that took it would write into a dir a /clear or a /sessions resume has since moved the session
-	// off — or, once the 14-day sweep has been past it, into one that is gone.
-	recordID := session.NewID(time.Now())
-
-	// The construction surface every unattended run shares (wire_firing.go), reached from this
-	// Driver's own facts. No `model:` overlay is handed over: the model this session is bound to is
-	// already the entry's own above, and naming it twice would be two routes to one value. The mode
-	// is the Schedule's, chosen explicitly at creation and never inherited from the session's own
-	// (ADR 0033, decision 3): Auto's eligibility was ruled on there, at the surface that offered it,
-	// exactly as agent.New trusts a Config that says Auto.
-	//
-	// The rebind notices are dropped — they are a launch's narration, and a Firing's narration is the
-	// session record it leaves behind.
-	cfg, routing, _, err := firingConfig(ctx, firingInputs{
+	// A Reaction's trouble, from either lane, is told through the Bridge's NotifyHook — the same
+	// seam this session's OWN Runner reports through (ADR 0073 §8).
+	res, _, err := raise(ctx, firingInputs{
 		opts:     opts,
 		entry:    entry,
 		apiKey:   binding.APIKey,
@@ -181,74 +159,51 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		//
 		// It carries the width this session resolves and the effort wire shape its own heartbeat
 		// observed (ADR 0060) — the session and its Firing are on one server, so the dialect it saw
-		// is the dialect this run must speak. The failure text is empty and the two liveness flags
-		// are set for the same reason the values are trusted at all: this session is talking to that
-		// server, which is a stronger observation than a fresh probe would be.
+		// is the dialect this run must speak. The two liveness flags and the failure text are the
+		// footer's verdict as the TUI last published it (upstream): a session whose footer says
+		// online is talking to that server, which is a stronger observation than a fresh probe would
+		// be, and one whose footer says offline has every reason raise needs to refuse the Firing
+		// before a prompt is spent on it (the gate is Beat.Answered, wire_firing.go). No verdict yet
+		// reads as online, so a session that has never heard from its monitor fires as it always did.
 		beat: func(context.Context, string, string, string) heartbeat.Beat {
+			offline, failure := w.upstream.verdict()
 			return heartbeat.Beat{
-				Reachable:     true,
-				Answered:      true,
+				Reachable:     !offline,
+				Answered:      !offline,
+				Failure:       failure,
 				TotalSlots:    w.width(),
 				EffortSupport: provider.EffortSupport{Dialect: w.live.observedDialect()},
 			}
 		},
-		recordID: recordID,
-		hooks:    hookRunner,
-		report:   w.notifyHook,
-	})
-	if err != nil {
-		return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's bindings: %w", err)
+		report: w.notifyHook,
+	}, f.Prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
+
+	// A Firing refused before it began — a composition that would not produce a Config, or a footer
+	// that says the server is offline — is this function's ERROR rather than an Outcome: the library
+	// lands it as schedule.EventFailed and the transcript's Firing block renders the sentence. It
+	// records no Outcome, because nothing was sent and there is nothing to report. The two stages
+	// are told apart by raise's typed refusal (errNotStarted) rather than by the sentence, on the
+	// daemon's terms (daemonfire.go): a composition refusal is wrapped under this Driver's own line,
+	// `%w` keeping the composer's error reachable, and the gate's refusal passes BARE — its sentence
+	// is the one a send earns at the prompt (internal/tui/heartbeat.go's upstreamBlockNote) and the
+	// one `apogee headless` prints, because all three read it from one composer, notice.ServerOffline,
+	// and a human who has just seen the footer refuse a send reads the same words from the Firing.
+	var refused errNotStarted
+	if errors.As(err, &refused) {
+		if refused.Stage == stageCompose {
+			return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's reactions/bindings: %w", refused.Err)
+		}
+		return schedule.Outcome{}, err
 	}
 
-	// Through the package's runner seam (headless.go) rather than run.Once directly: production never
-	// reassigns it, so this is the same call, and it is what lets a test read the Config a Firing
-	// composed — the width above being the whole point of one.
-	res, err := runOnce(ctx, run.Spec{
-		Config:       cfg,
-		Prompt:       f.Prompt,
-		ScheduleID:   f.ScheduleID,
-		ScheduleName: f.ScheduleName,
-		Store:        w.store,
-		RecordID:     recordID,
-		// The sync half of the `reactions:` list this session is running, armed on the Agent run.Once
-		// builds before its first Step, so a `gate:` the session answers to answers for the Firings it
-		// raises too.
-		Sync: syncReactions,
-		// The routing the composer resolved off the LIVE Options above, latched through run.Spec's
-		// seam (internal/run): a Firing raised in this session delegates to the entry the session
-		// delegates to, including one a `/sub-agents-server` pick moved it to since launch
-		// (liveSettings.subAgentsServer). Both fields are nil when no key named one.
-		DelegationTarget: routing.target,
-		DelegationSeat:   routing.seat,
-	})
-	// Everything the run learned about itself, mapped onto the scheduler's report in one place so
-	// both ends of this function tell the surface the same story. The library reads none of it — it
-	// is runner-agnostic (ADR 0033) — and a Driver renders the Firing from these fields alone: the
-	// answer without decoding a record, the stats without a second seam onto the run.
-	out := schedule.Outcome{
-		RecordID:  res.SessionID,
-		Title:     res.Title,
-		FinalText: res.FinalText,
-		Turns:     res.Turns,
-		Denied:    res.Denied,
-		Faulted:   res.Faulted,
-		Fault:     res.Fault,
-		// What the run found WRONG with the workspace's context files, and only that — the same
-		// ratified split the daemon's journal takes (daemonfire.go): a file present but unreadable,
-		// standing content past its Budget share. The plain loaded-files line stays dropped, because
-		// it is a launch's narration and a Firing's narration is the session record it leaves behind.
-		// Carried on an answer and on a failure that still produced a Result, since a Firing that
-		// went wrong is the one whose loading is worth suspecting. A failure carrying a ZERO
-		// run.Result carries nothing here: its report is empty, so this field is assigned an empty
-		// slice and the Firing block renders no anomaly line.
-		//
-		// Not stripped here: the text crosses as plain data (internal/notice composes; this Driver
-		// only routes), and the surface that renders it strips at its own seam — the TUI's Firing
-		// block does it for the prompt, the answer and the fault already.
-		ContextAnomalies: contextAnomalies(res.ContextFiles),
-		TotalTokens:      firingSpend(res),
-		SubAgents:        len(res.SubAgents),
-	}
+	// Everything the run learned about itself, mapped onto the scheduler's report by the one
+	// mapping every Driver's Firing shares (firingOutcome, wire_firing.go), so both ends of this
+	// function tell the surface the same story. The library reads none of it — it is
+	// runner-agnostic (ADR 0033) — and a Driver renders the Firing from these fields alone: the
+	// answer without decoding a record, the stats without a second seam onto the run. The anomalies
+	// it carries are what the run found WRONG with the workspace's context files — the transcript's
+	// Firing block renders them, stripping at its own seam (the text crosses as plain data).
+	out := firingOutcome(res)
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once fills its Result with whatever
 		// it managed BEFORE it stopped, and a surface that has already announced this Firing can
@@ -353,6 +308,45 @@ func (g *idleGate) wait(ctx context.Context) error {
 		case <-released:
 		}
 	}
+}
+
+// upstreamLatch is the host half of [tui.Options.ReportUpstream], the twin of [idleGate] one seam
+// over: the TUI publishes its footer's liveness verdict at each crossing, and a due Firing reads the
+// latched pair here to hand raise the beat it refuses on. It holds the verdict rather than deriving
+// one because the verdict IS the footer's — debounced over offlineFailureThreshold idle beats, deaf
+// to a failure during a busy Exchange, reset to cold by a `/server` switch — and any re-derivation
+// on this side from raw beats would disagree with what the human is looking at.
+//
+// It starts with NO observation, which reads as online: a session that has not heard from its
+// monitor has nothing to refuse on, and a Firing proceeds exactly as every Firing did before the
+// gate existed. The first crossing the TUI publishes is the first verdict held.
+type upstreamLatch struct {
+	mu      sync.Mutex
+	offline bool
+	failure string
+}
+
+// newUpstreamLatch builds a latch holding no observation.
+func newUpstreamLatch() *upstreamLatch { return &upstreamLatch{} }
+
+// report records the footer's verdict. It is the value wired into [tui.Options.ReportUpstream] and
+// is called from the Update loop at each crossing; a repeat of the value already held is harmless.
+func (l *upstreamLatch) report(offline bool, failure string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.offline, l.failure = offline, failure
+}
+
+// verdict reads the latched pair: offline, and the monitor's words for why when it had any. A nil
+// latch — a wiring with no TUI publishing to it, every composition test's — is no observation and
+// answers online, which is the same answer a latch nothing has reported to gives.
+func (l *upstreamLatch) verdict() (offline bool, failure string) {
+	if l == nil {
+		return false, ""
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.offline, l.failure
 }
 
 // scheduleAutoBlocked is the reason a Schedule may not be created in auto mode on this host, or ""

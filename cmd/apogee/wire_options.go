@@ -252,13 +252,16 @@ func (w *rootWiring) options() tui.Options {
 		// the session's own naming and leave the host generating delegation names nobody asked for.
 		OnAutoTitle: w.namer.setEnabled,
 		// The scheduler surface (ADR 0033): the seam /schedule and /schedule-stop drive, the reason
-		// auto is unavailable on this host (empty ⇒ it is available, and the picker offers it), and
-		// the activity report the Gate above releases a due Firing on. All three are wired together
-		// or not at all — the renderer's nil check on the seam speaks for the set.
+		// auto is unavailable on this host (empty ⇒ it is available, and the picker offers it), the
+		// activity report the Gate above releases a due Firing on, and the footer's liveness verdict
+		// a due Firing is refused on while the server is offline (upstreamLatch, schedule.go). All
+		// four are wired together or not at all — the renderer's nil check on the seam speaks for
+		// the set.
 		Schedules: w.schedules,
 		ScheduleAutoBlocked: scheduleAutoBlocked(
 			probe.BackendName(w.confiner), w.confiner.Capabilities(), w.opts.ConfineToWorkspace),
 		ReportActivity: w.gate.report,
+		ReportUpstream: w.upstream.report,
 		// engine.InExchange() reads the resumed Agent's open-Exchange state (false on a fresh start,
 		// or a cleanly-closed resume; true only when the stored snapshot died mid-task), so newModel
 		// appends the interrupted note and /continue picks the work back up. A pre-bound start has

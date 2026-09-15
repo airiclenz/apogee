@@ -389,11 +389,15 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// live — a runner that composes one unattended Firing from the session as it stands at that
 	// moment, settings and binding alike (schedule.go), a Gate that holds a due Firing until this
 	// session is quiescent, and a Notify that carries the scheduler's narration into the running
-	// program through the Bridge the Sink already uses.
+	// program through the Bridge the Sink already uses. The runner also reads the footer's
+	// liveness verdict off a latch the TUI publishes to (upstreamLatch, wired as
+	// tui.Options.ReportUpstream beside the Gate's ReportActivity), so a Firing due while the
+	// footer says offline is refused up front rather than failing at its first request.
 	//
 	// New's only refusal is a Config with no runner, which this one has; the error is returned
 	// rather than ignored because a scheduler that failed to build must not be handed on as a
 	// working seam.
+	w.upstream = newUpstreamLatch()
 	firings := scheduleWiring{
 		live:     w.live,
 		roots:    w.roots,
@@ -407,6 +411,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		// the same Bridge seam the session's own Runner reports through, so a failing Reaction reads
 		// identically whichever of the two fired it.
 		notifyHook: w.bridge.NotifyHook,
+		upstream:   w.upstream,
 	}
 	w.gate = newIdleGate()
 	w.schedules, err = schedule.New(schedule.Config{

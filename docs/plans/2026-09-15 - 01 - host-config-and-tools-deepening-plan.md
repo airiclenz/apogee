@@ -250,7 +250,14 @@ NOTES (2026-09-15): consequential edit — docs/adr/0075-the-headless-event-stre
 
 Commit: `refactor(cmd): the daemon Firing raises through raise`
 
-## 10. The in-session `/schedule` Firing raises through `raise` and gains the offline gate
+## 10. The in-session `/schedule` Firing raises through `raise` and gains the offline gate — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the host-side latch is `upstreamLatch` (`cmd/apogee/schedule.go`, beside `idleGate`), held on `rootWiring.upstream` (`wire.go`, not on the item's Files list — one field, the twin of `gate`) and built in `wire_live.go` beside the scheduler (also not on the Files list — the item names the `wire_options.go` wiring but the latch has to be constructed where `scheduleWiring` is); `scheduleWiring.upstream` nil or never reported to reads as online, so every existing `TestScheduleFiring*` builds no latch and stays green.
+NOTES (2026-09-15): the compose-stage refusal is wrapped "apogee: resolve the firing's reactions/bindings: %w" (the daemon's phrasing, item 9), replacing the two former prefixes ("build the firing's reactions" / "resolve the firing's bindings"); no test pinned either wording. The offline refusal passes bare (`errNotStarted.Error()`, Stage "offline").
+NOTES (2026-09-15): `runOnce` swaps that went (item 9's rule): only `TestScheduleFiringGetsItsOwnScratchDir`'s `assertFiringScratchDir` line — the record-id/scratch-dir pairing is `TestRaiseMintsOneIDForRecordAndScratch`'s for every Driver; the test keeps its Driver-side "never the session's seed dir" assertion (plus a non-empty check). `TestScheduleFiringCarriesTheSessionsSyncLane` stays: it asserts the session's LIVE lane list reaches `Spec.Sync`, a Driver-specific fact.
+NOTES (2026-09-15): consequential edit — cmd/apogee/wire_firing.go: made necessary by the beat now carrying the footer's verdict (the `firingInputs.beat` comment said a session hands over "an empty Failure").
+NOTES (2026-09-15): consequential edit — internal/tui/doc.go: made necessary by `Options.ReportUpstream` (the package map called `ReportActivity` "the one thing this package publishes rather than renders").
+NOTES (2026-09-15): consequential edit — internal/tui/heartbeat.go: made necessary by the `/schedule` Firing now refusing on `notice.ServerOffline` too (`upstreamBlockNote`'s comment named headless and the daemon as the only sharers).
 
 **What.** Recast at the regression check (2026-09-15). `cmd/apogee/schedule.go` replaces its sequence with `raise`, passing the session's live `Options`, live `*skills.Provider`, `w.width()` and the Monitor's last Beat. New user-visible behaviour (owner call): a Firing raised while the server is offline refuses up front with `notice.ServerOffline` — the same sentence headless prints — instead of failing at first send; `docs/manual/commands.md` (the `/schedule` row, or a paragraph beside it) states it. Depends on item 8.
 

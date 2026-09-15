@@ -383,6 +383,59 @@ func TestBusyFailureNeverFlipsOffline(t *testing.T) {
 	}
 }
 
+// upstreamReport is one publish through [Options.ReportUpstream], recorded as the pair it carried.
+type upstreamReport struct {
+	offline bool
+	failure string
+}
+
+// The footer's liveness verdict is PUBLISHED at exactly its three crossings — offline, with the
+// monitor's words; back online; and the cold reset a `/server` switch is — and at nothing else: a
+// first contact, a debounced single failure, a failed beat during a busy Exchange and a repeat
+// failure past the crossing all stay silent. The binary latches this pair to refuse a `/schedule`
+// Firing raised while the server is offline (cmd/apogee/schedule.go), so what it holds must be the
+// footer's own debounced verdict, fold rules and all, and never a re-derivation from raw beats.
+func TestReportUpstreamPublishesTheThreeCrossingsOnly(t *testing.T) {
+	t.Parallel()
+
+	var reports []upstreamReport
+	opts := testOpts
+	opts.ReportUpstream = func(offline bool, failure string) {
+		reports = append(reports, upstreamReport{offline: offline, failure: failure})
+	}
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo = staticServers(twoServers), (&fakeSwitch{}).switchTo
+	m := wireRebind(t, opts, &fakeHeartbeat{}, &fakeRebind{})
+
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // first contact: nothing crossed
+	m = foldBeatMsg(t, m, downBeat("timeout"))         // one failure at idle: debounced
+	if len(reports) != 0 {
+		t.Fatalf("reports after a first contact and one debounced failure = %+v, want none", reports)
+	}
+
+	m.state = stateRunning
+	m = step(t, m, beatMsg{gen: m.hb.gen, beat: downBeat("timeout")}) // busy: ignored
+	m.state = stateIdle
+	if len(reports) != 0 {
+		t.Fatalf("a failed beat during a busy Exchange published %+v; the fold ignores it", reports)
+	}
+
+	m = foldBeatMsg(t, m, downBeat("timeout")) // the second idle failure: the offline crossing
+	m = foldBeatMsg(t, m, downBeat("timeout")) // past the crossing: silent
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+	m, _ = typeCommand(t, m, "/server remote")
+
+	want := []upstreamReport{
+		{offline: true, failure: "timeout"},
+		{offline: false},
+		{offline: false},
+	}
+	if !reflect.DeepEqual(reports, want) {
+		t.Errorf("reports = %+v, want the three crossings %+v — offline with the monitor's words, "+
+			"back online, and the /server reset", reports, want)
+	}
+}
+
 // Recovery crosses back exactly once: the first successful beat after an offline stretch notes it,
 // every further success is silent, and the debounce counter is reset for the next stretch.
 func TestRecoveryNotesOnce(t *testing.T) {

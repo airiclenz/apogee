@@ -72,10 +72,10 @@ type firingInputs struct {
 	// one state. It also carries the liveness the unattended Drivers refuse a Firing on, which is
 	// why it is taken even when the entry pins both values away: the round trip IS the gate.
 	//
-	// A session passes its own beat instead — the width it already resolves and the dialect its
-	// heartbeat already observed, with an empty Failure — because it is holding the answer, and a
-	// Firing must not spend a round trip re-asking the server the session is talking to (design
-	// call 4).
+	// A session passes its own beat instead — the width it already resolves, the dialect its
+	// heartbeat already observed, and the liveness its footer last published (the upstream latch,
+	// schedule.go) — because it is holding the answer, and a Firing must not spend a round trip
+	// re-asking the server the session is talking to (design call 4).
 	beat func(ctx context.Context, endpoint, model, apiKey string) heartbeat.Beat
 	// recordID is the id this run's record is filed under. The run's scratch dir is created under
 	// it, so a saved run and the working files its model left behind are one thing to find and one

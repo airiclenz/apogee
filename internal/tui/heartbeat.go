@@ -287,12 +287,25 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	offeringMoved := m.picker.open && m.pickerCount() != shownBefore
 	crossed := m.hb.offline
 	m.hb.offline = false
+	if crossed {
+		m.reportUpstream(false, "")
+	}
 
 	m, rebound := m.observeBinding(beat, firstContact)
 	if crossed && !rebound {
 		m.transcript.addNote(onlineNote)
 	}
 	return m, crossed || rebound || offeringMoved
+}
+
+// reportUpstream publishes one liveness crossing through [Options.ReportUpstream] — the offline
+// crossing with the monitor's words, the back-online crossing and a `/server` reset with none. It
+// is the ONE call the three crossings share, so the publish and the state it reports cannot drift
+// apart at one site and not another; nil is nobody listening.
+func (m Model) reportUpstream(offline bool, failure string) {
+	if m.opts.ReportUpstream != nil {
+		m.opts.ReportUpstream(offline, failure)
+	}
 }
 
 // observeBinding measures a landed beat against the last observation that mattered and, when the
@@ -592,6 +605,10 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult, record c
 	m.opts.ContextWindow = result.ContextWindow
 	m.opts.Model = ""
 	m.hb = heartbeatState{gen: m.hb.gen, switched: true}
+	// The reset is a crossing too: whatever the footer said about the server being LEFT says
+	// nothing about the one being joined, so a listener holding an offline verdict is told to
+	// drop it before the first beat of the new chain has landed.
+	m.reportUpstream(false, "")
 	// The box's facts were frozen when it was seeded; restate it so the top of the scrollback names
 	// the server this session is now on rather than the one it launched against (applyRebind's own
 	// reason, one level up).
@@ -632,8 +649,8 @@ func serverSwitchNote(from string, to Options, saved bool) string {
 //     is not running should say so at once rather than after a debounce it has no evidence for.
 //   - Otherwise the crossing waits for offlineFailureThreshold consecutive idle failures.
 //
-// The crossing is noted exactly once; every further failed beat is silent until a success crosses
-// back (foldBeat).
+// The crossing is noted exactly once — and published once, through [Options.ReportUpstream] —
+// every further failed beat is silent until a success crosses back (foldBeat).
 func (m Model) foldBeatFailure(failure string) (Model, bool) {
 	if m.busy() || m.actuation.inFlight {
 		return m, false
@@ -645,6 +662,7 @@ func (m Model) foldBeatFailure(failure string) (Model, bool) {
 	}
 	m.hb.offline = true
 	m.transcript.addNote(offlineNote(failure))
+	m.reportUpstream(true, failure)
 	return m, true
 }
 
@@ -671,12 +689,13 @@ func (m Model) blockedUpstream() bool {
 // when the monitor has them, the failure's own words; the pre-bind case says the truth instead —
 // the server has not answered YET, which on a cold start is a matter of seconds.
 //
-// The offline sentence is SHARED with the unattended Drivers, which refuse a Firing on the same
-// finding (cmd/apogee/headless.go's offline gate and cmd/apogee/daemonfire.go's, both off
-// Beat.Answered). All three now READ it from one composer, notice.ServerOffline — the guard, the
-// endpoint and failure sources and the delivery still differ per Driver, only the wording is
-// shared — so the wording is edited there and nowhere else. Each Driver keeps its own test
-// spelling the sentence out, which is what catches a drift the composer cannot.
+// The offline sentence is SHARED with every unattended Firing, which is refused on the same
+// finding (cmd/apogee/wire_firing.go's raise, off Beat.Answered — headless and the daemon hand it
+// a probe, a `/schedule` Firing the verdict THIS fold published through [Options.ReportUpstream]).
+// All of them READ it from one composer, notice.ServerOffline — the guard, the endpoint and
+// failure sources and the delivery still differ per Driver, only the wording is shared — so the
+// wording is edited there and nowhere else. Each Driver keeps its own test spelling the sentence
+// out, which is what catches a drift the composer cannot.
 func (m Model) upstreamBlockNote() string {
 	if m.prebound() {
 		// The blocked-upstream ladder reads a session with no server as one whose first beat has not
