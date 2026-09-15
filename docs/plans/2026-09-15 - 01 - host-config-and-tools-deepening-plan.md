@@ -206,7 +206,14 @@ NOTES (2026-09-15): consequential edit — docs/adr/0037-every-settings-edit-app
 
 Commit: `refactor(cmd): firingConfig reads the bound entry; delete firingSources`
 
-## 8. `raise` — one act for every unattended Firing; headless ports first
+## 8. `raise` — one act for every unattended Firing; headless ports first — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `Outcome()` "derived by one method" is not added here — only the daemon builds a `schedule.Outcome`, and a helper with no caller until item 9 ports `daemonWiring.fire` would be dead code; item 9 (which the header's guard says gains `ContextAnomalies` on Outcome) owns that fold.
+NOTES (2026-09-15): the sweeps (`gcSessions`, `gcSnapshotDirs`) stay Driver steps BEFORE `raise` as the guard says, which means a composition/offline refusal now sweeps the stores where today the gate refused first — the guard's parenthetical ("a refused run still sweeps nothing, as today") has it inverted; no test asserts either way.
+NOTES (2026-09-15): `raise` always builds the Reaction Runner (an empty observe list included), as headless and the daemon both do today; `narrate` is therefore handed the Runner, never nil — `TestRaiseDecoratesTheSinkAfterTheGate` pins it. Two tests beyond the three the plan names: `TestRaiseCallsOnIDBeforeRefusingAndLatchesTheSchedule` and `TestRaiseDecoratesTheSinkAfterTheGate`.
+NOTES (2026-09-15): consequential edit — cmd/apogee/doc.go: made necessary by adding `raise` to wire_firing.go (the package map's half-line role for that file).
+NOTES (2026-09-15): consequential edit — docs/adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md: made necessary by moving the `firingConfig` failure and heartbeat-gate refusals it names into `raise` (dated in-place amendment, per the ratified ADR-text call).
+NOTES (2026-09-15): docs/manual/headless.md gains one sentence on the owned Ctrl-C-during-the-beat consequence (user-facing behaviour change).
 
 **What.** Recast at the regression check (2026-09-15). Add `raise(ctx, in firingInputs, prompt string, ref scheduleRef, store *session.Store, narrate func(domain.EventSink) domain.EventSink, beat heartbeat.Beat) (run.Result, []string, error)` in `cmd/apogee/wire_firing.go` owning, in order: `SplitLanes`, `firingHooks` + deferred `Close`, `session.NewID` (the same id seeds `RecordID` and the scratch dir — enforced by construction), `firingConfig`, route notices, the liveness gate (refuses with `notice.ServerOffline` when `beat` says offline), `cfg.Events` decoration via `narrate`, `runOnce(run.Spec)`, and `Outcome()` derived by one method. A not-started refusal is a typed `errNotStarted` so headless keeps exit 2 vs 1. `runOnce` stays the one injectable package var. Port `cmd/apogee/headless.go` onto it in this item (first caller proves the seam); its `RunStarted` emission moves into `narrate`. Depends on item 7.
 

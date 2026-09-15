@@ -265,7 +265,10 @@ that survivable:
   ignored for the duration of a `--format json` run so that the write returns an error instead of
   ending the process.
 - The first Ctrl-C is the polite stop: the run unwinds, its record is saved and its closing frame
-  is written. A **second** interrupt is taken literally — one stderr line, `apogee headless: second
+  is written. A Ctrl-C that lands **before the run starts** — while the server is still being
+  asked whether it is there — is the offline refusal instead: `cannot send — server offline
+  (<endpoint>): context canceled`, exit `2`, the closing frame written and nothing sent. A
+  **second** interrupt is taken literally — one stderr line, `apogee headless: second
   interrupt — exiting without waiting for the run`, and the process ends with exit `1` and **no
   `run_finished`**. It is the escape hatch for a stream nobody is draining, and the one path on
   which the closing frame is not written.

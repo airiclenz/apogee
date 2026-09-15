@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -1283,4 +1284,288 @@ func assertReadRootsCompose(t *testing.T, roots func() []string, skillRoots []st
 		t.Errorf("ExtraReadRoots() = %v; want the probed toolchain roots %v after the skill roots, got %v",
 			got, want, tail)
 	}
+}
+
+// raiseInputs is the one shape every raise test below starts from: a bound entry with a key already
+// resolved, throwaway roots, a fenceable host and a beat the test dictates — nothing that would
+// dial, read a keychain or reach the real runner. The stubRunner is installed on the package seam
+// for the test's duration; that is shared state, so none of these tests run in parallel.
+func raiseInputs(t *testing.T, stub *stubRunner, beat heartbeat.Beat) firingInputs {
+	t.Helper()
+	prev := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prev })
+	return firingInputs{
+		opts:     config.Options{Bypass: true},
+		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", ParallelAgents: 1},
+		apiKey:   "sk-test",
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		beat:     (&stubBeat{beat: beat}).discover,
+	}
+}
+
+// The liveness gate is raise's own: a server whose one beat answered NOTHING refuses the Firing
+// before a prompt is spent on it, with the sentence every Driver reads (notice.ServerOffline) and
+// the composition's notices still handed back — a Driver prints them before it reads the error.
+// A server that answered ANYTHING runs, because a 429 or a 404 is an answer this host has no
+// standing to judge (internal/heartbeat's Answered).
+func TestRaiseRefusesWhenOffline(t *testing.T) {
+	tests := []struct {
+		name    string
+		beat    heartbeat.Beat
+		wantErr string
+		wantRun bool
+	}{
+		{
+			name:    "nothing answered, and the beat says why",
+			beat:    heartbeat.Beat{Failure: "connection refused"},
+			wantErr: notice.ServerOffline("http://box.example/v1", "connection refused"),
+		},
+		{
+			name:    "nothing answered and nothing to say about it",
+			beat:    heartbeat.Beat{},
+			wantErr: notice.ServerOffline("http://box.example/v1", ""),
+		},
+		{
+			name:    "answered but throttled runs",
+			beat:    heartbeat.Beat{Answered: true, Throttled: true, Failure: "429"},
+			wantRun: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubRunner{res: run.Result{Turns: 1, FinalText: "the answer"}}
+			in := raiseInputs(t, stub, tc.beat)
+			// A `sub-agents-server:` no entry answers to: the one composition notice that does not
+			// depend on the beat, so the refusal path has something to hand back.
+			in.opts.SubAgentsServer = "ghost"
+
+			res, notices, err := raise(context.Background(), in, "a prompt", nil, nil, nil, nil)
+
+			if stub.called != tc.wantRun {
+				t.Fatalf("runner called = %v, want %v", stub.called, tc.wantRun)
+			}
+			if tc.wantRun {
+				if err != nil {
+					t.Fatalf("raise: %v", err)
+				}
+				if res.FinalText != "the answer" {
+					t.Errorf("Result = %+v; want the runner's own, passed through untouched", res)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.wantErr {
+				t.Errorf("err = %v; want %q verbatim", err, tc.wantErr)
+			}
+			if len(notices) != 1 || !strings.Contains(notices[0], "ghost") {
+				t.Errorf("notices = %q on the refusal; want the composition's own missing-name notice "+
+					"handed back beside the error — a Driver prints them before it reads it", notices)
+			}
+		})
+	}
+}
+
+// The by-construction guarantee: raise mints the id, hands it to onID BEFORE anything is composed,
+// and the very same id names both the record the runner is asked to file (run.Spec.RecordID) and
+// the scratch dir the composer fenced writable (Config.ScratchDir). Two Drivers minting two ids
+// was exactly the drift this act exists to make impossible.
+func TestRaiseMintsOneIDForRecordAndScratch(t *testing.T) {
+	stub := &stubRunner{res: run.Result{Turns: 1}}
+	in := raiseInputs(t, stub, heartbeat.Beat{Reachable: true, Answered: true})
+	var seen []string
+
+	_, _, err := raise(context.Background(), in, "a prompt", nil, nil,
+		func(recordID string) { seen = append(seen, recordID) }, nil)
+	if err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+
+	if len(seen) != 1 || seen[0] == "" {
+		t.Fatalf("onID saw %q; want exactly one non-empty id", seen)
+	}
+	if stub.spec.RecordID != seen[0] {
+		t.Errorf("run.Spec.RecordID = %q; want the id onID saw, %q", stub.spec.RecordID, seen[0])
+	}
+	if want := filepath.Join(in.roots.scratch, seen[0]); stub.spec.Config.ScratchDir != want {
+		t.Errorf("Config.ScratchDir = %q; want %q — the scratch dir is named after the record", stub.spec.Config.ScratchDir, want)
+	}
+	if _, statErr := os.Stat(stub.spec.Config.ScratchDir); statErr != nil {
+		t.Errorf("the scratch dir was not created: %v", statErr)
+	}
+}
+
+// onID fires before the composition and before the gate, so a Driver that stamps the id on a
+// stream stamps it on a refusal's closing frame too (ADR 0075 decision 5) — and a Schedule handed
+// in reaches the runner's Spec, so the record it files is the Schedule's.
+func TestRaiseCallsOnIDBeforeRefusingAndLatchesTheSchedule(t *testing.T) {
+	t.Run("an offline refusal still saw the id", func(t *testing.T) {
+		stub := &stubRunner{}
+		in := raiseInputs(t, stub, heartbeat.Beat{Failure: "connection refused"})
+		var seen string
+
+		_, _, err := raise(context.Background(), in, "a prompt", nil, nil,
+			func(recordID string) { seen = recordID }, nil)
+
+		if err == nil {
+			t.Fatal("a server that answered nothing was allowed to run")
+		}
+		if seen == "" {
+			t.Error("onID never saw the id; the refusal's closing frame would carry null")
+		}
+	})
+
+	t.Run("the Schedule reaches the Spec", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{Turns: 1}}
+		in := raiseInputs(t, stub, heartbeat.Beat{Reachable: true, Answered: true})
+
+		_, _, err := raise(context.Background(), in, "a prompt",
+			&reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil, nil, nil)
+
+		if err != nil {
+			t.Fatalf("raise: %v", err)
+		}
+		if stub.spec.ScheduleID != "sch-1" || stub.spec.ScheduleName != "Nightly" {
+			t.Errorf("Spec schedule = %q/%q; want sch-1/Nightly", stub.spec.ScheduleID, stub.spec.ScheduleName)
+		}
+		if stub.spec.Prompt != "a prompt" {
+			t.Errorf("Spec.Prompt = %q; want the prompt raise was handed", stub.spec.Prompt)
+		}
+	})
+}
+
+// narrate is handed the sink the Config carries and decides the one the run is driven with — and
+// it is called only once both gates have passed, so a Driver that announces the run from inside it
+// never announces a run that was refused.
+func TestRaiseDecoratesTheSinkAfterTheGate(t *testing.T) {
+	t.Run("a raised run is driven with the decorated sink", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{Turns: 1}}
+		in := raiseInputs(t, stub, heartbeat.Beat{Reachable: true, Answered: true})
+		sink := &recordingSink{}
+		var sawID string
+
+		_, _, err := raise(context.Background(), in, "a prompt", nil, nil, nil,
+			func(recordID string, cfg apogee.Config, inner domain.EventSink) domain.EventSink {
+				sawID = recordID
+				if _, ok := inner.(*reactions.Runner); !ok {
+					t.Errorf("narrate was handed %T; want the Reaction Runner raise built — the "+
+						"decoration WRAPS the Reactions, it never replaces them", inner)
+				}
+				if cfg.Endpoint != in.entry.Endpoint {
+					t.Errorf("narrate was handed a Config bound to %q; want the composed one", cfg.Endpoint)
+				}
+				return sink
+			})
+
+		if err != nil {
+			t.Fatalf("raise: %v", err)
+		}
+		if stub.spec.Config.Events != domain.EventSink(sink) {
+			t.Errorf("Config.Events = %v; want the sink narrate returned", stub.spec.Config.Events)
+		}
+		if sawID != stub.spec.RecordID {
+			t.Errorf("narrate saw id %q; want the run's own, %q", sawID, stub.spec.RecordID)
+		}
+	})
+
+	t.Run("a refused run never reaches narrate", func(t *testing.T) {
+		stub := &stubRunner{}
+		in := raiseInputs(t, stub, heartbeat.Beat{Failure: "connection refused"})
+
+		_, _, err := raise(context.Background(), in, "a prompt", nil, nil, nil,
+			func(string, apogee.Config, domain.EventSink) domain.EventSink {
+				t.Error("narrate was called on a refusal; the opening frame would announce a run that never happened")
+				return nil
+			})
+
+		if err == nil {
+			t.Fatal("a server that answered nothing was allowed to run")
+		}
+	})
+}
+
+// A refusal before the run is typed, so a Driver acts on the CLASS: composition refusals carry
+// Stage "compose", the gate's carry "offline", Error is the wrapped sentence verbatim — no prefix
+// of the type's own, so the exact wording a Driver prints stays the composer's — and
+// errors.Unwrap yields the refusal itself. A run that started passes its error through untyped.
+func TestRaiseNotStartedIsTyped(t *testing.T) {
+	tests := []struct {
+		name      string
+		shape     func(in *firingInputs)
+		beat      heartbeat.Beat
+		wantStage string
+	}{
+		{
+			name: "a composition refusal is stageCompose",
+			// The cheapest way into a composition refusal: an unknown placeholder in the system
+			// prompt, which the per-model half of the Config resolves and nothing earlier reads.
+			shape: func(in *firingInputs) {
+				in.opts.SystemPrompt = config.SystemPromptSettings{Global: config.PromptSource{Text: "hi {{bogus}}"}}
+			},
+			beat:      heartbeat.Beat{Reachable: true, Answered: true},
+			wantStage: stageCompose,
+		},
+		{
+			name: "a Reaction Runner this root cannot build is stageCompose",
+			// The Runner resolves the run's workspace before anything else is composed, and a
+			// leading ~ with no home to expand it against is the one way that resolution fails.
+			shape: func(in *firingInputs) {
+				if runtime.GOOS == "windows" {
+					t.Skip("the home lookup reads USERPROFILE on Windows; the ~ shape is not portable there")
+				}
+				t.Setenv("HOME", "")
+				in.roots.workspace = "~/nowhere"
+			},
+			beat:      heartbeat.Beat{Reachable: true, Answered: true},
+			wantStage: stageCompose,
+		},
+		{
+			name:      "the gate's refusal is stageOffline",
+			shape:     func(*firingInputs) {},
+			beat:      heartbeat.Beat{Failure: "connection refused"},
+			wantStage: stageOffline,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubRunner{}
+			in := raiseInputs(t, stub, tc.beat)
+			tc.shape(&in)
+
+			_, _, err := raise(context.Background(), in, "a prompt", nil, nil, nil, nil)
+
+			if stub.called {
+				t.Fatal("the runner ran; a refusal spends no prompt")
+			}
+			var refused errNotStarted
+			if !errors.As(err, &refused) {
+				t.Fatalf("err = %v (%T); want an errNotStarted", err, err)
+			}
+			if refused.Stage != tc.wantStage {
+				t.Errorf("Stage = %q; want %q", refused.Stage, tc.wantStage)
+			}
+			if inner := errors.Unwrap(err); inner == nil || inner != refused.Err {
+				t.Errorf("errors.Unwrap = %v; want the wrapped refusal %v", inner, refused.Err)
+			}
+			if err.Error() != refused.Err.Error() {
+				t.Errorf("Error() = %q; want the wrapped sentence %q verbatim", err.Error(), refused.Err.Error())
+			}
+		})
+	}
+
+	t.Run("a run that started passes its error through untyped", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{Turns: 1}, err: errors.New("apogee: the firing was cancelled")}
+		in := raiseInputs(t, stub, heartbeat.Beat{Reachable: true, Answered: true})
+
+		res, _, err := raise(context.Background(), in, "a prompt", nil, nil, nil, nil)
+
+		var refused errNotStarted
+		if errors.As(err, &refused) {
+			t.Errorf("a run that started came back typed as not started: %v", err)
+		}
+		if err == nil || err.Error() != "apogee: the firing was cancelled" || res.Turns != 1 {
+			t.Errorf("(res, err) = (%+v, %v); want the runner's own, passed through", res, err)
+		}
+	})
 }

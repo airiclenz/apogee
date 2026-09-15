@@ -55,7 +55,8 @@
 // acts cross to the renderer as; wire_firing.go the ONE composer every unattended run's
 // Config comes out of — the inputs a Driver decides and the twenty fields it does not, so
 // headless, a daemon Firing and a session's Schedule cannot read one configuration three
-// ways (ADR 0031, ADR 0033).
+// ways (ADR 0031, ADR 0033) — and raise, the one act that composes AND runs a Firing: the
+// Reaction Runner, the record id, the offline gate and the runner seam, in one order.
 //
 // The config cluster is no longer here: the schema, the precedence, the key registry, the
 // splice writer, the legacy fold and the [config.Options] the flags bind to all

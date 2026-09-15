@@ -88,7 +88,10 @@ through `notStarted` at thirteen points (exit 2): the flag, argument, config, wo
 checks before the session id is minted (`headless.go:489`); `firingConfig` failing (`:511`) and the
 server heartbeat (`:541`) after the id exists but before any sink does; and `run.Once`'s own pre-run
 exits (`:624`, `runErr != nil && res.Turns == 0`), which happen *after* the sink is installed
-(`:579`) yet emit nothing. `session` is present exactly when the id was minted, and its source is
+(`:579`) yet emit nothing. (Amended 2026-09-15: the composition and the heartbeat gate now happen
+inside `raise` (`wire_firing.go`), which mints the id and hands it to headless's `onID` hook before
+either, so both refusals still name the session; the line numbers above are the 2026-09 shape.)
+`session` is present exactly when the id was minted, and its source is
 headless's own `recordID`, never `run.Result.SessionID` — that is empty under `--no-save`, where the
 run still has an id. `saved` says whether a record was written, so a consumer does not feed the id
 of an unsaved run to `apogee undo`. A run cancelled by Ctrl-C still writes `run_finished`, with the

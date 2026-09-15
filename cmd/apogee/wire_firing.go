@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -10,6 +12,8 @@ import (
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -72,9 +76,11 @@ type firingInputs struct {
 	// Firing must not spend a round trip re-asking the server the session is talking to (design
 	// call 4).
 	beat func(ctx context.Context, endpoint, model, apiKey string) heartbeat.Beat
-	// recordID is the id this run's record is filed under, minted by the Driver because the Driver
-	// is what hands it to the runner. The run's scratch dir is created under it, so a saved run and
-	// the working files its model left behind are one thing to find and one thing to sweep.
+	// recordID is the id this run's record is filed under. The run's scratch dir is created under
+	// it, so a saved run and the working files its model left behind are one thing to find and one
+	// thing to sweep. A Driver that goes through raise leaves it empty — raise mints it, so the id
+	// that names the record and the id that names the scratch dir cannot be two — and a composition
+	// test, which runs nothing, states it directly.
 	recordID string
 	// hooks is the Reaction Runner this ONE Firing fires through (ADR 0073), built by the Driver from
 	// firingHooks and closed by it when the Firing ends. It is a field rather than a branch for the
@@ -607,4 +613,139 @@ func firingHooks(observe []domain.Reaction, workspace string, sched *reactions.S
 		Report:    report,
 		Exec:      reactions.DefaultExecutor(workspace),
 	})
+}
+
+// The two stages at which raise can refuse a Firing before it starts, carried on errNotStarted so
+// a Driver can tell WHICH refusal it is reporting without parsing the sentence: the composition
+// would not produce a Config, or it did and the bound server answered nothing.
+const (
+	stageCompose = "compose"
+	stageOffline = "offline"
+)
+
+// errNotStarted is raise's refusal of a Firing that never began: nothing was sent, nothing was
+// saved, and the sentence inside it is the whole of what the Driver has to say. It is typed rather
+// than sentinel because the Drivers act on the CLASS and not on the sentence — headless maps every
+// errNotStarted to its never-started exit code (exitNotStarted), whatever the Stage; the daemon
+// wraps a "compose" refusal under its own schedule-named log line and passes an "offline" one bare
+// — and Error is the wrapped sentence verbatim, with no prefix of this type's own, so the exact
+// wording a Driver prints (notice.ServerOffline above all) stays the composer's and the tests that
+// pin it keep comparing whole lines.
+type errNotStarted struct {
+	// Stage is stageCompose or stageOffline: which of raise's two gates refused.
+	Stage string
+	// Err is the refusal itself, as the composer or the gate worded it.
+	Err error
+}
+
+// Error reports the wrapped sentence verbatim.
+func (e errNotStarted) Error() string { return e.Err.Error() }
+
+// Unwrap exposes the wrapped refusal so errors.Is/As see straight through the stage.
+func (e errNotStarted) Unwrap() error { return e.Err }
+
+// raise is the ONE act every unattended Firing is: it takes what a Driver decided (firingInputs, the
+// prompt, the Schedule the run belongs to, the store its record lands in) and does, in this order,
+// everything the three Drivers used to spell out for themselves — divides the `reactions:` list
+// into its lanes (ADR 0076 A8), builds this Firing's own Reaction Runner and drains it when the
+// Firing ends (ADR 0073), mints the record id, composes the Config (firingConfig), refuses a server
+// that answered nothing (notice.ServerOffline), lets the Driver decorate the Event sink, and runs
+// the Firing once through the package's runner seam (runOnce). It exists because those steps were
+// three copies that had already drifted: the id that named a record and the id that named its
+// scratch dir were two mints in two Drivers rather than one by construction, and the liveness gate
+// was a sentence each Driver re-derived from the routing.
+//
+// It stays in cmd/apogee rather than moving into internal/run for ADR 0033 decision 6's reason: the
+// runner is runner-agnostic and the caller composes. What raise composes is the host's business —
+// Reactions, keys, skills, the beat — and what it never decides is the Driver's: the mode gate, the
+// roots, the sweeps and every notice a Driver prints in its own voice all happen before it is called.
+//
+// The id is minted HERE and nowhere else, which is the by-construction guarantee: firingConfig
+// creates the scratch dir under in.recordID and runOnce files the record under run.Spec.RecordID, and
+// both read the one value raise wrote. onID, when non-nil, sees that id immediately — before the
+// composition and before the gate — so a Driver that stamps it on a stream (headless's Event lines,
+// ADR 0075 decision 5) stamps it on a refusal's closing frame as well.
+//
+// narrate, when non-nil, is handed the sink the Config carries — the Runner, or nil where the Driver
+// built none — and returns the sink the run is driven with; it is called AFTER the gate, so a Driver
+// that announces the run from inside it (headless's opening frame) announces one that is committed
+// to. The notices are returned on EVERY path, the refusals included: a per-model rebind that had
+// something to say said it before the gate ran, and a Driver prints them before it reads the error.
+//
+// A refusal before the run is an errNotStarted, stageCompose for a Config that would not compose
+// (a `reactions:` list this root cannot resolve counts — it is structural configuration, exactly as
+// an unreadable prompt is) and stageOffline for the gate. That gate is Beat.Answered and nothing
+// else: false ONLY for a transport-level failure — a refused dial, a timeout, a DNS or TLS failure —
+// never for a server that answered something this host has no standing to judge; a 401, a 500 and a
+// 429 all ANSWER and keep the proceed-and-degrade every Firing has always had (internal/heartbeat).
+// The round trip was already taken by the composition, so the question costs nothing of its own.
+// Whatever runOnce returns passes through untouched: a run that started is the Driver's to report,
+// exit code and all.
+//
+// The Reaction drain is deferred here, so it runs BEFORE this function returns — a Firing refused
+// by either gate takes its workers down with it (a daemon runs for weeks, and a Runner leaked per
+// refused tick accumulates), and a Driver's own summary of a finished run prints after the last
+// Reaction has had its grace (hookCloseGrace). Close's own error is discarded: it says only that a
+// Reaction was killed at the deadline, the drop totals it wanted to report have already gone to the
+// Driver's report line, and the run is over either way.
+func raise(
+	ctx context.Context,
+	in firingInputs,
+	prompt string,
+	ref *reactions.ScheduleRef,
+	store *session.Store,
+	onID func(recordID string),
+	narrate func(recordID string, cfg apogee.Config, sink domain.EventSink) domain.EventSink,
+) (run.Result, []string, error) {
+	observeReactions, syncReactions := domain.SplitLanes(in.opts.Reactions)
+	hookRunner, err := firingHooks(observeReactions, in.roots.workspace, ref, in.report)
+	if err != nil {
+		return run.Result{}, nil, errNotStarted{Stage: stageCompose, Err: err}
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
+		defer cancel()
+		_ = hookRunner.Close(closeCtx)
+	}()
+	in.hooks = hookRunner
+
+	in.recordID = session.NewID(time.Now())
+	if onID != nil {
+		onID(in.recordID)
+	}
+
+	cfg, routing, notices, err := firingConfig(ctx, in)
+	if err != nil {
+		return run.Result{}, notices, errNotStarted{Stage: stageCompose, Err: err}
+	}
+	if !routing.Beat.Answered {
+		return run.Result{}, notices, errNotStarted{
+			Stage: stageOffline,
+			Err:   errors.New(notice.ServerOffline(in.entry.Endpoint, routing.Beat.Failure)),
+		}
+	}
+	if narrate != nil {
+		cfg.Events = narrate(in.recordID, cfg, cfg.Events)
+	}
+
+	spec := run.Spec{
+		Config:   cfg,
+		Prompt:   prompt,
+		Store:    store,
+		RecordID: in.recordID,
+		// The sync half of the `reactions:` list this Firing resolved, armed on the Agent run.Once
+		// builds before its first Step: a `gate:` answers this run's very first tool call, and its
+		// trouble reaches the same report line the Runner's does (Config.Report, firingConfig).
+		Sync: syncReactions,
+		// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a
+		// Firing delegates to the `sub-agents-server:` entry exactly as a session does, and both
+		// fields are nil when no key named one — the unrouted floor every Firing had before.
+		DelegationTarget: routing.target,
+		DelegationSeat:   routing.seat,
+	}
+	if ref != nil {
+		spec.ScheduleID, spec.ScheduleName = ref.ID, ref.Name
+	}
+	res, err := runOnce(ctx, spec)
+	return res, notices, err
 }

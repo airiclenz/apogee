@@ -3091,6 +3091,69 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 	return got
 }
 
+// A Ctrl-C DURING the composition's beat — before any run exists to cancel — is a refusal, not a
+// death by signal: the interrupt-aware ctx is installed before raise, so the beat sees the
+// cancellation, answers nothing, and the offline gate refuses with its own sentence carrying the
+// ctx's reason, exit 2, the closing frame written under `--format json` and the session named on
+// it. Owned consequence of one ctx for composition and run (plan 2026-09-15 - 01 item 8): the
+// process used to die by signal here, saying nothing.
+func TestHeadlessInterruptDuringTheBeatExits2(t *testing.T) {
+	const boundServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
+		"\nserver: testbox\n"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The beat stands in for a Monitor whose dial was cut short: the interrupt lands while it runs,
+	// and what it reports is what the real one reports for a cancelled ctx — no answer, and the
+	// ctx's own reason as the failure.
+	swapBeat(t, func(beatCtx context.Context, _, _, _ string) heartbeat.Beat {
+		cancel()
+		<-beatCtx.Done()
+		return heartbeat.Beat{Failure: beatCtx.Err().Error()}
+	})
+	stub := &stubRunner{}
+	prevRunner, prevConfiner := runOnce, newConfiner
+	runOnce = stub.once
+	newConfiner = func() apogee.Confiner { return fenceableHost }
+	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
+	t.Setenv(config.EnvMode, "")
+
+	cmd := newHeadlessCommand()
+	var outBuf, errBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&errBuf)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", testConfigHome(t, boundServer), "--workspace", t.TempDir(),
+		"--format", "json", "a prompt"})
+
+	err := cmd.ExecuteContext(ctx)
+
+	if err == nil {
+		t.Fatal("a run interrupted during the beat was allowed to start")
+	}
+	if stub.called {
+		t.Error("the runner ran; an interrupt during the beat refuses before a prompt is spent")
+	}
+	want := notice.ServerOffline(testServerEndpoint, context.Canceled.Error())
+	if got := err.Error(); got != want {
+		t.Errorf("the refusal reads %q; want the offline gate's own sentence %q", got, want)
+	}
+	if code := exitCodeFor(err); code != exitNotStarted {
+		t.Errorf("exit code = %d; want %d — nothing was sent and nothing was saved", code, exitNotStarted)
+	}
+	lines := jsonEventLines(t, outBuf.String())
+	if len(lines) != 1 {
+		t.Fatalf("stdout carried %d lines; want the closing frame alone: %q", len(lines), outBuf.String())
+	}
+	envelope, data := finishedFrame(t, lines)
+	wantExitCode(t, data, exitNotStarted)
+	if envelope["session"] == nil {
+		t.Error("session is null; the id was minted before the beat was taken")
+	}
+	if text, _ := data["error"].(string); text != want {
+		t.Errorf("the frame's error = %q; want %q", text, want)
+	}
+}
+
 // A --format value this command does not know is a usage mistake, refused in TEXT mode: no stream
 // has been opened yet, so the refusal reads as prose like every other never-started refusal and
 // stdout stays empty rather than carrying a single JSON line saying "that is not a format".

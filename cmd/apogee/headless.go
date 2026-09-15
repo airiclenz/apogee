@@ -665,12 +665,12 @@ func subAgentFrames(runs []run.SubAgentUsage) []eventjson.SubAgentUsage {
 // runner is handed, run it once, and route what came back — the answer to stdout, everything else
 // to stderr. It is split out of RunE so the whole path is one testable function.
 //
-// The Config itself is not composed here: it comes out of firingConfig (wire_firing.go), the one
-// composer every unattended run shares, because a headless run and a Firing are the same thing
-// reached by different Drivers (ADR 0031). What stays in this function is only what this Driver
-// decides — the prompt, the mode gate, the confinement backend and its eligibility ruling, the
-// scratch sweep, the notices this command prints in its own voice, and the store the record lands
-// in.
+// The Firing itself is not raised here: it goes through raise (wire_firing.go), the one act every
+// unattended run is — the Reaction Runner, the record id, the composition, the offline gate and the
+// run — because a headless run and a Firing are the same thing reached by different Drivers (ADR
+// 0031). What stays in this function is only what this Driver decides — the prompt, the mode gate,
+// the confinement backend and its eligibility ruling, the sweeps, the notices this command prints
+// in its own voice, the store the record lands in, and the exit code each outcome maps to.
 //
 // lines is the Event-line stream when the caller asked for one and nil under `--format text`, which
 // is the whole of what this function does differently for the two formats: it stamps the session id
@@ -727,33 +727,6 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		return run.Result{}, notStarted(err)
 	}
 
-	// This run's own Reaction Runner (ADR 0073), built as soon as the workspace it is rooted in is
-	// known — the `workspace:` filter that decides which Reactions are active here is compared against
-	// exactly that path (firingHooks), so it cannot be built any earlier.
-	//
-	// It belongs to the RUN rather than to the process: an `apogee headless` invocation is one
-	// Firing, and building the Runner per Firing is what lets a daemon tick and a `/schedule` Firing
-	// stamp the Schedule they belong to onto the payload while this one stamps none.
-	//
-	// A Reaction's trouble is reported on stderr, beside every other thing this command narrates:
-	// stdout is the model's answer and nothing else, and a Reaction that failed is a fact about a
-	// script the user configured rather than anything the answer should carry.
-	//
-	// A malformed list fails the run before a token is spent. `reactions:` is validated when the
-	// config file is parsed, so what is left to fail here is a `workspace:` this host cannot resolve —
-	// and an unattended run that quietly fired nothing would be indistinguishable from one whose
-	// Reactions all ran.
-	//
-	// The list is DIVIDED first (ADR 0076 A8): the Runner takes the observe half, and the sync half —
-	// the advise and gate entries the loop runs — is latched onto the Firing's own spec below, which
-	// is the one route it takes into an unattended run.
-	reportReaction := func(line string) { cmd.PrintErrln(line) }
-	observeReactions, syncReactions := domain.SplitLanes(opts.Reactions)
-	hookRunner, err := firingHooks(observeReactions, roots.workspace, nil, reportReaction)
-	if err != nil {
-		return run.Result{}, notStarted(err)
-	}
-
 	// The scratch sweep, run once here for the reason runRoot runs it at boot (wire.go): this run
 	// mints a dir of its own below and a host that is only ever driven headlessly never passes the
 	// TUI's boot, so this is the only beat on which the dirs earlier runs left behind are reclaimed.
@@ -797,19 +770,6 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 			}
 		}()
 	}
-
-	// The Reactions are drained AFTER the run and BEFORE the confinement teardown above — defers run
-	// in reverse, and this one is registered second — so a Reaction still holding an event this run
-	// produced finishes it while everything it was composed from still stands. The grace is the five
-	// seconds every root gives (ADR 0073 §7); what is still running when it expires is killed by the
-	// context, because a wedged script may not hold the shell's prompt. Close's own error is
-	// discarded: it says only that a Reaction was killed at the deadline, the drop totals it wanted to
-	// report have already gone to stderr, and the run is over either way.
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
-		defer cancel()
-		_ = hookRunner.Close(closeCtx)
-	}()
 
 	// Auto's eligibility is ruled on HERE, by the surface that offered the mode (ADR 0033,
 	// decision 3) — the same call the `/schedule` picker makes, through the same sentence, because
@@ -872,74 +832,6 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		}
 	}
 
-	// This run's own record id, minted here because the runner is handed it beside the Config
-	// (run.Spec) and the composer creates its scratch dir under that name. A headless run had
-	// neither before: nothing on this path mints a session id, so its model was offered no writable
-	// scratch inside the box and put its working files wherever else it could reach — the workspace
-	// itself, under an Auto fence.
-	recordID := session.NewID(time.Now())
-	// The stream's identity, stamped the moment the run acquires one. Every line written from here
-	// on carries it and every line before it carries null — a refusal that happened before the id
-	// existed reports honestly that the run had none, rather than being back-dated into one. The
-	// source is this Driver's own recordID and never run.Result.SessionID, which --no-save leaves
-	// empty on a run that had an id all along (ADR 0075 decision 5).
-	if lines != nil {
-		lines.SetSession(recordID)
-	}
-
-	// The construction surface every unattended run shares (wire_firing.go), reached from this
-	// Driver's own inputs: the startup selection as the bound entry, this invocation's roots and
-	// mode, and no key resolver, skill catalog or width source of its own — a command that runs once
-	// has no longer-lived facility to share, so the composer's own defaults are exactly right here.
-	//
-	// What comes back beside the Config is the per-model rebind's narration: a built-in Model
-	// profile announcing itself, and the roster delta such a profile carries. It goes to stderr,
-	// where it cannot contaminate the answer.
-	entry := opts.StartupEntry
-	cfg, routing, notices, err := firingConfig(cmd.Context(), firingInputs{
-		opts:     *opts,
-		entry:    entry,
-		roots:    roots,
-		confiner: confiner,
-		mode:     mode,
-		recordID: recordID,
-		hooks:    hookRunner,
-		report:   reportReaction,
-	})
-	if err != nil {
-		return run.Result{}, notStarted(err)
-	}
-	for _, n := range notices {
-		cmd.PrintErrln(n)
-	}
-
-	// The offline gate: a server that answered NOTHING refuses this run before a prompt is spent on
-	// it. The composition above already took the one beat an unattended run gets (firingConfig's
-	// unconditional observation, carried out on firingRouting), so the question costs no round trip
-	// of its own — it is read off what the composer already learned.
-	//
-	// The condition is Answered and nothing else: false ONLY for a transport-level failure — a
-	// refused dial, a timeout, a DNS or TLS failure, an address that could not be formed. Every
-	// server that returned ANY HTTP response — a 401, a 404, a 429, a body that would not decode —
-	// keeps today's proceed-and-degrade, because those are answers this Driver cannot judge and a
-	// throttled probe is silence rather than a verdict (internal/heartbeat's Beat.Answered). That is
-	// deliberately WEAKER than routing.Reachable, which is "handed me a usable model list": a
-	// completions-only endpoint that serves no list at all still runs, exactly as it does today.
-	//
-	// It refuses BEFORE runOnce, which is the whole point: no session record is written, no token is
-	// spent, and the exit is the existing never-started code (2), so a script can tell "the model
-	// never got the chance" from "the model ran and it went wrong".
-	//
-	// The wording comes from notice.ServerOffline, the one composer all three Drivers read, so a
-	// human who has seen a session refuse a send reads the same sentence from an unattended run.
-	// This gate keeps its own half — the one-shot beat it judges, the endpoint it names and the
-	// never-started exit it returns — and takes only the words; an edit to the wording belongs in
-	// internal/notice. The test below still pins the exact sentence, which is what catches a drift
-	// the composer cannot.
-	if !routing.Beat.Answered {
-		return run.Result{}, notStarted(errors.New(notice.ServerOffline(entry.Endpoint, routing.Beat.Failure)))
-	}
-
 	// The shared sessions store, built whatever --no-save says: the sweep below is about the
 	// records ALREADY on disk, not about the one this run may add, so the flag must not switch it
 	// off. Building it costs nothing on its own — the store is a directory path and a clock until
@@ -974,6 +866,11 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// Ctrl-C and SIGTERM end the run rather than the process: the cancellation flows out of Once
 	// as a run failure carrying whatever the run had reached, so an interrupted run still prints
 	// its partial answer and still saves its record.
+	//
+	// Installed BEFORE raise rather than between its gate and its run, so the composition's one
+	// beat of the server is taken under the same ctx the run is: a Ctrl-C during that beat refuses
+	// the Firing — the offline gate's own sentence, exit 2, a closing frame — instead of the process
+	// dying by signal with nothing said. Deliberately one ctx and not two.
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -990,15 +887,15 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		go watchSecondInterrupt(sigs, done, cmd.ErrOrStderr())
 	}
 
-	// The live view of the run. Everything a headless run REPORTS comes back on Result, but a
-	// tool call, a delegation's start and a prune all happen MID-run and leave no trace on the
-	// answer, so a human watching an unattended run would otherwise see nothing at all for ten
-	// minutes and read it as hung (narrationSink). The sink WRAPS whatever the Config already
-	// carries — the Reaction Runner since ADR 0073 — rather than replacing it, exactly as run.Once's
-	// own tap wraps this one in turn (run.Spec). The order that leaves is narration → Reactions →
-	// nothing: the renderer sees every Event first, and installing Reactions cannot change what
-	// this command prints. It is a pointer because it remembers each sub_agent call for its phase
-	// lines.
+	// The live view of the run, installed by raise on the sink the Config already carries — the
+	// Reaction Runner since ADR 0073 — once the Firing is committed to. Everything a headless run
+	// REPORTS comes back on Result, but a tool call, a delegation's start and a prune all happen
+	// MID-run and leave no trace on the answer, so a human watching an unattended run would otherwise
+	// see nothing at all for ten minutes and read it as hung (narrationSink). The sink WRAPS the
+	// Runner rather than replacing it, exactly as run.Once's own tap wraps this one in turn
+	// (run.Spec). The order that leaves is narration → Reactions → nothing: the renderer sees every
+	// Event first, and installing Reactions cannot change what this command prints. It is a pointer
+	// because it remembers each sub_agent call for its phase lines.
 	//
 	// Under `--format json` the encoder goes on TOP of that and never inside it, so the whole chain
 	// reads engine → serialEventSink → eventTap → encoder → narration → Reactions. Outermost is the
@@ -1012,19 +909,21 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// The narration goes quiet in the same breath, for the reason on the type: the prune, the
 	// calls and the phases are already their own lines on stdout under json, and each stderr
 	// sentence would be the same fact told twice.
-	cfg.Events = &narrationSink{inner: cfg.Events, out: cmd.ErrOrStderr(), quiet: lines != nil}
-	if lines != nil {
-		cfg.Events = lines.Wrap(cfg.Events)
-	}
-
-	// The opening frame, written HERE and not a line earlier: everything above this point can still
-	// refuse the run, and a `run_started` ahead of those refusals would announce a run that never
-	// happened. What it states is what the run was asked to BE — the bindings and the posture it
+	//
+	// The opening frame is written HERE and not a line earlier: raise calls this decorator only once
+	// its two gates have passed, and a `run_started` ahead of those refusals would announce a run that
+	// never happened. What it states is what the run was asked to BE — the bindings and the posture it
 	// was composed with — before it has done anything at all. The model is the one the composer
 	// actually bound (a per-model rebind may have moved it off the entry's own `model:`), and the
 	// version is the full build string `apogee --version` prints, so a consumer can tell which
 	// binary produced a stream it is reading back later.
-	if lines != nil {
+	entry := opts.StartupEntry
+	narrate := func(recordID string, cfg apogee.Config, sink domain.EventSink) domain.EventSink {
+		var events domain.EventSink = &narrationSink{inner: sink, out: cmd.ErrOrStderr(), quiet: lines != nil}
+		if lines == nil {
+			return events
+		}
+		events = lines.Wrap(events)
 		lines.RunStarted(eventjson.RunStarted{
 			Session:   recordID,
 			Workspace: roots.workspace,
@@ -1035,23 +934,69 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 			Confined:  opts.ConfineToWorkspace,
 			Version:   apogee.Version(),
 		})
+		return events
 	}
 
-	// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a
-	// headless run delegates to the `sub-agents-server:` entry exactly as a session does, and both
-	// fields are nil when no key named one — the unrouted floor every Firing had before this.
-	res, runErr := runOnce(ctx, run.Spec{
-		Config:   cfg,
-		Prompt:   prompt,
-		Store:    store,
-		RecordID: recordID,
-		// The sync half of the `reactions:` list this run resolved, armed on the Agent run.Once
-		// builds before its first Step: a `gate:` answers this run's very first tool call, and its
-		// trouble reaches the same stderr line the Runner's does (Config.Report, firingConfig).
-		Sync:             syncReactions,
-		DelegationTarget: routing.target,
-		DelegationSeat:   routing.seat,
-	})
+	// The stream's identity, stamped the moment the run acquires one — raise mints the id and hands it
+	// here before it composes anything, so every line written from here on carries it and every line
+	// before it carries null: a refusal that happened before the id existed reports honestly that the
+	// run had none, rather than being back-dated into one, and a refusal AFTER it (a Config that would
+	// not compose, a server that answered nothing) still names the session on its closing frame. The
+	// source is raise's own id and never run.Result.SessionID, which --no-save leaves empty on a run
+	// that had an id all along (ADR 0075 decision 5).
+	onID := func(recordID string) {
+		if lines != nil {
+			lines.SetSession(recordID)
+		}
+	}
+
+	// A Reaction's trouble is reported on stderr, beside every other thing this command narrates:
+	// stdout is the model's answer and nothing else, and a Reaction that failed is a fact about a
+	// script the user configured rather than anything the answer should carry. The same function
+	// serves both lanes (firingInputs.report), so one `reactions:` file's trouble reads the same way
+	// whichever lane it came from.
+	reportReaction := func(line string) { cmd.PrintErrln(line) }
+
+	// The one act every unattended run is (raise, wire_firing.go), reached from this Driver's own
+	// inputs: the startup selection as the bound entry, this invocation's roots and mode, and no key
+	// resolver, skill catalog or width source of its own — a command that runs once has no
+	// longer-lived facility to share, so the composer's own defaults are exactly right here. No
+	// Schedule: a headless run belongs to none, so its Reactions stamp none onto their payloads.
+	//
+	// What comes back beside the Result is the per-model rebind's narration: a built-in Model
+	// profile announcing itself, and the roster delta such a profile carries. It goes to stderr,
+	// where it cannot contaminate the answer, and it is printed BEFORE the error is read: a refusal
+	// still had a composition behind it, and what that composition said stands whether or not the
+	// run went on.
+	//
+	// The interrupt-aware ctx above is the ONE ctx the composition and the run share, which is what
+	// makes a Ctrl-C during the composition's beat land as a refusal — the offline gate's own sentence
+	// ("… context canceled"), exit 2, the closing frame written — rather than a process dying by
+	// signal with nothing said.
+	res, notices, runErr := raise(ctx, firingInputs{
+		opts:     *opts,
+		entry:    entry,
+		roots:    roots,
+		confiner: confiner,
+		mode:     mode,
+		report:   reportReaction,
+	}, prompt, nil, store, onID, narrate)
+	for _, n := range notices {
+		cmd.PrintErrln(n)
+	}
+
+	// A refusal that stopped the Firing before it was raised is exit 2, not exit 1: the composition
+	// would not produce a Config, or the bound server answered NOTHING — Beat.Answered false only for
+	// a transport-level failure, never for a 401, a 404 or a 429, which are answers this Driver cannot
+	// judge (raise carries the gate's whole reasoning). Nothing was sent, no session record was
+	// written and no token was spent, so what a script must do about it is fix the invocation, not
+	// read an outcome. The sentence is the composer's own, verbatim (errNotStarted), and for the gate
+	// it is notice.ServerOffline — the one composer all three Drivers read, so a human who has seen a
+	// session refuse a send reads the same sentence from an unattended run.
+	var refused errNotStarted
+	if errors.As(runErr, &refused) {
+		return run.Result{}, notStarted(runErr)
+	}
 
 	// What the workspace context files contributed, one line apiece on stderr: the same three
 	// sentences a session shows in its transcript, composed once in internal/notice so the two
