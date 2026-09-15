@@ -242,6 +242,30 @@ func contentStream(text string) string {
 	return fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(body), body)
 }
 
+// textObjectsStream renders one page whose text is written as one text object (BT … ET) per
+// run — the shape a producer emits when it positions every word or every wrapped line itself,
+// and the shape that hands the parser one fragment per line.
+func textObjectsStream(runs ...string) string {
+	var body strings.Builder
+	for _, run := range runs {
+		fmt.Fprintf(&body, "BT\n/F1 24 Tf\n72 720 Td\n(%s) Tj\nET\n", run)
+	}
+	return fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", body.Len(), body.String())
+}
+
+// onePagePDF builds a one-page document around the content-stream object it is given.
+func onePagePDF(t *testing.T, stream string) []byte {
+	t.Helper()
+
+	return hostilePDF(t,
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"+
+			" /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+		stream)
+}
+
 // textPagesPDF builds a document with one text-carrying page per string, behind a flat page
 // tree. Flat is right for a handful of pages and wrong for thousands — see treePagesPDF.
 func textPagesPDF(t *testing.T, pageTexts ...string) []byte {
@@ -565,5 +589,85 @@ func TestExtractPDF_CapsThePageWalk(t *testing.T) {
 	}
 	if want := fmt.Sprintf("[Pages %d–%d not extracted: %s]", pdfMaxPages+1, pdfMaxPages+1, pdfStopPageCap); !strings.HasSuffix(text, want) {
 		t.Errorf("text does not end with %q; tail: %q", want, text[max(0, len(text)-80):])
+	}
+}
+
+// TestPageAccumulator_JoinsWrappedLines pins the join rule on the accumulator itself, fed the
+// page text the parser hands it: a line carrying text that does not end a sentence is joined to
+// the next text line with one space, a sentence end keeps its break, a paragraph break (a blank
+// line) survives, and a blank line is never a join source — so a page whose text BEGINS with a
+// newline, as minimal.pdf's does, keeps that blank verbatim and read_file's `[Page 1]`, blank,
+// `Hello Apogee` pins hold.
+func TestPageAccumulator_JoinsWrappedLines(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		page string
+		want string
+	}{
+		{
+			name: "one word per line joins into one sentence",
+			page: "The\nquick\nbrown\nfox.",
+			want: "[Page 1]\nThe quick brown fox.",
+		},
+		{
+			name: "a sentence end keeps its break",
+			page: "First sentence.\nSecond\nsentence?\nThird: a clause;\nand more!",
+			want: "[Page 1]\nFirst sentence.\nSecond sentence?\nThird: a clause;\nand more!",
+		},
+		{
+			name: "a paragraph break survives",
+			page: "one\ntwo\n\nthree\nfour",
+			want: "[Page 1]\none two\n\nthree four",
+		},
+		{
+			name: "a leading blank line is kept verbatim",
+			page: "\nHello Apogee",
+			want: "[Page 1]\n\nHello Apogee",
+		},
+		{
+			name: "whitespace around a joined break collapses into the one space",
+			page: "wrapped \n  line",
+			want: "[Page 1]\nwrapped line",
+		},
+		{
+			name: "a whitespace-only line is neither joined nor a join target",
+			page: "a\n   \nb",
+			want: "[Page 1]\na\n   \nb",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			acc := pageAccumulator{}
+			acc.record(1, c.page, nil)
+
+			if got := strings.Join(acc.blocks, "\n\n"); got != c.want {
+				t.Errorf("record(%q) rendered %q, want %q", c.page, got, c.want)
+			}
+		})
+	}
+}
+
+// TestExtractPDF_JoinsOneTextObjectPerWord is the join seen end to end: a page written as one
+// text object per word — which the parser renders one word per line — reads back as a sentence,
+// and a page written as one object per sentence keeps its line per sentence.
+func TestExtractPDF_JoinsOneTextObjectPerWord(t *testing.T) {
+	t.Parallel()
+
+	data := onePagePDF(t, textObjectsStream("Hello", "joined", "world.", "Next", "line"))
+
+	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+	if failMessage != "" {
+		t.Fatalf("ExtractPDF failed: %s", failMessage)
+	}
+	if pages != 1 {
+		t.Errorf("pages = %d, want 1", pages)
+	}
+	if want := "[Page 1]\n\nHello joined world.\nNext line"; text != want {
+		t.Errorf("text = %q, want %q", text, want)
 	}
 }

@@ -100,6 +100,11 @@ func (f *transcriptFold) fold(e domain.Event) {
 		// holds a chars-per-token ratio of its own.
 		f.appendText(session.EntryKindNote,
 			fmt.Sprintf("pruned %d tool results (~%d tokens)", ev.Results, ev.Tokens), ev.EventBase)
+	case domain.RefClippedEvent:
+		// A note for the same reason: a reference that entered clipped is a message that went
+		// ahead, and the reader is told what the model was and was not shown. The event words
+		// the sentence itself (RefClippedEvent.Notice), so every Driver reads alike.
+		f.appendText(session.EntryKindNote, ev.Notice(), ev.EventBase)
 	}
 }
 

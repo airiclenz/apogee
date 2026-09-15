@@ -1073,9 +1073,21 @@ func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 // trimming is the deferred context-builder's job (TDD §8 #8).
 const maxRefFileBytes = 10 * 1024 * 1024
 
+// fileRefMaxTokens is the ABSOLUTE cap on one reference block — an @file's content or an attached
+// skill's body — whatever the window. The share of the History allocation (refBound) is a floor
+// against wedging the fold, and on a million-token window that share is itself hundreds of
+// thousands of tokens: a 1.2 MB reference then enters the conversation whole, spends the window
+// on one message and is never what the user meant by "@" a file (session-mining review
+// 2026-09-14, headline 10). Past this cap the block is elided to the same head/tail-plus-marker
+// shape and the model is told to read_file ranges for the rest. A constant, not a config key
+// (plan 2026-09-14 - 02, ratified): it mirrors read_file's own default window and is the same
+// kind of structural bound.
+const fileRefMaxTokens = 32_000
+
 // refBound is the structural bound ONE reference block of a message gets: the whole History
 // allocation (structuralFloor) SPLIT across the references that message carries, so however many
-// it carries their assembled blocks still fit the allocation.
+// it carries their assembled blocks still fit the allocation — and never more than
+// fileRefMaxTokens, the absolute cap a large window would otherwise let the share exceed.
 //
 // The divisor counts EVERY reference the message submitted — attached skills and @file refs
 // together, because both kinds are resolved into the one user message and spend the one
@@ -1087,7 +1099,26 @@ const maxRefFileBytes = 10 * 1024 * 1024
 // Computed ONCE per message by the caller (loop.go's pending-input consumption, Interject) and
 // handed to both resolvers, so the two seams cannot drift into two different arithmetics.
 func (a *Agent) refBound(refs int) int {
-	return max(a.structuralFloor()/max(refs, 1), 1)
+	return min(max(a.structuralFloor()/max(refs, 1), 1), fileRefMaxTokens)
+}
+
+// clampRef bounds one reference block against bound exactly as clampToBound does — the same
+// elision, byte for byte — and reports the clip as a domain.RefClippedEvent NOTE when it
+// happened: a clip that worked is housekeeping the human is owed a line about, never a fault,
+// so it does not ride the missing-reference ErrorEvent (refIgnored). The note names the bound
+// that clipped: the absolute cap when bound IS fileRefMaxTokens, else the reference's share of
+// the History allocation, which binds instead on a small window.
+func (a *Agent) clampRef(turn int, ref, content string, bound int) string {
+	clamped := a.clampToBound(content, bound)
+	if len(clamped) < len(content) {
+		a.cfg.Events.Emit(domain.RefClippedEvent{
+			EventBase: a.base(turn),
+			Ref:       ref,
+			Tokens:    bound,
+			Absolute:  bound == fileRefMaxTokens,
+		})
+	}
+	return clamped
 }
 
 // resolveFileRefs reads each @file reference within the workspace fence and returns the
@@ -1111,12 +1142,14 @@ func (a *Agent) refBound(refs int) int {
 // below are read-only before it tries to edit what it cannot write back.
 //
 // Every block carries the same STRUCTURAL floor a tool result has (clampToolResult, dispatch.go):
-// content past its share of the History allocation is elided to the shared head/tail-plus-marker
-// shape BEFORE the header is added, so the model still reads which file an elided block came from
-// and, for a document, how many pages it had. The bound is the CALLER'S (refBound), not this
-// function's: one message's attached skill blocks and @file blocks divide a single allocation
-// between them, so neither kind is bounded generously merely because the other kind carried the
-// rest of the references. The floor is structural (ADR 0006), not a Reaction:
+// content past its share of the History allocation — or past fileRefMaxTokens, whichever is
+// smaller — is elided to the shared head/tail-plus-marker shape BEFORE the header is added, so
+// the model still reads which file an elided block came from and, for a document, how many pages
+// it had. The bound is the CALLER'S (refBound), not this function's: one message's attached
+// skill blocks and @file blocks divide a single allocation between them, so neither kind is
+// bounded generously merely because the other kind carried the rest of the references. A clip is
+// reported to the human as a note (clampRef, domain.RefClippedEvent), never as the
+// missing-reference error. The floor is structural (ADR 0006), not a Reaction:
 // it consults no config and is never disabled under Bypass.
 // Like the tool floor it edits the conversation itself — the raw block never reaches history, and
 // so never reaches a snapshot or the rendered transcript. That is the price of a floor every later
@@ -1153,7 +1186,7 @@ func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bo
 			}
 			content, annotation = extracted, " ("+doctext.PDFAnnotation(pages)+")"
 		}
-		fmt.Fprintf(&b, "Referenced file `%s`%s:\n```\n%s\n```\n\n", ref, annotation, a.clampToBound(content, bound))
+		fmt.Fprintf(&b, "Referenced file `%s`%s:\n```\n%s\n```\n\n", ref, annotation, a.clampRef(turn, "@"+ref, content, bound))
 	}
 	return b.String()
 }
@@ -1251,8 +1284,10 @@ const skillDirToken = domain.SkillDirToken
 // wrote, but nothing bounds its size — a SKILL.md is any file on disk — and the fold's
 // keep-the-most-recent-message rule cannot shed the message a skill block rides in, so an
 // unclamped body could wedge the very Turn it was invoked to steer. The bound arrives from the
-// caller (refBound), shared with the @file blocks of the same message. {{SKILL_DIR}} is expanded
-// BEFORE the clamp measures the body: the model is bounded against the text it actually reads.
+// caller (refBound), shared with the @file blocks of the same message and capped at
+// fileRefMaxTokens like them; a clipped body is reported as the same note (clampRef).
+// {{SKILL_DIR}} is expanded BEFORE the clamp measures the body: the model is bounded against the
+// text it actually reads.
 func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 	if len(ids) == 0 {
 		return ""
@@ -1293,7 +1328,7 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 				"touch this folder\n", s.Dir)
 			body = strings.ReplaceAll(body, skillDirToken, s.Dir)
 		}
-		fmt.Fprintf(&b, "%s\n</skill>\n\n", a.clampToBound(body, bound))
+		fmt.Fprintf(&b, "%s\n</skill>\n\n", a.clampRef(turn, "/"+id, body, bound))
 	}
 	return b.String()
 }

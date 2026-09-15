@@ -149,7 +149,7 @@ rather than flattened beside it:
 
 | Member | What it carries |
 |---|---|
-| `event` | the line kind: one of the nineteen names below |
+| `event` | the line kind: one of the twenty names below |
 | `v` | the contract version — `2` today, on **every** line |
 | `seq` | 1-based, counting every line the run wrote, the two frames included |
 | `time` | RFC3339Nano, stamped as the line is written |
@@ -163,9 +163,9 @@ Every member is **always present**, and is `null` where the line has no value fo
 never has to test for a missing key. `depth` is what separates the run's own events from a
 sub-agent's: the lines carry every depth, not just the top.
 
-### The nineteen line kinds
+### The twenty line kinds
 
-Seventeen of them are engine events, and the two frames are not. The names are snake_case on
+Eighteen of them are engine events, and the two frames are not. The names are snake_case on
 purpose — a [Reaction notice](reactions.md)'s kebab-case name for a neighbouring moment is a *different*
 moment, and the case difference is the signal.
 
@@ -185,6 +185,7 @@ moment, and the case difference is the signal.
 | `reaction_fired` | a Reaction acted: an engine builtin (a Floor guard or the context-fill notice) or armed Reaction, at which Moment, and what it did |
 | `error` | something failed, named by its source |
 | `prune` | the context was pruned: how many results, how many tokens |
+| `ref_clipped` | an `@file` or attached skill entered the conversation clipped to its bound: which reference, the bound in tokens, whether the absolute per-reference cap or its share of the window bound it |
 | `usage` | one model call's token accounting and the run's cumulative totals |
 | `audit` | a tool call's allow/deny decision and its reason |
 | `seam_closed` | one in-loop seam finished passing: `data.seam` is its closing notice's name (`post-response-finished`, …) and `data.fired` the reactions that acted there, in order — **opt-in**, absent from the stream unless `--seams` asks for it |

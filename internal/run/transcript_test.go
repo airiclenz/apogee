@@ -32,6 +32,28 @@ func TestTranscriptFoldRecordsAPrune(t *testing.T) {
 	}
 }
 
+// TestTranscriptFoldRecordsAClippedReference pins the entry a clipped @file leaves in a record:
+// a NOTE, never an error — the message went ahead with the reference's head and tail, and the
+// reader is told what the model was shown — worded by the event itself (RefClippedEvent.Notice),
+// so the TUI and the record spell one clip one way.
+func TestTranscriptFoldRecordsAClippedReference(t *testing.T) {
+	t.Parallel()
+
+	f := newTranscriptFold("")
+
+	f.fold(domain.RefClippedEvent{Ref: "@docs/big.md", Tokens: 32000, Absolute: true})
+
+	entries := f.entries
+	if len(entries) != 1 {
+		t.Fatalf("the fold wrote %d entries, want the clip note alone: %+v", len(entries), entries)
+	}
+	const want = "@docs/big.md clipped to 32k tokens — read_file ranges for the rest"
+	if entries[0].Kind != session.EntryKindNote || entries[0].Text != want {
+		t.Errorf("clip entry = %s/%q, want %s reading %q",
+			entries[0].Kind, entries[0].Text, session.EntryKindNote, want)
+	}
+}
+
 // TestTranscriptFoldIgnoresAReactionFiring pins the other half of the prune contract: a Reaction
 // firing contributes NOTHING to a Firing's record. A reaction repairs the model's own failure or
 // shapes what it sees without steering it (ADR 0071, ADR 0076) — engine behaviour the reader of a

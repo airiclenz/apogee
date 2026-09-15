@@ -252,7 +252,9 @@ type pageAccumulator struct {
 
 // record renders one page's outcome. A page the parser could not read is a HOLE in the document
 // rather than a blank page: it is kept, and it resets the phantom run, because one unreadable
-// page must not cost the model the other ninety-nine.
+// page must not cost the model the other ninety-nine. A page that carries text is joined into
+// lines (joinWrappedLines) before it is kept: the parser breaks a line at every text object, and
+// a producer that emits one object per word hands the model one word per line.
 func (a *pageAccumulator) record(number int, pageText string, pageErr error) {
 	switch {
 	case pageErr != nil:
@@ -261,8 +263,59 @@ func (a *pageAccumulator) record(number int, pageText string, pageErr error) {
 		a.hold(number, pageBlock(number, ""))
 	default:
 		a.hasText = true
-		a.keep(number, pageBlock(number, strings.TrimRight(pageText, " \t\r\n")))
+		a.keep(number, pageBlock(number, joinWrappedLines(strings.TrimRight(pageText, " \t\r\n"))))
 	}
+}
+
+// sentenceEnds are the characters a line ends with when it ends a sentence or a clause — the one
+// signal, in text the parser has already flattened, that the next line starts something new
+// rather than continuing this one.
+const sentenceEnds = ".:;?!"
+
+// joinWrappedLines joins the line breaks the parser put INSIDE a sentence back into spaces. The
+// parser writes a newline at every text object (BT) and every explicit line move, so a page laid
+// out one object per word or per wrapped line comes back one fragment per line, and the model
+// reads a column of words where the page showed prose. A line carrying text that does not end
+// in a sentence end (sentenceEnds) and is followed by another text line is joined to it with a
+// single space; a line ending a sentence keeps its break, and a paragraph — a text line followed
+// by a blank line — survives. A blank (whitespace-only) line is never a join source and is
+// kept verbatim, so a page whose text begins with a newline still renders its marker, the blank,
+// then the text, exactly as before. The whitespace either side of a joined break collapses into
+// the one space; a line that keeps its break is written as it came.
+func joinWrappedLines(pageText string) string {
+	lines := strings.Split(pageText, "\n")
+	if len(lines) < 2 {
+		return pageText
+	}
+	var b strings.Builder
+	b.Grow(len(pageText))
+	joined := false
+	for i, line := range lines {
+		if joined {
+			line = strings.TrimLeft(line, " \t")
+		}
+		joined = i < len(lines)-1 && joinsWithNext(line, lines[i+1])
+		if joined {
+			b.WriteString(strings.TrimRight(line, " \t\r"))
+			b.WriteByte(' ')
+			continue
+		}
+		b.WriteString(line)
+		if i < len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// joinsWithNext says whether line continues onto next: both carry text, and line does not end a
+// sentence.
+func joinsWithNext(line, next string) bool {
+	text := strings.TrimRight(line, " \t\r")
+	if text == "" || strings.TrimSpace(next) == "" {
+		return false
+	}
+	return !strings.ContainsRune(sentenceEnds, rune(text[len(text)-1]))
 }
 
 // keep commits a page that belongs in the output, together with any blank run before it — those

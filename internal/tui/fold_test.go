@@ -275,6 +275,16 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
+			name: "RefClippedEvent appends the host note and moves nothing else",
+			// A reference entered the conversation clipped to its bound: one dim note in the
+			// scrollback, at the run that emitted it (transcript.addRefClipped, placement pinned in
+			// transcript_test.go), and never an error entry — the message went ahead. The gauge
+			// is untouched for the same reason a prune leaves it: the fill is what the last reply
+			// reported.
+			event:       domain.RefClippedEvent{Ref: "@docs/big.md", Tokens: 32000, Absolute: true},
+			wantEntries: 1,
+		},
+		{
 			name: "UsageEvent at depth 0 moves the gauge and appends no entry",
 			// The top-level reading is the status line's: it lights the gauge and nothing in the
 			// scrollback. A sub-agent's reading (Depth > 0) appends no entry either — it lands ON

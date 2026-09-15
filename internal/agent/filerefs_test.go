@@ -446,6 +446,131 @@ func TestClampToBound_SharedByToolResultsAndFileRefs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// The ABSOLUTE cap on one reference (plan 2026-09-14 - 02, item 7). The share
+// of the History allocation is a floor against wedging the fold, and on a
+// million-token window that share lets a 1.2 MB reference in whole; refBound
+// is now min(share, fileRefMaxTokens), and a clip is told to the human as a
+// NOTE (domain.RefClippedEvent), never as the missing-reference error.
+// ---------------------------------------------------------------------------
+
+// largeWindow is a window on which the share of the History allocation is far past
+// fileRefMaxTokens, so the absolute cap is the bound that clips.
+const largeWindow = 1_300_000
+
+// clippingRefAgent is refAgentWithWindow with the events kept: the clip note is the fact under
+// test, and refAgentWithWindow's own sink is not returned.
+func clippingRefAgent(t *testing.T, dir string, window int) (*Agent, *recordingSink) {
+	t.Helper()
+
+	sink := &recordingSink{}
+	a, _ := refAgentWithWindow(t, dir, window, func(cfg *domain.Config) { cfg.Events = sink })
+	return a, sink
+}
+
+// refClipNotes returns the clip notes a sink recorded, in order.
+func refClipNotes(events []domain.Event) []domain.RefClippedEvent {
+	var notes []domain.RefClippedEvent
+	for _, e := range events {
+		if note, ok := e.(domain.RefClippedEvent); ok {
+			notes = append(notes, note)
+		}
+	}
+	return notes
+}
+
+// TestResolveFileRefs_CapsAReferenceAtTheAbsoluteBound is the item's core fact: on a window whose
+// History share would admit a 1.2 MB reference whole, the block is still clipped to
+// fileRefMaxTokens with the shared marker, and the human reads one note naming the 32k bound —
+// a note, not an ErrorEvent, because the message went ahead.
+func TestResolveFileRefs_CapsAReferenceAtTheAbsoluteBound(t *testing.T) {
+	dir := t.TempDir()
+	huge := writeRefFile(t, dir, "huge.txt", 15_000, refFiller)
+	if len(huge) < 1_200_000 {
+		t.Fatalf("payload is %d bytes, want at least 1.2 MB for the test to mean anything", len(huge))
+	}
+
+	a, sink := clippingRefAgent(t, dir, largeWindow)
+	capChars := int(float64(fileRefMaxTokens) * a.budget().CharsPerToken)
+	if share := a.structuralFloor(); share <= fileRefMaxTokens {
+		t.Fatalf("History share = %d tokens on a %d-token window; the share, not the cap, would bind", share, largeWindow)
+	}
+
+	body := blockBody(t, submitOneRef(t, a, "read it", "huge.txt"))
+
+	if !strings.Contains(body, elisionMarker) {
+		t.Errorf("a 1.2 MB reference was not clipped on a large window (no elision marker):\n%.200s", body)
+	}
+	if len(body) > capChars {
+		t.Errorf("the block is %d chars, past the %d-char cap (%d tokens)", len(body), capChars, fileRefMaxTokens)
+	}
+	if !strings.Contains(body, refLine(0, refFiller)) || !strings.Contains(body, refLine(14_999, refFiller)) {
+		t.Error("the file's first and last lines did not both survive the clip")
+	}
+	if hasEvent[domain.ErrorEvent](sink.events) {
+		t.Error("a successful clip was announced as an ErrorEvent")
+	}
+	notes := refClipNotes(sink.events)
+	if len(notes) != 1 {
+		t.Fatalf("recorded %d clip notes, want exactly one: %+v", len(notes), notes)
+	}
+	const want = "@huge.txt clipped to 32k tokens — read_file ranges for the rest"
+	if got := notes[0].Notice(); got != want {
+		t.Errorf("clip note reads %q, want %q", got, want)
+	}
+	if !notes[0].Absolute || notes[0].Tokens != fileRefMaxTokens {
+		t.Errorf("clip note = %+v, want the absolute cap of %d tokens named as the bound", notes[0], fileRefMaxTokens)
+	}
+}
+
+// TestResolveFileRefs_ShareBoundClipNamesItsOwnBound pins the other half: on a small window the
+// share of the History allocation is the stricter bound, and the note names THAT — never the 32k
+// sentence, which would be a claim about a bound that did not bind.
+func TestResolveFileRefs_ShareBoundClipNamesItsOwnBound(t *testing.T) {
+	dir := t.TempDir()
+	longFiller := strings.Repeat("referenced text ", 32)
+	writeRefFile(t, dir, "big.txt", 400, longFiller)
+
+	a, sink := clippingRefAgent(t, dir, floorWindow)
+	share := a.structuralFloor()
+	if share >= fileRefMaxTokens {
+		t.Fatalf("History share = %d tokens on the %d-token window; the cap, not the share, would bind", share, floorWindow)
+	}
+
+	body := blockBody(t, submitOneRef(t, a, "read it", "big.txt"))
+
+	if !strings.Contains(body, elisionMarker) {
+		t.Fatalf("the reference was not clipped on the small window:\n%.200s", body)
+	}
+	notes := refClipNotes(sink.events)
+	if len(notes) != 1 {
+		t.Fatalf("recorded %d clip notes, want exactly one: %+v", len(notes), notes)
+	}
+	if notes[0].Absolute || notes[0].Tokens != share {
+		t.Errorf("clip note = %+v, want the share of %d tokens named as the bound", notes[0], share)
+	}
+	if got := notes[0].Notice(); strings.Contains(got, "32k") || !strings.Contains(got, "its share of the context window") {
+		t.Errorf("share-bound clip note reads %q; it must name the share, never the 32k cap", got)
+	}
+	if hasEvent[domain.ErrorEvent](sink.events) {
+		t.Error("a successful clip was announced as an ErrorEvent")
+	}
+}
+
+// TestResolveFileRefs_AReferenceUnderEveryBoundEmitsNoNote: the note is a claim that a clip
+// happened, so a reference that fits emits nothing.
+func TestResolveFileRefs_AReferenceUnderEveryBoundEmitsNoNote(t *testing.T) {
+	dir := t.TempDir()
+	writeRefFile(t, dir, "small.txt", 20, refFiller)
+
+	a, sink := clippingRefAgent(t, dir, largeWindow)
+	submitOneRef(t, a, "read it", "small.txt")
+
+	if notes := refClipNotes(sink.events); len(notes) != 0 {
+		t.Errorf("a reference under every bound emitted %d clip notes: %+v", len(notes), notes)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // The same STRUCTURAL floor on attached SKILL blocks (plan 2026-08-31 - 00, item 5).
 // A skill body is prose a human wrote, but nothing bounds a SKILL.md's size, and
 // the block rides the one message the emergency fold may not shed — so it meets
@@ -532,6 +657,38 @@ func TestResolveSkillRefs_ClampsAnOversizedBody(t *testing.T) {
 	}
 	if len(got) >= len(body) {
 		t.Errorf("user message is %d chars for a %d-char body; the clamp did not shrink it", len(got), len(body))
+	}
+}
+
+// TestResolveSkillRefs_ClipIsNotedAsTheSkill pins that an attached skill shares the @file cap AND
+// its note: a clipped body is told to the human under the skill's own `/id`, as a note, so a
+// skill silently losing its middle is not a failure mode either kind of reference has.
+func TestResolveSkillRefs_ClipIsNotedAsTheSkill(t *testing.T) {
+	dir := t.TempDir()
+	body := refBody(15_000, refFiller)
+	sink := &recordingSink{}
+	a, _ := refAgentWithWindow(t, dir, largeWindow, func(cfg *domain.Config) {
+		cfg.Events = sink
+		cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+			"review": {ID: "review", DisplayName: "Code Review", Body: body},
+		}}
+	})
+
+	got := submitSkillsAndRefs(t, a, "please look", []string{"review"}, nil)
+
+	if !strings.Contains(got, elisionMarker) {
+		t.Fatalf("an oversized skill body was not clipped on a large window:\n%.200s", got)
+	}
+	notes := refClipNotes(sink.events)
+	if len(notes) != 1 {
+		t.Fatalf("recorded %d clip notes, want exactly one: %+v", len(notes), notes)
+	}
+	const want = "/review clipped to 32k tokens — read_file ranges for the rest"
+	if got := notes[0].Notice(); got != want {
+		t.Errorf("clip note reads %q, want %q", got, want)
+	}
+	if hasEvent[domain.ErrorEvent](sink.events) {
+		t.Error("a successful clip was announced as an ErrorEvent")
 	}
 }
 

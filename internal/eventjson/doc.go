@@ -10,7 +10,7 @@
 // them apart is what stops a reader assuming the two streams are one.
 //
 // It shares no shape with internal/reactions. reactions.Payload is a flat document for five events and
-// `jq -r .path`; across seventeen variants a flat union becomes some sixty optional keys whose
+// `jq -r .path`; across eighteen variants a flat union becomes some sixty optional keys whose
 // names genuinely collide, so this package nests instead and reactions.Payload is untouched.
 //
 // One direction: it imports internal/domain for the events it reads and nothing else in the tree.

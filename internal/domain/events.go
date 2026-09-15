@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 // ----------------------------------------------------------------------------
 // Events (ADR 0001 — consumed as Go values in-process)
 // ----------------------------------------------------------------------------
@@ -364,6 +366,39 @@ type PruneEvent struct {
 	EventBase
 	Results int
 	Tokens  int
+}
+
+// RefClippedEvent reports that a reference the user attached to a message — an `@file` or an
+// attached Skill body — entered the conversation clipped to its structural bound rather than
+// whole. It is a NOTE, never a fault: the message went ahead and the block it carries still
+// shows the reference's head and tail with the shared elision marker between them, so the model
+// can read the rest through read_file ranges. A Driver renders it beside the missing-reference
+// ErrorEvent but as a note, because a clip that worked is not an error.
+//
+// Ref is the reference as the user wrote it (the @path, or the Skill's `/id`). Tokens is the
+// bound the block was clipped to; Absolute says which bound that was — the fixed per-reference
+// cap (true) or the reference's share of the History allocation (false), which binds instead on a
+// small window. Notice renders the one sentence every Driver shows, so no surface holds its own
+// spelling of the clip.
+type RefClippedEvent struct {
+	EventBase
+	Ref      string
+	Tokens   int
+	Absolute bool
+}
+
+// Notice is the model-facing and human-facing sentence for one clip: which reference, the bound
+// it was clipped to, and how to read the rest. The share case names its bound so the two never
+// read alike — a 32k clip on a large window and a share clip on a small one are different facts.
+func (e RefClippedEvent) Notice() string {
+	bound := fmt.Sprintf("%d", e.Tokens)
+	if e.Tokens >= 1000 && e.Tokens%1000 == 0 {
+		bound = fmt.Sprintf("%dk", e.Tokens/1000)
+	}
+	if e.Absolute {
+		return fmt.Sprintf("%s clipped to %s tokens — read_file ranges for the rest", e.Ref, bound)
+	}
+	return fmt.Sprintf("%s clipped to %s tokens (its share of the context window) — read_file ranges for the rest", e.Ref, bound)
 }
 
 // UsageEvent reports the token accounting an Upstream reply carried — the prompt

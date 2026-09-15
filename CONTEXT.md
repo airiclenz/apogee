@@ -1513,7 +1513,12 @@ reference's content — before its header is added — against the [Budget](#con
 History allocation *split across every reference of that one message* — @file blocks and attached
 **Skill** bodies alike, since the two kinds land in one message and spend one allocation — so
 anything past that share is elided to the same head/tail-plus-marker shape a capped tool result
-gets and no reference can hand the emergency fold a most-recent message it cannot shed.
+gets and no reference can hand the emergency fold a most-recent message it cannot shed. That
+share is itself capped at an **absolute 32k tokens** per reference (`fileRefMaxTokens`, a
+constant, no key): on a million-token window the share alone would admit a megabyte file whole.
+A clip is told to the user as a **note** (`domain.RefClippedEvent` — `@<name> clipped to 32k
+tokens — read_file ranges for the rest`, or naming the share when a small window's share bound
+instead), never as the missing-reference error: the message went ahead.
 _Avoid_: "attachment", "upload" (a reference is read live from the workspace, not stored).
 
 **Skill**:

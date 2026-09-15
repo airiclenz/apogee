@@ -3588,6 +3588,50 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 	})
 }
 
+// TestRefClippedNoteIsOneHostLineAtItsOwnRun pins what a clipped reference looks like in the
+// scrollback: one dim host note — never an error entry, which is what the missing-reference
+// ErrorEvent beside it renders as — worded by the event itself, and placed at the run that
+// emitted it, as a prune note is.
+func TestRefClippedNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the note is the event's own sentence", func(t *testing.T) {
+		tr := &transcript{}
+
+		tr.apply(domain.RefClippedEvent{Ref: "@docs/big.md", Tokens: 32000, Absolute: true})
+
+		if len(tr.entries) != 1 {
+			t.Fatalf("transcript holds %d entries, want the note alone", len(tr.entries))
+		}
+		got := tr.entries[0]
+		const want = "@docs/big.md clipped to 32k tokens — read_file ranges for the rest"
+		if got.kind != entryNote || got.text != want {
+			t.Errorf("clip fold = %v/%q, want an entryNote reading %q", got.kind, got.text, want)
+		}
+	})
+
+	t.Run("a child's clip lands inside the delegate's run", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentStarted(tr, "s1", 1)
+
+		tr.apply(domain.RefClippedEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Ref:       "@notes.txt",
+			Tokens:    4915,
+		})
+
+		if len(tr.entries) != 2 {
+			t.Fatalf("transcript holds %d entries, want the head and the note", len(tr.entries))
+		}
+		got := tr.entries[1]
+		if got.kind != entryNote || got.depth != 1 || got.spawnCallID != "s1" {
+			t.Errorf("clip entry = %v at depth %d/spawn %q, want an entryNote inside s1's run at depth 1",
+				got.kind, got.depth, got.spawnCallID)
+		}
+	})
+}
+
 // TestPruneNoteIsOneHostLineAtItsOwnRun pins what a pruning pass looks like in the scrollback: one
 // dim host note wording the engine's two counts verbatim, placed at the run that emitted it.
 //

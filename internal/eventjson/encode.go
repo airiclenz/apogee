@@ -6,7 +6,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The nineteen line kinds of ADR 0075 §4 — seventeen Event variants plus the two frames that
+// The twenty line kinds of ADR 0075 §4 — eighteen Event variants plus the two frames that
 // bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
@@ -26,6 +26,7 @@ const (
 	kindReactionFired     = "reaction_fired"
 	kindError             = "error"
 	kindPrune             = "prune"
+	kindRefClipped        = "ref_clipped"
 	kindUsage             = "usage"
 	kindAudit             = "audit"
 	kindSeamClosed        = "seam_closed"
@@ -53,6 +54,7 @@ func Kinds() []string {
 		kindReactionFired,
 		kindError,
 		kindPrune,
+		kindRefClipped,
 		kindUsage,
 		kindAudit,
 		kindSeamClosed,
@@ -133,6 +135,8 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 		return kindError, e.EventBase, errorData{Source: e.Source, Err: e.Err}, true
 	case domain.PruneEvent:
 		return kindPrune, e.EventBase, pruneData{Results: e.Results, Tokens: e.Tokens}, true
+	case domain.RefClippedEvent:
+		return kindRefClipped, e.EventBase, refClippedData{Ref: e.Ref, Tokens: e.Tokens, Absolute: e.Absolute}, true
 	case domain.UsageEvent:
 		return kindUsage, e.EventBase, usageData{
 			PromptTokens:                 e.PromptTokens,
@@ -265,6 +269,15 @@ type errorData struct {
 type pruneData struct {
 	Results int `json:"results"`
 	Tokens  int `json:"tokens"`
+}
+
+// refClippedData is the ref_clipped line: which attached reference entered the conversation
+// clipped, the bound in tokens it was clipped to, and whether that bound was the absolute
+// per-reference cap (true) or the reference's share of the History allocation (false).
+type refClippedData struct {
+	Ref      string `json:"ref"`
+	Tokens   int    `json:"tokens"`
+	Absolute bool   `json:"absolute"`
 }
 
 // usageData is the usage line: the token accounting an Upstream reply carried, the emitting

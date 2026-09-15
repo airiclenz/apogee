@@ -64,7 +64,12 @@ ahead — ask for a text version of that one. A very large reference is not drop
 The model is shown its head and its tail with a note in between saying the middle was cut
 to fit the context budget, and it can pull back the parts it needs with `read_file` on the
 same path. Several references in one message share that room between them, so a message
-full of files still fits.
+full of files still fits — and no single reference ever takes more than 32k tokens, however
+large the window, so a megabyte file cannot spend the context on one message. When a
+reference is clipped you see a note (`@notes.md clipped to 32k tokens — read_file ranges for
+the rest`), not an error: the message went ahead. A PDF's text is joined back into sentences
+where the document broke a line at every word, so the model reads prose rather than a
+column of words; paragraph breaks are kept.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works, and a queued message does not wait for sub-agents that have not started yet:

@@ -985,6 +985,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addError(e.Source, e.Err, runOf(e.EventBase))
 	case domain.PruneEvent:
 		t.addPrune(e.Results, e.Tokens, runOf(e.EventBase))
+	case domain.RefClippedEvent:
+		t.addRefClipped(e, runOf(e.EventBase))
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively
 		// versioned, so an unrecognised Event is rendered as nothing rather than a panic.
@@ -1950,6 +1952,24 @@ func (t *transcript) addPrune(results, tokens int, run runRef) {
 	t.place(entry{
 		kind:        entryNote,
 		text:        fmt.Sprintf("pruned %d tool results (~%d tokens)", results, tokens),
+		depth:       run.depth,
+		spawnCallID: run.spawn,
+	})
+}
+
+// addRefClipped appends the host note for one clipped reference — an @file or an attached skill
+// body that entered the conversation elided to its bound (domain.RefClippedEvent). A note and not
+// an error, unlike the missing-reference ErrorEvent beside it: the message went ahead, and the
+// line tells the human what the model was shown and how it reads the rest. The sentence is the
+// event's own (Notice), so the TUI and a session record spell one clip one way; the reference is
+// escape-stripped as addError strips its own, since it quotes a path the user typed.
+//
+// Placed at the run that emitted it, as addPrune is: a delegate's interjected reference is the
+// delegate's own message.
+func (t *transcript) addRefClipped(e domain.RefClippedEvent, run runRef) {
+	t.place(entry{
+		kind:        entryNote,
+		text:        stripEscapes(e.Notice()),
 		depth:       run.depth,
 		spawnCallID: run.spawn,
 	})

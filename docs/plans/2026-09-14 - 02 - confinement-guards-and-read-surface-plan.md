@@ -213,7 +213,13 @@ NOTES (2026-09-15): consequential edit — internal/tools/doc.go: made necessary
 
 **Commit:** `feat(tools): read_file caps at 400 lines by default, errors on bad ranges, windows locate and refuses binaries`
 
-## 7. `@file` references get an absolute cap; PDF text is joined into lines
+## 7. `@file` references get an absolute cap; PDF text is joined into lines — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the clip note wording lives on the event (`RefClippedEvent.Notice()`), so the run fold and the TUI render one sentence rather than each spelling it — the Prune precedent duplicates its wording; the JSON line carries the facts (`ref`, `tokens`, `absolute`).
+NOTES (2026-09-15): an attached skill's clip emits the same note under its `/id` (the plan binds skills to the cap and says nothing about their note; a silent skill clip would be the fault the item closes for @file).
+NOTES (2026-09-15): consequential edit — internal/tui/fold_test.go: made necessary by the new `RefClippedEvent` variant (`TestFoldEventCoversEveryEventVariant` enumerates every variant).
+NOTES (2026-09-15): consequential edit — cmd/apogee/headless_test.go: made necessary by the new `ref_clipped` kind (`TestHeadlessFormatJSONStreamsEveryEvent` emits one event per kind in `Kinds()` order).
+NOTES (2026-09-15): consequential edit — internal/eventjson/encode_test.go, internal/eventjson/doc.go, docs/manual/headless.md: made necessary by the new `ref_clipped` kind — the count pin `TestKindsAreNineteen` → `TestKindsAreTwenty` (the precedent of every earlier kind), the header/doc counts, and the manual's kinds table (`TestManualListsEveryEventLineKind` holds it to `Kinds()`). ADR 0075 §4's "Nineteen" list is left as the historical record it already is (it still names `mechanism_fired`/`floor_guard`).
 
 **What:** `internal/agent/loop.go` `refBound` becomes `min(share of the History allocation, fileRefMaxTokens)` with `fileRefMaxTokens = 32_000` (constant); the existing clamp marker stays; the Driver's notice path that reports a missing reference also reports `@<name> clipped to 32k tokens — read_file ranges for the rest` when a clip happened. Skills attached by reference share the same cap. `internal/doctext/pdf.go` `pageAccumulator.record` joins single newlines inside a sentence (a line not ending in `.`, `:`, `;`, `?`, `!` and not followed by a blank line is joined to the next with a space). CONTEXT.md **File reference** entry states the cap.
 
