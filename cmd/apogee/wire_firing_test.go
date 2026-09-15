@@ -198,9 +198,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if cfg.ExtraReadRoots == nil {
 		t.Fatal("Config.ExtraReadRoots is nil; the model could not read the files of a skill it was given")
 	}
-	if !slices.Equal(cfg.ExtraReadRoots(), provider.ReadRoots()) {
-		t.Errorf("Config.ExtraReadRoots() = %v; want the provider's own resolved mounts %v", cfg.ExtraReadRoots(), provider.ReadRoots())
-	}
+	assertReadRootsCompose(t, cfg.ExtraReadRoots, provider.ReadRoots())
 	// The three bounds the BOUND entry carries outrank the top-level keys, and a pin answers the
 	// fan-out width without spending a round trip on a question already settled.
 	if cfg.Context.MaxContextTokens != int(entry.ContextWindow) {
@@ -1256,5 +1254,26 @@ func TestFiringWriteTargetNamesAWriteAndNothingElse(t *testing.T) {
 		Arguments: []byte(`{"path":"notes/a.txt"}`),
 	}); ok {
 		t.Error("the roster named a target for read_file; only a workspace-scoped WRITER changes a file")
+	}
+}
+
+// assertReadRootsCompose pins the shape of a composed read-roots func: the provider's own
+// resolved mounts are its leading prefix, in the provider's order, and the toolchain roots the host
+// probed (toolchain_roots.go) are exactly what follows — nothing else on the line, nothing
+// reordered. The probe is waited for first so the func is read once it has settled: on a host with
+// `go` on PATH the tail is GOROOT and the module cache, on one without it is empty, and the pin
+// holds on both.
+func assertReadRootsCompose(t *testing.T, roots func() []string, skillRoots []string) {
+	t.Helper()
+
+	hostToolchain.wait()
+	got := roots()
+	if len(got) < len(skillRoots) || !slices.Equal(got[:len(skillRoots)], skillRoots) {
+		t.Fatalf("ExtraReadRoots() = %v; want the provider's own resolved mounts %v as its leading prefix",
+			got, skillRoots)
+	}
+	if tail, want := got[len(skillRoots):], hostToolchain.roots(); !slices.Equal(tail, want) {
+		t.Errorf("ExtraReadRoots() = %v; want the probed toolchain roots %v after the skill roots, got %v",
+			got, want, tail)
 	}
 }

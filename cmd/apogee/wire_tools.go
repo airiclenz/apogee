@@ -300,7 +300,8 @@ func hostToolsFor(cfg apogee.Config, seatChoice bool) tools.HostTools {
 		// inherits the operator's `api-key-env:` key, or connecting an MCP server would quietly
 		// re-open the exposure a session without MCP is closed against.
 		SecretEnvVars: cfg.SecretEnvVars,
-		// The read-only mounts the session opened up (the skill source dirs), off the same Config
+		// The read-only mounts the session opened up (the skill source dirs and the probed
+		// toolchain roots), off the same Config
 		// the engine would have read them from — this hand-assembly must not be the one place a
 		// read tool loses them, or the model could read a skill's bundled files in a session
 		// without MCP and not in one with it.

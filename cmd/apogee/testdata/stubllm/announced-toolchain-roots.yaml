@@ -1,0 +1,39 @@
+# The upstream TestE2EAnnouncedToolchainRootsAreReadable talks to: a model that reads a file out of
+# the Go toolchain's own tree through the root apogee ANNOUNCED, verbatim.
+#
+# The one tool turn carries a capture whose pattern lifts GOROOT out of the orientation block's
+# own `- Read-only library roots: %s — read them with …` line
+# (internal/agent/prompts/orientation.txt). The skill libraries lead that line and the probed
+# toolchain roots follow them (cmd/apogee/toolchain_roots.go), so the capture cannot take "the
+# first root" the way announced-skill-present.yaml does: the test substitutes the GOROOT it probed
+# on its own for the GOROOT-STANDS-HERE token below, and the capture then matches only if the line
+# apogee sent names that very directory — a line without it fails the capture rather than quietly
+# reading a path nobody was told about. read_file is the tool under test because a model asked
+# about a standard-library file reaches for it first; the fence it goes through is the one every
+# read tool shares.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced toolchain roots
+    # The prompt, and the one turn that reads the orientation.
+    - when:
+        last_message: VERSION file of the Go toolchain
+      captures:
+        - {name: goroot, from: system, pattern: 'Read-only library roots: (?:[^\n]*?, )?(GOROOT-STANDS-HERE)(?:,| —)'}
+      tool_calls:
+        - id: goroot-read
+          name: read_file
+          arguments: '{"path":"{{goroot}}/VERSION"}'
+    # The wrap-up, once the read has come back.
+    - when:
+        tool_result: read_file
+      text: The toolchain root is read.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

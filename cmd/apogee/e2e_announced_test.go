@@ -18,8 +18,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -172,6 +174,141 @@ func TestE2EAnnouncedSkillsRootIsPresentable(t *testing.T) {
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}
+}
+
+// announcedToolchainPrompt is what the toolchain-roots fixture's model is asked, and the phrase
+// announced-toolchain-roots.yaml keys its one capturing turn on.
+const announcedToolchainPrompt = "Show me the VERSION file of the Go toolchain."
+
+// announcedToolchainToken is the stand-in the fixture's capture pattern carries for the GOROOT the
+// test probes on its own; withAnnouncedToolchainRoot puts the real directory in its place.
+const announcedToolchainToken = "GOROOT-STANDS-HERE"
+
+// announcedRootsLine is the orientation's own `Read-only library roots:` bullet as it stands on the
+// wire, applied to the system text the stub was sent, so a test can hold the whole announced list
+// next to the root a tool result had to come through.
+var announcedRootsLine = regexp.MustCompile(`Read-only library roots: (.+?) — read them`)
+
+// TestE2EAnnouncedToolchainRootsAreReadable is the invariant over the orientation's `Read-only
+// library roots:` line for the roots the host PROBES rather than configures: the Go toolchain's
+// GOROOT, which `go build` under `terminal` has always been able to read, is named on the line and
+// readable through read_file by that exact spelling — under the dotfiles-symlinked home, in Auto,
+// with nobody asked. The expected root is probed independently here (`go env GOROOT`, resolved),
+// and the fixture's capture is anchored on it, so the test fails if the line stopped naming the
+// directory as well as if the read tool refused it.
+//
+// The module cache is not asserted: the suite's HOME is a throwaway (main_test.go), so its default
+// `$HOME/go/pkg/mod` does not exist and the probe rightly drops it — exactly the "announced only
+// when it is a directory" rule the unit tests pin.
+func TestE2EAnnouncedToolchainRootsAreReadable(t *testing.T) {
+	goroot := probedGOROOT(t)
+
+	stub := stubllm.New(t, withAnnouncedToolchainRoot(loadScript(t, "announced-toolchain-roots"), goroot))
+	fx := announcedSkillFixture(t, stub)
+	appendHomeConfig(t, fx.home, announcedStandingPrompt)
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIOn(t, drv, stub, fx.home, fx.ws, "--mode", "auto")
+	panes := watchApprovalPanes(t, drv)
+	// The probe runs off the boot path and the orientation is rendered per request: the prompt is
+	// sent only once the process-wide library has its answer, so what is exercised is the mount and
+	// not a race with the toolchain's start-up.
+	hostToolchain.wait()
+
+	submit(drv, announcedToolchainPrompt)
+	drv.WaitText("The toolchain root is read.")
+	drv.WaitQuiet(settled)
+
+	// The line named the probed GOROOT, and the one call read through that spelling.
+	line := announcedRootsLineOnTheWire(t, stub)
+	if !slices.Contains(strings.Split(line, ", "), goroot) {
+		t.Errorf("the orientation announced the library roots %q; want the probed GOROOT %s among them", line, goroot)
+	}
+	assertEveryToolCallNames(t, stub, goroot)
+
+	results := toolResults(stub)
+	if len(results) != 1 {
+		t.Fatalf("the run produced %d tool results; want the fixture's one:\n%s",
+			len(results), strings.Join(results, "\n---\n"))
+	}
+	if strings.Contains(results[0], "outside the workspace root") {
+		t.Errorf("read_file refused the announced toolchain root as an escape:\n%s", results[0])
+	}
+	if !strings.Contains(results[0], "go1.") {
+		t.Errorf("the read did not come back with the toolchain's VERSION file:\n%s", results[0])
+	}
+
+	if n := panes(); n != 0 {
+		t.Errorf("the run raised %d approval pane(s); an announced path must cost nobody a look", n)
+	}
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+	stub.AssertConsumed(t)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// probedGOROOT is the toolchain root this test expects on the line: `go env GOROOT` asked the way
+// the host asks it (local toolchain, no go.work), resolved to its real path. It skips the test when
+// there is no `go` to ask — the probe then announces nothing, which the unit tests cover.
+func probedGOROOT(t *testing.T) string {
+	t.Helper()
+
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go on PATH; the toolchain probe announces nothing here")
+	}
+	cmd := exec.Command("go", "env", "GOROOT")
+	cmd.Env = append(os.Environ(), toolchainProbePins...)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skipf("go env GOROOT failed: %v", err)
+	}
+	goroot, err := filepath.EvalSymlinks(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatalf("resolve GOROOT: %v", err)
+	}
+	return goroot
+}
+
+// withAnnouncedToolchainRoot anchors the fixture's `goroot` capture on the directory the test
+// probed, in place of the token the file carries, and fails if the fixture no longer has such a
+// capture — the substitution must not silently stop happening.
+func withAnnouncedToolchainRoot(script stubllm.Script, goroot string) stubllm.Script {
+	replaced := false
+	for i := range script.Turns {
+		for j := range script.Turns[i].Captures {
+			capture := &script.Turns[i].Captures[j]
+			if strings.Contains(capture.Pattern, announcedToolchainToken) {
+				capture.Pattern = strings.Replace(capture.Pattern, announcedToolchainToken, regexp.QuoteMeta(goroot), 1)
+				replaced = true
+			}
+		}
+	}
+	if !replaced {
+		panic("announced-toolchain-roots.yaml carries no capture with the " + announcedToolchainToken + " token")
+	}
+	return script
+}
+
+// announcedRootsLineOnTheWire is the root list the orientation announced on the run's requests,
+// read off the system message itself.
+func announcedRootsLineOnTheWire(t *testing.T, stub *stubllm.Server) string {
+	t.Helper()
+
+	for _, req := range stub.Requests() {
+		for _, msg := range req.Messages {
+			if msg.Role != "system" {
+				continue
+			}
+			if match := announcedRootsLine.FindStringSubmatch(msg.Content); match != nil {
+				return match[1]
+			}
+		}
+	}
+	t.Fatal("no request's system prompt announced read-only library roots; the orientation bullet is missing")
+	return ""
 }
 
 // announcedUser is the account name the fixture's home hangs under, so the shape it builds is a

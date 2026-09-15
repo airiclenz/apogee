@@ -83,6 +83,11 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 		UseProjectSkills: opts.UseProjectSkills,
 		UseShippedSkills: opts.UseShippedSkills,
 	})
+	// The Go toolchain's own trees — GOROOT and the module cache — probed once for the process and
+	// off the boot path (toolchain_roots.go): they join the skill libraries on the read roots the
+	// Config below composes, and a session whose model asks for a standard-library file before the
+	// probe has answered simply finds the roots on its next call.
+	hostToolchain.start(roots.config, roots.workspace)
 
 	// The Bridge late-binds the event sink and approval gate to the Bubble Tea program
 	// the launcher starts. Its Sink/Approver are installed in Config before construction
@@ -317,7 +322,9 @@ func (w *rootWiring) resolveConfig() error {
 		// Sub-agents need no wiring of their own: a child's registry is a Subset of the parent's
 		// tool INSTANCES (domain.ToolRegistry.Subset), so the same read tools — and with them
 		// this same func — ride along at every depth.
-		ExtraReadRoots: w.skillProvider.ReadRoots,
+		// The toolchain roots the host probed (toolchain_roots.go) follow the skill libraries on
+		// the same func, in that order, so the orientation line and the mount list one library.
+		ExtraReadRoots: composeReadRoots(w.skillProvider.ReadRoots, hostToolchain.roots),
 		// The same mount for the source that has NO host path: apogee's own shipped skills live in
 		// the binary, so their bundled files are reachable only under the `shipped:<id>` address
 		// their SKILL.md block announces (ADR 0065 §3). Without this the announced files: line

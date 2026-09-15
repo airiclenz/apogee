@@ -278,6 +278,9 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// seed the box fences writable and the read root the read tools reach it back through — a
 	// Firing never moves it, so the live func below answers the one dir the run announced.
 	scratchDir := ensureScratchDir(in.roots.scratch, in.recordID)
+	// The toolchain roots' probe, started here for the Drivers that reach this composer with no
+	// session before it (headless, the daemon); inside a session it is the no-op second start.
+	hostToolchain.start(in.roots.config, in.roots.workspace)
 
 	cfg := apogee.Config{
 		Endpoint: in.entry.Endpoint,
@@ -354,7 +357,11 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		// ReadRoots, like the session's own mount, is the resolved-path view of the same sources —
 		// a workspace anchor that is a symlink out of the workspace is dropped rather than mounted
 		// (audit 2026-08-25 F-13), and it stays a method value so the mount follows SetSources.
-		ExtraReadRoots: skillProvider.ReadRoots,
+		// The toolchain roots follow the skill libraries on the same func exactly as a session's
+		// do (toolchain_roots.go): one probe per process, so a Firing raised inside a session
+		// composes over the answer the session already has, and a headless or daemon run starts
+		// the probe here because nothing before it did.
+		ExtraReadRoots: composeReadRoots(skillProvider.ReadRoots, hostToolchain.roots),
 		// And the mount a shipped skill's bundled files are served through, so an unattended run
 		// reads the `shipped:<id>` address its own injected block announces exactly as a session
 		// does (ADR 0031's Driver parity).

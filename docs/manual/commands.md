@@ -229,6 +229,16 @@ A refusal from the workspace fence — a path outside the roots apogee may read 
 clause. A suggestion there would read as absence, as though the file were simply not present, and
 hide the fact that the answer was *not allowed* rather than *not found*.
 
+**What the read tools may read.** The roots those tools accept are the workspace, the session's
+scratch directory, the skill libraries, and — when `go` is on your PATH — the Go toolchain's own two
+trees: `GOROOT` and the module cache (`GOMODCACHE`). apogee asks `go env` for the two once at
+start-up, in its own home rather than your project (so a `go.mod` asking for a newer toolchain
+cannot make the question download one) and off the start-up path, and lists whichever of them exist
+on the orientation's `Read-only library roots:` line beside the skill folders — so a model asked
+about a standard-library function or a dependency's source can `read_file`, `grep`, `list_dir`,
+`find_files` or `copy_file` it rather than being refused the very trees its `go build` had just
+read. Both are mounted read-only; nothing under them is writable through any tool.
+
 ## Suggested skills
 
 A library you cannot recall is a library you do not use, so apogee ranks your skills against the

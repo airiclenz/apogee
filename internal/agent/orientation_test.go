@@ -298,6 +298,37 @@ func TestOrientation_ScratchLineStatesTheConfinedCaches(t *testing.T) {
 	}
 }
 
+// rootsLine renders the WHOLE roots bullet — label, paths and the guidance that follows — composed
+// from the asset the way scratchLine is, so the clause pin below asserts the exact wire line.
+func rootsLine(roots ...string) string {
+	return fmt.Sprintf(orientationTemplate[orientationRootsLine], strings.Join(roots, ", "))
+}
+
+// rootsToolchainClause is the tail of the roots bullet, pinned verbatim: the line lists the Go
+// toolchain's GOROOT and module cache beside the skill libraries (cmd/apogee's probe), and those
+// two are trees every `go build` under `terminal` must read — so the tail names the read tools
+// and lets a toolchain command read its own roots, where it used to say "never through terminal
+// commands" and would have told the model to keep its builds off the trees a build cannot do
+// without. A reworded template fails here, not in a model's session.
+const rootsToolchainClause = "read them with read_file, list_dir, grep, find_files or copy_file; " +
+	"a toolchain command may still read its own roots."
+
+// TestOrientation_RootsLineLetsAToolchainReadItsOwnRoots pins the roots bullet's guidance tail
+// against the exact clause the toolchain mount is announced with.
+func TestOrientation_RootsLineLetsAToolchainReadItsOwnRoots(t *testing.T) {
+	t.Parallel()
+
+	line := rootsLine(orientationFirstRoot, orientationSecondRoot)
+
+	if !strings.HasSuffix(line, " — "+rootsToolchainClause) {
+		t.Errorf("the roots bullet does not end with the toolchain clause %q:\n%q",
+			rootsToolchainClause, line)
+	}
+	if !strings.HasPrefix(line, rootsBullet(orientationFirstRoot, orientationSecondRoot)) {
+		t.Errorf("the roots bullet no longer opens with its label and paths:\n%q", line)
+	}
+}
+
 // TestOrientation_EveryModeStatesTheScratchDir: the session scratch dir is writable on every rung
 // of the ladder — Plan runs Apogee's own writers there and nowhere else, Ask-Before runs them there
 // unprompted (ADR 0012 second loosen, 2026-09-14) — so every mode, Plan included, renders the

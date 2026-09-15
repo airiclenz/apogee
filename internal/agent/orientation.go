@@ -102,7 +102,9 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 // and an engine-owned block changes none of the facts above.
 //
 // KV cache: every input moves only on a session-level door — the workspace and the roots are
-// the host's wiring, the scratch dir moves only at a session boundary, the context-file cache is
+// the host's wiring (the roots settle once, when the host's off-boot toolchain probe answers,
+// which is one early re-encode and never a per-turn one), the scratch dir moves only at a
+// session boundary, the context-file cache is
 // refilled only at one too (ADR 0026 §5), and the Delegation seats move only on the human's own
 // `/server`, `/model` and `/sub-agents-server` doors — so the block is prefix-cache-stable
 // between those doors, exactly like the {{scratch}} placeholder it stands beside. The mode left

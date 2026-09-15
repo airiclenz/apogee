@@ -41,6 +41,8 @@
 // live settings holder, the dispatcher a committed /settings key is applied through,
 // and the per-model re-resolution a heartbeat rebind drives; wire_tools.go the live
 // tool registry and the builders that assemble one — built-ins plus MCP;
+// toolchain_roots.go the once-per-process probe of the Go toolchain's GOROOT and module
+// cache and the composed read-roots func that lists them after the skill libraries;
 // wire_mcp.go the connected MCP sessions
 // and the validate-then-commit reconnect that moves a session onto another set;
 // wire_present.go the presentation ladder this host can walk and the holder that
