@@ -216,16 +216,23 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	}
 
 	calls := resp.ToolCalls()
-	if len(calls) == 0 || a.wrapUp {
+	if a.wrapUp {
+		// The wrap-up Turn (Agent.wrapUp) keeps at most ONE tool: write_file, for a delegation
+		// spawned with an `output_path`, and then only the calls aimed at that tool survive
+		// (wrapUpCalls, subagent.go). Everything else the reply asked for is asking for something
+		// the request told it it cannot have, and a withdrawn menu that is still reachable is no
+		// withdrawal at all — so those calls are DROPPED undispatched here, and with the menu
+		// withdrawn wholesale that is every call.
+		calls = a.wrapUpCalls(calls)
+	}
+	if len(calls) == 0 {
 		// Final no-tool response: commit the assistant message and end the Exchange. It is
 		// necessarily substantive — an empty reply never reaches here, the empty-reply guard
 		// (reviewedOutcome) faults the Turn first.
 		//
-		// The wrap-up Turn (Agent.wrapUp) takes this exit WHATEVER the reply carries: its menu was
-		// withdrawn, so a model that asks for a tool anyway is asking for something the request
-		// told it it cannot have, and a withdrawn menu that is still reachable is no withdrawal at
-		// all. The calls are DROPPED undispatched and the assistant message is committed without
-		// them. A wrap-up reply with no text — empty OR whitespace-only, the same emptiness
+		// The wrap-up Turn takes this exit WHATEVER the reply carried once its calls are dropped
+		// above: the assistant message is committed without them. A wrap-up reply with no text —
+		// empty OR whitespace-only, the same emptiness
 		// replyFault tests — is committed NOWHERE and emits no MessageEvent: a blank assistant
 		// message would become the child's last visible text and bury the partial result its
 		// capped Turns already earned, so that case falls back to the result instead
@@ -243,6 +250,13 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	a.conv.Append(assistantMessage(resp, calls))
 	if a.dispatchTools(ctx, turn, calls) == dispatchCancelled {
 		return a.turns.end(t, endCancelled), nil
+	}
+	if a.wrapUp {
+		// The wrap-up's one kept write has been dispatched — run against the output path, refused
+		// with a result naming it anywhere else (resolve's wrap-up row) — and the Turn still ENDS
+		// THE EXCHANGE: the latch buys one request, never a fifth working Turn, and the reply's text
+		// stays committed on the assistant message above as the child's closing report.
+		return a.turns.end(t, endExchangeDone), nil
 	}
 	return a.turns.end(t, endTurnDone), nil
 }
@@ -907,7 +921,9 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	// the reply ceiling above: after construction, before any pre-request hook, because it is the
 	// engine's own bound and must hold under Bypass, where no hook runs at all. It is the other
 	// half of the withdrawn menu toolMenu just returned — without it the child is left to guess
-	// why its tools vanished. AppendToSystem CREATES the system message when none exists, so a
+	// why its tools vanished — and it carries the output clause exactly when that menu kept
+	// write_file for the delegation's `output_path` (wrapUpWriter). AppendToSystem CREATES the
+	// system message when none exists, so a
 	// session with no configured prompt and no context files still carries the directive.
 	if a.wrapUp {
 		req.AppendToSystem(wrapUpMarker, a.wrapUpDirective())
@@ -1451,9 +1467,21 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 	// cap gets one closing request with no tools at all, and an empty menu is what "the tools are
 	// gone" means on a wire that carries no tool_choice — the seam renders no tool-instruction
 	// block for it and sends no native array. The withdrawal is the prohibition; step() drops any
-	// call a model makes anyway, so no path can reach a tool from here.
+	// call a model makes anyway, so no path can reach a tool from here. The ONE exception is
+	// write_file for a delegation spawned with an `output_path` (wrapUpWriter, subagent.go): that
+	// menu is exactly the one tool, offered only where the child holds it and its Mode admits the
+	// write, and step() dispatches only calls to it — a write elsewhere is refused by resolve's
+	// wrap-up row, never run.
 	if a.wrapUp {
-		return nil
+		writer, ok := a.wrapUpWriter()
+		if !ok {
+			return nil
+		}
+		return []domain.ToolDef{{
+			Name:        writer.Name(),
+			Description: writer.Description(),
+			Schema:      writer.Schema(),
+		}}
 	}
 	planMode := a.Mode() == domain.ModePlan
 	scratchSet := a.ScratchDir() != ""

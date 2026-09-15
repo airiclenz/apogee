@@ -754,9 +754,25 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		scratchDir:             a.ScratchDir(),
 		atDepthBound:           a.depth >= a.maxDepth(),
 		maxDepth:               a.maxDepth(),
+		wrapUpOutput:           a.wrapUpOutput(),
+		writesWrapUpOutput:     tool.Name() == tools.WriteFileToolName && target.real == a.outputTarget,
 		approverPresent:        a.cfg.Approver != nil,
 		box:                    a.confinementBox(),
 	}
+}
+
+// wrapUpOutput is the path resolve's wrap-up row keys on: the delegation's `output_path` as its
+// spawning call spelled it, on the wrap-up Turn that kept write_file for it (wrapUpWriter), and ""
+// on every other call — an ordinary Turn, or a wrap-up whose menu was withdrawn wholesale — so
+// the row is inert everywhere the exception is not in force.
+func (a *Agent) wrapUpOutput() string {
+	if !a.wrapUp {
+		return ""
+	}
+	if _, ok := a.wrapUpWriter(); !ok {
+		return ""
+	}
+	return a.outputPath
 }
 
 // confinementBox is the box every per-call consumer builds from: Config.ConfinementBox() — the
@@ -1389,6 +1405,7 @@ type writeTargetClass struct {
 	inFence   bool   // inside the ladder's fence (workspace root ∪ declared writable paths)
 	inScratch bool   // inside the LIVE session scratch dir (false when none is set)
 	escape    string // the resolved path a permit must name, "" for an in-root write
+	real      string // the resolved path itself, "" when the call has no inspectable target
 }
 
 // classifyWriteTarget answers ALL the facts a workspace-scoped writer's target decides, from the
@@ -1410,6 +1427,9 @@ type writeTargetClass struct {
 //     path outside the workspace is in-fence for the ladder (it gates nothing) and still needs the
 //     permit at Execute, because the fence itself keeps one rule — the workspace root, plus
 //     whatever single target the context's permit names.
+//   - real — the resolved path itself, wherever it lands, so a consumer that compares the target
+//     against another reading of the same resolver (the wrap-up's output path, Agent.outputTarget)
+//     compares two outputs of one resolution rather than resolving again.
 func (a *Agent) classifyWriteTarget(tool domain.Tool, call domain.ToolCall) writeTargetClass {
 	abs, ok := tools.WorkspaceWriteTarget(tool, call)
 	if !ok {
@@ -1417,7 +1437,7 @@ func (a *Agent) classifyWriteTarget(tool domain.Tool, call domain.ToolCall) writ
 	}
 	inScratch := pathWithin(abs, a.ScratchDir()) // pathWithin answers false for an unset ("") dir
 	if pathWithin(abs, a.cfg.WorkspaceDir) {
-		return writeTargetClass{inFence: true, inScratch: inScratch}
+		return writeTargetClass{inFence: true, inScratch: inScratch, real: abs}
 	}
 	// The union is read off the LIVE box — the same fold every per-call consumer builds from —
 	// rather than the raw ConfineWritablePaths slice, so the session's scratch dir (folded in by
@@ -1426,10 +1446,10 @@ func (a *Agent) classifyWriteTarget(tool domain.Tool, call domain.ToolCall) writ
 	// left that dir gating in Allow-Edits/Auto and refused by a Firing's denier.
 	for _, writable := range a.confinementBox().WritablePaths {
 		if pathWithin(abs, writable) {
-			return writeTargetClass{inFence: true, inScratch: inScratch, escape: abs}
+			return writeTargetClass{inFence: true, inScratch: inScratch, escape: abs, real: abs}
 		}
 	}
-	return writeTargetClass{inScratch: inScratch, escape: abs}
+	return writeTargetClass{inScratch: inScratch, escape: abs, real: abs}
 }
 
 // resolvedPath is the DISCLOSURE twin of classifyWriteTarget: the same resolved target,

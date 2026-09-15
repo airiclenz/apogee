@@ -632,7 +632,15 @@ request goes out with the tool menu withdrawn, telling the delegate which bound 
 tools are gone, and asking it to report to the agent that delegated the task, unfinished work
 included. That Turn is EXTRA — it sits outside the cap, so `delegate-max-steps: 3` still buys
 three working Turns plus this one reply — and when it faults, errors or answers with a tool
-call the result falls back to the child's last visible text. The parent receives a non-error
+call the result falls back to the child's last visible text. The withdrawal has ONE exception
+(2026-09-15, reversing the 2026-09-01 tool-less call): a delegation whose `sub_agent` call named
+an `output_path` — the file it is expected to write, resolved through the same write fence as
+`write_file`'s own target — keeps `write_file` for exactly that path on the wrap-up Turn, the
+directive says so (`You may still call write_file once, for <path> only.`), the engine
+dispatches that one call before ending, and a `write_file` aimed anywhere else is refused with
+`wrap-up: only <path> may be written`. The exception is offered only where the child still holds
+`write_file` and its Mode admits a workspace write — a Plan-mode child's wrap-up stays tool-less
+— so it is never announced and then refused. The parent receives a non-error
 result whose first line marks it partial and names the bound that tripped (`step cap`, `token
 budget` or `time limit`), followed by that report, so Turns of real work are not thrown away,
 and what the parent reads is authored rather than scavenged from whatever the child happened to

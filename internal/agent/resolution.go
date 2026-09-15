@@ -244,6 +244,15 @@ type resolutionInput struct {
 	// to name.
 	atDepthBound bool
 	maxDepth     int
+	// wrapUpOutput is the ONE path the step-cap wrap-up Turn may write — the delegation's
+	// `output_path` as its spawning call spelled it (Agent.outputPath) — and "" for every call
+	// outside a wrap-up that kept write_file (Agent.wrapUp, wrapUpWriter): no other call reaches
+	// the ladder from a wrap-up, because step() drops them undispatched. writesWrapUpOutput is
+	// precomputed by dispatch from the SAME on-disk resolution the three write-target facts above
+	// come from: whether this call is write_file AND its target resolves to that path
+	// (Agent.outputTarget). The wrap-up row refuses a call that has the first without the second.
+	wrapUpOutput       string
+	writesWrapUpOutput bool
 	// approverPresent reports whether an Approver is configured (a gate with none refuses).
 	approverPresent bool
 	// box is the prebuilt confinement box a Confine verdict carries.
@@ -255,12 +264,17 @@ type resolutionInput struct {
 //
 //  1. A guard hard-refuse (Tier-1 dangerous action or a tripped circuit-breaker) refuses in
 //     every mode — the tighten-only floor runs before the ladder.
-//  2. The sub_agent recursion point is Delegated, not run as a leaf. A Tier-2 force-approval
+//  2. The step-cap wrap-up row: a wrap-up Turn that kept write_file for the delegation's
+//     `output_path` (wrapUpOutput) runs ONLY the write aimed at that path — any other call it
+//     dispatched is refused with a result naming the path (wrapUpOutputRefusalFormat). It sits
+//     above the ladder because it is narrower than every row there: the call still meets its
+//     ordinary row below, so an output path the Mode gates is gated exactly as any other write.
+//  3. The sub_agent recursion point is Delegated, not run as a leaf. A Tier-2 force-approval
 //     is DELIBERATELY not applied to a Delegate (D3/ADR 0013): nothing executes at
 //     delegation, so the shared read-only floor re-fires on the child's own dangerous call.
 //     At the depth bound the delegation is refused defensively (mirrors runSubAgent).
-//  3. An unknown tool refuses (not audit-recorded today, D8).
-//  4. The autonomy-ladder × blast-radius table produces the leaf verdict, then the leaf
+//  4. An unknown tool refuses (not audit-recorded today, D8).
+//  5. The autonomy-ladder × blast-radius table produces the leaf verdict, then the leaf
 //     overlays apply: a Tier-2 force upgrades a non-Refuse leaf to a forced Gate; a Gate with
 //     no Approver refuses; a Gate gets its class reason + cache key; a Confine gets its box
 //     and its precomputed runtime-demote fallback.
@@ -275,7 +289,16 @@ func resolve(in resolutionInput) resolution {
 		}
 	}
 
-	// 2. The sub_agent recursion point (Tier-2 is intentionally NOT applied here — D3).
+	// 2. The wrap-up row — not audit-recorded, like an unknown tool: nothing dangerous was asked,
+	// only a write the Turn was never offered.
+	if in.wrapUpOutput != "" && !in.writesWrapUpOutput {
+		return resolution{
+			kind:   resolveRefuse,
+			reason: fmt.Sprintf(wrapUpOutputRefusalFormat, in.wrapUpOutput),
+		}
+	}
+
+	// 3. The sub_agent recursion point (Tier-2 is intentionally NOT applied here — D3).
 	if isSubAgentCall(in.call) {
 		if in.atDepthBound {
 			return resolution{
@@ -292,7 +315,7 @@ func resolve(in resolutionInput) resolution {
 		}
 	}
 
-	// 3. Unknown tool — refuse, NOT audit-recorded (D8).
+	// 4. Unknown tool — refuse, NOT audit-recorded (D8).
 	if in.tool == nil {
 		return resolution{
 			kind:   resolveRefuse,
@@ -300,7 +323,7 @@ func resolve(in resolutionInput) resolution {
 		}
 	}
 
-	// 4. The ladder table, then the leaf overlays.
+	// 5. The ladder table, then the leaf overlays.
 	return applyOverlays(in, resolveLadder(in))
 }
 

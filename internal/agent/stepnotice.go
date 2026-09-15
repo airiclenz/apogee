@@ -13,7 +13,8 @@ import (
 // — and a child alone, because only a delegate carries a step cap (Agent.stepCap) — that it has
 // spent three quarters of the Turns its delegation is bounded to, once, on the tool result that
 // closes the Turn reaching that share, so the model can write its output while it still holds the
-// tools to write it with rather than discovering the cap on the tool-less wrap-up Turn. It steers
+// tools to write it with rather than discovering the cap on the wrap-up Turn — tool-less, bar
+// write_file to a spawn-named `output_path` (Agent.outputPath). It steers
 // rather than corrects, which is why it ships OFF (Config.StepBudgetNotice) and why Bypass switches
 // it off with the rest of its class.
 

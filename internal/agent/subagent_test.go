@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -2305,13 +2307,204 @@ func TestUserSteeredTrailer_SingularAndPlural(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The wrap-up Turn keeps write_file for a spawn-named output_path (plan 2026-09-14 - 03, item 8)
+// ----------------------------------------------------------------------------
+
+// outputPathAgent builds a parent in mode over a real workspace with a real write_file tool and
+// the fake reader, capped at two child Turns, whose one delegation names outputPath (or none, for
+// ""). The scripts are the child's two capped Turns, then the wrap-up reply given, then the
+// parent's close. It returns the parent, the responder that logs every request the tree sent,
+// the sink, and the workspace root the output path resolves against.
+func outputPathAgent(t *testing.T, mode domain.Mode, outputPath string, wrapUp []provider.Delta) (*Agent, *requestLogResponder, *recordingSink, string) {
+	t.Helper()
+
+	ws := t.TempDir()
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, mode, reader, tools.NewWriteFile(ws))
+	cfg.WorkspaceDir = ws
+	cfg.Delegation.MaxSteps = 2
+
+	call, err := json.Marshal(tools.SubAgentArgs{Task: "trawl the repo", OutputPath: outputPath})
+	if err != nil {
+		t.Fatalf("marshal sub_agent args: %v", err)
+	}
+	scripts := [][]provider.Delta{toolCallScript("c1", tools.SubAgentToolName, string(call))}
+	scripts = append(scripts, cappedChildTurns(2)...)
+	scripts = append(scripts, wrapUp, contentScript("parent done"))
+	responder := &requestLogResponder{scripts: scripts}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	return a, responder, sink, ws
+}
+
+// wrapUpRequest is the child's wrap-up request in a two-Turn capped delegation: the parent's
+// opening request, two child Turns, then this one.
+func wrapUpRequest(t *testing.T, responder *requestLogResponder) provider.Request {
+	t.Helper()
+
+	const wrapUpIndex = 3
+	if len(responder.requests) <= wrapUpIndex {
+		t.Fatalf("requests = %d, want the wrap-up at index %d", len(responder.requests), wrapUpIndex)
+	}
+	return responder.requests[wrapUpIndex]
+}
+
+// wrapUpWriteResults returns every tool result a child (Depth 1) committed for the named tool.
+func wrapUpWriteResults(events []domain.Event, tool string) []domain.ToolResult {
+	ids := map[string]bool{}
+	var out []domain.ToolResult
+	for _, e := range events {
+		switch ev := e.(type) {
+		case domain.ToolCallEvent:
+			if ev.Depth == 1 && ev.Call.Tool == tool {
+				ids[ev.Call.ID] = true
+			}
+		case domain.ToolResultEvent:
+			if ids[ev.Result.CallID] {
+				out = append(out, ev.Result)
+			}
+		}
+	}
+	return out
+}
+
+// TestSubAgent_OutputPathKeepsWriteFileInTheWrapUp drives the exception whole: a delegation
+// spawned with an `output_path` reaches its cap, its wrap-up request offers exactly write_file
+// and says so after the untouched directive, the scripted write to that path LANDS, and the
+// parent still reads the capped result with the closing report the same reply carried.
+func TestSubAgent_OutputPathKeepsWriteFileInTheWrapUp(t *testing.T) {
+	a, responder, sink, ws := outputPathAgent(t, domain.ModeAllowEdits, "out/report.md",
+		narratedToolCallScript("w0", tools.WriteFileToolName,
+			`{"path":"out/report.md","content":"the survey so far"}`, childClosingReport))
+
+	runExchange(t, a, "please research")
+
+	req := wrapUpRequest(t, responder)
+	if len(req.Tools) != 1 || req.Tools[0].Name != tools.WriteFileToolName {
+		t.Fatalf("wrap-up menu = %+v, want exactly write_file", req.Tools)
+	}
+	want := fmt.Sprintf(wrapUpDirectiveFormat, 2) + fmt.Sprintf(wrapUpOutputClauseFormat, "out/report.md")
+	if got := requestSystemText(req); !strings.Contains(got, want) {
+		t.Errorf("system text = %q, want it to contain the directive followed by the output clause %q", got, want)
+	}
+
+	body, err := os.ReadFile(filepath.Join(ws, "out", "report.md"))
+	if err != nil {
+		t.Fatalf("the wrap-up write did not land: %v", err)
+	}
+	if string(body) != "the survey so far" {
+		t.Errorf("output file = %q, want the scripted content", body)
+	}
+	results := wrapUpWriteResults(sink.events, tools.WriteFileToolName)
+	if len(results) != 1 || results[0].IsError {
+		t.Errorf("write_file results = %+v, want one non-error result", results)
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	head := fmt.Sprintf(stepCapResultFormat, 2)
+	if sub.IsError || !strings.HasPrefix(sub.Content, head+"\n") || !strings.HasSuffix(sub.Content, childClosingReport) {
+		t.Errorf("sub_agent result = %q, want a non-error capped result carrying the closing report", sub.Content)
+	}
+	// The wrap-up bought one request, never a further working Turn: the child asked three times.
+	if got := len(responder.requests); got != 5 {
+		t.Errorf("requests = %d, want 5 — parent, two capped child Turns, the wrap-up, the parent's close", got)
+	}
+}
+
+// TestSubAgent_WrapUpRefusesAWriteElsewhere pins the refusal: a wrap-up write_file aimed anywhere
+// but the output path gets exactly the wrap-up refusal naming that path, and writes nothing.
+func TestSubAgent_WrapUpRefusesAWriteElsewhere(t *testing.T) {
+	a, _, sink, ws := outputPathAgent(t, domain.ModeAllowEdits, "out/report.md",
+		narratedToolCallScript("w0", tools.WriteFileToolName,
+			`{"path":"elsewhere.md","content":"not the output"}`, childClosingReport))
+
+	runExchange(t, a, "please research")
+
+	results := wrapUpWriteResults(sink.events, tools.WriteFileToolName)
+	if len(results) != 1 {
+		t.Fatalf("write_file results = %d, want exactly one — the refusal", len(results))
+	}
+	if !results[0].IsError || results[0].Content != "wrap-up: only out/report.md may be written" {
+		t.Errorf("write_file result = %+v, want the exact wrap-up refusal naming the output path", results[0])
+	}
+	if _, err := os.Stat(filepath.Join(ws, "elsewhere.md")); !os.IsNotExist(err) {
+		t.Errorf("elsewhere.md exists (stat err = %v); a refused wrap-up write must not land", err)
+	}
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok || sub.IsError || !strings.HasSuffix(sub.Content, childClosingReport) {
+		t.Errorf("sub_agent result = %+v, want the non-error capped result with the closing report", sub)
+	}
+}
+
+// TestSubAgent_WrapUpStaysToolLessWithoutAnOutputPath is the control: the same workspace and the
+// same write_file in the child's registry, but a spawn that named no output path — the wrap-up
+// menu is empty, the directive carries no clause, and the write the reply asks for is dropped.
+func TestSubAgent_WrapUpStaysToolLessWithoutAnOutputPath(t *testing.T) {
+	a, responder, sink, ws := outputPathAgent(t, domain.ModeAllowEdits, "",
+		narratedToolCallScript("w0", tools.WriteFileToolName,
+			`{"path":"out/report.md","content":"the survey so far"}`, childClosingReport))
+
+	runExchange(t, a, "please research")
+
+	req := wrapUpRequest(t, responder)
+	if len(req.Tools) != 0 {
+		t.Errorf("wrap-up menu = %+v, want none without an output path", req.Tools)
+	}
+	got := requestSystemText(req)
+	if want := fmt.Sprintf(wrapUpDirectiveFormat, 2); !strings.Contains(got, want) {
+		t.Errorf("system text = %q, want the plain directive %q", got, want)
+	}
+	if strings.Contains(got, "You may still call write_file") {
+		t.Errorf("system text = %q carries the output clause without an output path", got)
+	}
+	if results := wrapUpWriteResults(sink.events, tools.WriteFileToolName); len(results) != 0 {
+		t.Errorf("write_file results = %+v, want none — a withdrawn menu is not reachable", results)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "out", "report.md")); !os.IsNotExist(err) {
+		t.Errorf("out/report.md exists (stat err = %v); a dropped wrap-up write must not land", err)
+	}
+}
+
+// TestSubAgent_PlanModeWrapUpOffersNoWriter pins the announced-then-refused guard: a Plan-mode
+// child inherits Plan, whose ladder refuses a workspace write, so its wrap-up keeps no writer and
+// says nothing about one even though the spawn named an output path.
+func TestSubAgent_PlanModeWrapUpOffersNoWriter(t *testing.T) {
+	a, responder, sink, ws := outputPathAgent(t, domain.ModePlan, "out/report.md",
+		narratedToolCallScript("w0", tools.WriteFileToolName,
+			`{"path":"out/report.md","content":"the survey so far"}`, childClosingReport))
+
+	runExchange(t, a, "please research")
+
+	req := wrapUpRequest(t, responder)
+	if len(req.Tools) != 0 {
+		t.Errorf("wrap-up menu = %+v, want none in Plan mode", req.Tools)
+	}
+	if got := requestSystemText(req); strings.Contains(got, "You may still call write_file") {
+		t.Errorf("system text = %q carries the output clause for a Plan-mode child", got)
+	}
+	if results := wrapUpWriteResults(sink.events, tools.WriteFileToolName); len(results) != 0 {
+		t.Errorf("write_file results = %+v, want none in Plan mode", results)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "out", "report.md")); !os.IsNotExist(err) {
+		t.Errorf("out/report.md exists (stat err = %v); Plan mode writes nothing", err)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The tool-less wrap-up Turn (Agent.wrapUp)
 // ----------------------------------------------------------------------------
 //
 // These tests set the latch BY HAND — nothing in the engine writes it yet — because the three
 // seams it moves (toolMenu, buildRequest, step) are its whole observable contract: one request
 // with no tools and a directive saying why, and a reply that ends the Exchange whatever it asks
-// for.
+// for. They are the no-output_path shape; the write_file exception has its own block above.
 
 // wrapUpAgent builds a latched-or-clear single Agent over the given scripts with one read tool,
 // returns it alongside the responder that logs what the loop actually sent and a counter the

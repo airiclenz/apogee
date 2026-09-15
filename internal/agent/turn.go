@@ -161,7 +161,8 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		status = domain.StatusCancelled
 	case endStepCapped:
 		// The delegate step cap's FALLBACK exit. The cap no longer ends the Exchange on this row in
-		// the ordinary case: finishAtStepCap (agent.go) spends one further tool-less Turn on the
+		// the ordinary case: finishAtStepCap (agent.go) spends one further tool-less Turn (bar
+		// write_file to a spawn-named `output_path`) on the
 		// child's closing report, and THAT Turn ends through endExchangeDone — counter
 		// advanced, Exchange closed — so a capped child now ends at cap+1 Turns and the boundary
 		// the parent reads is the wrap-up's own with StepCapped forced on. This row is what is

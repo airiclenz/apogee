@@ -407,16 +407,32 @@ type Agent struct {
 	capStart time.Time
 	capHit   delegateBound
 
-	// wrapUp latches the ONE tool-less closing Turn a delegate stopped at its step cap is given
+	// wrapUp latches the ONE closing Turn a delegate stopped at its step cap is given
 	// (subagent.go's wrapUpDirectiveFormat). While it is set, three seams change together and only
 	// for the request they compose: toolMenu returns no tools, buildRequest stamps the directive
 	// that says why they are gone and what to write instead, and step() takes the final-answer exit
-	// even if the reply asks for a tool anyway (loop.go). It is latched for exactly ONE request and
+	// even if the reply asks for a tool anyway (loop.go). The Turn is tool-less with ONE exception:
+	// a delegation spawned with an `output_path` keeps write_file for exactly that file
+	// (outputPath, wrapUpWriter), so a capped child can still land the output it was asked for;
+	// every other call is still dropped, and a write elsewhere is refused (resolve, resolution.go).
+	// It is latched for exactly ONE request and
 	// cleared before the capped Exchange returns, so it never outlives the Exchange that raised it,
 	// and it is written on this Agent's own loop goroutine. Transient like turns.exchangeTurns: it is neither configured nor serialized,
 	// because a resumed session resumes at a boundary, never mid-wrap-up. Structural (ADR 0006),
 	// not a Reaction: no config key, and it holds under Bypass.
 	wrapUp bool
+
+	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
+	// argument of its sub_agent call (tools.SubAgentArgs.OutputPath), set on the CHILD by
+	// runSubAgent and empty on every Agent whose spawn named none, the top-level Agent included.
+	// outputPath is the path as the call spelled it, the spelling the wrap-up directive and the
+	// refusal quote back to the model; outputTarget is that path resolved through the same write
+	// fence write_file's own target is (tools.WorkspaceWriteTarget: workspace-joined, symlinks
+	// followed), the spelling a wrap-up write_file call's target is compared against. It is not
+	// privilege and reaches no ladder row: what it buys is the one exception wrapUp documents.
+	// Structural like wrapUp: no config key, and it holds under Bypass.
+	outputPath   string
+	outputTarget string
 
 	// midExchangeCompaction lifts shouldAutoCompact's Exchange-boundary-only gate (S2) for this
 	// Agent, so the estimate-driven fold may also run at a quiescent TURN boundary — the top of
@@ -440,7 +456,8 @@ type Agent struct {
 
 // stepCapErrFormat is the ErrorEvent text a delegate surfaces when it reaches its step cap — the
 // human-facing half of the bound, and the only thing that says the delegation was STOPPED rather
-// than finished. It is emitted at the cap and the Exchange then runs ONE further tool-less Turn
+// than finished. It is emitted at the cap and the Exchange then runs ONE further Turn — tool-less,
+// bar write_file to a spawn-named `output_path` (Agent.outputPath) —
 // for the child's closing report (finishAtStepCap), which is why the middle clause says what the
 // engine does next rather than what it already has. It is a package constant, pinned by test,
 // because the line names the key that raises the bound and a watcher acts on it. %d is the cap
@@ -729,7 +746,8 @@ func (a *Agent) emitTurn(res domain.StepResult) {
 // token and time bounds joined it (Agent.tokenCap, Agent.timeCap), the one place all three are: a
 // child agent that is still asking for tools after its capped number of Turns, or whose prompt
 // tokens or wall clock have reached their bound, leaves this loop rather than looping on, is given
-// one further tool-less Turn to report what it has (finishAtStepCap), and the boundary returned
+// one further tool-less Turn (bar write_file to a spawn-named `output_path` — Agent.outputPath) to
+// report what it has (finishAtStepCap), and the boundary returned
 // carries StepCapped. A Step-driving host is not capped — it decides when to stop stepping itself
 // — and neither is a top-level Agent, whose caps are always 0.
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
@@ -774,7 +792,10 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 // (the child's own stream, at its Depth), then latches wrapUp for exactly one step(): the tool
 // menu is withdrawn and the request tells the delegate why its tools are gone and asks it to
 // report to the agent that delegated the task (subagent.go's wrapUpDirectiveFormat, loop.go's
-// three seams). What the parent reads is then AUTHORED rather than scavenged from whatever the
+// three seams). The one tool that survives the withdrawal is write_file, and only for a
+// delegation spawned with an `output_path` (Agent.outputPath, wrapUpWriter): the request then
+// also says that file may still be written, and step() dispatches that one call before ending.
+// What the parent reads is then AUTHORED rather than scavenged from whatever the
 // child happened to narrate alongside its last tool call.
 //
 // That Turn is EXTRA and uncounted: turns.exchangeTurns is advanced only by Run's loop, which this

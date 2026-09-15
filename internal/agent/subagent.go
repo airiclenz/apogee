@@ -76,7 +76,8 @@ const stepCapClampNoteFormat = "[max_steps %d requested; the configured cap is %
 // step cap (Agent.stepCap): a NON-error result whose first line says the answer that follows is
 // partial, so the parent can re-delegate a narrower task instead of treating a half-finished
 // investigation as the finding. What follows it is the child's last visible text, which since
-// finishAtStepCap (agent.go) is normally its CLOSING REPORT — the tool-less wrap-up Turn's reply —
+// finishAtStepCap (agent.go) is normally its CLOSING REPORT — the wrap-up Turn's reply, tool-less
+// bar write_file to a spawn-named `output_path` (Agent.outputPath) —
 // and falls back to whatever it last said out loud when that Turn produced nothing. The line
 // itself is unchanged either way: it promises a partial result, and a report of unfinished work is
 // exactly that. It is a package constant, pinned by test, because the parent model reads it as the
@@ -127,8 +128,9 @@ const stepCapNoTextMarker = "(no visible text)"
 
 // wrapUpMarker and wrapUpDirectiveFormat are the one-request system directive a delegate stopped
 // at its step cap is handed for its closing report (Agent.wrapUp, loop.go): the request that
-// carries it carries no tools at all, so the directive is the only thing that tells the child WHY
-// its menu vanished and what to do with the reply it has left. It states the cause, the
+// carries it carries no tools at all — bar write_file for a delegation spawned with an
+// `output_path`, which wrapUpOutputClauseFormat announces below — so the directive is the only
+// thing that tells the child WHY its menu vanished and what to do with the reply it has left. It states the cause, the
 // prohibition and the ask — report to the agent that delegated the task, unfinished work included
 // — because a model that is merely given no tools narrates its next tool call instead of a result,
 // which is exactly the scavenged text this replaces.
@@ -142,8 +144,16 @@ const stepCapNoTextMarker = "(no visible text)"
 // The token and time bounds hand the child the same directive with their own opening clause
 // (wrapUpTokenDirectiveFormat, wrapUpTimeDirectiveFormat): the cause differs, the prohibition and
 // the ask do not, so the three share wrapUpDirectiveTail and wrapUpDirective picks by capHit.
+//
+// wrapUpOutputClauseFormat is the one clause appended AFTER the directive — never folded into it,
+// so the three formats above keep their arity and their pinned text — when, and only when, the
+// wrap-up keeps write_file for the delegation's `output_path` (wrapUpWriter): it names the one
+// path the child may still write, in the spelling its spawning call used (Agent.outputPath), so
+// the exception is announced exactly where the withdrawal is. %s is that path.
 const (
 	wrapUpMarker = "no further tool calls are possible"
+
+	wrapUpOutputClauseFormat = "\n\nYou may still call write_file once, for %s only."
 
 	wrapUpDirectiveTail = "no further tool calls are possible: the tools have been withdrawn for this final reply." +
 		"\n\nReport back to the agent that delegated this task now: what you found, what you " +
@@ -162,15 +172,91 @@ const (
 
 // wrapUpDirective renders the closing-report directive for the bound capHit names, with that
 // bound's applied value in the clause — the same number the human read in the ErrorEvent and the
-// parent reads in the result head, so all three tell one story.
+// parent reads in the result head, so all three tell one story. The output clause rides it only
+// when the wrap-up menu actually carries write_file (wrapUpWriter), so the child is never told it
+// may write a file the menu then withholds.
 func (a *Agent) wrapUpDirective() string {
+	var directive string
 	switch a.capHit {
 	case boundTokens:
-		return fmt.Sprintf(wrapUpTokenDirectiveFormat, a.tokenCap)
+		directive = fmt.Sprintf(wrapUpTokenDirectiveFormat, a.tokenCap)
 	case boundTime:
-		return fmt.Sprintf(wrapUpTimeDirectiveFormat, boundDurationText(a.timeCap))
+		directive = fmt.Sprintf(wrapUpTimeDirectiveFormat, boundDurationText(a.timeCap))
+	default:
+		directive = fmt.Sprintf(wrapUpDirectiveFormat, a.stepCap)
 	}
-	return fmt.Sprintf(wrapUpDirectiveFormat, a.stepCap)
+	if _, ok := a.wrapUpWriter(); ok {
+		directive += fmt.Sprintf(wrapUpOutputClauseFormat, a.outputPath)
+	}
+	return directive
+}
+
+// wrapUpOutputRefusalFormat is the error result a wrap-up write_file call gets when its target is
+// not the delegation's `output_path`: the one write the Turn was offered is the one write it may
+// make, and the refusal names that path in the spelling the directive used. %s is Agent.outputPath.
+const wrapUpOutputRefusalFormat = "wrap-up: only %s may be written"
+
+// wrapUpWriter is the ONE tool the step-cap wrap-up Turn keeps, and whether it keeps it: write_file,
+// for a delegation spawned with an `output_path` (Agent.outputPath), so a capped child can still
+// land the file it was asked for. It answers false — and the wrap-up stays tool-less and
+// clause-less, never announced-then-refused — unless all three hold: the spawn named an output
+// path that resolved (outputTarget), this Agent's registry holds write_file (a `tools:` roster may
+// have dropped it), and its live Mode admits a workspace write at all — a Plan-mode child inherits
+// Plan, whose ladder row refuses the call, so offering it there would be a promise the ladder
+// breaks. It is read by the three wrap-up seams (toolMenu, wrapUpDirective, step's call filter)
+// and by resolve's wrap-up row through resolutionInput, so the offer and the permission cannot
+// drift apart.
+func (a *Agent) wrapUpWriter() (domain.Tool, bool) {
+	if a.outputTarget == "" || a.Mode() == domain.ModePlan {
+		return nil, false
+	}
+	return a.lookupTool(tools.WriteFileToolName)
+}
+
+// wrapUpCalls is the wrap-up Turn's call filter (step, loop.go): with write_file on the menu
+// (wrapUpWriter) it keeps every write_file call the reply made and drops the rest, and with the
+// menu withdrawn wholesale it keeps nothing. A kept call is not yet permitted — the wrap-up row of
+// resolve refuses one aimed anywhere but the output path — it is merely dispatched, so the
+// refusal reaches the transcript instead of vanishing with the dropped calls.
+func (a *Agent) wrapUpCalls(calls []domain.ToolCall) []domain.ToolCall {
+	if _, ok := a.wrapUpWriter(); !ok {
+		return nil
+	}
+	var kept []domain.ToolCall
+	for _, call := range calls {
+		if call.Tool == tools.WriteFileToolName {
+			kept = append(kept, call)
+		}
+	}
+	return kept
+}
+
+// resolveOutputPath resolves a spawning call's `output_path` for the child through the SAME fence
+// write_file's own target is classified by (tools.WorkspaceWriteTarget over the child's write_file
+// tool: workspace-joined, symlinks followed), so the wrap-up's comparison is between two readings
+// of one resolver. It sets nothing when the child holds no write_file — then there is no writer to
+// keep and no resolver to read — or when the path is not inspectable; either leaves the wrap-up
+// tool-less exactly as a spawn that named no path.
+func (a *Agent) resolveOutputPath(path string) {
+	if path == "" {
+		return
+	}
+	writer, ok := a.lookupTool(tools.WriteFileToolName)
+	if !ok {
+		return
+	}
+	args, err := json.Marshal(struct {
+		Path string `json:"path"`
+	}{Path: path})
+	if err != nil {
+		return
+	}
+	target, ok := tools.WorkspaceWriteTarget(writer, domain.ToolCall{Tool: writer.Name(), Arguments: args})
+	if !ok {
+		return
+	}
+	a.outputPath = path
+	a.outputTarget = target
 }
 
 // userSteeredTrailerSingular and userSteeredTrailerPluralFormat are the two renderings of the
@@ -333,6 +419,10 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	if narrowed != nil {
 		sub.tools = sub.tools.Subset(narrowed...)
 	}
+	// AFTER the narrowing, because the output path is resolved through the child's own write_file
+	// and kept only where the child still holds one: a `tools:` roster that dropped the writer
+	// leaves the wrap-up tool-less, as it must (wrapUpWriter).
+	sub.resolveOutputPath(args.OutputPath)
 	// The call's optional max_steps can only ever LOWER the configured cap: a model may say "this
 	// one is small, stop it sooner", never "let me run longer than the host allows". Both values
 	// must be positive for the request to bite — a request against an UNBOUNDED cap (0, the key
@@ -497,8 +587,8 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		// child last said out loud. The child's own ErrorEvent already told the human the cap hit.
 		//
 		// That last visible text is normally the child's CLOSING REPORT: finishAtStepCap spends one
-		// tool-less Turn asking the capped delegate to sum up, and its reply is the last thing
-		// committed (agent.go). This branch is also the fallback for that Turn going wrong — a
+		// tool-less Turn (bar write_file to a spawn-named `output_path`) asking the capped delegate
+		// to sum up, and its reply is the last thing committed (agent.go). This branch is also the fallback for that Turn going wrong — a
 		// faulted or text-less wrap-up arrives here with Faulted cleared, and the pre-cap text (or
 		// stepCapNoTextMarker) answers exactly as it did before the wrap-up existed.
 		text := a.lastVisibleText()

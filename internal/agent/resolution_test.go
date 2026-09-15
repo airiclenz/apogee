@@ -795,6 +795,67 @@ func TestResolve_UnknownTool(t *testing.T) {
 	})
 }
 
+// TestResolve_WrapUpRow proves the step-cap wrap-up row (plan 2026-09-14 - 03, item 8): on a
+// wrap-up Turn that kept write_file for the delegation's output path, the write aimed at that path
+// falls through to its ordinary ladder row, any other call is refused with the exact wording naming
+// the path and no audit decision, and the row is inert — the ordinary verdict — off the wrap-up.
+func TestResolve_WrapUpRow(t *testing.T) {
+	t.Parallel()
+
+	writer := tools.NewWriteFile(t.TempDir())
+	call := domain.ToolCall{ID: "w1", Tool: writer.Name(), Arguments: json.RawMessage(`{"path":"a.md","content":"x"}`)}
+	base := resolutionInput{
+		mode:                   domain.ModeAllowEdits,
+		call:                   call,
+		tool:                   writer,
+		guard:                  proceed,
+		writeTargetInWorkspace: true,
+		approverPresent:        true,
+	}
+
+	t.Run("the output write runs on its ordinary row", func(t *testing.T) {
+		t.Parallel()
+		in := base
+		in.wrapUpOutput, in.writesWrapUpOutput = "out/report.md", true
+		if got := resolve(in); got.kind != resolveRun {
+			t.Errorf("kind = %s, want run — the output write meets the Allow-Edits row as any in-workspace write", got.kind)
+		}
+	})
+
+	t.Run("a write elsewhere is refused naming the path", func(t *testing.T) {
+		t.Parallel()
+		in := base
+		in.wrapUpOutput, in.writesWrapUpOutput = "out/report.md", false
+		got := resolve(in)
+		if got.kind != resolveRefuse {
+			t.Fatalf("kind = %s, want refuse", got.kind)
+		}
+		if want := "wrap-up: only out/report.md may be written"; got.reason != want {
+			t.Errorf("reason = %q, want %q", got.reason, want)
+		}
+		if got.auditDecision != "" {
+			t.Errorf("auditDecision = %q, want empty (a wrap-up refusal is not audited)", got.auditDecision)
+		}
+	})
+
+	t.Run("a guard refuse still wins", func(t *testing.T) {
+		t.Parallel()
+		in := base
+		in.wrapUpOutput, in.writesWrapUpOutput = "out/report.md", false
+		in.guard = security.PreCheck{Outcome: security.GuardRefuse, Reason: "rm -rf /", Audit: security.AuditDangerousRefused}
+		if got := resolve(in); got.auditDecision != security.AuditDangerousRefused {
+			t.Errorf("auditDecision = %q, want the guard's — the guard row runs before the wrap-up row", got.auditDecision)
+		}
+	})
+
+	t.Run("off the wrap-up the row is inert", func(t *testing.T) {
+		t.Parallel()
+		if got := resolve(base); got.kind != resolveRun {
+			t.Errorf("kind = %s, want run — an empty wrapUpOutput leaves the ordinary verdict alone", got.kind)
+		}
+	})
+}
+
 // TestResolve_NilApproverGateRefuses proves every gate-producing verdict becomes a Refuse when
 // no Approver is configured (D5): a Gate always means the Approver is actually consulted, so a
 // nil Approver refuses rather than run unapproved — and that refusal IS audited (pass-through).

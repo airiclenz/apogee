@@ -8,8 +8,14 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
+// WriteFileToolName is the published name of the write_file tool. It is exported for the one
+// reader outside this package that must name the tool rather than hold it: the engine's step-cap
+// wrap-up, which keeps exactly this tool on the menu for a delegation's `output_path`
+// (SubAgentArgs.OutputPath).
+const WriteFileToolName = "write_file"
+
 var writeFileSpec = toolSpec{
-	name:        "write_file",
+	name:        WriteFileToolName,
 	description: "Create or overwrite a file with the given content. Parent directories are created as needed.",
 	schema: json.RawMessage(`{
   "type": "object",

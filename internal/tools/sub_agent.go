@@ -50,6 +50,10 @@ const (
 // widens — the engine intersects it with the parent's own roster — and an unknown name is refused
 // with a result naming it, so a model learns the spelling instead of silently losing the tool (plan
 // 2026-09-14 - 03, item 5).
+//
+// `output_path` is the file the delegation is expected to write. It changes nothing about the
+// task; it names the ONE file the child may still write on its step-cap wrap-up Turn, where every
+// other tool is withdrawn (Agent.wrapUp — plan 2026-09-14 - 03, item 8).
 const subAgentSchemaTemplate = `{
   "type": "object",
   "required": ["task"],
@@ -57,7 +61,8 @@ const subAgentSchemaTemplate = `{
     "task": {"type": "string", "minLength": 20, "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
     "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."},
-    "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."}%s
+    "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."},
+    "output_path": {"type": "string", "description": "optional; the file the sub-agent is expected to write, relative to the workspace root or absolute. If it hits its step cap, write_file to this one path stays available for its final reply."}%s
   }
 }`
 
@@ -124,12 +129,20 @@ var subAgentSpec = toolSpec{
 // the third argument that can only ever tighten: the engine intersects it with the tools the child
 // would otherwise inherit, so it names a subset or it names nothing — the zero value, which leaves
 // the inherited roster alone.
+//
+// OutputPath is the file this ONE delegation is expected to write — the same path spelling
+// write_file's `path` takes, relative to the workspace root or absolute. The task text is left
+// untouched by it; what it buys is the step-cap wrap-up: a capped child that named one keeps
+// write_file for exactly that path on its closing Turn, where every other tool is withdrawn (plan
+// 2026-09-14 - 03, item 8). Empty means the wrap-up stays tool-less. Never privilege: the write
+// still runs through the same fence and Mode the child's every other write does.
 type SubAgentArgs struct {
-	Task     string         `json:"task"`
-	Name     string         `json:"name"`
-	MaxSteps int            `json:"max_steps"`
-	RunOn    string         `json:"run_on"`
-	Tools    SubAgentRoster `json:"tools"`
+	Task       string         `json:"task"`
+	Name       string         `json:"name"`
+	MaxSteps   int            `json:"max_steps"`
+	RunOn      string         `json:"run_on"`
+	Tools      SubAgentRoster `json:"tools"`
+	OutputPath string         `json:"output_path"`
 }
 
 // SubAgentRoster is the decoded `tools` argument of a sub_agent call — the one argument whose wire

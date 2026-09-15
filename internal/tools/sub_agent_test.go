@@ -229,11 +229,71 @@ func TestSubAgentArgsParsesTheOptionalMaxSteps(t *testing.T) {
 	}
 }
 
+// TestSubAgentSchemaOffersAnOptionalOutputPath pins the model-facing half of the step-cap
+// writer (plan 2026-09-14 - 03, item 8): the published schema advertises a string `output_path`
+// property that stays OPTIONAL — a model that never names one keeps making valid calls and its
+// delegation's wrap-up stays tool-less — and whose description says what naming one buys: write_file
+// to that one path on the closing Turn.
+func TestSubAgentSchemaOffersAnOptionalOutputPath(t *testing.T) {
+	t.Parallel()
+
+	var schema struct {
+		Required   []string                  `json:"required"`
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(NewSubAgent().Schema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+
+	prop, ok := schema.Properties["output_path"]
+	if !ok {
+		t.Fatal("schema is missing the output_path property")
+	}
+	if prop["type"] != "string" {
+		t.Errorf("output_path type = %v, want string", prop["type"])
+	}
+	desc, _ := prop["description"].(string)
+	if !strings.Contains(desc, "write_file") || !strings.Contains(desc, "step cap") {
+		t.Errorf("output_path description = %q, want it to say write_file stays available at the step cap", desc)
+	}
+	if len(schema.Required) != 1 || schema.Required[0] != "task" {
+		t.Errorf("required = %v, want [task] — output_path must stay optional", schema.Required)
+	}
+}
+
+// TestSubAgentArgsParsesTheOptionalOutputPath proves the exported argument shape carries the
+// output path across the JSON boundary, and that a call omitting it yields "" — the value the
+// orchestrator reads as "the wrap-up stays tool-less" — rather than failing to parse.
+func TestSubAgentArgsParsesTheOptionalOutputPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		payload  string
+		wantPath string
+	}{
+		{"named", `{"task":"summarise the repo","output_path":"notes/summary.md"}`, "notes/summary.md"},
+		{"absent", `{"task":"summarise the repo"}`, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var args SubAgentArgs
+			if err := json.Unmarshal([]byte(tc.payload), &args); err != nil {
+				t.Fatalf("unmarshal %s: %v", tc.payload, err)
+			}
+			if args.OutputPath != tc.wantPath {
+				t.Errorf("OutputPath = %q, want %q", args.OutputPath, tc.wantPath)
+			}
+		})
+	}
+}
+
 // wantPlainSubAgentSchema is the sub_agent schema as the plain variant publishes it: the schema
 // shipped before seat choice existed (ADR 0069), plus the two schema floors — `minLength` on task,
 // `minimum` on max_steps — and the rewritten max_steps description that landed with them (plan
-// 2026-09-14 - 03, item 4), plus the `tools` roster property (item 5 of the same plan — the two
-// items change the plain schema once, together). It is spelled out here rather than derived, because "byte-identical" is
+// 2026-09-14 - 03, item 4), plus the `tools` roster property (item 5 of the same plan) and the
+// `output_path` property (item 8 — the three items change the plain schema once, together). It is spelled out here rather than derived, because "byte-identical" is
 // the whole claim: the plain variant is prefill on every request of every session that never
 // enables the choice, so a stray comma or a reordered property in the shared template would be paid
 // for by every model that was never offered a seat — and would break the KV-cache prefix of a
@@ -245,7 +305,8 @@ const wantPlainSubAgentSchema = `{
     "task": {"type": "string", "minLength": 20, "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
     "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."},
-    "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."}
+    "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."},
+    "output_path": {"type": "string", "description": "optional; the file the sub-agent is expected to write, relative to the workspace root or absolute. If it hits its step cap, write_file to this one path stays available for its final reply."}
   }
 }`
 

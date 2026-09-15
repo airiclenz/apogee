@@ -37,6 +37,25 @@ turns:
       tool_calls:
         - name: sub_agent
           arguments: '{"task":"Read the workspace files one at a time and describe them","name":"survey","max_steps":50}'
+    # The output_path variant (plan 2026-09-14 - 03, item 8) — the same delegation, naming the file
+    # it is expected to write. A capped child that named one keeps write_file for exactly that path
+    # on its wrap-up Turn.
+    - when:
+        last_message: ^Delegate the survey with an output file
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Read the workspace files one at a time and describe them","name":"survey","output_path":"survey.md"}'
+    # The output_path child's closing Turn: its wrap-up request still carries the directive AND the
+    # output clause, which only that variant's request carries — so this turn sits ABOVE the plain
+    # wrap-up turn to win the request that has the clause. It spends its one reply on the write it
+    # was told it may still make (a stubllm turn is one kind — a call here, not a report).
+    - when:
+        system: You may still call write_file once, for survey.md only
+      repeat: true
+      tool_calls:
+        - name: write_file
+          arguments: '{"path":"survey.md","content":"a.txt says hello; the survey stopped at the grep.\n"}'
     # The child's closing report. The engine spends ONE extra tool-less Turn on a capped delegate,
     # stamping its system prompt with the directive this matches — so this turn is the only one a
     # `system:` matcher can claim, and it sits ABOVE the child's tool turns to win that request. Its

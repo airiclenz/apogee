@@ -42,6 +42,7 @@ const (
 	plainPrompt     = "Just answer this yourself: what is in the workspace?"
 	capPrompt       = "Delegate the survey to a sub-agent."
 	raisedCapPrompt = "Delegate it again with a raised cap in the call."
+	outputCapPrompt = "Delegate the survey with an output file."
 	// childTask is the delegate's own instruction, and it is how a child's requests are told from
 	// the parent's: every message of the child's conversation carries it and none of the parent's
 	// does.
@@ -303,6 +304,54 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		if got := childRequests(stub, childTask); got != before+4 {
 			t.Errorf("the second delegation made %d child requests; max_steps: 50 must not raise a "+
 				"cap of 3, which allows 3 plus one wrap-up", got-before)
+		}
+
+		if err := sess.Quit(); err != nil {
+			t.Fatalf("the run returned %v; want a clean quit", err)
+		}
+	})
+
+	// The output_path variant (plan 2026-09-14 - 03, item 8): the same capped child, spawned with
+	// the file it is expected to write. Its wrap-up keeps write_file for that one path, so the
+	// file EXISTS after the run — under allow-edits, where an in-workspace write needs no gate —
+	// and the wrap-up is the one request whose menu is armed with exactly that tool, which is why
+	// the no-output_path pin above (true, true, true, false) is this run's opposite on its last
+	// request.
+	t.Run("a capped child with an output path still writes it", func(t *testing.T) {
+		stub := stubllm.New(t, loadScript(t, "delegate-cap"))
+		drv := tuitest.NewDriver(t, e2eSize)
+		sess := launchTUIConfigured(t, drv, stub, "delegate-max-steps: 3\nmode: allow-edits\n")
+
+		submit(drv, outputCapPrompt)
+		drv.WaitText("The delegate handed back what it had.")
+		drv.WaitQuiet(settled)
+
+		if got := childRequests(stub, childTask); got != 4 {
+			t.Errorf("the child made %d requests; a cap of 3 turns allows 3 plus one wrap-up", got)
+		}
+		if got := childToolMenus(stub, childTask); !slices.Equal(got, []bool{true, true, true, true}) {
+			t.Errorf("the child's requests offered tools %v; want the wrap-up armed with write_file "+
+				"for the output path", got)
+		}
+		reqs := stub.Requests()
+		last := reqs[len(reqs)-1]
+		for _, req := range reqs {
+			for _, msg := range req.Messages {
+				if strings.Contains(msg.Content, childTask) {
+					last = req
+					break
+				}
+			}
+		}
+		if len(last.Tools) != 1 || last.Tools[0] != "write_file" {
+			t.Errorf("the wrap-up offered %v; want exactly write_file", last.Tools)
+		}
+		body, err := os.ReadFile(filepath.Join(sess.Workspace(), "survey.md"))
+		if err != nil {
+			t.Fatalf("the output file the capped child was told it may still write does not exist: %v", err)
+		}
+		if !strings.Contains(string(body), "a.txt says hello") {
+			t.Errorf("survey.md = %q, want the child's scripted content", body)
 		}
 
 		if err := sess.Quit(); err != nil {

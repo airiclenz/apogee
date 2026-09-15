@@ -209,7 +209,15 @@ NOTES (2026-09-15): sibling tests added beyond the plan's list — wire_boot_tes
 
 **Commit:** `feat(agent): step-budget-notice advise Reaction warns a child at 75 % of its step cap (off by default)`
 
-## 8. `output_path` on `sub_agent`; the wrap-up Turn keeps `write_file` for it
+## 8. `output_path` on `sub_agent`; the wrap-up Turn keeps `write_file` for it — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — internal/tools/write_file.go: added the exported `WriteFileToolName` constant (spec now reads it) so the engine names the wrap-up writer without a bare string; no behaviour change.
+NOTES (2026-09-15): consequential edit — internal/agent/dispatch.go: `writeTargetClass` gained a `real` field and `resolutionInput` the two wrap-up facts (`wrapUpOutput`, `writesWrapUpOutput`), computed from the one existing target resolution; the refusal itself is resolve()'s new row 2 in resolution.go.
+NOTES (2026-09-15): consequential edit — internal/agent/stepnotice.go: item 7's "tool-less wrap-up Turn" comment gained the `output_path` exception per the item's prose rule.
+NOTES (2026-09-15): the prose-rule grep's hits in builtins.go:254, construct.go:263/299, swaptools.go:27 and subagent.go:909/958/967 name a tool-less AGENT (no registry), not the wrap-up — left untouched; construct.go and swaptools.go therefore carry no edit despite being listed in Files.
+NOTES (2026-09-15): salvageToolCall's wrap-up gate now skips only a tool-less wrap-up — a wrap-up that offers write_file salvages against that one-tool menu like any Turn (builtins.go); the plan's Read-first anchor on it left the call to the implementer.
+NOTES (2026-09-15): the "Mode admits a workspace write" offer test is `Mode() != Plan` (a Plan child stays tool-less even with a scratch dir set), matching the item's Plan-mode test; the OUT path is resolved but never fence-checked at spawn — an out-of-fence path meets the ladder exactly as any other write_file would.
+NOTES (2026-09-15): the e2e OUT variant runs under `mode: allow-edits` (the plan's `mode:` alternative) and its stubllm wrap-up turn is a bare `write_file` call — a stubllm turn is exactly one kind, so it cannot also carry report text.
 
 **What:** Depends on items 1, 4. Reverses the 2026-09-01 "tool-less wrap-up" call (owner, 2026-09-14). `sub_agent` gains `output_path` (string, optional): the file the child is expected to write, resolved through the write fence like `write_file`'s target (workspace or scratch dir). When set: the delegation's task text is unchanged; the wrap-up Turn (`agent.go` `finishAtStepCap` / `loop.go` `toolMenu` under `wrapUp`) offers exactly `write_file`, and `wrapUpDirectiveFormat` gains the clause `You may still call write_file once, for <path> only.`; a `write_file` in the wrap-up to any other path is refused with `wrap-up: only <path> may be written`; the loop dispatches that one call before ending (`step()`'s `wrapUp` exit). Without `output_path` the wrap-up stays tool-less. CONTEXT.md **Step cap** amended; `docs/manual/configuration.md` (`output_path` documented beside `max_steps`).
 
