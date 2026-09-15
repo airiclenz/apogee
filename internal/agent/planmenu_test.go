@@ -39,7 +39,7 @@ func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.Pre
 // host delegates supplied, so ask_user and present_document are in it too) plus fakes for the
 // classes no built-in occupies — a third-party network tool, an MCP tool, a third-party
 // in-process writer — and the two RO-declaring-marker-carrying shapes a host could register.
-// Together they span all eight toolClass values — the RO-subproc one is occupied by the
+// Together they span all eight tools.ToolClass values — the RO-subproc one is occupied by the
 // shipped git read set (the trio plus git_show), whose marker is unexported and therefore
 // unfakeable here.
 func planMenuTools(ws string) []domain.Tool {

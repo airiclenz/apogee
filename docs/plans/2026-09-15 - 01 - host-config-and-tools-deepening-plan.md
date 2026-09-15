@@ -314,7 +314,20 @@ NOTES (2026-09-15): the unbacked-delegate drop is a type switch on `*LoadSkill`/
 
 Commit: `refactor(tools): KnownToolNames is derived and HostTools has one composer`
 
-## 13. `tools.Classify` lives beside the markers it reads
+## 13. `tools.Classify` lives beside the markers it reads — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `TestClassifyTool` rewritten in place in `internal/agent/dispatch_test.go` over `tools.Classify`/`tools.Class…` (the plan's first alternative) — its four fakes are shared by a dozen other `internal/agent` test files, so moving them would drag the package's fixtures.
+NOTES (2026-09-15): `tools.ToolClass` gained a `String()` spelling the contract's §4 row names (RO, RO-subproc, WS-write, net, 3p-net, mcp, subproc, 3p-write) so the two table tests report names instead of ints; `TestToolClass_String` covers it.
+NOTES (2026-09-15): consequential edit — internal/tools/doc.go: made necessary by the new file (docmap test enforces the package map); the spine count read "Thirteen" against fourteen listed files before this item and now reads "Fifteen" with classify.go.
+NOTES (2026-09-15): consequential edit — internal/agent/loop.go: made necessary by renaming `classReadOnly`/`classReadOnlySubprocess`/`classWorkspaceWrite` (comment-only).
+NOTES (2026-09-15): consequential edit — internal/agent/planmenu_test.go: made necessary by renaming `toolClass` (comment-only).
+NOTES (2026-09-15): consequential edit — internal/agent/mcp_servergrain_test.go: made necessary by renaming `classMCP` (comment-only).
+NOTES (2026-09-15): consequential edit — internal/config/config.go: made necessary by renaming `classMCP` (comment-only).
+NOTES (2026-09-15): consequential edit — internal/mcp/client.go: made necessary by renaming `classMCP` (comment-only).
+NOTES (2026-09-15): consequential edit — internal/mcp/tool.go: made necessary by renaming `classMCP` (comment-only).
+NOTES (2026-09-15): consequential edit — internal/mcp/mcp_test.go: made necessary by renaming `classMCP` (comment-only).
+NOTES (2026-09-15): consequential edit — cmd/apogee/wire_tools.go: made necessary by renaming `classMCP` (comment-only).
+NOTES (2026-09-15): `internal/agent/resolution_test.go` changed only in one comment naming `classSubprocess`; `TestResolve_LadderTable` is untouched and green.
 
 **What.** Move `classifyTool` (`internal/agent/resolution.go`) to `internal/tools/classify.go` as `Classify(tool domain.Tool) ToolClass` with the eight classes exported; the predicate order becomes a documented table in that file; `internal/agent` consumes the class. The unfakeable markers stay unexported (contract §3.5). Depends on item 12.
 

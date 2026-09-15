@@ -20,7 +20,7 @@ import (
 // Client owns the live sessions to the configured MCP servers and the tools they
 // advertise. Its lifecycle is the design surface (ADR 0012 D3): Connect dials every
 // server and lists its tools; Tools surfaces the discovered tools for registration into
-// the agent's ToolRegistry as classMCP ExternalEffectTools (gated in Auto for free);
+// the agent's ToolRegistry as tools.ClassMCP ExternalEffectTools (gated in Auto for free);
 // Close tears down every session (no orphan). A resumed session reconnects FRESH — the
 // host calls Connect again on resume; no server-side state is restored (ADR 0008).
 
@@ -207,7 +207,7 @@ func listServerTools(ctx context.Context, serverAlias string, session *mcpsdk.Cl
 }
 
 // Tools returns the tools surfaced from every connected server, in (server, tool) discovery
-// order — the set the host registers into the Agent's ToolRegistry (each a classMCP
+// order — the set the host registers into the Agent's ToolRegistry (each a tools.ClassMCP
 // ExternalEffectTool the dispatch disposition gates in Auto for free). The slice is a fresh copy
 // so a caller registering it cannot mutate the Client's bookkeeping.
 func (c *Client) Tools() []domain.Tool {

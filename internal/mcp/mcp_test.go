@@ -215,7 +215,7 @@ func TestConnect_SurfacesServerToolsAndCalls(t *testing.T) {
 
 // TestServerTool_IsMCPExternalEffect proves the load-bearing gating property: a REAL surfaced
 // MCP tool is an ExternalEffectTool of kind mcp. This is the signal the dispatch disposition
-// classifies as classMCP and gates through Approval in Auto under confine-to-workspace=true
+// classifies as tools.ClassMCP and gates through Approval in Auto under confine-to-workspace=true
 // (proven exhaustively in internal/agent/dispatch_test.go); surfacing every server tool with
 // this kind is what makes that gate hold for free (§3 D3).
 func TestServerTool_IsMCPExternalEffect(t *testing.T) {

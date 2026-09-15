@@ -217,7 +217,7 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // url-safety guard, the web-search endpoint, the Asker, the Presenter, the skill catalog, the
 // credential scrub — through the one composer the engine uses, tools.HostToolsOf) PLUS
 // the dynamically discovered MCP tools registered on top. MCP tools are DYNAMIC (discovered from a
-// server at runtime), so they are NOT in DefaultTools — they ride the registry as classMCP
+// server at runtime), so they are NOT in DefaultTools — they ride the registry as tools.ClassMCP
 // ExternalEffectTools the dispatch disposition gates in Auto. A duplicate name (an MCP server's
 // qualified tool colliding with a built-in — unlikely given the alias prefix) is dropped with a
 // stderr notice rather than failing startup; the built-in wins.

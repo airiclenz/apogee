@@ -16,7 +16,7 @@ import (
 //
 // serverTool adapts one tool advertised by a connected MCP server into Apogee's
 // domain.Tool surface. It implements ExternalEffectTool of kind mcp, so the dispatch
-// disposition classifies it as classMCP and gates it through Approval in Auto under
+// disposition classifies it as tools.ClassMCP and gates it through Approval in Auto under
 // confine-to-workspace=true (ADR 0012 D3) — the gating is inherited for free from the
 // effect kind, not re-implemented here. The server's description and input schema are
 // UNTRUSTED data passed to the model verbatim (the trust boundary in doc.go): this
@@ -203,7 +203,7 @@ func okResult(callID, content string) domain.ToolResult {
 }
 
 // Compile-time proof serverTool satisfies the external-effect tool surface the dispatch
-// disposition classifies as classMCP.
+// disposition classifies as tools.ClassMCP.
 var (
 	_ domain.Tool               = serverTool{}
 	_ domain.ExternalEffectTool = serverTool{}

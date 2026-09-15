@@ -212,7 +212,7 @@ func TestResolve_LadderTable(t *testing.T) {
 		ladderRow{ladderCase{"WS-in/plan-with-scratch", wsw, domain.ModePlan, true, true, true, resolveRefuse, planScratchRefusalReason(scratch), ""}, false, scratch},
 		ladderRow{ladderCase{"WS-out/plan-with-scratch", wsw, domain.ModePlan, true, true, false, resolveRefuse, planScratchRefusalReason(scratch), ""}, false, scratch},
 		ladderRow{ladderCase{"WS-in/ask-before-with-scratch", wsw, domain.ModeAskBefore, true, true, true, resolveGate, "out-of-workspace write", security.AuditAllowed}, false, scratch},
-		// The terminal route into the scratch dir is classSubprocess: still refused in Plan
+		// The terminal route into the scratch dir is tools.ClassSubprocess: still refused in Plan
 		// (with the scratch-naming reason) and gated in Ask-Before, whatever the command text.
 		ladderRow{ladderCase{"subproc/plan-with-scratch", sub, domain.ModePlan, true, true, true, resolveRefuse, planScratchRefusalReason(scratch), ""}, false, scratch},
 		ladderRow{ladderCase{"subproc/ask-before-with-scratch", sub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed}, false, scratch},

@@ -1492,7 +1492,7 @@ type fileConfig struct {
 	ResponseReserve float64 `yaml:"response-reserve"`
 	// MCPServers configures external MCP servers to connect on startup (P3.15). Absent/empty ⇒
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
-	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
+	// registry as tools.ClassMCP ExternalEffectTools the disposition gates in Auto.
 	MCPServers []mcpServerConfig `yaml:"mcp-servers"`
 	// Reactions is the global list of user-origin Reactions (ADR 0076): each entry names the Moments
 	// it fires on under `on:` and the actions it takes under `run:` — an argv list run out of

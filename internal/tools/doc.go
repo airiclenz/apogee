@@ -289,7 +289,7 @@
 //
 // # The package spine, one line each
 //
-// Thirteen files register no tool. tools.go is the shared toolSpec (name, description, JSON
+// Fifteen files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
 // including okSummary, which attaches the structured half. registry.go is HostTools and its
 // one composer from domain.Config (HostToolsOf, shared by the engine and the composition root),
@@ -335,7 +335,11 @@
 // argument a given writer lands on. readonly_subprocess.go is its sibling on the READ side: the
 // unexported readOnlySubprocess marker and IsReadOnlySubprocess, which say that a subprocess call
 // is one of apogee's own hardened read-side git reads — and with it the minting conditions a tool
-// must keep to carry it (contract §4, amended 2026-09-06).
+// must keep to carry it (contract §4, amended 2026-09-06). classify.go is what those markers are
+// FOR: Classify and the eight ToolClass values — the blast-radius class the autonomy ladder
+// (internal/agent/resolution.go) keys on, decided here beside the markers it reads (2026-09-15)
+// so the class leaves this package as a value while the markers themselves stay unexported; its
+// header is the check-order table, which is the invariant.
 // regions.go is the one Edit-region builder the four writing
 // tools share — editRegions, which cuts diff.go's line-diff operations into the changed regions
 // with their line numbers and up to three context lines each side, tiled so neighbouring regions

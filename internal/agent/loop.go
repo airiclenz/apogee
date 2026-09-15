@@ -1452,12 +1452,12 @@ func (a *Agent) maxOutputTokens() int {
 // OS-subprocess marker) in Plan and the ladder refused it on the call; keying both on one fact
 // means the menu can never offer what the ladder refuses on every target (contract §4 fn 2).
 //
-// Two classes pass the filter unconditionally: classReadOnly, and classReadOnlySubprocess —
-// RO-subproc, i.e. read-only by construction, subprocess by mechanism (the git read set:
-// git_status, git_log, git_diff_range, git_show), which Plan offers and runs (contract §4 amendment
-// 2026-09-06). A third passes iff a session scratch dir is set: classWorkspaceWrite — Apogee's
-// own writers, which Plan runs on that one target and refuses elsewhere with a reason naming
-// it (ADR 0012 second loosen, 2026-09-14).
+// Two classes pass the filter unconditionally: tools.ClassReadOnly, and
+// tools.ClassReadOnlySubprocess — RO-subproc, i.e. read-only by construction, subprocess by
+// mechanism (the git read set: git_status, git_log, git_diff_range, git_show), which Plan offers
+// and runs (contract §4 amendment 2026-09-06). A third passes iff a session scratch dir is set:
+// tools.ClassWorkspaceWrite — Apogee's own writers, which Plan runs on that one target and
+// refuses elsewhere with a reason naming it (ADR 0012 second loosen, 2026-09-14).
 //
 // The mode and the scratch dir are each read ONCE, before the loop: a mid-build tighten or
 // session move must not compose a menu from two different states (both are live — agent.go).

@@ -13,10 +13,11 @@ import (
 // ----------------------------------------------------------------------------
 //
 // ADR 0012 promises MCP "allow for this session" caches at SERVER grain: approving one
-// `github` tool allows `github.*` for the Session. resolve() keys a classMCP gate's
+// `github` tool allows `github.*` for the Session. resolve() keys a tools.ClassMCP gate's
 // allow-for-session cache on "mcp-server:<alias>" (the CacheKey seam), obtained through the
-// optional ServerAlias() interface so internal/agent does not import internal/mcp. A classMCP
-// tool that does not expose an alias falls back to the tool name — a tighten-only degradation.
+// optional ServerAlias() interface so internal/agent does not import internal/mcp. A
+// tools.ClassMCP tool that does not expose an alias falls back to the tool name — a tighten-only
+// degradation.
 
 // mcpServerTool is a fake ExternalEffectTool of kind mcp that ALSO exposes a ServerAlias — the
 // optional interface the resolver keys the allow-for-session cache on at server grain. It mirrors
@@ -43,7 +44,7 @@ func (t mcpServerTool) Execute(_ context.Context, call domain.ToolCall) (domain.
 // TestResolve_MCPGateCacheKeyServerGrain pins the CacheKey shape item 3 introduces: a gated MCP
 // tool exposing a ServerAlias keys the allow-for-session cache on "mcp-server:<alias>" (server
 // grain, ADR 0012); the empty-alias (single unnamed server) case is still one grain; and a
-// classMCP tool that does NOT expose an alias falls back to the tool name (tighten-only).
+// tools.ClassMCP tool that does NOT expose an alias falls back to the tool name (tighten-only).
 func TestResolve_MCPGateCacheKeyServerGrain(t *testing.T) {
 	t.Parallel()
 
@@ -55,8 +56,8 @@ func TestResolve_MCPGateCacheKeyServerGrain(t *testing.T) {
 	}{
 		{"named server", mcpServerTool{name: "github__search", alias: "github"}, "mcp-server:github", resolveGate},
 		{"empty alias is one grain", mcpServerTool{name: "thing", alias: ""}, "mcp-server:", resolveGate},
-		// externalTool (dispatch_test.go) is classMCP but exposes NO ServerAlias, so it degrades
-		// to the tool-name key — today's tighter grain, unchanged.
+		// externalTool (dispatch_test.go) is tools.ClassMCP but exposes NO ServerAlias, so it
+		// degrades to the tool-name key — today's tighter grain, unchanged.
 		{"no ServerAlias falls back to tool name", externalTool{name: "legacy_mcp", kind: domain.EffectMCP}, "legacy_mcp", resolveGate},
 	}
 

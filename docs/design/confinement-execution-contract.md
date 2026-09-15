@@ -457,6 +457,7 @@ one level down (D2), for free, with no threading.
 > row**, in every mode — the marker is unfakeable by construction, `ReadOnly()` is a bare
 > self-declaration, and the declaration can never outrank a structural fact about what the tool
 > does (ADR 0012's core invariant: never both unsupervised *and* unbounded). `classifyTool`
+> *(since 2026-09-15 `tools.Classify`, `internal/tools/classify.go` — beside the markers it reads)*
 > expresses this through its check ORDER: every marker is consulted first and **RO is the terminal
 > floor**, reached only by a tool no marker claimed. The declaration keeps its other jobs — Plan
 > mode's menu filter and Ask-Before's harmless-read skip still read it. Two shipped built-ins move
@@ -476,10 +477,12 @@ one level down (D2), for free, with no threading.
 > class, and recorded the gap in footnote ² as deliberate. It was not sustainable: Plan advertised
 > `git_diff_range` and `diagnostics` and then refused the call, which reads to a small model as a
 > broken tool rather than as a mode boundary. Both now key on ONE predicate — `planAdmits`
-> (`internal/agent/resolution.go`), which is `classifyTool(tool) == RO` — so the menu can never
+> (`internal/agent/resolution.go`), which is `classifyTool(tool) == RO` *(since 2026-09-15
+> `tools.Classify(tool) == tools.ClassReadOnly`)* — so the menu can never
 > offer what the ladder refuses. **Plan drops those two tools from the menu**; the `sub_agent`
 > recursion point stays (it is `Delegate`d before the ladder, never a leaf). `ReadOnly()` keeps its
-> remaining jobs: it is the terminal-floor input to `classifyTool` and what self-regulation's
+> remaining jobs: it is the terminal-floor input to `classifyTool` *(since 2026-09-15
+> `tools.Classify`)* and what self-regulation's
 > read/write tally reads. Menu-only change; no ladder cell moves, and no verdict changes.
 > **Note 2026-09-14 (the second loosen, ADR 0012 amendment of that date):** the menu now keys on
 > `planOffers` — `planAdmits` plus Apogee's own **WS-write** carriers whenever a session scratch
@@ -561,7 +564,8 @@ one level down (D2), for free, with no threading.
 > in Plan was a rule outliving its reason. ADR 0012's core invariant is untouched: the call is
 > bounded by construction, so "unsupervised" is no longer paired with "unbounded".
 >
-> **What does not move.** `classifyTool` consults the marker AFTER the workspace-write and
+> **What does not move.** `classifyTool` *(since 2026-09-15 `tools.Classify`,
+> `internal/tools/classify.go`)* consults the marker AFTER the workspace-write and
 > external-effect markers and BEFORE the bare subprocess marker, so a tool that also writes the
 > workspace or reaches the network still takes the outranking class — the marker narrows a
 > subprocess call, it never widens one. The trio keeps its `Subprocess()` declaration, which still

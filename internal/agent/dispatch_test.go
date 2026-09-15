@@ -78,7 +78,7 @@ type subprocTool struct {
 	name string
 	// readOnly is the SELF-DECLARATION a tool makes about itself. A subprocess launcher may
 	// honestly declare it (diagnostics does — a vet writes nothing), which is exactly the case
-	// classifyTool must not let outrank the marker. Apogee's own hardened git reads are the
+	// tools.Classify must not let outrank the marker. Apogee's own hardened git reads are the
 	// narrow exception, and they earn it with the unexported readOnlySubprocess marker rather
 	// than with the declaration this field carries.
 	readOnly bool
@@ -163,59 +163,63 @@ func capsBoth() domain.ConfinementCaps {
 }
 
 // ----------------------------------------------------------------------------
-// classifyTool — the tool-class resolution the disposition keys on
+// tools.Classify — the tool-class resolution the disposition keys on
 // ----------------------------------------------------------------------------
 
+// TestClassifyTool exercises tools.Classify (internal/tools/classify.go, since 2026-09-15) from
+// the ladder's side, with this package's fakes: a fake can declare anything, but only a REAL tool
+// can carry an unexported marker, which is the difference every row below pins. The
+// every-default-tool table is its sibling in internal/tools (TestClassifyEveryDefaultTool).
 func TestClassifyTool(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	tests := []struct {
 		name string
 		tool domain.Tool
-		want toolClass
+		want tools.ToolClass
 	}{
-		{"read-only", fakeTool{name: "read_file", readOnly: true}, classReadOnly},
-		{"workspace writer", tools.NewWriteFile(ws), classWorkspaceWrite},
+		{"read-only", fakeTool{name: "read_file", readOnly: true}, tools.ClassReadOnly},
+		{"workspace writer", tools.NewWriteFile(ws), tools.ClassWorkspaceWrite},
 		// P3.7 file-editing family: the write tools carry the same workspaceScopedWriter
-		// marker as write_file, so they classify as classWorkspaceWrite and ride the
-		// identical per-mode disposition; the read tools classify as classReadOnly.
-		{"single find-replace", tools.NewSingleFindReplace(ws), classWorkspaceWrite},
-		{"multi find-replace", tools.NewMultiFindReplace(ws), classWorkspaceWrite},
-		{"edit existing file", tools.NewEditExistingFile(ws), classWorkspaceWrite},
-		{"view diff", tools.NewViewDiff(ws), classReadOnly},
+		// marker as write_file, so they classify as tools.ClassWorkspaceWrite and ride the
+		// identical per-mode disposition; the read tools classify as tools.ClassReadOnly.
+		{"single find-replace", tools.NewSingleFindReplace(ws), tools.ClassWorkspaceWrite},
+		{"multi find-replace", tools.NewMultiFindReplace(ws), tools.ClassWorkspaceWrite},
+		{"edit existing file", tools.NewEditExistingFile(ws), tools.ClassWorkspaceWrite},
+		{"view diff", tools.NewViewDiff(ws), tools.ClassReadOnly},
 		// The network kind splits on the (unexported, unfakeable) url-filter marker: Apogee's
 		// own web_fetch routes through the network funnel and is vouched for; a tool that only
 		// DECLARES EffectNetwork reaches unfiltered URLs and is third-party network.
-		{"vouched-for network", tools.NewWebFetch(security.URLGuard{}), classNetwork},
-		{"third-party network", externalTool{name: "3p-net", kind: domain.EffectNetwork}, classThirdPartyNetwork},
-		{"mcp", externalTool{name: "github", kind: domain.EffectMCP}, classMCP},
-		{"subprocess", &subprocTool{name: "terminal"}, classSubprocess},
-		{"third-party writer", thirdPartyWriter{name: "weird"}, classThirdPartyWrite},
+		{"vouched-for network", tools.NewWebFetch(security.URLGuard{}), tools.ClassNetwork},
+		{"third-party network", externalTool{name: "3p-net", kind: domain.EffectNetwork}, tools.ClassThirdPartyNetwork},
+		{"mcp", externalTool{name: "github", kind: domain.EffectMCP}, tools.ClassMCP},
+		{"subprocess", &subprocTool{name: "terminal"}, tools.ClassSubprocess},
+		{"third-party writer", thirdPartyWriter{name: "weird"}, tools.ClassThirdPartyWrite},
 		// The unfakeable markers outrank the self-declared ReadOnly (§4 amended 2026-07-26):
-		// classReadOnly is the terminal floor, reached only by a tool NO marker claimed. A tool
+		// tools.ClassReadOnly is the terminal floor, reached only by a tool NO marker claimed. A tool
 		// that declares itself read-only and also reaches the network / launches a subprocess
 		// is classified by what it does, so it can never be both unsupervised and unbounded.
-		{"read-only + network declaration", externalTool{name: "ro-net", kind: domain.EffectNetwork, readOnly: true}, classThirdPartyNetwork},
-		{"read-only + mcp declaration", externalTool{name: "ro-mcp", kind: domain.EffectMCP, readOnly: true}, classMCP},
-		{"read-only + subprocess marker", &subprocTool{name: "ro-subproc", readOnly: true}, classSubprocess},
+		{"read-only + network declaration", externalTool{name: "ro-net", kind: domain.EffectNetwork, readOnly: true}, tools.ClassThirdPartyNetwork},
+		{"read-only + mcp declaration", externalTool{name: "ro-mcp", kind: domain.EffectMCP, readOnly: true}, tools.ClassMCP},
+		{"read-only + subprocess marker", &subprocTool{name: "ro-subproc", readOnly: true}, tools.ClassSubprocess},
 		// The shipped built-in that carries the pair, through the real tool: a read-only
 		// declaration plus an OS-subprocess launch Apogee cannot vouch for (the Go toolchain).
-		{"diagnostics (real)", tools.NewDiagnostics(ws), classSubprocess},
+		{"diagnostics (real)", tools.NewDiagnostics(ws), tools.ClassSubprocess},
 		// Apogee's OWN hardened git read set — the trio plus git_show (2026-09-15) — carries the
 		// unexported readOnlySubprocess marker (contract §4 amendment 2026-09-06), which is
 		// consulted BEFORE the bare subprocess marker and puts them on the read-only row of the
 		// ladder in every mode. The fake above cannot mint that marker, which is the whole point
 		// of leaving it unexported.
-		{"git_status (real)", tools.NewGitStatus(ws), classReadOnlySubprocess},
-		{"git_log (real)", tools.NewGitLog(ws), classReadOnlySubprocess},
-		{"git_diff_range (real)", tools.NewGitDiffRange(ws), classReadOnlySubprocess},
-		{"git_show (real)", tools.NewGitShow(ws), classReadOnlySubprocess},
+		{"git_status (real)", tools.NewGitStatus(ws), tools.ClassReadOnlySubprocess},
+		{"git_log (real)", tools.NewGitLog(ws), tools.ClassReadOnlySubprocess},
+		{"git_diff_range (real)", tools.NewGitDiffRange(ws), tools.ClassReadOnlySubprocess},
+		{"git_show (real)", tools.NewGitShow(ws), tools.ClassReadOnlySubprocess},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := classifyTool(tt.tool); got != tt.want {
-				t.Errorf("classifyTool(%s) = %d, want %d", tt.name, got, tt.want)
+			if got := tools.Classify(tt.tool); got != tt.want {
+				t.Errorf("tools.Classify(%s) = %s, want %s", tt.name, got, tt.want)
 			}
 		})
 	}

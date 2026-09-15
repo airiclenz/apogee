@@ -32,8 +32,9 @@ import (
 // resolve() is the single decision point: dispatch (dispatch.go) is a thin executor that
 // gathers the facts resolutionInput carries, calls resolve() once, and mechanically carries
 // out the verdict — it holds no ladder, guard-tier, or demote decision of its own. The
-// tool-classification the ladder keys on (classifyTool / toolClass) lives here too, beside the
-// table that consumes it, and it is the ONLY classification in the engine: the Plan-mode tool
+// tool-classification the ladder keys on (tools.Classify / tools.ToolClass) lives beside the
+// unfakeable markers it reads (internal/tools/classify.go, since 2026-09-15; before that it was
+// classifyTool here), and it is the ONLY classification in the engine: the Plan-mode tool
 // menu (loop.go) keys on it through planOffers (planAdmits plus the scratch-dir writers) rather
 // than re-deriving one of its own, so the menu can never offer a tool the ladder would refuse
 // on every target (2026-08-02; scratch writers 2026-09-14).
@@ -333,82 +334,6 @@ func resolve(in resolutionInput) resolution {
 	return applyOverlays(in, resolveLadder(in))
 }
 
-// toolClass is the blast-radius class the ladder keys on (confinement-execution-contract §4).
-// classifyTool decides which one a tool takes; the classes themselves are just the list, and
-// the load-bearing part is the CHECK ORDER there — every unfakeable marker is consulted before
-// the self-declared read-only floor.
-type toolClass int
-
-const (
-	classReadOnly           toolClass = iota // IsReadOnly and NO other marker (the terminal floor)
-	classReadOnlySubprocess                  // readOnlySubprocess marker (Apogee's own hardened git reads)
-	classWorkspaceWrite                      // workspaceScopedWriter marker (Apogee's own write)
-	classNetwork                             // network + urlFilteredNetworker marker (Apogee's own)
-	classThirdPartyNetwork                   // network, no url-filter marker (unfiltered URLs — gates)
-	classMCP                                 // ExternalEffectTool, kind mcp
-	classSubprocess                          // SubprocessTool (shell/exec; OS-confinable)
-	classThirdPartyWrite                     // write-capable, none of the above (can't vouch for scoping)
-)
-
-// classifyTool maps a tool onto its blast-radius class. The check order IS the invariant: every
-// marker that is unfakeable by construction is consulted first — Apogee's own workspace-scoped
-// writer, then the external-effect kinds (the network kind splitting on the url-filter marker),
-// then Apogee's own read-only-subprocess marker, then the bare subprocess marker — and
-// classReadOnly is the TERMINAL FLOOR, reached only by a tool that no marker claimed. A tool
-// that carries neither a marker nor a read-only declaration is a third-party in-process writer.
-//
-// classReadOnlySubprocess is read-only BY CONSTRUCTION and a subprocess only by MECHANISM: the
-// hardened git read set (git_status, git_log, git_diff_range, git_show) builds every argv itself, runs
-// with hooks/fsmonitor off, refuses repo-local program keys and passes no user string to a
-// shell, so the "a subprocess is unbounded" premise that puts classSubprocess behind a
-// confinement box does not hold for it (contract §4 amendment 2026-09-06). It is consulted
-// AFTER the workspace-write and external-effect markers and BEFORE the bare subprocess marker,
-// so a tool that also writes the workspace or reaches the network still takes the outranking
-// class — the marker narrows a subprocess call, it never widens one.
-//
-// ReadOnly() is a bare SELF-DECLARATION, so it can never outrank a structural fact about what
-// the tool does (ADR 0012 Amendment 2026-07-25(a): classification keys on the marker). A tool
-// declaring itself read-only that also launches an OS subprocess Apogee cannot vouch for
-// (diagnostics) is classified by the subprocess it launches and is confined/gated accordingly;
-// one declaring itself read-only that also reaches the network takes a network class and is
-// url-filtered or gated. Otherwise a call could be both unsupervised and unbounded — the one
-// thing ADR 0012's core invariant forbids. The declaration keeps its own job: it decides the
-// floor for the tools no marker claims (read_file, grep, view_diff, list_dir, ask_user). It is
-// NO LONGER what Plan
-// mode's menu filter reads (2026-08-02): the menu keys on this class through planAdmits,
-// because a filter on the bare declaration offered diagnostics in Plan and the ladder below
-// then refused it.
-//
-// The network kind splits on the url-filter marker: an EffectNetwork tool that routes through
-// internal/tools' network funnel is classNetwork (Apogee vouches that every outbound URL passed
-// the host's URLGuard, so it auto-runs in Auto); one WITHOUT the marker is
-// classThirdPartyNetwork — its URLs are unfiltered, so it gates instead of reaching the network
-// unattended (ADR 0012 Amendment 2026-07-25, the network analogue of classThirdPartyWrite).
-func classifyTool(tool domain.Tool) toolClass {
-	if tools.IsWorkspaceScopedWriter(tool) {
-		return classWorkspaceWrite
-	}
-	if ext, ok := tool.(domain.ExternalEffectTool); ok {
-		if ext.ExternalEffect() == domain.EffectNetwork {
-			if tools.IsURLFilteredNetworker(tool) {
-				return classNetwork
-			}
-			return classThirdPartyNetwork
-		}
-		return classMCP
-	}
-	if tools.IsReadOnlySubprocess(tool) {
-		return classReadOnlySubprocess
-	}
-	if domain.IsSubprocessTool(tool) {
-		return classSubprocess
-	}
-	if domain.IsReadOnly(tool) {
-		return classReadOnly
-	}
-	return classThirdPartyWrite
-}
-
 // planAdmits reports whether Plan mode admits tool on EVERY target — the read-only floor the
 // Plan row of the ladder (resolveLadder) runs unconditionally and the Plan tool-menu filter
 // (loop.go's toolMenu) offers through planOffers, so the menu can never offer a tool the ladder
@@ -417,13 +342,13 @@ func classifyTool(tool domain.Tool) toolClass {
 //
 // It is the blast-radius CLASS, never the bare ReadOnly() self-declaration: a tool that declares
 // itself read-only while carrying an unfakeable marker — diagnostics declares it and launches an
-// OS subprocess Apogee cannot vouch for — is classSubprocess, so Plan neither offers nor runs it
-// (contract §4 fn 2, resolved 2026-08-02; previously the menu read the declaration and offered
-// exactly that tool, which the ladder refused on the call).
+// OS subprocess Apogee cannot vouch for — is tools.ClassSubprocess, so Plan neither offers nor
+// runs it (contract §4 fn 2, resolved 2026-08-02; previously the menu read the declaration and
+// offered exactly that tool, which the ladder refused on the call).
 //
-// Two classes pass: classReadOnly, and classReadOnlySubprocess — the hardened git read set,
-// read-only by construction and a subprocess only by mechanism, which Plan both offers and runs
-// (contract §4 amendment 2026-09-06).
+// Two classes pass: tools.ClassReadOnly, and tools.ClassReadOnlySubprocess — the hardened git
+// read set, read-only by construction and a subprocess only by mechanism, which Plan both offers
+// and runs (contract §4 amendment 2026-09-06).
 //
 // It is also what a delegation's `tools: "read-only"` ask means (subagent.go's
 // requestedChildTools): the child's inherited tools this predicate admits, so "read-only" on a
@@ -434,8 +359,8 @@ func classifyTool(tool domain.Tool) toolClass {
 // same reason — a Plan sub-agent inherits Plan, so its children are read-only too (each with the
 // same one scratch-dir exception, ADR 0012 second loosen).
 func planAdmits(tool domain.Tool) bool {
-	class := classifyTool(tool)
-	return class == classReadOnly || class == classReadOnlySubprocess
+	class := tools.Classify(tool)
+	return class == tools.ClassReadOnly || class == tools.ClassReadOnlySubprocess
 }
 
 // planOffers reports whether Plan mode offers tool on the menu — the ONE predicate the Plan
@@ -447,7 +372,7 @@ func planAdmits(tool domain.Tool) bool {
 // other target is refused with a reason naming the dir. Without a scratch dir the writers stay
 // off the menu and Plan is the read-only floor it always was.
 func planOffers(tool domain.Tool, scratchSet bool) bool {
-	return planAdmits(tool) || (scratchSet && classifyTool(tool) == classWorkspaceWrite)
+	return planAdmits(tool) || (scratchSet && tools.Classify(tool) == tools.ClassWorkspaceWrite)
 }
 
 // planScratchRefusalReason is returned to the model when Plan mode refuses a tool while a
@@ -462,7 +387,7 @@ func planScratchRefusalReason(dir string) string {
 // plus the box for a Confine). The leaf overlays — guard Tier-2, nil-Approver, gate
 // reason/cacheKey, Confine fallback — are applied afterward by applyOverlays.
 func resolveLadder(in resolutionInput) resolution {
-	class := classifyTool(in.tool)
+	class := tools.Classify(in.tool)
 
 	switch in.mode {
 	case domain.ModePlan:
@@ -472,7 +397,7 @@ func resolveLadder(in resolutionInput) resolution {
 		// answer for an offered writer aimed anywhere else — it names the dir the write would have
 		// run in. Without a scratch dir the writers are off the menu and the refusal is defensive
 		// only, as before: a host-registered tool called without being offered.
-		if planAdmits(in.tool) || (class == classWorkspaceWrite && in.writeTargetInScratch) {
+		if planAdmits(in.tool) || (class == tools.ClassWorkspaceWrite && in.writeTargetInScratch) {
 			return resolution{kind: resolveRun}
 		}
 		if in.scratchDir != "" {
@@ -483,10 +408,10 @@ func resolveLadder(in resolutionInput) resolution {
 	case domain.ModeAllowEdits:
 		// Apogee's own in-workspace writes auto-approve; everything unbounded (and any
 		// out-of-workspace write) gates. NO Confine is ever invoked here (ADR 0012 D5).
-		if class == classReadOnly || class == classReadOnlySubprocess {
+		if class == tools.ClassReadOnly || class == tools.ClassReadOnlySubprocess {
 			return resolution{kind: resolveRun}
 		}
-		if class == classWorkspaceWrite && in.writeTargetInWorkspace {
+		if class == tools.ClassWorkspaceWrite && in.writeTargetInWorkspace {
 			return resolution{kind: resolveRun}
 		}
 		return resolution{kind: resolveGate}
@@ -498,11 +423,11 @@ func resolveLadder(in resolutionInput) resolution {
 		// An empty / unknown mode is Ask-Before — gate every write/exec/external, run only
 		// harmless reads (the hardened git read trio among them) and Apogee's own writes into
 		// the session scratch dir, the one write Ask-Before does not gate (ADR 0012 second
-		// loosen). The terminal route into that dir is classSubprocess and still gates.
-		if class == classReadOnly || class == classReadOnlySubprocess {
+		// loosen). The terminal route into that dir is tools.ClassSubprocess and still gates.
+		if class == tools.ClassReadOnly || class == tools.ClassReadOnlySubprocess {
 			return resolution{kind: resolveRun}
 		}
-		if class == classWorkspaceWrite && in.writeTargetInScratch {
+		if class == tools.ClassWorkspaceWrite && in.writeTargetInScratch {
 			return resolution{kind: resolveRun}
 		}
 		return resolution{kind: resolveGate}
@@ -511,9 +436,9 @@ func resolveLadder(in resolutionInput) resolution {
 
 // resolveLadderAuto ports disposeAuto(): the Auto-mode leaf, tuned by confine-to-workspace
 // (the load-bearing column). The one deliberate departure from the P3 table is
-// classThirdPartyNetwork, which gates where the undivided network class auto-ran (ADR 0012
+// tools.ClassThirdPartyNetwork, which gates where the undivided network class auto-ran (ADR 0012
 // Amendment 2026-07-25 — tighten-only).
-func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
+func resolveLadderAuto(in resolutionInput, class tools.ToolClass) resolution {
 	if !in.confineToWorkspace {
 		// "I am the sandbox" (VM-only): everything auto-runs unfenced. The dangerous-action
 		// floor already ran (and may have forced approval / refused) before this point.
@@ -522,34 +447,34 @@ func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 
 	// confine-to-workspace = true (the default).
 	switch class {
-	case classReadOnly, classReadOnlySubprocess:
+	case tools.ClassReadOnly, tools.ClassReadOnlySubprocess:
 		// The hardened git read trio auto-runs UNCONFINED here, exactly like read_file: it is
 		// read-only by construction, so there is nothing for a box to bound (contract §4
 		// amendment 2026-09-06). No Confine, no D4 demote fallback.
 		return resolution{kind: resolveRun}
-	case classWorkspaceWrite:
+	case tools.ClassWorkspaceWrite:
 		// An in-workspace Apogee write runs path-safety-bounded; an out-of-workspace one gates.
 		if in.writeTargetInWorkspace {
 			return resolution{kind: resolveRun}
 		}
 		return resolution{kind: resolveGate}
-	case classNetwork:
+	case tools.ClassNetwork:
 		// Native network tools auto-run url-filtered — the network is open (ADR 0012).
 		return resolution{kind: resolveRun}
-	case classThirdPartyNetwork:
+	case tools.ClassThirdPartyNetwork:
 		// Unfiltered network reach — Apogee cannot vouch for its URLs, so it gates (the
-		// network analogue of classThirdPartyWrite).
+		// network analogue of tools.ClassThirdPartyWrite).
 		return resolution{kind: resolveGate}
-	case classMCP:
+	case tools.ClassMCP:
 		// MCP executes in a server Apogee cannot fence: gate (server-grain allow-for-session).
 		return resolution{kind: resolveGate}
-	case classSubprocess:
+	case tools.ClassSubprocess:
 		// Confine if the backend can, else gate ("confine if you can, gate if you can't").
 		if in.fsConfineAvailable {
 			return resolution{kind: resolveConfine}
 		}
 		return resolution{kind: resolveGate}
-	default: // classThirdPartyWrite
+	default: // tools.ClassThirdPartyWrite
 		// A write-capable tool Apogee cannot vouch for: gate.
 		return resolution{kind: resolveGate}
 	}
@@ -632,9 +557,9 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 		// The lower rungs deliberately get nothing: in Allow-Edits and in the gate cell the
 		// child's bound is its HARDENED ARGV — apogee's own fixed `git add -A -- :(literal)<path>`
 		// with the repository's command-config refused, not a model-chosen program — which is
-		// the blast radius classWorkspaceWrite already declares, so ADR 0012 D5's "no Confine in
-		// the lower modes" is kept intact.
-		if classifyTool(in.tool) == classWorkspaceWrite && in.mode == domain.ModeAuto &&
+		// the blast radius tools.ClassWorkspaceWrite already declares, so ADR 0012 D5's "no
+		// Confine in the lower modes" is kept intact.
+		if tools.Classify(in.tool) == tools.ClassWorkspaceWrite && in.mode == domain.ModeAuto &&
 			in.confineToWorkspace && in.fsConfineAvailable {
 			leaf.box = in.box
 			leaf.confineChildren = true
@@ -705,7 +630,7 @@ type serverAliaser interface {
 // is nothing wider to disclose. The alias itself may be EMPTY with ok TRUE: the single unnamed
 // server is one grain like any other.
 func mcpServerAlias(tool domain.Tool) (alias string, ok bool) {
-	if classifyTool(tool) != classMCP {
+	if tools.Classify(tool) != tools.ClassMCP {
 		return "", false
 	}
 	aliaser, exposed := tool.(serverAliaser)
@@ -736,7 +661,7 @@ const gateArgumentsSeparator = "\x00"
 // too. With the arguments in the key, the answer authorises the call the human actually read.
 // The deliberate cost is ergonomic: allowing `npm test` no longer clears `npm run build`.
 func gateCacheKey(tool domain.Tool, call domain.ToolCall) string {
-	if classifyTool(tool) == classMCP {
+	if tools.Classify(tool) == tools.ClassMCP {
 		if alias, exposed := mcpServerAlias(tool); exposed {
 			return mcpServerCacheKeyPrefix + alias
 		}
@@ -823,16 +748,16 @@ func confineFallback(in resolutionInput) *resolution {
 // blast radius the user chose. Reason and remedy leave together so a prompt cannot name one
 // cause and prescribe another's fix.
 func gateReason(in resolutionInput) (reason, remedy string) {
-	switch classifyTool(in.tool) {
-	case classNetwork:
+	switch tools.Classify(in.tool) {
+	case tools.ClassNetwork:
 		return "network reach", ""
-	case classThirdPartyNetwork:
+	case tools.ClassThirdPartyNetwork:
 		return "unfiltered network reach", ""
-	case classMCP:
+	case tools.ClassMCP:
 		return "unconfinable MCP tool", ""
-	case classSubprocess:
+	case tools.ClassSubprocess:
 		return subprocessGateReason(in)
-	case classWorkspaceWrite:
+	case tools.ClassWorkspaceWrite:
 		return "out-of-workspace write", ""
 	default:
 		return "write", ""

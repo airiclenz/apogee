@@ -333,7 +333,8 @@ a small model as a broken tool.
 **(a) A new class: read-only by construction, a subprocess only by mechanism.** The three tools
 carry an unexported `readOnlySubprocess` marker (`internal/tools`), minted exactly the way
 `workspaceScopedWriter` (contract §3) is: no type outside that package — and no third-party tool in
-another module — can spell it. `classifyTool` reads it through `tools.IsReadOnlySubprocess` as the
+another module — can spell it. `classifyTool` *(since 2026-09-15 `tools.Classify`, moved into
+`internal/tools/classify.go` beside the markers it reads)* reads it through `tools.IsReadOnlySubprocess` as the
 **RO-subproc** class, which takes the **read-only row in every mode, Auto included**: Plan offers
 and runs the trio, the middle rungs do not gate it, and Auto runs it **unconfined**, exactly as it
 runs `read_file`. The marker may be minted only for a tool that on every reachable path spawns git
