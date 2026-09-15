@@ -1080,7 +1080,13 @@ as apogee always has. `parallel-agents: N` (a file-only key) sets the width your
 and is a **pin** apogee never overrides. Mind the trade the server makes for you:
 `--parallel N` splits its context into N slots, so more parallel agents means a smaller
 window each — the per-slot number is the one apogee has always shown you. A sub-agent's
-own delegations stay one at a time. `apogee headless` resolves the cap the same way a
+own delegations stay one at a time. When a reply asks for more delegations than the
+width allows, the ones past it wait for a slot, and the model is told so once: the last
+result of that group ends with one line stating the width the group actually ran under —
+`[1 of this group's 3 delegations ran after the others finished — the width is 2]` —
+so it does not read results that arrived in two waves as one. A group that fit inside
+the width carries no such line, and neither does a group in which a delegation was
+skipped, refused or never started. `apogee headless` resolves the cap the same way a
 session does: the pin if the entry carries one, and otherwise a single look at what the
 server advertises, taken once as the run is composed. A scheduled firing runs at the
 width the session it fires beneath is running at, read when it fires — so a `/server`

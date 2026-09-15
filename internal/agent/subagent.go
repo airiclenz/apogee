@@ -402,9 +402,16 @@ func (a *Agent) resolveOutputPath(path string) {
 // otherwise hide that the task moved under it. The notice states the COUNT and nothing else: what
 // was said is the child's to fold into its own answer, and quoting it here would let a human steer
 // the parent through a child they only addressed. %d is the number of messages that LANDED.
+//
+// userSteeredTrailerHead and userSteeredTrailerPluralTail are the fixed ends both renderings share
+// — what splitUserSteeredTrailer recognises the trailer by — and userSteeredTrailerSeparator is
+// the blank line that sets it apart from the body.
 const (
-	userSteeredTrailerSingular     = "(the user sent 1 message to this sub-agent while it ran)"
-	userSteeredTrailerPluralFormat = "(the user sent %d messages to this sub-agent while it ran)"
+	userSteeredTrailerHead         = "(the user sent "
+	userSteeredTrailerPluralTail   = " messages to this sub-agent while it ran)"
+	userSteeredTrailerSingular     = userSteeredTrailerHead + "1 message to this sub-agent while it ran)"
+	userSteeredTrailerPluralFormat = userSteeredTrailerHead + "%d" + userSteeredTrailerPluralTail
+	userSteeredTrailerSeparator    = "\n\n"
 )
 
 // userSteeredTrailer renders the parent notice for steered landed messages — singular for exactly
@@ -414,6 +421,57 @@ func userSteeredTrailer(steered int) string {
 		return userSteeredTrailerSingular
 	}
 	return fmt.Sprintf(userSteeredTrailerPluralFormat, steered)
+}
+
+// splitUserSteeredTrailer takes a committed delegation result apart into its body and the
+// user-steered trailer delegationResult appended to it — the separator included, so body+trailer
+// is the content byte for byte. A result with no trailer comes back whole with an empty trailer.
+//
+// It exists for the ONE reader that has to put a line under the body after delegationResult has
+// already closed it: the parent committing a fan-out group (dispatch.go withBodyNote), which knows
+// nothing of the child's steered count and can only read the trailer off the result. The
+// recognition is exact — the separator, the head, a count, and the plural tail or the singular
+// rendering as a single line — so a child answer that merely mentions the words is not mistaken
+// for the notice.
+func splitUserSteeredTrailer(content string) (body, trailer string) {
+	i := strings.LastIndex(content, userSteeredTrailerSeparator+userSteeredTrailerHead)
+	if i < 0 {
+		return content, ""
+	}
+	line := content[i+len(userSteeredTrailerSeparator):]
+	if line != userSteeredTrailerSingular && !isPluralUserSteeredTrailer(line) {
+		return content, ""
+	}
+	return content[:i], content[i:]
+}
+
+// isPluralUserSteeredTrailer reports whether line is userSteeredTrailerPluralFormat rendered with
+// some count — head, digits, tail, and nothing else.
+func isPluralUserSteeredTrailer(line string) bool {
+	count, ok := strings.CutPrefix(line, userSteeredTrailerHead)
+	if !ok {
+		return false
+	}
+	count, ok = strings.CutSuffix(count, userSteeredTrailerPluralTail)
+	if !ok || count == "" {
+		return false
+	}
+	for _, r := range count {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// withBodyNote appends note as the last line of a delegation result's BODY: immediately above the
+// user-steered trailer when the result carries one — ADR 0063 D3 keeps that trailer the result's
+// final line on every outcome — and as the new last line otherwise. It is the parent-side twin of
+// the note slot delegationResult fills on the child's side (SeatFallbackNote and its neighbours),
+// for a note only the parent can know.
+func withBodyNote(content, note string) string {
+	body, trailer := splitUserSteeredTrailer(content)
+	return body + "\n" + note + trailer
 }
 
 // isSubAgentCall reports whether call targets the sub_agent recursion point — the signal
@@ -786,7 +844,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// lines — so the trailer survives a clamped result by shape rather than by being re-appended
 	// anywhere later.
 	if a.steered > 0 {
-		result.Content += "\n\n" + userSteeredTrailer(a.steered)
+		result.Content += userSteeredTrailerSeparator + userSteeredTrailer(a.steered)
 	}
 	return result, dispatchDone
 }

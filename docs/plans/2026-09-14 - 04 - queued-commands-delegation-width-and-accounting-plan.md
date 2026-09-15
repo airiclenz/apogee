@@ -102,7 +102,11 @@ NOTES (2026-09-15): the "— idle only" menu tag was renamed to "— runs at idl
 
 **Commit:** `docs(interjection): commands queue at idle — ADR 0025 amendment, CONTEXT.md, manual, layout`
 
-## 4. A fan-out's last result states the delegation width
+## 4. A fan-out's last result states the delegation width — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `internal/agent/subagent.go` edited beyond the item's Files list — the body-note insertion (`withBodyNote`, `splitUserSteeredTrailer`) lives beside the user-steered trailer it has to recognise, and the trailer's fixed head/tail/separator became named constants so the recognition shares the trailer's own spelling; `delegationResult`'s append site now uses the separator constant (same bytes).
+NOTES (2026-09-15): `cmd/apogee/testdata/stubllm/fanout.yaml` is reused unchanged — the e2e keeps its `Count the` lead, alpha/beta/gamma names and `^Fan out` trigger, so `e2e_livestate_test.go` is untouched; the width comes from a one-server home carrying `parallel-agents: 2` (`fanOutWidthHome`, reusing `e2e_parallel_test.go`'s `parallelPin`).
+NOTES (2026-09-15): the e2e's "byte-identical to a run without a fan-out" is asserted within one session — the system text of the parent's request after the fan-out equals that of its request before any delegation ran — because the standing block is KV-cache-stable per session and a second run would differ by its workspace path alone.
 
 **What:** Recast at the regression check (2026-09-14). Depends on item 1. One structural fact, engine-composed and no steering (ADR 0023 2026-08-25): `dispatch.go` `dispatchFanOut` — when a group had more delegations than the width it ran under and every slot RAN, the LAST committed result of the group has a body ending with the exact line `[K of this group's N delegations ran after the others finished — the width is W]` (above any steered trailer, ADR 0063 D3), W read from `fanOutWidthFor` at dispatch (the value the group actually ran under), K = N − W. No orientation change: the `Delegations:` bullet in `internal/agent/prompts/orientation.txt` and `orientation.go` are untouched. Nothing counts announced-vs-emitted calls (writer call). Manual: the `configuration.md` width paragraph (around lines 1005-1010) and the `commands.md` run-view paragraph (around line 100 — there is no sub_agent paragraph) name the trailer.
 

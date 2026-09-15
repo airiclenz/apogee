@@ -1062,3 +1062,202 @@ func TestDispatchSerially_PendingInterjectionSkipsTheNextDelegation(t *testing.T
 		t.Errorf("leaf ran %d times, result %+v; want it to run once with the seam still true", looked, results[2])
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The delegation-width line (plan 2026-09-14 - 04 item 4)
+// ----------------------------------------------------------------------------
+//
+// A group wider than the width it ran under states that width ONCE, as the last line of its last
+// committed result's body. The tests below read the committed results off the sink exactly as the
+// parent model reads them off its history: the line is a model-facing fact, so its placement is
+// asserted byte for byte.
+
+// assertNoWidthNote fails when any of results carries a delegation-width line.
+func assertNoWidthNote(t *testing.T, results []domain.ToolResult) {
+	t.Helper()
+	for _, r := range results {
+		if strings.Contains(r.Content, "of this group's") {
+			t.Errorf("%s result = %q, want no delegation-width line", r.CallID, r.Content)
+		}
+	}
+}
+
+// TestFanOut_LastResultStatesTheWidth is the item's core: three delegations under a width of 2 put
+// the exact width line at the end of the THIRD result's body and nowhere else.
+func TestFanOut_LastResultStatesTheWidth(t *testing.T) {
+	sink := &recordingSink{}
+
+	a := threeWayFanOutParent(t, sink, 2, nil)
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3", len(results))
+	}
+	const want = "[1 of this group's 3 delegations ran after the others finished — the width is 2]"
+	if got := results[2].Content; got != "child three done\n"+want {
+		t.Errorf("last result = %q, want the child's answer then the exact width line %q", got, want)
+	}
+	assertNoWidthNote(t, results[:2])
+}
+
+// TestFanOut_GroupInsideTheWidthStatesNothing is the floor: a group no wider than its width had
+// nothing wait, so no result carries the line and each one is the child's answer alone.
+func TestFanOut_GroupInsideTheWidthStatesNothing(t *testing.T) {
+	sink := &recordingSink{}
+
+	a := threeWayFanOutParent(t, sink, 3, nil)
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3", len(results))
+	}
+	assertNoWidthNote(t, results)
+}
+
+// TestFanOut_WidthLineStatesTheRoutedWidth pins W as the width the group ACTUALLY ran under: the
+// session server is pinned to 4, which alone would fit the group, but a latched two-slot Sub-agent
+// server replaces that cap (delegationCap), so the line says 2.
+func TestFanOut_WidthLineStatesTheRoutedWidth(t *testing.T) {
+	sink := &recordingSink{}
+	srv := gruntUpstream(t, nil, "grunt child done")
+
+	a := threeWayFanOutParent(t, sink, 4 /* would fit all three on the session server */, nil)
+	a.SetDelegationTarget(gruntTarget(srv.URL, 2))
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3", len(results))
+	}
+	const want = "[1 of this group's 3 delegations ran after the others finished — the width is 2]"
+	if last := lastLine(results[2].Content); last != want {
+		t.Errorf("last result's last line = %q, want the routed width stated: %q", last, want)
+	}
+	assertNoWidthNote(t, results[:2])
+}
+
+// TestFanOut_WidthLineSitsAboveTheSteeredTrailer is the collision ADR 0063 D3 settles: the human
+// steers the LAST child while it runs, so its result carries the parent notice — which stays the
+// result's final line — and the width line is the last line of the body, immediately above it.
+func TestFanOut_WidthLineSitsAboveTheSteeredTrailer(t *testing.T) {
+	sink := &recordingSink{}
+	var parent atomic.Pointer[Agent]
+	looked := 0
+	// The third child's first Turn is a tool call so a second Turn follows, and the remark is
+	// interjected before that first Turn streams — the shape runSteeredDelegation uses — so it
+	// LANDS at the child's next boundary. Its answer is then routed by the landed remark, which is
+	// the child's last user message from there on.
+	steer := func(context.Context) {
+		if err := parent.Load().InterjectChild("c3", domain.UserInput{Text: "focus on the tests"}); err != nil {
+			t.Errorf("InterjectChild while the child runs: %v", err)
+		}
+	}
+	up := newRoutedResponder().
+		route("delegate three things", nil, fanOutScript(
+			[2]string{"c1", "task one"}, [2]string{"c2", "task two"}, [2]string{"c3", "task three"})).
+		route("task one", nil, contentScript("child one done")).
+		route("task two", nil, contentScript("child two done")).
+		route("task three", steer, toolCallScript("t3", "look", `{}`)).
+		route("focus on the tests", nil, contentScript("child three done")).
+		route("delegate three things", nil, contentScript("parent done"))
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "look", readOnly: true, ran: &looked, result: "looked"})
+	cfg.ParallelAgents = 2
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	parent.Store(a)
+	if err := a.Submit(domain.UserInput{Text: "delegate three things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3", len(results))
+	}
+	const width = "[1 of this group's 3 delegations ran after the others finished — the width is 2]"
+	want := "child three done\n" + width + "\n\n" + userSteeredTrailerSingular
+	if got := results[2].Content; got != want {
+		t.Errorf("steered last result = %q, want the body ending with the width line under the parent notice: %q", got, want)
+	}
+	assertNoWidthNote(t, results[:2])
+}
+
+// TestFanOut_PreemptedGroupStatesNoWidth pins the gate on the line: a group whose third slot was
+// skipped for a pending interjection did not run three delegations, so NO result carries the
+// width line — the skipped slot commits exactly the skip result, as it always has.
+func TestFanOut_PreemptedGroupStatesNoWidth(t *testing.T) {
+	sink := &recordingSink{}
+	var pending atomic.Bool
+	arrived := make(chan struct{}, 3)
+	release := make(chan struct{})
+	gate := func(ctx context.Context) {
+		arrived <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	go func() {
+		for i := 0; i < 2; i++ {
+			<-arrived
+		}
+		pending.Store(true)
+		close(release)
+	}()
+
+	a := threeWayFanOutParentSeamed(t, sink, 2, gate, pending.Load)
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3 (the skipped slot still commits)", len(results))
+	}
+	assertSkippedDelegation(t, sink.events, results[2])
+	assertNoWidthNote(t, results)
+}
+
+// TestSplitUserSteeredTrailer pins the recognition withBodyNote rests on: only the exact notice,
+// set apart by its blank line, is split off — a body that merely mentions the words stays whole.
+func TestSplitUserSteeredTrailer(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		content string
+		body    string
+		trailer string
+	}{
+		{"no trailer", "child done", "child done", ""},
+		{"singular", "child done\n\n" + userSteeredTrailerSingular, "child done", "\n\n" + userSteeredTrailerSingular},
+		{"plural", "child done\n\n" + userSteeredTrailer(12), "child done", "\n\n" + userSteeredTrailer(12)},
+		{"mentioned in the body", "(the user sent 2 messages to this sub-agent while it ran) is what I read", "(the user sent 2 messages to this sub-agent while it ran) is what I read", ""},
+		{"not set apart", "child done\n" + userSteeredTrailerSingular, "child done\n" + userSteeredTrailerSingular, ""},
+		{"no count", "child done\n\n(the user sent  messages to this sub-agent while it ran)", "child done\n\n(the user sent  messages to this sub-agent while it ran)", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			body, trailer := splitUserSteeredTrailer(tc.content)
+
+			if body != tc.body || trailer != tc.trailer {
+				t.Errorf("splitUserSteeredTrailer(%q) = %q, %q; want %q, %q", tc.content, body, trailer, tc.body, tc.trailer)
+			}
+		})
+	}
+}

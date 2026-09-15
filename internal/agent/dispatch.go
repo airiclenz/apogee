@@ -321,12 +321,59 @@ type fanOutSlot struct {
 	// productivity signal and the post-tool-result reactions — the serial path's `continue`.
 	hookFailed bool
 	outcome    dispatchOutcome
+	// widthNote is the group's delegation-width line (fanOutWidthNote), set on the LAST slot of a
+	// group that ran wider than its width with every slot a real child, and empty everywhere else.
+	// It is decided after the pool joins — only then is it known that no slot was skipped — and
+	// appended at commit, so the audit record keeps the child's own result.
+	widthNote string
+}
+
+// fanOutWidthNoteFormat is the ONE structural fact a fan-out states to the parent model about HOW
+// its group ran: when a reply asked for more delegations than the width the group ran under, the
+// slots past the width waited for a worker — so their results arrived after the others finished,
+// and the model reading the burst of results as "all at once" would be reading a fact that is not
+// so. It is stated exactly once per group, as the last line of the group's LAST committed result's
+// body, and only for a group whose every slot actually ran (fanOutWidthNote's caller): a group with
+// a skipped, refused or hook-failed slot did not run N delegations, so the count would be a lie.
+//
+// Engine-composed and no steering (ADR 0023 2026-08-25 amendment): the line reports the width the
+// group actually ran under — the once-per-reply snapshot fanOutWidthFor took at dispatch — and
+// says nothing about what the model should do with it. The orientation block is deliberately not
+// where it lives: the width can change per reply (a latched Delegation target, a mixed-seat group)
+// while the orientation facts are session-constant (ADR 0069 decisions 4 and 6). The arguments are
+// K (the delegations past the width), N (the group's size) and W (the width).
+const fanOutWidthNoteFormat = "[%d of this group's %d delegations ran after the others finished — the width is %d]"
+
+// fanOutWidthNote renders the delegation-width line for a group of `group` delegations that ran
+// `width` at a time, or "" when the group fit inside the width and no delegation waited.
+func fanOutWidthNote(group, width int) string {
+	if group <= width {
+		return ""
+	}
+	return fmt.Sprintf(fanOutWidthNoteFormat, group-width, group, width)
+}
+
+// everySlotRan reports whether each slot of a group reached the pool and ran a child: no refusal,
+// no unknown tool, no hook failure, no interjection skip. Only such a group's width line counts
+// real delegations, so it is the gate on stating one at all.
+func everySlotRan(slots []fanOutSlot) bool {
+	for i := range slots {
+		if !slots[i].run || slots[i].hookFailed {
+			return false
+		}
+	}
+	return true
 }
 
 // dispatchFanOut runs a reply's delegation group concurrently, width children at a time, and
 // commits their results in emitted-call order. It returns dispatchCancelled when ANY child ended
 // on a cancellation: the whole group is then dropped unappended, because a delegation is atomic
 // within the parent Turn and the Turn is about to roll back wholesale (ADR 0013 §5).
+//
+// A group wider than its width states that width once, on its last committed result
+// (fanOutWidthNote) — decided here, after the join, because whether every slot ran is only known
+// once the pool has dequeued them all: a slot the pool skipped for a pending interjection clears
+// its run flag at dequeue, and such a group carries no width line at all.
 func (a *Agent) dispatchFanOut(ctx context.Context, turn, width int, calls []domain.ToolCall) dispatchOutcome {
 	slots := make([]fanOutSlot, len(calls))
 	for i, call := range calls {
@@ -341,6 +388,9 @@ func (a *Agent) dispatchFanOut(ctx context.Context, turn, width int, calls []dom
 		if slots[i].outcome == dispatchCancelled {
 			return dispatchCancelled
 		}
+	}
+	if everySlotRan(slots) {
+		slots[len(slots)-1].widthNote = fanOutWidthNote(len(slots), width)
 	}
 	for i := range slots {
 		a.commitDelegation(ctx, turn, &slots[i])
@@ -593,6 +643,12 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 		// verdict. A refused slot was already recorded by executeRefuse in the prepare phase; a
 		// slot the pool skipped for a pending interjection never ran and records nothing.
 		a.recordExecuted(turn, slot.call, slot.verdict.auditDecision, slot.verdict.auditReason, slot.result)
+	}
+	if slot.widthNote != "" {
+		// The group's width line, appended AFTER the audit record so the record keeps the child's
+		// own result, and as the last line of the BODY — the SeatFallbackNote precedent — so the
+		// user-steered trailer stays the result's final line where both apply (ADR 0063 D3).
+		slot.result.Content = withBodyNote(slot.result.Content, slot.widthNote)
 	}
 	advised := a.firePostToolResult(ctx, slot.call, &slot.result)
 	a.appendToolResult(turn, slot.result, advised)

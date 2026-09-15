@@ -121,7 +121,12 @@ still working the prompt box addresses **that sub-agent** — the box reads
 own steps, exactly as a message to the main agent is picked up between its. A run that has
 already finished (or has not started yet) opens read-only and says so in the box. Nothing
 else changes: the sub-agent keeps the tools, the mode and the confinement it was given, and
-a message to it never widens any of that. `⌃l` is the
+a message to it never widens any of that. When a reply asked for more delegations than
+the server's width allowed ([several sub-agents at
+once](configuration.md#the-servers-you-run-models-on)), the last result of that group
+carries one extra line for the parent model — `[1 of this group's 3 delegations ran
+after the others finished — the width is 2]` — saying the results did not all arrive at
+once and what the width was; the delegations' own rows and run views are unchanged. `⌃l` is the
 readline redraw: it forces a full repaint, which is the way back from a terminal that
 has smeared or eaten part of the frame. It sends nothing, edits nothing and interrupts
 nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
