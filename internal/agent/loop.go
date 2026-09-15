@@ -93,7 +93,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// boundary would split one instruction's writes across two undo steps, so the human would
 		// have to `/undo` twice to take back work they asked for once (ADR 0051, ratified call 8).
 		// The closing half of the pair carries the same gate for the same reason, at the one owner
-		// of Exchange end (Agent.closeUndoGroup, reached through turnLifecycle.onClose).
+		// of Exchange end (Agent.closeUndoGroup, reached through turnLifecycle's exchangeObserver).
 		if a.journal != nil && !a.isDelegate() {
 			a.journal.BeginGroup()
 		}

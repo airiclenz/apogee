@@ -87,7 +87,7 @@ func (a *Agent) contextFillNotice(_ context.Context, view domain.LoopView, _ dom
 // the next result the notice measures fires whichever rung its fill reaches, as the first result
 // of a session does. Called where the conversation the ladder climbed is replaced or scrapped —
 // after a fold that ran (fold), on /clear (ClearContext) and on a cancelled Turn's rollback (end()'s
-// endCancelled row through turnLifecycle.onRollback, which drops the tool result a notice rode on
+// endCancelled row through the lifecycle's exchangeObserver, which drops the tool result a notice rode on
 // and which a Step-driven host may reach again on resume — the reset is idempotent, so twice is
 // harmless); the lifecycle re-arms itself on a snapshot swapped into a live Agent (restore) and on
 // an aborted Exchange (abort, which drops the same results). Without it a fold landing the next

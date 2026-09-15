@@ -333,7 +333,7 @@ func TestContextFillNoticeReArmsAfterAnAbortedExchange(t *testing.T) {
 // A cancelled Turn's rollback (end()'s endCancelled row, turn.go) drops the Turn's committed tool
 // results — including the one a notice rode on — the way AbortExchange does, and the Step-driven
 // host re-attempts the Turn on resume: the ladder therefore ends its climb at the rollback
-// (turnLifecycle.onRollback → rearmFillNotice), so the re-attempt's first result back at 50–74%
+// (exchangeObserver.turnRolledBack → rearmFillNotice), so the re-attempt's first result back at 50–74%
 // fires the 50 rung again, once, rather than staying silent until 75 over a result the model never
 // saw.
 func TestContextFillNoticeReArmsAfterACancelledTurnRollsBack(t *testing.T) {

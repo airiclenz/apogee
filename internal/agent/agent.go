@@ -1129,11 +1129,11 @@ func (a *Agent) RedoRevert(generation uint64) (undo.Report, error) {
 }
 
 // closeUndoGroup takes the closing image of the Exchange that is ending — the post half of ADR
-// 0074's capture pair — and is the func turnLifecycle.closeExchange fires through its onClose
-// seam (construct.go). It runs on every row that ENDS an Exchange (a final reply, a faulted Turn,
-// a step-capped delegation, the host's AbortExchange) and on no row that leaves one open: a
-// cancelled Turn is re-attempted inside the same Exchange, so its group stays open for the
-// re-attempt's writes.
+// 0074's capture pair — and is what turnLifecycle.closeExchange fires through its
+// exchangeObserver seam (Agent.exchangeClosed, construct.go). It runs on every row that ENDS an
+// Exchange (a final reply, a faulted Turn, a step-capped delegation, the host's AbortExchange)
+// and on no row that leaves one open: a cancelled Turn is re-attempted inside the same Exchange,
+// so its group stays open for the re-attempt's writes.
 //
 // Depth 0 only, exactly as loop.go's BeginGroup is: a delegated child shares the parent's journal,
 // and its Exchange ends inside the parent's, so closing there would cut one instruction's writes

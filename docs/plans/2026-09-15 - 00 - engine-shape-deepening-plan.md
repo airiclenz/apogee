@@ -360,7 +360,11 @@ NOTES (2026-09-15): the SwitchUpstream row asserts through compactTranscriptChar
 
 Commit: `refactor(agent): the unknown-window fallback is applied at one site`
 
-## 15. One `exchangeObserver` replaces the `*bool` and two callbacks
+## 15. One `exchangeObserver` replaces the `*bool` and two callbacks — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the `*compactFailed` pointer named in What was already gone — item 13 made `compactFailed` a plain lifecycle-owned bool — so only the two callbacks were replaced, as the item's own "after item 13" clause anticipates.
+NOTES (2026-09-15): consequential edit — internal/agent/stepnotice.go: made necessary by the removal of `turnLifecycle.onRollback` (its `rearmStepNotice` comment named the field).
+NOTES (2026-09-15): consequential edit — internal/agent/fillnotice_test.go: made necessary by the removal of `turnLifecycle.onRollback` (the `TestContextFillNoticeReArmsAfterACancelledTurnRollsBack` comment named the field).
 
 **What.** `turnLifecycle` reaches back into `Agent` through a `*compactFailed` pointer and `onClose`/`onRollback` callbacks (`internal/agent/turn.go`). Replace the three with one small `exchangeObserver` interface the Agent implements; after item 13 the pointer target lives in the lifecycle itself, so only the two notifications remain. Depends on item 13.
 

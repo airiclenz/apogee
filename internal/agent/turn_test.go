@@ -249,6 +249,76 @@ func TestOpenExchange(t *testing.T) {
 	}
 }
 
+// countingObserver is a bare exchangeObserver for the lifecycle's notification contract: it
+// counts each moment and does nothing else, standing where the Agent stands in construct.go.
+type countingObserver struct{ closed, rolledBack int }
+
+func (o *countingObserver) exchangeClosed() { o.closed++ }
+func (o *countingObserver) turnRolledBack() { o.rolledBack++ }
+
+// The lifecycle owns two moments that reach past it and tells its observer about each exactly
+// once: an Exchange END (closeExchange — every row that ends an Exchange, none that leaves one
+// open) and a cancelled Turn's ROLLBACK (end()'s endCancelled row). The rows are mutually
+// exclusive on purpose: a cancel leaves the Exchange open for the re-attempt, so it must never
+// read as a close, and a close is not a rollback.
+func TestTurnLifecycleNotifiesItsObserver(t *testing.T) {
+	past := time.Now().Add(-time.Millisecond)
+
+	t.Run("closeExchange tells the observer once and nothing else", func(t *testing.T) {
+		conv := domain.NewConversation(nil)
+		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
+		conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "done"})
+		obs := &countingObserver{}
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true, observer: obs}
+
+		l.end(&turnRun{turn: 5, start: past}, endExchangeDone)
+
+		if obs.closed != 1 {
+			t.Errorf("exchangeClosed fired %d times, want 1 (once per Exchange END)", obs.closed)
+		}
+		if obs.rolledBack != 0 {
+			t.Errorf("turnRolledBack fired %d times on an Exchange end, want 0", obs.rolledBack)
+		}
+	})
+
+	t.Run("endCancelled tells the observer of the rollback once and never of a close", func(t *testing.T) {
+		conv := domain.NewConversation(nil)
+		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
+		rollback := conv.Len()
+		conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a"})
+		conv.Append(domain.Message{Role: domain.RoleTool, Content: "result"})
+		obs := &countingObserver{}
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true, observer: obs}
+
+		l.end(&turnRun{turn: 5, start: past, rollback: rollback}, endCancelled)
+
+		if obs.rolledBack != 1 {
+			t.Errorf("turnRolledBack fired %d times, want 1 (once per Turn ROLLBACK)", obs.rolledBack)
+		}
+		if obs.closed != 0 {
+			t.Errorf("exchangeClosed fired %d times on a cancel, want 0 (the Exchange stays open for the re-attempt)", obs.closed)
+		}
+		if !l.inExchange {
+			t.Error("inExchange cleared by a cancel; the rollback must leave the Exchange open")
+		}
+	})
+
+	t.Run("a nil observer is inert on both rows", func(t *testing.T) {
+		conv := domain.NewConversation(nil)
+		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
+		rollback := conv.Len()
+		conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a"})
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true}
+
+		l.end(&turnRun{turn: 5, start: past, rollback: rollback}, endCancelled) // must not panic
+		l.end(&turnRun{turn: 5, start: past}, endExchangeDone)                  // must not panic
+
+		if l.inExchange {
+			t.Error("inExchange still set after endExchangeDone with no observer")
+		}
+	})
+}
+
 func TestAnchorAtBridge(t *testing.T) {
 	t.Run("mid-Exchange re-anchors to the just-appended bridge", func(t *testing.T) {
 		conv := buildConv(4) // the bridge is the last message

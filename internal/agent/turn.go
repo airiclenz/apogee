@@ -76,27 +76,33 @@ type turnLifecycle struct {
 	// Written on the Agent's own loop goroutine, read by the parent only after Run has returned.
 	lastFault string
 
-	// onClose is fired by closeExchange, once per Exchange END — the seam the undo journal's
-	// closing capture hangs off (Agent.closeUndoGroup, agent.go). It is a bare func for the same
-	// reason conv is a pointer: this type owns the MOMENT an Exchange ends and knows nothing of
-	// what an Agent wants to do about it, and closeExchange carries neither a context nor an Agent
-	// to hand one. nil is inert, never an error — a bare lifecycle in a unit test has no Agent
-	// behind it, and an engine that records nothing simply hangs nothing here.
-	//
-	// It fires on every row that ends an Exchange and on none that leaves one open, which is
-	// exactly closeExchange's own contract: endCancelled is not a caller, so a Turn that will be
-	// re-attempted never closes the group its re-attempt writes into.
-	onClose func()
+	// observer is told the two MOMENTS this type owns that mean something outside it: an Exchange
+	// ENDING (exchangeClosed, fired by closeExchange) and a cancelled Turn's ROLLBACK
+	// (turnRolledBack, fired by end()'s endCancelled row). It is an interface rather than an Agent
+	// for the same reason conv is a pointer: this type owns the moments and knows nothing of what
+	// an Agent wants to do about them — the undo journal's closing capture hangs off the first
+	// (Agent.closeUndoGroup, agent.go), the context-fill ladder's and step-budget notice's re-arm
+	// off the second (Agent.rearmNotices, stepnotice.go) — and neither fire site carries a context
+	// or an Agent to hand one. nil is inert, never an error — a bare lifecycle in a unit test has
+	// no Agent behind it, and an engine that records nothing simply hangs nothing here.
+	observer exchangeObserver
+}
 
-	// onRollback is fired by end()'s endCancelled row, once per Turn ROLLBACK, after the
-	// conversation is dropped back to the Turn's boundary — the seam the context-fill notice's
-	// re-arm hangs off (Agent.rearmFillNotice, fillnotice.go). The rollback drops the Turn's
-	// committed tool results, including the one a notice rode on, so the ladder must end its climb
-	// here exactly as it does on AbortExchange. Same shape as onClose for the same reason: this
-	// type owns the MOMENT a Turn is rolled back and nothing of what the Agent tracks against the
-	// conversation it dropped. nil is inert, never an error. A Step-driven host may re-attempt the
-	// Turn and cancel again, so what hangs here must be idempotent (the re-arm is).
-	onRollback func()
+// exchangeObserver is what turnLifecycle notifies at the two moments it owns that reach past it
+// (turnLifecycle.observer); the Agent is its one implementation (construct.go).
+//
+// exchangeClosed fires on every row that ends an Exchange and on none that leaves one open, which
+// is exactly closeExchange's own contract: endCancelled is not a caller, so a Turn that will be
+// re-attempted never closes the group its re-attempt writes into.
+//
+// turnRolledBack fires once per Turn ROLLBACK, after the conversation is dropped back to the
+// Turn's boundary. The rollback drops the Turn's committed tool results, including the one a
+// notice rode on, so what tracks against the dropped conversation ends here exactly as it does
+// on AbortExchange. A Step-driven host may re-attempt the Turn and cancel again, so an
+// implementation must be idempotent (the re-arm is).
+type exchangeObserver interface {
+	exchangeClosed()
+	turnRolledBack()
 }
 
 // turnRun is the working state of one Turn attempt — the values step() used to thread as five
@@ -191,9 +197,9 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		l.conv.TruncateDeferred(t.deferredFloor)
 		l.restoreDeferred(t.deferred)
 		// The dropped tool results may include the one a context-fill notice rode on: let the
-		// Agent end the ladder's climb (onRollback → rearmFillNotice), as abort does.
-		if l.onRollback != nil {
-			l.onRollback()
+		// Agent end the ladder's climb (observer.turnRolledBack → rearmNotices), as abort does.
+		if l.observer != nil {
+			l.observer.turnRolledBack()
 		}
 		// inExchange is deliberately left untouched (NOT cleared) and the counter is NOT advanced,
 		// so the snapshot taken here resumes and re-attempts the Turn from serializable state: a
@@ -240,7 +246,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 // faulted Turn), and AbortExchange (the host scrapping the Exchange). endCancelled is
 // deliberately NOT one — a cancelled Turn leaves the Exchange open for the resume re-attempt
 // and truncates-then-restores the deferred queue instead (F6(b)). Being the one owner is what
-// lets the undo journal hang its closing capture here through onClose: four Exchange ends, one
+// lets the undo journal hang its closing capture here through the observer: four Exchange ends, one
 // capture point, and the row that does not end an Exchange does not take an image either.
 func (l *turnLifecycle) closeExchange() {
 	l.inExchange = false
@@ -249,8 +255,8 @@ func (l *turnLifecycle) closeExchange() {
 	// capture (ADR 0074 decision 3). It runs AFTER the state flips so an observer reached from it
 	// sees a closed Exchange, and it is the last word here for the same reason — whatever it does,
 	// the Exchange is already over.
-	if l.onClose != nil {
-		l.onClose()
+	if l.observer != nil {
+		l.observer.exchangeClosed()
 	}
 }
 

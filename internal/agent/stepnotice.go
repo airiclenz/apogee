@@ -61,7 +61,7 @@ func (a *Agent) stepBudgetNotice(_ context.Context, view domain.LoopView, _ doma
 }
 
 // rearmStepNotice forgets the Turn the notice rode, so a re-attempt of that Turn is told again.
-// Called on a cancelled Turn's rollback (turnLifecycle.onRollback, through rearmNotices), which
+// Called on a cancelled Turn's rollback (the lifecycle's exchangeObserver, through rearmNotices), which
 // drops the tool result the notice landed on; idempotent, so a Step-driven host that cancels the
 // re-attempt too is harmless.
 func (a *Agent) rearmStepNotice() { a.stepNoticeAt = 0 }

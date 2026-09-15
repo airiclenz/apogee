@@ -152,18 +152,26 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 	}
 	// Wire the Turn lifecycle owner AFTER the literal so conv points at the Agent's field: a later
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
-	// onClose rides here for the same reason: the lifecycle owns the moment an Exchange ends, the
-	// Agent owns what an ending Exchange costs — the undo journal's closing capture (ADR 0074).
-	// onRollback likewise: the lifecycle owns the moment a cancelled Turn is rolled back, the Agent
-	// owns the two notices that rode the tool results the rollback drops — the context-fill ladder
-	// (ADR 0077 D4) and the step-budget notice's Turn latch (stepnotice.go).
+	// The Agent rides along as the lifecycle's exchangeObserver for the same reason: the lifecycle
+	// owns the moment an Exchange ends and the moment a cancelled Turn is rolled back, the Agent
+	// owns what each costs — the undo journal's closing capture (ADR 0074) and the two notices
+	// that rode the tool results the rollback drops, the context-fill ladder (ADR 0077 D4) and the
+	// step-budget notice's Turn latch (stepnotice.go).
 	a.turns = &turnLifecycle{
-		conv:       &a.conv,
-		onClose:    a.closeUndoGroup,
-		onRollback: a.rearmNotices,
+		conv:     &a.conv,
+		observer: a,
 	}
 	return a, nil
 }
+
+// exchangeClosed is the Agent's half of the exchangeObserver contract for an Exchange END
+// (turnLifecycle.closeExchange): the undo journal's closing capture (closeUndoGroup, agent.go).
+func (a *Agent) exchangeClosed() { a.closeUndoGroup() }
+
+// turnRolledBack is the Agent's half of the exchangeObserver contract for a cancelled Turn's
+// ROLLBACK (turnLifecycle.end's endCancelled row): the two notices that rode the dropped tool
+// results are re-armed (rearmNotices, stepnotice.go).
+func (a *Agent) turnRolledBack() { a.rearmNotices() }
 
 // seedTopLevel gives a top-level Agent the fields it owns afresh — the ones a delegate takes from
 // its parent instead (delegation.seed). Empty and per-process, every one of them, because this
