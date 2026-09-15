@@ -279,7 +279,11 @@ NOTES (2026-09-15): the dial-only tests that build the parent through white-box 
 
 Commit: `refactor(agent): one Dialer seam for every provider dial`
 
-## 11. `domain.Reaction.Validate` owns every per-reaction rule
+## 11. `domain.Reaction.Validate` owns every per-reaction rule — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the config layer already called `Reaction.Validate` once per mapped entry and held no runnability rule, so `internal/config/reactions.go` changed only in the comment over that loop; the "exactly one site" sentence the guard asks to delete exists in no source file (nothing to delete).
+NOTES (2026-09-15): `TestHookValidateRefusesAReactionTheCoreRejects` gained an empty-argv row so hooks_test.go still proves the forwarder surfaces the moved rule; `unparseableURL` moved with the URL rows to `internal/domain/reaction_test.go`.
+NOTES (2026-09-15): `internal/agent/syncexec.go`'s fire-time `run: is empty` branch is now unreachable from config but left in place — it still guards a Reaction built in code that skipped `Validate`, and the file is outside this item's Files.
 
 **What.** Recast at the regression check (2026-09-15). Move the handler-runnability rules of `reactions.Validate` (`internal/reactions/hooks.go` — argv[0] present, URL shape, headers-env) into `domain.Reaction.Validate` (`internal/domain/reaction.go`) so one table holds every rule a Reaction value can break; the non-positive-timeout rule stays lane-side (see the guard). `internal/config/reactions.go` keeps only the on-disk shape and the Floor-key refusal and calls `Reaction.Validate` once per entry. `reactions.Validate` / `ValidateAll` become thin forwarders (or are deleted when no caller remains). Admitted widening: the sync lane's `advise:`/`gate:` argv entries gain the argv[0] rule at load (an empty `advise: []` or `gate: ["  "]` loads today and fails at fire time with `run: is empty`; after, it is a startup refusal, and `syncexec.go`'s fire-time branch becomes unreachable from config). Depends on item 1.
 

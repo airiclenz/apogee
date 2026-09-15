@@ -2,8 +2,6 @@ package reactions
 
 import (
 	"errors"
-	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,11 +104,6 @@ func webhookHook(handler domain.WebhookHandler) domain.Reaction {
 	}
 }
 
-// unparseableURL returns a URL net/url cannot parse — the host's bracket is never closed. It is a
-// function rather than a constant because staticcheck's SA1007 reads a constant operand of
-// url.Parse and reports the very malformation the refusal table is here to exercise.
-func unparseableURL() string { return "http://[::1" }
-
 // TestHookValidateAcceptsTheValidShapes covers the six shapes a `reactions:` entry may take: a bare
 // command, a command scoped to a workspace, a command on several events, a bare webhook, a
 // webhook with literal headers, and a webhook with env-referenced headers.
@@ -155,24 +148,16 @@ func TestHookValidateAcceptsTheValidShapes(t *testing.T) {
 }
 
 // TestHookValidateRefusesEachRule checks every rule of the entry shape this package still owns —
-// the exactly-one-action and headers-belong-to-a-webhook rules moved to the config layer with the
-// Reaction struct, since a domain.Reaction carries one Handler — and that the message names the
-// entry so a user with several entries is told which line to fix.
+// the id, the notice-event list and the observe lane's timeout floor. The handler-runnability
+// rules (a command's program, a webhook's URL and headers-env) moved to [domain.Reaction.Validate]
+// with the rest of the rules a Reaction value can break on its own, and the exactly-one-action and
+// headers-belong-to-a-webhook rules to the config layer with the Reaction struct — and that the
+// message names the entry so a user with several entries is told which line to fix.
 //
-// Every refusal this package emits itself is pinned on the WHOLE sentence it announces, key prefix
-// and quoted operand included — never a tail substring that would survive a rewording of `run:`,
-// `run: url:` or `headers-env:`. The rules the core owns keep their shorter markers: their wording
-// belongs to internal/domain, not here.
+// Every refusal this package emits itself is pinned on the sentence it announces; the rules the
+// core owns keep their shorter markers, since their wording belongs to internal/domain, not here.
 func TestHookValidateRefusesEachRule(t *testing.T) {
 	t.Parallel()
-
-	// The unparseable URL's refusal quotes net/url's own error text, so the expectation is built
-	// from that error rather than copied: a stdlib rewording must not fail this test.
-	badURL := unparseableURL()
-	_, parseErr := url.Parse(badURL)
-	if parseErr == nil {
-		t.Fatalf("url.Parse(%q) returned no error, want the one the refusal quotes", badURL)
-	}
 
 	cases := []struct {
 		name     string
@@ -195,29 +180,6 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 			h.On = []Event{"turn-started"}
 			return h
 		}(), wantText: "unknown reaction event"},
-		{name: "empty argv", hook: func() domain.Reaction {
-			h := validHook()
-			h.Handler = domain.ArgvHandler{}
-			return h
-		}(), wantText: "run: the first element is the program to run and must not be blank"},
-		{name: "blank argv[0]", hook: func() domain.Reaction {
-			h := validHook()
-			h.Handler = domain.ArgvHandler{Argv: []string{"   ", "done"}}
-			return h
-		}(), wantText: "run: the first element is the program to run and must not be blank"},
-		{name: "unparseable webhook url", hook: webhookHook(domain.WebhookHandler{URL: badURL}),
-			wantText: fmt.Sprintf("run: url: %q is not a URL: %v", badURL, parseErr)},
-		{name: "relative webhook", hook: webhookHook(domain.WebhookHandler{URL: "example.test/hook"}),
-			wantText: `run: url: "example.test/hook" must be an absolute http:// or https:// URL`},
-		{name: "non-http webhook", hook: webhookHook(domain.WebhookHandler{URL: "ftp://example.test/hook"}),
-			wantText: `run: url: "ftp://example.test/hook" must be an absolute http:// or https:// URL`},
-		{name: "hostless webhook", hook: webhookHook(domain.WebhookHandler{URL: "https:///hook"}),
-			wantText: `run: url: "https:///hook" names no host`},
-		{name: "blank headers-env value", hook: webhookHook(domain.WebhookHandler{
-			URL:        "https://example.test/hook",
-			HeadersEnv: map[string]string{"Authorization": " "},
-		}), wantText: `headers-env: "Authorization" maps to no environment variable name — ` +
-			"the value is the NAME of the variable holding the header, not the header itself"},
 		{name: "zero timeout", hook: func() domain.Reaction {
 			h := validHook()
 			h.Timeout = 0
@@ -250,21 +212,44 @@ func TestHookValidateRefusesEachRule(t *testing.T) {
 }
 
 // TestHookValidateRefusesAReactionTheCoreRejects proves this package's own checks do not shadow
-// [domain.Reaction.Validate]: a shape only the core knows about — here a user entry claiming a
-// class the observe lane does not take — still earns the core's refusal.
+// [domain.Reaction.Validate]: a shape only the core knows about — a user entry claiming a class the
+// observe lane does not take, and a command with no program to run — still earns the core's
+// refusal through the forwarder.
 func TestHookValidateRefusesAReactionTheCoreRejects(t *testing.T) {
 	t.Parallel()
 
-	h := validHook()
-	h.Class = domain.ClassAdvise
-
-	err := Validate(h)
-
-	if err == nil {
-		t.Fatal("Validate() accepted a command entry claiming class advise, want the core's refusal")
+	cases := []struct {
+		name string
+		hook domain.Reaction
+	}{
+		{"a command entry claiming class advise", func() domain.Reaction {
+			h := validHook()
+			h.Class = domain.ClassAdvise
+			return h
+		}()},
+		{"a command with no program", func() domain.Reaction {
+			h := validHook()
+			h.Handler = domain.ArgvHandler{}
+			return h
+		}()},
 	}
-	if !errors.Is(err, domain.ErrInvalidReaction) {
-		t.Errorf("Validate() = %v, want it to wrap domain.ErrInvalidReaction", err)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := Validate(c.hook)
+
+			if err == nil {
+				t.Fatalf("Validate() accepted %s, want the core's refusal", c.name)
+			}
+			if !errors.Is(err, domain.ErrInvalidReaction) {
+				t.Errorf("Validate() = %v, want it to wrap domain.ErrInvalidReaction", err)
+			}
+			if !strings.Contains(err.Error(), `reaction "`+c.hook.ID+`"`) {
+				t.Errorf("Validate() = %q, want it to name the entry %q", err, c.hook.ID)
+			}
+		})
 	}
 }
 

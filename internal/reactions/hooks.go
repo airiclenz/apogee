@@ -2,7 +2,6 @@ package reactions
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -83,13 +82,18 @@ func eventList() string {
 
 // Validate reports whether one entry is a usable observe reaction, naming the entry in every
 // message so a user with several of them is told WHICH line to fix. It is this package's own
-// RUNNABLE checks — a name to report by, at least one known event, an action the executors can
-// actually run, and a bounded timeout — run BEFORE [domain.Reaction.Validate], so a malformed
-// entry earns the sentence that names the config key rather than the core's structural refusal.
+// LANE checks — a name to report by, at least one known notice event, and a bounded timeout — run
+// BEFORE [domain.Reaction.Validate], so a malformed entry earns the sentence that names the config
+// key rather than the core's structural refusal; the core then holds every rule the Reaction VALUE
+// can break on its own, the runnability of its command or webhook included.
 //
-// The exactly-one-action and headers-belong-to-a-webhook rules are NOT here: a domain.Reaction
-// carries one Handler, so those two rules live where both fields still coexist — the config
-// layer's own mapping (internal/config's reactions.go).
+// The timeout rule is this lane's and not the core's on purpose: a zero Timeout means "class
+// default" on the sync lane and is ignored by every Go handler, so only the observe lane, whose
+// config mapping has already resolved the default, can call a non-positive one wrong.
+//
+// The exactly-one-action and headers-belong-to-a-webhook rules are NOT here either: a
+// domain.Reaction carries one Handler, so those two rules live where both fields still coexist —
+// the config layer's own mapping (internal/config's reactions.go).
 func Validate(r domain.Reaction) error {
 	if strings.TrimSpace(r.ID) == "" {
 		return fmt.Errorf(
@@ -103,51 +107,10 @@ func Validate(r domain.Reaction) error {
 			return reactionError(r.ID, "%v", err)
 		}
 	}
-	if err := validateHandler(r); err != nil {
-		return err
-	}
 	if r.Timeout <= 0 {
 		return reactionError(r.ID, "timeout: %v is not a positive duration — write it as `30s` or `2m`", r.Timeout)
 	}
 	return r.Validate()
-}
-
-// validateHandler checks whichever action the entry carries is one the executors can run. A
-// handler kind this package does not run at all is left to [domain.Reaction.Validate], which
-// owns the origin × class × handler rules; the events check above has already refused it, since
-// a Go handler's seam is not in the notice vocabulary.
-func validateHandler(r domain.Reaction) error {
-	switch handler := r.Handler.(type) {
-	case domain.ArgvHandler:
-		if len(handler.Argv) == 0 || strings.TrimSpace(handler.Argv[0]) == "" {
-			return reactionError(r.ID, "run: the first element is the program to run and must not be blank")
-		}
-		return nil
-	case domain.WebhookHandler:
-		return validateWebhook(r.ID, handler)
-	}
-	return nil
-}
-
-// validateWebhook refuses anything that is not an absolute http(s) URL, and any header mapped to
-// a blank environment variable name — a header whose value would silently be the empty string.
-func validateWebhook(id string, handler domain.WebhookHandler) error {
-	parsed, err := url.Parse(handler.URL)
-	switch {
-	case err != nil:
-		return reactionError(id, "run: url: %q is not a URL: %v", handler.URL, err)
-	case parsed.Scheme != "http" && parsed.Scheme != "https":
-		return reactionError(id, "run: url: %q must be an absolute http:// or https:// URL", handler.URL)
-	case parsed.Host == "":
-		return reactionError(id, "run: url: %q names no host", handler.URL)
-	}
-	for header, envName := range handler.HeadersEnv {
-		if strings.TrimSpace(envName) == "" {
-			return reactionError(id, "headers-env: %q maps to no environment variable name — "+
-				"the value is the NAME of the variable holding the header, not the header itself", header)
-		}
-	}
-	return nil
 }
 
 // reactionError builds a message prefixed with the entry it is about.

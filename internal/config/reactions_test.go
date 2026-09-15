@@ -259,6 +259,11 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 			want: `reaction "coach": advise: is an argv list`,
 		},
 		{
+			name: "advise: is an empty argv list",
+			body: "reactions:\n  - id: coach\n    on: [post-tool-result]\n    advise: []\n",
+			want: `invalid reaction "coach": the command's first element is the program to run and must not be blank`,
+		},
+		{
 			name: "advise: reacts at a Moment it cannot take",
 			body: "reactions:\n  - id: coach\n    on: [turn-finished]\n    advise: [\"say-something\"]\n",
 			want: `invalid reaction "coach": advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`,

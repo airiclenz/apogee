@@ -7,6 +7,8 @@ package domain
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"slices"
 	"testing"
 )
@@ -547,6 +549,115 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				}
 				return
 			}
+			if err == nil {
+				t.Fatalf("Validate() = nil, want %q", c.wantErr)
+			}
+			if !errors.Is(err, ErrInvalidReaction) {
+				t.Errorf("Validate() = %v, want it to wrap ErrInvalidReaction", err)
+			}
+			if got := err.Error(); got != c.wantErr {
+				t.Errorf("Validate() = %q, want %q", got, c.wantErr)
+			}
+		})
+	}
+}
+
+// unparseableURL returns a URL net/url cannot parse — the host's bracket is never closed. It is a
+// function rather than a constant because staticcheck's SA1007 reads a constant operand of
+// url.Parse and reports the very malformation the refusal table is here to exercise.
+func unparseableURL() string { return "http://[::1" }
+
+// TestReactionValidateRefusesAnUnrunnableHandler pins the handler-runnability rows of the one
+// table — a command with no program, a webhook whose URL is not an absolute http(s) URL with a
+// host, a header mapped to no environment variable name — on the WHOLE sentence each announces,
+// key prefix and quoted operand included, so a rewording is a deliberate change here rather than
+// something a tail substring would let through. The command sentence names no config key: the same
+// ArgvHandler reaches Validate from `run:`, `advise:` and `gate:` alike.
+func TestReactionValidateRefusesAnUnrunnableHandler(t *testing.T) {
+	t.Parallel()
+
+	// The unparseable URL's refusal quotes net/url's own error text, so the expectation is built
+	// from that error rather than copied: a stdlib rewording must not fail this test.
+	badURL := unparseableURL()
+	_, parseErr := url.Parse(badURL)
+	if parseErr == nil {
+		t.Fatalf("url.Parse(%q) returned no error, want the one the refusal quotes", badURL)
+	}
+
+	observe := func(handler Handler) Reaction {
+		return Reaction{
+			ID:      "notify",
+			Origin:  OriginUser,
+			Class:   ClassObserve,
+			On:      []Moment{MomentError},
+			Handler: handler,
+		}
+	}
+	webhook := func(handler WebhookHandler) Reaction { return observe(handler) }
+
+	cases := []struct {
+		name     string
+		reaction Reaction
+		wantErr  string
+	}{
+		{
+			name:     "empty argv",
+			reaction: observe(ArgvHandler{}),
+			wantErr:  `apogee: invalid reaction "notify": the command's first element is the program to run and must not be blank`,
+		},
+		{
+			name:     "blank argv[0]",
+			reaction: observe(ArgvHandler{Argv: []string{"   ", "done"}}),
+			wantErr:  `apogee: invalid reaction "notify": the command's first element is the program to run and must not be blank`,
+		},
+		{
+			name: "blank argv[0] on the sync lane",
+			reaction: Reaction{
+				ID:      "warden",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{MomentPreToolExec},
+				Handler: ArgvHandler{Argv: []string{"  "}},
+			},
+			wantErr: `apogee: invalid reaction "warden": the command's first element is the program to run and must not be blank`,
+		},
+		{
+			name:     "unparseable webhook url",
+			reaction: webhook(WebhookHandler{URL: badURL}),
+			wantErr:  fmt.Sprintf(`apogee: invalid reaction "notify": run: url: %q is not a URL: %v`, badURL, parseErr),
+		},
+		{
+			name:     "relative webhook",
+			reaction: webhook(WebhookHandler{URL: "example.test/hook"}),
+			wantErr:  `apogee: invalid reaction "notify": run: url: "example.test/hook" must be an absolute http:// or https:// URL`,
+		},
+		{
+			name:     "non-http webhook",
+			reaction: webhook(WebhookHandler{URL: "ftp://example.test/hook"}),
+			wantErr:  `apogee: invalid reaction "notify": run: url: "ftp://example.test/hook" must be an absolute http:// or https:// URL`,
+		},
+		{
+			name:     "hostless webhook",
+			reaction: webhook(WebhookHandler{URL: "https:///hook"}),
+			wantErr:  `apogee: invalid reaction "notify": run: url: "https:///hook" names no host`,
+		},
+		{
+			name: "blank headers-env value",
+			reaction: webhook(WebhookHandler{
+				URL:        "https://example.test/hook",
+				HeadersEnv: map[string]string{"Authorization": " "},
+			}),
+			wantErr: `apogee: invalid reaction "notify": headers-env: "Authorization" maps to no environment variable name — ` +
+				"the value is the NAME of the variable holding the header, not the header itself",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := c.reaction.Validate()
+
 			if err == nil {
 				t.Fatalf("Validate() = nil, want %q", c.wantErr)
 			}

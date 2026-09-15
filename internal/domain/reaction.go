@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -296,9 +298,10 @@ func (HistoryRewriteFunc) seam() Moment { return MomentHistoryRewrite }
 // advise fires at post-tool-result or file-changed and its stdout becomes the fenced trailer;
 // gate fires at pre-tool-exec and its first stdout line is the verdict.
 type ArgvHandler struct {
-	// Argv is the command and its arguments. Validate seals the KIND only — that the handler's
-	// class and Moments agree — while the Runner refuses an empty list, since running it is the
-	// Runner's job and the refusal belongs where the attempt is.
+	// Argv is the command and its arguments. Validate refuses a list whose first element is empty
+	// or blank — there is no program to run — beside the KIND rules that say where the handler's
+	// class and Moments agree, so an unrunnable command is a refusal at arming, not at the first
+	// Moment it would have fired on.
 	Argv []string
 }
 
@@ -427,14 +430,18 @@ type Reaction struct {
 
 // ErrInvalidReaction is wrapped by Reaction.Validate for a reaction the engine will not accept:
 // one with no ID, no origin or class, an origin × class outside the Reaction surface matrix, no
-// handler, an empty or duplicate-bearing On list, or an On entry its handler cannot serve.
-// Match it with errors.Is.
+// handler, an out-of-process handler nothing could run (a command with no program, a webhook whose
+// URL is not an absolute http(s) one or whose header maps to no variable name), an empty or
+// duplicate-bearing On list, or an On entry its handler cannot serve. Match it with errors.Is.
 var ErrInvalidReaction = errors.New("apogee: invalid reaction")
 
 // Validate reports whether the Reaction is well formed, wrapping ErrInvalidReaction with what is
-// wrong. It is the one gate every reaction passes before it can fire, so the checks are ordered
-// from the most identifying failure outwards: without an ID no later message can name the
-// offender.
+// wrong. It is the one gate every reaction passes before it can fire — and the ONE table of every
+// rule a Reaction value can break on its own, the runnability of its out-of-process handler
+// included — so the checks are ordered from the most identifying failure outwards: without an ID
+// no later message can name the offender. What it does not hold is a rule that reads outside the
+// value: a lane's timeout floor, a duplicate id across a list, or the spelling of an on-disk key
+// stay with the lane, the Generation and the config layer that know them.
 func (r Reaction) Validate() error {
 	if r.ID == "" {
 		return fmt.Errorf("%w: a reaction needs a non-empty ID", ErrInvalidReaction)
@@ -453,6 +460,9 @@ func (r Reaction) Validate() error {
 	}
 	if r.Handler == nil {
 		return fmt.Errorf("%w %q: no handler", ErrInvalidReaction, r.ID)
+	}
+	if err := r.validateHandlerRunnable(); err != nil {
+		return err
 	}
 	if len(r.On) == 0 {
 		return fmt.Errorf("%w %q: fires on no Moment", ErrInvalidReaction, r.ID)
@@ -514,6 +524,51 @@ func (r Reaction) Validate() error {
 				"%w %q: Moment %q is not the handler's seam %q",
 				ErrInvalidReaction, r.ID, m, r.Handler.seam(),
 			)
+		}
+	}
+	return nil
+}
+
+// validateHandlerRunnable refuses an out-of-process handler nothing could run: a command whose
+// first element — the program — is empty or blank, and a webhook whose URL is not an absolute
+// http(s) URL with a host or whose header is mapped to a blank environment variable name (a header
+// whose value would silently be the empty string). A Go handler is a func and is always runnable.
+//
+// The command sentence names no config key on purpose: an ArgvHandler reaches here from `run:`,
+// `advise:` and `gate:` alike, while a webhook can only have been written under `run:`, so the
+// webhook sentences keep the key a user has to look for.
+func (r Reaction) validateHandlerRunnable() error {
+	switch handler := r.Handler.(type) {
+	case ArgvHandler:
+		if len(handler.Argv) == 0 || strings.TrimSpace(handler.Argv[0]) == "" {
+			return fmt.Errorf(
+				"%w %q: the command's first element is the program to run and must not be blank",
+				ErrInvalidReaction, r.ID,
+			)
+		}
+	case WebhookHandler:
+		parsed, err := url.Parse(handler.URL)
+		switch {
+		case err != nil:
+			return fmt.Errorf(
+				"%w %q: run: url: %q is not a URL: %v", ErrInvalidReaction, r.ID, handler.URL, err,
+			)
+		case parsed.Scheme != "http" && parsed.Scheme != "https":
+			return fmt.Errorf(
+				"%w %q: run: url: %q must be an absolute http:// or https:// URL",
+				ErrInvalidReaction, r.ID, handler.URL,
+			)
+		case parsed.Host == "":
+			return fmt.Errorf("%w %q: run: url: %q names no host", ErrInvalidReaction, r.ID, handler.URL)
+		}
+		for header, envName := range handler.HeadersEnv {
+			if strings.TrimSpace(envName) == "" {
+				return fmt.Errorf(
+					"%w %q: headers-env: %q maps to no environment variable name — "+
+						"the value is the NAME of the variable holding the header, not the header itself",
+					ErrInvalidReaction, r.ID, header,
+				)
+			}
 		}
 	}
 	return nil

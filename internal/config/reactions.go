@@ -178,9 +178,11 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 		return nil, runShapeError(id)
 	}
 
-	// The core's structural refusal, run here so a seam under `on:` earns the sentence that says
-	// which Moments the key it was written under reacts at, rather than the vocabulary listing a
-	// misspelling earns.
+	// The core's own refusal — every rule the Reaction value can break on its own, its command's
+	// program and its webhook's URL included — run here once per Reaction, so a seam under `on:`
+	// earns the sentence that says which Moments the key it was written under reacts at, rather
+	// than the vocabulary listing a misspelling earns, and an empty `advise: []` or `gate: ["  "]`
+	// is a startup refusal rather than a command that fails at the first Moment it fires on.
 	for _, reaction := range mapped {
 		if err := reaction.Validate(); err != nil {
 			return nil, err
