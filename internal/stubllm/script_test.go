@@ -186,6 +186,39 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 			yaml: "turns:\n  - captures: [{name: p, from: system, pattern: '(.)'}]\n    hang: 10ms\n",
 			want: "a hang turn carries no captures",
 		},
+		// The terminator cases: `cut` and `error` are refused with each other and with the two
+		// kinds that never start a stream — and the one-kind rule's wording is untouched, because
+		// a terminator is not a kind.
+		{
+			name: "cut and http together",
+			yaml: "turns:\n  - cut: {after_runes: 3}\n    http: {status: 500}\n",
+			want: "a cut ends a stream, and an http turn never starts one",
+		},
+		{
+			name: "cut and hang together",
+			yaml: "turns:\n  - cut: {after_runes: 3}\n    hang: 10ms\n",
+			want: "a cut ends a stream, and a hang turn never starts one",
+		},
+		{
+			name: "cut and error together",
+			yaml: "turns:\n  - text: hi\n    cut: {after_runes: 1}\n    error: {message: gone}\n",
+			want: "sets both cut and error — a stream ends one way",
+		},
+		{
+			name: "error and http together",
+			yaml: "turns:\n  - error: {code: 502, message: gone}\n    http: {status: 500}\n",
+			want: "a error ends a stream, and an http turn never starts one",
+		},
+		{
+			name: "usage on a cut turn",
+			yaml: "turns:\n  - text: hi\n    cut: {after_runes: 1}\n    usage: {prompt: 1, completion: 1}\n",
+			want: "a cut turn never reaches the terminator, so it carries no usage or finish_reason",
+		},
+		{
+			name: "a negative cut",
+			yaml: "turns:\n  - text: hi\n    cut: {after_runes: -1}\n",
+			want: "cut.after_runes cannot be negative",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -200,6 +233,44 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTerminatorRidesAnOrdinaryTurn pins the other side of the terminator refusals: `cut` and
+// `error` are legal on a text, tool-call or empty turn, and the parsed Turn carries them with
+// the `error` code defaulting to 502.
+func TestTerminatorRidesAnOrdinaryTurn(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		yaml string
+	}{
+		{name: "cut on a text turn", yaml: "turns:\n  - text: hello\n    cut: {after_runes: 3}\n"},
+		{name: "cut on a tool-call turn", yaml: "turns:\n  - tool_calls: [{name: list_dir}]\n    cut: {after_runes: 0}\n"},
+		{name: "cut on an empty turn", yaml: "turns:\n  - cut: {after_runes: 0}\n"},
+		{name: "error on a text turn", yaml: "turns:\n  - text: hello\n    error: {code: 429, message: slow down}\n"},
+		{name: "error on an empty turn", yaml: "turns:\n  - error: {message: gone}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := Parse([]byte(tc.yaml)); err != nil {
+				t.Fatalf("parse refused %q: %v", tc.yaml, err)
+			}
+		})
+	}
+
+	t.Run("error code defaults to 502", func(t *testing.T) {
+		t.Parallel()
+
+		script, err := Parse([]byte("turns:\n  - error: {message: gone}\n"))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if got := script.Turns[0].Error.code(); got != 502 {
+			t.Errorf("code = %d, want 502", got)
+		}
+	})
 }
 
 // TestEmptyReplyTurnIsLegal pins the one turn that looks like a mistake and is not: a turn with

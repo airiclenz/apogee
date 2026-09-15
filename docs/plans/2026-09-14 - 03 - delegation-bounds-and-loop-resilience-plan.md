@@ -70,7 +70,12 @@ NOTES (2026-09-15): gate verified — plan 01 is absent from `docs/plans/`, pres
 
 **Commit:** none (gate only).
 
-## 2. stubllm gains `cut` and `error` turn kinds
+## 2. stubllm gains `cut` and `error` turn kinds — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `cut` and `error` are implemented as terminators per the regression guard — `kindCount` and the one-kind wording are untouched; `validateTerminators` refuses each with `http`, `hang`, the other terminator, and `usage`/`finish_reason` (never reached), plus a negative `after_runes`.
+NOTES (2026-09-15): `internal/stubllm/wire.go` is edited though the item's Files list omits it — the in-band `error` member belongs on `sseEnvelope`/`wholeReply` there per the package's own file split (wire shapes live in wire.go, and the item's Read-first names `wire.go — sseEnvelope`).
+NOTES (2026-09-15): consequential edit — internal/stubllm/doc.go: made necessary by the two new Turn types (the package map's script.go line and the fault list in the package comment name them).
+NOTES (2026-09-15): the kill is Hijack + `conn.Close()`, falling back to `panic(http.ErrAbortHandler)` when the writer cannot be hijacked; `TestServerCutTurnKillsTheConnection` was checked to FAIL on a plain handler return (clean EOF) and pass on the kill. A cut at or past the end of the text streams every delta (tool-call fragments included) and kills in the terminator's place; the non-streamed path kills after the 200 header. The `error` event is followed by `[DONE]` so a client that ignores the object is caught committing an empty reply; the whole-reply path carries the object as a body member.
 
 **What:** `internal/stubllm/script.go` `Turn` gains two kinds beside `text`, `tool_calls`, `http`, `hang` (one kind per turn, `kindCount` extended): `cut: {after_runes: N}` — the server streams the turn's `text` and closes the response body after N runes without a terminal chunk (an `unexpected EOF` at the client); `error: {code, message}` — an in-band `{"error": {...}}` object on a 200 response mid-stream (code 502 default). `serve` implements both; `record` is untouched. `docs/design/test-drivers.md` turn-kind table gains the two rows.
 

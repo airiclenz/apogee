@@ -75,13 +75,24 @@ func (r chatRequest) toolNames() []string {
 }
 
 // sseEnvelope is one streamed data event. Choices is omitted on the terminal usage event,
-// which is the shape servers send when stream_options.include_usage is on.
+// which is the shape servers send when stream_options.include_usage is on, and on the in-band
+// error event an `error` turn ends with.
 type sseEnvelope struct {
 	ID      string      `json:"id"`
 	Object  string      `json:"object"`
 	Model   string      `json:"model,omitempty"`
 	Choices []sseChoice `json:"choices,omitempty"`
 	Usage   *usageWire  `json:"usage,omitempty"`
+	Error   *wireError  `json:"error,omitempty"`
+}
+
+// wireError is the in-band failure member an aggregator delivers on an HTTP 200 — as an SSE
+// data event on the streamed path, inside the JSON body on the whole-reply one. Code is a
+// number here because that is what a scripted `error` turn carries; the slug spellings some
+// aggregators send instead are not scripted.
+type wireError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
 }
 
 type sseChoice struct {
@@ -114,13 +125,15 @@ type sseFunction struct {
 	Arguments string `json:"arguments"`
 }
 
-// wholeReply is the non-streamed completion.
+// wholeReply is the non-streamed completion. Error is the in-band member an `error` turn
+// adds; absent on every healthy reply.
 type wholeReply struct {
 	ID      string        `json:"id"`
 	Object  string        `json:"object"`
 	Model   string        `json:"model,omitempty"`
 	Choices []wholeChoice `json:"choices"`
 	Usage   *usageWire    `json:"usage,omitempty"`
+	Error   *wireError    `json:"error,omitempty"`
 }
 
 type wholeChoice struct {

@@ -351,7 +351,8 @@ func (s *Server) reply(w http.ResponseWriter, r *http.Request, t Turn, stream bo
 
 // writeStream plays a Turn as SSE: reasoning first, then content, then the tool-call
 // fragments, then the terminal finish_reason, the usage chunk and [DONE] — the order and
-// framing a real OpenAI-compatible server uses.
+// framing a real OpenAI-compatible server uses. A `cut` turn kills the connection where the
+// terminator would go; an `error` turn writes its in-band object there instead.
 func writeStream(ctx context.Context, w http.ResponseWriter, t Turn, model string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -378,13 +379,28 @@ func writeStream(ctx context.Context, w http.ResponseWriter, t Turn, model strin
 		return true
 	}
 
-	for i, delta := range streamDeltas(t) {
+	for i, delta := range streamDeltas(t.beforeCut()) {
 		if i > 0 && !sleep(ctx, t.TokenDelay) {
 			return
 		}
 		if !send(sseEnvelope{Choices: []sseChoice{{Delta: delta}}}) {
 			return
 		}
+	}
+	if t.Cut != nil {
+		kill(w)
+		return
+	}
+	if t.Error != nil {
+		// The error object is followed by [DONE] on purpose: a client that honours the
+		// object returns at it, while one that ignores it and reads on to the [DONE] would
+		// commit a silent empty reply — the very failure the member exists to prevent.
+		if !send(sseEnvelope{Error: t.Error.wire()}) {
+			return
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		flusher.Flush()
+		return
 	}
 	if !send(sseEnvelope{Choices: []sseChoice{{FinishReason: t.finishReason()}}}) {
 		return
@@ -394,6 +410,47 @@ func writeStream(ctx context.Context, w http.ResponseWriter, t Turn, model strin
 	}
 	_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	flusher.Flush()
+}
+
+// beforeCut is the Turn as far as its `cut` lets it stream: the Text truncated to the cut
+// point and, when the cut lands inside the Text, the tool calls that would have followed it
+// dropped. A turn without a cut, or one cut at or past the end of its Text, is returned whole
+// — every delta streams and the kill takes the terminator's place.
+func (t Turn) beforeCut() Turn {
+	if t.Cut == nil {
+		return t
+	}
+	runes := []rune(t.Text)
+	if t.Cut.AfterRunes >= len(runes) {
+		return t
+	}
+	cut := t
+	cut.Text = string(runes[:t.Cut.AfterRunes])
+	cut.ToolCalls = nil
+	return cut
+}
+
+// kill drops the TCP connection under w without a terminating chunk, so the client's read
+// fails with io.ErrUnexpectedEOF. It hijacks the connection and closes the socket; where the
+// writer cannot be hijacked it aborts the handler with http.ErrAbortHandler, which makes
+// net/http close the connection the same way. Simply returning from the handler is NOT an
+// option: that ends the chunked body cleanly, and a clean EOF is what the provider client
+// commits as Done(stop) — the opposite of the fault a `cut` turn scripts.
+func kill(w http.ResponseWriter) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		panic(http.ErrAbortHandler)
+	}
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		panic(http.ErrAbortHandler)
+	}
+	_ = conn.Close()
+}
+
+// wire is the JSON member this error reaches the client as.
+func (e InBandError) wire() *wireError {
+	return &wireError{Code: e.code(), Message: e.Message}
 }
 
 // streamDeltas is the ordered list of deltas a Turn streams before its terminator. An
@@ -444,8 +501,18 @@ func toolCallDeltas(index int, c ToolCall) []sseDelta {
 }
 
 // writeWhole plays a Turn as a single JSON completion — the non-streamed path. TokenDelay has
-// no meaning here: there are no chunks to space out.
+// no meaning here: there are no chunks to space out, and a `cut` has no runes to land in, so
+// it kills the connection after the 200 header and before any body.
 func writeWhole(w http.ResponseWriter, t Turn, model string) {
+	w.Header().Set("Content-Type", "application/json")
+	if t.Cut != nil {
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		kill(w)
+		return
+	}
 	reply := wholeReply{
 		ID:     completionID,
 		Object: "chat.completion",
@@ -471,8 +538,9 @@ func writeWhole(w http.ResponseWriter, t Turn, model string) {
 	if t.Usage != nil {
 		reply.Usage = usageOf(*t.Usage)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
+	if t.Error != nil {
+		reply.Error = t.Error.wire()
+	}
 	_ = json.NewEncoder(w).Encode(reply)
 }
 

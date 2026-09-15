@@ -92,6 +92,14 @@ the only way to script it.
 | `http` | a raw HTTP reply — `status` (required), `body`, `location`, `content_type` — and not one SSE event |
 | `hang` | stalls for the duration, then answers as the empty-reply turn does; a cancelled request context releases it at once |
 | *(none of the above)* | the empty-reply turn |
+| `cut: {after_runes: N}` | *terminator* — streams the reasoning and the first N runes of the `text`, then KILLS the TCP connection without a terminal chunk, so the client reads `io.ErrUnexpectedEOF` (never a handler return, whose clean EOF the provider would commit as a finished reply); N at or past the end of the text streams every delta, tool-call fragments included, and kills in the terminator's place |
+| `error: {code, message}` | *terminator* — streams the leading deltas, then an in-band `{"error": {"code": N, "message": "..."}}` object on the 200 response in the terminator's place (then `[DONE]`); `code` defaults to 502, the retryable class; on the non-streamed path the object is a member of the JSON body |
+
+`cut` and `error` are **terminators, not kinds**: each rides a text, tool-call or empty turn and only
+changes how its stream ends, so the one-kind rule above is untouched. A turn sets at most one of
+them; either with `http` or `hang` — which never start a stream — is a parse error, as is `usage` or
+`finish_reason` on such a turn, which never reaches the terminator that would carry them. A
+non-streamed `cut` turn kills the connection after the 200 header, before any body.
 
 `reasoning` (the thinking channel, streamed before the content) and `usage` accompany a
 text or tool-call turn; they are refused on an `http` or `hang` turn, which never reach the

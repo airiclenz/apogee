@@ -4,7 +4,8 @@
 // A test names the replies it wants as a [Script] — an ordered list of [Turn]s — and gets an
 // HTTP server that plays them back through the wire shapes a real llama.cpp or OpenRouter
 // endpoint uses: SSE content deltas, a reasoning channel, streamed tool-call fragments, a
-// terminal usage object with the cached-prompt breakdown, plain HTTP failures, and a stall.
+// terminal usage object with the cached-prompt breakdown, plain HTTP failures, a stall, a
+// mid-stream connection loss and an in-band upstream error.
 // Nothing about apogee is imported here — the stub is a server, and the code under test
 // reaches it through internal/provider exactly as it reaches a real one.
 //
@@ -25,7 +26,8 @@
 //
 // # Files
 //
-//   - script.go — the Script/Turn/Match/Usage/HTTPReply types, their YAML form, and validation.
+//   - script.go — the Script/Turn/Match/Usage/HTTPReply/Cut/InBandError types, their YAML form,
+//     and validation.
 //   - match.go — which Turn answers which request: ordered by default, a `when:` turn first;
 //     and what that Turn's captures lift out of the request before it is played.
 //   - server.go — the HTTP surface: /v1/models, /v1/chat/completions, SSE and whole replies,

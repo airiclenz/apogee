@@ -58,6 +58,11 @@ type Script struct {
 // EMPTY-REPLY turn a real model produces when it abandons a reply mid-flight. Reasoning and
 // Usage accompany a text or tool-call turn; they are refused on an http or hang turn, which
 // never reach the completion wire shape at all.
+//
+// Cut and Error are TERMINATORS, not kinds: each rides a text, tool-call or empty turn and
+// replaces the stream's ordinary ending — the finish_reason, the usage chunk and [DONE] — with
+// a failure a real upstream produces. A turn sets at most one of them, and neither on an http
+// or hang turn, which never start a stream to end.
 type Turn struct {
 	// When, when set, makes this Turn answer only the requests it matches — and makes it
 	// beat the ordered turns for those requests. A nil When is an ordered turn.
@@ -119,6 +124,47 @@ type Turn struct {
 	// FinishReason overrides the terminal finish_reason. Empty means "stop", or "tool_calls"
 	// when the Turn emits any.
 	FinishReason string `yaml:"finish_reason,omitempty"`
+	// Cut kills the connection mid-stream, after the runes it names, so the client reads an
+	// unexpected EOF where the terminator should have been.
+	Cut *Cut `yaml:"cut,omitempty"`
+	// Error ends the stream with an in-band `{"error": {...}}` object on the 200 response —
+	// the way an aggregator reports the failure of the upstream it routed to.
+	Error *InBandError `yaml:"error,omitempty"`
+}
+
+// Cut is the mid-stream connection loss: the server streams the Turn's reasoning and the first
+// AfterRunes runes of its Text, then kills the TCP connection without a terminal chunk, so the
+// client's read fails with io.ErrUnexpectedEOF. When AfterRunes covers the whole Text (or the
+// Turn has none) every delta is streamed — the tool-call fragments included — and the kill
+// lands in place of the terminator; a cut inside the Text drops everything after it. The
+// non-streamed path kills the connection after the 200 header, before any body.
+//
+// The connection is KILLED rather than the handler returned: a returned handler ends the
+// chunked body cleanly, which is the EOF the provider client commits as Done(stop) — the
+// opposite of the fault this scripts.
+type Cut struct {
+	AfterRunes int `yaml:"after_runes"`
+}
+
+// InBandError is the failure an OpenAI-compatible aggregator delivers on an HTTP 200: an
+// `{"error": {"code": N, "message": "..."}}` object, written as an SSE data event after the
+// leading deltas on the streamed path and as a member of the JSON body on the whole-reply
+// path. Code defaults to 502, the transient class the provider client retries.
+type InBandError struct {
+	Code    int    `yaml:"code,omitempty"`
+	Message string `yaml:"message,omitempty"`
+}
+
+// defaultInBandErrorCode is the code an `error` turn carries when the fixture names none: a
+// 502, because the fault a test most often scripts is the retryable one.
+const defaultInBandErrorCode = 502
+
+// code is the numeric code this error reaches the wire with.
+func (e InBandError) code() int {
+	if e.Code != 0 {
+		return e.Code
+	}
+	return defaultInBandErrorCode
 }
 
 // Match selects the requests a Turn answers. Any combination of its members may be set, and
@@ -278,10 +324,52 @@ func (t Turn) validate() error {
 			return err
 		}
 	}
+	if err := t.validateTerminators(); err != nil {
+		return err
+	}
 	if err := t.validateReasoningField(); err != nil {
 		return err
 	}
 	return t.validateCaptures()
+}
+
+// validateTerminators reports the first thing wrong with a Turn's `cut` or `error`. They are
+// not counted by kindCount because they are not kinds: each rides a text, tool-call or empty
+// turn and only changes how its stream ENDS, so the one-kind rule and its wording stand and
+// the refusals here are the terminators' own — the other terminator, the two kinds that never
+// start a stream, and the terminal members a cut or errored stream never reaches.
+func (t Turn) validateTerminators() error {
+	if t.Cut != nil && t.Error != nil {
+		return errors.New("sets both cut and error — a stream ends one way")
+	}
+	name := t.terminatorName()
+	if name == "" {
+		return nil
+	}
+	if t.HTTP != nil {
+		return fmt.Errorf("a %s ends a stream, and an http turn never starts one", name)
+	}
+	if t.Hang > 0 {
+		return fmt.Errorf("a %s ends a stream, and a hang turn never starts one", name)
+	}
+	if t.Usage != nil || t.FinishReason != "" {
+		return fmt.Errorf("a %s turn never reaches the terminator, so it carries no usage or finish_reason", name)
+	}
+	if t.Cut != nil && t.Cut.AfterRunes < 0 {
+		return errors.New("cut.after_runes cannot be negative")
+	}
+	return nil
+}
+
+// terminatorName is the key of the terminator this Turn sets, or "" for an ordinary ending.
+func (t Turn) terminatorName() string {
+	switch {
+	case t.Cut != nil:
+		return "cut"
+	case t.Error != nil:
+		return "error"
+	}
+	return ""
 }
 
 // The two wire spellings of the thinking channel a Turn can be scripted in. `reasoning_content`

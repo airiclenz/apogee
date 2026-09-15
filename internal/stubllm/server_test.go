@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -274,6 +275,133 @@ func TestServerHangEndsWithTheRequestContext(t *testing.T) {
 			if d.Kind == provider.DeltaContent {
 				t.Errorf("content delta %q, want an empty reply", d.Content)
 			}
+		}
+	})
+}
+
+// TestServerCutTurnKillsTheConnection pins the `cut` terminator to the connection KILL: the
+// client reads the deltas before the cut point and then io.ErrUnexpectedEOF, never a clean
+// end. A handler that merely returned would close the chunked body cleanly — a clean EOF the
+// provider commits as Done(stop) — and io.ReadAll would succeed, so the errors.Is here is what
+// tells the two apart.
+func TestServerCutTurnKillsTheConnection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("inside the text", func(t *testing.T) {
+		t.Parallel()
+
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{
+			Text:       "Hello, world",
+			ChunkRunes: 5,
+			Cut:        &Cut{AfterRunes: 7},
+		}}})
+
+		raw, err := readStreamRaw(t, server, `{"model":"stub-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("read error = %v, want io.ErrUnexpectedEOF from the killed connection", err)
+		}
+		for _, want := range []string{`"content":"Hello"`, `"content":", "`} {
+			if !strings.Contains(raw, want) {
+				t.Errorf("stream %q lacks %s, want the deltas before the cut", raw, want)
+			}
+		}
+		for _, unwanted := range []string{"ld", "finish_reason", "[DONE]"} {
+			if strings.Contains(raw, unwanted) {
+				t.Errorf("stream %q carries %q, want nothing past the cut point", raw, unwanted)
+			}
+		}
+	})
+
+	t.Run("past the text streams the tool calls then dies", func(t *testing.T) {
+		t.Parallel()
+
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{
+			ToolCalls: []ToolCall{{Name: "list_dir", Arguments: `{"path":"."}`}},
+			Cut:       &Cut{AfterRunes: 0},
+		}}})
+
+		raw, err := readStreamRaw(t, server, `{"model":"stub-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("read error = %v, want io.ErrUnexpectedEOF from the killed connection", err)
+		}
+		if !strings.Contains(raw, `"name":"list_dir"`) {
+			t.Errorf("stream %q lacks the tool-call head, want every delta before the terminator", raw)
+		}
+		if strings.Contains(raw, "finish_reason") || strings.Contains(raw, "[DONE]") {
+			t.Errorf("stream %q carries a terminator, want the kill in its place", raw)
+		}
+	})
+
+	t.Run("non-streamed", func(t *testing.T) {
+		t.Parallel()
+
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Text: "hi", Cut: &Cut{AfterRunes: 1}}}})
+
+		raw, err := readStreamRaw(t, server, `{"model":"stub-model","messages":[{"role":"user","content":"hi"}]}`)
+
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("read error = %v, want io.ErrUnexpectedEOF from the killed connection", err)
+		}
+		if raw != "" {
+			t.Errorf("body = %q, want nothing before the kill", raw)
+		}
+	})
+}
+
+// TestServerErrorTurnEndsWithTheInBandObject pins the `error` terminator: the leading deltas
+// stream as usual, then the in-band object takes the terminator's place — and the real
+// provider client faults on it as a retryable 502 rather than reading on to the [DONE].
+func TestServerErrorTurnEndsWithTheInBandObject(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Model: "stub-model", Turns: []Turn{{
+		Text:   "Hello",
+		Error:  &InBandError{Message: "upstream gone"},
+		Repeat: true,
+	}}})
+
+	t.Run("wire", func(t *testing.T) {
+		events := postStream(t, server, "hi")
+
+		if got := contentDeltas(t, events); !reflect.DeepEqual(got, []string{"Hell", "o"}) {
+			t.Errorf("content deltas = %q, want the leading deltas before the error", got)
+		}
+		errorEvent := findEvent(t, events, `"error"`)
+		if want := `"error":{"code":502,"message":"upstream gone"}`; !strings.Contains(errorEvent, want) {
+			t.Errorf("error event = %s, want it to carry %s", errorEvent, want)
+		}
+		for _, event := range events {
+			if strings.Contains(event, "finish_reason") {
+				t.Errorf("events = %q, want no finish_reason after an in-band error", events)
+			}
+		}
+	})
+
+	t.Run("through the provider client", func(t *testing.T) {
+		var fault provider.Delta
+		client := provider.NewClient(server.URL, server.Model)
+		for delta := range client.Stream(t.Context(), provider.Request{
+			Messages: []provider.Message{{Role: "user", Content: "hi"}},
+		}) {
+			if delta.Kind == provider.DeltaError {
+				fault = delta
+			}
+		}
+		if fault.Kind != provider.DeltaError {
+			t.Fatal("no error delta, want the in-band object faulted")
+		}
+		if !fault.Retryable || !strings.Contains(fault.Err, "502") {
+			t.Errorf("fault = %+v, want a retryable in-band 502", fault)
+		}
+	})
+
+	t.Run("non-streamed", func(t *testing.T) {
+		got := post(t, server, `{"model":"stub-model","messages":[{"role":"user","content":"hi"}]}`)
+
+		if reply := decodeWhole(t, got); reply.Error == nil || reply.Error.Code != 502 || reply.Error.Message != "upstream gone" {
+			t.Errorf("whole reply = %s, want the in-band error member", got.body)
 		}
 	})
 }
@@ -593,6 +721,27 @@ func postWith(t *testing.T, client *http.Client, server *Server, body string) re
 		contentType: resp.Header.Get("Content-Type"),
 		location:    resp.Header.Get("Location"),
 	}
+}
+
+// readStreamRaw sends one request and drains the raw body with a fresh client, returning what
+// arrived and the read error — the shape a killed connection is judged on. The client is fresh
+// so a dropped connection can never be one the default client's pool hands to another test.
+func readStreamRaw(t *testing.T, server *Server, body string) (string, error) {
+	t.Helper()
+
+	client := &http.Client{Transport: &http.Transport{}}
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(newRequest(t, t.Context(), server, body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 before the kill", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	return string(raw), err
 }
 
 // readAll drains a response body into a string.
