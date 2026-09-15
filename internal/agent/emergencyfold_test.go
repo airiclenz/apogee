@@ -47,9 +47,8 @@ func TestEmergencyFoldRunsMidExchangeAndBridges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	seedToolCallConv(a) // 8 messages of paired tool calls/results past a 1-message protected prefix
-	a.turns.inExchange = true
-	a.turns.exchangeStart = 4 // "now add tests" opened the Exchange still in flight
+	seedToolCallConv(a)                                               // 8 messages of paired tool calls/results past a 1-message protected prefix
+	a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 4}) // "now add tests" opened the Exchange still in flight
 
 	if !a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = false mid-Exchange; the overflow path must fold there (S2 is amended for it)")
@@ -108,8 +107,7 @@ func TestEmergencyFoldUnknownWindowStillBoundsTheSummaryCall(t *testing.T) {
 	if rawChars/4 <= serverWindow {
 		t.Fatalf("test setup: conversation (%d chars) fits the server window; it must overflow unbudgeted", rawChars)
 	}
-	a.turns.inExchange = true
-	a.turns.exchangeStart = 1
+	a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 1})
 
 	if !a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = false with an unknown window; the default bound must let the fold run")
@@ -154,8 +152,7 @@ func TestEmergencyFoldSkipsWhenNothingToFold(t *testing.T) {
 	}
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "the overarching goal"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: strings.Repeat("x", 25000)})
-	a.turns.inExchange = true
-	a.turns.exchangeStart = 1
+	a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 1})
 
 	if a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = true on a skipped fold; nothing was folded, so a retry cannot help")
@@ -188,7 +185,7 @@ func TestEmergencyFoldRespectsCompactionOptOut(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	seedFoldable(a)
-	a.turns.inExchange = true
+	a.turns.restore(turnSnapshot{inExchange: true})
 
 	if a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = true with auto-compact off; the opt-out covers recovery too")
@@ -216,8 +213,7 @@ func TestEmergencyFoldFaultSurfacesOnceAndKeepsHistory(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	seedFoldable(a)
-	a.turns.inExchange = true
-	a.turns.exchangeStart = 2
+	a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 2})
 
 	if a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = true despite the summary call failing")
@@ -252,7 +248,7 @@ func TestEmergencyFoldCancelIsQuiet(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	seedFoldable(a)
-	a.turns.inExchange = true
+	a.turns.restore(turnSnapshot{inExchange: true})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	folded := make(chan bool, 1)

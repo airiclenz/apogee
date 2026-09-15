@@ -488,7 +488,7 @@ func TestRebindMovesTheDialectAndClearsTheStandDownLatch(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	runExchange(t, a, "before the rebind")
-	a.compactFailed = true // a fold faulted against the model and server now being left
+	a.turns.foldFaulted() // a fold faulted against the model and server now being left
 
 	if err := a.Rebind(RebindSpec{
 		Model:            "new-model",
@@ -505,7 +505,7 @@ func TestRebindMovesTheDialectAndClearsTheStandDownLatch(t *testing.T) {
 		t.Errorf("cfg dialect = %q, want %q (the seed must not keep the departed server's shape)",
 			a.cfg.EffortDialect, domain.EffortDialectReasoning)
 	}
-	if a.compactFailed {
+	if a.turns.compactFailed {
 		t.Error("the compaction stand-down latch survived the rebind")
 	}
 }

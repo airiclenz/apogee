@@ -117,7 +117,7 @@ func (a *Agent) capResultHead() string {
 }
 
 // subAgentFaultPrefix opens the error result a FAULTED delegation becomes. What follows it is the
-// child's own fault sentence (Agent.lastFault) — the same line the human read at Depth+1 — so the
+// child's own fault sentence (turnLifecycle.lastFault) — the same line the human read at Depth+1 — so the
 // parent model reads the cause in the result itself instead of being sent to an error it cannot see.
 const subAgentFaultPrefix = "sub-agent faulted before finishing the delegated task: "
 
@@ -266,7 +266,7 @@ func (a *Agent) outputMissing() bool {
 }
 
 // wrapUpMarker and wrapUpDirectiveFormat are the one-request system directive a delegate stopped
-// at its step cap is handed for its closing report (Agent.wrapUp, loop.go): the request that
+// at its step cap is handed for its closing report (turnLifecycle.wrapUp, loop.go): the request that
 // carries it carries no tools at all — bar write_file for a delegation spawned with an
 // `output_path`, which wrapUpOutputClauseFormat announces below — so the directive is the only
 // thing that tells the child WHY its menu vanished and what to do with the reply it has left. It states the cause, the
@@ -791,7 +791,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		// reached the shared EventSink at Depth+1, so the human sees the cause — and the cause now
 		// rides the RESULT too, because "see the preceding error" addresses a reader the parent
 		// MODEL is not: it reads one tool result and has no transcript to look back through.
-		cause := a.lastFault
+		cause := a.turns.fault()
 		if cause == "" {
 			cause = subAgentFaultNoCause
 		}

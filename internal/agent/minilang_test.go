@@ -101,7 +101,7 @@ func TestClearContextRefusedMidExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	a.turns.inExchange = true // a mid-Exchange boundary — clearing here would orphan a half-run turn
+	a.turns.restore(turnSnapshot{inExchange: true}) // a mid-Exchange boundary — clearing here would orphan a half-run turn
 	if err := a.ClearContext(); !errors.Is(err, domain.ErrInputPending) {
 		t.Errorf("ClearContext mid-exchange err = %v, want ErrInputPending", err)
 	}
@@ -161,7 +161,7 @@ func TestCompactRefusedMidExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	a.turns.inExchange = true // a mid-Exchange boundary — compacting here would orphan a half-run turn
+	a.turns.restore(turnSnapshot{inExchange: true}) // a mid-Exchange boundary — compacting here would orphan a half-run turn
 	if _, err := a.Compact(context.Background()); !errors.Is(err, domain.ErrInputPending) {
 		t.Errorf("Compact mid-exchange err = %v, want ErrInputPending", err)
 	}

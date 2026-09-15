@@ -238,7 +238,7 @@ func TestAutoCompactSkippedFoldDoesNotSaturate(t *testing.T) {
 	if n := countCompactionErrors(sink.events); n != 0 {
 		t.Fatalf("a skipped fold emitted %d compaction ErrorEvents, want 0 (nothing folded ⇒ nothing proved)", n)
 	}
-	if a.compactSat {
+	if a.turns.compactSat {
 		t.Fatal("a skipped fold latched the saturation trigger; the skip must not saturate")
 	}
 
@@ -337,8 +337,7 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 		a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: id, Tool: "probe"}}})
 		a.conv.Append(domain.Message{Role: domain.RoleTool, ToolCallID: id, Content: "result " + string(rune('a'+i))})
 	}
-	a.turns.inExchange = true
-	a.turns.exchangeStart = 6 // where PENDING QUESTION was appended — the un-repaired opening value
+	a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 6}) // where PENDING QUESTION was appended — the un-repaired opening value
 
 	res, err := a.Step(context.Background())
 	if err != nil {
@@ -436,7 +435,7 @@ func TestAutoCompactFoldsMidExchangeOnAnAgentThatCompactsMidExchange(t *testing.
 	if a.historyExceedsAllocation() {
 		t.Error("the fold ran but did not bring the history under its allocation; the setup drifted")
 	}
-	if a.compactSat {
+	if a.turns.compactSat {
 		t.Error("a fold that DID bring the history under its allocation saturated the trigger")
 	}
 	if n := countCompactionErrors(sink.events); n != 0 {
@@ -571,7 +570,7 @@ func TestAutoCompactFailedFoldReArmsAtTheNextExchangeOpening(t *testing.T) {
 	if up.summaryCalls != 1 {
 		t.Fatalf("the first opening did not fold once: summarizer calls = %d, want 1", up.summaryCalls)
 	}
-	if a.compactFailed {
+	if a.turns.compactFailed {
 		t.Error("the stand-down latch survived openExchange; the main agent must re-arm at every opening")
 	}
 
@@ -626,7 +625,7 @@ func TestFailedFoldStandDownDoesNotBlockTheEmergencyFold(t *testing.T) {
 		t.Fatalf("Step 1: %v", err)
 	}
 
-	if !a.compactFailed {
+	if !a.turns.compactFailed {
 		t.Fatal("setup: the Turn-boundary fold did not fault, so the latch is not set and the exemption is untested")
 	}
 	if up.summaryCalls != 2 {
@@ -643,7 +642,7 @@ func TestCompactOnDemandIgnoresTheStandDownLatch(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	seedFoldable(a)
-	a.compactFailed = true // what a faulted automatic fold left behind earlier in this Exchange
+	a.turns.foldFaulted() // what a faulted automatic fold left behind earlier in this Exchange
 
 	skipped, err := a.Compact(context.Background())
 	if err != nil {

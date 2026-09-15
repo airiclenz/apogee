@@ -158,10 +158,9 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 	// owns the two notices that rode the tool results the rollback drops — the context-fill ladder
 	// (ADR 0077 D4) and the step-budget notice's Turn latch (stepnotice.go).
 	a.turns = &turnLifecycle{
-		conv:          &a.conv,
-		compactFailed: &a.compactFailed,
-		onClose:       a.closeUndoGroup,
-		onRollback:    a.rearmNotices,
+		conv:       &a.conv,
+		onClose:    a.closeUndoGroup,
+		onRollback: a.rearmNotices,
 	}
 	return a, nil
 }

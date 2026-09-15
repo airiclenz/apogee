@@ -320,7 +320,14 @@ NOTES (2026-09-15): consequential edit — cmd/apogee/wire_settings.go: made nec
 
 Commit: `fix(agent): SetReactions validates and reserves builtin ids; consumers stop re-validating`
 
-## 13. `turnLifecycle` owns the Exchange state whole
+## 13. `turnLifecycle` owns the Exchange state whole — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): verb names follow the plan where it names one (`open`, `capped`, `noteFault`, `restore(snapshot)`); the existing `openExchange`/`closeExchange`/`end` keep their names (`close` and `rollback` are those), and the Rebind/SwitchUpstream clear is `resetFoldLatches` rather than the plan's `reset` — the verb clears two latches of nine fields, and `reset` would misname it.
+NOTES (2026-09-15): `restore` also re-arms the context-fill ladder (`fillRung`), so `RestoreSession`'s explicit `rearmFillNotice()` call is dropped as a duplicate; `abort` re-arms it too, taking over `AbortExchange`'s call — `rearmFillNotice`'s doc names the two paths the lifecycle now owns itself.
+NOTES (2026-09-15): the guard's enumeration was a floor — `dispatch.go` (`wrapUpOutput`) also read `a.wrapUp` and is re-pointed; bare `&Agent{lastFault: …}` literals in `seat_test.go`/`subagent_test.go` become `turns: &turnLifecycle{lastFault: …}`.
+NOTES (2026-09-15): consequential edit — internal/tools/sub_agent.go: comment `Agent.wrapUp` → `turnLifecycle.wrapUp`, made necessary by the field move.
+NOTES (2026-09-15): consequential edit — internal/agent/resolution.go: comment `Agent.wrapUp` → `turnLifecycle.wrapUp`, made necessary by the field move.
+NOTES (2026-09-15): consequential edit — internal/agent/floorguards_test.go, internal/agent/live_delegate_cap_test.go: comments `Agent.wrapUp` → `turnLifecycle.wrapUp`, made necessary by the field move.
 
 **What.** Move `pendingInput`, `wrapUp`, `compactSat`, `compactFailed`, `fillRung`, `lastFault` from `Agent` (`internal/agent/agent.go`) into `turnLifecycle` (`internal/agent/turn.go`) behind verbs — `open`, `close`, `rollback`, `capped`, `noteFault`, `restore(snapshot)`; producers/consumers: `loop.go`, `compact.go`, `rebind.go` (Rebind and SwitchUpstream clear via one `reset` verb), `state.go` (`restoreState` calls `restore`, which clears `compactFailed`/`compactSat` — in-passing defect: `RestoreSession` left them latched). Tests stop writing `a.turns.*` fields directly and drive the verbs. Depends on item 1.
 

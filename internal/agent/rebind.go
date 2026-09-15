@@ -234,12 +234,9 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	// needs none (see this method's doc).
 	a.effortDialect = spec.EffortDialect
 	a.tokens = apogeectx.NewTokenEstimator()
-	a.compactSat = false
-	// The stand-down latch goes with the saturation one: it recorded that an automatic fold FAULTED
-	// against the server and model just departed, which says nothing about the pair now bound. The
-	// Exchange-scoped clear (turnLifecycle.openExchange) would reach it at the next Exchange anyway
-	// — a rebind is a quiescent boundary — so this only keeps the two latches moving together.
-	a.compactFailed = false
+	// Both fold latches go with the estimator: what they judged, they judged against the server and
+	// model just departed (turnLifecycle.resetFoldLatches).
+	a.turns.resetFoldLatches()
 	return nil
 }
 
@@ -377,9 +374,8 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	a.cfg.Context.MaxOutputTokens = spec.MaxOutputTokens
 	a.cfg.Context.ResponseReserveFraction = spec.ResponseReserveFraction
 	a.tokens = apogeectx.NewTokenEstimator()
-	a.compactSat = false
-	// Cleared with the saturation latch, for the reason Rebind clears it: a fold that faulted
+	// Both fold latches clear, for the reason Rebind clears them: a fold that faulted or saturated
 	// against the retired server judges nothing about the one just dialled.
-	a.compactFailed = false
+	a.turns.resetFoldLatches()
 	return nil
 }

@@ -87,12 +87,13 @@ type agentState struct {
 // It marshals the conversation through a pointer so domain.Conversation's MarshalJSON (a
 // pointer method) runs — a value field would emit its unexported fields as an empty object.
 func (a *Agent) encodeState() (json.RawMessage, error) {
+	turns := a.turns.snapshot()
 	state, err := json.Marshal(agentState{
 		Conversation:  &a.conv,
-		TurnIndex:     a.turns.index,
-		InExchange:    a.turns.inExchange,
-		ExchangeStart: a.exchangeBoundary(),
-		PendingInput:  a.pendingInput,
+		TurnIndex:     turns.index,
+		InExchange:    turns.inExchange,
+		ExchangeStart: turns.exchangeStart,
+		PendingInput:  turns.pendingInput,
 		Tasks:         a.tasks.Items(),
 	})
 	if err != nil {
@@ -165,10 +166,15 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 		}
 		a.conv = *st.Conversation
 	}
-	a.turns.index = st.TurnIndex
-	a.turns.inExchange = st.InExchange
-	a.turns.exchangeStart = exchangeStart
-	a.pendingInput = st.PendingInput
+	// The lifecycle is put back whole — and its latches cleared with it: a fold that faulted or
+	// saturated against the outgoing history, and the context-fill climb over it, judged a
+	// conversation this swap just replaced (turnLifecycle.restore).
+	a.turns.restore(turnSnapshot{
+		index:         st.TurnIndex,
+		inExchange:    st.InExchange,
+		exchangeStart: exchangeStart,
+		pendingInput:  st.PendingInput,
+	})
 	return nil
 }
 

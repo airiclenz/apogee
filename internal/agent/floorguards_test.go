@@ -1035,7 +1035,7 @@ func TestFloorGuard_ToolCallSalvageStaysOutWhereItMust(t *testing.T) {
 	}
 }
 
-// The WRAP-UP Turn (Agent.wrapUp) is the fourth case, and it needs the delegate's own harness: a
+// The WRAP-UP Turn (turnLifecycle.wrapUp) is the fourth case, and it needs the delegate's own harness: a
 // delegate stopped at its step cap is offered no menu at all and owes its parent a closing report,
 // so a call salvaged out of that report would be a call the delegation had already been refused.
 func TestFloorGuard_ToolCallSalvageIsSilentOnTheWrapUpTurn(t *testing.T) {

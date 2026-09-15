@@ -2460,7 +2460,7 @@ func TestSubAgent_ParentNoticeOnEveryOutcomeButCancelled(t *testing.T) {
 		wantBody string
 	}{
 		{"run error", &Agent{steered: 2}, domain.StepResult{}, errors.New("boom"), "sub-agent failed: boom"},
-		{"faulted", &Agent{steered: 2, lastFault: "the upstream died"}, domain.StepResult{Faulted: true}, nil, subAgentFaultPrefix + "the upstream died"},
+		{"faulted", &Agent{steered: 2, turns: &turnLifecycle{lastFault: "the upstream died"}}, domain.StepResult{Faulted: true}, nil, subAgentFaultPrefix + "the upstream died"},
 		{"step capped", &Agent{steered: 2, stepCap: 3}, domain.StepResult{StepCapped: true}, nil, fmt.Sprintf(stepCapResultFormat, 3)},
 		{"success", &Agent{steered: 2}, domain.StepResult{}, nil, ""},
 	}
@@ -2868,7 +2868,7 @@ func TestSubAgent_CompletedChildWithoutItsOutputIsAFault(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The tool-less wrap-up Turn (Agent.wrapUp)
+// The tool-less wrap-up Turn (turnLifecycle.wrapUp)
 // ----------------------------------------------------------------------------
 //
 // These tests set the latch BY HAND — nothing in the engine writes it yet — because the three
@@ -2893,7 +2893,9 @@ func wrapUpAgent(t *testing.T, latched bool, scripts ...[]provider.Delta) (*Agen
 		t.Fatalf("newAgent: %v", err)
 	}
 	a.stepCap = 3 // what newChildAgent seeds on a delegate; the directive states this number
-	a.wrapUp = latched
+	if latched {
+		a.turns.capped()
+	}
 	return a, responder, sink, &ran
 }
 

@@ -156,7 +156,7 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 		// next opening while a child — whose whole life is ONE Exchange — stands down for the
 		// delegation. The emergency fold keeps its own single shot and /compact still folds on
 		// demand; neither consults this latch.
-		a.compactFailed = true
+		a.turns.foldFaulted()
 		msg := err.Error()
 		if a.turns.inExchange {
 			msg += foldStandDownSuffix
@@ -210,7 +210,7 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 	// bound biting their session is an assumption apogee had to make, and that a config key replaces
 	// it with the truth.
 	if a.historyExceedsAllocation() {
-		a.compactSat = true
+		a.turns.foldSaturated()
 		msg := "compaction could not bring the history under its allocation: the protected prefix " +
 			"(system prompt + first user message) and the compaction summary together exceed it; " +
 			"automatic folding is paused until the history estimate drops below the allocation"
@@ -256,21 +256,11 @@ func (a *Agent) shouldAutoCompact() bool {
 	if a.turns.inExchange && !a.midExchangeCompaction {
 		return false
 	}
-	// A fold that FAULTED this Exchange stands the trigger down (compactFailed, set by
-	// autoCompact). It is checked before the allocation compare deliberately: the compare is also
-	// where compactSat clears, and a stand-down must not double as a reason to leave that
-	// saturation latch stale. Cleared by openExchange, so the main agent re-arms next Exchange.
-	if a.compactFailed {
-		return false
-	}
-	if !a.historyExceedsAllocation() {
-		a.compactSat = false // under the allocation again — a later overflow may fold afresh
-		return false
-	}
-	// Over the allocation: fold unless a prior fold already proved it cannot help (compactSat — an
-	// oversized protected prefix). Growth alone must not re-trigger while saturated; only dropping
-	// back under the allocation (cleared above) rearms the trigger.
-	return !a.compactSat
+	// The two stand-down latches — a fold that FAULTED this Exchange (foldFaulted, set by
+	// autoCompact; cleared by openExchange, so the main agent re-arms next Exchange) and a fold
+	// that SATURATED (foldSaturated) — decide the rest against the allocation compare
+	// (turnLifecycle.autoFoldArmed).
+	return a.turns.autoFoldArmed(a.historyExceedsAllocation)
 }
 
 // historyExceedsAllocation reports whether the conversation's estimated token size has outgrown the

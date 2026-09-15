@@ -804,7 +804,7 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 // on every other call — an ordinary Turn, or a wrap-up whose menu was withdrawn wholesale — so
 // the row is inert everywhere the exception is not in force.
 func (a *Agent) wrapUpOutput() string {
-	if !a.wrapUp {
+	if !a.turns.wrappingUp() {
 		return ""
 	}
 	if _, ok := a.wrapUpWriter(); !ok {

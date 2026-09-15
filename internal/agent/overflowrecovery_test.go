@@ -343,8 +343,7 @@ func seedOpenToolTurn(a *Agent) {
 		{ID: "c2", Tool: "read_file", Arguments: json.RawMessage(`{"path":"main_test.go"}`)},
 	}})
 	a.conv.Append(domain.Message{Role: domain.RoleTool, ToolCallID: "c2", Content: strings.Repeat("huge file body ", 200)})
-	a.turns.inExchange = true
-	a.turns.exchangeStart = 1
+	a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 1})
 }
 
 // TestOverflowRecoveryOnToolContinuationIsTemplateLegal drives the real failure mode: a whole-file

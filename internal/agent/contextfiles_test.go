@@ -334,7 +334,7 @@ func TestContextFilesUntouchedByRefusedClearContext(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	writeWorkspaceFile(t, dir, "AGENTS.md", "second")
-	a.turns.inExchange = true // a mid-Exchange boundary — re-reading here would swap content mid-task
+	a.turns.restore(turnSnapshot{inExchange: true}) // a mid-Exchange boundary — re-reading here would swap content mid-task
 
 	if err := a.ClearContext(); !errors.Is(err, domain.ErrInputPending) {
 		t.Fatalf("ClearContext mid-Exchange = %v, want ErrInputPending", err)

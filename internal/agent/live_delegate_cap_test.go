@@ -310,7 +310,7 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 			"pre-cap fallback", result.Content)
 	}
 
-	// And the request that Turn built: the menu is withdrawn WHOLESALE (toolMenu, Agent.wrapUp),
+	// And the request that Turn built: the menu is withdrawn WHOLESALE (toolMenu, turnLifecycle.wrapUp),
 	// which on a wire that carries no tool_choice is the entire prohibition. The child's LAST
 	// request is the wrap-up's; SOME earlier request must have carried an armed menu — otherwise
 	// an empty menu throughout would satisfy the check while proving nothing. The claim is

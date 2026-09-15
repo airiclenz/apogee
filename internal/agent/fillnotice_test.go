@@ -381,13 +381,13 @@ func TestContextFillNoticeReArmsAfterACancelledTurnRollsBack(t *testing.T) {
 	if got := a.conv.Len(); got != 1 {
 		t.Fatalf("after the rollback the conversation has %d messages, want 1 (the user input alone)", got)
 	}
-	if a.fillRung != 0 {
-		t.Fatalf("fillRung = %d after the rollback, want 0 — the ladder re-arms with the dropped result", a.fillRung)
+	if a.turns.fillRung != 0 {
+		t.Fatalf("fillRung = %d after the rollback, want 0 — the ladder re-arms with the dropped result", a.turns.fillRung)
 	}
 	// The rollback a Step-driven host may reach again on resume: a second re-arm is a no-op.
 	a.rearmFillNotice()
-	if a.fillRung != 0 {
-		t.Fatalf("fillRung = %d after a second re-arm, want 0", a.fillRung)
+	if a.turns.fillRung != 0 {
+		t.Fatalf("fillRung = %d after a second re-arm, want 0", a.turns.fillRung)
 	}
 
 	// Resume: the open Exchange re-attempts the Turn against the next script.

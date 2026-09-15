@@ -195,7 +195,7 @@ func TestDelegateReport_DoesNotContradictTheWrapUpDirective(t *testing.T) {
 		t.Fatalf("newChildAgent: %v", err)
 	}
 	child.stepCap = 3
-	child.wrapUp = true // the one tool-less closing Turn (Agent.finishAtStepCap)
+	child.turns.capped() // the one tool-less closing Turn (Agent.finishAtStepCap)
 
 	got := seedSystemMessage(t, child, responder, "the delegated task")
 

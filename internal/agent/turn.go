@@ -6,10 +6,12 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// turnLifecycle owns the loop's Turn/Exchange lifecycle state — where the loop stands
-// between quiescent boundaries (ADR 0007) — and the exits that mutate it. The collaborator the
-// exits touch is the conversation (rollback, deferred queue). Same-package, unexported: the Turn
-// is the loop's concept, not a public seam.
+// turnLifecycle owns the loop's Turn/Exchange lifecycle state WHOLE — where the loop stands
+// between quiescent boundaries (ADR 0007), the input queued for the next Exchange, and the
+// per-Exchange latches the loop's structural reducers set and the Exchange's end or replacement
+// clears — and the verbs that mutate it; nothing outside this type writes a field of it. The
+// collaborator the exits touch is the conversation (rollback, deferred queue). Same-package,
+// unexported: the Turn is the loop's concept, not a public seam.
 type turnLifecycle struct {
 	conv *domain.Conversation
 
@@ -24,18 +26,62 @@ type turnLifecycle struct {
 	// Exchange's cap starts counting again from there.
 	exchangeTurns int
 
-	// compactFailed points at Agent.compactFailed — the stand-down latch a FAILED automatic fold
-	// sets (compact.go). It is a POINTER for the same reason conv is one: the Agent owns the
-	// value, this type owns the moment it resets, and construct.go wires the two together. nil is
-	// inert, never an error — a bare lifecycle in a unit test has no Agent behind it.
-	compactFailed *bool
+	// pendingInput is the user input Submit queued for the next Exchange, consumed by open() on
+	// the Turn that opens it. Non-nil only between a Submit and the Step that consumes it: submit
+	// refuses a second input while one is queued or an Exchange is open, so a continuation Turn
+	// never finds one. Serialized (snapshot/restore): a session snapshotted between Submit and
+	// Step resumes with its input still queued.
+	pendingInput *domain.UserInput
+
+	// wrapUp latches the ONE closing Turn a delegate stopped at its step cap is given (capped;
+	// Agent.finishAtStepCap, subagent.go's wrapUpDirectiveFormat). While it is set, three seams
+	// change together and only for the request they compose: toolMenu returns no tools, buildRequest
+	// stamps the directive that says why they are gone and what to write instead, and step() takes
+	// the final-answer exit even if the reply asks for a tool anyway (loop.go). The Turn is
+	// tool-less with ONE exception: a delegation spawned with an `output_path` keeps write_file for
+	// exactly that file (Agent.outputPath, wrapUpWriter), so a capped child can still land the
+	// output it was asked for; every other call is still dropped, and a write elsewhere is refused
+	// (resolve, resolution.go). It is latched for exactly ONE request and released before the
+	// capped Exchange returns, so it never outlives the Exchange that raised it. Transient like
+	// exchangeTurns: neither configured nor serialized, because a resumed session resumes at a
+	// boundary, never mid-wrap-up. Structural (ADR 0006), not a Reaction: no config key, and it
+	// holds under Bypass.
+	wrapUp bool
+
+	// compactSat is the saturation latch (S2): a prior automatic fold could not bring the history
+	// under its allocation (an oversized protected prefix), so further automatic folds stand down
+	// until the estimate drops back under it (foldSaturated / autoFoldArmed, compact.go).
+	compactSat bool
+
+	// compactFailed is the stand-down latch: an automatic fold FAULTED, so the estimate-driven
+	// trigger stands down for the rest of THIS Exchange rather than re-running the identical
+	// failing summary call at every Turn boundary (foldFaulted, compact.go). openExchange clears
+	// it; the emergency fold and the on-demand /compact ignore it.
+	compactFailed bool
+
+	// fillRung is the context-fill notice's ladder position (fillnotice.go): the highest rung fired
+	// on the current climb toward the compaction line, 0 = none. Every path that shrinks or
+	// replaces the conversation behind the model's back — a fold, /clear, a restored snapshot, an
+	// aborted Exchange, a cancelled Turn's rollback — re-arms the whole ladder (rearmFill), so the
+	// next climb fires from its first reached rung (ADR 0077 D4).
+	fillRung int
+
+	// lastFault is the text of the most recent loop-level fault this Agent surfaced as an
+	// ErrorEvent — the very sentence the human already read (noteFault; Agent.emitLoopFault). It
+	// exists for the PARENT of a delegation: runSubAgent turns a faulted child Exchange into an
+	// error tool result, and without this the result could only point at "the preceding error",
+	// which the parent MODEL never sees. A fault ends the Exchange, so the last one recorded is
+	// always the one that abandoned it; an Exchange abandoned with no ErrorEvent at all (a recovered
+	// hook panic) leaves this empty and the caller falls back to wording that names no cause.
+	// Written on the Agent's own loop goroutine, read by the parent only after Run has returned.
+	lastFault string
 
 	// onClose is fired by closeExchange, once per Exchange END — the seam the undo journal's
 	// closing capture hangs off (Agent.closeUndoGroup, agent.go). It is a bare func for the same
-	// reason compactFailed is a pointer: this type owns the MOMENT an Exchange ends and knows
-	// nothing of what an Agent wants to do about it, and closeExchange carries neither a context
-	// nor an Agent to hand one. nil is inert, never an error — a bare lifecycle in a unit test has
-	// no Agent behind it, and an engine that records nothing simply hangs nothing here.
+	// reason conv is a pointer: this type owns the MOMENT an Exchange ends and knows nothing of
+	// what an Agent wants to do about it, and closeExchange carries neither a context nor an Agent
+	// to hand one. nil is inert, never an error — a bare lifecycle in a unit test has no Agent
+	// behind it, and an engine that records nothing simply hangs nothing here.
 	//
 	// It fires on every row that ends an Exchange and on none that leaves one open, which is
 	// exactly closeExchange's own contract: endCancelled is not a caller, so a Turn that will be
@@ -145,7 +191,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		l.conv.TruncateDeferred(t.deferredFloor)
 		l.restoreDeferred(t.deferred)
 		// The dropped tool results may include the one a context-fill notice rode on: let the
-		// Agent end the ladder's climb (onRollback → rearmFillNotice), as AbortExchange does.
+		// Agent end the ladder's climb (onRollback → rearmFillNotice), as abort does.
 		if l.onRollback != nil {
 			l.onRollback()
 		}
@@ -231,13 +277,175 @@ func (l *turnLifecycle) openExchange() {
 	// count starts over here rather than accumulating across a delegation's life (Agent.Run).
 	l.exchangeTurns = 0
 	// And a new automatic-fold budget, for the same reason: a fold that faulted stood the
-	// estimate-driven trigger down for the Exchange it faulted in (Agent.compactFailed,
-	// compact.go), not forever. The main agent therefore re-arms at every opening; a CHILD never
-	// reaches here a second time — its whole life is one Exchange — so its stand-down lasts the
-	// delegation, which is the retry runaway this closes.
-	if l.compactFailed != nil {
-		*l.compactFailed = false
+	// estimate-driven trigger down for the Exchange it faulted in (compactFailed, compact.go), not
+	// forever. The main agent therefore re-arms at every opening; a CHILD never reaches here a
+	// second time — its whole life is one Exchange — so its stand-down lasts the delegation, which
+	// is the retry runaway this closes.
+	l.compactFailed = false
+}
+
+// submit queues in as the input the next Step opens an Exchange with (Agent.Submit's engine
+// half). Submitting while an input is already queued or an Exchange is open is refused with
+// domain.ErrInputPending: a second user message would interleave into the open Exchange (two
+// consecutive user messages, or one wedged after a tool result — both of which a strict chat
+// template rejects).
+func (l *turnLifecycle) submit(in domain.UserInput) error {
+	if l.pendingInput != nil || l.inExchange {
+		return domain.ErrInputPending
 	}
+	l.pendingInput = &in
+	return nil
+}
+
+// open consumes the queued input and opens the Exchange it begins (openExchange), returning the
+// input for step() to append as the Exchange's first user message. It returns nil — and opens
+// nothing — when no input is queued: a continuation Turn of an open Exchange, whose boundary must
+// not be reset. The input is taken BEFORE the boundary flips, so a reader reached from the
+// opening never sees an input queued behind an open Exchange.
+func (l *turnLifecycle) open() *domain.UserInput {
+	in := l.pendingInput
+	if in == nil {
+		return nil
+	}
+	l.pendingInput = nil
+	l.openExchange()
+	return in
+}
+
+// abort scraps the open Exchange (Agent.AbortExchange's engine half): it rolls the conversation
+// back to the boundary the Exchange began at — dropping the un-answered user message and any tool
+// Turns committed so far — re-arms the context-fill ladder, closes the Exchange and drops any
+// input queued behind it. No-op when no Exchange is open.
+//
+// The ladder re-arms because the tool results the scrapped Exchange committed go with it —
+// including the one that carried a context-fill notice — so the climb ends here as it does after
+// a fold: the next result at or above a rung must be told again, not left silent until the rung
+// above. closeExchange runs after the rollback so it expires any deferred Response Action with
+// the Exchange (F6) — a mid-fan-out abort must not leave a stale remaining-items directive queued
+// for the next Exchange's request.
+func (l *turnLifecycle) abort() {
+	if !l.inExchange {
+		return
+	}
+	l.conv.DropRange(l.exchangeStart, l.conv.Len())
+	l.rearmFill()
+	l.closeExchange()
+	l.pendingInput = nil
+}
+
+// capped latches the wrap-up Turn (wrapUp) a delegate stopped at its step cap is given and returns
+// the func that releases it — `defer l.capped()()` brackets exactly the one step() the latch is
+// for (Agent.finishAtStepCap), so it never outlives the capped Exchange.
+func (l *turnLifecycle) capped() (release func()) {
+	l.wrapUp = true
+	return func() { l.wrapUp = false }
+}
+
+// wrappingUp reports whether the current Turn is the capped wrap-up Turn (capped) — the read the
+// tool menu, the request builder, the reply-salvage and step()'s exits share.
+func (l *turnLifecycle) wrappingUp() bool { return l.wrapUp }
+
+// noteFault records the text of a loop-level fault as the reason the Exchange it ends was
+// ABANDONED (lastFault) — read back by fault for the parent of a faulted delegation, and by
+// Agent.LastFault for a Driver.
+func (l *turnLifecycle) noteFault(text string) { l.lastFault = text }
+
+// fault returns the text of the most recent loop-level fault, or "" when none has been surfaced.
+func (l *turnLifecycle) fault() string { return l.lastFault }
+
+// foldFaulted latches the automatic-fold stand-down (compactFailed): a fold FAULTED against this
+// Exchange's history, and retrying the identical summary call at every Turn boundary is the
+// 2026-08-29 runaway. openExchange clears it.
+func (l *turnLifecycle) foldFaulted() { l.compactFailed = true }
+
+// foldSaturated latches the saturation stand-down (compactSat): a fold ran and could not bring the
+// history under its allocation, so growth alone must not re-trigger one. autoFoldArmed clears it
+// once the estimate drops back under the allocation.
+func (l *turnLifecycle) foldSaturated() { l.compactSat = true }
+
+// autoFoldArmed is the latch half of the automatic-fold trigger (Agent.shouldAutoCompact): whether
+// the two stand-down latches let an estimate-driven fold run, given exceedsAllocation, the
+// history-versus-allocation compare. The stand-down (compactFailed) is consulted BEFORE the compare
+// deliberately: the compare is also where compactSat clears, and a stand-down must not double as a
+// reason to leave that saturation latch stale. Under the allocation the saturation latch clears —
+// a later overflow may fold afresh — and nothing fires; over it, a fold fires unless a prior fold
+// already proved it cannot help (compactSat — an oversized protected prefix). Only dropping back
+// under the allocation re-arms a saturated trigger.
+func (l *turnLifecycle) autoFoldArmed(exceedsAllocation func() bool) bool {
+	if l.compactFailed {
+		return false
+	}
+	if !exceedsAllocation() {
+		l.compactSat = false
+		return false
+	}
+	return !l.compactSat
+}
+
+// resetFoldLatches clears both fold latches together (Rebind, SwitchUpstream): each recorded a
+// verdict on a fold against the server and model just departed — that it faulted, or that it
+// could not bring the history under THAT window's allocation — which says nothing about the pair
+// now bound. The Exchange-scoped clear (openExchange) would reach the stand-down at the next
+// Exchange anyway — a rebind is a quiescent boundary — so this keeps the two latches moving together.
+func (l *turnLifecycle) resetFoldLatches() {
+	l.compactSat = false
+	l.compactFailed = false
+}
+
+// noteFill records the rung a context-fill reading reached on the current climb (fillRung) and
+// reports whether the notice fires: only a NEW high does. A reading UNDER a fired rung is the
+// estimate moving — a usage report recalibrated the chars→token ratio — not a shorter history
+// (every path that shrinks the conversation re-arms the whole ladder through rearmFill), so the
+// rungs the reading fell under re-arm silently: the model was told the higher figure already, and
+// a "50" at 74% would only repeat it lower. A reading AT the fired rung is the same climb and fires
+// nothing.
+func (l *turnLifecycle) noteFill(reached int) (fires bool) {
+	fires = reached > l.fillRung
+	l.fillRung = reached
+	return fires
+}
+
+// rearmFill ends the current context-fill climb: every rung is armed again, so the next result the
+// notice measures fires whichever rung its fill reaches, as the first result of a session does.
+// Idempotent — a Step-driven host may roll the same Turn back twice.
+func (l *turnLifecycle) rearmFill() { l.fillRung = 0 }
+
+// turnSnapshot is the serializable half of the lifecycle — the fields a Session snapshot carries
+// (state.go's agentState) and restore puts back whole. The latches (wrapUp, compactSat,
+// compactFailed, fillRung, lastFault) and exchangeTurns are deliberately absent: a snapshot is
+// taken at a quiescent boundary, and what they recorded belongs to the conversation the snapshot
+// replaces.
+type turnSnapshot struct {
+	index         int
+	inExchange    bool
+	exchangeStart int
+	pendingInput  *domain.UserInput
+}
+
+// snapshot returns the serializable half of the lifecycle for Agent.encodeState.
+func (l *turnLifecycle) snapshot() turnSnapshot {
+	return turnSnapshot{
+		index:         l.index,
+		inExchange:    l.inExchange,
+		exchangeStart: l.exchangeStart,
+		pendingInput:  l.pendingInput,
+	}
+}
+
+// restore puts a snapshot's lifecycle state back whole (Agent.restoreState — Resume onto a fresh
+// Agent and RestoreSession onto a live one) and clears the latches that judged the conversation
+// the snapshot replaces: a fold that faulted or saturated against the outgoing history says
+// nothing about the incoming one, and the context-fill ladder climbed the conversation just
+// swapped out, not this one. RestoreSession left the two fold latches standing before this verb
+// owned the reset, so a session restored over a stood-down Agent stayed stood down.
+func (l *turnLifecycle) restore(s turnSnapshot) {
+	l.index = s.index
+	l.inExchange = s.inExchange
+	l.exchangeStart = s.exchangeStart
+	l.pendingInput = s.pendingInput
+	l.compactSat = false
+	l.compactFailed = false
+	l.rearmFill()
 }
 
 // reanchorAfterShrink repairs the cached Exchange boundary (S2) after a mid-Exchange history

@@ -53,7 +53,7 @@ const (
 //
 // `output_path` is the file the delegation is expected to write. It changes nothing about the
 // task; it names the ONE file the child may still write on its step-cap wrap-up Turn, where every
-// other tool is withdrawn (Agent.wrapUp — plan 2026-09-14 - 03, item 8).
+// other tool is withdrawn (turnLifecycle.wrapUp — plan 2026-09-14 - 03, item 8).
 const subAgentSchemaTemplate = `{
   "type": "object",
   "required": ["task"],

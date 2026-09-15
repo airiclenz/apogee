@@ -354,20 +354,16 @@ type Agent struct {
 	// cached). newAgent always supplies it; nil is an inactive floor, never an error.
 	tree *treeSnapshotter
 
-	conv          domain.Conversation // serializable conversation state (ADR 0001)
-	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step
-	turns         *turnLifecycle      // owns the Turn/Exchange lifecycle state (index, inExchange, exchangeStart) and, from item 2 on, the exits — internal/agent/turn.go
-	compacting    bool                // guards the automatic Compaction trigger against re-entry (item 9)
-	compactSat    bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
-	compactFailed bool                // stand-down latch: an automatic fold FAULTED, so the estimate-driven trigger stands down for the rest of THIS Exchange rather than re-running the identical failing summary call at every Turn boundary (turnLifecycle.openExchange clears it; the emergency fold and the on-demand /compact ignore it)
-	fillRung      int                 // context-fill notice (fillnotice.go): the highest rung fired on the current climb toward the compaction line, 0 = none; a fold, /clear, a restored snapshot, an aborted Exchange or a cancelled Turn's rollback re-arms the whole ladder (rearmFillNotice), so the next climb fires from its first reached rung (ADR 0077 D4)
-	stepNoticeAt  int                 // step-budget notice (stepnotice.go): the 1-based index of the Turn the notice rode, 0 = none; latches the notice against that Turn's further tool results, and a cancelled Turn's rollback re-arms it (rearmStepNotice)
-	depth         int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
-	callID        string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
-	consoleOwner  string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
-	task          string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
-	seatFallback  bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so. False for every other spawn, the absent ask included
-	capRequested  int                 // the `max_steps` this delegation's spawning call asked for when it was ABOVE the configured step cap and was applied as the cap instead (runSubAgent): delegationResult appends the clamp note that says so. 0 for every other spawn — no ask, a lower ask that bound, an ask against an unbounded cap
+	conv         domain.Conversation // serializable conversation state (ADR 0001)
+	turns        *turnLifecycle      // owns the Turn/Exchange lifecycle state whole — index, inExchange, exchangeStart, the pending input, the wrap-up, fold and context-fill latches, the last fault — and the verbs that mutate it (internal/agent/turn.go)
+	compacting   bool                // guards the automatic Compaction trigger against re-entry (item 9)
+	stepNoticeAt int                 // step-budget notice (stepnotice.go): the 1-based index of the Turn the notice rode, 0 = none; latches the notice against that Turn's further tool results, and a cancelled Turn's rollback re-arms it (rearmStepNotice)
+	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
+	callID       string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
+	consoleOwner string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
+	task         string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
+	seatFallback bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so. False for every other spawn, the absent ask included
+	capRequested int                 // the `max_steps` this delegation's spawning call asked for when it was ABOVE the configured step cap and was applied as the cap instead (runSubAgent): delegationResult appends the clamp note that says so. 0 for every other spawn — no ask, a lower ask that bound, an ask against an unbounded cap
 
 	// nameMu guards name, which is the ONE identity field a running Agent may see replaced under
 	// it: a delegation the model left unnamed is named out of band, by a completion that lands while
@@ -415,21 +411,6 @@ type Agent struct {
 	capStart time.Time
 	capHit   delegateBound
 
-	// wrapUp latches the ONE closing Turn a delegate stopped at its step cap is given
-	// (subagent.go's wrapUpDirectiveFormat). While it is set, three seams change together and only
-	// for the request they compose: toolMenu returns no tools, buildRequest stamps the directive
-	// that says why they are gone and what to write instead, and step() takes the final-answer exit
-	// even if the reply asks for a tool anyway (loop.go). The Turn is tool-less with ONE exception:
-	// a delegation spawned with an `output_path` keeps write_file for exactly that file
-	// (outputPath, wrapUpWriter), so a capped child can still land the output it was asked for;
-	// every other call is still dropped, and a write elsewhere is refused (resolve, resolution.go).
-	// It is latched for exactly ONE request and
-	// cleared before the capped Exchange returns, so it never outlives the Exchange that raised it,
-	// and it is written on this Agent's own loop goroutine. Transient like turns.exchangeTurns: it is neither configured nor serialized,
-	// because a resumed session resumes at a boundary, never mid-wrap-up. Structural (ADR 0006),
-	// not a Reaction: no config key, and it holds under Bypass.
-	wrapUp bool
-
 	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
 	// argument of its sub_agent call (tools.SubAgentArgs.OutputPath), set on the CHILD by
 	// runSubAgent and empty on every Agent whose spawn named none, the top-level Agent included.
@@ -437,8 +418,8 @@ type Agent struct {
 	// refusal quote back to the model; outputTarget is that path resolved through the same write
 	// fence write_file's own target is (tools.WorkspaceWriteTarget: workspace-joined, symlinks
 	// followed), the spelling a wrap-up write_file call's target is compared against. It is not
-	// privilege and reaches no ladder row: what it buys is the one exception wrapUp documents.
-	// Structural like wrapUp: no config key, and it holds under Bypass.
+	// privilege and reaches no ladder row: what it buys is the one exception turnLifecycle.wrapUp
+	// documents. Structural like that latch: no config key, and it holds under Bypass.
 	outputPath   string
 	outputTarget string
 
@@ -450,16 +431,6 @@ type Agent struct {
 	// the main loop keeps folding at Exchange boundaries only so bench arms stay comparable.
 	// Structural (ADR 0006), not a Reaction: there is no config key and it stays on under Bypass.
 	midExchangeCompaction bool
-
-	// lastFault is the text of the most recent loop-level fault this Agent surfaced as an
-	// ErrorEvent — the very sentence the human already read (emitLoopFault). It exists for the
-	// PARENT of a delegation: runSubAgent turns a faulted child Exchange into an error tool
-	// result, and without this the result could only point at "the preceding error", which the
-	// parent MODEL never sees. A fault ends the Exchange, so the last one recorded is always the
-	// one that abandoned it; an Exchange abandoned with no ErrorEvent at all (a recovered hook
-	// panic) leaves this empty and the caller falls back to wording that names no cause. Written
-	// on this Agent's own loop goroutine, read by the parent only after Run has returned.
-	lastFault string
 }
 
 // stepCapErrFormat is the ErrorEvent text a delegate surfaces when it reaches its step cap — the
@@ -751,11 +722,7 @@ func (a *Agent) Submit(in domain.UserInput) error {
 	if a.cfg.Model == "" {
 		return errNoModelBound
 	}
-	if a.pendingInput != nil || a.turns.inExchange {
-		return domain.ErrInputPending
-	}
-	a.pendingInput = &in
-	return nil
+	return a.turns.submit(in)
 }
 
 // Step advances the loop exactly one Turn and returns at a quiescent boundary — no
@@ -896,8 +863,7 @@ func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) dom
 		Err:       a.boundErrText(),
 	})
 
-	a.wrapUp = true
-	defer func() { a.wrapUp = false }()
+	defer a.turns.capped()()
 
 	res, err := a.step(ctx)
 	switch {
@@ -927,21 +893,7 @@ func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) dom
 // rather than rejected with ErrInputPending. Like Snapshot, it is valid only at a quiescent
 // boundary: no worker may be driving the Agent when it is called (the host calls it only after
 // the worker has returned its cancellation), preserving the single-goroutine contract.
-func (a *Agent) AbortExchange() {
-	if !a.turns.inExchange {
-		return
-	}
-	a.conv.DropRange(a.exchangeBoundary(), a.conv.Len())
-	// The tool results the scrapped Exchange committed go with it — including the one that carried
-	// a context-fill notice — so the ladder ends its climb here as it does after a fold: the next
-	// result at or above a rung must be told again, not left silent until the rung above.
-	a.rearmFillNotice()
-	// The Exchange is scrapped: closeExchange expires any deferred Response Action with it (F6) — a
-	// mid-fan-out abort must not leave a stale remaining-items directive queued for the next
-	// Exchange's request.
-	a.turns.closeExchange()
-	a.pendingInput = nil
-}
+func (a *Agent) AbortExchange() { a.turns.abort() }
 
 // exchangeBoundary returns the conversation index the open Exchange began at — the rollback
 // target AbortExchange drops from and the boundary the snapshot round-trips. It is the ONE
@@ -1599,7 +1551,6 @@ func (a *Agent) RestoreSession(snap domain.Session) error {
 	a.consoles.CloseAll()
 	a.usage = usageTally{}
 	a.reloadContextFiles()
-	a.rearmFillNotice() // the ladder climbed the conversation just swapped out, not this one
 	return nil
 }
 
@@ -1621,7 +1572,7 @@ func (a *Agent) InExchange() bool { return a.turns.inExchange }
 // 0031): internal/run copies it onto run.Result so an unattended caller — `apogee headless`, the
 // daemon — can say WHY its answer is not an answer. Like InExchange it is a boundary-only read,
 // meant for use after Run has returned with no worker driving the Agent.
-func (a *Agent) LastFault() string { return a.lastFault }
+func (a *Agent) LastFault() string { return a.turns.fault() }
 
 // Compact (the /compact command's engine half) lives in compact.go alongside its provider
 // adapter and the generative reducer it drives (internal/context.Compact).

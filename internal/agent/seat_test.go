@@ -173,7 +173,7 @@ func TestSeat_FallbackNoteIsTheBodysLastLine(t *testing.T) {
 		wantHead string
 	}{
 		{"run error", &Agent{seatFallback: true}, domain.StepResult{}, errors.New("boom"), "sub-agent failed: boom"},
-		{"faulted", &Agent{seatFallback: true, lastFault: "the upstream died"}, domain.StepResult{Faulted: true}, nil, subAgentFaultPrefix + "the upstream died"},
+		{"faulted", &Agent{seatFallback: true, turns: &turnLifecycle{lastFault: "the upstream died"}}, domain.StepResult{Faulted: true}, nil, subAgentFaultPrefix + "the upstream died"},
 		{"step capped", &Agent{seatFallback: true, stepCap: 3}, domain.StepResult{StepCapped: true}, nil, fmt.Sprintf(stepCapResultFormat, 3)},
 		{"success", &Agent{seatFallback: true}, domain.StepResult{}, nil, "(sub-agent completed with no final message)"},
 	}

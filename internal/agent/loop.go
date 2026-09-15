@@ -75,11 +75,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// history never trips it. Structural, so it runs under Bypass too (D5/D6).
 	a.autoCompact(ctx, turn)
 
-	if a.pendingInput != nil {
-		// Open the Exchange: cache the boundary it begins at (the current length, before the first
-		// user message is appended) and flip inExchange (turn.go). The reorder of inExchange ahead
-		// of the Append is inert — no reader runs between the two.
-		a.turns.openExchange()
+	if in := a.turns.open(); in != nil {
+		// The queued input opened the Exchange: the boundary it begins at is cached (the current
+		// length, before the first user message is appended) and inExchange is flipped (turn.go).
+		// The reorder of inExchange ahead of the Append is inert — no reader runs between the two.
 		// And open the undo group this Exchange's writes will accumulate into (ADR 0051). It
 		// only MARKS the boundary — the group materializes on the first write after it, or, where
 		// snapshots are in force, at the Exchange's close when the workspace tree moved at all
@@ -104,11 +103,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// One structural bound for the whole message (refBound), computed from BOTH reference
 		// counts and handed to both resolvers: the blocks land in one message and split one
 		// allocation between them.
-		bound := a.refBound(len(a.pendingInput.SkillIDs) + len(a.pendingInput.FileRefs))
-		skillBlocks := a.resolveSkillRefs(turn, a.pendingInput.SkillIDs, bound)
-		refs := a.resolveFileRefs(ctx, turn, a.pendingInput.FileRefs, bound)
-		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: skillBlocks + refs + a.pendingInput.Text})
-		a.pendingInput = nil
+		bound := a.refBound(len(in.SkillIDs) + len(in.FileRefs))
+		skillBlocks := a.resolveSkillRefs(turn, in.SkillIDs, bound)
+		refs := a.resolveFileRefs(ctx, turn, in.FileRefs, bound)
+		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: skillBlocks + refs + in.Text})
 	}
 
 	// The history-rewrite Moment: reactions edit conversation state before it is projected
@@ -216,8 +214,8 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	}
 
 	calls := resp.ToolCalls()
-	if a.wrapUp {
-		// The wrap-up Turn (Agent.wrapUp) keeps at most ONE tool: write_file, for a delegation
+	if a.turns.wrappingUp() {
+		// The wrap-up Turn (turnLifecycle.wrapUp) keeps at most ONE tool: write_file, for a delegation
 		// spawned with an `output_path`, and then only the calls aimed at that tool survive
 		// (wrapUpCalls, subagent.go). Everything else the reply asked for is asking for something
 		// the request told it it cannot have, and a withdrawn menu that is still reachable is no
@@ -251,7 +249,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	if a.dispatchTools(ctx, turn, calls) == dispatchCancelled {
 		return a.turns.end(t, endCancelled), nil
 	}
-	if a.wrapUp {
+	if a.turns.wrappingUp() {
 		// The wrap-up's one kept write has been dispatched — run against the output path, refused
 		// with a result naming it anywhere else (resolve's wrap-up row) — and the Turn still ENDS
 		// THE EXCHANGE: the latch buys one request, never a fifth working Turn, and the reply's text
@@ -597,13 +595,13 @@ func (a *Agent) replyFault(resp *domain.Response) (string, bool) {
 }
 
 // emitLoopFault surfaces a loop-level fault as the ErrorEvent it has always been AND records its
-// text on the Agent (lastFault), so a parent converting a faulted CHILD Exchange into a tool result
+// text on the lifecycle (turnLifecycle.noteFault), so a parent converting a faulted CHILD Exchange into a tool result
 // can name the cause rather than point the parent model at an error only the human can see
 // (runSubAgent). Every fault that ends an Exchange ABANDONED goes through here; the loop's
 // non-fatal notices — an ignored @file reference, an unknown attached skill — deliberately do not,
 // because nothing ended because of them.
 func (a *Agent) emitLoopFault(turn int, err string) {
-	a.lastFault = err
+	a.turns.noteFault(err)
 	a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: err})
 }
 
@@ -927,7 +925,7 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	// write_file for the delegation's `output_path` (wrapUpWriter). AppendToSystem CREATES the
 	// system message when none exists, so a
 	// session with no configured prompt and no context files still carries the directive.
-	if a.wrapUp {
+	if a.turns.wrappingUp() {
 		req.AppendToSystem(wrapUpMarker, a.wrapUpDirective())
 	}
 	deferred, ok := a.conv.TakeDeferred()
@@ -1465,7 +1463,7 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 	if a.tools == nil {
 		return nil
 	}
-	// The wrap-up Turn withdraws the menu WHOLESALE (Agent.wrapUp): a delegate stopped at its step
+	// The wrap-up Turn withdraws the menu WHOLESALE (turnLifecycle.wrapUp): a delegate stopped at its step
 	// cap gets one closing request with no tools at all, and an empty menu is what "the tools are
 	// gone" means on a wire that carries no tool_choice — the seam renders no tool-instruction
 	// block for it and sends no native array. The withdrawal is the prohibition; step() drops any
@@ -1474,7 +1472,7 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 	// menu is exactly the one tool, offered only where the child holds it and its Mode admits the
 	// write, and step() dispatches only calls to it — a write elsewhere is refused by resolve's
 	// wrap-up row, never run.
-	if a.wrapUp {
+	if a.turns.wrappingUp() {
 		writer, ok := a.wrapUpWriter()
 		if !ok {
 			return nil

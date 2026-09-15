@@ -383,8 +383,7 @@ func TestRestore_AnEmptyPayloadClearsTheLiveSession(t *testing.T) {
 		t.Fatalf("seed the list: %v", err)
 	}
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "the outgoing session's history"})
-	a.turns.index = 7
-	a.pendingInput = &domain.UserInput{Text: "the outgoing session's queued input"}
+	a.turns.restore(turnSnapshot{index: 7, pendingInput: &domain.UserInput{Text: "the outgoing session's queued input"}})
 
 	if err := a.RestoreSession(domain.Session{Version: domain.SessionVersion}); err != nil {
 		t.Fatalf("RestoreSession of an empty payload: %v", err)
@@ -399,7 +398,33 @@ func TestRestore_AnEmptyPayloadClearsTheLiveSession(t *testing.T) {
 	if a.turns.index != 0 {
 		t.Errorf("the Turn index after restoring an empty payload = %d, want 0", a.turns.index)
 	}
-	if a.pendingInput != nil {
-		t.Errorf("the pending input after restoring an empty payload = %v, want nil", a.pendingInput)
+	if a.turns.pendingInput != nil {
+		t.Errorf("the pending input after restoring an empty payload = %v, want nil", a.turns.pendingInput)
+	}
+}
+
+// TestRestoreSessionClearsCompactionLatches: the two automatic-fold latches judged the OUTGOING
+// conversation — a fold that faulted against it, a fold that could not bring it under the
+// allocation — so a session restored over a stood-down Agent must not stay stood down. Before
+// turnLifecycle.restore owned the reset, RestoreSession left both latched, so the first over-budget
+// boundary of the incoming session never folded. The context-fill ladder re-arms with them.
+func TestRestoreSessionClearsCompactionLatches(t *testing.T) {
+	a := newSnapshotAgent(t)
+	a.turns.foldFaulted()
+	a.turns.foldSaturated()
+	a.turns.noteFill(50)
+
+	if err := a.RestoreSession(domain.Session{Version: domain.SessionVersion}); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+
+	if a.turns.compactFailed {
+		t.Error("compactFailed still latched after RestoreSession — the incoming session inherits a stand-down it never earned")
+	}
+	if a.turns.compactSat {
+		t.Error("compactSat still latched after RestoreSession — the incoming session inherits a saturation it never measured")
+	}
+	if a.turns.fillRung != 0 {
+		t.Errorf("fillRung = %d after RestoreSession, want 0 — the ladder climbed the conversation just swapped out", a.turns.fillRung)
 	}
 }

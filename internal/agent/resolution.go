@@ -252,7 +252,7 @@ type resolutionInput struct {
 	maxDepth     int
 	// wrapUpOutput is the ONE path the step-cap wrap-up Turn may write — the delegation's
 	// `output_path` as its spawning call spelled it (Agent.outputPath) — and "" for every call
-	// outside a wrap-up that kept write_file (Agent.wrapUp, wrapUpWriter): no other call reaches
+	// outside a wrap-up that kept write_file (turnLifecycle.wrapUp, wrapUpWriter): no other call reaches
 	// the ladder from a wrap-up, because step() drops them undispatched. writesWrapUpOutput is
 	// precomputed by dispatch from the SAME on-disk resolution the three write-target facts above
 	// come from: whether this call is write_file AND its target resolves to that path

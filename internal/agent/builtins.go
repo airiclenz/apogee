@@ -129,7 +129,7 @@ func classedBuiltin(id, action string, class domain.Class, on domain.Moment, han
 //   - Only a NATIVE profile (processing.IsNative). A markdown-fenced or custom-regex profile
 //     already extracts a call from the visible text at the parse seam (assembleResponse), so
 //     salvaging the same text again would dispatch the call twice.
-//   - Never on a tool-less WRAP-UP Turn (Agent.wrapUp). That Turn is offered no menu at all and
+//   - Never on a tool-less WRAP-UP Turn (turnLifecycle.wrapUp). That Turn is offered no menu at all and
 //     its reply is a closing report by construction: a call salvaged out of it would be a call
 //     the delegation had already been told it could not make. A wrap-up that kept write_file for
 //     the delegation's `output_path` (wrapUpWriter) is offered exactly that menu, and salvages
@@ -146,7 +146,7 @@ func classedBuiltin(id, action string, class domain.Class, on domain.Moment, han
 // may hold several: snapshot, resume and tests stay stable across runs. The Detail names what
 // was read back out of the text, the one fact the reaction's id cannot carry.
 func (a *Agent) salvageToolCall(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
-	if (a.wrapUp && a.wrapUpOutput() == "") || !processing.IsNative(a.textParser) {
+	if (a.turns.wrappingUp() && a.wrapUpOutput() == "") || !processing.IsNative(a.textParser) {
 		return domain.Outcome{}, nil
 	}
 
