@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/userexec"
 )
 
 // requireShell skips a test that scripts its Reaction with `sh`. Every assertion in this file is
@@ -113,8 +114,8 @@ func TestCommandExecutorReportsTheExitStatusAndWhatTheCommandSaid(t *testing.T) 
 // The two cases are the two shapes a hung Reaction takes. A command that IS the sleep dies with the
 // deadline and nothing else is owed. A wrapper-shaped one — a shell that spawned the sleep — leaves
 // a grandchild holding the stderr pipe it inherited, and the copy behind that pipe would block
-// forever; waitGrace is what bounds it, so this case must finish soon after the grace and never
-// later (keyresolve.go and keystore/run.go carry the same guard for the same reason).
+// forever; userexec.WaitGrace is what bounds it, so this case must finish soon after the grace and
+// never later (internal/userexec's table pins the bound itself; this is the Reaction's wording of it).
 func TestCommandExecutorReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T) {
 	requireShell(t)
 
@@ -124,7 +125,7 @@ func TestCommandExecutorReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T
 		within time.Duration
 	}{
 		{name: "the command itself", script: "exec sleep 5", within: time.Second},
-		{name: "a wrapper's grandchild", script: "sleep 5", within: waitGrace + time.Second},
+		{name: "a wrapper's grandchild", script: "sleep 5", within: userexec.WaitGrace + time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hook := shellHook("notify", tc.script)
@@ -201,8 +202,8 @@ func TestCommandExecutorCutsAnOverlongComplaintDownToATail(t *testing.T) {
 	if !strings.HasSuffix(message, "…") {
 		t.Errorf("error = %q, want the truncated tail to end in an ellipsis", message)
 	}
-	if runes := []rune(message); len(runes) > maxErrorStderr+len("exit 1: ")+1 {
-		t.Errorf("error is %d runes long; the tail is capped at %d", len(runes), maxErrorStderr)
+	if runes := []rune(message); len(runes) > userexec.StderrTailRunes+len("exit 1: ")+1 {
+		t.Errorf("error is %d runes long; the tail is capped at %d", len(runes), userexec.StderrTailRunes)
 	}
 }
 

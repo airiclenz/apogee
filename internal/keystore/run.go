@@ -1,8 +1,12 @@
 package keystore
 
-// The exec contract every store command runs under — the resolver's contract (internal/config's
-// keyresolve.go), because these commands are the same kind of thing: a credential tool, run by
-// apogee on the user's behalf, from a process that owns the terminal.
+// The exec contract every store command runs under — internal/userexec's contract, the one the
+// `api-key-cmd:` resolver and a Reaction's `run:` argv share, because these commands are the same
+// kind of thing: a credential tool, run by apogee on the user's behalf, from a process that owns
+// the terminal. It is kept as a runner of its own rather than a fourth caller of that package
+// because the posture differs where it matters: the argv is apogee's, not the user's, so there is
+// nothing to fence, and a non-zero exit is DATA here ("no such secret" is the probe's healthy
+// answer) rather than the failure the user reads.
 //
 // No shell. The argv is built here, word by word, from values apogee decided; there is nothing for a
 // shell to add but the chance that a character in a server name means something.
@@ -44,7 +48,7 @@ const probeTimeout = 5 * time.Second
 
 // waitGrace bounds the wait AFTER a timeout fired. Killing the process ends the process, but a
 // wrapper-shaped tool can leave a grandchild holding the stderr pipe it inherited, and cmd.Run would
-// then block on the copy forever (keyresolve.go carries the same guard).
+// then block on the copy forever (internal/userexec's WaitGrace is the same guard).
 const waitGrace = 2 * time.Second
 
 // maxToolStderr bounds what a store tool may make apogee hold in memory. Stderr is kept only to

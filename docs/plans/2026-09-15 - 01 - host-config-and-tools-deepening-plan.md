@@ -77,7 +77,12 @@ deleted (17r). Sibling plan A (`2026-09-15 - 00`) holds the engine half.
 
 ---
 
-## 1. `internal/userexec`: one fenced, bounded runner for the user's own argv
+## 1. `internal/userexec`: one fenced, bounded runner for the user's own argv — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): `Options` gained a `WorkspaceRoot` field beyond the plan's five — the fence root has to reach `security.ResolveProgram` somehow and both callers hold one; the plan's `Run(ctx, argv, Options{…})` signature is otherwise as written. The exported bounds are spelled `WaitGrace` (the name both copies used), `MaxStderr` and `StderrTailRunes`.
+NOTES (2026-09-15): `internal/config/keyresolve_test.go` needed no edit — it reads only `maxKeyCommandOutput`, which stays; its `flood` fixture and every `TestKeyResolver*` case pass unchanged. A failed `api-key-cmd:` now reads `failed: exit status N` composed from `Result.ExitCode` rather than `%w` of the `exec.ExitError` — identical text for an exit status; a signal-ended child (never reached by keyresolve, which runs with no cancellable context) would read `exit status -1` instead of `signal: killed`.
+NOTES (2026-09-15): consequential edit — internal/reactions/doc.go: made necessary by deleting command.go's copied exec posture (its package map said "the api-key-cmd exec posture, copied"; it now points at internal/userexec).
+NOTES (2026-09-15): the shared fence/cap/timeout table lives in `internal/userexec/userexec_test.go` (exit status + tail, stdout wanted/capped/zero-cap, stdin + env-last, context deadline and `Options.Timeout` each within the WaitGrace bound, SIGPIPE-safe stderr cap, fence refusal + empty-root pass, empty argv / not-on-PATH sentences); the reactions and keyresolve suites stay as caller-wording tests, `TestCommandExecutorReportsTheDeadlineRatherThanWaitingOnASleep` and `…CutsAnOverlongComplaintDownToATail` now read `userexec.WaitGrace` / `userexec.StderrTailRunes`.
 
 **What.** New leaf package `internal/userexec` (imports `internal/security` only) with `Run(ctx, argv, Options{Stdin, WantStdout, StdoutCap, Timeout, Env}) (Result, error)`: `argv[0]` fenced via `security.ResolveProgram`, `WaitDelay` 2s, 4 KiB capped stderr that reports a full write (SIGPIPE-safe), 240-rune head tail, the three-way error sentence. `internal/reactions/command.go` and `internal/config/keyresolve.go` (`runKeyCommand`, `cappedWriter`) become one-line callers; their copies and the header comment declaring unification out of scope are deleted. `internal/keystore/run.go` and `tools.RunHookSubprocess` are NOT touched (different postures).
 

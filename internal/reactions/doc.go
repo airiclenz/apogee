@@ -33,7 +33,7 @@
 // queues and workers, the Driver-facing failure reporter, and the reload (Replace) and shutdown
 // (Close) paths. exec.go is the production Executor — DefaultExecutor's dispatch onto whichever
 // action the entry configured, and the one JSON encoding both actions send. command.go runs a
-// Reaction's argv: the api-key-cmd exec posture, copied, with the payload on stdin and the
-// APOGEE_REACTION_* facts in the environment. webhook.go POSTs the same document to a Reaction's
-// URL, with the literal and environment-resolved headers it carries and no retry.
+// Reaction's argv through internal/userexec — the api-key-cmd exec posture — with the payload on
+// stdin and the APOGEE_REACTION_* facts in the environment. webhook.go POSTs the same document to a
+// Reaction's URL, with the literal and environment-resolved headers it carries and no retry.
 package reactions

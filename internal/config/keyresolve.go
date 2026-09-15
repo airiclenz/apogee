@@ -36,17 +36,14 @@ package config
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
-	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/userexec"
 	"github.com/google/shlex"
 )
 
@@ -57,26 +54,12 @@ import (
 // message at all.
 const keyCommandTimeout = 60 * time.Second
 
-// keyCommandWaitGrace bounds the wait AFTER the timeout fired. The deadline kills the process, but a
-// wrapper-shaped command — a shell script re-execing the real tool — can leave a grandchild holding
-// the stdout pipe it inherited, and cmd.Run() would then block on the output copy forever
-// (internal/keystore's tool runner carries the same guard for the same reason).
-const keyCommandWaitGrace = 2 * time.Second
-
-// maxKeyCommandOutput and maxKeyCommandStderr bound what one command may make apogee hold in
-// memory. An API key is a short line; a command printing more than 64 KiB of it is a misconfigured
-// command (`cat /dev/urandom`, a binary on the wrong path), and reading it to the end is how a typo
-// in a config file becomes an out-of-memory kill. Stderr is held only to quote back in the refusal,
-// so it is bounded far tighter.
-const (
-	maxKeyCommandOutput = 64 << 10
-	maxKeyCommandStderr = 4 << 10
-)
-
-// maxKeyErrorStderr is how much of what the command said survives into the refusal message. The
-// message is read on one line of a TUI, and the first sentence of a tool's complaint ("The specified
-// item could not be found in the keychain.") is the part that names the fix.
-const maxKeyErrorStderr = 240
+// maxKeyCommandOutput bounds what one command may make apogee hold in memory. An API key is a short
+// line; a command printing more than 64 KiB of it is a misconfigured command (`cat /dev/urandom`, a
+// binary on the wrong path), and reading it to the end is how a typo in a config file becomes an
+// out-of-memory kill. It is the stdout cap handed to internal/userexec, which bounds stderr and the
+// quoted tail on its own.
+const maxKeyCommandOutput = 64 << 10
 
 // keySource is the triple of key-source fields an entry carries, captured as a comparable value so
 // the cache can ask "is this still the same source?" with one equality test. It holds the raw
@@ -148,7 +131,7 @@ type KeyResolver struct {
 	// workspaceRoot is the fence an `api-key-cmd:` program is measured against before it runs (see
 	// runKeyCommand). It is the resolved workspace root of the Driver that built this resolver, and
 	// EMPTY on the two commands that have no workspace to name — `probe model` and `daemon` — where
-	// security.ResolveProgram's empty-fence rule then refuses nothing.
+	// internal/userexec's empty-fence rule then refuses nothing.
 	workspaceRoot string
 
 	// commandTimeout overrides keyCommandTimeout for one resolver. It exists for tests, which
@@ -317,28 +300,21 @@ func APIKeyEnvNames(opts Options) []string {
 
 // runKeyCommand runs an entry's `api-key-cmd:` and returns what it printed as the key.
 //
-// The command line is split by the POSIX splitter and executed DIRECTLY — argv[0] resolved the way
-// the user's own shell would resolve it, their config and their PATH (opener.go's rung 3 reasoning)
-// — with no shell between apogee and it. A key-fetching command is a fixed invocation of a
-// credential tool, and handing the string to a shell would buy `|` and `$(…)` at the price of making
-// every metacharacter in a config file executable.
+// The command line is split by the POSIX splitter and executed DIRECTLY through internal/userexec
+// — argv[0] resolved the way the user's own shell would resolve it, their config and their PATH
+// (opener.go's rung 3 reasoning) — with no shell between apogee and it. A key-fetching command is a
+// fixed invocation of a credential tool, and handing the string to a shell would buy `|` and `$(…)`
+// at the price of making every metacharacter in a config file executable.
 //
 // It still resolves on the USER's PATH — but a program that resolves INSIDE the workspace is refused
-// before it runs, through security.ResolveProgram like every other exec apogee performs. The config
-// file is the operator's and the workspace is the model's, so an `api-key-cmd:` landing in the
-// latter would hand the model the credential this key source exists to protect. A bare name goes
-// through the PATH lookup unchanged; an argv[0] carrying a path separator — the rule exec.Command
-// itself uses to skip PATH — is made absolute against apogee's working directory first, which is
-// exactly what exec.Command would have resolved it against, so the wrapper script the manual tells
-// operators to write keeps working unless it actually resolves inside the workspace. The box is nil:
-// this command runs on apogee's own behalf, before any confinement box exists (the keystore probe
-// and the opener are the precedent), so the workspace root each Driver holds is the whole fence.
+// before it runs, through the same fence as every other exec apogee performs. The config file is the
+// operator's and the workspace is the model's, so an `api-key-cmd:` landing in the latter would hand
+// the model the credential this key source exists to protect. The workspace root each Driver holds
+// is the whole fence: this command runs on apogee's own behalf, before any confinement box exists.
 //
-// The child gets no stdin and neither of apogee's standard streams: it is running under a TUI that
-// owns the terminal, so a tool that tried to prompt there would draw over the frame and read the
-// keystrokes meant for apogee. It inherits the environment whole, deliberately — `pass`, `op`,
-// `security` and their agents need HOME, DISPLAY, the D-Bus and GPG agent addresses, and this is the
-// USER's own command rather than one the model chose (which is what internal/tools scrubs for).
+// The child gets no stdin and no terminal (a tool that must prompt does so through a GUI agent), and
+// inherits the environment whole — `pass`, `op`, `security` and their agents need HOME, DISPLAY, the
+// D-Bus and GPG agent addresses; internal/userexec's package comment carries the why of each.
 func runKeyCommand(entry, command, workspaceRoot string, timeout time.Duration) (string, error) {
 	argv, err := shlex.Split(command)
 	if err != nil {
@@ -352,115 +328,44 @@ func runKeyCommand(entry, command, workspaceRoot string, timeout time.Duration) 
 			entry, command, entry)
 	}
 
-	program, err := resolveKeyProgram(entry, argv[0], workspaceRoot)
-	if err != nil {
-		return "", err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, program, argv[1:]...)
-	cmd.Stdin = nil
-	stdout := &cappedWriter{limit: maxKeyCommandOutput}
-	stderr := &cappedWriter{limit: maxKeyCommandStderr}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.WaitDelay = keyCommandWaitGrace
-
-	runErr := cmd.Run()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	result, err := userexec.Run(context.Background(), argv, userexec.Options{
+		WorkspaceRoot: workspaceRoot,
+		WantStdout:    true,
+		StdoutCap:     maxKeyCommandOutput,
+		Timeout:       timeout,
+	})
+	said := saidOnStderr(result.StderrTail)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %w%s", entry, err, said)
+	case result.TimedOut:
 		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q did not answer within %s — a backend that "+
 			"has to ask you to unlock must prompt through a GUI agent (pinentry-mac, the Keychain dialog), "+
 			"since this command runs with no terminal of its own", entry, command, timeout)
-	}
-	if runErr != nil {
-		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q failed: %w%s",
-			entry, command, runErr, saidOnStderr(stderr.String()))
-	}
-	if stdout.over {
+	case result.ExitCode != 0:
+		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q failed: exit status %d%s",
+			entry, command, result.ExitCode, said)
+	case result.StdoutTruncated:
 		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q printed more than %d bytes — that is not an "+
 			"API key; check that the command is the one that PRINTS the key and nothing else",
 			entry, command, maxKeyCommandOutput)
 	}
 
-	key := strings.TrimRightFunc(stdout.String(), unicode.IsSpace)
+	key := strings.TrimRightFunc(result.Stdout, unicode.IsSpace)
 	if key == "" {
 		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q printed nothing — a key source that answers "+
 			"with nothing is a broken source, not a keyless server; remove the entry's key source altogether to "+
-			"send no Authorization header%s", entry, command, saidOnStderr(stderr.String()))
+			"send no Authorization header%s", entry, command, said)
 	}
 	return key, nil
 }
 
-// resolveKeyProgram turns an `api-key-cmd:` argv[0] into the absolute program apogee will execute,
-// or the refusal it earns. It is the exec fence on the one exec path that used to run bare.
-//
-// An argv[0] carrying a path separator is made absolute FIRST, against apogee's own working
-// directory: that is exactly what exec.Command does with such a name — it skips PATH and hands the
-// relative path to the child, which resolves it against the same directory — so making it absolute
-// here changes nothing about which file runs and everything about whether the fence can see it. A
-// bare name has no such meaning and goes through the PATH lookup unchanged. An absolute form that
-// cannot be derived is left relative on purpose: ResolveProgram refuses a relative program path,
-// which is the same answer security.RefuseExecFromWritablePath gives for that case.
-func resolveKeyProgram(entry, argv0, workspaceRoot string) (string, error) {
-	program := argv0
-	if filepath.Base(program) != program {
-		if abs, err := filepath.Abs(program); err == nil {
-			program = abs
-		}
-	}
-
-	resolved, err := security.ResolveProgram(nil, program, workspaceRoot, nil)
-	switch {
-	case errors.Is(err, security.ErrExecFromWritablePath):
-		return "", fmt.Errorf("apogee: server %q: api-key-cmd: refusing to run %q: %w", entry, argv0, err)
-	case err != nil:
-		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q is not on this machine's PATH", entry, argv0)
-	}
-	return resolved, nil
-}
-
-// saidOnStderr renders what the command complained about as a tail for the refusal, or nothing at
-// all when it stayed quiet. The text is folded onto one line and cut short because the refusal is
-// read on one line of a TUI — the tool's own first sentence is almost always the part that names the
-// fix, and a page of it would push apogee's own message off the screen.
-func saidOnStderr(text string) string {
-	folded := strings.Join(strings.Fields(text), " ")
-	if folded == "" {
+// saidOnStderr renders the tail internal/userexec kept of what the command complained about as the
+// refusal's own clause, or nothing at all when it stayed quiet — the tool's first sentence is almost
+// always the part that names the fix.
+func saidOnStderr(tail string) string {
+	if tail == "" {
 		return ""
 	}
-	if runes := []rune(folded); len(runes) > maxKeyErrorStderr {
-		folded = strings.TrimSpace(string(runes[:maxKeyErrorStderr])) + "…"
-	}
-	return " — it said: " + folded
-}
-
-// cappedWriter is the bounded sink the key command's streams are read into: it keeps the first limit
-// bytes, remembers that there were more, and never fails the write. Failing it would kill the
-// command with a broken pipe and report THAT instead of the oversized output, which is the one fact
-// the user needs.
-type cappedWriter struct {
-	limit int
-	buf   []byte
-	over  bool
-}
-
-// Write keeps what still fits and notes anything beyond it, always reporting a full write.
-func (w *cappedWriter) Write(p []byte) (int, error) {
-	switch room := w.limit - len(w.buf); {
-	case room <= 0:
-		w.over = w.over || len(p) > 0
-	case len(p) > room:
-		w.buf = append(w.buf, p[:room]...)
-		w.over = true
-	default:
-		w.buf = append(w.buf, p...)
-	}
-	return len(p), nil
-}
-
-// String is what was kept.
-func (w *cappedWriter) String() string {
-	return string(w.buf)
+	return " — it said: " + tail
 }
