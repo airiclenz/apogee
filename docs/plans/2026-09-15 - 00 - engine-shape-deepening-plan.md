@@ -77,7 +77,9 @@ Second round (2026-09-15, b2e3d75d; `regression-5.md`, one reviewer over the ame
 
 ---
 
-## 1. Gate: plan 2026-09-14 - 04 is archived
+## 1. Gate: plan 2026-09-14 - 04 is archived — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): gate PASSED — `docs/plans/archived/` holds all three `2026-09-14 - 02/03/04` plans (grep -c = 3) and `docs/plans/` holds none (grep -c = 0); `2026-09-14 - 04 - queued-commands-delegation-width-and-accounting-plan.md` present in archived/. No code change; the plan says `Commit: none`.
 
 **What.** Verify `docs/plans/archived/2026-09-14 - 04 - queued-commands-delegation-width-and-accounting-plan.md` exists and `docs/plans/` holds no `2026-09-14 - 02/03/04` file. If not, STOP the run here (resume later). No code change.
 
