@@ -340,6 +340,14 @@ type Model struct {
 	pendingInterjections []queuedInterjection
 	interjectSeq         int
 
+	// deferredCommands is the queue of idle-only /commands typed while a worker worked (ADR 0025,
+	// amended 2026-09-14): a plain slice, appended copy-on-write exactly as pendingInterjections is,
+	// and the host's alone — the engine learns nothing of a queued command (ADR 0031). Rows drain
+	// FIFO through the ordinary command path at the next idle (runDeferredCommands), before any held
+	// message is sent, so a queued /clear clears before a queued message lands. Like the staged
+	// rows above they are session-ephemeral: a quit drops them unrun.
+	deferredCommands []parsedInput
+
 	// The skill-suggestion band's state (suggestband.go, ADR 0061) — a Driver-side hint about the
 	// draft, never anything the model is told about.
 	//
@@ -1041,13 +1049,15 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// completion the interjection contract releases a queue on (ADR 0025): anything the human
 		// typed while the model worked and the worker never got to deliver — rows staged while it
 		// wrote its final answer, with no further boundary to land at — opens the next Exchange
-		// from here, without a second keypress.
+		// from here, without a second keypress. The commands queued meanwhile run FIRST
+		// (runDeferredCommands), so a queued /clear clears before a queued message lands.
 		cmd := m.finishWorker(stateIdle)
-		return m.flushAfterCompletion(cmd)
+		return m.drainThenFlush(cmd)
 
 	case cancelledMsg:
 		// The worker cancelled at a quiescent boundary and has returned, so the engine is the Update
-		// loop's to touch again (C1): discard the interrupted Exchange and hold whatever was staged.
+		// loop's to touch again (C1): discard the interrupted Exchange, run the commands queued
+		// meanwhile, and hold whatever messages were staged.
 		return m.foldCancelled()
 
 	case errMsg:
@@ -1056,8 +1066,8 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.foldLoopError(msg)
 
 	case compactDoneMsg:
-		// The /compact worker returned (startCompact): note what it did, return to idle, and flush a
-		// queue the compaction was a natural completion for (commandrun.go).
+		// The /compact worker returned (startCompact): note what it did, return to idle, drain the
+		// queued commands and flush a queue the compaction was a natural completion for (commandrun.go).
 		return m.foldCompactDone(msg)
 
 	case interjectedMsg:
@@ -1597,7 +1607,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// must not be answered by firing off their queued remarks.
 			m.lastErr = nil
 			m.state = stateIdle
-			return m, nil
+			// The commands queued before the fault run at this idle — after the error is cleared,
+			// before any held message is sent (that stays the next ⏎'s) — so a /clear typed at this
+			// idle can never run ahead of the commands queued before it.
+			return m.runDeferredCommands()
 		default:
 			return m, nil
 		}
@@ -1679,9 +1692,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if m.input.Value() == "" && msg.String() == "backspace" {
-			// Backspace on an empty input un-does the last thing staged: it lifts the newest queued
-			// interjection back into the box. Nothing else is staged beside the text any more — a
+			// Backspace on an empty input un-does the last thing staged: it lifts the band's row
+			// nearest the box back into it — the newest queued command, and with none queued the
+			// newest queued interjection. Nothing else is staged beside the text any more — a
 			// skill is a /token IN it, deleted like any other word.
+			if popped, ok := m.popDeferredCommand(); ok {
+				return popped, nil
+			}
 			if popped, reload, ok := m.popInterjection(); ok {
 				return popped, reload
 			}
@@ -1987,7 +2004,9 @@ func (m Model) foldHookNotice(msg hookNoticeMsg) (tea.Model, tea.Cmd) {
 //
 // A stop is NOT a completion, so a staged queue is held rather than flushed: Esc stops everything,
 // including what was waiting to go out (ADR 0025). The note says so once, and ⏎ on the empty box is
-// what sends it afterwards.
+// what sends it afterwards. The COMMANDS queued meanwhile are the exception: they were never
+// addressed to the Exchange the stop scrapped, so they run at this idle (runDeferredCommands),
+// before the hold is stated (amended 2026-09-14).
 //
 // "Held" covers exactly what the worker never DELIVERED. A row it did deliver was dropped from the
 // conversation by the AbortExchange below and stays dropped — sent is sent (owner ruling
@@ -1999,9 +2018,14 @@ func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
 	m.transcript.commitCancelled()
 	m.transcript.addNote("cancelled")
 	cmd := m.finishWorker(stateIdle)
+	// The commands queued while it ran are not held by the stop — they run at this idle, FIFO,
+	// before the hold is stated; only the MESSAGES stay held for the next ⏎ (ADR 0025 D7, amended
+	// 2026-09-14). A verb that opens a worker of its own stops the drain, and the rest wait for
+	// that worker's fold.
+	m, drained := m.runDeferredCommands()
 	m.noteHeldQueue()
 	m.refreshViewport()
-	return m, cmd
+	return m, tea.Batch(cmd, drained)
 }
 
 // foldLoopError folds a loop-level fault: the interrupted Exchange is discarded, the error is
@@ -2017,7 +2041,8 @@ func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
 // A fault is not a completion either, so — exactly as on a cancel — a staged queue is held and
 // noted rather than flushed: sending the human's remarks into the wreckage of a failed Exchange is
 // not what they asked for (ADR 0025). Dismissing the error takes one ⏎ and sending the held queue
-// the next.
+// the next. The commands queued before the fault wait with it — the errored state is not idle —
+// and run at that dismissing ⏎ (handleKey's stateErrored case), still ahead of any held message.
 func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
 	m.eng.AbortExchange()
 	m.lastErr = msg.Err
@@ -3846,7 +3871,7 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 		seated++
 	}
 
-	plan.band = bandShape(len(m.pendingInterjections), left, m.hasSkillHints())
+	plan.band = bandShape(m.stagedRowCount(), left, m.hasSkillHints())
 	left -= plan.band.height()
 
 	// The transcript's soft reserve is the one thing the FULL-HEIGHT pane changes: while /settings is

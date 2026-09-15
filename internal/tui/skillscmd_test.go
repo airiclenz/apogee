@@ -222,8 +222,8 @@ func TestSkillsLineDecidesWhatRunsMidRun(t *testing.T) {
 	}
 }
 
-// The export mutates the workspace's library, so a line typed while the model works earns the
-// standing answer instead of running — while the bare listing keeps answering, which is the whole
+// The export mutates the workspace's library, so a line typed while the model works is queued to
+// run at idle instead of running now — while the bare listing keeps answering, which is the whole
 // point of splitting the policy on the line (TestSkillsListingStillAnswersMidRun below).
 func TestSkillsExportIsRefusedWhileTheModelWorks(t *testing.T) {
 	opts := exportOpts(t)
@@ -238,8 +238,8 @@ func TestSkillsExportIsRefusedWhileTheModelWorks(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(opts.ConfigHome, "skills", "debugging")); err == nil {
 		t.Error("the export ran mid-run; it writes into the library the engine's own run may be reading")
 	}
-	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	if got := plain(m.View()); !strings.Contains(got, "queued command: /skills export debugging") {
+		t.Errorf("the queued-command row is missing from the band:\n%s", got)
 	}
 }
 

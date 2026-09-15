@@ -79,6 +79,26 @@ func TestAutocompleteCommandAndFileTitles(t *testing.T) {
 	}
 }
 
+// A row the menu cannot run mid-run says what ⏎ will do with it: the verb is QUEUED to run at idle
+// (queueCommand), so the tag says "runs at idle", not that the line is refused. The literal is
+// pinned here because it is a promise the menu makes about the accept.
+func TestIdleOnlyTagSaysRunsAtIdle(t *testing.T) {
+	if idleOnlyTag != "— runs at idle" {
+		t.Fatalf("idleOnlyTag = %q; want %q — an idle-only verb is queued, never refused", idleOnlyTag, "— runs at idle")
+	}
+	m := newDropdownModel(t, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+	m.input.SetValue("/cle")
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+	if got := plain(m.View()); !strings.Contains(got, "— runs at idle") {
+		t.Errorf("the mid-run menu row for /clear is missing the tag:\n%s", got)
+	}
+}
+
 // The merged "/" menu mixes rows whose first column is a short verb ("/clear") with rows whose
 // first column is a glyph plus a long id ("✦ /clean-code"), and every one of them starts its
 // description at the SAME display column — the widest first cell plus the module's gutter. Before

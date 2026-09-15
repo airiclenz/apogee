@@ -138,8 +138,8 @@ type autocompleteState struct {
 // message content that rides the interjection the same way. A COMMAND is the one that cannot
 // simply ride, so the menu tells the truth about it instead of hiding it: the verbs that only
 // report run mid-run, the ones that need a quiescent engine are TAGGED "— idle only"
-// (commandSuggestions) and earn commandsAtIdleNote if accepted. An offered row that says what it
-// will do is worth more than a namespace that disappears.
+// (commandSuggestions) and are queued to run at the next idle if accepted (queueCommand). An
+// offered row that says what it will do is worth more than a namespace that disappears.
 //
 // Each region is scoped to the TOKEN AT THE CARET, never to the whole line and no longer to the end
 // of the buffer: the "/" menu opens on the "/word" being edited in a draft that already holds text
@@ -402,11 +402,11 @@ func fileRefToken(path string) string {
 
 // idleOnlyTag fills the third column of a command row that cannot run in the state the menu is open
 // in. The dropdown offers every verb while a worker works — hiding half the namespace is what made
-// the "/" menu useless mid-run — so the row that would be refused says so instead of pretending. It
+// the "/" menu useless mid-run — so the row that would be queued says so instead of pretending. It
 // needs no style of its own: renderPopup paints every unselected row faint already, and the
 // selected one on its highlight bar, so the tag inherits whichever the row is wearing (layout.md's
 // "in the pane's faint unselected style").
-const idleOnlyTag = "— idle only"
+const idleOnlyTag = "— runs at idle"
 
 // commandSuggestions returns the verbs of commandSpecs (command.go — the one registry the parser
 // reads too) whose name has partial as a prefix, in table order, each as the command schema's three
@@ -422,7 +422,7 @@ const idleOnlyTag = "— idle only"
 //
 // busy says a worker owns the engine, which is what fills the tag cell: the verbs
 // commandSpec.whileRunning marks as reporting-only leave it empty (they run right here), every other
-// row carries the tag and earns commandsAtIdleNote if accepted. The tag is a property of the
+// row carries the tag and is queued to run at the next idle if accepted. The tag is a property of the
 // MOMENT, not of the verb, so it is a parameter rather than a second table column. At idle no row
 // fills that cell at all and the whole column collapses (layoutPopupRow), costing the pane nothing.
 //
@@ -875,8 +875,9 @@ func (m Model) autocompleteExactMatch() bool {
 //   - every other command RUNS — if it may run NOW. Its token is cut out of the draft
 //     (removeCompletionToken) and runCommand drives it, so invoking a command from the middle of a
 //     half-written message costs the message nothing. An idle-only verb accepted while a worker
-//     works is refused instead (refuseIdleOnlyCommand): the row was tagged "— idle only", and the
-//     note repeats that answer without touching a character the human typed.
+//     works is queued instead (queueCommand): the row was tagged "— runs at idle", and the same cut
+//     takes only the verb token — the bare verb joins the queue and the rest of the draft stays
+//     verbatim, so the message being written costs nothing either way.
 //
 // The cursor lands at the end of the spliced text, or where the cut token stood.
 func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
@@ -895,10 +896,11 @@ func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
 		return m.spliceCompletion("/" + it.value)
 	}
 	parsed := parsedInput{kind: kindCommand, command: it.value}
+	m = m.removeCompletionToken()
 	if !m.commandRunnable(parsed) {
-		return m.refuseIdleOnlyCommand()
+		return m.queueCommand(parsed)
 	}
-	return m.removeCompletionToken().runCommand(parsed)
+	return m.runCommand(parsed)
 }
 
 // completionRegion is the byte range the overlay is completing, clamped to the value as it stands

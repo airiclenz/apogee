@@ -10,12 +10,12 @@ import (
 // Command running and refusal (ADR 0043)
 // ----------------------------------------------------------------------------
 //
-// The two refusals a typed line can meet before anything runs, the gate they hang off, and the
-// three drivers that DO run: the Exchange launch both send paths share, the session reset /clear
-// means, and the /command switchboard itself. Lifted out of model.go as one concern: what a
-// recognised verb does and what an unrunnable one is answered with are the same question. The
-// parse that classifies the line stays in command.go; [Model.submit] stays in model.go with the
-// input concern it belongs to.
+// The refusal a typed line can meet before anything runs, the gate that decides whether a line
+// runs now or is queued for the next idle, the queue's drain, and the three drivers that DO run:
+// the Exchange launch both send paths share, the session reset /clear means, and the /command
+// switchboard itself. Lifted out of model.go as one concern: what a recognised verb does and what
+// an unrunnable one is answered with are the same question. The parse that classifies the line
+// stays in command.go; [Model.submit] stays in model.go with the input concern it belongs to.
 
 // refuseUnknownSlash answers the sole-token typo guard (parseInput's kindUnknownSlash): a note
 // naming the word that resolved to nothing, and the line left exactly where it was. It is the
@@ -34,8 +34,8 @@ func (m Model) refuseUnknownSlash(parsed parsedInput) (tea.Model, tea.Cmd) {
 
 // commandRunnable reports whether parsed's verb may be driven in the state the Model is in RIGHT
 // NOW. It is the one gate the two invocation routes share — ⏎ on a whole-input line
-// (stageInterjection) and a dropdown accept (acceptAutocomplete) — so the menu's "— idle only" tag,
-// the refusal note and what actually happens are three views of a single rule.
+// (stageInterjection) and a dropdown accept (acceptAutocomplete) — so the menu's "— runs at idle"
+// tag, the queue a line goes into and what actually happens are three views of a single rule.
 //
 // At a quiescent boundary every verb is runnable. While a worker owns the engine (m.busy() — the
 // same predicate that decides whether Esc stops something) only the reporting lines are:
@@ -46,20 +46,54 @@ func (m Model) commandRunnable(parsed parsedInput) bool {
 	return !m.busy() || parsed.safeWhileRunning()
 }
 
-// refuseIdleOnlyCommand answers an idle-only command invoked while a worker works: the note that
-// says commands run at idle, and NOTHING else moved. The draft stays exactly as it was — the verb
-// token included, because it was never consumed — so the human can press ⏎ on the very same line the
-// moment the Exchange ends; it is refuseUnknownSlash's posture, applied to a word that resolves fine
-// and merely came too early.
+// queueCommand stages an idle-only command invoked while a worker works: the parsed line joins
+// deferredCommands, to run FIFO at the next idle through the ordinary command path
+// (runDeferredCommands), and the band above the box paints it as a "queued command: /verb" row. The
+// engine is not told — a queued command is the host's own bookkeeping until it runs (ADR 0031). The
+// caller has already put the box where it belongs, exactly as runCommand's callers have: a
+// whole-input line emptied it (stageCommand), a dropdown accept cut only the verb token out of the
+// draft (acceptAutocomplete), so the rest of a half-written message stays verbatim.
 //
-// The overlay closes, because the accept key was answered: every other branch of acceptAutocomplete
-// either closes it or deliberately re-derives it, and an open menu still highlighting the row that
-// was just refused would only invite the same refusal again. Typing on re-opens it, tag and all.
-func (m Model) refuseIdleOnlyCommand() (tea.Model, tea.Cmd) {
-	m.transcript.addNote(commandsAtIdleNote)
-	m.dismissAutocomplete()
-	m.layout()
+// A line that could not run even at idle — a parse error — is not queued: runCommand's own usage
+// note answers it right here, as it would at idle, because deferring it would only defer the same
+// refusal to a moment the human is no longer looking at the line.
+func (m Model) queueCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
+	if parsed.err != nil {
+		return m.runCommand(parsed)
+	}
+	m.deferredCommands = append(m.deferredCommands, parsed)
+	m.layout() // the band above the box gains a row
 	return m, nil
+}
+
+// runDeferredCommands drives the commands queued while a worker worked, oldest first, through the
+// ordinary command path — the same runCommand a line typed at idle reaches, so a queued /clear
+// resets the session exactly as a typed one does. It is called at every transition into idle: the
+// natural completions (drainThenFlush), the stop (foldCancelled) and the errored → idle ⏎
+// dismissal, and it runs BEFORE any held or staged message is sent from that idle, so a queued
+// /clear clears before a queued message lands (ADR 0025 D7 and D10, amended 2026-09-14).
+//
+// The drain stops at the first verb that leaves the Model busy — /compact starts its worker,
+// /continue opens an Exchange — because the next verb would be driven against a worker that owns
+// the engine: never two workers on one Agent. What is left queued waits for that worker's own
+// terminal fold, which drains again, so a /clear queued behind a /compact still runs, in order,
+// once the compaction lands. A deferred quit runs nothing: the queued commands are
+// session-ephemeral like the staged rows (ADR 0025), and a program that is exiting has no session
+// to run them in.
+func (m Model) runDeferredCommands() (Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	for len(m.deferredCommands) > 0 && !m.busy() && !m.quitting {
+		parsed := m.deferredCommands[0]
+		m.deferredCommands = m.deferredCommands[1:]
+		if len(m.deferredCommands) == 0 {
+			m.deferredCommands = nil
+		}
+		next, cmd := m.runCommand(parsed)
+		m = next.(Model)
+		cmds = append(cmds, cmd)
+	}
+	m.layout() // the band above the box loses the rows that ran
+	return m, tea.Batch(cmds...)
 }
 
 // launchExchange starts the worker over one Exchange and moves the Model into stateRunning: a
@@ -234,7 +268,8 @@ func (m *Model) resetSessionView() {
 // It is reached at stateIdle — where the engine is quiescent and ClearContext/Compact are safe to
 // launch — OR, for a reporting line alone, while a worker runs. Its callers own that gate
 // ([Model.commandRunnable]); by the time a verb arrives here it is either at a boundary or
-// boundary-FREE. The verbs that can arrive mid-run are boundary-free by inspection: /version and
+// boundary-FREE — a line that is neither is queued (queueCommand) and arrives here at the next
+// idle instead. The verbs that can arrive mid-run are boundary-free by inspection: /version and
 // /skills' LISTING form are synchronous notes touching no engine at all (/skills export writes a
 // file and is idle-only, the /confine split one clause on), and /confine's status form reads
 // [Engine.ConfineToWorkspace], which the Agent serves under its own RWMutex precisely so the UI may
@@ -242,8 +277,7 @@ func (m *Model) resetSessionView() {
 // both of its halves: the verb itself only opens a popup, and the accept behind it drives two doors
 // the Agent serves under that same RWMutex, writing an override that is read when the NEXT request
 // is built — so the Turn already in flight is untouched (ADR 0050). Everything else is idle-only
-// and is refused before it gets
-// here.
+// and waits in deferredCommands until it may get here.
 //
 // It never touches the editor: the CALLER has already put the box where it belongs, and the two
 // callers disagree on purpose. A whole-input invocation arrives from submit, which empties the box
@@ -488,10 +522,11 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 // so leave the gauge as it was and say so plainly rather than claiming a compaction. A failure
 // surfaces its reason as a note. Either way the worker is done: return to idle.
 //
-// A compaction that LANDED is a natural completion, so it flushes like an Exchange does: a row typed
-// while /compact ran had no Exchange to be interjected into (the /compact worker drives none, so it
-// carries no mailbox) and has been waiting for exactly this boundary. Only a stop or a fault holds —
-// a cancelled compaction returns cancelledMsg, not this Msg.
+// A compaction that LANDED is a natural completion, so it drains and flushes like an Exchange does:
+// the commands queued while /compact ran go first (runDeferredCommands), then a row typed while it
+// ran — which had no Exchange to be interjected into (the /compact worker drives none, so it carries
+// no mailbox) and has been waiting for exactly this boundary — goes out. Only a stop or a fault holds
+// — a cancelled compaction returns cancelledMsg, not this Msg.
 func (m Model) foldCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Err != nil:
@@ -504,5 +539,5 @@ func (m Model) foldCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	cmd := m.finishWorker(stateIdle)
 	m.refreshViewport()
-	return m.flushAfterCompletion(cmd)
+	return m.drainThenFlush(cmd)
 }

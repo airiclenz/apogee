@@ -171,14 +171,6 @@ func (b *interjectBox) drainAll() []queuedInterjection {
 // Staging — the Update-goroutine half: type, queue, take back, and record on arrival
 // ----------------------------------------------------------------------------
 
-// commandsAtIdleNote is what an IDLE-ONLY /command typed while the model works earns instead of a
-// queue slot: the verbs that drive the engine at a boundary the Update loop owns (/clear, /new,
-// /sessions, /compact, /continue, /confine off|on) cannot run mid-Step, and queueing one would only
-// defer a refusal. The human's line is left in the box, because they may well want to send it the
-// moment the Exchange ends. The reporting verbs are not refused at all — they run right there
-// (parsedInput.safeWhileRunning), which is why this note is no longer about "commands" as a class.
-const commandsAtIdleNote = "commands run at idle — not queued"
-
 // stageInterjection is what ⏎ does while a worker runs: it turns the editor's contents into a
 // staged row and empties the box, launching nothing (the single-worker invariant is untouched —
 // the running worker delivers the row at its next between-Steps boundary, ADR 0025).
@@ -186,10 +178,11 @@ const commandsAtIdleNote = "commands run at idle — not queued"
 // Five outcomes, and the input's fate is the difference between them: a REPORTING /command runs on
 // the spot — /version, /skills, /confine status answer while the model works, because they touch no
 // boundary (commandRunnable), and the box empties exactly as it does at idle since a whole-input
-// invocation IS the command line; any other /command is REFUSED with a note and the line is left
-// exactly where it was (refuseIdleOnlyCommand); a lone /word that names nothing is refused the same
-// way, with the typo guard's note (refuseUnknownSlash — a mistyped invocation must no more be queued
-// for the model than sent to it); a blank box stages nothing at all; anything else is queued and the
+// invocation IS the command line; any other /command is QUEUED to run at the next idle, and the box
+// empties the same way (stageCommand — ADR 0025 D10, amended 2026-09-14); a lone /word that names
+// nothing is refused with the typo guard's note and the line left exactly where it was
+// (refuseUnknownSlash — a mistyped invocation must no more be queued for the model than sent to
+// it); a blank box stages nothing at all; anything else is queued and the
 // editor is cleared, the same way a submit clears it. The row carries both halves — the verbatim
 // editor text for the Backspace restore, and the parsed input the engine consumes, whose @file
 // references deliberately stay unresolved until delivery, so the model reads the file as it stands
@@ -204,21 +197,7 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 
 	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
-		if !m.commandRunnable(parsed) {
-			return m.refuseIdleOnlyCommand()
-		}
-		// Nothing else was typed (the whole-input command rule), so emptying the box is exactly
-		// stripping the verb — submit's reading at idle, and runCommand touches the editor in neither.
-		m.promptEditor.reset()
-		if parsed.recallable() {
-			// The same carve-out submit makes, so noRecall means "never recorded" rather than
-			// "not recorded at idle". No verb reaches here carrying the flag today — /clear and
-			// /new are both idle-only, so commandRunnable refuses them above — which is exactly
-			// why the guard is written now: it costs nothing and it cannot be forgotten later.
-			m, record = m.recordSend(sent)
-		}
-		next, cmd := m.runCommand(parsed)
-		return next, tea.Batch(cmd, record)
+		return m.stageCommand(parsed, sent)
 	}
 	if parsed.kind == kindUnknownSlash {
 		return m.refuseUnknownSlash(parsed)
@@ -249,6 +228,77 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	return m, record
 }
 
+// stageCommand is what ⏎ does with a whole-input /command while a worker runs — the branch both
+// staging paths share, at the top level and inside a run view alike, because a command is the
+// host's and never the child's. The box empties exactly as it does at idle: nothing else was typed
+// (the whole-input command rule), so emptying it is exactly stripping the verb, and the line is
+// recorded for ↑ on the same terms a submitted one is (recall.go, decision 3) — a queued command is
+// a line the human sent, and the noRecall carve-out submit makes is kept here for the same reason.
+// A reporting line then runs on the spot; every other line is queued to run at the next idle
+// (queueCommand, ADR 0025 D10 amended 2026-09-14).
+func (m Model) stageCommand(parsed parsedInput, sent string) (tea.Model, tea.Cmd) {
+	var record tea.Cmd
+	m.promptEditor.reset()
+	if parsed.recallable() {
+		m, record = m.recordSend(sent)
+	}
+	if !m.commandRunnable(parsed) {
+		next, cmd := m.queueCommand(parsed)
+		return next, tea.Batch(cmd, record)
+	}
+	next, cmd := m.runCommand(parsed)
+	return next, tea.Batch(cmd, record)
+}
+
+// popDeferredCommand is Backspace's first answer on an empty box: the newest queued command comes
+// back into the editor as the line that queued it, and it will not run. It is asked before
+// popInterjection because the band paints the queued commands BELOW the staged messages, so a
+// queued command is always the row nearest the box — and the row nearest the box is the one a
+// Backspace takes back. The states are popInterjection's: idle and running, where the queue is the
+// human's to edit.
+//
+// The restored line is the verb and its arguments re-joined (commandLine) — not the editor text
+// verbatim, which a dropdown accept never had: it queues the bare verb cut out of a draft. The
+// overlay is not re-derived over it: the line is complete as restored, and ⏎ is what it invites.
+func (m Model) popDeferredCommand() (Model, bool) {
+	if !m.state.live() {
+		return m, false
+	}
+	n := len(m.deferredCommands)
+	if n == 0 {
+		return m, false
+	}
+	parsed := m.deferredCommands[n-1]
+	m.deferredCommands = m.deferredCommands[:n-1]
+	if len(m.deferredCommands) == 0 {
+		m.deferredCommands = nil
+	}
+	m.input.SetValue(commandLine(parsed))
+	m.input.MoveToEnd()
+	m.layout() // the box regrows around the restored line; the band loses a row
+	return m, true
+}
+
+// commandLine is a queued command as one line — "/verb", with its arguments after it when the verb
+// read any (parsedInput.args is set for the takesArgs verbs alone; a bare verb ignores what
+// followed it). It is the line the band's row shows and the line a Backspace hands back.
+func commandLine(parsed parsedInput) string {
+	line := "/" + parsed.command
+	if len(parsed.args) > 0 {
+		line += " " + strings.Join(parsed.args, " ")
+	}
+	return line
+}
+
+// stagedRowCount is how many rows the band above the input box has to seat: the staged messages
+// and the queued commands together, because they share one band (renderPendingInterjections), one
+// row budget (bandShape, via frameRowPlan) and one status-line readout (queuedSegment). The hold
+// note is the one reader that does NOT count both: a stop or a fault holds MESSAGES only, and the
+// queued commands run at that very idle (noteHeldQueue, runDeferredCommands).
+func (m Model) stagedRowCount() int {
+	return len(m.pendingInterjections) + len(m.deferredCommands)
+}
+
 // ----------------------------------------------------------------------------
 // Addressing the child on screen — ⏎ inside a run view (ADR 0063)
 // ----------------------------------------------------------------------------
@@ -275,8 +325,8 @@ func childNotRunningNote(name string) string {
 // It is stageInterjection's shape with one seam swapped, and deliberately so: the parse is the same
 // ([promptEditor.submitParse]), so a message to a child carries its @file references and its skill
 // /tokens exactly as one to the model does; the two /command branches are the same, so a reporting
-// verb typed inside a view runs on the spot, an idle-only one is refused with its note and a lone
-// mistyped /word is refused with the typo guard's — none of them reaching the child, because a
+// verb typed inside a view runs on the spot, an idle-only one is queued to run at the next idle and
+// a lone mistyped /word is refused with the typo guard's — none of them reaching the child, because a
 // command is a word for the HOST whatever the box happens to be addressing. What differs is where a
 // message goes: the top-level [interjectBox] is bypassed whole, because the engine mailbox IS the
 // queue for a child, and the display row is labelled with the run it went to.
@@ -294,15 +344,7 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 
 	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
-		if !m.commandRunnable(parsed) {
-			return m.refuseIdleOnlyCommand()
-		}
-		m.promptEditor.reset()
-		if parsed.recallable() {
-			m, record = m.recordSend(sent)
-		}
-		next, cmd := m.runCommand(parsed)
-		return next, tea.Batch(cmd, record)
+		return m.stageCommand(parsed, sent) // a command never reaches the child: it runs or queues at the top level
 	}
 	if parsed.kind == kindUnknownSlash {
 		return m.refuseUnknownSlash(parsed)
@@ -340,7 +382,7 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 }
 
 // refuseChildMessage is the one posture both refusals inside a view take: the note, and nothing
-// else moved but the status line. The draft stays exactly as it was — refuseIdleOnlyCommand's
+// else moved but the status line. The draft stays exactly as it was — refuseUnknownSlash's
 // posture, applied to a message that is fine and merely has nowhere to go — so the human can carry
 // the same line back up a level and send it there.
 //
@@ -484,6 +526,22 @@ func (m Model) flushAfterCompletion(done tea.Cmd) (tea.Model, tea.Cmd) {
 	}
 	next, cmd := m.flushInterjections()
 	return next, tea.Batch(done, cmd)
+}
+
+// drainThenFlush is the terminal ruling for a natural completion in full: the commands queued
+// while the worker ran go first, FIFO (runDeferredCommands), and the staged messages flush into a
+// new Exchange after them (flushAfterCompletion) — so a queued /clear clears before a queued
+// message lands, which is the order the human typed them in. A queued verb that opens a worker of
+// its own (/compact, /continue) stops the drain and the flush alike: never two workers on one
+// Agent, so what is still staged waits for THAT worker's own terminal fold, which reaches this
+// same ruling (foldCompactDone, the exchangeDoneMsg case).
+func (m Model) drainThenFlush(done tea.Cmd) (tea.Model, tea.Cmd) {
+	m, drained := m.runDeferredCommands()
+	done = tea.Batch(done, drained)
+	if m.busy() {
+		return m, done
+	}
+	return m.flushAfterCompletion(done)
 }
 
 // flushInterjections opens a new Exchange carrying everything still staged and empties the queue.
@@ -685,7 +743,7 @@ func bandShape(n, budget int, hints bool) bandPlan {
 // composed TO the window's width so that a narrow one sheds the activity phrase around the count
 // rather than the count off the end of the row ([Model.statusLeft]).
 func (m Model) renderPendingInterjections() string {
-	if len(m.pendingInterjections) == 0 {
+	if m.stagedRowCount() == 0 {
 		return ""
 	}
 	band := m.frameRowPlan(m.openPanes()).band
@@ -697,8 +755,9 @@ func (m Model) renderPendingInterjections() string {
 	if band.hidden > 0 {
 		rows = append(rows, m.queuedRow(bodyIndent+fmt.Sprintf("… %d more queued", band.hidden)))
 	}
-	for _, it := range m.pendingInterjections[len(m.pendingInterjections)-band.shown:] {
-		rows = append(rows, m.queuedRow(bodyIndent+glyphInterject+" "+m.queuedRowBody(it)))
+	bodies := m.stagedRowBodies()
+	for _, body := range bodies[len(bodies)-band.shown:] {
+		rows = append(rows, m.queuedRow(bodyIndent+glyphInterject+" "+body))
 	}
 	// The closing framing row, unless the skill-suggestion row has been granted it: the two
 	// surfaces share ONE block above the box, so the group closes on the hint instead and
@@ -729,6 +788,27 @@ func (m Model) queuedRow(text string) string {
 	return m.th.queuedText.Render(line)
 }
 
+// stagedRowBodies is every row of the band in paint order: the staged messages first, oldest to
+// newest, then the queued commands below them, oldest to newest — so a queued command is always
+// the row nearest the box, the one Backspace takes back first (popDeferredCommand). A queued
+// command's row names itself as one, because a bare "/verb" reads like a skill token, and the band
+// is the one place on screen that says the line is waiting to RUN rather than to be sent.
+func (m Model) stagedRowBodies() []string {
+	bodies := make([]string, 0, m.stagedRowCount())
+	for _, it := range m.pendingInterjections {
+		bodies = append(bodies, m.queuedRowBody(it))
+	}
+	for _, parsed := range m.deferredCommands {
+		bodies = append(bodies, queuedCommandRow(parsed))
+	}
+	return bodies
+}
+
+// queuedCommandRow is what a queued command's band row says: the line it will run, labelled.
+func queuedCommandRow(parsed parsedInput) string {
+	return "queued command: " + commandLine(parsed)
+}
+
 // queuedRowBody is what one staged row says. A row waiting for the MODEL says the message and
 // nothing else — the band sits above the box the human typed it in, and there is only one place it
 // could be going. A row addressed to a child says where it is going first, because with several
@@ -755,9 +835,11 @@ func queuedRowText(raw string) string {
 
 // queuedSegment is the status line's "N queued" readout, rendered whenever anything is waiting to
 // go out — including at idle, where a queue held over from a stop or an error must keep saying so.
-// afterPhrase asks for the " · " separator, for the states whose slot already carries words.
+// It counts both kinds of staged row, the messages and the queued commands (stagedRowCount): the
+// band it stands in for on a short window seats both. afterPhrase asks for the " · " separator,
+// for the states whose slot already carries words.
 func (m Model) queuedSegment(afterPhrase bool) string {
-	n := len(m.pendingInterjections)
+	n := m.stagedRowCount()
 	if n == 0 {
 		return ""
 	}

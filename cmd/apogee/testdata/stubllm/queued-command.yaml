@@ -1,0 +1,33 @@
+# The upstream TestE2EQueuedCommandRunsAtIdle talks to: one plain reply, one Turn that hangs long
+# enough for a /compact to be typed while it is in flight, and the summary that /compact then asks
+# for once the Exchange has ended and the queued command runs at idle.
+#
+# The hang answers as the empty-reply turn does when it expires, so the Exchange ends on its own —
+# no stop key — and whatever the loop does with that empty reply (the empty-response recovery
+# guard's retry, or the abandoned Turn) is answered by the unconditional tail turn. The first reply
+# is what gives the compaction something to fold: two messages past the protected prefix is the
+# reducer's floor (internal/context/compact.go), below which /compact says "nothing to compact".
+model: queued-command-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Queued command
+    - when:
+        last_message: ^Say hello
+      text: Hello there.
+    # The Turn the command is typed during: long enough to type into, bounded so a failing test
+    # still ends.
+    - when:
+        last_message: ^Think about this for a while
+      hang: 2s
+    # The queued /compact's summary call, keyed on the reducer's tail instruction.
+    - when:
+        last_message: Summarize the conversation above as instructed
+      repeat: true
+      text: "Summary: the human said hello and asked for a moment's thought."
+    # Anything else — the retry after the expired hang, above all.
+    - repeat: true
+      text: Thought about it.

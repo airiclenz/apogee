@@ -559,8 +559,8 @@ func TestModelNamingTheBoundModelRecordsThePin(t *testing.T) {
 	}
 }
 
-// /model is idle-only by the commandSpecs table, so a line typed mid-run earns the standing answer
-// instead of running — the tag the dropdown shows and what ⏎ does are one rule.
+// /model is idle-only by the commandSpecs table, so a line typed mid-run is queued to run at idle
+// instead of running now — the tag the dropdown shows and what ⏎ does are one rule.
 func TestModelCommandIsIdleOnly(t *testing.T) {
 	if spec, ok := commandByName("model"); !ok || spec.whileRunning || !spec.takesArgs {
 		t.Fatalf("commandSpec = %+v, want an idle-only verb that reads its arguments", spec)
@@ -576,8 +576,8 @@ func TestModelCommandIsIdleOnly(t *testing.T) {
 	if m.picker.open {
 		t.Error("the picker opened mid-run; /model is idle-only")
 	}
-	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	if got := plain(m.View()); !strings.Contains(got, "queued command: /model") {
+		t.Errorf("the queued-command row is missing from the band:\n%s", got)
 	}
 }
 
@@ -1344,8 +1344,8 @@ func TestServerCommandIsIdleOnly(t *testing.T) {
 	if len(sw.calls) != 0 {
 		t.Errorf("switch calls = %v, want none mid-run", sw.calls)
 	}
-	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	if got := plain(m.View()); !strings.Contains(got, "queued command: /server remote") {
+		t.Errorf("the queued-command row is missing from the band:\n%s", got)
 	}
 }
 
@@ -1719,8 +1719,8 @@ func TestModelCommandIsIdleOnlyWithTheLauncher(t *testing.T) {
 	if m.actuation.inFlight {
 		t.Error("the latch was taken mid-run")
 	}
-	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	if got := plain(m.View()); !strings.Contains(got, "queued command: /model alpha") {
+		t.Errorf("the queued-command row is missing from the band:\n%s", got)
 	}
 }
 
@@ -3067,8 +3067,8 @@ func TestSubAgentsServerRunsWhileTheWorkerWorks(t *testing.T) {
 	if want := []string{"remote"}; !reflect.DeepEqual(host.retargets, want) {
 		t.Errorf("retargets = %v, want %v mid-run", host.retargets, want)
 	}
-	if got := plain(m.View()); strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the idle-only refusal was said for a whileRunning verb:\n%s", got)
+	if got := plain(m.View()); strings.Contains(got, "queued command") {
+		t.Errorf("a whileRunning verb was queued instead of run:\n%s", got)
 	}
 
 	// The BARE form too: the overlay opens over a working agent and claims its own keys, or it would

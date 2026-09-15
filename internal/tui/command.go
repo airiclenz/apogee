@@ -85,9 +85,10 @@ type parsedInput struct {
 //     /schedule and /schedule-stop — writes only to the scheduler library, whose Schedules fire as
 //     separate headless runs (ADR 0033), or — /sub-agents-server — moves where the NEXT delegation is
 //     spawned, which no sub-agent already in flight can be reached by (ADR 0045). Any of the three:
-//     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is idle-only and earns commandsAtIdleNote mid-run
-//     instead of running (parsedInput.safeWhileRunning is where the flag is read, and /confine's
-//     reporting FORM is the one nuance it adds).
+//     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is
+//     idle-only and is queued mid-run to run at the next idle (Model.queueCommand) instead of
+//     running (parsedInput.safeWhileRunning is where the flag is read, and /confine's reporting
+//     FORM is the one nuance it adds).
 //
 //   - noRecall — a sent invocation of this verb is NEVER recorded as a recallable prompt, in memory
 //     or on disk. The session-reset pair /clear and /new carry it because recall exists so a line

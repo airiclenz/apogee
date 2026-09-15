@@ -221,8 +221,8 @@ func TestUndoArgumentErrorReportsTheUsageLineAndTouchesNothing(t *testing.T) {
 	}
 }
 
-// /undo mutates the workspace, so a line typed while the model works earns the standing answer
-// instead of running — the group it would revert is the one the running Step is still filling.
+// /undo mutates the workspace, so a line typed while the model works is queued to run at idle
+// instead of running now — the group it would revert is the one the running Step is still filling.
 func TestUndoIsRefusedWhileTheModelWorks(t *testing.T) {
 	eng := &fakeEngine{undoStep: scriptedStep(7), undoStepOK: true}
 	m := newTestModelEng(t, eng, testOpts)
@@ -236,8 +236,8 @@ func TestUndoIsRefusedWhileTheModelWorks(t *testing.T) {
 	if m.undoGeneration != 0 {
 		t.Errorf("stashed generation = %d, want 0 — the command never ran", m.undoGeneration)
 	}
-	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	if got := plain(m.View()); !strings.Contains(got, "queued command: /undo") {
+		t.Errorf("the queued-command row is missing from the band:\n%s", got)
 	}
 }
 

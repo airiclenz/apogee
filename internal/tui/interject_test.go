@@ -449,25 +449,139 @@ func TestStagedRowCarriesFileRefs(t *testing.T) {
 	}
 }
 
-// TestCommandWhileRunningRefusedWithNote pins the thing that does NOT queue: a MUTATING /command
-// needs a quiescent engine, so it earns a note and keeps the human's line in the box for the moment
-// the Exchange ends. (The reporting verbs run right there — TestReportingCommandsRunWhileRunning.)
-func TestCommandWhileRunningRefusedWithNote(t *testing.T) {
+// An idle-only command typed mid-run is QUEUED, not refused (ADR 0025 D10, amended 2026-09-14): the
+// band above the box paints it as a "queued command" row, the box empties as a send does, no note is
+// written and nothing is driven — the line runs at the next idle.
+func TestCommandWhileRunningIsQueued(t *testing.T) {
 	m := runningModel(t)
-	m.input.SetValue("/clear")
+	m.input.SetValue("/compact")
 	next, cmd := stepCmd(t, m, keyEnter())
 
 	if cmd != nil {
-		t.Error("a refused command returned a Cmd; nothing may be driven while a worker runs")
+		t.Error("a queued command returned a Cmd; nothing may be driven while a worker runs")
 	}
-	if got := next.input.Value(); got != "/clear" {
-		t.Errorf("input = %q; want the command preserved for the human to re-send at idle", got)
+	if got := next.input.Value(); got != "" {
+		t.Errorf("input = %q; want the box emptied — the line was taken, not refused", got)
 	}
-	if len(next.pendingInterjections) != 0 {
-		t.Errorf("staged rows = %+v; want none — commands are never queued", next.pendingInterjections)
+	if got := commandLines(next); !reflect.DeepEqual(got, []string{"/compact"}) {
+		t.Errorf("queued commands = %v; want the one line", got)
 	}
-	if got := plain(next.View()); !strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	if n := len(next.pendingInterjections); n != 0 {
+		t.Errorf("staged messages = %d; want none — a command queues on its own list", n)
+	}
+	view := plain(next.View())
+	if !strings.Contains(view, "queued command: /compact") {
+		t.Errorf("the queued-command row is missing from the band:\n%s", view)
+	}
+	if !strings.Contains(view, "1 queued") {
+		t.Errorf("the status line does not count the queued command:\n%s", view)
+	}
+	if n := len(next.transcript.entries); n != len(m.transcript.entries) {
+		t.Errorf("transcript grew by %d entries; want no note for a queued command", n-len(m.transcript.entries))
+	}
+}
+
+// commandLines is the queued commands as the lines they will run, oldest first.
+func commandLines(m Model) []string {
+	var lines []string
+	for _, parsed := range m.deferredCommands {
+		lines = append(lines, commandLine(parsed))
+	}
+	return lines
+}
+
+// Backspace on an empty box takes the queued command back into the editor as its line, and it no
+// longer runs: the band's row nearest the box is the one un-done, and a queued command is always
+// that row.
+func TestBackspaceEmptyPopsTheQueuedCommand(t *testing.T) {
+	m := runningModel(t)
+	m = stageRow(t, m, "a remark")
+	m = stageRow(t, m, "/compact")
+
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+
+	if got := m.input.Value(); got != "/compact" {
+		t.Fatalf("editor = %q; want the queued command's line restored", got)
+	}
+	if n := len(m.deferredCommands); n != 0 {
+		t.Fatalf("queued commands = %d; want none — the pop took it back", n)
+	}
+	if n := len(m.pendingInterjections); n != 1 {
+		t.Fatalf("staged messages = %d; want the remark still queued — the command was the nearer row", n)
+	}
+	if got := plain(m.View()); strings.Contains(got, "queued command") {
+		t.Errorf("the band still paints a queued-command row after the pop:\n%s", got)
+	}
+}
+
+// Esc×2 stops the Exchange and KEEPS the queued command: a stop scraps what the model was doing,
+// not what the human asked to happen next, and the command runs at the stop's idle
+// (TestStopRunsTheQueuedCommandAndHoldsTheMessage).
+func TestStopKeepsTheQueuedCommand(t *testing.T) {
+	m := runningModel(t)
+	m = stageRow(t, m, "/compact")
+
+	m = step(t, m, keyEsc())
+	m = step(t, m, keyEsc())
+
+	if got := commandLines(m); !reflect.DeepEqual(got, []string{"/compact"}) {
+		t.Errorf("queued commands after esc×2 = %v; want the line kept", got)
+	}
+}
+
+// At idle the queued command RUNS through the ordinary command path and its row is gone: a /compact
+// queued mid-run starts its worker the moment the Exchange completes.
+func TestQueuedCommandRunsAtIdle(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	m = stageRow(t, m, "/compact")
+
+	next, cmd := stepCmd(t, m, exchangeDoneMsg{})
+
+	if n := len(next.deferredCommands); n != 0 {
+		t.Fatalf("queued commands = %d; want the queue drained at idle", n)
+	}
+	if next.state != stateRunning || next.box != nil {
+		t.Fatalf("state = %v, box = %v; want the compaction worker running with no mailbox", next.state, next.box)
+	}
+	drainCmd(t, next, cmd)
+	if eng.compactCalls != 1 {
+		t.Errorf("Compact calls = %d, want 1 — the queued /compact ran at idle", eng.compactCalls)
+	}
+	if got := plain(next.View()); strings.Contains(got, "queued command") {
+		t.Errorf("the band still paints the queued-command row after it ran:\n%s", got)
+	}
+}
+
+// A stop with one held message and one queued command runs the command at the stop's idle and
+// holds the message: the hold note counts messages alone, because only they wait for the next ⏎
+// (ADR 0025 D7, amended 2026-09-14).
+func TestStopRunsTheQueuedCommandAndHoldsTheMessage(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	m = stageRow(t, m, "still worth sending")
+	m = stageRow(t, m, "/clear")
+
+	next, _ := stepCmd(t, m, cancelledMsg{})
+
+	if next.state != stateIdle {
+		t.Fatalf("state = %v; want idle — /clear launches nothing", next.state)
+	}
+	if n := len(next.deferredCommands); n != 0 {
+		t.Errorf("queued commands = %d; want the command run at the stop's idle", n)
+	}
+	if eng.clearCalls != 1 {
+		t.Errorf("ClearContext calls = %d, want 1 — the queued /clear ran at the stop's idle", eng.clearCalls)
+	}
+	if n := len(next.pendingInterjections); n != 1 {
+		t.Errorf("staged messages = %d; want the message held — /clear keeps a held queue", n)
+	}
+	if got := countNotes(next, heldNote(1)); got != 1 {
+		t.Errorf("hold note %q written %d times; want exactly once, counting the message alone", heldNote(1), got)
 	}
 }
 
@@ -964,7 +1078,7 @@ func TestScrollWhileRunningViaPgKeysAndWheel(t *testing.T) {
 // TestAutocompleteOpensWhileRunning: both regions are offered in an interjection — the first
 // ISSUES #12 symptom was the "/" namespace vanishing exactly when the human was composing the
 // message to send next. A @ref and a skill token are message content that rides the interjection; a
-// command row is offered too, and the ones that need a boundary carry the "— idle only" tag rather
+// command row is offered too, and the ones that need a boundary carry the "— runs at idle" tag rather
 // than being hidden, so the menu says what accepting them will do.
 func TestAutocompleteOpensWhileRunning(t *testing.T) {
 	dir := t.TempDir()
@@ -1077,21 +1191,24 @@ func TestConfineStatusRunsWhileRunningButOffIsRefused(t *testing.T) {
 
 	m.input.SetValue("/confine off")
 	m = step(t, m, keyEnter())
-	if got := m.input.Value(); got != "/confine off" {
-		t.Errorf("input = %q; want the refused line preserved", got)
+	if got := m.input.Value(); got != "" {
+		t.Errorf("input = %q; want the box emptied — the line was queued", got)
 	}
 	if got := eng.confinesSet(); len(got) != 0 {
 		t.Errorf("SetConfineToWorkspace calls = %v, want none — the mutating form is idle-only", got)
 	}
-	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	if got := commandLines(m); !reflect.DeepEqual(got, []string{"/confine off"}) {
+		t.Errorf("queued commands = %v; want the mutating line queued with its argument", got)
+	}
+	if got := plain(m.View()); !strings.Contains(got, "queued command: /confine off") {
+		t.Errorf("the queued-command row is missing from the band:\n%s", got)
 	}
 }
 
-// Accepting a tagged row from the dropdown while running answers with the note and touches NOTHING
-// else: the draft (the verb token included — it was never consumed) is exactly as it was, so ⏎ on
-// the very same line works the moment the Exchange ends.
-func TestAcceptIdleOnlyCommandWhileRunningNotesAndKeepsTheDraft(t *testing.T) {
+// Accepting a tagged row from the dropdown while running QUEUES the bare verb and cuts only its
+// token out of the draft: the rest of the half-written message stays verbatim, exactly as an
+// accept at idle leaves it, and nothing is driven until the Exchange ends.
+func TestAcceptIdleOnlyCommandWhileRunningQueuesTheVerbAndKeepsTheDraft(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -1106,19 +1223,22 @@ func TestAcceptIdleOnlyCommandWhileRunningNotesAndKeepsTheDraft(t *testing.T) {
 	next, cmd := stepCmd(t, m, keyTab())
 
 	if cmd != nil {
-		t.Error("a refused accept returned a Cmd; nothing may be driven while a worker runs")
+		t.Error("a queued accept returned a Cmd; nothing may be driven while a worker runs")
 	}
 	if eng.clearCalls != 0 {
 		t.Errorf("ClearContext calls = %d, want 0 — /clear cannot run mid-Step", eng.clearCalls)
 	}
-	if got, want := next.input.Value(), "fix the parser /clear"; got != want {
-		t.Errorf("editor = %q, want the draft untouched (%q)", got, want)
+	if got, want := next.input.Value(), "fix the parser "; got != want {
+		t.Errorf("editor = %q, want only the verb token cut out (%q)", got, want)
+	}
+	if got := commandLines(next); !reflect.DeepEqual(got, []string{"/clear"}) {
+		t.Errorf("queued commands = %v; want the bare verb queued", got)
 	}
 	if next.autocomplete.active {
 		t.Error("the overlay stayed open after the accept was answered")
 	}
-	if got := plain(next.View()); !strings.Contains(got, commandsAtIdleNote) {
-		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	if got := plain(next.View()); !strings.Contains(got, "queued command: /clear") {
+		t.Errorf("the queued-command row is missing from the band:\n%s", got)
 	}
 }
 

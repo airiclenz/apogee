@@ -58,7 +58,13 @@ NOTES (2026-09-15): the archived plan's header still reads `**Status:** unexecut
 
 **Commit:** none (gate only).
 
-## 2. An idle-only command typed mid-run is queued and runs at idle
+## 2. An idle-only command typed mid-run is queued and runs at idle — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — internal/tui/command.go: made necessary by the deletion of `commandsAtIdleNote` (the `whileRunning` flag's doc named it; comment only).
+NOTES (2026-09-15): the two interject_test.go refusal tests were renamed to what they now assert (`TestCommandWhileRunningIsQueued`, `TestAcceptIdleOnlyCommandWhileRunningQueuesTheVerbAndKeepsTheDraft`); the picker/skills/undo test names were kept, only their assertions rewritten. Both new names still match the item's acceptance regex.
+NOTES (2026-09-15): Backspace pops the band's row nearest the box — a queued command first (commands paint below the staged messages), then the newest staged message — which is the "existing pop order extended" reading that keeps the band and the pop consistent; a popped command is restored as `/verb args` (parsedInput carries no verbatim text; a dropdown accept never had one).
+NOTES (2026-09-15): internal/tui/doc.go still names `commandsAtIdleNote` / `[Model.refuseIdleOnlyCommand]` (lines ~132, ~801) and docs/manual/commands.md, layout.md and ADR 0025/0027 still say "idle only" / "never queued" — left for item 3, which the plan's regression check assigns doc.go and the docs to; not a defect of this item's code (no docmap test reads those names).
+NOTES (2026-09-15): the e2e console step 10 deletes the popped `/sessions` line with nine Backspaces and waits for the box's running placeholder before the Esc×2, because the stop keys sent on the heels of the Backspaces were swallowed (three of three runs green after the wait; the PTY Esc timing, not the queue).
 
 **What:** Depends on item 1. `internal/tui/commandrun.go` `refuseIdleOnlyCommand` (reached from `commandRunnable` when a verb lacks `whileRunning`) posts `commands run at idle — not queued` and keeps the draft. Replace: the parsed command is appended to a new `deferredCommands []parsedInput` on the `Model` (value-copied slice, appended copy-on-write like `pendingInterjections`), the draft clears, and the staged band paints it as a row reading `queued command: /<verb> <args>` below any interjection rows; Backspace with an empty draft pops the newest staged row of either kind (existing pop order extended); Esc×2 cancels the Exchange and KEEPS the queued commands. At `finishWorker(stateIdle)` the deferred commands run FIFO through the ordinary command path BEFORE the held-queue note (`noteHeldQueue`) and before any queued interjection is sent — a queued `/clear` therefore clears before a queued message lands. `commandsAtIdleNote` is deleted; a verb that cannot run even at idle (a parse error) reports as it does today. `autocomplete.go` `idleOnlyTag` becomes `— runs at idle`.
 

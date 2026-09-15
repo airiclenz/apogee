@@ -122,11 +122,14 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 			"`no console 1 (open consoles: none)`; a restore inherits no Console ids")
 	}
 
-	// Step 10, the edge — a REFUSED switch reaps nothing. The refusal lands one layer earlier than
-	// the checklist's hand-run does: `/sessions` is an idle-only command (internal/tui/command.go),
-	// so mid-Exchange the TUI refuses the COMMAND and RestoreSession is never called. Either way the
-	// claim under test is the same one, and it is the one the "Fails if" names: a switch that did not
-	// happen must leave the host exactly as it was.
+	// Step 10, the edge — a switch that did not happen reaps nothing. It lands one layer earlier
+	// than the checklist's hand-run does: `/sessions` is an idle-only command
+	// (internal/tui/command.go), so mid-Exchange the TUI QUEUES the command to run at idle and
+	// RestoreSession is never called. Either way the claim under test is the same one, and it is
+	// the one the "Fails if" names: a switch that did not happen must leave the host exactly as it
+	// was. The queued row is then taken back with Backspace BEFORE the stop below: a /sessions that
+	// ran at the stop's idle would open the browser, which claims every key (model.go's
+	// keyClaimOrder) and would swallow the quit's ctrl+c×2.
 	submit(drv, "Open a console running "+parentSleep+".")
 	allowIfAsked(drv)
 	drv.WaitText("The console is open.")
@@ -140,10 +143,18 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	submit(drv, "/sessions")
 	// No quiet check here: the Turn is still hanging, so the spinner is still animating and a screen
 	// that never goes quiet is the correct state to be asserting in.
-	drv.WaitText("commands run at idle — not queued")
+	drv.WaitText("queued command: /sessions")
 	if pids := descendants(t, drv.Pid(), parentSleep); len(pids) != 1 {
-		t.Errorf("%q runs as %v after a REFUSED switch; a refusal must reap nothing", parentSleep, pids)
+		t.Errorf("%q runs as %v after a QUEUED switch; a command that has not run must reap nothing", parentSleep, pids)
 	}
+	// Backspace on the empty box pops the queued row back into it as its line, and it will not run;
+	// the line is then deleted character by character so the box is empty for the keys below.
+	drv.Press(tuitest.Backspace)
+	drv.WaitGone("queued command: /sessions")
+	for range len("/sessions") {
+		drv.Press(tuitest.Backspace)
+	}
+	drv.WaitText(busyPlaceholder) // the emptied box invites again: every Backspace has landed before the stop keys go
 
 	// Step 11 — quitting closes every open Console. The pid is read before the quit, because after it
 	// there is no process to ask about.
