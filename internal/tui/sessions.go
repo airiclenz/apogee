@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -606,6 +607,10 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// brings back the run heads that carry their own readings, and those replace this the moment
 	// one reports (delegateUsageTotal). A record whose blob no longer decodes keeps it instead.
 	m.delegateUsage = usageTotals(msg.rec.Meta.DelegateUsage)
+	// The models that answered the resumed session come back with its tallies, for the same reason
+	// the base does: the host rebuilds Meta from what the renderer hands it on every save, so a set
+	// not carried in here would be dropped by the reopened session's first save.
+	m.servedModels = slices.Clone(msg.rec.Meta.ServedModels)
 	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
 	m.flash = ""
 	m.layout()

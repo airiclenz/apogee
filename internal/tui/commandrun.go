@@ -240,6 +240,9 @@ func (m *Model) resetSessionView() {
 	m.usage = usageTotals{}
 	m.usageBase = usageTotals{}
 	m.delegateUsage = usageTotals{}
+	// The models that answered fall with the tallies they qualify: they were the closed session's
+	// answerers, and its record took them with the same saveAtIdle above.
+	m.servedModels = nil
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
 	// A bound reset queues a Rotate above, which opens a fresh Session record, and a fresh record
 	// names itself; a pre-bound one had no session to rotate. Either way: unlatch the naming call,

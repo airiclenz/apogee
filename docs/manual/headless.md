@@ -186,7 +186,7 @@ moment, and the case difference is the signal.
 | `error` | something failed, named by its source |
 | `prune` | the context was pruned: how many results, how many tokens |
 | `ref_clipped` | an `@file` or attached skill entered the conversation clipped to its bound: which reference, the bound in tokens, whether the absolute per-reference cap or its share of the window bound it |
-| `usage` | one model call's token accounting and the run's cumulative totals |
+| `usage` | one model call's token accounting and the run's cumulative totals; `data.model` is the id the call asked for and `data.served_model` the id the server answered with (empty when it named none) |
 | `audit` | a tool call's allow/deny decision and its reason |
 | `seam_closed` | one in-loop seam finished passing: `data.seam` is its closing notice's name (`post-response-finished`, …) and `data.fired` the reactions that acted there, in order — **opt-in**, absent from the stream unless `--seams` asks for it |
 | `run_started` | the opening frame — not an event |

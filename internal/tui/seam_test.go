@@ -467,6 +467,7 @@ type savedCall struct {
 	ctxUsed       int
 	usage         session.Usage
 	delegateUsage session.Usage
+	servedModels  []string
 }
 
 // fakeSessionHost is a recording SessionHost for the save-pipeline tests: it captures every Save,
@@ -514,6 +515,7 @@ func (h *fakeSessionHost) Save(
 	title string,
 	userMsgs, ctxUsed int,
 	usage, delegateUsage session.Usage,
+	servedModels []string,
 ) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -524,6 +526,7 @@ func (h *fakeSessionHost) Save(
 	h.saves = append(h.saves, savedCall{
 		id: h.activeID, sess: sess, transcript: transcript, title: title,
 		userMsgs: userMsgs, ctxUsed: ctxUsed, usage: usage, delegateUsage: delegateUsage,
+		servedModels: servedModels,
 	})
 	return h.saveErr
 }

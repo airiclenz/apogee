@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,6 +31,10 @@ type savePayload struct {
 	// inside it so the record keeps the two halves of a session's spend apart, which is what lets
 	// the browser report the whole of it (session.Meta).
 	delegateUsage session.Usage
+	// servedModels is every model id the upstream has answered with so far, in order first seen
+	// (Model.servedModels) — its own copy, so a fold that appends after the snapshot cannot reach
+	// into a payload already queued behind an in-flight save.
+	servedModels []string
 }
 
 // snapshotPayload assembles a savePayload around a captured engine snapshot: it encodes the
@@ -50,6 +55,7 @@ func (m Model) snapshotPayload(sess domain.Session) (savePayload, bool) {
 		ctxUsed:       m.ctxUsed,
 		usage:         session.Usage(m.usage),
 		delegateUsage: session.Usage(m.delegateUsageTotal()),
+		servedModels:  slices.Clone(m.servedModels),
 	}, true
 }
 
@@ -309,7 +315,8 @@ func (m Model) writeCmd(w recordWrite) tea.Cmd {
 		p := w.payload
 		return func() tea.Msg {
 			return saveDoneMsg{Err: sessions.Save(
-				p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed, p.usage, p.delegateUsage)}
+				p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed, p.usage, p.delegateUsage,
+				p.servedModels)}
 		}
 	}
 	return func() tea.Msg {

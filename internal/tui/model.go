@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -424,6 +425,15 @@ type Model struct {
 	// a view from a record: the engine never sees one.
 	usageBase usageTotals
 
+	// servedModels is every distinct model id the upstream has answered with in this session, in
+	// the order first seen — the ServedModel each UsageEvent carries, at EVERY depth (a routed
+	// delegation's own model, ADR 0045, is one the session was answered by), folded as a set
+	// (foldStats). It is a record fact the renderer keeps because it is the one that sees the
+	// readings: it is seeded from a resumed record (ResumedSession.ServedModels, resumeLoaded),
+	// saved with every snapshot beside the tallies (savePayload), painted by /usage as `served:`,
+	// and zeroed with the tallies on /clear (resetSessionView). Nil until a reply names a model.
+	servedModels []string
+
 	// delegateUsage is the delegate half of a RESUMED record's accounting (session.Meta), and only
 	// ever a fallback: a live run head's own reading replaces it the moment one reports, so the two
 	// are never added together (delegateUsageTotal). It exists for the record whose scrollback did
@@ -745,6 +755,7 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	m.usageBase = usageTotals(r.Usage)
 	m.usage = m.usageBase                          // the engine counts from zero; the fold adds its reading on top
 	m.delegateUsage = usageTotals(r.DelegateUsage) // …and the delegate half beside it, until a head reports
+	m.servedModels = slices.Clone(r.ServedModels)  // …and the models that answered it, so the first save keeps them
 	m.replayScrollback(r.Transcript, r.Title, r.InExchange)
 }
 

@@ -143,7 +143,15 @@ NOTES (2026-09-15): `docs/manual/sessions.md` gained one sentence on the `/clear
 
 **Commit:** `fix(tui): /clear and /new reset the usage tallies in the engine and the view`
 
-## 6. The record carries the models that answered
+## 6. The record carries the models that answered — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — internal/provider/wire.go: made necessary by the non-streamed path — `RawResponse` gains `Model` so `chatCompletionResponse.model` has somewhere to land (the plan's "a non-streamed response likewise" test asserts it in client_test.go, the file that holds the Respond round-trip).
+NOTES (2026-09-15): consequential edit — internal/provider/client_test.go: made necessary by the `RawResponse.Model` assertion (the plan's non-streamed test); the streamed half is in stream_test.go as listed.
+NOTES (2026-09-15): consequential edit — internal/agent/routedspawn_test.go: made necessary by threading `served` through `usageTally.record` (its `reading` helper calls the signature).
+NOTES (2026-09-15): consequential edit — internal/agent/usagetally_test.go: the compaction `ServedModel` assertion the plan's "agent test" asks for lives in the existing `TestCompactionUsageRidesFlaggedMaintenanceEvent`; `usageScript` now stamps a served id on its Done.
+NOTES (2026-09-15): consequential edit — internal/tui/reportpane.go, internal/tui/autotitle_test.go, cmd/apogee/upstream_test.go: made necessary by the `usageContent` and `SessionHost.Save` signature changes (call sites only).
+NOTES (2026-09-15): `store_test.go`'s `TestSaveLoadRoundTrip` compares Meta with `reflect.DeepEqual` now that Meta holds a slice (`!=` no longer compiles); the pre-feature decode case rides the existing legacy-record subtest plus a new `TestServedModelsRoundTrip`.
+NOTES (2026-09-15): `docs/manual/commands.md`'s `/usage` row gained the `served:` line (user-facing behaviour changed; the file is not in the item's list).
 
 **What:** `internal/provider/wirejson.go` `chatCompletionResponse` and the stream's chunks gain the `model` field; `internal/provider/stream.go`'s `Delta` gains `Model`, populated on the `DeltaDone` delta (from the first chunk of a stream / the whole reply of a non-streamed response); `domain.UsageEvent` gains `ServedModel string` (the response's id; empty when the server sends none). The TUI fold — and only the TUI fold — folds every distinct value in order first seen into `session.Meta.ServedModels []string` (`json:"servedModels,omitempty"`, tolerant decode — old records read back unchanged); `Meta.Model` stays the bound profile. The record's readers are the `/sessions` pane and `internal/run`: the pane is unchanged, and a headless / Firing record written through `internal/run` carries no `served_models` (Out of scope); `/usage` shows `served: a, b` when the set is non-empty. Producers/consumers of `UsageEvent` enumerated: `internal/agent/loop.go` and `internal/agent/compact.go` (emit, both through `usageTally.record`), `internal/tui/fold.go` `foldStats` (folds the set) and `internal/tui/transcript.go` `applyUsage` (a child's reading), `internal/tui/usage.go` (paints `served:`), `internal/run` (headless prints usage), `internal/eventjson` (the `usage` line kind gains `served_model`, additive — manual kinds table).
 

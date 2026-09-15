@@ -172,6 +172,9 @@ type RawResponse struct {
 	ToolCalls    []ToolCall
 	FinishReason string
 	Usage        Usage
+	// Model is the id the server put on the reply — what it actually answered with, on the same
+	// terms as the streamed [Delta.Model]; empty when the server sends none.
+	Model string
 
 	// TopCandidates are the candidate tokens the server reported for the FIRST generated
 	// token position, most-likely first. It is non-nil only when the Request asked for

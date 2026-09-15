@@ -568,6 +568,53 @@ func TestFoldStatsTracksTheMainAgentsCumulativeTotals(t *testing.T) {
 	})
 }
 
+// TestFoldStatsCollectsTheModelsThatAnswered pins the served-model fold: every distinct id a
+// reading carries joins the session's set in the order first seen, a repeat is not added twice, a
+// reading that names none adds nothing — and a delegate's reading counts, because a routed child
+// (ADR 0045) is answered by a model the session was answered by, so the set is folded ahead of the
+// depth guard that keeps its FILL off the gauge.
+func TestFoldStatsCollectsTheModelsThatAnswered(t *testing.T) {
+	t.Parallel()
+
+	t.Run("two servers, in order first seen, once each", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+
+		m = m.foldEvent(servedUsage("a", 0))
+		m = m.foldEvent(servedUsage("b", 0))
+		m = m.foldEvent(servedUsage("a", 0))
+		m = m.foldEvent(servedUsage("", 0))
+
+		if want := []string{"a", "b"}; !slices.Equal(m.servedModels, want) {
+			t.Errorf("servedModels = %q, want %q — first seen first, no repeat, no blank", m.servedModels, want)
+		}
+	})
+
+	t.Run("a routed delegate's id reaches the set", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+
+		m = m.foldEvent(servedUsage("main-model", 0))
+		m = m.foldEvent(servedUsage("grunt-8b", 1))
+
+		if want := []string{"main-model", "grunt-8b"}; !slices.Equal(m.servedModels, want) {
+			t.Errorf("servedModels = %q, want %q — a depth-1 reading names a model this session was answered by", m.servedModels, want)
+		}
+		if m.usage.Calls != 1 {
+			t.Errorf("main totals = %+v, want the one depth-0 call — the child's fill still counts on its own head", m.usage)
+		}
+	})
+}
+
+// servedUsage is a counted reading at the given depth whose reply the server stamped with the
+// served id — "" for a server that named none.
+func servedUsage(served string, depth int) domain.UsageEvent {
+	e := mainUsage(1000, 200, 1200, 1000, 200, 1200, 1)
+	e.Depth = depth
+	e.ServedModel = served
+	return e
+}
+
 // TestFoldStatsSkipsAMaintenanceReadingForTheGaugeAndClock pins where the two readings part
 // company: a maintenance event (the compaction call) is real spend, so the totals take it, but its
 // prompt describes the summarizer's own request — so the gauge must not move to it and the

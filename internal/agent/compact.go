@@ -519,6 +519,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	var errMsg string
 	var finish domain.FinishReason
 	var usage *provider.Usage
+	var served string
 	for delta := range c.a.upstream.Stream(ctx, preq) {
 		switch delta.Kind {
 		case provider.DeltaContent:
@@ -527,6 +528,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 			upstreamThinking.WriteString(delta.Thinking)
 		case provider.DeltaDone:
 			usage = delta.Usage // nil when the server omits its accounting, exactly as in streamResponse
+			served = delta.Model
 			finish = domain.FinishReason(delta.FinishReason)
 		case provider.DeltaError, provider.DeltaContextOverflow:
 			failed = true
@@ -554,7 +556,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 
 	if usage != nil {
 		event := c.a.usage.record(
-			c.a.base(c.a.turns.index), c.a.cfg.Model, c.a.cfg.Context.MaxContextTokens,
+			c.a.base(c.a.turns.index), c.a.cfg.Model, served, c.a.cfg.Context.MaxContextTokens,
 			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CachedPromptTokens,
 		)
 		event.Maintenance = true

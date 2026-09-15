@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strconv"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -52,6 +53,17 @@ const (
 // session, or a server that omits usage entirely. It is BODY prose rather than a row, because a row
 // would be read as an agent under the column headers the pane would then have to draw over nothing.
 const usageEmptyBody = "no usage reported yet — no completion has come back with a token count"
+
+// usageServedLabel leads the pane's one line of prose above the rows: the model ids the upstream
+// actually ANSWERED with this session (Model.servedModels), which is not always the profile the
+// session is bound to — an alias resolved server-side, a routed delegation's own model. It is prose
+// rather than a column because it is a fact about the session, not about any one agent's row, and
+// the line is absent altogether while no reply has named a model, so a server that sends none
+// leaves the pane exactly as it was. usageServedSeparator joins the ids in order first seen.
+const (
+	usageServedLabel     = "served: "
+	usageServedSeparator = ", "
+)
 
 // maxUsageRows is the pane's own taste for how many rows it shows at once: the header, a main row
 // and a session total leave nine for delegates, which is more than a session fans out to in one
@@ -116,7 +128,7 @@ func (m Model) renderUsage() string { return m.renderReport(usageReport) }
 // composed — the pane's own entry into [Model.reportSpec], which the window and the paint reach
 // through [Model.reportContent] instead.
 func (m Model) usageSpec(rows []popupRow) (popupSpec, bool) {
-	return m.reportSpec(usageReport, usageContent(rows))
+	return m.reportSpec(usageReport, usageContent(rows, m.servedModels))
 }
 
 // usageKey is the pane's whole key contract: esc closes the report, ↑/↓ scroll it a row at a time and
@@ -148,11 +160,17 @@ func (m Model) usageWheel(msg tea.MouseWheelMsg) (Model, bool) {
 
 // usageContent is what the report tells the shared module about itself for one frame: its name, the
 // keys it spells, how tall it likes to be, the rows it was composed with, and — where there are none
-// — the one sentence it shows instead of them.
-func usageContent(rows []popupRow) reportContent {
+// — the one sentence it shows instead of them. served is the set of model ids the session was
+// answered by, which the body names above the rows (usageServedLabel) when it is non-empty; with
+// no rows the empty sentence stands alone, since a session no reply has counted was answered by
+// no model the pane could name either.
+func usageContent(rows []popupRow, served []string) reportContent {
 	body := ""
-	if len(rows) == 0 {
+	switch {
+	case len(rows) == 0:
 		body = usageEmptyBody
+	case len(served) > 0:
+		body = usageServedLabel + strings.Join(served, usageServedSeparator)
 	}
 	return reportContent{
 		title:  usageTitle,

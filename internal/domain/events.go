@@ -439,6 +439,13 @@ func (e RefClippedEvent) Notice() string {
 // agent knows no window (none discovered, none pinned), and a Driver falls back to its own —
 // which is what every unrouted reading amounts to, the child inheriting the parent's window
 // verbatim.
+//
+// ServedModel is the id the server put on the reply itself — what it actually ANSWERED with —
+// where Model is what the agent asked for. The two differ whenever the server resolves the
+// requested id to something else: an alias, an aggregator routing to a backing model, a
+// launcher that swapped what a profile serves. It is the response's own `model` field, taken
+// verbatim, and empty when the server sends none — an absence a reader shows as unknown rather
+// than filling in from Model, since the point of the field is to catch the two disagreeing.
 type UsageEvent struct {
 	EventBase
 	PromptTokens     int
@@ -461,6 +468,7 @@ type UsageEvent struct {
 	CumulativeCalls              int
 
 	Maintenance bool
+	ServedModel string
 }
 
 // AuditEvent surfaces one append-only audit record — a tool call, the guardrail

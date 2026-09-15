@@ -49,7 +49,13 @@ type Delta struct {
 	ToolCall     *ToolCall
 	FinishReason string
 	Usage        *Usage
-	Err          string
+	// Model is meaningful on the terminal DeltaDone: the model id the server put on the reply's
+	// chunks — what it actually ANSWERED with, which is not always what the request asked for
+	// (an alias resolved server-side, an aggregator routing to a backing model). It is read off
+	// the first chunk that carries one, since every chunk of a reply repeats it. Empty when the
+	// server sends none, which a consumer treats as "unknown", never as "the bound model".
+	Model string
+	Err   string
 	// Retryable is meaningful only on DeltaError: it reports that the fault's class is one
 	// the client would have retried had it arrived as an HTTP status (429, 5xx, or an
 	// aggregator's "provider_unavailable"), or a body read that ended in a mid-stream EOF or a
@@ -177,6 +183,9 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 	var open openToolCalls
 	var pendingFinish string
 	var pendingUsage *Usage
+	// The id the server put on the reply's chunks: the first one that names a model settles it
+	// (every chunk of a reply repeats the same id), and it rides the terminal Done.
+	var servedModel string
 
 	// Running total of the content and reasoning bytes yielded so far. Tool-call bytes are
 	// not summed here — openToolCalls carries its own maxToolCallBytes cap, on the sum
@@ -204,7 +213,7 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 		if !open.flush(yield) {
 			return
 		}
-		yield(Delta{Kind: DeltaDone, FinishReason: reason, Usage: usage, MalformedChunks: malformed})
+		yield(Delta{Kind: DeltaDone, FinishReason: reason, Usage: usage, Model: servedModel, MalformedChunks: malformed})
 	}
 
 	for scanner.Scan() {
@@ -241,6 +250,9 @@ func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) 
 			fault.MalformedChunks = malformed
 			yield(fault)
 			return
+		}
+		if servedModel == "" {
+			servedModel = chunk.Model
 		}
 		if chunk.Usage != nil {
 			usage := chunk.Usage.usage()
@@ -458,8 +470,10 @@ func (o *openToolCalls) flush(yield func(Delta) bool) bool {
 	return true
 }
 
-// sseChunk is one decoded SSE data event from a streamed completion.
+// sseChunk is one decoded SSE data event from a streamed completion. Model is the id the server
+// answered with, repeated on every chunk of a reply; absent on servers that omit it.
 type sseChunk struct {
+	Model   string `json:"model"`
 	Choices []struct {
 		Delta        sseDelta `json:"delta"`
 		FinishReason string   `json:"finish_reason"`

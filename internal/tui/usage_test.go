@@ -231,6 +231,27 @@ func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
 	}
 }
 
+// TestUsagePaneNamesTheModelsThatAnswered pins the served line: the pane says `served: a, b` above
+// its rows once a reply has named a model, in the order the session first saw them, and carries no
+// such line while no reply has — a server that names no model leaves the pane exactly as it was.
+func TestUsagePaneNamesTheModelsThatAnswered(t *testing.T) {
+	m := usageModel(t, mainTotals, 8192)
+	m.servedModels = []string{"gpt-oss-20b-mxfp4", "grunt-8b"}
+
+	pane := strip(m.renderUsage())
+	if want := usageServedLabel + "gpt-oss-20b-mxfp4" + usageServedSeparator + "grunt-8b"; !strings.Contains(pane, want) {
+		t.Errorf("the pane does not name the models that answered %q:\n%s", want, pane)
+	}
+	if !strings.Contains(pane, usageMainLabel) {
+		t.Errorf("the served line displaced the rows:\n%s", pane)
+	}
+
+	unnamed := strip(usageModel(t, mainTotals, 8192).renderUsage())
+	if strings.Contains(unnamed, usageServedLabel) {
+		t.Errorf("the pane drew a served line with no model named:\n%s", unnamed)
+	}
+}
+
 // closedUsage is the model with the report dismissed — the renderer's own "" condition.
 func (m Model) closedUsage() Model {
 	m.usagePane = usagePane{}
@@ -564,6 +585,7 @@ func TestClearResetsTheUsageTallies(t *testing.T) {
 		t.Parallel()
 		m := resumedUsageModel(t, stored)
 		m = m.foldEvent(mainUsage(5000, 300, 5300, 5000, 300, 5300, 1))
+		m = m.foldEvent(servedUsage("resumed-answerer", 0))
 		if m.usage.Calls != 41 {
 			t.Fatalf("precondition: the resumed session has spent %+v, want 41 calls to clear away", m.usage)
 		}
@@ -574,6 +596,9 @@ func TestClearResetsTheUsageTallies(t *testing.T) {
 		if m.usage != (usageTotals{}) || m.usageBase != (usageTotals{}) {
 			t.Fatalf("after /clear usage = %+v, base = %+v, want both zero — the spend went with the closed session",
 				m.usage, m.usageBase)
+		}
+		if m.servedModels != nil {
+			t.Errorf("after /clear servedModels = %q, want none — the closed session's answerers went with its tallies", m.servedModels)
 		}
 		m = m.foldEvent(mainUsage(700, 40, 740, 700, 40, 740, 1))
 

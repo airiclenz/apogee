@@ -65,12 +65,16 @@ type SessionHost interface {
 	// accounting as of this save — and delegateUsage — the sum its sub-agents reported by then —
 	// populate the browsable metadata. The two accountings arrive apart and are stored apart: what
 	// the SESSION spent is their sum, which is the browser's business rather than the host's.
+	// servedModels is every model id the upstream answered with so far, in order first seen — the
+	// renderer folds the set off the readings it sees, and the host stores it beside the bound
+	// profile it knows (session.Meta.ServedModels).
 	Save(
 		sess domain.Session,
 		transcript []byte,
 		title string,
 		userMsgs, ctxUsed int,
 		usage, delegateUsage session.Usage,
+		servedModels []string,
 	) error
 	// Rotate closes the active session so the next Save mints a fresh ID — the /clear|/new and
 	// load-a-different-session boundary. It is idempotent on an already-inactive session.
@@ -1477,6 +1481,12 @@ type ResumedSession struct {
 	// and those replace it (Model.delegateUsageTotal). It is what a record whose blob no longer
 	// replays has left to say that a delegate spent anything at all.
 	DelegateUsage session.Usage
+	// ServedModels is the set of model ids the record saw the upstream answer with, in order first
+	// seen (session.Meta.ServedModels), seeded so the reopened session's first save keeps them:
+	// the host rebuilds Meta on every Save from what the renderer hands it, so a set the renderer
+	// did not carry in would be dropped by the first save of the resumed session. nil on a record
+	// written before the field existed.
+	ServedModels []string
 	// InExchange marks a session interrupted mid-task — the resumed Agent reports an open Exchange
 	// (the binary reads agent.InExchange() after building it). newModel then appends the interrupted
 	// note so the human knows /continue picks up the unfinished work; false for a cleanly-closed

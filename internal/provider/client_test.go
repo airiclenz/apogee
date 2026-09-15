@@ -63,6 +63,7 @@ func TestRespond_ParsesWholeResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{
+			"model": "m-served",
 			"choices": [{
 				"message": {
 					"content": "hello",
@@ -101,6 +102,11 @@ func TestRespond_ParsesWholeResponse(t *testing.T) {
 	// server's prefix-cache hit without a second round trip to ask for it.
 	if got.Usage != (Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, CachedPromptTokens: 6}) {
 		t.Errorf("Usage = %+v, want {10 5 15 cached 6}", got.Usage)
+	}
+	// The served id is the reply's own, on the same terms as the streamed Done's: what the server
+	// answered with, which here is not the m the client asked for.
+	if got.Model != "m-served" {
+		t.Errorf("Model = %q, want m-served — the id the reply carried, not the requested one", got.Model)
 	}
 }
 

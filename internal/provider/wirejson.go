@@ -136,7 +136,9 @@ type chatResponseMessage struct {
 // chatCompletionResponse is the whole (non-streamed) reply. The thinking channel some servers
 // emit rides on the message (see reasoningChannel); usage is absent on servers that omit it,
 // and logprobs is absent on every server that was not asked for it (or cannot supply it).
+// Model is the id the server answered with — the served model, not necessarily the requested one.
 type chatCompletionResponse struct {
+	Model   string `json:"model"`
 	Choices []struct {
 		Message      chatResponseMessage `json:"message"`
 		LogProbs     *logProbsJSON       `json:"logprobs"`
@@ -246,6 +248,7 @@ func (r chatCompletionResponse) toRawResponse() RawResponse {
 	if r.Usage != nil {
 		out.Usage = r.Usage.usage()
 	}
+	out.Model = r.Model
 	return out
 }
 

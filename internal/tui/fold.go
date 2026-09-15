@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -166,6 +167,12 @@ func (m Model) foldStats(e domain.Event) Model {
 			m.genStart = time.Time{} // the Turn re-streams (events.go) — time the fresh generation
 		}
 	case domain.UsageEvent:
+		// The model that answered is a SESSION fact before it is any one agent's: a routed child's
+		// reading (ADR 0045) names a model the session was answered by just as the main agent's does,
+		// so the set is folded ahead of the depth guard below, in order first seen and once each.
+		if e.ServedModel != "" && !slices.Contains(m.servedModels, e.ServedModel) {
+			m.servedModels = append(slices.Clone(m.servedModels), e.ServedModel)
+		}
 		if e.Depth != 0 {
 			break // a delegate's fill, which is its run block's business and not the gauge's
 		}

@@ -554,8 +554,11 @@ type usageTally struct {
 // they produced. They are passed in rather than read off a member because the tally holds only its
 // own arithmetic, and they are passed at all because a routed sub-agent runs on a model — and in a
 // window — of its own (ADR 0045): without the stamp a Driver painting the child's fill has no way
-// to say which model filled it, nor what it was full OF.
-func (t *usageTally) record(base domain.EventBase, model string, window, prompt, completion, total, cached int) domain.UsageEvent {
+// to say which model filled it, nor what it was full OF. served is the id the reply itself
+// carried (provider.Delta.Model) — the model the server answered with, "" when it named none — and
+// it is stamped beside model rather than in place of it because the two disagreeing is a fact a
+// record should keep, not paper over.
+func (t *usageTally) record(base domain.EventBase, model, served string, window, prompt, completion, total, cached int) domain.UsageEvent {
 	t.prompt += prompt
 	t.completion += completion
 	t.total += total
@@ -568,6 +571,7 @@ func (t *usageTally) record(base domain.EventBase, model string, window, prompt,
 		TotalTokens:                  total,
 		CachedPromptTokens:           cached,
 		Model:                        model,
+		ServedModel:                  served,
 		ContextWindow:                window,
 		CumulativePromptTokens:       t.prompt,
 		CumulativeCompletionTokens:   t.completion,

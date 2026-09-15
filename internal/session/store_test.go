@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -54,7 +55,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if got.RecordVersion != RecordVersion {
 		t.Errorf("RecordVersion = %d, want %d (Save must stamp it)", got.RecordVersion, RecordVersion)
 	}
-	if got.Meta != want.Meta {
+	if !reflect.DeepEqual(got.Meta, want.Meta) {
 		t.Errorf("Meta round-trip = %+v, want %+v", got.Meta, want.Meta)
 	}
 	if string(got.Transcript) != string(want.Transcript) {
@@ -810,6 +811,67 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 		if (got.Meta.DelegateUsage != Usage{}) {
 			t.Errorf("a record predating the accounting loaded delegate usage %+v, want the zero totals",
 				got.Meta.DelegateUsage)
+		}
+		if got.Meta.ServedModels != nil {
+			t.Errorf("a record predating the served set loaded %q, want none", got.Meta.ServedModels)
+		}
+	})
+}
+
+// TestServedModelsRoundTrip pins the record's third session fact: the model ids the upstream
+// answered with come back off disk in the order they were stored, under the camelCase key every
+// Meta member wears, beside — never in place of — the bound Model. A session no reply has named a
+// model for writes no key at all, which is what lets a record predating the field read back the
+// same nothing (the pre-feature case rides TestUsageTotalsRoundTrip's legacy record).
+func TestServedModelsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the set comes back off disk in order", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		st := NewStore(dir)
+
+		want := sampleRecord("20260915T120000Z-aaaa1111", time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC))
+		want.Meta.Model = "gpt-oss-20b"
+		want.Meta.ServedModels = []string{"gpt-oss-20b-mxfp4", "grunt-8b"}
+		if err := st.Save(want); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+
+		got, err := st.Load(want.Meta.ID)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !slices.Equal(got.Meta.ServedModels, want.Meta.ServedModels) {
+			t.Errorf("loaded served models = %q, want %q", got.Meta.ServedModels, want.Meta.ServedModels)
+		}
+		if got.Meta.Model != "gpt-oss-20b" {
+			t.Errorf("loaded model = %q, want the bound gpt-oss-20b beside the served set", got.Meta.Model)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, want.Meta.ID+".json"))
+		if err != nil {
+			t.Fatalf("read record: %v", err)
+		}
+		if !bytes.Contains(data, []byte(`"servedModels":["gpt-oss-20b-mxfp4","grunt-8b"]`)) {
+			t.Errorf("the record does not carry the set under its camelCase key: %s", data)
+		}
+	})
+
+	t.Run("a session no reply named a model for writes no key", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		st := NewStore(dir)
+
+		rec := sampleRecord("20260915T130000Z-bbbb2222", time.Date(2026, 9, 15, 13, 0, 0, 0, time.UTC))
+		if err := st.Save(rec); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, rec.Meta.ID+".json"))
+		if err != nil {
+			t.Fatalf("read record: %v", err)
+		}
+		if bytes.Contains(data, []byte("servedModels")) {
+			t.Errorf("an empty served set reached the record: %s", data)
 		}
 	})
 }

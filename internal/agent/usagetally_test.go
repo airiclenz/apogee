@@ -19,9 +19,14 @@ import (
 func usageScript(text string, u provider.Usage) []provider.Delta {
 	return []provider.Delta{
 		{Kind: provider.DeltaContent, Content: text},
-		{Kind: provider.DeltaDone, FinishReason: "stop", Usage: &u},
+		{Kind: provider.DeltaDone, FinishReason: "stop", Usage: &u, Model: servedModelID},
 	}
 }
+
+// servedModelID is the id every usageScript reply names as the model that answered — deliberately
+// not the id baseConfig binds, so a reading that stamped the bound model where the served one
+// belongs would show.
+const servedModelID = "served-by-x"
 
 // usageToolCallScript is toolCallScript with the same terminal usage report attached, so a
 // Turn that ends in a tool call still accounts for the tokens it spent.
@@ -256,6 +261,12 @@ func TestCompactionUsageRidesFlaggedMaintenanceEvent(t *testing.T) {
 	}
 	if got[2] != fold {
 		t.Error("the Maintenance event is not the third emission; the fold must account at the point it ran")
+	}
+	// The summariser's reply names the model that answered it exactly as a Turn's does: the served
+	// id is read off the same terminal Done the usage is, so a fold on an aliased or routed server
+	// records who summarised, not just what it cost.
+	if fold.ServedModel != servedModelID {
+		t.Errorf("compaction ServedModel = %q, want %q — the id the summary reply carried", fold.ServedModel, servedModelID)
 	}
 
 	after := got[3]

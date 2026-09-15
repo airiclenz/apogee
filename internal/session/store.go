@@ -122,6 +122,15 @@ type Meta struct {
 	// deliberately rather than mistaking one for it. Like Usage it is compatible in
 	// both directions: an older record decodes to the zero Usage, an older build ignores the key.
 	DelegateUsage Usage `json:"delegateUsage,omitzero"`
+	// ServedModels is every distinct model id the upstream ANSWERED with over this session, in the
+	// order first seen — the reply's own `model` field, as its writer folded it off each UsageEvent
+	// (a Driver's fold; internal/run writes none). It sits beside Model rather than replacing it
+	// because the two are different facts: Model is the bound profile the session asked for, and
+	// this is what actually answered — an alias resolved server-side, a routed delegation's own
+	// model (ADR 0045), a launcher that swapped what a profile serves. Empty on a server that names
+	// no model and on every record written before the field existed, which decodes to nil on the
+	// same tolerant terms as Usage above: no RecordVersion bump, an older build ignores the key.
+	ServedModels []string `json:"servedModels,omitempty"`
 }
 
 // Usage is one agent's cumulative token accounting over a session: how many completions it

@@ -776,7 +776,7 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 				// event per agent rather than summing the stream, and a sub-agent — a separate
 				// Agent with its own tally — reports child-local totals at its own Depth.
 				a.cfg.Events.Emit(a.usage.record(
-					a.base(turn), a.cfg.Model, a.cfg.Context.MaxContextTokens,
+					a.base(turn), a.cfg.Model, delta.Model, a.cfg.Context.MaxContextTokens,
 					u.PromptTokens, u.CompletionTokens, u.TotalTokens, u.CachedPromptTokens,
 				))
 			}

@@ -118,13 +118,16 @@ func newSessionHost(store *session.Store, workspace, model string, resumed *sess
 // UpdatedAt, the transcript blob, and the browsable counts refresh every Save. Workspace and Model
 // come from the wiring, the facts the renderer cannot know. The two token accountings are stored
 // exactly as they arrive — the main agent's and its delegates' — because the record keeps the halves
-// of a session's spend apart (session.Meta).
+// of a session's spend apart (session.Meta), and servedModels — the ids the upstream actually
+// answered with, which the renderer folds off the readings — is stored beside the bound Model
+// rather than in place of it, so the record says both what was asked for and what answered.
 func (h *sessionHost) Save(
 	sess apogee.Session,
 	transcript []byte,
 	title string,
 	userMsgs, ctxUsed int,
 	usage, delegateUsage session.Usage,
+	servedModels []string,
 ) error {
 	now := h.now().UTC()
 	h.mu.Lock()
@@ -154,6 +157,7 @@ func (h *sessionHost) Save(
 			CtxUsed:       ctxUsed,
 			Usage:         usage,
 			DelegateUsage: delegateUsage,
+			ServedModels:  servedModels,
 		},
 		Transcript: transcript,
 		Session:    sess,
@@ -420,6 +424,7 @@ func resumedSession(rec *session.Record, inExchange bool) *tui.ResumedSession {
 		CtxUsed:       rec.Meta.CtxUsed,
 		Usage:         rec.Meta.Usage,
 		DelegateUsage: rec.Meta.DelegateUsage,
+		ServedModels:  rec.Meta.ServedModels,
 		UserMsgs:      rec.Meta.UserMsgs,
 		InExchange:    inExchange,
 	}

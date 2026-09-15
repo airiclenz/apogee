@@ -265,6 +265,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 				TotalTokens:                  1020,
 				CachedPromptTokens:           640,
 				Model:                        "gpt-oss-20b",
+				ServedModel:                  "gpt-oss-20b-mxfp4",
 				ContextWindow:                32768,
 				CumulativePromptTokens:       1800,
 				CumulativeCompletionTokens:   240,
@@ -276,7 +277,8 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "usage",
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"prompt_tokens":900,"completion_tokens":120,"total_tokens":1020,` +
-				`"cached_prompt_tokens":640,"model":"gpt-oss-20b","context_window":32768,` +
+				`"cached_prompt_tokens":640,"model":"gpt-oss-20b","served_model":"gpt-oss-20b-mxfp4",` +
+				`"context_window":32768,` +
 				`"cumulative_prompt_tokens":1800,"cumulative_completion_tokens":240,` +
 				`"cumulative_total_tokens":2040,"cumulative_cached_prompt_tokens":640,` +
 				`"cumulative_calls":2,"maintenance":true}`,

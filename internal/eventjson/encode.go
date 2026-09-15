@@ -144,6 +144,7 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			TotalTokens:                  e.TotalTokens,
 			CachedPromptTokens:           e.CachedPromptTokens,
 			Model:                        e.Model,
+			ServedModel:                  e.ServedModel,
 			ContextWindow:                e.ContextWindow,
 			CumulativePromptTokens:       e.CumulativePromptTokens,
 			CumulativeCompletionTokens:   e.CumulativeCompletionTokens,
@@ -281,13 +282,17 @@ type refClippedData struct {
 }
 
 // usageData is the usage line: the token accounting an Upstream reply carried, the emitting
-// agent's running totals, and the model and window that fill sits in.
+// agent's running totals, and the model and window that fill sits in. served_model is the id the
+// server put on the reply — what actually answered, beside the model that was asked for — and ""
+// where the server named none; added within v 2, since a member a reader did not know is one it
+// ignores.
 type usageData struct {
 	PromptTokens       int    `json:"prompt_tokens"`
 	CompletionTokens   int    `json:"completion_tokens"`
 	TotalTokens        int    `json:"total_tokens"`
 	CachedPromptTokens int    `json:"cached_prompt_tokens"`
 	Model              string `json:"model"`
+	ServedModel        string `json:"served_model"`
 	ContextWindow      int    `json:"context_window"`
 
 	CumulativePromptTokens       int `json:"cumulative_prompt_tokens"`

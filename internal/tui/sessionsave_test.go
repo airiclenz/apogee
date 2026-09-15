@@ -2,7 +2,9 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -386,6 +388,94 @@ func TestSaveCarriesBothHalvesOfTheSessionsSpend(t *testing.T) {
 	if got, want := calls[0].delegateUsage, session.Usage(usageSum(childTotals, childTotals)); got != want {
 		t.Errorf("saved delegate usage = %+v, want the two heads' readings summed %+v", got, want)
 	}
+}
+
+// TestSaveCarriesTheModelsThatAnswered pins the record's third session fact beside the two spends:
+// the ids the upstream answered with reach the host on every save, in the order the session first
+// saw them — and a save takes a copy, so a reply naming a new model after the snapshot cannot reach
+// into a payload already queued.
+func TestSaveCarriesTheModelsThatAnswered(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	seedConversation(&m)
+	m = m.foldEvent(servedUsage("gpt-oss-20b-mxfp4", 0))
+	m = m.foldEvent(servedUsage("grunt-8b", 1))
+
+	m, cmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{Version: domain.SessionVersion}})
+	if cmd == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save")
+	}
+	m = m.foldEvent(servedUsage("late-arrival", 0))
+	runWrites(t, m, cmd)
+
+	calls := host.savedCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Save calls = %d, want the one per-Turn save", len(calls))
+	}
+	if want := []string{"gpt-oss-20b-mxfp4", "grunt-8b"}; !slices.Equal(calls[0].servedModels, want) {
+		t.Errorf("saved served models = %q, want %q — the set as the snapshot found it", calls[0].servedModels, want)
+	}
+}
+
+// TestResumedRecordKeepsItsServedModelsAcrossTheFirstSave pins the seeding half: the host rebuilds
+// Meta from what the renderer hands it on every save, so a resumed record's ids must be carried in
+// with its tallies (ResumedSession.ServedModels on --resume, the record's Meta on a browser
+// restore) or the reopened session's first save drops them. A reply the resumed session gets from
+// a new model joins the set behind them.
+func TestResumedRecordKeepsItsServedModelsAcrossTheFirstSave(t *testing.T) {
+	t.Run("--resume carries the record's ids in", func(t *testing.T) {
+		host := &fakeSessionHost{}
+		m := newModel(context.Background(), &fakeEngine{}, Options{
+			Sessions:  host,
+			Workspace: "/ws/a",
+			Resumed:   &ResumedSession{Title: "france question", ServedModels: []string{"stored-a"}},
+		}, nil)
+		m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+		seedConversation(&m)
+		m = m.foldEvent(servedUsage("live-b", 0))
+
+		m, cmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{Version: domain.SessionVersion}})
+		if cmd == nil {
+			t.Fatal("the per-Turn snapshot scheduled no save")
+		}
+		runWrites(t, m, cmd)
+
+		calls := host.savedCalls()
+		if len(calls) != 1 {
+			t.Fatalf("Save calls = %d, want the one per-Turn save", len(calls))
+		}
+		if want := []string{"stored-a", "live-b"}; !slices.Equal(calls[0].servedModels, want) {
+			t.Errorf("saved served models = %q, want %q — the record's ids first, the live reply's behind", calls[0].servedModels, want)
+		}
+	})
+
+	t.Run("a browser restore carries the record's ids in", func(t *testing.T) {
+		host := &fakeSessionHost{}
+		host.seed(session.Record{
+			Meta: session.Meta{
+				ID: "sess-1", Title: "france question", Workspace: "/ws/a",
+				UpdatedAt: time.Now(), UserMsgs: 1, ServedModels: []string{"stored-a"},
+			},
+			Session: domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"restored":true}`)},
+		})
+		m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+		seedConversation(&m)
+		m = m.foldEvent(servedUsage("outgoing", 0))
+		m = openBrowser(t, m)
+		m, loadCmd := stepCmd(t, m, keyEnter())
+		if loadCmd == nil {
+			t.Fatal("enter dispatched no Load Cmd")
+		}
+		m = foldResume(t, m, loadCmd)
+
+		if want := []string{"stored-a"}; !slices.Equal(m.servedModels, want) {
+			t.Fatalf("after the restore servedModels = %q, want the record's %q — the outgoing session's went with it", m.servedModels, want)
+		}
+		m = m.foldEvent(servedUsage("live-b", 0))
+		if want := []string{"stored-a", "live-b"}; !slices.Equal(m.servedModels, want) {
+			t.Errorf("servedModels = %q, want %q — a new answerer joins behind the record's", m.servedModels, want)
+		}
+	})
 }
 
 // TestSavedRecordHoldsANestedChildsSiblingOnce is the session-record side of the once-only commit:

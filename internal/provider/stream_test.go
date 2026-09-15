@@ -100,6 +100,48 @@ func TestStream_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestStream_DoneCarriesTheServedModel pins the served-model read: the id the server repeats on
+// every chunk of a reply reaches the terminal Done, taken off the first chunk that names one, and
+// a stream whose chunks name none leaves it empty rather than filling in the requested model.
+func TestStream_DoneCarriesTheServedModel(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the first chunk's id rides the Done", func(t *testing.T) {
+		t.Parallel()
+		srv := sseServer(`data: {"model":"x","choices":[{"delta":{"content":"Hel"}}]}
+
+data: {"model":"x","choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`)
+		defer srv.Close()
+
+		deltas := collectStream(NewClient(srv.URL, "m"), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+		done := deltas[len(deltas)-1]
+		if done.Kind != DeltaDone {
+			t.Fatalf("last delta = %+v, want the terminal Done", done)
+		}
+		if done.Model != "x" {
+			t.Errorf("Done.Model = %q, want x — the id the server put on the reply, not the requested m", done.Model)
+		}
+	})
+
+	t.Run("a stream that names no model leaves it empty", func(t *testing.T) {
+		t.Parallel()
+		srv := sseServer(roundTripSSE)
+		defer srv.Close()
+
+		deltas := collectStream(NewClient(srv.URL, "m"), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+		done := deltas[len(deltas)-1]
+		if done.Kind != DeltaDone || done.Model != "" {
+			t.Errorf("Done = %+v, want Model empty — an absent id is unknown, never the bound model", done)
+		}
+	})
+}
+
 // TestStream_UsageCarriesCachedPromptTokens pins the OpenAI-shaped prompt-token breakdown: when
 // the terminal usage chunk reports how much of the prompt came from the server's prefix cache,
 // that number reaches the seam beside the counters it qualifies. It is a subset of PromptTokens,

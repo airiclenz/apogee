@@ -181,7 +181,7 @@ type reportContent struct {
 func (m Model) reportContent(r reportKind) reportContent {
 	switch r {
 	case usageReport:
-		return usageContent(m.usageRows())
+		return usageContent(m.usageRows(), m.servedModels)
 	case inspectReport:
 		return m.inspectContent()
 	case thinkingReport:
