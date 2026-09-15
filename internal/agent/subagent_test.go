@@ -952,7 +952,7 @@ func TestSubAgent_ChildInheritsTheLiveNoticeSwitch(t *testing.T) {
 
 	gen := parent.Generation()
 	gen.ContextFillNotice = true
-	parent.SetReactions(gen)
+	mustSetReactions(t, parent, gen)
 	child, err := parent.newChildAgent("spawn-1", "survey the tree", "surveyor")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
@@ -962,7 +962,7 @@ func TestSubAgent_ChildInheritsTheLiveNoticeSwitch(t *testing.T) {
 	}
 
 	gen.ContextFillNotice = false
-	parent.SetReactions(gen)
+	mustSetReactions(t, parent, gen)
 	child, err = parent.newChildAgent("spawn-2", "survey the tree again", "surveyor")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)

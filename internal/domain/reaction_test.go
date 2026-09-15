@@ -726,8 +726,10 @@ func TestGenerationValidateRejectsANonObserveEntry(t *testing.T) {
 
 // TestGenerationValidateAcceptsAnObserveListAndRefusesTheRest covers the generation's remaining
 // answers: an empty generation is well formed — a Driver with no user entries applies one every
-// time — a list of distinct observe entries passes, and both a malformed entry and a repeated ID
-// are refused, since the ID is what a firing is reported under.
+// time — a list of distinct observe entries passes, and a repeated ID is refused, since the ID is
+// what a firing is reported under. An entry's OWN rules are not re-run here: they are answered once
+// where the entry is built (the config layer's mapping pins those sentences), so a Generation
+// carrying one is a caller's mistake, not this check's catch.
 func TestGenerationValidateAcceptsAnObserveListAndRefusesTheRest(t *testing.T) {
 	t.Parallel()
 
@@ -760,17 +762,6 @@ func TestGenerationValidateAcceptsAnObserveListAndRefusesTheRest(t *testing.T) {
 			gen:     Generation{Observe: []Reaction{entry("notify"), entry("notify")}},
 			wantErr: `apogee: invalid reaction "notify": listed twice in the observe list`,
 		},
-		{
-			name: "an entry that does not validate",
-			gen: Generation{Observe: []Reaction{{
-				ID:      "notify",
-				Origin:  OriginUser,
-				Class:   ClassObserve,
-				On:      []Moment{MomentPreToolExec},
-				Handler: ArgvHandler{Argv: []string{"/usr/bin/notify"}},
-			}}},
-			wantErr: `apogee: invalid reaction "notify": run: reacts to notices; "pre-tool-exec" is a seam`,
-		},
 	}
 
 	for _, c := range cases {
@@ -800,9 +791,9 @@ func TestGenerationValidateAcceptsAnObserveListAndRefusesTheRest(t *testing.T) {
 
 // TestGenerationValidateGuardsTheSyncLane pins what the sync lane adds beyond the rules each
 // entry already answers for itself: the lane is the user's alone, it takes advise or gate and
-// nothing else, and it refuses a repeated ID of its own. The last case is the one a configured
-// entry actually produces — the SAME id in both lanes, because one entry resolves to up to one
-// reaction per class and they all carry the entry's id.
+// nothing else, and it refuses a repeated ID of its own. The "one id in both lanes" case is the
+// one a configured entry actually produces — the SAME id in both lanes, because one entry
+// resolves to up to one reaction per class and they all carry the entry's id.
 func TestGenerationValidateGuardsTheSyncLane(t *testing.T) {
 	t.Parallel()
 
@@ -850,11 +841,6 @@ func TestGenerationValidateGuardsTheSyncLane(t *testing.T) {
 			name:    "a repeated ID within the sync lane",
 			gen:     Generation{Sync: []Reaction{advise("advice"), advise("advice")}},
 			wantErr: `apogee: invalid reaction: the sync list names "advice" twice`,
-		},
-		{
-			name:    "a sync entry that does not validate",
-			gen:     Generation{Sync: []Reaction{entry("notify", OriginUser, ClassGate, MomentTurnFinished)}},
-			wantErr: `apogee: invalid reaction "notify": gate: reacts at pre-tool-exec; "turn-finished" is not it`,
 		},
 	}
 

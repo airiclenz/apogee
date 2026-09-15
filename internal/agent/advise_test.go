@@ -173,10 +173,11 @@ func TestAdviseIsSilentUnderBypass(t *testing.T) {
 // every advise reaction that listed file-changed onto the post-tool-result seam, so the narrowing
 // that pays for it has to hold on the seam's own invoke path, whatever the handler's kind. A Go
 // advise handler on file-changed hears a successful workspace write and nothing else — a read-only
-// call never calls it, never spans and never books. The reaction is armed through the live sync
-// lane (SetReactions), the one arming route that takes a list as given: domain.Reaction.Validate
-// pins a Go handler to its own seam and would refuse this shape on Config.Reactions, so the
-// dispatcher's guarantee is pinned here independently of that refusal.
+// call never calls it, never spans and never books. The reaction is installed through the live
+// lane's install half (installGeneration), the one arming route that takes a list as given: the
+// arming step itself refuses this shape on both routes — domain.Reaction.Validate pins a Go handler
+// to its own seam on Config.Reactions, and SetReactions refuses an engine-origin sync entry — so
+// the dispatcher's guarantee is pinned here independently of either refusal.
 func TestAdviseGoHandlerAtFileChangedIsNarrowed(t *testing.T) {
 	sink := &recordingSink{}
 	var reported []string
@@ -197,7 +198,7 @@ func TestAdviseGoHandlerAtFileChangedIsNarrowed(t *testing.T) {
 	}
 	gen := a.Generation()
 	gen.Sync = []domain.Reaction{watcher}
-	a.SetReactions(gen)
+	a.installGeneration(gen)
 
 	call, result := readCall()
 	msg := adviseArgvCall(t, a, call, result)

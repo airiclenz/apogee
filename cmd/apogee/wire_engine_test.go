@@ -482,6 +482,64 @@ func TestSetReactionsReportsTheRunnersRefusal(t *testing.T) {
 	}
 }
 
+// The ENGINE's refusal ends the apply before either half moves. A Generation the Agent will not arm
+// — here a sync entry named after a Floor guard — is refused with the engine's own sentence, it is
+// never parked for the bind's replay (a replay would re-install exactly what was refused), and the
+// Runner is never reached, even though the observe list moved: a swap that installed its Runner half
+// alone would leave the two halves on different generations (ADR 0076 A8). The holder keeps
+// describing what the session is actually running, so the next well-formed apply lands whole.
+func TestSetReactionsRefusedByTheEngineReachesNeitherHalf(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	runner := &recordingRunner{engine: engine}
+	seeded := apogee.Generation{Bypass: true}
+	engine.seedReactions(runner, seeded)
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	refused := apogee.Generation{
+		Observe: []domain.Reaction{observeReaction("notify")},
+		Sync:    []domain.Reaction{gateReaction("tool-loop-breaker")},
+	}
+	err := engine.SetReactions(refused)
+
+	if !errors.Is(err, apogee.ErrInvalidReaction) {
+		t.Fatalf("SetReactions err = %v; want the engine's ErrInvalidReaction for a reserved id", err)
+	}
+	if len(runner.lists) != 0 {
+		t.Errorf("the Runner was handed %+v; want no swap — the engine refused first", runner.lists)
+	}
+	if got := engine.pendingGeneration; got == nil || !got.Bypass || len(got.Sync) != 0 {
+		t.Errorf("pendingGeneration = %+v; want the seeded generation, not the refused one", got)
+	}
+	if got := engine.bound().Generation(); !got.Bypass || len(got.Sync) != 0 {
+		t.Errorf("the bound Agent's generation = %+v; want the seeded one untouched", got)
+	}
+}
+
+// A generation parked while UNBOUND meets no engine to refuse it, so the refusal falls to the bind's
+// replay — on the pendingProfile terms: the Agent is released and the bind fails, naming the entry,
+// rather than a session being installed running a lane the engine would misreport.
+func TestLateEngineBindRefusesAPendingGenerationTheEngineWillNotArm(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	engine.seedReactions(nil, apogee.Generation{Sync: []domain.Reaction{gateReaction("read-cache")}})
+
+	err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) })
+
+	if !errors.Is(err, apogee.ErrInvalidReaction) {
+		t.Fatalf("Bind err = %v; want the engine's ErrInvalidReaction for a reserved id", err)
+	}
+	if engine.bound() != nil {
+		t.Errorf("an Agent was installed despite the refusal; want the holder left unbound")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The session's undo journal (ADR 0074)
 // ---------------------------------------------------------------------------

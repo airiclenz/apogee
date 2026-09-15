@@ -144,17 +144,19 @@ type worker struct {
 	lastFailure string
 }
 
-// New builds a Runner over the given Reaction list. The list is validated and reduced to the ones
-// ACTIVE at this root — a Reaction whose `workspace:` resolves to a different directory is simply
-// not here — and one worker goroutine is started per survivor. A Runner with no active Reaction is
-// a legitimate, cheap result: Emit then forwards and does nothing else.
+// New builds a Runner over the given Reaction list. The list is reduced to the ones ACTIVE at this
+// root — a Reaction whose `workspace:` resolves to a different directory is simply not here — and
+// one worker goroutine is started per survivor. A Runner with no active Reaction is a legitimate,
+// cheap result: Emit then forwards and does nothing else.
 //
-// It fails when an entry is malformed (ValidateAll's message names the entry), when a workspace
-// path cannot be resolved, or when a Reaction would have to run with no Options.Exec to run it.
+// The list is taken AS VALIDATED: the Runner does not re-run ValidateAll. Every entry's rules are
+// answered once, by the caller that built the list — the config layer's mapping for a `reactions:`
+// file (which runs ValidateAll over the observe lane), an embedder's own check at the facade door
+// (apogee.NewReactionRunner) — so a root that skipped that check is handing over an unchecked list.
+//
+// It fails when a workspace path cannot be resolved, or when a Reaction would have to run with no
+// Options.Exec to run it.
 func New(list []domain.Reaction, o Options) (*Runner, error) {
-	if err := ValidateAll(list); err != nil {
-		return nil, err
-	}
 	workspace, err := ResolveWorkspace(o.Workspace)
 	if err != nil {
 		return nil, err
@@ -243,9 +245,11 @@ func (r *Runner) noteDrop(w *worker) {
 
 // Replace swaps the active Reaction list — the config file changed under a live session — and
 // drains the previous generation in the BACKGROUND, so a reload never blocks the goroutine that
-// noticed the change. The new list is validated and re-filtered by workspace exactly as New's was,
-// and a failure leaves the running set untouched: a broken edit to `reactions:` costs the user
-// nothing.
+// noticed the change. The new list is re-filtered by workspace exactly as New's was — and, like
+// New's, taken as validated: the caller that built it answered its entries' rules once, and the
+// live-swap door (Agent.SetReactions) refuses a Generation the engine will not arm BEFORE its
+// observe lane reaches here — and a failure leaves the running set untouched: a broken edit to
+// `reactions:` costs the user nothing.
 //
 // The previous generation finishes what it already holds (its in-flight job and its queue) under
 // the same grace Close gives, then stops. Firings the old matcher was still correlating — a write
@@ -253,9 +257,6 @@ func (r *Runner) noteDrop(w *worker) {
 // clean correlation map; a reload is a rare, human-initiated event and the alternative would be to
 // read one generation's map from another generation's goroutine.
 func (r *Runner) Replace(list []domain.Reaction) error {
-	if err := ValidateAll(list); err != nil {
-		return err
-	}
 	r.swapMu.Lock()
 	defer r.swapMu.Unlock()
 	if r.closed.Load() {

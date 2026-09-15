@@ -272,7 +272,7 @@ func TestFloorGuard_ChildInheritsTheLiveFloor(t *testing.T) {
 	}
 
 	want := domain.Generation{Floor: domain.FloorConfig{DisableToolLoopBreaker: true}, Bypass: true}
-	parent.SetReactions(want)
+	mustSetReactions(t, parent, want)
 	child, err := parent.newChildAgent("spawn-1", "survey the tree", "surveyor")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)

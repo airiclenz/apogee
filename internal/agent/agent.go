@@ -1228,6 +1228,17 @@ func (a *Agent) closeUndoGroup() {
 // this would guard against cannot be configured, and refusing a swap at fire time has nowhere to
 // report the refusal to.
 //
+// The Generation is VALIDATED here, once, and a refusal installs nothing — the previous generation
+// stays exactly as it was, every field of it. This is the arming step for the live route, the
+// counterpart of what armReactions is for Config.Reactions: Generation.Validate answers the lane
+// rules (a sync entry is user origin and of class advise or gate, no id twice within a lane) and
+// refuseReservedIDs the one rule only the engine can answer — a sync entry may not take the name
+// of a Floor guard or an engine notice (reservedIDs), switched on or off. Each ENTRY's own rules
+// (Reaction.Validate) are the caller's, answered where the entry was built: the config layer's
+// mapping for a `reactions:` file, the Firing's or embedder's own check for a list composed in Go.
+// The error wraps domain.ErrInvalidReaction and names the entry, which is the sentence a settings
+// row shows the human.
+//
 // The builtin ladder is REBUILT from gen.Floor, gen.ContextFillNotice and gen.StepBudgetNotice,
 // because a Floor guard whose boolean is off — or a notice while its switch is off — is absent
 // from the ladder rather than self-skipping at fire time (the enable set, ADR 0076 A8): the firing
@@ -1243,7 +1254,24 @@ func (a *Agent) closeUndoGroup() {
 // It is safe to call from another goroutine (the settings surface) while a Step runs, like
 // SetMode. A sub-agent spawned AFTER the swap inherits the new generation (newChildAgent reads
 // it at spawn); one already mid-flight keeps what it was spawned with.
-func (a *Agent) SetReactions(gen domain.Generation) {
+func (a *Agent) SetReactions(gen domain.Generation) error {
+	if err := gen.Validate(); err != nil {
+		return err
+	}
+	if err := refuseReservedIDs(gen.Sync); err != nil {
+		return err
+	}
+	a.installGeneration(gen)
+	return nil
+}
+
+// installGeneration is SetReactions' install half — the swap itself, under the generation lock,
+// with the ladder rebuilt when an enable-set input moved. It takes the Generation as ALREADY
+// validated: SetReactions is the only production caller and validates first; a test that pins a
+// dispatcher guarantee against a shape the arming step refuses (an engine-origin Go handler on the
+// live lane, advise_test.go) arms through here directly, so the guarantee is pinned independently
+// of the refusal rather than by weakening it.
+func (a *Agent) installGeneration(gen domain.Generation) {
 	a.genMu.Lock()
 	defer a.genMu.Unlock()
 	if gen.Floor != a.gen.Floor || gen.ContextFillNotice != a.gen.ContextFillNotice || gen.StepBudgetNotice != a.gen.StepBudgetNotice {

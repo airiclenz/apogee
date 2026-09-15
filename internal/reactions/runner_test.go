@@ -471,33 +471,6 @@ func TestReplaceStopsTheOldHookAndStartsTheNew(t *testing.T) {
 	}
 }
 
-// TestReplaceRefusesAMalformedListAndKeepsRunning — a broken edit to `reactions:` costs the live
-// session nothing: the running set is untouched and still fires.
-func TestReplaceRefusesAMalformedListAndKeepsRunning(t *testing.T) {
-	t.Parallel()
-
-	exec := newFakeExecutor()
-	runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
-		Workspace: t.TempDir(), Exec: exec,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	broken := commandHook("notify", TurnFinished)
-	broken.Handler = domain.ArgvHandler{}
-	if err := runner.Replace([]domain.Reaction{broken}); err == nil {
-		t.Fatal("Replace accepted an entry with an empty command")
-	}
-
-	runner.Emit(turnEvent(1))
-	closeRunner(t, runner)
-
-	if runs := exec.recorded(); len(runs) != 1 || runs[0].Reaction != "notify" {
-		t.Fatalf("ran %#v, want the surviving reaction to have fired", runs)
-	}
-}
-
 // TestCloseWithAnExpiredContextCancelsTheRunningHook — shutdown is bounded: a wedged script does
 // not hold the Driver open, and the executor's own context is cancelled under it.
 func TestCloseWithAnExpiredContextCancelsTheRunningHook(t *testing.T) {
@@ -630,17 +603,6 @@ func TestNewRefusesAHookItCannotRun(t *testing.T) {
 		t.Fatalf("New with no reactions: %v", err)
 	}
 	closeRunner(t, runner)
-}
-
-// TestNewRefusesAMalformedList — the Runner validates what it is handed, so a root that skipped
-// the config layer's own check cannot start a Reaction that could never fire correctly.
-func TestNewRefusesAMalformedList(t *testing.T) {
-	t.Parallel()
-
-	nameless := commandHook("", TurnFinished)
-	if _, err := New([]domain.Reaction{nameless}, Options{Workspace: t.TempDir(), Exec: newFakeExecutor()}); err == nil {
-		t.Fatal("New accepted a nameless entry")
-	}
 }
 
 // TestSeamClosedProjectionIsTakenBeforeEmitReturns — the value a SeamClosedEvent carries is the

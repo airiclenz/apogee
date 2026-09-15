@@ -298,7 +298,14 @@ NOTES (2026-09-15): `internal/agent/syncexec.go`'s fire-time `run: is empty` bra
 
 Commit: `refactor(domain): Reaction.Validate owns every per-reaction rule`
 
-## 12. Consumers validate once; `SetReactions` arms like `Config.Reactions`
+## 12. Consumers validate once; `SetReactions` arms like `Config.Reactions` — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): the two "does not validate" rows were deleted from `internal/domain/reaction_test.go` rather than moved — the caller that now owns the check (the config layer's mapping) already pins both exact sentences in `internal/config/reactions_test.go` (`warden`/`post-tool-result`, `shaper`/`pre-request`); `TestNewRefusesAMalformedList` and `TestReplaceRefusesAMalformedListAndKeepsRunning` were deleted and replaced by the caller-side `TestSetReactionsRefusesAMalformedGeneration` (lane rules — the only thing the swap seam refuses beyond the reserved ids, since `Generation.Validate` no longer runs `Reaction.Validate`), `TestSetReactionsRefusesAReservedBuiltinID`, `TestSetReactionsRefusedByTheEngineReachesNeitherHalf` and `TestLateEngineBindRefusesAPendingGenerationTheEngineWillNotArm`.
+NOTES (2026-09-15): the advise fixture is re-routed through `installGeneration`, the real install half `SetReactions` calls after validating (not a test-only helper); the test's comment is rewritten to say so.
+NOTES (2026-09-15): a Generation parked while UNBOUND meets no engine to refuse it (the reserved set is agent-private), so the refusal falls to `lateEngine.Bind`'s replay on the existing `pendingProfile` terms — the Agent is released and the bind fails naming the entry; the plan's guard only spoke to the bound case.
+NOTES (2026-09-15): `internal/agent/stepnotice_test.go`, `routedspawn_test.go` and `wire_test.go` were folded in by the plan's `grep -rln "SetReactions("` rule and the `swapBypass` helper (which now takes `t` so its call is checked); `mustSetReactions(t, a, gen)` is the shared checked helper for the agent tests.
+NOTES (2026-09-15): consequential edit — cmd/apogee/wire.go: made necessary by `Agent.SetReactions` returning an error (the interface comment said only the Runner could refuse).
+NOTES (2026-09-15): consequential edit — cmd/apogee/wire_settings.go: made necessary by the same — `applyFloorGuard`/`applyContextFillNotice`/`reloadReactions` comments said "the engine half takes booleans and cannot fail" / "the Runner's alone".
 
 **What.** `Generation.Validate` (`internal/domain/reaction.go`) checks lane class and duplicates only, no longer calling `Reaction.Validate` per entry; `Runner.New`/`Replace` (`internal/reactions/runner.go`) stop re-running `ValidateAll` — the caller validates. `Agent.SetReactions` (`internal/agent/agent.go`) runs `Generation.Validate` and the builtin-id reservation `armReactions` applies to `Config.Reactions` (`internal/agent/reactions.go`), refusing instead of installing (in-passing defect: the live route installed unvalidated Sync). `CONTEXT.md` §Reaction's duplicate-id sentence names the arming seam as the one place. Depends on item 11.
 

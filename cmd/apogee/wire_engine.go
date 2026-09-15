@@ -232,9 +232,15 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	// independent of the Agent's lifetime, so SetReactions swapped its list at the moment the edit
 	// happened — bound or not. It is also how the file's `advise:` and `gate:` entries FIRST reach a
 	// session's Agent: the composition root seeds them here (wire_live.go) and this replay arms them
-	// on the Agent the bind constructs.
+	// on the Agent the bind constructs. It is one of the two remembered values that can be REFUSED
+	// (the other is the profile below): a generation parked while unbound met no engine to arm it,
+	// so a sync entry the engine will not take — one named after a Floor guard, say — is refused
+	// HERE, on the pendingProfile terms: the Agent is released and the bind fails, naming the entry.
 	if gen := e.pendingGeneration; gen != nil {
-		agent.SetReactions(*gen)
+		if err := agent.SetReactions(*gen); err != nil {
+			_ = agent.Close()
+			return err
+		}
 	}
 	if e.pendingCompaction != nil {
 		agent.SetCompactionEnabled(*e.pendingCompaction)
@@ -257,7 +263,7 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	if j := e.pendingJournal; j != nil {
 		agent.SetJournal(j.journal, j.note)
 	}
-	// The one remembered value that can be REFUSED: a dialect this build cannot parse. The Agent is
+	// The other remembered value that can be REFUSED: a dialect this build cannot parse. The Agent is
 	// released and the bind fails, which is exactly what a config carrying that profile at launch
 	// does — a session is never installed reading its model's replies in a language it does not have.
 	if p := e.pendingProfile; p != nil {
@@ -496,13 +502,24 @@ func (e *lateEngine) SetPruneToolResults(enabled bool) {
 // has COMMITTED, so a refused swap leaves the session firing exactly what it was firing and a later
 // identical apply still tries.
 //
-// The returned error is the Runner's alone — a list it will not take (a malformed entry, an
-// unresolvable `workspace:`), which is the sentence the settings row shows the human. The engine
-// half cannot fail: Floor and Bypass are booleans.
+// The returned error is either half's refusal, and it is the sentence the settings row shows the
+// human. The ENGINE's comes first and ends the apply: a Generation the Agent will not arm (a sync
+// entry outside the lane's rules, or named after a builtin — Agent.SetReactions) is refused before
+// the Runner is reached and before anything is remembered, so it is never parked for the bind's
+// replay, and the Runner half is never swapped alone against an engine half that stayed put — a
+// session never runs the two halves on different generations (ADR 0076 A8). The Runner's is a
+// list it will not take (an unresolvable `workspace:`); by then the engine half has applied, so the
+// generation IS remembered and only the observe list waits for a retry.
 func (e *lateEngine) SetReactions(gen apogee.Generation) error {
 	e.mu.Lock()
-	e.pendingGeneration = &gen
 	agent, runner := e.agent, e.runner
+	if agent != nil {
+		if err := agent.SetReactions(gen); err != nil {
+			e.mu.Unlock()
+			return err
+		}
+	}
+	e.pendingGeneration = &gen
 	// Every field the Runner builds a worker out of — the id, the Moments, the workspace filter, the
 	// timeout, and the handler's argv or URL and headers — compared in one reach: the handler is an
 	// interface over values carrying maps, which no comparison operator reaches (delegation.go asks
@@ -510,9 +527,6 @@ func (e *lateEngine) SetReactions(gen apogee.Generation) error {
 	moved := !reflect.DeepEqual(e.observe, gen.Observe)
 	e.mu.Unlock()
 
-	if agent != nil {
-		agent.SetReactions(gen)
-	}
 	if !moved || runner == nil {
 		return nil
 	}

@@ -1255,9 +1255,13 @@ an engine reaction always names exactly one seam; and two out-of-process kinds a
 an `ArgvHandler` (a command, serving observe, advise and gate) and a `WebhookHandler` (a POST,
 serving observe alone) — whose `On` list spans Moments and is checked against the class. `Validate`
 refuses an `On` list the handler cannot serve, an origin × class outside the matrix, and a missing
-id, origin, class or handler; a duplicate id is refused one level up — `Generation.Validate` per
-lane (the same id may appear in both the observe and the sync lane) and the agent's arming step,
-which also refuses an id a builtin or the context-fill notice already holds. `TopLevelOnly` opts a reaction
+id, origin, class or handler, and is answered ONCE, where the entry is built (the config layer's
+mapping for a `reactions:` file, the agent's arming step for `Config.Reactions`) — `Generation.Validate`
+and the Reaction Runner take an entry as validated; a duplicate id is refused one level up —
+`Generation.Validate` per lane (the same id may appear in both the observe and the sync lane) — and
+an id a builtin or an engine notice already holds is refused at the **arming seam**, the one place
+for both routes: `armReactions` for `Config.Reactions` and `Agent.SetReactions` for the live sync
+lane, which validates the Generation it is handed and installs nothing on a refusal. `TopLevelOnly` opts a reaction
 **out** of sub-agent inheritance — the zero value is inherited by every child agent; `Timeout` is
 the deadline an out-of-process handler runs under on either lane (observe 30s, advise 10s, gate 5s
 by default; an entry's `timeout:` binds every reaction it arms) and is ignored by a Go one, which

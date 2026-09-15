@@ -606,17 +606,19 @@ type Generation struct {
 
 // Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what
 // is wrong. Floor, Bypass and the two notice switches are booleans and cannot be malformed, so every
-// check is about the two lanes: each entry validates on its own, each takes a class its lane
-// accepts — observe for the Runner's lane, advise or gate for the sync lane, which is the user's
-// alone — and no two entries WITHIN one lane share an ID, which is what a firing is reported
-// under. The same ID may appear in both lanes: one configured entry resolves to up to one
-// reaction per class and they all carry the entry's id.
+// check is about the two lanes: each entry takes a class its lane accepts — observe for the
+// Runner's lane, advise or gate for the sync lane, which is the user's alone — and no two entries
+// WITHIN one lane share an ID, which is what a firing is reported under. The same ID may appear in
+// both lanes: one configured entry resolves to up to one reaction per class and they all carry the
+// entry's id.
+//
+// It does NOT re-run Reaction.Validate per entry: an entry's own rules are answered ONCE, where the
+// entry is built — the config layer's mapping for a `reactions:` file, the agent's arming step for
+// Config.Reactions — and the lanes here are the checks only the whole value can make. A Generation
+// handed to the swap seam (Agent.SetReactions) is validated there, and nowhere below it.
 func (g Generation) Validate() error {
 	seen := make(map[string]bool, len(g.Observe))
 	for _, r := range g.Observe {
-		if err := r.Validate(); err != nil {
-			return err
-		}
 		if r.Class != ClassObserve {
 			return fmt.Errorf(
 				"%w %q: the observe list takes class %q, not %q",
@@ -631,9 +633,6 @@ func (g Generation) Validate() error {
 
 	seenSync := make(map[string]bool, len(g.Sync))
 	for _, r := range g.Sync {
-		if err := r.Validate(); err != nil {
-			return err
-		}
 		if r.Origin != OriginUser {
 			return fmt.Errorf(
 				"%w %q: the sync list takes origin %q, not %q",

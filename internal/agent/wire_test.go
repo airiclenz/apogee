@@ -144,7 +144,7 @@ func TestEffortHoldsUnderBypass(t *testing.T) {
 	a.SetEffortOverride(domain.EffortHigh)
 
 	before := a.toProviderRequest(effortTestRequest()).ThinkingEffort
-	swapBypass(a, true)
+	swapBypass(t, a, true)
 	after := a.toProviderRequest(effortTestRequest()).ThinkingEffort
 
 	if before != provider.EffortHigh || after != before {

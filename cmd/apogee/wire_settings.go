@@ -2048,10 +2048,11 @@ func applyUndoSnapshots(a settingsApplier, key, value string) (string, error) {
 // keys this row does not name — and the `bypass:` switch and the observe list beside them — keep the
 // values they had; the whole reason the write and the read are one locked act inside setFloorGuard.
 //
-// The refusal is the Runner's and cannot arrive here: a generation whose observe list did not move
-// never reaches the Runner (lateEngine.SetReactions), and the engine half of a swap takes booleans
-// and cannot fail. It is returned rather than discarded because that is the seam's contract, and a
-// row that swallowed a refusal would be a row that lies about an edit the file already carries.
+// The refusal cannot arrive here in practice: a generation whose observe list did not move never
+// reaches the Runner (lateEngine.SetReactions), and the engine half validates a Generation whose
+// only moved field is a boolean — the sync lane beside it is the one it already armed. It is
+// returned rather than discarded because that is the seam's contract, and a row that swallowed a
+// refusal would be a row that lies about an edit the file already carries.
 func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
 	on, err := settingBool(key, value)
 	if err != nil {
@@ -2065,7 +2066,7 @@ func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
 // engine seam, so the seven Floor gates, the `bypass:` switch and the two lanes beside it keep the
 // values they had. The engine half rebuilds its builtin ladder from the moved switch
 // (Agent.SetReactions), so the notice is armed or disarmed the moment this returns; the refusal it
-// returns is the Runner's and cannot arrive here, for applyFloorGuard's reason.
+// returns cannot arrive here, for applyFloorGuard's reason.
 func applyContextFillNotice(a settingsApplier, key, value string) (string, error) {
 	on, err := settingBool(key, value)
 	if err != nil {
@@ -2319,9 +2320,10 @@ func (a settingsApplier) reconnectMCP() error {
 // through the one swap door, so the Floor gates and `bypass:` cross the edit untouched while the
 // Runner's retired generation finishes what it already holds in the background and then stops.
 //
-// A file that no longer parses is refused before anything is swapped, and so is a list the Runner
-// will not take (a malformed entry, an unresolvable `workspace:`): a broken edit costs the session
-// nothing, and it keeps firing the Reactions it already had. A file that has gone BACK to the
+// A file that no longer parses is refused before anything is swapped, and so is a Generation the
+// engine will not arm (a sync entry named after a builtin — Agent.SetReactions) or a list the Runner
+// will not take (an unresolvable `workspace:`): a broken edit costs the session nothing, and it
+// keeps firing the Reactions it already had. A file that has gone BACK to the
 // retired `hooks:` spelling is refused too, and nothing is written: the fold into `reactions:` is a
 // startup act, because apogee does not rewrite a config file out from under a running session.
 //

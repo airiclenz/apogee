@@ -230,13 +230,13 @@ func TestStepNoticeSwitchArmsAndRebuildsIndependently(t *testing.T) {
 		t.Errorf("ladder = %v, want the guards and the step notice last, no fill notice", ids)
 	}
 
-	a.SetReactions(domain.Generation{ContextFillNotice: true, StepBudgetNotice: true})
+	mustSetReactions(t, a, domain.Generation{ContextFillNotice: true, StepBudgetNotice: true})
 	ids = builtinIDs(a)
 	if n := len(ids); n != len(guardIDs)+2 || ids[n-2] != contextFillNoticeID || ids[n-1] != stepBudgetNoticeID {
 		t.Errorf("ladder = %v, want the seven guards, the fill notice and then the step notice", ids)
 	}
 
-	a.SetReactions(domain.Generation{ContextFillNotice: true})
+	mustSetReactions(t, a, domain.Generation{ContextFillNotice: true})
 	if got := a.Generation(); got.StepBudgetNotice || !got.ContextFillNotice {
 		t.Errorf("Generation() = %+v, want the step switch cleared and the fill switch kept", got)
 	}
@@ -257,7 +257,7 @@ func TestStepNoticeSwitchReachesAChildAtSpawn(t *testing.T) {
 			}
 			gen := parent.Generation()
 			gen.StepBudgetNotice = on
-			parent.SetReactions(gen)
+			mustSetReactions(t, parent, gen)
 
 			child, err := parent.newChildAgent("c1", "count the files", "")
 			if err != nil {

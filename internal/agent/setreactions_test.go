@@ -10,6 +10,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -23,6 +24,119 @@ func syncGen(a *Agent, sync ...domain.Reaction) domain.Generation {
 	gen := a.Generation()
 	gen.Sync = sync
 	return gen
+}
+
+// mustSetReactions installs gen through the swap door and fails the test on a refusal: every
+// fixture here hands over a Generation the arming step accepts, so a refusal is the test's own
+// mistake, not the behaviour under test.
+func mustSetReactions(t *testing.T, a *Agent, gen domain.Generation) {
+	t.Helper()
+	if err := a.SetReactions(gen); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
+}
+
+// The swap door VALIDATES: a Generation whose sync lane breaks a lane rule — an observe-class entry,
+// an engine-origin one, an id listed twice — is refused with the sentence Generation.Validate
+// writes, and NOTHING is installed: the lane, Bypass and the Floor stay exactly as the previous swap
+// left them. This is where the Runner's own re-validation went (ADR 0076 A8: one Generation,
+// validated once, at the seam that arms it), so a Driver that skipped the config layer cannot arm a
+// shape the engine would misreport.
+func TestSetReactionsRefusesAMalformedGeneration(t *testing.T) {
+	t.Parallel()
+
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "reply"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	armed := syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"}))
+	armed.Bypass = true
+	mustSetReactions(t, a, armed)
+
+	observer := goGate("watcher", domain.GateDecision{Verdict: domain.GateAllow})
+	observer.Class = domain.ClassObserve
+	engineOrigin := goGate("builtin", domain.GateDecision{Verdict: domain.GateAllow})
+	engineOrigin.Origin = domain.OriginEngine
+	cases := []struct {
+		name    string
+		sync    []domain.Reaction
+		wantErr string
+	}{
+		{
+			name:    "an observe entry in the sync lane",
+			sync:    []domain.Reaction{observer},
+			wantErr: `apogee: invalid reaction "watcher": the sync list takes class "advise" or "gate", not "observe"`,
+		},
+		{
+			name:    "an engine-origin entry in the sync lane",
+			sync:    []domain.Reaction{engineOrigin},
+			wantErr: `apogee: invalid reaction "builtin": the sync list takes origin "user", not "engine"`,
+		},
+		{
+			name: "an id listed twice",
+			sync: []domain.Reaction{
+				goGate("twice", domain.GateDecision{Verdict: domain.GateAllow}),
+				goGate("twice", domain.GateDecision{Verdict: domain.GateAllow}),
+			},
+			wantErr: `apogee: invalid reaction: the sync list names "twice" twice`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			refused := armed
+			refused.Bypass = false
+			refused.Sync = tc.sync
+
+			err := a.SetReactions(refused)
+
+			if !errors.Is(err, domain.ErrInvalidReaction) {
+				t.Fatalf("SetReactions = %v, want ErrInvalidReaction", err)
+			}
+			if got := err.Error(); got != tc.wantErr {
+				t.Errorf("SetReactions = %q, want %q", got, tc.wantErr)
+			}
+			got := a.Generation()
+			if !got.Bypass || len(got.Sync) != 1 || got.Sync[0].ID != "warden" {
+				t.Errorf("after the refusal Generation = %+v, want the previous swap untouched (Bypass on, warden armed)", got)
+			}
+		})
+	}
+}
+
+// A sync entry may not take a builtin's name: the seven Floor-guard keys and the two engine notices
+// are reserved on the live route exactly as they are on Config.Reactions (armReactions), switched on
+// or off — a guard the user disabled still owns its id, because the moment its switch moves back the
+// builtin would answer under it again. The refusal installs nothing.
+func TestSetReactionsRefusesAReservedBuiltinID(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.Floor = domain.FloorConfig{DisableToolLoopBreaker: true}
+	a, err := newAgent(cfg, echoResponder{reply: "reply"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	mustSetReactions(t, a, syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny})))
+
+	for _, id := range []string{guardToolLoopBreaker, guardReadCache, contextFillNoticeID, stepBudgetNoticeID} {
+		t.Run(id, func(t *testing.T) {
+			err := a.SetReactions(syncGen(a, goGate(id, domain.GateDecision{Verdict: domain.GateAllow})))
+
+			if !errors.Is(err, domain.ErrInvalidReaction) {
+				t.Fatalf("SetReactions(%q) = %v, want ErrInvalidReaction", id, err)
+			}
+			want := `apogee: invalid reaction "` + id + `": that ID is already armed`
+			if got := err.Error(); got != want {
+				t.Errorf("SetReactions(%q) = %q, want %q", id, got, want)
+			}
+			if got := a.Generation(); len(got.Sync) != 1 || got.Sync[0].ID != "warden" {
+				t.Errorf("after the refusal Sync = %+v, want the armed warden untouched", got.Sync)
+			}
+		})
+	}
 }
 
 // A swap ARMS an advise entry: the tool result committed before it carries the tool's own output,
@@ -41,7 +155,7 @@ func TestSetReactionsArmsAnAdviseEntryForTheNextToolResult(t *testing.T) {
 		t.Fatalf("content before the swap = %q, want the tool's own output %q", before.Content, result.Content)
 	}
 
-	a.SetReactions(syncGen(a, userAdvise("coach", []domain.Moment{domain.MomentPostToolResult},
+	mustSetReactions(t, a, syncGen(a, userAdvise("coach", []domain.Moment{domain.MomentPostToolResult},
 		"/bin/sh", "-c", `printf 'mind the tests\n'`)))
 
 	call2, result2 := readCall()
@@ -67,14 +181,14 @@ func TestSetReactionsRemovingAGateStopsTheDenial(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	a := gateAgent(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran)
-	a.SetReactions(syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"})))
+	mustSetReactions(t, a, syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"})))
 
 	result, _ := prepareAndRun(a, readCallOnly())
 	if !result.IsError || ran != 0 {
 		t.Fatalf("armed gate: result %+v after %d runs, want a refusal and no run", result, ran)
 	}
 
-	a.SetReactions(syncGen(a))
+	mustSetReactions(t, a, syncGen(a))
 
 	result, _ = prepareAndRun(a, readCallOnly())
 	if result.IsError || ran != 1 {
@@ -95,11 +209,11 @@ func TestSetReactionsFloorOnlySwapLeavesTheSyncLaneArmed(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	a := gateAgent(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran)
-	a.SetReactions(syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"})))
+	mustSetReactions(t, a, syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"})))
 
 	gen := a.Generation()
 	gen.Floor.DisableToolCallRepair = true
-	a.SetReactions(gen)
+	mustSetReactions(t, a, gen)
 
 	if live := a.Generation(); len(live.Sync) != 1 || live.Sync[0].ID != "warden" || !live.Floor.DisableToolCallRepair {
 		t.Fatalf("live generation = %+v, want the guard off and the sync lane intact", live)
@@ -120,7 +234,7 @@ func TestSetReactionsReachesAChildSpawnedAfterTheSwap(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	a := gateAgent(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran)
-	a.SetReactions(syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"})))
+	mustSetReactions(t, a, syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"})))
 
 	child, err := a.newChildAgent("call_sub", "the delegated task", "")
 	if err != nil {
@@ -136,7 +250,7 @@ func TestSetReactionsReachesAChildSpawnedAfterTheSwap(t *testing.T) {
 	}
 
 	// The swap that empties the parent's lane does not disarm a child already running.
-	a.SetReactions(syncGen(a))
+	mustSetReactions(t, a, syncGen(a))
 	result, _ = prepareAndRun(child, readCallOnly())
 	if !result.IsError {
 		t.Errorf("child result after the parent's later swap = %+v, want the spawn-time gate still denying", result)
@@ -154,7 +268,7 @@ func TestSetReactionsArgvGateNeverReachesTheSeamCascade(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	a := gateAgent(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran)
-	a.SetReactions(syncGen(a, userGate("warden", "/bin/sh", "-c", `printf 'allow\n'`)))
+	mustSetReactions(t, a, syncGen(a, userGate("warden", "/bin/sh", "-c", `printf 'allow\n'`)))
 
 	call := readCallOnly()
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{call}})

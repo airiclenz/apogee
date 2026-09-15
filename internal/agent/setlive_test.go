@@ -26,10 +26,11 @@ func gateRow(id string, class domain.Class) domain.Reaction {
 // swapBypass moves Bypass alone through the ONE live-swap door: read the whole Generation, edit
 // the copy, hand it back (ADR 0076 A8). Every caller of the retired SetBypass wrapper now does
 // this for itself, and the suites that probe the gate share it so they read as one idiom.
-func swapBypass(a *Agent, on bool) {
+func swapBypass(t *testing.T, a *Agent, on bool) {
+	t.Helper()
 	gen := a.Generation()
 	gen.Bypass = on
-	a.SetReactions(gen)
+	mustSetReactions(t, a, gen)
 }
 
 // TestAgentSetBypassFlipsTheGateBetweenEvaluations proves a runtime Bypass swap changes the skip
@@ -61,13 +62,13 @@ func TestAgentSetBypassFlipsTheGateBetweenEvaluations(t *testing.T) {
 				t.Fatalf("bypassSkips at construction = %t, want %t", got, tc.wantUnderOff)
 			}
 
-			swapBypass(a, true)
+			swapBypass(t, a, true)
 
 			if got := a.bypassSkips(row); got != tc.wantUnderOn {
 				t.Fatalf("bypassSkips with Bypass swapped on = %t, want %t", got, tc.wantUnderOn)
 			}
 
-			swapBypass(a, false)
+			swapBypass(t, a, false)
 
 			if got := a.bypassSkips(row); got != tc.wantUnderOff {
 				t.Fatalf("bypassSkips with Bypass swapped off = %t, want %t again", got, tc.wantUnderOff)
@@ -97,7 +98,7 @@ func TestAgentSetBypassObservedByTheNextHookFire(t *testing.T) {
 		t.Fatalf("before the switch: the shape-view Reaction fired %d times, the observe one %d; want 1 and 1", nudged, offRamped)
 	}
 
-	swapBypass(a, true)
+	swapBypass(t, a, true)
 
 	_ = runExchange(t, a, "second")
 	if nudged != 1 {
@@ -136,7 +137,9 @@ func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
-			a.SetReactions(generations[i%len(generations)])
+			if err := a.SetReactions(generations[i%len(generations)]); err != nil {
+				t.Errorf("SetReactions: %v", err)
+			}
 		}
 	}()
 	go func() {
@@ -153,7 +156,7 @@ func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
 
 	// The last generation installed is what the Agent runs, all four switches of it.
 	want := domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableToolCallSalvage: true}, ContextFillNotice: true, StepBudgetNotice: true}
-	a.SetReactions(want)
+	mustSetReactions(t, a, want)
 	got := a.Generation()
 	if got.Floor != want.Floor || got.Bypass != want.Bypass || got.ContextFillNotice != want.ContextFillNotice || got.StepBudgetNotice != want.StepBudgetNotice {
 		t.Errorf("Generation() = %+v, want %+v", got, want)
@@ -280,7 +283,7 @@ func TestAgentAnytimeSettersConcurrent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
-			swapBypass(a, i%2 == 0)
+			swapBypass(t, a, i%2 == 0)
 			a.SetCompactionEnabled(i%2 == 0)
 			a.SetContextFiles(i%2 == 0, []string{"A.md"})
 		}

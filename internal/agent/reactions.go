@@ -741,30 +741,56 @@ func wrongHandler(m domain.Moment, h domain.Handler) error {
 	return fmt.Errorf("%w: %q cannot call a %T handler", errReactionSeam, m, h)
 }
 
-// armReactions validates the Reactions a host armed on Config.Reactions and returns them in the
-// dispatcher's own shape. Every entry must be well formed (Reaction.Validate) and answer to an
-// ID no builtin and no earlier entry already holds: the ReactionFiredEvent, the identity
-// projector and the provenance ledger all key on the ID, so two reactions sharing one name make
-// every attribution ambiguous. Either failure fails construction — an invalid or shadowed
-// reaction never silently does nothing.
+// reservedIDs is the set of ids the engine's own builtins answer to, which no armed Reaction may
+// take on EITHER route — Config.Reactions at construction (armReactions) or the live sync lane
+// (Agent.SetReactions): the ReactionFiredEvent, the identity projector and the provenance ledger
+// all key on the ID, so a reaction sharing a builtin's name makes every attribution ambiguous.
 //
-// The reserved set is guardIDs — ALL seven guard keys, not the enable set the ladder currently
-// holds (floorguards.go) — plus the two engine notices' ids (fillnotice.go, stepnotice.go), on
-// the same terms.
-// A builtin the user switched off still owns its name: arming an entry under it would be
-// answered by the builtin again the moment its switch moves back.
-func armReactions(reactions []domain.Reaction) ([]armedReaction, error) {
-	if len(reactions) == 0 {
-		return nil, nil
-	}
-
-	taken := make(map[string]bool, len(guardIDs)+2+len(reactions))
+// The set is guardIDs — ALL seven guard keys, not the enable set the ladder currently holds
+// (floorguards.go) — plus the two engine notices' ids (fillnotice.go, stepnotice.go), on the same
+// terms. A builtin the user switched off still owns its name: arming an entry under it would be
+// answered by the builtin again the moment its switch moves back. The map is fresh per call, so a
+// caller may grow it with the ids it arms.
+func reservedIDs() map[string]bool {
+	taken := make(map[string]bool, len(guardIDs)+2)
 	for _, id := range guardIDs {
 		taken[id] = true
 	}
 	taken[contextFillNoticeID] = true
 	taken[stepBudgetNoticeID] = true
+	return taken
+}
 
+// refuseReservedIDs reports the first entry whose ID a builtin already holds (reservedIDs), in the
+// sentence armReactions refuses the same collision with. It is the live sync lane's share of the
+// arming step: duplicates WITHIN the lane are domain.Generation.Validate's, so this asks the one
+// question only the engine can answer — which names its own builtins have taken.
+func refuseReservedIDs(reactions []domain.Reaction) error {
+	reserved := reservedIDs()
+	for _, r := range reactions {
+		if reserved[r.ID] {
+			return fmt.Errorf("%w %q: that ID is already armed", domain.ErrInvalidReaction, r.ID)
+		}
+	}
+	return nil
+}
+
+// armReactions validates the Reactions a host armed on Config.Reactions and returns them in the
+// dispatcher's own shape. Every entry must be well formed (Reaction.Validate) and answer to an
+// ID no builtin (reservedIDs) and no earlier entry already holds: the ReactionFiredEvent, the
+// identity projector and the provenance ledger all key on the ID, so two reactions sharing one
+// name make every attribution ambiguous. Either failure fails construction — an invalid or
+// shadowed reaction never silently does nothing.
+//
+// This is the ONE place Config.Reactions is validated: the route has no config layer in front of
+// it — the bench and an embedder hand Reaction values straight to the constructor — so the
+// per-entry rules are answered here, once, and the dispatcher below takes the list as given.
+func armReactions(reactions []domain.Reaction) ([]armedReaction, error) {
+	if len(reactions) == 0 {
+		return nil, nil
+	}
+
+	taken := reservedIDs()
 	armed := make([]armedReaction, 0, len(reactions))
 	for _, r := range reactions {
 		if err := r.Validate(); err != nil {

@@ -322,11 +322,14 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// zero — every guard on, Bypass off — under a caller that had switched them.
 	//
 	// An empty lane is left alone rather than handed over, so a Firing that arms nothing makes no
-	// swap at all.
+	// swap at all. The swap door validates the lane (Agent.SetReactions) — a Firing whose Spec.Sync
+	// the engine will not arm fails here, before its first Step, rather than running without it.
 	if len(spec.Sync) > 0 {
 		gen := a.Generation()
 		gen.Sync = spec.Sync
-		a.SetReactions(gen)
+		if err := a.SetReactions(gen); err != nil {
+			return Result{}, fmt.Errorf("apogee: arm the firing's sync lane: %w", err)
+		}
 	}
 
 	// What the workspace context files contributed, read HERE and held: this is session

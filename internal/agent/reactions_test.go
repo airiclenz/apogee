@@ -391,7 +391,7 @@ func TestFireBypassMatrix(t *testing.T) {
 			} else {
 				a, sink = ladderAgent(t, nil, subject)
 			}
-			swapBypass(a, true)
+			swapBypass(t, a, true)
 
 			if _, err := a.fire(context.Background(), domain.MomentPostResponse, postResponse(true)); err != nil {
 				t.Fatalf("fire: %v", err)
@@ -726,14 +726,14 @@ func TestSetReactionsRebuildsTheLadderOnlyWhenTheFloorMoves(t *testing.T) {
 	log := &ladderLog{}
 	a, _ := ladderAgent(t, []domain.Reaction{probe(log, "installed", domain.ClassShapeView, nil)}, nil)
 
-	a.SetReactions(domain.Generation{Bypass: true})
+	mustSetReactions(t, a, domain.Generation{Bypass: true})
 
 	assertOrder(t, "the ladder after a Bypass-only swap", builtinIDs(a), []string{"installed"})
 	if !a.Generation().Bypass {
 		t.Error("Bypass did not land")
 	}
 
-	a.SetReactions(domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableReadCache: true}})
+	mustSetReactions(t, a, domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableReadCache: true}})
 
 	ids := builtinIDs(a)
 	if slices.Contains(ids, "installed") {
@@ -755,10 +755,10 @@ func TestSetReactionsRebuildsTheLadderWhenOnlyTheNoticeSwitchMoves(t *testing.T)
 	log := &ladderLog{}
 	a, _ := ladderAgent(t, []domain.Reaction{probe(log, "installed", domain.ClassShapeView, nil)}, nil)
 
-	a.SetReactions(domain.Generation{})
+	mustSetReactions(t, a, domain.Generation{})
 	assertOrder(t, "the ladder after a swap that moved nothing", builtinIDs(a), []string{"installed"})
 
-	a.SetReactions(domain.Generation{ContextFillNotice: true})
+	mustSetReactions(t, a, domain.Generation{ContextFillNotice: true})
 
 	if !a.Generation().ContextFillNotice {
 		t.Error("the notice switch did not land")
@@ -772,12 +772,12 @@ func TestSetReactionsRebuildsTheLadderWhenOnlyTheNoticeSwitchMoves(t *testing.T)
 	}
 
 	// Moving it back is a move too, and a second identical generation is not.
-	a.SetReactions(domain.Generation{})
+	mustSetReactions(t, a, domain.Generation{})
 	if a.Generation().ContextFillNotice {
 		t.Error("the notice switch did not clear")
 	}
 	a.builtins = append(a.builtins, armedReaction{spec: probe(log, "installed-again", domain.ClassShapeView, nil)})
-	a.SetReactions(domain.Generation{})
+	mustSetReactions(t, a, domain.Generation{})
 	if ids := builtinIDs(a); !slices.Contains(ids, "installed-again") {
 		t.Errorf("ladder = %v after a swap that moved nothing, want the installed slice kept", ids)
 	}
@@ -972,7 +972,7 @@ func TestFireEmitsSeamClosedUnderBypassAndWhenNothingIsArmed(t *testing.T) {
 		a, sink := ladderAgent(t, nil, []domain.Reaction{
 			probe(log, "advisor", domain.ClassAdvise, acts(domain.Outcome{Edited: true})),
 		})
-		swapBypass(a, true)
+		swapBypass(t, a, true)
 		payload := postResponse(true)
 
 		if _, err := a.fire(context.Background(), domain.MomentPostResponse, payload); err != nil {
