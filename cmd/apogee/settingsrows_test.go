@@ -56,6 +56,8 @@ func fabricatedSettings() config.Options {
 		UndoSnapshots:         true,
 		DelegateMaxSteps:      40,
 		DelegateMaxDepth:      2,
+		DelegateMaxTokens:     5000000,
+		DelegateTimeout:       90 * time.Minute,
 		AutoTitle:             false,
 		RememberModel:         true,
 		ContextWindow:         32768,
@@ -407,6 +409,8 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"undo-snapshots":          "true",
 		"delegate-max-steps":      "40",
 		"delegate-max-depth":      "2",
+		"delegate-max-tokens":     "5000000",
+		"delegate-timeout":        "1h30m0s", // a duration prints itself, ui.stall-after's spelling
 		"auto-title":              "false",
 		"remember-model":          "true",
 		"context-window":          "32768",

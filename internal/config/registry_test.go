@@ -441,6 +441,9 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"delegate-max-steps", "eighty", "0 or more"},
 		{"delegate-max-depth", "0", "at least 1"},
 		{"delegate-max-depth", "deep", "at least 1"},
+		{"delegate-max-tokens", "-1", "0 or more"},
+		{"delegate-timeout", "soon", "length of time"},
+		{"delegate-timeout", "-5m", "0 or more"},
 		{"present.port", "70000", "0-65535"},
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
@@ -500,6 +503,11 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		// 1 is the shipped default, and 2 is the one deeper bound a human is likely to write.
 		{"delegate-max-depth", "1"},
 		{"delegate-max-depth", "2"},
+		// 0 is the documented "unbounded" on both; the other value is each key's shipped default.
+		{"delegate-max-tokens", "0"},
+		{"delegate-max-tokens", "20000000"},
+		{"delegate-timeout", "0"},
+		{"delegate-timeout", "2h"},
 		{"present.port", "0"},
 		{"present.port", "8080"},
 		{"mode", string(domain.ModeAuto)},

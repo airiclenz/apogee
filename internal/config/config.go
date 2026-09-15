@@ -762,6 +762,30 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no bound").
+		row: mustKey("delegate-max-tokens"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.DelegateMaxTokens = defaultDelegateMaxTokens
+			if fc.DelegateMaxTokens != nil && *fc.DelegateMaxTokens >= 0 {
+				o.DelegateMaxTokens = *fc.DelegateMaxTokens
+			}
+		},
+	},
+	{
+		// A duration's text on disk, `ui.stall-after`'s posture: an absent key and an empty value
+		// resolve to the default, an explicit `0` is off, and text no duration can be made of is
+		// left at the default HERE and refused by the startup pass (ResolveOptions), which quotes it.
+		row: mustKey("delegate-timeout"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.DelegateTimeout = defaultDelegateTimeout
+			if fc.DelegateTimeout != nil {
+				if d, err := parseDelegateTimeout(*fc.DelegateTimeout); err == nil {
+					o.DelegateTimeout = d
+				}
+			}
+		},
+	},
+	{
 		row: mustKey("undo-snapshots"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.UndoSnapshots = fc.UndoSnapshots == nil || *fc.UndoSnapshots
@@ -1389,6 +1413,18 @@ type fileConfig struct {
 	// int rather than a pointer because 0 is not a value here — the bound is at least 1, so an
 	// absent key and a 0 both resolve to the built-in 1. It feeds domain.Config.Delegation.MaxDepth.
 	DelegateMaxDepth int `yaml:"delegate-max-depth"`
+	// DelegateMaxTokens bounds what a CHILD agent's one Exchange may SPEND, in cumulative prompt
+	// tokens (default 20000000). File-only (no flag/env), and a pointer for DelegateMaxSteps's
+	// reason: an explicit `0` is the documented spelling of "unbounded". It feeds
+	// domain.Config.Delegation.MaxTokens.
+	DelegateMaxTokens *int `yaml:"delegate-max-tokens"`
+	// DelegateTimeout bounds how long a CHILD agent's one Exchange may run on the wall clock, from
+	// its first request, as time.ParseDuration spells one (`2h`, `30m`; default 2h; `0` = unbounded).
+	// File-only (no flag/env), and a string pointer for `ui.stall-after`'s reason: the text is
+	// resolved to a duration by the accessor (parseDelegateTimeout) and refused, quoted as written,
+	// by the startup pass when no duration can be made of it. It feeds
+	// domain.Config.Delegation.Timeout.
+	DelegateTimeout *string `yaml:"delegate-timeout"`
 	// UndoSnapshots gates the SNAPSHOT-backed undo store (ADR 0074): with it on, apogee images the
 	// workspace around each exchange in a git object database of the session's own, outside the
 	// workspace, so `/undo` survives a relaunch and reaches writes that never went through apogee's
@@ -3002,6 +3038,16 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// internal/domain owns.
 	if err := validateCursorShapeName(opts.CursorShape); err != nil {
 		return notices, err
+	}
+	// A `delegate-timeout:` that is not a length of time is the same kind of loud startup error, on
+	// `ui.stall-after`'s reasoning: a bound that quietly resolved to the default would leave the file
+	// reading as configured while a delegation ran under a limit nobody set. The judgement is the
+	// registry's own validator over the text AS WRITTEN, so the startup refusal and the one the
+	// /settings pane writes are one wording.
+	if fc.DelegateTimeout != nil {
+		if err := validateDelegateTimeout(*fc.DelegateTimeout); err != nil {
+			return notices, err
+		}
 	}
 	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,
 	// or a per-model entry carrying no prompt at all — is a defect in the FILE, independent of

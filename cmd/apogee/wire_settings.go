@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -228,6 +229,11 @@ type liveSettings struct {
 	// file into the constructed Config, no setter behind it, mirrored for the Firings this
 	// session raises.
 	delegateMaxDepth int
+	// delegateMaxTokens and delegateTimeout mirror `delegate-max-tokens:` and `delegate-timeout:`
+	// on the same footing again — read off the file into the constructed Config at spawn, no
+	// setter behind them, mirrored for the Firings this session raises.
+	delegateMaxTokens int
+	delegateTimeout   time.Duration
 
 	// inspector mirrors `ui.inspector:`, whose live apply is the WRITE alone — the wire observer is
 	// installed while THIS session's provider client is constructed and there is no seam to arm one
@@ -302,8 +308,10 @@ func newLiveSettings(opts config.Options) *liveSettings {
 			Sync:              sync,
 		},
 
-		delegateMaxSteps: opts.DelegateMaxSteps,
-		delegateMaxDepth: opts.DelegateMaxDepth,
+		delegateMaxSteps:  opts.DelegateMaxSteps,
+		delegateMaxDepth:  opts.DelegateMaxDepth,
+		delegateMaxTokens: opts.DelegateMaxTokens,
+		delegateTimeout:   opts.DelegateTimeout,
 	}
 }
 
@@ -875,6 +883,22 @@ func (s *liveSettings) setDelegateMaxDepth(depth int) {
 	s.delegateMaxDepth = depth
 }
 
+// setDelegateMaxTokens mirrors `delegate-max-tokens:`, on setDelegateMaxSteps's footing: the
+// budget is a field of the Config an Agent was constructed with, so the store is the whole of what
+// the value can reach in this process, and what it reaches is the next Firing's own delegations.
+func (s *liveSettings) setDelegateMaxTokens(tokens int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.delegateMaxTokens = tokens
+}
+
+// setDelegateTimeout mirrors `delegate-timeout:`, on the same footing.
+func (s *liveSettings) setDelegateTimeout(limit time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.delegateTimeout = limit
+}
+
 // setInspector mirrors `ui.inspector:`. Unlike the two above there is no engine seam this shadows —
 // the capture is armed while a provider client is CONSTRUCTED — so the store is the whole of what
 // the value can reach in this process, and what it reaches is the next Firing's own client.
@@ -937,6 +961,8 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.UndoSnapshots = s.undoSnapshots
 	next.DelegateMaxSteps = s.delegateMaxSteps
 	next.DelegateMaxDepth = s.delegateMaxDepth
+	next.DelegateMaxTokens = s.delegateMaxTokens
+	next.DelegateTimeout = s.delegateTimeout
 
 	// And the Reaction surface, which is pushed as ONE value and comes back as four keys: the
 	// reaction list, the `bypass:` switch, the `context-fill-notice:` switch, and the seven Floor
@@ -1491,6 +1517,18 @@ var settingsTable = []settingsEntry{
 		apply:   applyDelegateMaxDepth,
 	},
 	{
+		key: "delegate-max-tokens",
+		// As delegate-max-steps above: no member, no seam, no re-resolution.
+		reaches: reachesWithoutAMember,
+		apply:   applyDelegateMaxTokens,
+	},
+	{
+		key: "delegate-timeout",
+		// As delegate-max-steps above: no member, no seam, no re-resolution.
+		reaches: reachesWithoutAMember,
+		apply:   applyDelegateTimeout,
+	},
+	{
 		key:     "undo-snapshots",
 		reaches: reachesWithoutAMember,
 		apply:   applyUndoSnapshots,
@@ -1892,6 +1930,36 @@ func applyDelegateMaxDepth(a settingsApplier, key, value string) (string, error)
 	}
 	if a.live != nil {
 		a.live.setDelegateMaxDepth(depth)
+	}
+	return "", nil
+}
+
+// applyDelegateMaxTokens is `delegate-max-tokens:`, on applyDelegateMaxSteps's footing exactly: the
+// budget is a field of the Config a child Agent is constructed with at spawn, so the write is the
+// whole of the apply for this session, and the mirror onto the holder is what bounds the delegations
+// of the Firings it raises. Success, no note, the Description's "takes effect at the next start"
+// carrying the promise; the value is parsed because a value that is to be recorded has to be read.
+func applyDelegateMaxTokens(a settingsApplier, key, value string) (string, error) {
+	tokens, err := settingInt(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.setDelegateMaxTokens(tokens)
+	}
+	return "", nil
+}
+
+// applyDelegateTimeout is `delegate-timeout:`, on the same footing, read as the length of time the
+// registry's own validator accepted (`0` is unbounded); a negative one is refused here too rather
+// than trusted from the file, settingInt's reason.
+func applyDelegateTimeout(a settingsApplier, key, value string) (string, error) {
+	limit, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil || limit < 0 {
+		return "", fmt.Errorf("apogee: %s is a length of time of 0 or more, not %q", key, value)
+	}
+	if a.live != nil {
+		a.live.setDelegateTimeout(limit)
 	}
 	return "", nil
 }

@@ -1041,7 +1041,8 @@ the work on and has nothing of its own in flight, which is the one live fact its
 stand in for, the nested run they would show being collapsed too. Once the report arrives the slot
 carries the **report's first line**, or `· done` where the report was long enough to become a
 body — unless the engine wrapped that report in an **outcome envelope**, which takes the slot
-instead: `· stopped at its step cap` where the step cap stopped the run mid-task, and
+instead: `· stopped at its step cap` where the step cap stopped the run mid-task (`· stopped at
+its token budget` / `· stopped at its time limit` where one of its sibling bounds did), and
 `· steered by 2 messages` appended to whichever verdict stands where the human addressed the child
 while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its
 cause. A capped run still closes with a wrap-up report; the envelope takes the slot ahead of that

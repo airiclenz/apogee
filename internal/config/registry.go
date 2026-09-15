@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/prompt"
@@ -472,6 +473,26 @@ var KeyRegistry = []Key{
 		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxDepth) },
 	},
 	{
+		Path: "delegate-max-tokens", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxTokens),
+		Editable: true,
+		Validate: validateDelegateMaxTokens,
+		Desc: "Prompt tokens a delegated sub-agent may spend in all before apogee ends it; 0 lets " +
+			"it run unbounded; takes effect at the next start.",
+		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxTokens) },
+	},
+	{
+		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
+		// posture, for its reason: the kind carries the shape, the hook carries the contract.
+		Path: "delegate-timeout", Kind: KindString, Default: defaultDelegateTimeoutText,
+		Editable: true,
+		Validate: validateDelegateTimeout,
+		Desc: "Wall-clock time a delegated sub-agent may run before apogee ends it; 0 lets it run " +
+			"unbounded; takes effect at the next start.",
+		// The limit as a DURATION prints itself (`2h0m0s`), a spelling the key takes back — so the
+		// value seeding an edit field is one the next commit persists unchanged.
+		Read: func(o Options) string { return o.DelegateTimeout.String() },
+	},
+	{
 		Path: "undo-snapshots", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc: "Snapshot the workspace around each exchange so /undo survives a relaunch and " +
@@ -872,6 +893,69 @@ func validateDelegateMaxDepth(value string) error {
 			"(%d is the default: the session delegates, its delegates do not)", value, defaultDelegateMaxDepth)
 	}
 	return nil
+}
+
+// defaultDelegateMaxTokens is the built-in bound on what a CHILD agent's one Exchange may spend, in
+// cumulative prompt tokens: twenty million, which a delegation re-reading a swollen history reaches
+// long before its Turn count says anything is wrong, and which no bounded task needs. The registry
+// row advertises it and the loader resolves an unstated key to it, so the two cannot drift apart.
+const defaultDelegateMaxTokens = 20_000_000
+
+// validateDelegateMaxTokens refuses a negative token bound. Zero is the documented spelling of
+// "unbounded", so it is accepted here as it is on disk (validateDelegateMaxSteps's posture).
+func validateDelegateMaxTokens(value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return fmt.Errorf("apogee: invalid delegate-max-tokens %q: want a token count of 0 or more "+
+			"(0 lets a delegation run unbounded; %d is the default)", value, defaultDelegateMaxTokens)
+	}
+	return nil
+}
+
+// defaultDelegateTimeoutText is the built-in bound on how long a CHILD agent's one Exchange may run,
+// as the config file spells it; defaultDelegateTimeout is the same bound resolved. Two hours is
+// longer than any bounded task needs on a local model and shorter than a night nobody watched.
+const defaultDelegateTimeoutText = "2h"
+
+var defaultDelegateTimeout = mustParseDuration(defaultDelegateTimeoutText)
+
+// mustParseDuration resolves a duration the package itself spells; a misspelt default is a defect
+// in this file, so it panics at init rather than resolving to some other bound.
+func mustParseDuration(text string) time.Duration {
+	d, err := time.ParseDuration(text)
+	if err != nil {
+		panic("config: " + err.Error())
+	}
+	return d
+}
+
+// parseDelegateTimeout reads a `delegate-timeout:` value into the duration it bounds: the empty
+// value is the default (an absent key's reading), `0` is off, and text no duration can be made of
+// — or a negative one — is refused with the key named. It is the ONE reading of the key: the
+// loader's accessor resolves through it and the registry's validate hook judges through it, so
+// what startup accepts and what the settings pane writes are one answer.
+func parseDelegateTimeout(value string) (time.Duration, error) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return defaultDelegateTimeout, nil
+	}
+	d, err := time.ParseDuration(text)
+	if err != nil {
+		return 0, fmt.Errorf("apogee: invalid delegate-timeout %q: want a length of time like 2h or 30m, "+
+			"or 0 to let a delegation run unbounded", value)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("apogee: invalid delegate-timeout %s: want 0 or more, where 0 lets a "+
+			"delegation run unbounded", d)
+	}
+	return d, nil
+}
+
+// validateDelegateTimeout refuses a `delegate-timeout:` that is not a length of time to allow,
+// through the loader's own reading (parseDelegateTimeout) rather than a second time.ParseDuration.
+func validateDelegateTimeout(value string) error {
+	_, err := parseDelegateTimeout(value)
+	return err
 }
 
 // validateResponseReserve refuses a reply share the Budget could not spend, through the same check

@@ -1266,6 +1266,8 @@ func TestSummaryStyleGreensOnlyTheDelegationVerdict(t *testing.T) {
 		{"done · steered by 3 messages", true},
 		{delegationCappedVerdict, false},
 		{"stopped at its step cap · steered by 1 message", false},
+		{"stopped at its token budget", false},
+		{"stopped at its time limit", false},
 		{"clean", false},
 		{"PASS", false},
 		{"exit 0", false},

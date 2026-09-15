@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -1558,6 +1559,191 @@ func TestSubAgent_StepCapZeroIsUnbounded(t *testing.T) {
 	}
 	if got := countCapErrors(sink.events, 1); got != 0 {
 		t.Errorf("step-cap ErrorEvents = %d with the cap switched off, want 0", got)
+	}
+}
+
+// spentChildTurns is cappedChildTurns with a server-reported usage on every Turn: prompts[i] is
+// the prompt-token count Turn i reports, which the child's own tally sums — the reading the token
+// bound (Agent.tokenCap) is enforced against.
+func spentChildTurns(prompts ...int) [][]provider.Delta {
+	out := make([][]provider.Delta, 0, len(prompts))
+	for i, prompt := range prompts {
+		script := narratedToolCallScript(
+			fmt.Sprintf("t%d", i), "read_thing", fmt.Sprintf(`{"n":%d}`, i), fmt.Sprintf("reading file %d", i))
+		script[len(script)-1].Usage = &provider.Usage{PromptTokens: prompt, TotalTokens: prompt}
+		out = append(out, script)
+	}
+	return out
+}
+
+// steppingClock is a pinned `now` that moves by step on every reading after the first, so a bound
+// measured against it trips deterministically and never waits on the wall.
+func steppingClock(start time.Time, step time.Duration) func() time.Time {
+	calls := 0
+	return func() time.Time {
+		now := start.Add(time.Duration(calls) * step)
+		calls++
+		return now
+	}
+}
+
+// runBoundedDelegation drives one delegation of a parent built on cfg whose child spends the
+// scripted Turns, then answers the wrap-up with childClosingReport and lets the parent finish. It
+// returns the recorded events, the sub_agent result and the responder, for the bound tests below
+// to read their own marker off.
+func runBoundedDelegation(t *testing.T, cfg domain.Config, sink *recordingSink, now func() time.Time,
+	childTurns [][]provider.Delta) (domain.ToolResult, *requestLogResponder) {
+	t.Helper()
+	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
+	scripts = append(scripts, childTurns...)
+	scripts = append(scripts, contentScript(childClosingReport), contentScript("parent done"))
+	responder := &requestLogResponder{scripts: scripts}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if now != nil {
+		a.now = now
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted || res.StepCapped {
+		t.Errorf("parent result = %+v, want a clean uncapped exchange-complete", res)
+	}
+	if responder.calls != len(scripts) {
+		t.Errorf("upstream calls = %d, want %d — the bound ends the child after its scripted Turns and one wrap-up",
+			responder.calls, len(scripts))
+	}
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	return sub, responder
+}
+
+// TestSubAgent_TokenBudgetEndsTheChildThroughTheWrapUp pins the token bound (`delegate-max-tokens`,
+// Config.Delegation.MaxTokens): a child whose usage tally passes the budget after its second Turn
+// is ended exactly as the step cap ends one — one wrap-up request with the menu withdrawn and the
+// budget named in its directive, a non-error result opening with the token marker, one ErrorEvent
+// on the child's stream naming the key — while the parent's Exchange completes.
+func TestSubAgent_TokenBudgetEndsTheChildThroughTheWrapUp(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 80
+	cfg.Delegation.MaxTokens = 20_000_000
+
+	// 10M after Turn 1 (under), 25M after Turn 2 (over): the bound trips at the second boundary.
+	sub, responder := runBoundedDelegation(t, cfg, sink, nil, spentChildTurns(10_000_000, 15_000_000))
+
+	if sub.IsError {
+		t.Errorf("sub_agent result IsError = true for a delegation stopped at its token budget: %q", sub.Content)
+	}
+	marker := fmt.Sprintf(tokenCapResultFormat, 20_000_000)
+	if !strings.HasPrefix(sub.Content, marker+"\n") {
+		t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, marker)
+	}
+	if !strings.HasSuffix(sub.Content, childClosingReport) {
+		t.Errorf("sub_agent result = %q, want it to end with the wrap-up reply", sub.Content)
+	}
+	wrapUp := responder.requests[len(responder.requests)-2]
+	if got := len(wrapUp.Tools); got != 0 {
+		t.Errorf("the wrap-up request carries %d tools, want 0", got)
+	}
+	if directive := fmt.Sprintf(wrapUpTokenDirectiveFormat, 20_000_000); !strings.Contains(wrapUp.Messages[0].Content, directive) {
+		t.Errorf("wrap-up system content = %q, want the token directive %q", wrapUp.Messages[0].Content, directive)
+	}
+	if !hasErrorContaining(sink.events, 1, "token budget (20000000 tokens)") ||
+		!hasErrorContaining(sink.events, 1, "raise delegate-max-tokens") {
+		t.Error("no ErrorEvent at Depth 1 names the token budget and the key that raises it")
+	}
+	if got := countCapErrors(sink.events, 1); got != 0 {
+		t.Errorf("step-cap ErrorEvents = %d, want 0 — the step cap was never reached", got)
+	}
+}
+
+// TestSubAgent_TimeLimitEndsTheChildThroughTheWrapUp pins the time bound (`delegate-timeout`,
+// Config.Delegation.Timeout) on a pinned clock threaded from the parent: the child's first request
+// starts the clock, and a reading past the limit at the next boundary ends it through the same
+// wrap-up path with the time marker — spelled `2h0m`, the duration's own text without its idle
+// seconds.
+func TestSubAgent_TimeLimitEndsTheChildThroughTheWrapUp(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 80
+	cfg.Delegation.Timeout = 2 * time.Hour
+
+	// Every reading after the first is three hours on, so the child's first boundary is past 2h.
+	clock := steppingClock(time.Date(2026, 9, 15, 9, 0, 0, 0, time.UTC), 3*time.Hour)
+	sub, responder := runBoundedDelegation(t, cfg, sink, clock, cappedChildTurns(1))
+
+	if sub.IsError {
+		t.Errorf("sub_agent result IsError = true for a delegation stopped at its time limit: %q", sub.Content)
+	}
+	marker := fmt.Sprintf(timeCapResultFormat, "2h0m")
+	if !strings.HasPrefix(sub.Content, marker+"\n") {
+		t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, marker)
+	}
+	wrapUp := responder.requests[len(responder.requests)-2]
+	if got := len(wrapUp.Tools); got != 0 {
+		t.Errorf("the wrap-up request carries %d tools, want 0", got)
+	}
+	if directive := fmt.Sprintf(wrapUpTimeDirectiveFormat, "2h0m"); !strings.Contains(wrapUp.Messages[0].Content, directive) {
+		t.Errorf("wrap-up system content = %q, want the time directive %q", wrapUp.Messages[0].Content, directive)
+	}
+	if !hasErrorContaining(sink.events, 1, "time limit (2h0m)") ||
+		!hasErrorContaining(sink.events, 1, "raise delegate-timeout") {
+		t.Error("no ErrorEvent at Depth 1 names the time limit and the key that raises it")
+	}
+}
+
+// TestSubAgent_TokenAndTimeBoundsAtZeroLeaveTheStepCapAlone pins the off spelling of both keys: at
+// 0 neither trips however much the child spends or however far the clock moves, and the 80-step
+// cap — lowered to 3 here so the test can reach it — is the only thing that ends the child.
+func TestSubAgent_TokenAndTimeBoundsAtZeroLeaveTheStepCapAlone(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 3
+	cfg.Delegation.MaxTokens = 0
+	cfg.Delegation.Timeout = 0
+
+	clock := steppingClock(time.Date(2026, 9, 15, 9, 0, 0, 0, time.UTC), 3*time.Hour)
+	sub, _ := runBoundedDelegation(t, cfg, sink, clock, spentChildTurns(30_000_000, 30_000_000, 30_000_000))
+
+	marker := fmt.Sprintf(stepCapResultFormat, 3)
+	if !strings.HasPrefix(sub.Content, marker+"\n") {
+		t.Errorf("sub_agent result = %q, want it to open with the step-cap marker %q", sub.Content, marker)
+	}
+	if got := countCapErrors(sink.events, 1); got != 1 {
+		t.Errorf("step-cap ErrorEvents at Depth 1 = %d, want exactly 1", got)
+	}
+	if hasErrorContaining(sink.events, 1, "token budget") || hasErrorContaining(sink.events, 1, "time limit") {
+		t.Error("a bound at 0 wrote its ErrorEvent; 0 is off")
+	}
+}
+
+// TestBoundDurationText pins the spelling the time markers quote: idle trailing seconds are dropped
+// after a minutes field and nothing else is touched.
+func TestBoundDurationText(t *testing.T) {
+	for _, tc := range []struct {
+		in   time.Duration
+		want string
+	}{
+		{2 * time.Hour, "2h0m"},
+		{90 * time.Minute, "1h30m"},
+		{90 * time.Second, "1m30s"},
+		{45 * time.Second, "45s"},
+	} {
+		if got := boundDurationText(tc.in); got != tc.want {
+			t.Errorf("boundDurationText(%s) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

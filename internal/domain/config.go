@@ -484,6 +484,18 @@ type DelegationConfig struct {
 	// "no delegation", so an embedder's zero Config still delegates once. The host folds in the
 	// `delegate-max-depth:` key (default 1, at least 1); an embedder sets it directly.
 	MaxDepth int
+	// MaxTokens bounds what a child agent may SPEND in its one Exchange: the cumulative prompt
+	// tokens of every request it makes (its own usage tally), after which the engine ends it the
+	// way the step cap does — one wrap-up Turn, a partial result marked as such; 0 = unbounded. It
+	// is the bound the step cap cannot be: a delegate whose every Turn re-reads a swollen history
+	// spends far more than its Turn count says. The host folds in the `delegate-max-tokens:` key
+	// (default 20000000); an embedder sets it directly.
+	MaxTokens int
+	// Timeout bounds the WALL CLOCK a child agent's one Exchange may run, measured from its first
+	// request, after which the engine ends it through the same wrap-up path; 0 = unbounded. A slow
+	// server makes a cheap delegation a long one, and nobody is watching a delegate's clock. The
+	// host folds in the `delegate-timeout:` key (default 2h); an embedder sets it directly.
+	Timeout time.Duration
 }
 
 // ContextConfig governs the structural context reducers — Budget, Compaction and Pruning —

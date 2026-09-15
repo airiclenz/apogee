@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -389,6 +390,22 @@ type Agent struct {
 	// (ADR 0006), not a Reaction: it stays on under Bypass. Run is the ONE enforcement site.
 	stepCap int
 
+	// tokenCap and timeCap are the step cap's two siblings, seeded at the same site and enforced
+	// at the same one (Run): the cumulative PROMPT tokens this Agent's usage tally may reach
+	// (Config.Delegation.MaxTokens, the `delegate-max-tokens` key) and the wall clock its one
+	// Exchange may run from its first request (Config.Delegation.Timeout, `delegate-timeout`);
+	// 0 = unbounded, and a top-level Agent is left at 0 for stepCap's reason. capStart is the
+	// clock reading the time bound counts from, taken at the head of the child's Run through
+	// a.now so a test can pin it; capHit records WHICH bound ended the Exchange, the one fact the
+	// three markers a capped run writes (finishAtStepCap's ErrorEvent, loop.go's wrap-up
+	// directive, subagent.go's result head) need in common. Its zero value is the step cap, so a
+	// capped boundary that never named a bound reads exactly as every capped boundary read before
+	// the other two existed. Structural like stepCap (ADR 0006): on under Bypass, no Reaction.
+	tokenCap int
+	timeCap  time.Duration
+	capStart time.Time
+	capHit   delegateBound
+
 	// wrapUp latches the ONE tool-less closing Turn a delegate stopped at its step cap is given
 	// (subagent.go's wrapUpDirectiveFormat). While it is set, three seams change together and only
 	// for the request they compose: toolMenu returns no tools, buildRequest stamps the directive
@@ -429,6 +446,67 @@ type Agent struct {
 // actually applied.
 const stepCapErrFormat = "delegate stopped at its step cap (%d steps) — asking it to sum up; " +
 	"narrow the task or raise delegate-max-steps"
+
+// tokenCapErrFormat and timeCapErrFormat are stepCapErrFormat for the two other bounds a delegate
+// runs under (Agent.tokenCap, Agent.timeCap): the same shape and the same middle clause, because
+// the engine does the same thing next, and each names the key that raises ITS bound. %d is the
+// token budget applied; %s is the time limit, spelled by boundDurationText.
+const (
+	tokenCapErrFormat = "delegate stopped at its token budget (%d tokens) — asking it to sum up; " +
+		"narrow the task or raise delegate-max-tokens"
+	timeCapErrFormat = "delegate stopped at its time limit (%s) — asking it to sum up; " +
+		"narrow the task or raise delegate-timeout"
+)
+
+// delegateBound names which of a delegate's three bounds ended its Exchange (Agent.capHit). The
+// zero value is the step cap — the bound every capped result was read as before the token and
+// time bounds existed, so an Agent built with a stepCap alone still words its markers as it did.
+type delegateBound int
+
+const (
+	boundSteps delegateBound = iota
+	boundTokens
+	boundTime
+)
+
+// boundDurationText spells a time bound the way the markers quote it: time.Duration's own text
+// with a trailing `0s` dropped where minutes precede it, so the default reads `2h0m` rather than
+// `2h0m0s` and a bound of `90s` still reads as `1m30s`.
+func boundDurationText(d time.Duration) string {
+	text := d.String()
+	if strings.HasSuffix(text, "m0s") {
+		text = strings.TrimSuffix(text, "0s")
+	}
+	return text
+}
+
+// delegateBoundHit reports which bound, if any, the Turn just completed has reached — steps
+// first, then tokens, then time, so where two trip at once the cheaper story wins. A bound at 0
+// is off. The token bound reads this Agent's own usage tally, which is what the child spent and
+// nothing a parent spent; the time bound reads the clock through a.now against capStart, which
+// Run set at its head.
+func (a *Agent) delegateBoundHit() (delegateBound, bool) {
+	switch {
+	case a.stepCap > 0 && a.turns.exchangeTurns >= a.stepCap:
+		return boundSteps, true
+	case a.tokenCap > 0 && a.usage.prompt >= a.tokenCap:
+		return boundTokens, true
+	case a.timeCap > 0 && !a.capStart.IsZero() && a.now().Sub(a.capStart) >= a.timeCap:
+		return boundTime, true
+	}
+	return boundSteps, false
+}
+
+// boundErrText words the ErrorEvent finishAtStepCap emits for the bound capHit names.
+func (a *Agent) boundErrText() string {
+	switch a.capHit {
+	case boundTokens:
+		return fmt.Sprintf(tokenCapErrFormat, a.tokenCap)
+	case boundTime:
+		return fmt.Sprintf(timeCapErrFormat, boundDurationText(a.timeCap))
+	}
+	return fmt.Sprintf(stepCapErrFormat, a.stepCap)
+}
 
 // usageTally is one Agent's running token accounting: the sums and the call count behind the
 // cumulative fields of every domain.UsageEvent that Agent emits. It is deliberately a plain
@@ -646,12 +724,19 @@ func (a *Agent) emitTurn(res domain.StepResult) {
 // (children.go). ADR 0063 D1 records this and supersedes ADR 0025's rejected Run-side drain for
 // depth > 0 ONLY: the top-level contract in the paragraph above stands unchanged.
 //
-// It is also the one place the DELEGATE STEP CAP is enforced (Agent.stepCap): a child agent that
-// is still asking for tools after its capped number of Turns leaves this loop rather than looping
-// on, is given one further tool-less Turn to report what it has (finishAtStepCap), and the
-// boundary returned carries StepCapped. A Step-driving host is not capped — it decides when to
-// stop stepping itself — and neither is a top-level Agent, whose cap is always 0.
+// It is also the one place the DELEGATE STEP CAP is enforced (Agent.stepCap) — and, since the
+// token and time bounds joined it (Agent.tokenCap, Agent.timeCap), the one place all three are: a
+// child agent that is still asking for tools after its capped number of Turns, or whose prompt
+// tokens or wall clock have reached their bound, leaves this loop rather than looping on, is given
+// one further tool-less Turn to report what it has (finishAtStepCap), and the boundary returned
+// carries StepCapped. A Step-driving host is not capped — it decides when to stop stepping itself
+// — and neither is a top-level Agent, whose caps are always 0.
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
+	// The time bound counts from the child's first request, which this Run is about to make; the
+	// reading is taken once, so a resumed loop never restarts the clock.
+	if a.timeCap > 0 && a.capStart.IsZero() {
+		a.capStart = a.now()
+	}
 	for {
 		res, err := a.step(ctx)
 		a.emitTurn(res)
@@ -663,8 +748,12 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 		// Turn completed, which is after its tool calls were dispatched and their results
 		// appended — so the history the parent snapshots ends on a complete tool round and stays
 		// alternation-clean. A top-level Agent has no cap and never leaves this loop early.
+		// The token and time bounds are checked at the same boundary for the same reason: each
+		// is a fact about the Turns already spent, and the history still ends on a complete tool
+		// round when one trips.
 		a.turns.exchangeTurns++
-		if a.stepCap > 0 && a.turns.exchangeTurns >= a.stepCap {
+		if bound, hit := a.delegateBoundHit(); hit {
+			a.capHit = bound
 			capped := a.finishAtStepCap(ctx, res)
 			a.emitTurn(capped)
 			return capped, nil
@@ -677,8 +766,10 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 	}
 }
 
-// finishAtStepCap ends the open Exchange at the delegate step cap — but not before spending one
-// further Turn on the child's CLOSING REPORT. It surfaces the bound to the human as one ErrorEvent
+// finishAtStepCap ends the open Exchange at a delegate bound — the step cap it is named for, or
+// the token or time bound capHit says tripped instead, which take the same path with their own
+// markers (boundErrText) — but not before spending one further Turn on the child's CLOSING
+// REPORT. It surfaces the bound to the human as one ErrorEvent
 // (the child's own stream, at its Depth), then latches wrapUp for exactly one step(): the tool
 // menu is withdrawn and the request tells the delegate why its tools are gone and asks it to
 // report to the agent that delegated the task (subagent.go's wrapUpDirectiveFormat, loop.go's
@@ -712,7 +803,7 @@ func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) dom
 	a.cfg.Events.Emit(domain.ErrorEvent{
 		EventBase: a.base(last.TurnIndex),
 		Source:    "loop",
-		Err:       fmt.Sprintf(stepCapErrFormat, a.stepCap),
+		Err:       a.boundErrText(),
 	})
 
 	a.wrapUp = true

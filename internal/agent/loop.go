@@ -910,7 +910,7 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	// why its tools vanished. AppendToSystem CREATES the system message when none exists, so a
 	// session with no configured prompt and no context files still carries the directive.
 	if a.wrapUp {
-		req.AppendToSystem(wrapUpMarker, fmt.Sprintf(wrapUpDirectiveFormat, a.stepCap))
+		req.AppendToSystem(wrapUpMarker, a.wrapUpDirective())
 	}
 	deferred, ok := a.conv.TakeDeferred()
 	if ok {

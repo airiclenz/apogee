@@ -722,6 +722,25 @@ context-fill-notice: false
 # delegate-max-depth: 1
 
 # =============================================================================
+# How much a delegated sub-agent may spend. The step ceiling above counts turns, and a turn that
+# re-reads a long history costs far more than one that does not, so a sub-agent well inside its
+# step ceiling can still burn through a fortune in tokens. This is the ceiling on that spend,
+# counted in PROMPT TOKENS across every request the sub-agent makes; when it is reached apogee ends
+# the delegation the same way the step ceiling does — one closing turn to sum up, the result
+# marked as partial. 0 lets a delegation spend unbounded. Config-file only (no flag or env).
+# Default: 20000000.
+# delegate-max-tokens: 20000000
+
+# =============================================================================
+# How long a delegated sub-agent may run. A slow server turns a cheap delegation into a long one,
+# and nobody is watching a sub-agent's clock, so this is the wall-clock ceiling on one delegation,
+# counted from its first request, as a length of time like 2h or 30m; when it is reached apogee
+# ends the delegation the way the step ceiling does — one closing turn to sum up, the result
+# marked as partial. 0 lets a delegation run for as long as it takes. Config-file only (no flag or
+# env). Default: 2h.
+# delegate-timeout: 2h
+
+# =============================================================================
 # Snapshot the workspace for /undo. With this on, apogee images your whole workspace around each
 # exchange — once immediately before the exchange's first write-capable tool call, once when the
 # exchange ends — into a small object database of that session's own under ~/.apogee/snapshots/.

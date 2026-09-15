@@ -132,7 +132,7 @@ func TestGrepBranchRowShowsTheSearchedPath(t *testing.T) {
 // The ADR 0069 routing note — the line a delegation's result gains when its call asked for the
 // Sub-agent server and ran on the session server instead — is APPENDED to the result BODY. Both
 // recognisers that word a delegation's slot read the envelope from a fixed end of that body:
-// delegationStepCapHead at the START, delegationFailure from the first line. So a fallen-back
+// delegationBoundHead at the START, delegationFailure from the first line. So a fallen-back
 // result must classify exactly as the plain one does, and only the text beneath the head may change.
 func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 	t.Parallel()

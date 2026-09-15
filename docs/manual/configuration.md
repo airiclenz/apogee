@@ -716,6 +716,20 @@ hand-off further from you, so raise it only for work that genuinely needs a midd
 It must be at least `1`; a session that should not delegate at all disables the
 `sub_agent` tool instead (`tools.disabled`).
 
+Two more file-only keys bound what a **single delegation may spend**, because a turn count
+alone cannot: a sub-agent re-reading a long history costs far more per turn than one that
+does not, and a slow server turns a cheap delegation into a long one while nobody watches
+its clock. `delegate-max-tokens:` is the ceiling in **prompt tokens** across every request
+the sub-agent makes (default **20000000**), and `delegate-timeout:` is the ceiling on the
+**wall clock**, counted from the sub-agent's first request, as a length of time like `2h`
+or `30m` (default **2h**). Either one, when reached, ends the delegation exactly as the step
+ceiling does — the tools are taken away, the sub-agent is told which limit it hit and spends
+one closing turn summing up, and your agent receives the result marked as partial, its
+first line naming the limit (`token budget` or `time limit`) so it learns which knob its
+next delegation is up against. `0` switches either off. Both are read when a delegation
+starts, so a change applies to the sub-agents spawned after it and never to one already
+running; like the step ceiling, they bound sub-agents only.
+
 **What a sub-agent may call** is your agent's own menu, narrowed. Two tools never reach a
 sub-agent at any depth: `ask_user` and `present_document` are the seat at *your* prompt — a
 question put to you, a document opened for you — and a delegation has no such seat, so a

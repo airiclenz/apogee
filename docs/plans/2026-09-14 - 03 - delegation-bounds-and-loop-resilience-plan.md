@@ -162,7 +162,13 @@ NOTES (2026-09-15): `internal/tools/ask_user.go` and `present_document.go` gaine
 
 **Commit:** `feat(agent): children never get ask_user or present_document; sub_agent takes a tools roster`
 
-## 6. `delegate-max-tokens` and `delegate-timeout` bound every child
+## 6. `delegate-max-tokens` and `delegate-timeout` bound every child — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — layout.md: made necessary by the two new outcome-slot verdicts beside `· stopped at its step cap` (delegationBoundVerdict in internal/tui/toolregistry.go).
+NOTES (2026-09-15): consequential edit — internal/tui/toolregistry_test.go: made necessary by renaming `delegationStepCapHead` to `delegationBoundHead` (a comment naming the recogniser).
+NOTES (2026-09-15): consequential edit — internal/config/registry_test.go: the two validator enumerations (`TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse`, `...AcceptTheirDocumentedShapes`) gained rows for the two keys, mirroring item 4.
+NOTES (2026-09-15): the registry row for `delegate-timeout` advertises `Default: "2h"` while `Read` prints the resolved duration (`2h0m0s`) — `ui.stall-after`'s own posture (`90s` / `1m30s`); the parent-facing marker spells the limit through `boundDurationText` (`2h0m`), as the plan's literal reads.
+NOTES (2026-09-15): `wrapUpDirectiveFormat` keeps its exact value and `%d`; its tail was lifted into `wrapUpDirectiveTail` so the token and time directives share it, and `loop.go` now stamps `a.wrapUpDirective()` (picks by the bound that tripped) at the unchanged site — item 8's clause append lands after it.
 
 **What:** Depends on item 4. Two new top-level keys beside `delegate-max-steps`: `delegate-max-tokens` (int, default 20000000, the child's cumulative prompt tokens from its `usageTally`) and `delegate-timeout` (duration, default `2h`, wall clock from the child's first request); 0 disables either. `DelegationConfig` gains `MaxTokens`, `Timeout`. When a bound trips, the child ends through the SAME path as the step cap (`finishAtStepCap` → one wrap-up Turn), with its own markers: child directive and parent result lines read `[delegate stopped at its token budget (N tokens)]` / `[delegate stopped at its time limit (2h0m)]` in the `stepCapResultFormat` shape, and an `ErrorEvent` names the bound. Live reload applies to children spawned after the swap. Registry rows, template lines, `/settings` rows, manual, CONTEXT.md **Step cap** (renamed sentence: "step, token or time bound").
 

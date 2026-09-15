@@ -149,6 +149,26 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.DelegateMaxDepth = 2 },
 		},
 		{
+			name: "delegate-max-tokens is file-only and defaults 20000000",
+			file: fileConfig{DelegateMaxTokens: intptr(5_000_000)},
+			want: func(o *Options) { o.DelegateMaxTokens = 5_000_000 },
+		},
+		{
+			name: "an explicit delegate-max-tokens: 0 stays 0 — the documented spelling of unbounded",
+			file: fileConfig{DelegateMaxTokens: intptr(0)},
+			want: func(o *Options) { o.DelegateMaxTokens = 0 },
+		},
+		{
+			name: "delegate-timeout is file-only, a duration, and defaults 2h",
+			file: fileConfig{DelegateTimeout: strptr("30m")},
+			want: func(o *Options) { o.DelegateTimeout = 30 * time.Minute },
+		},
+		{
+			name: "an explicit delegate-timeout: 0 stays 0 — the documented spelling of unbounded",
+			file: fileConfig{DelegateTimeout: strptr("0")},
+			want: func(o *Options) { o.DelegateTimeout = 0 },
+		},
+		{
 			name: "auto-title is file-only and defaults true",
 			file: fileConfig{AutoTitle: boolptr(false)},
 			want: func(o *Options) { o.AutoTitle = false },
@@ -315,13 +335,15 @@ func wantDefaults() Options {
 		ToolUseEnforcer:  true, EmptyResponseRecovery: true, ToolCallRepair: true,
 		ToolCallSalvage: true,
 		ToolLoopBreaker: true, ToolResultCap: true, ReadCache: true,
-		UndoSnapshots:    true,
-		SubAgentsChoice:  SubAgentsChoiceFixed,
-		UseShippedSkills: true,
-		UseDefaultPrompt: true,
-		DelegateMaxSteps: defaultDelegateMaxSteps,
-		DelegateMaxDepth: defaultDelegateMaxDepth,
-		AutoTitle:        true, ContextFiles: []string{"AGENTS.md"},
+		UndoSnapshots:     true,
+		SubAgentsChoice:   SubAgentsChoiceFixed,
+		UseShippedSkills:  true,
+		UseDefaultPrompt:  true,
+		DelegateMaxSteps:  defaultDelegateMaxSteps,
+		DelegateMaxDepth:  defaultDelegateMaxDepth,
+		DelegateMaxTokens: defaultDelegateMaxTokens,
+		DelegateTimeout:   defaultDelegateTimeout,
+		AutoTitle:         true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
 }
@@ -544,6 +566,8 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"UndoSnapshots":     true,
 		"DelegateMaxSteps":  true,
 		"DelegateMaxDepth":  true,
+		"DelegateMaxTokens": true,
+		"DelegateTimeout":   true,
 		"UseShippedSkills":  true,
 		"UseDefaultPrompt":  true,
 		"AutoTitle":         true, "RememberModel": true,
@@ -601,6 +625,8 @@ func everyKeyFileConfig() fileConfig {
 		UseDefaultPrompt:  boolptr(false),
 		DelegateMaxSteps:  intptr(12),
 		DelegateMaxDepth:  2,
+		DelegateMaxTokens: intptr(5_000_000),
+		DelegateTimeout:   strptr("30m"),
 		RememberModel:     boolptr(true),
 		ContextWindow:     64000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
@@ -1984,6 +2010,114 @@ func TestDelegateMaxDepthSettingKeyValidator(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "delegate-max-depth") || !strings.Contains(err.Error(), "must be at least 1") {
 			t.Errorf("error = %v, want it to name the key and say the bound is at least 1", err)
+		}
+	}
+}
+
+// The delegate-max-tokens key parses into opts.delegateMaxTokens on delegate-max-steps's footing: a
+// file-only key, a pointer on disk so an explicit 0 — the documented "unbounded" — survives as 0,
+// and an absent key resolving to the built-in twenty million.
+func TestApplyConfigDelegateMaxTokens(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		file string
+		want int
+	}{
+		{"a stated budget", "delegate-max-tokens: 5000000\n", 5_000_000},
+		{"an absent key takes the built-in default", "", defaultDelegateMaxTokens},
+		{"an explicit 0 is unbounded", "delegate-max-tokens: 0\n", 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.DelegateMaxTokens != tt.want {
+				t.Errorf("opts.delegateMaxTokens = %d; want %d", opts.DelegateMaxTokens, tt.want)
+			}
+		})
+	}
+}
+
+// The delegate-timeout key parses into opts.delegateTimeout as a DURATION, `ui.stall-after`'s
+// posture: the file's text is read once, an absent key resolves to the built-in 2h, an explicit 0
+// is unbounded, and text no duration can be made of — or a negative one — is a startup error that
+// names the key and quotes the value as written, rather than a bound that quietly resolved to the
+// default.
+func TestApplyConfigDelegateTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		file    string
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "a stated limit", file: "delegate-timeout: 30m\n", want: 30 * time.Minute},
+		{name: "an absent key takes the built-in default", file: "", want: defaultDelegateTimeout},
+		{name: "an explicit 0 is unbounded", file: "delegate-timeout: 0\n", want: 0},
+		{name: "text that is no duration is refused", file: "delegate-timeout: soon\n", wantErr: `invalid delegate-timeout "soon"`},
+		{name: "a negative limit is refused", file: "delegate-timeout: -5m\n", wantErr: "invalid delegate-timeout -5m0s"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ApplyConfig error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.DelegateTimeout != tt.want {
+				t.Errorf("opts.delegateTimeout = %s; want %s", opts.DelegateTimeout, tt.want)
+			}
+		})
+	}
+}
+
+// TestDelegateBoundSettingKeyValidators pins the write path's guard on the two new bounds: the
+// token budget refuses a negative count and text, the timeout refuses text that is no duration and
+// a negative one, and each accepts its default and its documented 0.
+func TestDelegateBoundSettingKeyValidators(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		key     string
+		accept  []string
+		refuse  []string
+		wantErr string
+	}{
+		{"delegate-max-tokens", []string{"0", "20000000"}, []string{"-1", "lots"}, "0 or more"},
+		{"delegate-timeout", []string{"0", "2h", "30m"}, []string{"soon", "-5m"}, "delegate-timeout"},
+	} {
+		row, ok := LookupKey(tc.key)
+		if !ok || row.Validate == nil {
+			t.Fatalf("%s has no validate hook", tc.key)
+		}
+		for _, value := range tc.accept {
+			if err := row.Validate(value); err != nil {
+				t.Errorf("validate %s = %q: %v; want it accepted", tc.key, value, err)
+			}
+		}
+		for _, value := range tc.refuse {
+			err := row.Validate(value)
+			if err == nil {
+				t.Errorf("validate %s = %q: want a refusal", tc.key, value)
+				continue
+			}
+			if !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %v, want it to name %s and say %q", err, tc.key, tc.wantErr)
+			}
 		}
 	}
 }

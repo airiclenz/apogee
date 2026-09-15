@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
@@ -320,6 +321,17 @@ type Options struct {
 	// its delegates do not; at least 1), loaded from the config file only. ApplyConfig sets it
 	// from settings; the composition root folds it into apogee.Config.Delegation.MaxDepth.
 	DelegateMaxDepth int
+
+	// delegateMaxTokens bounds what a CHILD agent's one Exchange may SPEND, in cumulative prompt
+	// tokens (default 20000000; 0 = unbounded), loaded from the config file only. ApplyConfig sets
+	// it from settings; the composition root folds it into apogee.Config.Delegation.MaxTokens.
+	DelegateMaxTokens int
+
+	// delegateTimeout bounds how long a CHILD agent's one Exchange may run on the wall clock, from
+	// its first request (default 2h; 0 = unbounded), loaded from the config file only and resolved
+	// to a DURATION here, `ui.stall-after`'s posture. ApplyConfig sets it from settings; the
+	// composition root folds it into apogee.Config.Delegation.Timeout.
+	DelegateTimeout time.Duration
 
 	// autoTitle gates the automatic session-naming call — the cosmetic out-of-band completion that
 	// names a new Session record from its first prompt (default true), loaded from the config file

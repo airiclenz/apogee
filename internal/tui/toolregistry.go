@@ -792,22 +792,36 @@ func consoleOpenStat(res domain.ToolResult) (statValue, bool) {
 // line the failure layer already paints.
 func cleanStat(domain.ToolResult) (statValue, bool) { return plainStat("clean"), true }
 
-// The three words a delegation's outcome slot is built from. `done` is the ordinary verdict — a
-// child that reached its own boundary and reported; the step-cap verdict replaces it wholesale,
-// because a run the engine stopped mid-task did not finish; and the steering cell is appended to
-// whichever verdict stands, since a human may steer a child on any outcome (ADR 0063 D3).
+// The words a delegation's outcome slot is built from. `done` is the ordinary verdict — a child
+// that reached its own boundary and reported; a bound verdict replaces it wholesale, because a
+// run the engine stopped mid-task did not finish — delegationCappedVerdict is the step cap's, and
+// the token and time bounds word theirs from the same lead and the bound's own name
+// (delegationBoundVerdict); and the steering cell is appended to whichever verdict stands, since
+// a human may steer a child on any outcome (ADR 0063 D3).
 const (
 	delegationDoneVerdict    = "done"
-	delegationCappedVerdict  = "stopped at its step cap"
+	delegationBoundLead      = "stopped at its "
+	delegationCappedVerdict  = delegationBoundLead + "step cap"
 	delegationSteeredLead    = "steered by "
 	delegationSteeredMessage = "message"
 )
 
-// delegationStepCapHead matches the marker line a STEP-CAPPED delegation's result opens with —
-// "[delegate stopped at its step cap (3 steps); partial result — its last visible text follows]"
-// (internal/agent's stepCapResultFormat) — anchored at the START, where the engine writes it, so a
-// line the child itself printed cannot be read as the marker.
-var delegationStepCapHead = regexp.MustCompile(`^\[delegate stopped at its step cap \(\d+ steps?\);`)
+// delegationBoundHead matches the marker line a delegation stopped at one of its BOUNDS opens with
+// — "[delegate stopped at its step cap (3 steps); partial result — its last visible text follows]",
+// or the same shape naming its token budget or its time limit (internal/agent's
+// stepCapResultFormat, tokenCapResultFormat and timeCapResultFormat) — anchored at the START, where
+// the engine writes it, so a line the child itself printed cannot be read as the marker. The one
+// submatch is the bound's name, which the verdict repeats.
+var delegationBoundHead = regexp.MustCompile(
+	`^\[delegate stopped at its (step cap \(\d+ steps?\)|token budget \(\d+ tokens?\)|time limit \([^)]+\));`)
+
+// delegationBoundVerdict words the slot for the bound a matched head names: `stopped at its step
+// cap`, `stopped at its token budget`, `stopped at its time limit` — the name without its
+// parenthesis, which is the number the parent model reads and the row has no room for.
+func delegationBoundVerdict(bound string) string {
+	name, _, _ := strings.Cut(bound, " (")
+	return delegationBoundLead + name
+}
 
 // delegationSteeredTail matches the PARENT NOTICE a steered delegation's result closes with — "(the
 // user sent 2 messages to this sub-agent while it ran)" (internal/agent's userSteeredTrailer, ADR
@@ -840,7 +854,7 @@ func delegationSteeredCell(steered int) string {
 }
 
 // delegationVerdict words a finished delegation's slot from the RESULT ENVELOPE the engine wraps a
-// child's answer in: the step-cap marker it opens with, and the parent notice it closes with. Both
+// child's answer in: the bound marker it opens with, and the parent notice it closes with. Both
 // are the engine's own lines rather than the child's, and since a run's block collapsed to a single
 // row (collapsedSubAgentView) the slot is the ONE place in the parent's conversation either can be
 // read — the reader who has to know a delegation was stopped short, or was steered, is reading that
@@ -850,8 +864,8 @@ func delegationSteeredCell(steered int) string {
 func delegationVerdict(content string) string {
 	body, steered := readDelegationSteering(content)
 	verdict := delegationDoneVerdict
-	if delegationStepCapHead.MatchString(body) {
-		verdict = delegationCappedVerdict
+	if m := delegationBoundHead.FindStringSubmatch(body); m != nil {
+		verdict = delegationBoundVerdict(m[1])
 	}
 	if steered > 0 {
 		verdict += " · " + delegationSteeredCell(steered)

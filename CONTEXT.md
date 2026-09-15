@@ -621,17 +621,22 @@ The number of **Turns** a **delegate** may take in its one Exchange before the e
 the `delegate-max-steps` key, default **80**, `0` = unbounded. It bounds child agents ONLY: the
 main loop is the human's to stop, a delegate's is nobody's, and an uncapped delegation is how a
 single `/code-audit` run reached 633 Turns and a billion prompt tokens. A `sub_agent` call's
-optional `max_steps` argument may LOWER the cap for that one delegation, never raise it. On a
-hit the child's Exchange ends **cleanly, not faulted** (`StepResult.StepCapped`) — but not
-before the engine spends one further Turn on the child's CLOSING REPORT: that request goes out
-with the tool menu withdrawn, telling the delegate why its tools are gone and asking it to
-report to the agent that delegated the task, unfinished work included. That Turn is EXTRA — it
-sits outside the cap, so `delegate-max-steps: 3` still buys three working Turns plus this one
-reply — and when it faults, errors or answers with a tool call the result falls back to the
-child's last visible text. The parent receives a non-error result whose first line marks it
-partial, followed by that report, so Turns of real work are not thrown away, and what the
-parent reads is authored rather than scavenged from whatever the child happened to narrate
-alongside its last tool call. It is a **structural floor**
+optional `max_steps` argument may LOWER the cap for that one delegation, never raise it. Two
+sibling bounds ride the same path (`Config.Delegation.MaxTokens`, `.Timeout`): the
+`delegate-max-tokens` key, default **20000000**, bounds the child's cumulative PROMPT tokens
+(its own usage tally), and the `delegate-timeout` key, default **2h**, bounds the wall clock
+from the child's first request; `0` disables either, and both are read at spawn. On a step,
+token or time bound the child's Exchange ends **cleanly, not faulted** (`StepResult.StepCapped`)
+— but not before the engine spends one further Turn on the child's CLOSING REPORT: that
+request goes out with the tool menu withdrawn, telling the delegate which bound it hit, why its
+tools are gone, and asking it to report to the agent that delegated the task, unfinished work
+included. That Turn is EXTRA — it sits outside the cap, so `delegate-max-steps: 3` still buys
+three working Turns plus this one reply — and when it faults, errors or answers with a tool
+call the result falls back to the child's last visible text. The parent receives a non-error
+result whose first line marks it partial and names the bound that tripped (`step cap`, `token
+budget` or `time limit`), followed by that report, so Turns of real work are not thrown away,
+and what the parent reads is authored rather than scavenged from whatever the child happened to
+narrate alongside its last tool call. It is a **structural floor**
 ([ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), not an armed **Reaction** —
 it stays on under **Bypass** and nothing withdraws it at runtime. Enforced in exactly one place,
 `Agent.Run`.

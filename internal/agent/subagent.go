@@ -83,6 +83,30 @@ const stepCapClampNoteFormat = "[max_steps %d requested; the configured cap is %
 // contract for what the rest of the result is. %d is the cap actually applied.
 const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); partial result — its last visible text follows]"
 
+// tokenCapResultFormat and timeCapResultFormat are stepCapResultFormat for the two other bounds a
+// delegate runs under (Agent.tokenCap, Agent.timeCap): the same shape — a non-error head promising
+// a partial result — with the bound that tripped named in the parenthesis, so the parent learns
+// which knob its next delegation is up against. Package constants, pinned by test, because the TUI
+// reads the three heads by shape (delegationBoundHead) and the parent model reads them as the
+// contract for the rest of the result. %d is the token budget applied; %s is the time limit,
+// spelled by boundDurationText.
+const (
+	tokenCapResultFormat = "[delegate stopped at its token budget (%d tokens); partial result — its last visible text follows]"
+	timeCapResultFormat  = "[delegate stopped at its time limit (%s); partial result — its last visible text follows]"
+)
+
+// capResultHead is the marker line a capped delegation's result opens with, for the bound capHit
+// names — the receiver is the CHILD, as in delegationResult.
+func (a *Agent) capResultHead() string {
+	switch a.capHit {
+	case boundTokens:
+		return fmt.Sprintf(tokenCapResultFormat, a.tokenCap)
+	case boundTime:
+		return fmt.Sprintf(timeCapResultFormat, boundDurationText(a.timeCap))
+	}
+	return fmt.Sprintf(stepCapResultFormat, a.stepCap)
+}
+
 // subAgentFaultPrefix opens the error result a FAULTED delegation becomes. What follows it is the
 // child's own fault sentence (Agent.lastFault) — the same line the human read at Depth+1 — so the
 // parent model reads the cause in the result itself instead of being sent to an error it cannot see.
@@ -114,15 +138,40 @@ const stepCapNoTextMarker = "(no visible text)"
 // reads in stepCapErrFormat and the parent reads in stepCapResultFormat, so all three tell one
 // story. Package constants, pinned by test, because the child reads them as the contract for its
 // last reply.
+//
+// The token and time bounds hand the child the same directive with their own opening clause
+// (wrapUpTokenDirectiveFormat, wrapUpTimeDirectiveFormat): the cause differs, the prohibition and
+// the ask do not, so the three share wrapUpDirectiveTail and wrapUpDirective picks by capHit.
 const (
 	wrapUpMarker = "no further tool calls are possible"
 
-	wrapUpDirectiveFormat = "You have reached the step limit for this delegation (%d steps) and " +
-		"no further tool calls are possible: the tools have been withdrawn for this final reply." +
+	wrapUpDirectiveTail = "no further tool calls are possible: the tools have been withdrawn for this final reply." +
 		"\n\nReport back to the agent that delegated this task now: what you found, what you " +
 		"concluded, and what remains unfinished. This is your only remaining reply — anything you " +
 		"do not write here is lost."
+
+	wrapUpDirectiveFormat = "You have reached the step limit for this delegation (%d steps) and " +
+		wrapUpDirectiveTail
+
+	wrapUpTokenDirectiveFormat = "You have reached the token budget for this delegation (%d tokens) and " +
+		wrapUpDirectiveTail
+
+	wrapUpTimeDirectiveFormat = "You have reached the time limit for this delegation (%s) and " +
+		wrapUpDirectiveTail
 )
+
+// wrapUpDirective renders the closing-report directive for the bound capHit names, with that
+// bound's applied value in the clause — the same number the human read in the ErrorEvent and the
+// parent reads in the result head, so all three tell one story.
+func (a *Agent) wrapUpDirective() string {
+	switch a.capHit {
+	case boundTokens:
+		return fmt.Sprintf(wrapUpTokenDirectiveFormat, a.tokenCap)
+	case boundTime:
+		return fmt.Sprintf(wrapUpTimeDirectiveFormat, boundDurationText(a.timeCap))
+	}
+	return fmt.Sprintf(wrapUpDirectiveFormat, a.stepCap)
+}
 
 // userSteeredTrailerSingular and userSteeredTrailerPluralFormat are the two renderings of the
 // PARENT NOTICE a delegation's result carries when the human addressed the child while it ran
@@ -440,8 +489,9 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		}
 		result = errorToolResult(callID, subAgentFaultPrefix+cause)
 	case res.StepCapped:
-		// The engine STOPPED the child at its step cap (Agent.Run) — it was still asking for tools,
-		// so what it has is partial. That is not a failure and must not be reported as one: an error
+		// The engine STOPPED the child at one of its bounds (Agent.Run) — the step cap, or the
+		// token or time bound that takes the same path with its own head line (capResultHead) —
+		// it was still asking for tools, so what it has is partial. That is not a failure and must not be reported as one: an error
 		// result would throw away Turns of real work. So the parent gets a NON-error result whose
 		// first line is the marker saying the answer below is partial, followed by whatever the
 		// child last said out loud. The child's own ErrorEvent already told the human the cap hit.
@@ -457,7 +507,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		}
 		result = domain.ToolResult{
 			CallID:  callID,
-			Content: fmt.Sprintf(stepCapResultFormat, a.stepCap) + "\n" + text,
+			Content: a.capResultHead() + "\n" + text,
 			IsError: false,
 		}
 	default:
@@ -754,6 +804,14 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// server's effort dialect — no bound on spend) — and a grandchild inherits it the same way. runSubAgent may lower it for this one
 	// delegation from the spawning call's max_steps.
 	child.stepCap = childCfg.Delegation.MaxSteps
+	// Its two siblings ride the same Config for the same reasons — top-level keys, not per-server,
+	// inherited by a grandchild the same way — and are read here at SPAWN, so a value the settings
+	// surface moved bounds the children spawned after the move and never one already running.
+	child.tokenCap = childCfg.Delegation.MaxTokens
+	child.timeCap = childCfg.Delegation.Timeout
+	// The clock the time bound reads is the parent's, so a test that pins the parent's now has
+	// pinned the child's — newAgent seeded time.Now, which no test can move.
+	child.now = a.now
 	// And the child's other structural bound on runaway context: it folds under budget pressure at
 	// quiescent TURN boundaries, not only at Exchange boundaries (shouldAutoCompact's S2 guard). A
 	// delegation is ONE Exchange from its first Turn to its report, so the boundary the main loop's
