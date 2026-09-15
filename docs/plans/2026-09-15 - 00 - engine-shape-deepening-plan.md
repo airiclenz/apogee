@@ -379,7 +379,11 @@ NOTES (2026-09-15): consequential edit — internal/agent/fillnotice_test.go: ma
 
 Commit: `refactor(agent): turnLifecycle notifies one exchangeObserver`
 
-## 16. `Interject` resolves references under the caller's context
+## 16. `Interject` resolves references under the caller's context — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): consequential edit — internal/agent/agent.go: made necessary by `drainMailbox` taking ctx (Run's call site passes its ctx); the file was not in the item's Files list, which named only what the `Interject(` grep finds.
+NOTES (2026-09-15): consequential edit — docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md: made necessary by the signature change; the ADR's two `Agent.Interject(domain.UserInput) error` mentions gain a dated in-place amendment (ratified call: amendments, never superseding ADRs).
+NOTES (2026-09-15): test recast to the existing fate per DECISION (TestInterjectResolvesReferencesUnderTheCallersContext in filerefs_test.go, beside the PDF interject test): pre-cancelled ctx + minimal.pdf → Interject returns nil, the tail message commits without a "Referenced file" block, one loop ErrorEvent containing "cancelled". internal/tui/interject_test.go needed no edit — the fake's scripted `interjectFn` keeps its `func(domain.UserInput) error` shape and the fake discards the ctx.
 
 **What.** `Agent.Interject` (`internal/agent/interject.go`) resolves `@file`/PDF references under `context.Background()`, so a cancelled Step cannot stop it. Take a `ctx` parameter and resolve under it; the TUI worker (`internal/tui/worker.go` — `deliverInterjections`) and `children.go`'s mailbox drain pass the Step's context. Depends on item 1.
 

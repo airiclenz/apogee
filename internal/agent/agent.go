@@ -816,7 +816,7 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 		// actually follows it: committing a remark into an Exchange that ends here would report it
 		// as landed to a model that never reads it. What stays queued is reported undelivered when
 		// the run ends (runSubAgent).
-		a.drainMailbox(a.turns.index)
+		a.drainMailbox(ctx, a.turns.index)
 	}
 }
 

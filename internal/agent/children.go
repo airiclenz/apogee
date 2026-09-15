@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -179,14 +180,17 @@ func (a *Agent) InterjectChild(spawnCallID string, in domain.UserInput) error {
 // the delegations it has not started (Agent.interjectionPending) — a predicate, never a drain
 // (ADR 0025, amended 2026-09-14).
 //
-// turn is the Turn the messages are about to reach, which is what the events report.
-func (a *Agent) drainMailbox(turn int) {
+// ctx is the child's Run context — the one the Step it is about to make runs under — and bounds
+// only the reference resolution inside Interject; a cancel there skips a document, never the
+// message, so the drain's refusal rule below is untouched by it. turn is the Turn the messages
+// are about to reach, which is what the events report.
+func (a *Agent) drainMailbox(ctx context.Context, turn int) {
 	if !a.isDelegate() {
 		return
 	}
 	queued := a.mailbox.drain()
 	for i, in := range queued {
-		if err := a.Interject(in); err != nil {
+		if err := a.Interject(ctx, in); err != nil {
 			// The first refusal STOPS the drain, exactly as the TUI's own delivery does
 			// (deliverInterjections): an Interject error is a statement about the Exchange, not
 			// about that one message, so pressing on would produce more of the same and deliver

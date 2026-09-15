@@ -195,8 +195,9 @@ func (f *fakeEngine) Step(ctx context.Context) (domain.StepResult, error) {
 // with whatever the test scripted (nil ⇒ committed). A scripted refusal models the real Agent's
 // ErrNoOpenExchange / empty-input guards without needing an engine in a particular state. It
 // mirrors Submit: the call is recorded whether or not it is refused, so a test can prove that a
-// refusal STOPPED the drain rather than merely skipping a row.
-func (f *fakeEngine) Interject(in domain.UserInput) error {
+// refusal STOPPED the drain rather than merely skipping a row. The ctx is not recorded: the fake
+// resolves nothing, so the only thing the worker passes through it is the Step's own context.
+func (f *fakeEngine) Interject(_ context.Context, in domain.UserInput) error {
 	f.mu.Lock()
 	f.interjected = append(f.interjected, in)
 	fn := f.interjectFn

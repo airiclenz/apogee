@@ -156,7 +156,7 @@ func TestInterjectInjectsAPDFAsExtractedText(t *testing.T) {
 
 	copyPDFFixture(t, dir, "minimal.pdf", "minimal.pdf")
 
-	if err := a.Interject(domain.UserInput{Text: "and this doc", FileRefs: []string{"minimal.pdf"}}); err != nil {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "and this doc", FileRefs: []string{"minimal.pdf"}}); err != nil {
 		t.Fatalf("Interject: %v", err)
 	}
 
@@ -169,6 +169,40 @@ func TestInterjectInjectsAPDFAsExtractedText(t *testing.T) {
 	}
 	if strings.Contains(got, "%PDF-") {
 		t.Errorf("raw PDF bytes reached the interjected message:\n%s", got)
+	}
+}
+
+// TestInterjectResolvesReferencesUnderTheCallersContext proves the ctx Interject takes bounds
+// ONLY the reference resolution: a document reached under an already-cancelled Step context is
+// cut short and skipped with the same refIgnored ErrorEvent a Submitted message gets, while the
+// remark itself still commits — the cancel is not a third refusal, so a Driver's drain never
+// stops on one. A plain-text reference cannot observe the cancel (readFileRef takes no ctx); only
+// a PDF's extraction walk does, which is why the fixture is a document.
+func TestInterjectResolvesReferencesUnderTheCallersContext(t *testing.T) {
+	dir := t.TempDir()
+	sink := &recordingSink{}
+	cfg := interjectConfig(sink)
+	cfg.WorkspaceDir = dir
+	a, _ := interjectAgentAtBoundary(t, cfg)
+	copyPDFFixture(t, dir, "minimal.pdf", "minimal.pdf")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sink.events = nil
+
+	if err := a.Interject(ctx, domain.UserInput{Text: "and this doc", FileRefs: []string{"minimal.pdf"}}); err != nil {
+		t.Fatalf("Interject under a cancelled ctx returned %v, want nil (the cancel bounds resolution, not the commit)", err)
+	}
+
+	got := a.conv.At(a.conv.Len() - 1)
+	if !got.Interjected || !strings.Contains(got.Content, "and this doc") {
+		t.Errorf("the remark did not commit as an interjection:\n%+v", got)
+	}
+	if strings.Contains(got.Content, "Referenced file") {
+		t.Errorf("a document cut short by the cancel still produced a block:\n%s", got.Content)
+	}
+	errs := errorEvents(sink.events)
+	if len(errs) != 1 || errs[0].Source != "loop" || !strings.Contains(errs[0].Err, "cancelled") {
+		t.Errorf("ErrorEvents = %+v, want exactly one from source \"loop\" naming the cancel", errs)
 	}
 }
 
@@ -769,7 +803,7 @@ func TestInterjectSharesOneSplitAcrossSkillAndFile(t *testing.T) {
 	}}
 	a, _ := interjectAgentAtBoundary(t, cfg)
 
-	if err := a.Interject(domain.UserInput{
+	if err := a.Interject(context.Background(), domain.UserInput{
 		Text:     "and this too",
 		SkillIDs: []string{"review"},
 		FileRefs: []string{"notes.txt"},

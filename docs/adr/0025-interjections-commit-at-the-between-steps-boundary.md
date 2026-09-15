@@ -100,7 +100,13 @@ worker's, the commit is the engine's — and the split follows ownership, not co
   each copy its own lock and unsynchronise the two goroutines *silently*).
 - **The engine commits.** `Agent.Interject(domain.UserInput) error` appends one marked user message,
   resolving attached skills and `@file` references **at delivery** so the model reads a file as it
-  stands then, not as it stood when the remark was typed.
+  stands then, not as it stood when the remark was typed. *Amended 2026-09-15 (plan
+  `2026-09-15 - 00`, item 16):* the signature is `Interject(ctx context.Context, in
+  domain.UserInput) error` — the caller passes the context of the Step it is about to make, and it
+  bounds **only** the reference resolution (a cancelled Step stops a document extraction
+  mid-walk, as it already did for a Submitted message). The return contract is unchanged: a
+  cut-short reference is skipped with the same `ErrorEvent`, the remark still commits, and a
+  cancel is not a third refusal.
 
 **4. `Interject` names a THIRD engine-call class: between-Steps calls by the driving goroutine.**
 It takes **no new mutex**, and that is a decision, not an omission. The class already existed in the
@@ -273,7 +279,8 @@ the feature.
 
 ## Consequences
 
-- **The public Go surface gains `Agent.Interject(domain.UserInput) error`** — published for free
+- **The public Go surface gains `Agent.Interject(domain.UserInput) error`** (since 2026-09-15
+  `Interject(ctx, in)`, per the amendment in decision 3) — published for free
   through the `apogee.Agent` alias — plus the exported `domain.Message.Interjected` field and the
   `domain.ErrNoOpenExchange` sentinel, re-exported at the root and pinned by `example_test.go`'s
   completeness guard. All additive ([ADR 0010](0010-package-layout-domain-core-and-thin-root-facade.md)),

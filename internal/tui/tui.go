@@ -649,7 +649,10 @@ type Engine interface {
 	// It refuses with domain.ErrNoOpenExchange when no Exchange is open, and with an
 	// empty-interjection error when the input carries no text, references, or skills; on
 	// either refusal the conversation is untouched and the worker holds the remaining rows.
-	Interject(domain.UserInput) error
+	// The ctx is the Step's — it bounds only the @file / document resolution the delivery
+	// performs, so a cancelled Step stops an extraction mid-walk; a cancel is NOT a third
+	// refusal: the cut-short reference is skipped with an ErrorEvent and the message commits.
+	Interject(context.Context, domain.UserInput) error
 	// InterjectChild queues a user message for the RUNNING sub-agent that the sub_agent call
 	// spawnCallID spawned, anywhere in the engine's tree — its own children, and recursively
 	// theirs. The message lands at that child's next between-Steps boundary as an ordinary

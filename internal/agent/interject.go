@@ -38,7 +38,13 @@ var errEmptyInterjection = errors.New("apogee: interjection is empty")
 // Attached skills and @file references resolve HERE, at delivery — so a file the model just
 // rewrote is read as it stands now, not as it stood when the human typed the remark. An
 // unresolvable reference is reported as an ErrorEvent and skipped, exactly as it is for a
-// Submitted message (resolveFileRefs / resolveSkillRefs).
+// Submitted message (resolveFileRefs / resolveSkillRefs). ctx bounds ONLY that resolution work
+// — the caller passes the context of the Step it is about to make, so a cancelled Step stops a
+// document extraction mid-walk (resolveFileRefs) instead of finishing one nobody will read. It
+// changes nothing about the return: a reference the cancel cut short is skipped with the same
+// refIgnored ErrorEvent a Submitted message gets, and the remark still commits — a cancelled ctx
+// is not a third refusal, so a Driver's drain (deliverInterjections, drainMailbox) never stops on
+// one.
 //
 // It refuses with domain.ErrNoOpenExchange when no Exchange is in flight (the caller wants
 // Submit) and with an empty-interjection error when in carries no text, references, or
@@ -55,7 +61,7 @@ var errEmptyInterjection = errors.New("apogee: interjection is empty")
 // call needs arrives when the children already running finish, instead of after every
 // queued one. That seam is a predicate, not a drain — the message itself still commits
 // only here, at the boundary, on the driving goroutine.
-func (a *Agent) Interject(in domain.UserInput) error {
+func (a *Agent) Interject(ctx context.Context, in domain.UserInput) error {
 	if !a.turns.inExchange {
 		return domain.ErrNoOpenExchange
 	}
@@ -72,11 +78,10 @@ func (a *Agent) Interject(in domain.UserInput) error {
 	// them rather than handing each list the whole floor.
 	bound := a.refBound(len(in.SkillIDs) + len(in.FileRefs))
 	skillBlocks := a.resolveSkillRefs(turn, in.SkillIDs, bound)
-	// context.Background, not the running Turn's: an interjection is delivered on the HOST's
-	// goroutine (a human typed it), it commits before the Turn it steers is cancellable from
-	// here, and the Turn's own context is not in scope at this seam. Document extraction is still
-	// bounded — the page, read and output bounds are the extractor's own and need no context.
-	refs := a.resolveFileRefs(context.Background(), turn, in.FileRefs, bound)
+	// The caller's ctx — the Step's — bounds the extraction exactly as it does for a Submitted
+	// message, so the one cancel the host holds reaches both paths. A cancelled ctx here only
+	// skips the document (refIgnored); the commit below is unconditional either way.
+	refs := a.resolveFileRefs(ctx, turn, in.FileRefs, bound)
 	a.conv.Append(domain.Message{
 		Role:        domain.RoleUser,
 		Content:     skillBlocks + refs + in.Text,

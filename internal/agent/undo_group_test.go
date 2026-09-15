@@ -69,7 +69,7 @@ func TestUndoGroupsFollowTheExchange(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 	stepExpecting(t, a, domain.StatusTurnComplete, "exchange 1 turn 0")
-	if err := a.Interject(domain.UserInput{Text: "also write b"}); err != nil {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "also write b"}); err != nil {
 		t.Fatalf("Interject: %v", err)
 	}
 	stepExpecting(t, a, domain.StatusTurnComplete, "exchange 1 turn 1")

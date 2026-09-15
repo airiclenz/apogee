@@ -311,12 +311,12 @@ func (e *lateEngine) Snapshot() (apogee.Session, error) {
 }
 
 // Interject commits a message into the open Exchange; unbound there is none.
-func (e *lateEngine) Interject(in apogee.UserInput) error {
+func (e *lateEngine) Interject(ctx context.Context, in apogee.UserInput) error {
 	agent := e.bound()
 	if agent == nil {
 		return errNoServerBound
 	}
-	return agent.Interject(in)
+	return agent.Interject(ctx, in)
 }
 
 // InterjectChild queues a message for a running sub-agent; unbound there is no tree to reach into.

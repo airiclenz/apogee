@@ -61,7 +61,7 @@ func TestInterjectAppendsMarkedUserMessage(t *testing.T) {
 	if got := a.conv.Len(); got != 3 {
 		t.Fatalf("conversation has %d messages at the boundary, want 3", got)
 	}
-	if err := a.Interject(domain.UserInput{Text: "also check the tests"}); err != nil {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "also check the tests"}); err != nil {
 		t.Fatalf("Interject: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestInterjectRefusedWhenIdle(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	if err := a.Interject(domain.UserInput{Text: "too early"}); !errors.Is(err, domain.ErrNoOpenExchange) {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "too early"}); !errors.Is(err, domain.ErrNoOpenExchange) {
 		t.Errorf("Interject on a fresh Agent err = %v, want ErrNoOpenExchange", err)
 	}
 	if got := a.conv.Len(); got != 0 {
@@ -131,7 +131,7 @@ func TestInterjectRefusedWhenIdle(t *testing.T) {
 	if err := a.Submit(domain.UserInput{Text: "the real ask"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if err := a.Interject(domain.UserInput{Text: "still too early"}); !errors.Is(err, domain.ErrNoOpenExchange) {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "still too early"}); !errors.Is(err, domain.ErrNoOpenExchange) {
 		t.Errorf("Interject after Submit err = %v, want ErrNoOpenExchange", err)
 	}
 	if got := a.conv.Len(); got != 0 {
@@ -146,7 +146,7 @@ func TestInterjectRefusesEmptyInput(t *testing.T) {
 	a, _ := interjectAgentAtBoundary(t, interjectConfig(&recordingSink{}))
 
 	before := a.conv.Len()
-	if err := a.Interject(domain.UserInput{}); !errors.Is(err, errEmptyInterjection) {
+	if err := a.Interject(context.Background(), domain.UserInput{}); !errors.Is(err, errEmptyInterjection) {
 		t.Errorf("Interject with empty input err = %v, want errEmptyInterjection", err)
 	}
 	if got := a.conv.Len(); got != before {
@@ -167,7 +167,7 @@ func TestInterjectResolvesFileRefs(t *testing.T) {
 	// Written mid-Exchange: a Submit-time resolution could not have seen this.
 	writeWorkspaceFile(t, dir, "notes.txt", "FRESH CONTENT 7")
 
-	if err := a.Interject(domain.UserInput{Text: "and this file", FileRefs: []string{"notes.txt"}}); err != nil {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "and this file", FileRefs: []string{"notes.txt"}}); err != nil {
 		t.Fatalf("Interject: %v", err)
 	}
 	got := a.conv.At(a.conv.Len() - 1).Content
@@ -202,7 +202,7 @@ func TestInterjectSurvivesCancelledTurn(t *testing.T) {
 		t.Fatalf("Step 0 = %+v, %v; want StatusTurnComplete", res, err)
 	}
 
-	if err := a.Interject(domain.UserInput{Text: "wait — also the tests"}); err != nil {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "wait — also the tests"}); err != nil {
 		t.Fatalf("Interject: %v", err)
 	}
 
@@ -231,7 +231,7 @@ func TestInterjectSurvivesCancelledTurn(t *testing.T) {
 func TestAbortExchangeDropsInterjections(t *testing.T) {
 	a, _ := interjectAgentAtBoundary(t, interjectConfig(&recordingSink{}))
 
-	if err := a.Interject(domain.UserInput{Text: "one more thing"}); err != nil {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "one more thing"}); err != nil {
 		t.Fatalf("Interject: %v", err)
 	}
 	a.AbortExchange()
@@ -250,7 +250,7 @@ func TestAbortExchangeDropsInterjections(t *testing.T) {
 func TestInterjectPersistsAcrossSnapshotRestore(t *testing.T) {
 	a, _ := interjectAgentAtBoundary(t, interjectConfig(&recordingSink{}))
 
-	if err := a.Interject(domain.UserInput{Text: "carry me across"}); err != nil {
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "carry me across"}); err != nil {
 		t.Fatalf("Interject: %v", err)
 	}
 	snap, err := a.Snapshot()

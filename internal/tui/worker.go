@@ -225,7 +225,7 @@ func deliverInterjections(ctx context.Context, eng Engine, box *interjectBox, no
 	}
 	delivered := make([]queuedInterjection, 0, len(staged))
 	for _, it := range staged {
-		if err := eng.Interject(it.input); err != nil {
+		if err := eng.Interject(ctx, it.input); err != nil {
 			break
 		}
 		delivered = append(delivered, it)
