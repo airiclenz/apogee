@@ -51,7 +51,8 @@ const (
 	// It is also the ONE ceiling the other three window-gated growth bounds fall back to — the
 	// predictive guard (requestExceedsWindow, loop.go), the boundary compaction trigger
 	// (historyExceedsAllocation) and the structural tool-result clamp (clampToolResult,
-	// dispatch.go) — rather than each inventing its own default. With no window there is nothing to
+	// dispatch.go) — rather than each inventing its own default, and the substitution is made at
+	// ONE site, deriveGrowthBounds, that all four readers call. With no window there is nothing to
 	// ALLOCATE across a request's parts (context.Allocate returns the zero Allocation for exactly
 	// that reason), so the one meaningful rule left is that nothing the fold can shed — the
 	// conversation, or a single result about to enter it — may exceed what the fold can actually
@@ -67,6 +68,62 @@ const (
 	// at a code-heavy ratio, past a 3072-token ceiling before the user has typed anything.
 	compactUnknownWindowTranscriptTokens = 3072
 )
+
+// growthBounds are the window-gated bounds the engine lets the conversation grow against: the
+// room a request may fill before the predictive guard fires (requestExceedsWindow, loop.go), the
+// History floor the boundary trigger and the structural clamps measure against
+// (historyExceedsAllocation; structuralFloor, dispatch.go), and the token budget the summary
+// call's transcript is rendered into (compactTranscriptChars). TWO windows feed them, never one:
+// room and transcriptBudget derive off the ADVERTISED window (Budget.Window), the wall the server
+// enforces and the one that drives overflow detection, while historyFloor derives off the
+// WORKING-room History allocation (Budget.History), the soft ceiling a `working-window:` key
+// lowers (domain.ContextConfig.WorkingWindow). With no window known every bound falls back to
+// compactUnknownWindowTranscriptTokens, and it does so HERE and nowhere else — deriveGrowthBounds
+// is the one substitution site, so the four readers cannot drift onto four defaults.
+//
+// It is a pure derivation off one Budget view, read live by each reader at the moment it decides
+// and never cached at Turn open: Agent.Compact (/compact, outside an Exchange) and a
+// SwitchUpstream between Turns must see the window the session is bound to NOW, and a value taken
+// when the Turn opened would bound against a server the session no longer talks to.
+type growthBounds struct {
+	// windowKnown reports whether an advertised window with room past its reserve backs room.
+	// False means room is the fallback and the predictive guard measures the TRANSCRIPT alone
+	// against it — the only part a fold can shed (requestExceedsWindow).
+	windowKnown bool
+	// room is what a request may fill: the advertised window less the response reserve. It is
+	// pre-margin — the uncalibrated margin (uncalibratedRoomMargin) stays the reader's live read
+	// of Budget.Used.
+	room int
+	// historyFloor is the History allocation the boundary trigger and both structural clamps bound
+	// against — the most a renderable conversation, or a single body entering it, may occupy.
+	historyFloor int
+	// transcriptBudget is the token budget the summary call's rendered transcript fits into: the
+	// advertised window less the summary's reply reserve (compactMaxTokens) and prompt overhead,
+	// floored at compactMinTranscriptTokens so a tiny window still sends a useful tail.
+	transcriptBudget int
+}
+
+// deriveGrowthBounds derives the growthBounds from one Budget view (Agent.budget).
+func deriveGrowthBounds(b domain.Budget) growthBounds {
+	// The fallback is named ONCE: every bound below with no window to derive from takes it.
+	fallback := compactUnknownWindowTranscriptTokens
+	g := growthBounds{
+		room:             b.Window - b.ResponseReserve,
+		historyFloor:     b.History,
+		transcriptBudget: fallback,
+	}
+	g.windowKnown = g.room > 0
+	if !g.windowKnown {
+		g.room = fallback
+	}
+	if g.historyFloor <= 0 {
+		g.historyFloor = fallback
+	}
+	if b.Window > 0 {
+		g.transcriptBudget = max(b.Window-compactMaxTokens-compactPromptOverheadTokens, compactMinTranscriptTokens)
+	}
+	return g
+}
 
 // Compact triggers generative Compaction on demand — the engine half of the /compact command.
 // It summarizes the conversation and Replaces the folded history with a single summary message
@@ -271,18 +328,16 @@ func (a *Agent) shouldAutoCompact() bool {
 //
 // Where one does NOT exist — a zero History, meaning no window is known — the compare would answer
 // false for a history of any size, so the boundary trigger never fired and the history grew until
-// the server rejected it (audit 2026-08-01, follow-up B). The bound substituted here is the same
-// conservative ceiling the emergency fold renders against
-// (compactUnknownWindowTranscriptTokens): the fold is what this trigger's fold-to-a-summary
+// the server rejected it (audit 2026-08-01, follow-up B). The bound substituted there is the same
+// conservative ceiling the emergency fold renders against (growthBounds.historyFloor, which falls
+// back to compactUnknownWindowTranscriptTokens): the fold is what this trigger's fold-to-a-summary
 // actually costs, so a history the fold cannot render whole is precisely the history worth folding.
 // The substitution is the ENGINE's, deliberately: the Budget the Reactions see keeps its
 // honest zero allocation, so nothing outside this file starts steering on a guessed window
 // (the standing posture: never fire on a guess) or shows a fill against a window nobody reported.
 func (a *Agent) historyExceedsAllocation() bool {
 	b := a.budget()
-	if b.History <= 0 {
-		b.History = compactUnknownWindowTranscriptTokens
-	}
+	b.History = deriveGrowthBounds(b).historyFloor
 	return b.HistoryExceedsAllocation(a.conv.Messages())
 }
 
@@ -406,21 +461,17 @@ func (a *Agent) emergencyFold(ctx context.Context, turn int) bool {
 // tokens) minus the response reserve (compactMaxTokens) minus prompt overhead is the transcript's
 // token budget, converted to characters via the budget's chars→token estimate.
 //
-// With an UNKNOWN window (neither discovery nor `context-window:` reported one) it falls back to
-// compactUnknownWindowTranscriptTokens through the same ratio rather than returning 0. A zero
-// budget means "render the whole conversation" to the reducer, which is precisely what overflows
-// the emergency fold's own summary call on the long session that needed the fold — the give-up
-// then repeats for every message and the session wedges (audit 2026-08-01). The result is always
-// positive, so the summary call is bounded on every path.
+// With an UNKNOWN window (neither discovery nor `context-window:` reported one) the budget
+// (growthBounds.transcriptBudget) falls back to compactUnknownWindowTranscriptTokens through the
+// same ratio rather than returning 0. A zero budget means "render the whole conversation" to the
+// reducer, which is precisely what overflows the emergency fold's own summary call on the long
+// session that needed the fold — the give-up then repeats for every message and the session
+// wedges (audit 2026-08-01). The result is always positive, so the summary call is bounded on
+// every path. It is read live, at the fold: a SwitchUpstream between Turns changes what the next
+// /compact renders against.
 func (a *Agent) compactTranscriptChars() int {
-	transcriptTokens := compactUnknownWindowTranscriptTokens
-	if window := a.cfg.Context.MaxContextTokens; window > 0 {
-		transcriptTokens = window - compactMaxTokens - compactPromptOverheadTokens
-		if transcriptTokens < compactMinTranscriptTokens {
-			transcriptTokens = compactMinTranscriptTokens
-		}
-	}
-	return int(float64(transcriptTokens) * a.budget().CharsPerToken)
+	b := a.budget()
+	return int(float64(deriveGrowthBounds(b).transcriptBudget) * b.CharsPerToken)
 }
 
 // cappedSummaryErrFmt is the head of the fault text for a summary call that came back with no

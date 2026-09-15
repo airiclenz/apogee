@@ -342,7 +342,10 @@ NOTES (2026-09-15): consequential edit — internal/agent/floorguards_test.go, i
 
 Commit: `refactor(agent): turnLifecycle owns the Exchange state; RestoreSession clears the compaction latches`
 
-## 14. `growthBounds` is derived at one site
+## 14. `growthBounds` is derived at one site — ✅ DONE (2026-09-15)
+
+NOTES (2026-09-15): growthBounds carries a fourth field, `windowKnown` — requestExceedsWindow switches its MEASURE (request vs. transcript alone) on whether an advertised window backs the room, and re-deriving that condition at the reader would be a second substitution site; the struct is otherwise `{room, historyFloor, transcriptBudget}` as planned.
+NOTES (2026-09-15): the SwitchUpstream row asserts through compactTranscriptChars — the exact value Agent.Compact hands the reducer — rather than driving Agent.Compact itself, which would need a scripted summary upstream to prove the same read.
 
 **What.** Recast at the regression check (2026-09-15). The unknown-window fallback (`compactUnknownWindowTranscriptTokens`) is applied by four readers — `loop.go`, `compact.go` (two sites), `dispatch.go`. Derive one `growthBounds{room, historyFloor, transcriptBudget}` as a pure function of `a.budget()`/cfg that each of the four readers calls at read time (see the guard); the substitution happens in one place. Depends on item 13.
 

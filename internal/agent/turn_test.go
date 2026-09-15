@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -270,4 +271,134 @@ func TestAnchorAtBridge(t *testing.T) {
 			t.Errorf("exchangeStart = %d, want 1 (no-op outside an Exchange)", l.exchangeStart)
 		}
 	})
+}
+
+// TestGrowthBounds_Table pins deriveGrowthBounds as the ONE site the unknown-window fallback is
+// applied at, and pins which window each bound derives from: room and transcriptBudget off the
+// ADVERTISED window, historyFloor off the WORKING-room History allocation — never one number for
+// all three.
+func TestGrowthBounds_Table(t *testing.T) {
+	const window = 32768
+	tests := []struct {
+		name   string
+		budget domain.Budget
+		want   growthBounds
+	}{
+		{
+			name:   "a known window derives every bound from the Budget",
+			budget: domain.Budget{Window: window, ResponseReserve: 4096, History: 12000},
+			want: growthBounds{
+				windowKnown:      true,
+				room:             window - 4096,
+				historyFloor:     12000,
+				transcriptBudget: window - compactMaxTokens - compactPromptOverheadTokens,
+			},
+		},
+		{
+			name:   "an unknown window falls back to the one conservative ceiling on every bound",
+			budget: domain.Budget{},
+			want: growthBounds{
+				windowKnown:      false,
+				room:             compactUnknownWindowTranscriptTokens,
+				historyFloor:     compactUnknownWindowTranscriptTokens,
+				transcriptBudget: compactUnknownWindowTranscriptTokens,
+			},
+		},
+		{
+			name:   "a zero reserve leaves the whole advertised window as room",
+			budget: domain.Budget{Window: window, ResponseReserve: 0, History: 20000},
+			want: growthBounds{
+				windowKnown:      true,
+				room:             window,
+				historyFloor:     20000,
+				transcriptBudget: window - compactMaxTokens - compactPromptOverheadTokens,
+			},
+		},
+		{
+			name:   "a window smaller than the summary reserves floors the transcript budget",
+			budget: domain.Budget{Window: 2048, ResponseReserve: 256, History: 1000},
+			want: growthBounds{
+				windowKnown:      true,
+				room:             2048 - 256,
+				historyFloor:     1000,
+				transcriptBudget: compactMinTranscriptTokens,
+			},
+		},
+		{
+			name: "a working window smaller than the advertised one lowers only the History floor",
+			// Budget.History is the allocation off the WORKING room; Window stays the advertised wall.
+			budget: domain.Budget{Window: window, ResponseReserve: 2048, History: 6000},
+			want: growthBounds{
+				windowKnown:      true,
+				room:             window - 2048,
+				historyFloor:     6000,
+				transcriptBudget: window - compactMaxTokens - compactPromptOverheadTokens,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveGrowthBounds(tc.budget)
+
+			if got != tc.want {
+				t.Errorf("deriveGrowthBounds(%+v) = %+v, want %+v", tc.budget, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGrowthBounds_WorkingWindowKeepsReaderNumbers pins the two readers a `working-window:` key
+// splits: compactTranscriptChars keeps deriving off the ADVERTISED window while structuralFloor
+// follows the WORKING-room History allocation — today's numbers, through the shared derivation.
+func TestGrowthBounds_WorkingWindowKeepsReaderNumbers(t *testing.T) {
+	const advertised, working = 32768, 16384
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = advertised
+	cfg.Context.WorkingWindow = working
+	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	b := a.budget()
+
+	gotChars, gotFloor := a.compactTranscriptChars(), a.structuralFloor()
+
+	wantChars := int(float64(advertised-compactMaxTokens-compactPromptOverheadTokens) * b.CharsPerToken)
+	if gotChars != wantChars {
+		t.Errorf("compactTranscriptChars() = %d, want %d (derived off the ADVERTISED window)", gotChars, wantChars)
+	}
+	if gotFloor != b.History {
+		t.Errorf("structuralFloor() = %d, want the working-room History allocation %d", gotFloor, b.History)
+	}
+	advertisedHistory := apogeectx.Allocate(advertised, cfg.Context.ResponseReserve, cfg.Context.ResponseReserveFraction).History
+	if gotFloor >= advertisedHistory {
+		t.Errorf("structuralFloor() = %d, not below the advertised window's allocation %d: the working window did not lower it", gotFloor, advertisedHistory)
+	}
+}
+
+// TestGrowthBounds_SwitchUpstreamIsReadLive pins that the bounds are derived at read time, never
+// cached at Turn open: a SwitchUpstream between Turns re-binds the window, and the next /compact
+// (Agent.Compact hands compactTranscriptChars to the reducer) renders against the NEW one.
+func TestGrowthBounds_SwitchUpstreamIsReadLive(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = 32768
+	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	before := a.compactTranscriptChars()
+
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: "http://elsewhere.invalid:9999", MaxContextTokens: 8192}); err != nil {
+		t.Fatalf("SwitchUpstream: %v", err)
+	}
+	after := a.compactTranscriptChars()
+
+	want := int(float64(8192-compactMaxTokens-compactPromptOverheadTokens) * a.budget().CharsPerToken)
+	if after != want {
+		t.Errorf("compactTranscriptChars() after the switch = %d, want %d (the NEW window's budget)", after, want)
+	}
+	if after == before {
+		t.Errorf("compactTranscriptChars() = %d before and after the switch: the bound was not read live", before)
+	}
 }

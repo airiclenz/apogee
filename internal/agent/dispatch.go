@@ -1567,7 +1567,9 @@ func (a *Agent) appendToolResult(
 // supposed to rescue the Turn.
 //
 // With an unknown window (a zero History allocation — Allocate had no basis to allocate) the floor
-// measures against compactUnknownWindowTranscriptTokens instead of standing down. Being inert there
+// measures against compactUnknownWindowTranscriptTokens instead of standing down — the substitution
+// growthBounds.historyFloor makes at the one site every growth bound shares (deriveGrowthBounds,
+// compact.go), so this clamp and the boundary trigger bound against one number. Being inert there
 // was not the conservative choice it looked like: the fold's transcript render keeps the most recent
 // message UNCONDITIONALLY, so an unclamped giant body becomes the one message the emergency fold
 // cannot shed and re-wedges the session bounding the fold was meant to un-wedge (audit 2026-08-01,
@@ -1585,10 +1587,7 @@ func (a *Agent) appendToolResult(
 // Smaller windows invert the two and lose the property; they sit far under the ~32k target window
 // and are too small to run a coding Turn in (ADR 0018 §8 states the same condition).
 func (a *Agent) structuralFloor() int {
-	if history := a.budget().History; history > 0 {
-		return history
-	}
-	return compactUnknownWindowTranscriptTokens
+	return deriveGrowthBounds(a.budget()).historyFloor
 }
 
 // clampToBound is the RENDERING both structural clamps share: content whose estimated tokens exceed

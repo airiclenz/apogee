@@ -1047,7 +1047,8 @@ const uncalibratedRoomMargin = 2
 // With an UNKNOWN window (no discovery, no config: Allocate returns the zero Allocation, leaving
 // no working room) BOTH sides of the compare change. The room becomes
 // compactUnknownWindowTranscriptTokens — the same conservative ceiling the emergency fold renders
-// against — and the measure becomes the TRANSCRIPT alone: the conversation, without the tool menu
+// against, substituted at the one site every growth bound draws on (deriveGrowthBounds,
+// compact.go) — and the measure becomes the TRANSCRIPT alone: the conversation, without the tool menu
 // and without the standing system content the request projection seeds at position 0. That
 // ceiling is a transcript budget (compact.go), the transcript is the only part a fold can shed,
 // and the boundary trigger measures exactly the same quantity against the same number
@@ -1074,12 +1075,13 @@ const uncalibratedRoomMargin = 2
 // the margin applies to the assumed room as well.
 func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 	b := a.budget()
-	room, chars := b.Window-b.ResponseReserve, 0
-	if room > 0 {
+	g := deriveGrowthBounds(b)
+	room, chars := g.room, 0
+	if g.windowKnown {
 		st := req.State()
 		chars = domain.PromptChars(st.Messages, st.Tools)
 	} else {
-		room, chars = compactUnknownWindowTranscriptTokens, domain.PromptChars(a.conv.Messages(), nil)
+		chars = domain.PromptChars(a.conv.Messages(), nil)
 	}
 	if b.Used == 0 {
 		room *= uncalibratedRoomMargin
